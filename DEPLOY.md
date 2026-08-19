@@ -112,6 +112,58 @@ actually fix it.
 Line endings matter: `install.sh` must stay LF (a CRLF shebang is reported as
 `bad interpreter`) and `install.ps1` stays CRLF.
 
+## The design, and what the motion is for
+
+Warm paper, ink, hairlines — and the terminal set into it as a dark figure, the
+way a plate sits in a printed manual. That is the whole system. It exists
+because the previous version dressed the site as the product (black page, amber
+text, monospace throughout) and read as costume: everything in this category
+looks like that, and a page of one uniform texture has nowhere left to put
+emphasis.
+
+Consequences worth keeping:
+
+- **The ember is loud in exactly two places** — the italic word in the headline
+  and inside the terminal figures. Spending it anywhere else is what turns a
+  restrained page into a busy one.
+- **No shadows and no rounded cards on the paper side.** Depth comes from the
+  figures being a different material. Hairlines and space do the rest.
+- **Instrument Serif is display only.** It is the decision that stops this
+  looking like a template; it is also unreadable as body text.
+
+GSAP appears four times, and each one does something the static page cannot:
+
+| Where | Why |
+|---|---|
+| Hero entrance | Establishes reading order. About a second, and the install command arrives early rather than last. |
+| Reflex section | Pinned and scroll-scrubbed. The reader operates the correction loop instead of reading about it. |
+| Figures | They count up because the number *is* the claim — two readings landing on the same value says "flat" faster than the sentence does. |
+| Section rules | A line drawing itself is the quietest entrance available. |
+
+Everything else is still, and that is the point. Adding a fifth is how a page
+starts to feel automated.
+
+## Checking it
+
+```bash
+npm start &
+node tools/a11y.mjs http://localhost:3300    # the checks that matter
+node tools/shots.mjs                          # screenshots at four widths
+sh tools/check-scripts.sh                     # the installers
+```
+
+`a11y.mjs` earns its place: it caught the one defect that reading the source
+would not have. Under `prefers-reduced-motion` two of the three Reflex beats
+stayed dimmed to 25% forever, because the dim state was an inline style in the
+markup and only the timeline lifted it. Anyone with that preference saw a
+permanently greyed-out page. **A scroll-scrubbed animation must never be the
+only thing that makes content legible** — that check now asserts it.
+
+`shots.mjs` is not decoration either. The first pass of this design had a
+four-second entrance, unreadable quote glyphs, a pinned panel that was mostly
+empty and a flag wrapping mid-token. All four were invisible in the source and
+obvious in a screenshot.
+
 ## Changing the install commands or the links
 
 Everything the page says about names, commands and URLs comes from
