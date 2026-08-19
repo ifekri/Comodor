@@ -174,8 +174,8 @@ message. Buttons and the sidebar are clickable where the terminal supports it.
 ### Commands
 
 `/help` `/model` `/provider` `/mode` `/loop` `/gw` `/rules` `/progress` `/memory`
-`/teach` `/skills` `/good` `/bad` `/undo` `/cost` `/export` `/theme` `/settings`
-`/approve` `/save` `/attach` `/clear` `/resume` `/quit`
+`/teach` `/skills` `/search` `/good` `/bad` `/undo` `/cost` `/export` `/theme`
+`/settings` `/approve` `/save` `/attach` `/clear` `/resume` `/quit`
 
 ## The three switches
 
@@ -207,6 +207,24 @@ for it, so twenty skills cost no more per turn than one.
 | `~/.comodor/skills/` | yours, in every project |
 | `.comodor/skills/` | this project's, committed with it — wins on a name clash |
 
+A skill is either a single Markdown file, or a folder holding a `SKILL.md` — the
+[Agent Skills](https://agentskills.io) open format. That means a skill written
+for another agent runs here unchanged, and one you write here runs there. The
+folder form can also bundle files:
+
+```
+~/.comodor/skills/pdf-processing/
+├─ SKILL.md              the instructions, loaded when the skill matches
+├─ references/           documents read only when the task calls for one
+├─ scripts/              code the agent can run
+└─ assets/               templates and data
+```
+
+Bundled files are **named in the prompt, never inlined**. A skill can carry a
+thousand-line API reference and cost nothing until the one turn that needs it,
+at which point the agent asks for it by name. Nothing outside a loaded skill's
+own folder is reachable that way.
+
 ```markdown
 ---
 name: review
@@ -230,12 +248,16 @@ nitpicks buries the one thing that mattered.
 
 | field | |
 |---|---|
-| `name` | required; how the skill is referred to |
-| `description` | what the skill is for — this is what gets matched against your request |
+| `name` | required; lowercase letters, digits and single hyphens |
+| `description` | required; what the skill does **and when to use it** — this is what gets matched against your request |
 | `triggers` | extra words that should select it |
-| `tools` | tools this kind of work needs, as a hint |
 | `always` | `true` to apply it to every turn — house rules, style guides |
 | `enabled` | `false` to keep the file but stop using it |
+| `license` `compatibility` `metadata` | optional, from the open format |
+
+A skill that departs from the format still loads — it is your file, and Comodor
+can run it perfectly well. What `/skills` tells you is where another agent would
+disagree, before you have shared it with anyone.
 
 The description and triggers are matched against what you asked; nothing
 relevant means nothing injected, and the transcript names any skill that was
@@ -245,6 +267,26 @@ rather than silently ignored.
 
 Three worked examples are written into your skills folder the first time
 Comodor runs, so there is something to read before there is something to write.
+
+### Skills it drafts for you
+
+Comodor also notices when it has solved the same shape of problem several times.
+Once a procedure has worked at least three times, `/skills draft` offers it back
+as a finished `SKILL.md` — with the evidence attached, and the exact text it
+would write:
+
+```
+### add-a-rest-endpoint
+worked 4 of 5 times
+
+/skills adopt add-a-rest-endpoint  to keep it.
+```
+
+**Nothing is written until you say so.** A skill shapes every future answer it
+matches, so an agent quietly authoring its own instructions would be changing
+its behaviour in a way you never agreed to and would struggle to find. What it
+writes is an ordinary file in your folder, marked `origin: learned`, and yours
+to edit or delete.
 
 ## Reflex — a two-speed brain
 
@@ -287,6 +329,27 @@ Everything is inspectable and reversible:
 /memory             the distilled lessons, same controls
 /teach  /good  /bad
 ```
+
+## Everything you have ever asked
+
+Rules are what Comodor generalises. Transcripts are what actually happened, and
+they are searchable:
+
+```
+/search cursor pagination
+
+  you · 12 Apr · 20260412-090000
+  > add cursor pagination to the results endpoint
+```
+
+The agent can search them too, and does so on its own when you refer to earlier
+work — "like we did last time", "that bug from last week". Nothing from history
+enters the context until it decides a question needs it, so four hundred stored
+sessions cost nothing on the turns that do not.
+
+The index is a cache built from the transcripts already on disk. Delete
+`search.db` and the next search rebuilds it; delete a session and it leaves
+search with it. There is no second copy of anything to keep in step.
 
 ## Proof, not claims: `/progress`
 
@@ -382,8 +445,8 @@ src/comodor/
 ├─ tools/       files, search, shell, python, web, task list
 ├─ safety/      permissions, checkpoints, redaction
 ├─ learning/    the brain: hot index, async writer, signals, rules, progress
-├─ skills/      authored skills: loading, matching, starter examples
-├─ session/     persistence and export
+├─ skills/      authored skills: the open format, matching, drafts
+├─ session/     persistence, export, and full-text search over transcripts
 └─ ui/          layout, theme, widgets, raw input, the app loop
 ```
 

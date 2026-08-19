@@ -9,14 +9,16 @@ than like a thwarted attempt to edit files.
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
 
 from ..providers.base import ToolSpec
 from ..safety import Risk
 from .base import Tool, ToolContext, ToolResult
 from .fs import EditFile, ListDir, ReadFile, WriteFile
+from .history import SearchHistory
 from .search import Glob, Grep
 from .shell import RunPython, RunShell
+from .skills import ReadSkillFile
 from .todo import TodoWrite
 from .web import WebFetch, WebSearch
 
@@ -32,10 +34,22 @@ DEFAULT_TOOLS: tuple[type[Tool], ...] = (
 class ToolRegistry:
     """Holds tool instances and answers "what can I use right now?"."""
 
-    def __init__(self, tools: Iterable[Tool] | None = None) -> None:
+    def __init__(self, tools: Iterable[Tool] | None = None,
+                 skills: Any = None, history: Any = None,
+                 session_id: str = "") -> None:
         self._tools: dict[str, Tool] = {}
         for tool in tools if tools is not None else (cls() for cls in DEFAULT_TOOLS):
             self.add(tool)
+        # Only offered when a skill actually bundles files. A tool the model can
+        # see but can never use successfully is worse than one that is absent:
+        # it invites a wasted call on every turn.
+        if skills is not None and any(skill.bundled for skill in skills.all()):
+            self.add(ReadSkillFile(skills))
+        # Likewise: with no transcripts yet there is nothing to find, and a
+        # search tool that can only ever answer "nothing" trains the model to
+        # keep asking.
+        if history is not None and history.stats()["turns"]:
+            self.add(SearchHistory(history, current_session=session_id))
 
     def add(self, tool: Tool) -> None:
         self._tools[tool.name] = tool

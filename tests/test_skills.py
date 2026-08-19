@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from comodor.skills import SkillError, SkillRegistry, parse
+from comodor.skills import SkillError, SkillRegistry, load, parse
 from comodor.skills import examples
 
 MINIMAL = """\
@@ -415,3 +415,220 @@ def test_skills_switched_off_load_nothing_and_touch_no_disk(tmp_path, monkeypatc
 
     assert len(load_for(config)) == 0
     assert not config.paths.skills.exists(), "a disabled feature should not create folders"
+
+
+# --------------------------------------------------------------------------- #
+# the open format: a skill folder with SKILL.md and bundled files
+# --------------------------------------------------------------------------- #
+
+
+def make_bundle(root, name="pdf-processing", extra_header="", body=None,
+                references=("REFERENCE.md",), scripts=()):
+    """A skill laid out the way the open format specifies."""
+    folder = root / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "SKILL.md").write_text(
+        "---\n"
+        f"name: {name}\n"
+        "description: Extract text and tables from PDF files. Use when working with PDFs.\n"
+        f"{extra_header}"
+        "---\n\n"
+        + (body or "Read references/REFERENCE.md before starting."),
+        encoding="utf-8")
+    if references:
+        (folder / "references").mkdir(exist_ok=True)
+        for filename in references:
+            (folder / "references" / filename).write_text(
+                f"# {filename}\n\nThe detail lives here.", encoding="utf-8")
+    if scripts:
+        (folder / "scripts").mkdir(exist_ok=True)
+        for filename in scripts:
+            (folder / "scripts" / filename).write_text("print('hi')", encoding="utf-8")
+    return folder
+
+
+def test_a_skill_folder_loads_from_its_manifest(tmp_path):
+    make_bundle(tmp_path)
+    registry = SkillRegistry()
+    assert registry.discover(tmp_path, tmp_path / "absent") == 1
+
+    skill = registry.get("pdf-processing")
+    assert skill.name == "pdf-processing"
+    assert skill.root is not None and skill.root.name == "pdf-processing"
+
+
+def test_the_folder_name_stands_in_when_the_header_omits_a_name(tmp_path):
+    folder = tmp_path / "code-review"
+    folder.mkdir()
+    (folder / "SKILL.md").write_text(
+        "---\ndescription: Review a change\n---\nRead it all.", encoding="utf-8")
+
+    registry = SkillRegistry()
+    registry.discover(tmp_path, tmp_path / "absent")
+    assert "code-review" in registry.skills, "SKILL.md is not a name; its folder is"
+
+
+def test_bundled_files_are_found_but_not_read(tmp_path):
+    make_bundle(tmp_path, references=("REFERENCE.md", "FORMS.md"), scripts=("extract.py",))
+    registry = SkillRegistry()
+    registry.discover(tmp_path, tmp_path / "absent")
+    skill = registry.get("pdf-processing")
+
+    assert skill.resources == ["references/FORMS.md", "references/REFERENCE.md",
+                               "scripts/extract.py"]
+    block = skill.render()
+    assert "references/REFERENCE.md" in block, "the model must know they exist"
+    assert "The detail lives here" not in block, "…and must not be handed them"
+
+
+def test_reference_files_are_not_themselves_loaded_as_skills(tmp_path):
+    """Every file under a skill folder would otherwise be read as a broken one."""
+    make_bundle(tmp_path, references=("REFERENCE.md", "FORMS.md"))
+    registry = SkillRegistry()
+
+    assert registry.discover(tmp_path, tmp_path / "absent") == 1
+    assert registry.errors == []
+
+
+def test_a_folder_without_a_manifest_is_reported(tmp_path):
+    (tmp_path / "half-written").mkdir()
+    (tmp_path / "half-written" / "notes.md").write_text("no header", encoding="utf-8")
+
+    registry = SkillRegistry()
+    registry.discover(tmp_path, tmp_path / "absent")
+    assert registry.errors, "silence would leave the author with no idea why"
+
+
+def test_single_file_skills_still_work_beside_folders(tmp_path):
+    make_bundle(tmp_path)
+    (tmp_path / "commit-style.md").write_text(MINIMAL, encoding="utf-8")
+
+    registry = SkillRegistry()
+    assert registry.discover(tmp_path, tmp_path / "absent") == 2
+
+
+def test_the_optional_format_fields_are_read(tmp_path):
+    make_bundle(tmp_path, extra_header=(
+        "license: Apache-2.0\n"
+        "compatibility: Requires Python 3.14+ and uv\n"
+        "allowed-tools: read_file grep\n"
+        "metadata:\n"
+        "  author: example-org\n"
+        '  version: "1.0"\n'
+    ))
+    registry = SkillRegistry()
+    registry.discover(tmp_path, tmp_path / "absent")
+    skill = registry.get("pdf-processing")
+
+    assert skill.license == "Apache-2.0"
+    assert skill.compatibility == "Requires Python 3.14+ and uv"
+    assert skill.allowed_tools == ["read_file", "grep"]
+    assert skill.metadata == {"author": "example-org", "version": "1.0"}
+    assert "Requires Python 3.14+" in skill.render(), "an unmet requirement should show"
+
+
+def test_comodor_fields_can_be_carried_in_metadata(tmp_path):
+    """The format says client-specific keys belong there; both spellings work."""
+    make_bundle(tmp_path, extra_header="metadata:\n  triggers: pdf, forms\n  always: true\n")
+    registry = SkillRegistry()
+    registry.discover(tmp_path, tmp_path / "absent")
+    skill = registry.get("pdf-processing")
+
+    assert skill.triggers == ["pdf", "forms"]
+    assert skill.always is True
+
+
+def test_a_non_portable_name_warns_but_loads(tmp_path):
+    folder = tmp_path / "My_Review"
+    folder.mkdir()
+    (folder / "SKILL.md").write_text(
+        "---\nname: My_Review\ndescription: Review\n---\nDo it.", encoding="utf-8")
+
+    skill = load(folder)
+    assert skill.name == "My_Review", "refusing would help nobody"
+    assert any("portable" in warning for warning in skill.warnings)
+
+
+def test_a_name_that_disagrees_with_its_folder_warns(tmp_path):
+    make_bundle(tmp_path, name="pdf-processing")
+    (tmp_path / "pdf-processing" / "SKILL.md").write_text(
+        "---\nname: something-else\ndescription: d\n---\nbody", encoding="utf-8")
+
+    skill = load(tmp_path / "pdf-processing")
+    assert any("does not match the folder" in warning for warning in skill.warnings)
+
+
+# --------------------------------------------------------------------------- #
+# reading a bundled file on demand
+# --------------------------------------------------------------------------- #
+
+
+def read_tool(registry, tmp_path):
+    from comodor.config import Config
+    from comodor.events import EventBus
+    from comodor.paths import Paths
+    from comodor.events import Cancellation
+    from comodor.safety import CheckpointStore, PermissionEngine, Redactor
+    from comodor.tools.base import ToolContext
+    from comodor.tools.skills import ReadSkillFile
+
+    config = Config(paths=Paths(user=tmp_path / "home", project=tmp_path))
+    bus = EventBus()
+    context = ToolContext(
+        config=config, permissions=PermissionEngine(config, bus),
+        checkpoints=CheckpointStore(tmp_path / "cp"), bus=bus,
+        redact=Redactor([]), cancel=Cancellation(), cwd=tmp_path)
+    return ReadSkillFile(registry), context
+
+
+def test_a_bundled_file_can_be_read_on_demand(tmp_path):
+    make_bundle(tmp_path)
+    registry = SkillRegistry()
+    registry.discover(tmp_path, tmp_path / "absent")
+
+    tool, context = read_tool(registry, tmp_path)
+    result = tool.run(context, skill="pdf-processing", path="references/REFERENCE.md")
+
+    assert result.ok
+    assert "The detail lives here" in result.content
+
+
+def test_only_files_the_skill_bundles_can_be_read(tmp_path):
+    """The reachable set is what discovery found — not what a path can express."""
+    make_bundle(tmp_path)
+    (tmp_path / "secret.txt").write_text("not for the model", encoding="utf-8")
+
+    registry = SkillRegistry()
+    registry.discover(tmp_path, tmp_path / "absent")
+    tool, context = read_tool(registry, tmp_path)
+
+    for attempt in ("../secret.txt", "../../secret.txt", "/etc/passwd",
+                    "references/../../secret.txt", "SKILL.md"):
+        result = tool.run(context, skill="pdf-processing", path=attempt)
+        assert not result.ok, f"{attempt} should not be readable"
+        assert "not for the model" not in result.content
+
+
+def test_an_unknown_skill_says_what_is_available(tmp_path):
+    make_bundle(tmp_path)
+    registry = SkillRegistry()
+    registry.discover(tmp_path, tmp_path / "absent")
+    tool, context = read_tool(registry, tmp_path)
+
+    result = tool.run(context, skill="nope", path="references/REFERENCE.md")
+    assert not result.ok
+    assert "pdf-processing" in result.content
+
+
+def test_the_tool_is_only_offered_when_a_skill_bundles_something(tmp_path):
+    from comodor.tools import ToolRegistry
+
+    plain = SkillRegistry()
+    examples.install(tmp_path / "plain")
+    plain.discover(tmp_path / "plain", tmp_path / "absent")
+    assert "read_skill_file" not in ToolRegistry(skills=plain)
+
+    bundled = SkillRegistry()
+    make_bundle(tmp_path / "bundled")
+    bundled.discover(tmp_path / "bundled", tmp_path / "absent")
+    assert "read_skill_file" in ToolRegistry(skills=bundled)

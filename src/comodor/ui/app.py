@@ -27,7 +27,9 @@ from ..learning import LearningEngine
 from ..providers.fake import demo_scripts
 from ..providers.gateway import Gateway
 from ..safety import CheckpointStore, PermissionEngine, Redactor
-from ..session import SessionMeta, SessionStore, derive_title, new_session_id
+from ..session import (SessionIndex, SessionMeta, SessionStore,
+                       derive_title, new_session_id)
+from ..skills import candidates as skill_candidates
 from ..skills import load_for as skills_for
 from ..tools import ToolRegistry
 from . import console as console_module
@@ -62,7 +64,6 @@ class App:
         self.bus = EventBus()
         self.events = EventQueue(self.bus)
         self.gateway = Gateway(config, scripts=demo_scripts() if demo else None)
-        self.tools = ToolRegistry()
         self.permissions = PermissionEngine(config, self.bus)
 
         # Reflex needs the checkpoint journal: it is what records the exact bytes
@@ -82,17 +83,25 @@ class App:
         # Authored skills: the user's own procedures, loaded from their folder
         # and from the project's. Separate from the learned brain on purpose —
         # one is written by hand, the other is inferred.
-        self._load_skills()
-
-        self.agent = AgentLoop(config, self.gateway, self.tools, self.bus,
-                               self.permissions, self.conversation, self.memory,
-                               skills=self.skills)
-
         self.sessions = SessionStore(config.paths.user / "sessions")
         self.session = SessionMeta(
             id=new_session_id(), cwd=str(config.paths.project),
             provider=config.provider, model=config.active_model(),
         )
+
+        # Everything ever said, searchable. Built from the transcripts already
+        # on disk, so it costs nothing to have and can be deleted at any time.
+        self.history = SessionIndex(self.sessions)
+        self.history.refresh()
+
+        # Authored skills: the user's own procedures, loaded from their folder
+        # and from the project's. Separate from the learned brain on purpose —
+        # one is written by hand, the other is inferred.
+        self._load_skills()
+
+        self.agent = AgentLoop(config, self.gateway, self.tools, self.bus,
+                               self.permissions, self.conversation, self.memory,
+                               skills=self.skills)
 
         self.state = ScreenState()
         self.state.slash_commands = [(name, spec[1]) for name, spec in COMMANDS.items()]
@@ -161,12 +170,19 @@ class App:
         return 0
 
     def _load_skills(self) -> int:
-        """Discover skills, creating the folder with examples on a first run."""
+        """Discover skills, creating the folder with examples on a first run.
+
+        The tool set is rebuilt with them, because whether `read_skill_file` is
+        offered depends on whether any loaded skill actually bundles files.
+        """
         self.skills = skills_for(self.config)
+        self.tools = ToolRegistry(skills=self.skills, history=self.history,
+                                  session_id=self.session.id)
         return len(self.skills)
 
     def _shutdown(self) -> None:
         self.agent.interrupt()
+        self.history.close()
         if self.worker and self.worker.is_alive():
             self.worker.join(timeout=2.0)
         # Flush whatever the agent produced after the last event we pumped —
@@ -843,14 +859,33 @@ class App:
             return
         self.memory.teach(args)
 
+    def _proposals(self) -> list:
+        """Learned procedures that have earned an offer to become real skills."""
+        try:
+            return skill_candidates(self.memory.store.all_skills(), self.skills)
+        except Exception:
+            return []
+
     def cmd_skills(self, args: str) -> None:
         """Skills you wrote, and procedures Comodor worked out for itself."""
+        words = args.strip().split()
+        verb = words[0].lower() if words else ""
+
+        if verb in ("draft", "drafts", "propose"):
+            self._show_proposals()
+            return
+
+        if verb == "adopt":
+            self._adopt_proposal(" ".join(words[1:]).strip())
+            return
+
         if args.strip().lower() in ("reload", "refresh"):
             count = self._load_skills()
-            # The agent holds the registry it was built with, so re-reading the
-            # folder has to reach it too or /skills reload would report a
-            # change that the next turn does not see.
+            # The agent holds what it was built with, so re-reading the folder
+            # has to reach it too, or /skills reload would report a change that
+            # the next turn does not see.
             self.agent.skills = self.skills
+            self.agent.tools = self.tools
             self._toast(f"reloaded {count} skill(s)", "good")
             return
 
@@ -889,8 +924,93 @@ class App:
             body.append("None yet. Comodor saves one when a multi-step task looks")
             body.append("like it will recur.")
 
-        body += ["", "`/skills reload` re-reads both folders."]
+        pending = self._proposals()
+        if pending:
+            body += ["", "### Drafts waiting for you", ""]
+            for offer in pending:
+                body.append(f"- **{offer.name}** — {offer.evidence}. "
+                            f"`/skills adopt {offer.name}`")
+
+        body += ["", "`/skills reload` re-reads both folders · "
+                     "`/skills draft` shows what Comodor would like to save."]
         self.state.overlay = info_overlay("Skills", "\n".join(body))
+
+    def cmd_search(self, args: str) -> None:
+        """Find something in an earlier conversation."""
+        query = args.strip()
+        if not query:
+            stats = self.history.stats()
+            self._toast(
+                f"/search <words> — {stats['turns']} messages across "
+                f"{stats['sessions']} sessions are indexed", "accent", ttl=6.0)
+            return
+
+        self.history.refresh()
+        hits = self.history.search(query, limit=10,
+                                   exclude_session=self.session.id)
+
+        if not hits:
+            self._toast(f"nothing earlier matches {query!r}", "warn")
+            return
+
+        body = [f"## {len(hits)} match(es) for *{query}*", ""]
+        for hit in hits:
+            speaker = "you" if hit.role == "user" else "Comodor"
+            body.append(f"**{speaker}** · {hit.when} · `{hit.session_id}`")
+            body.append("")
+            body.append(f"> {hit.snippet(320)}")
+            body.append("")
+        body.append("`/resume` reopens a session by id.")
+        self.state.overlay = info_overlay("History", "\n".join(body))
+
+    def _show_proposals(self) -> None:
+        """What Comodor would like to write down, and exactly what it would say."""
+        offers = self._proposals()
+        if not offers:
+            self._toast(
+                "nothing to propose yet — a procedure has to work several times first",
+                "dim", ttl=6.0)
+            return
+
+        body = ["## Drafts Comodor would like to save", ""]
+        body.append("Each is a procedure it worked out and then repeated. Nothing is")
+        body.append("written until you say so.")
+        body.append("")
+        for offer in offers:
+            body.append(f"### {offer.name}")
+            body.append(f"*{offer.evidence}*")
+            body.append("")
+            body.append("```markdown")
+            body.append(offer.render().strip())
+            body.append("```")
+            body.append(f"`/skills adopt {offer.name}` to keep it.")
+            body.append("")
+        self.state.overlay = info_overlay("Skill drafts", "\n".join(body))
+
+    def _adopt_proposal(self, name: str) -> None:
+        offers = self._proposals()
+        if not name:
+            names = ", ".join(offer.name for offer in offers) or "none available"
+            self._toast(f"/skills adopt <name> — {names}", "accent", ttl=6.0)
+            return
+
+        chosen = next((offer for offer in offers if offer.name == name), None)
+        if chosen is None:
+            self._toast(f"no draft named {name!r} — /skills draft lists them", "warn")
+            return
+
+        try:
+            path = chosen.write(self.config.paths.skills)
+        except (FileExistsError, OSError) as error:
+            self._toast(str(error), "bad", ttl=6.0)
+            return
+
+        count = self._load_skills()
+        self.agent.skills = self.skills
+        self.agent.tools = self.tools
+        self._toast(f"saved {chosen.name} — {count} skill(s) now", "good", ttl=6.0)
+        self.state.entries.append(
+            Entry("notice", f"skill saved: {path}  (edit it freely; it is yours)"))
 
     def cmd_good(self, args: str) -> None:
         self.memory.feedback(self.agent._recalled, good=True, note=args)
@@ -1208,5 +1328,6 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/attach": ("cmd_attach", "add a file to the prompt"),
     "/clear": ("cmd_clear", "start a fresh conversation"),
     "/resume": ("cmd_resume", "reopen an earlier session"),
+    "/search": ("cmd_search", "find something in an earlier conversation"),
     "/quit": ("cmd_quit", "exit"),
 }

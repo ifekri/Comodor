@@ -6,6 +6,8 @@ and can be committed alongside the code they describe.
 """
 
 from .loader import Skill, SkillError, load, parse
+from .propose import Proposal, candidates
 from .registry import SkillRegistry, load_for
 
-__all__ = ["Skill", "SkillError", "SkillRegistry", "load", "load_for", "parse"]
+__all__ = ["Skill", "SkillError", "SkillRegistry", "Proposal",
+           "candidates", "load", "load_for", "parse"]
