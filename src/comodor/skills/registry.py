@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..learning.hotindex import HotIndex
-from .loader import Skill, SkillError, load
+from .loader import MANIFEST, Skill, SkillError, load
 
 SKILL_SUFFIXES = (".md", ".markdown")
 #: A skill must clear this share of the request's terms to be worth injecting.
@@ -35,16 +35,12 @@ class SkillRegistry:
     # -- discovery -------------------------------------------------------- #
 
     def load_from(self, directory: Path, scope: str = "user") -> int:
-        """Read every skill file in a directory. Returns how many loaded."""
+        """Read every skill in a directory. Returns how many loaded."""
         if not directory.is_dir():
             return 0
 
         found = 0
-        for path in sorted(directory.rglob("*")):
-            if not path.is_file() or path.suffix.lower() not in SKILL_SUFFIXES:
-                continue
-            if path.name.upper() in ("README.MD", "README.MARKDOWN"):
-                continue
+        for path in self._candidates(directory):
             try:
                 skill = load(path, scope=scope)
             except (SkillError, OSError) as error:
@@ -55,6 +51,30 @@ class SkillRegistry:
             self.add(skill)
             found += 1
         return found
+
+    @staticmethod
+    def _candidates(directory: Path) -> list[Path]:
+        """Skill directories first, then loose files that are not part of one.
+
+        A folder holding a SKILL.md is one skill, not one per Markdown file in
+        it — otherwise every `references/REFERENCE.md` would be read as a broken
+        skill and reported as an error the user cannot act on.
+        """
+        folders = [path for path in sorted(directory.iterdir())
+                   if path.is_dir() and (path / MANIFEST).is_file()]
+        claimed = {folder.resolve() for folder in folders}
+
+        loose: list[Path] = []
+        for path in sorted(directory.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in SKILL_SUFFIXES:
+                continue
+            if path.name.upper() in ("README.MD", "README.MARKDOWN"):
+                continue
+            if any(parent.resolve() in claimed for parent in path.parents):
+                continue
+            loose.append(path)
+
+        return folders + loose
 
     def add(self, skill: Skill) -> Skill:
         """Register a skill. A project skill shadows a user one of the name."""

@@ -122,9 +122,9 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     )
     permissions = PermissionEngine(config, bus)
     permissions.on_denied = memory.on_denied
-    agent = AgentLoop(config, gateway, ToolRegistry(), bus,
-                      permissions, Conversation(), memory,
-                      skills=load_skills(config))
+    skills = load_skills(config)
+    agent = AgentLoop(config, gateway, ToolRegistry(skills=skills), bus,
+                      permissions, Conversation(), memory, skills=skills)
 
     if not args.json:
         # Progress on stderr keeps stdout clean for the answer itself.

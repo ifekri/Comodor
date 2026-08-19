@@ -41,6 +41,17 @@ First public release.
 - Markdown files with front matter in `~/.comodor/skills/` and
   `.comodor/skills/`, describing how a kind of work should be done. A project
   file shadows a personal one of the same name.
+- Both layouts of the [Agent Skills](https://agentskills.io) open format are
+  read: a single `.md` file, or a folder holding `SKILL.md` with `references/`,
+  `scripts/` and `assets/` beside it. A skill written for another agent runs
+  here unchanged.
+- Bundled files are named in the prompt but never inlined. `read_skill_file`
+  fetches one on demand, and can reach nothing outside a loaded skill's own
+  folder — the reachable set is what discovery found, not what a path can
+  express.
+- `/skills draft` offers a procedure Comodor has repeated at least three times
+  as a finished `SKILL.md`, evidence attached; `/skills adopt <name>` writes it.
+  Nothing is written without approval.
 - Matched against the request and only then injected, so a collection costs no
   more per turn than a single file. `always: true` opts a file into every turn.
 - Applied identically in the interface and in headless runs, so a team
@@ -59,6 +70,17 @@ First public release.
   `.comodor/config.json` merges over the personal one so a repository can pin
   settings without carrying secrets; provider environment variables still take
   precedence, which keeps CI working with no file at all.
+
+### Searching past sessions
+
+- `/search <words>` finds anything said in an earlier conversation, ranked with
+  FTS5 in under a millisecond, with a pure-Python fallback for SQLite builds
+  without it.
+- `search_history` gives the agent the same index, so it can look up how a
+  problem was solved before instead of solving it again. History enters the
+  context only when it asks.
+- The index is a cache derived from the transcripts. Deleting it costs nothing
+  but a rebuild; deleting a session removes it from search.
 
 ### Interface
 
