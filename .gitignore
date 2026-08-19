@@ -1,5 +1,11 @@
 # python
 __pycache__/
+# A virtual environment built in the repository root rather than in
+# .venv/ leaves these behind. On Windows the symlinks inside bin/ are
+# unreadable, which breaks both `git add` and pytest collection.
+bin/
+lib64
+pyvenv.cfg
 *.py[cod]
 .venv/
 .comodor/

@@ -58,8 +58,18 @@ curl -fsSL https://comodor.ai/install.sh | sh
 irm https://comodor.ai/install.ps1 | iex
 ```
 
-The installer uses whichever of `uv`, `pipx` or `pip` you already have, and
-tells you what it did. If you would rather run one yourself:
+**The installer finishes the job.** It uses `uv` or `pipx` if you have them,
+builds an isolated environment if you have a working Python, and downloads what
+it needs if you have neither — then puts `comodor` on your PATH and runs it once
+to prove it works. It will not leave you with a half-install or a wall of
+Python packaging errors.
+
+In particular it handles the case that stops most one-line installers: a
+distribution or tool-managed Python that refuses `pip install` under
+[PEP 668](https://peps.python.org/pep-0668/). It builds an environment instead,
+and it never passes `--break-system-packages`.
+
+If you would rather run one yourself:
 
 ```bash
 uv tool install comodor          # fastest; fetches a Python if you have none
@@ -67,9 +77,9 @@ pipx install comodor             # isolated and on your PATH
 pip install comodor              # into the current environment
 ```
 
-Requires Python 3.11 or newer. **`rich` is the only dependency** — the HTTP
-client, the streaming reader and the configuration loader are all part of the
-package.
+Requires Python 3.11 or newer — or nothing at all, since the installer can fetch
+one. **`rich` is the only dependency**: the HTTP client, the streaming reader
+and the configuration loader are all part of the package.
 
 ## First run
 
