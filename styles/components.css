@@ -116,8 +116,9 @@
   line-height: 1.85;
   color: var(--term-text);
   /* The only shadow on the page, and only because this is a physical object
-     set into paper. Warm, not neutral, so it belongs to the palette. */
-  box-shadow: 0 22px 50px -30px rgba(35, 22, 10, 0.5);
+     set into paper. Warm, not neutral, so it belongs to the palette — and a
+     token, because on a dark page a drop shadow is just a grey halo. */
+  box-shadow: var(--figure-shadow);
 }
 
 .term__bar {
@@ -454,7 +455,7 @@
   background: var(--term-bg);
   border: 1px solid var(--term-rule);
   padding: 1.2rem 1.25rem 0.9rem;
-  box-shadow: 0 22px 50px -30px rgba(35, 22, 10, 0.5);
+  box-shadow: var(--figure-shadow);
 }
 
 .skill-file figcaption {
@@ -893,4 +894,82 @@
   display: flex;
   gap: 1.4rem;
   font-size: 0.86rem;
+}
+
+/* ================================================================= theme == */
+
+/*
+ * The switch. Fixed, because it has to be reachable from any section, and
+ * quiet, because it is the only floating element on a page that is otherwise
+ * flat. It sits on the same hairline vocabulary as everything else — a border
+ * and a label, no pill, no track, no sliding knob. A toggle that looks like a
+ * physical switch would be the loudest object in the corner of a very still
+ * layout.
+ */
+.theme {
+  position: fixed;
+  top: clamp(0.85rem, 2vw, 1.5rem);
+  right: clamp(0.85rem, 2vw, 1.5rem);
+  z-index: 20;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2rem;
+  padding: 0.36rem 0.7rem;
+
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+
+  background: color-mix(in srgb, var(--paper) 86%, transparent);
+  border: 1px solid var(--rule);
+  cursor: pointer;
+  /* Legible over the reflex band, which is a different tone from the rest. */
+  backdrop-filter: blur(8px);
+  transition: color 0.18s ease, border-color 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.theme:hover {
+  color: var(--ember);
+  border-color: var(--ember);
+}
+
+.theme__icon {
+  display: flex;
+  color: currentColor;
+}
+
+@media (max-width: 560px) {
+  /* On a phone the word is the first thing worth losing; the icon still says
+     what the button does. */
+  .theme__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  .theme {
+    padding: 0.45rem;
+  }
+}
+
+/* The placeholder rendered before the client knows which theme applies. */
+div.theme {
+  border-color: transparent;
+  background: none;
+  backdrop-filter: none;
+  pointer-events: none;
+  width: 5.4rem;
+}
+
+@media (max-width: 560px) {
+  div.theme {
+    width: 2rem;
+  }
 }

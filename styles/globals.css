@@ -23,7 +23,9 @@
   --paper-3: #eae4d9;
   --ink: #17150f;
   --ink-2: #46413a;
-  --ink-3: #867f74;
+  /* Was #867f74, which measured 3.73:1 on paper. It carries every label,
+     eyebrow and note on the page, so it has to clear 4.5. */
+  --ink-3: #6f6960;
   --rule: #ded7c9;
   --rule-strong: #c5bcab;
 
@@ -54,6 +56,56 @@
   --measure: 34rem;
   --gutter: clamp(1.25rem, 4vw, 4rem);
   --band: clamp(5rem, 11vh, 9rem);
+
+  /* The paper's faint warmth. A token because dark has to switch it off:
+     a highlight built for white looks like a smudge on charcoal. */
+  --wash: radial-gradient(130% 55% at 50% 0%, #fdfcf8 0%, var(--paper) 60%);
+  --figure-shadow: 0 22px 50px -30px rgba(35, 22, 10, 0.5);
+}
+
+/*
+ * Dark.
+ *
+ * Not an inversion. The whole design rests on the terminal being a dark figure
+ * set into pale paper, and simply flipping the page would dissolve exactly
+ * that: a near-black panel on a near-black page is not a figure, it is a
+ * smudge. So the relationship is rebuilt rather than mirrored — the page
+ * becomes a warm charcoal, the terminal goes *deeper* than it, and a warmer
+ * border carries the edge that the tone no longer can.
+ *
+ * The ember shifts too. #bf3d0b is chosen for contrast against paper and turns
+ * muddy on charcoal, so dark gets a brighter, less saturated one. A single
+ * accent used in two places has to be right in both.
+ */
+:root[data-theme="dark"] {
+  /* A warm charcoal, not near-black. The first attempt put the page at
+     #13110d and the terminal at #0a0906, which measured 1.06:1 apart — two
+     tones that are both "very dark" are not a figure and a ground, they are
+     one smudge. Lifting the page is what gives the panel an edge to have. */
+  --paper: #282420;
+  --paper-2: #201d19;
+  --paper-3: #332e28;
+  --ink: #ece7dc;
+  --ink-2: #b8af9f;
+  /* Brightened to match: the same grey that read well on near-black is 3.7:1
+     against the lifted page. */
+  --ink-3: #a49a89;
+  --rule: #3a352d;
+  --rule-strong: #554e42;
+
+  --ember: #ff7d3c;
+  --ember-soft: #33200f;
+
+  /* Deeper than the page, so the figure still reads as an object. */
+  --term-bg: #080705;
+  --term-panel: #12100b;
+  --term-rule: #56422a;
+  --term-text: #ddd6c9;
+  --term-dim: #8a8071;
+
+  --wash: radial-gradient(130% 55% at 50% 0%, #302b25 0%, var(--paper) 60%);
+  /* Almost nothing. A drop shadow on a dark page is a grey halo. */
+  --figure-shadow: 0 18px 44px -34px rgba(0, 0, 0, 0.9);
 }
 
 *,
@@ -78,12 +130,12 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   /* Barely there, so a large empty area is not perfectly flat. */
-  background-image: radial-gradient(
-    130% 55% at 50% 0%,
-    #fdfcf8 0%,
-    var(--paper) 60%
-  );
+  background-image: var(--wash);
   background-attachment: fixed;
+  /* Only the surfaces, and only briefly. Animating `color` as well makes the
+     whole page appear to melt, and a theme switch should feel like a light
+     being turned on rather than a transition being performed. */
+  transition: background-color 0.28s ease, border-color 0.28s ease;
 }
 
 /*
