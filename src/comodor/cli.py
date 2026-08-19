@@ -1,0 +1,328 @@
+"""Command line entry point.
+
+Three ways in:
+
+* ``comodor`` — the full interface.
+* ``comodor run "<task>"`` — one task, no interface, output to stdout or JSON.
+  This is the mode CI and scripts use; it needs explicit ``--yes`` before it
+  will change anything, because there is nobody there to approve a prompt.
+* ``comodor setup`` — the first-run questions again, on demand.
+* ``comodor doctor`` — what is configured, what is reachable, what the terminal
+  can do. The first thing to run when something is not working.
+
+There is no configuration file to write by hand. The first run asks a handful
+of questions and saves the answers to ``~/.comodor/config.json``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from typing import Any
+
+from . import __version__
+from .config import Config, load as load_config
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="comodor",
+        description="Comodor — a terminal coding agent that learns as it works.",
+    )
+    parser.add_argument("--version", action="version", version=f"comodor {__version__}")
+
+    parser.add_argument("--provider", help="provider to use (openrouter, anthropic, …)")
+    parser.add_argument("--model", help="model id")
+    parser.add_argument("--mode", choices=("act", "plan", "chat"), help="starting mode")
+    parser.add_argument("--no-loop", action="store_true",
+                        help="answer once instead of iterating autonomously")
+    parser.add_argument("--theme", help="colour theme (ember, midnight, matrix, mono)")
+    parser.add_argument("--ascii", action="store_true",
+                        help="ASCII borders, for terminals without box-drawing glyphs")
+    parser.add_argument("--no-mouse", action="store_true", help="disable mouse support")
+    parser.add_argument("--cwd", help="workspace directory (default: the project root)")
+    parser.add_argument("--demo", action="store_true",
+                        help="run the interface against a scripted offline provider")
+    parser.add_argument("--resume", nargs="?", const="__pick__",
+                        help="reopen the most recent session, or one by id")
+
+    sub = parser.add_subparsers(dest="command")
+
+    run = sub.add_parser("run", help="run one task without the interface")
+    run.add_argument("task", help="what to do")
+    run.add_argument("--json", action="store_true", help="emit a JSON result")
+    run.add_argument("--yes", action="store_true",
+                     help="approve file writes and commands automatically")
+    run.add_argument("--max-steps", type=int, help="override the step limit")
+
+    sub.add_parser("setup", help="choose a provider and model, and save the answers")
+    sub.add_parser("doctor", help="show configuration and environment diagnostics")
+
+    preview = sub.add_parser("preview",
+                             help="render the interface at a given size and exit")
+    preview.add_argument("size", nargs="?", default="120x34", help="WIDTHxHEIGHT")
+    preview.add_argument("--svg", help="also write an SVG to this path")
+
+    return parser
+
+
+def apply_overrides(config: Config, args: argparse.Namespace) -> Config:
+    if args.provider:
+        config.provider = args.provider
+        entry = config.providers.get(args.provider)
+        if entry and not args.model:
+            config.model = entry.model
+    if args.model:
+        config.model = args.model
+    if args.mode:
+        config.agent.mode = args.mode
+    if args.no_loop:
+        config.agent.loop = False
+    if args.theme:
+        config.ui.theme = args.theme
+    if args.ascii:
+        config.ui.ascii_borders = True
+    if args.no_mouse:
+        config.ui.mouse = False
+    return config
+
+
+# --------------------------------------------------------------------------- #
+# subcommands
+# --------------------------------------------------------------------------- #
+
+
+def run_headless(config: Config, args: argparse.Namespace) -> int:
+    """One task, no TUI. Used by scripts, hooks and CI."""
+    from .agent import AgentLoop, Conversation
+    from .events import EventBus, Kind
+    from .learning import LearningEngine
+    from .providers.gateway import Gateway
+    from .safety import CheckpointStore, PermissionEngine, Redactor
+    from .skills import load_for as load_skills
+    from .tools import ToolRegistry
+
+    if args.yes:
+        config.safety.auto_approve_writes = True
+        config.safety.auto_approve_shell = True
+    if args.max_steps:
+        config.agent.max_steps = args.max_steps
+
+    bus = EventBus()
+    gateway = Gateway(config)
+    # Headless runs learn from corrections too: a scripted run whose output the
+    # user later fixes by hand should teach the same lesson an interactive one
+    # would, or the brain would depend on how the agent happened to be invoked.
+    memory = LearningEngine(
+        config, bus, gateway,
+        checkpoints=CheckpointStore(config.paths.checkpoints),
+        redact=Redactor([entry.api_key for entry in config.providers.values()
+                         if entry.api_key]),
+    )
+    permissions = PermissionEngine(config, bus)
+    permissions.on_denied = memory.on_denied
+    agent = AgentLoop(config, gateway, ToolRegistry(), bus,
+                      permissions, Conversation(), memory,
+                      skills=load_skills(config))
+
+    if not args.json:
+        # Progress on stderr keeps stdout clean for the answer itself.
+        def echo(event: Any) -> None:
+            if event.kind is Kind.TOOL_START:
+                print(f"· {event.get('summary', event.get('name'))}", file=sys.stderr)
+            elif event.kind is Kind.ERROR:
+                print(f"! {event.text}", file=sys.stderr)
+
+        bus.subscribe(echo)
+
+    result = agent.run(args.task)
+    memory.wait_for_reflection(timeout=20.0)
+
+    if args.json:
+        print(json.dumps({
+            "text": result.text,
+            "ok": result.ok,
+            "stopped": result.stopped,
+            "steps": result.steps,
+            "tool_calls": result.tool_calls,
+            "error": result.error,
+            "usage": {
+                "input_tokens": result.usage.input_tokens,
+                "output_tokens": result.usage.output_tokens,
+                "cost_usd": round(result.usage.cost_usd, 6),
+            },
+            "elapsed": round(result.elapsed, 2),
+        }, ensure_ascii=False, indent=2))
+    else:
+        print(result.text)
+        if result.error:
+            print(f"\nerror: {result.error}", file=sys.stderr)
+
+    memory.close()
+    gateway.close()
+    return 0 if result.ok else 1
+
+
+def run_setup_command(config: Config) -> int:
+    """`comodor setup` — run the wizard again, keeping what is already there."""
+    from .setup import run_setup
+
+    try:
+        run_setup(config)
+    except (KeyboardInterrupt, EOFError):
+        print("\nSetup cancelled; nothing was changed.", file=sys.stderr)
+        return 130
+    return 0
+
+
+def run_doctor(config: Config) -> int:
+    from rich.table import Table
+
+    from .learning import BrainStore
+    from .ui import console as console_module
+
+    theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
+                                         no_color=False)
+    console = console_module.build(theme)
+
+    console.print(f"[title]Comodor {__version__}[/title]\n")
+
+    providers = Table(title="Providers", title_justify="left", box=theme.box,
+                      border_style=theme.style("border.dim"), expand=False)
+    providers.add_column("name", style=theme.style("value"))
+    providers.add_column("model")
+    providers.add_column("endpoint", style=theme.style("dim"))
+    providers.add_column("key")
+    for entry in config.providers.values():
+        status = ("[good]ready[/good]" if entry.ready else
+                  "[dim]local[/dim]" if entry.local else "[bad]missing[/bad]")
+        marker = " ←" if entry.name == config.provider else ""
+        providers.add_row(entry.name + marker, entry.model, entry.base_url, status)
+    console.print(providers)
+
+    brain = BrainStore(config.paths.brain_db)
+    stats = brain.stats()
+    console.print("\n[title]Brain[/title]")
+    console.print(f"  reflex:  {stats['rules_active']} active rules of "
+                  f"{stats['rules']} · {stats['signals']} signals observed")
+    console.print(f"  memory:  {stats['lessons']} lessons · {stats['skills']} skills · "
+                  f"{stats['episodes']} tasks "
+                  f"({stats['success_rate']:.0%} succeeded)")
+    console.print(f"  index:   {'FTS5' if stats['fts'] else 'python BM25 fallback'}, "
+                  f"{stats['indexed']} records in memory")
+    console.print(f"  file:    [dim]{stats['path']}[/dim]")
+    brain.close()
+
+    console.print("\n[title]Terminal[/title]")
+    console.print(f"  size: {console.size.width}×{console.size.height}")
+    console.print(f"  colour: {console.color_system or 'none'}")
+    console.print(f"  unicode: {console_module.supports_unicode()}")
+    console.print(f"  legacy windows console: {console.legacy_windows}")
+
+    missing = "" if config.paths.config_file.exists() else \
+        "  [bad](missing — run comodor setup)[/bad]"
+    console.print("\n[title]Paths[/title]")
+    console.print(f"  workspace: [dim]{config.paths.project}[/dim]")
+    console.print(f"  config:    [dim]{config.paths.config_file}[/dim]{missing}")
+    console.print(f"  skills:    [dim]{config.paths.skills}[/dim]")
+
+    if config.needs_setup:
+        console.print("\n[bad]No provider is configured.[/bad] Run "
+                      "[accent]comodor setup[/accent] to choose one, or "
+                      "[accent]comodor --demo[/accent] to try the interface "
+                      "offline.")
+        return 1
+    return 0
+
+
+def run_preview(config: Config, args: argparse.Namespace) -> int:
+    """Render one frame at a fixed size — for screenshots and layout checks."""
+    from .ui import console as console_module
+    from .ui import layout as layout_module
+    from .ui.screen import Screen, ScreenState
+    from .ui.widgets.statusbar import StatusModel
+
+    try:
+        width, _, height = args.size.lower().partition("x")
+        size = (int(width), int(height))
+    except ValueError:
+        print(f"bad size {args.size!r}; expected WIDTHxHEIGHT", file=sys.stderr)
+        return 2
+
+    theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
+                                         no_color=False)
+    console = console_module.build(theme, width=size[0], height=size[1],
+                                   record=bool(args.svg))
+    state = ScreenState()
+    state.status = StatusModel(
+        provider=config.active().display if config.active() else "none",
+        model=config.active_model(), connected=bool(config.available()),
+        mode=config.agent.mode, loop=config.agent.loop,
+        gateway="Disable" if not config.gateway.enabled else config.gateway.policy,
+        context_limit=config.agent.context_limit,
+    )
+    geometry = layout_module.compute(size[0], size[1])
+    console.print(Screen(console, theme).render(state, geometry))
+    if args.svg:
+        console.save_svg(args.svg, title="Comodor")
+        print(f"wrote {args.svg}", file=sys.stderr)
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# entry point
+# --------------------------------------------------------------------------- #
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    config = apply_overrides(load_config(args.cwd), args)
+
+    if args.command == "doctor":
+        return run_doctor(config)
+    if args.command == "preview":
+        return run_preview(config, args)
+    if args.command == "setup":
+        return run_setup_command(config)
+    if args.command == "run":
+        return run_headless(config, args)
+
+    if args.demo:
+        from .config import ProviderConfig
+
+        config.providers["fake"] = ProviderConfig(
+            name="fake", kind="fake", base_url="offline", api_key="demo",
+            model="comodor-demo", label="Demo (offline)", configured=True)
+        config.provider = "fake"
+        config.model = "comodor-demo"
+    elif config.needs_setup:
+        # Nothing usable is configured, so ask rather than print an error and
+        # leave the user to find the documentation. This is the whole first-run
+        # experience: a few questions, then straight into the interface.
+        from .setup import run_setup
+
+        try:
+            config = run_setup(config)
+        except (KeyboardInterrupt, EOFError):
+            print("\nSetup cancelled. Run `comodor setup` when you are ready, "
+                  "or `comodor --demo` to look around offline.", file=sys.stderr)
+            return 130
+        if config.needs_setup:
+            return 1
+
+    from .ui.app import App
+
+    resume = None
+    if args.resume and args.resume != "__pick__":
+        resume = args.resume
+
+    app = App(config, demo=args.demo, resume=resume)
+    try:
+        return app.run()
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

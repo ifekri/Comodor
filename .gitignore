@@ -1,0 +1,25 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.comodor/
+*.db
+*.db-shm
+*.db-wal
+.env
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+
+# The comodor.ai site is a separate deliverable and is deliberately not part
+# of this repository. It lives in its own tree.
+website/
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+.env*.local
+npm-debug.log*
+dist/
