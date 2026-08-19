@@ -57,7 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-steps", type=int, help="override the step limit")
 
     sub.add_parser("setup", help="choose a provider and model, and save the answers")
-    sub.add_parser("doctor", help="show configuration and environment diagnostics")
+    doctor = sub.add_parser(
+        "doctor", help="check everything, and repair what can be repaired")
+    doctor.add_argument("--fix", action="store_true",
+                        help="apply every repair the check found")
+
+    from .mcp.commands import register as register_mcp
+
+    register_mcp(sub)
 
     preview = sub.add_parser("preview",
                              help="render the interface at a given size and exit")
@@ -100,6 +107,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     from .learning import LearningEngine
     from .providers.gateway import Gateway
     from .safety import CheckpointStore, PermissionEngine, Redactor
+    from .mcp import MCPManager
     from .skills import load_for as load_skills
     from .tools import ToolRegistry
 
@@ -123,7 +131,8 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     permissions = PermissionEngine(config, bus)
     permissions.on_denied = memory.on_denied
     skills = load_skills(config)
-    agent = AgentLoop(config, gateway, ToolRegistry(skills=skills), bus,
+    mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
+    agent = AgentLoop(config, gateway, ToolRegistry(skills=skills, mcp=mcp), bus,
                       permissions, Conversation(), memory, skills=skills)
 
     if not args.json:
@@ -161,6 +170,8 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
 
     memory.close()
     gateway.close()
+    if mcp is not None:
+        mcp.close()
     return 0 if result.ok else 1
 
 
@@ -176,7 +187,7 @@ def run_setup_command(config: Config) -> int:
     return 0
 
 
-def run_doctor(config: Config) -> int:
+def run_doctor(config: Config, fix: bool = False) -> int:
     from rich.table import Table
 
     from .learning import BrainStore
@@ -227,13 +238,59 @@ def run_doctor(config: Config) -> int:
     console.print(f"  config:    [dim]{config.paths.config_file}[/dim]{missing}")
     console.print(f"  skills:    [dim]{config.paths.skills}[/dim]")
 
+    # -- checks, and repairs ---------------------------------------------- #
+
+    from .doctor import Status, apply_fixes, run_checks
+
+    report = run_checks(config)
+    # Padded before the markup is added, not after: Rich tags are characters to
+    # an f-string but nothing to the terminal, so formatting the tagged string
+    # aligns the columns to the wrong width.
+    marks = {Status.OK: ("ok", "good"), Status.WARN: ("warn", "warn"),
+             Status.FAIL: ("fail", "bad")}
+    label_width = max((len(f.name) for f in report.findings), default=12)
+
+    console.print("\n[title]Checks[/title]")
+    for finding in report.findings:
+        word, style = marks[finding.status]
+        console.print(f"  [{style}]{word:<4}[/{style}]  "
+                      f"{finding.name:<{label_width}}  [dim]{finding.detail}[/dim]")
+        if finding.status is not Status.OK and finding.remedy:
+            console.print(f"  {'':<6}  [dim]{'':<{label_width}}  "
+                          f"→ {finding.remedy}[/dim]")
+
+    if fix and report.fixable:
+        console.print("\n[title]Repairs[/title]")
+        apply_fixes(report)
+        for done in report.repaired:
+            console.print(f"  [good]fixed[/good]   {done}")
+        for failed in report.failed:
+            console.print(f"  [bad]failed[/bad]  {failed}")
+
+        # Re-checked, so what is printed is the state now rather than the state
+        # that prompted the repair. A repair that did not take should say so.
+        report = run_checks(config)
+        remaining = report.problems
+        if remaining:
+            console.print(f"\n{len(remaining)} problem(s) still need you:")
+            for finding in remaining:
+                console.print(f"  [dim]{finding.name}: "
+                              f"{finding.remedy or finding.detail}[/dim]")
+        else:
+            console.print("\n[good]Everything checks out.[/good]")
+
+    elif report.fixable:
+        console.print(f"\n{len(report.fixable)} of these can be repaired "
+                      "automatically: [accent]comodor doctor --fix[/accent]")
+
     if config.needs_setup:
         console.print("\n[bad]No provider is configured.[/bad] Run "
                       "[accent]comodor setup[/accent] to choose one, or "
                       "[accent]comodor --demo[/accent] to try the interface "
                       "offline.")
         return 1
-    return 0
+
+    return 1 if report.worst is Status.FAIL else 0
 
 
 def run_preview(config: Config, args: argparse.Namespace) -> int:
@@ -280,7 +337,11 @@ def main(argv: list[str] | None = None) -> int:
     config = apply_overrides(load_config(args.cwd), args)
 
     if args.command == "doctor":
-        return run_doctor(config)
+        return run_doctor(config, fix=getattr(args, "fix", False))
+    if args.command == "mcp":
+        from .mcp.commands import run as run_mcp
+
+        return run_mcp(config, args)
     if args.command == "preview":
         return run_preview(config, args)
     if args.command == "setup":

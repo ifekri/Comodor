@@ -4,6 +4,37 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 ## 0.2.0 — unreleased
 
+### `comodor doctor` repairs what it finds
+
+- Nine checks covering the config, the selected provider and model, the brain,
+  the search index, skills, leftover files and MCP servers.
+- `--fix` applies every repair on offer and re-checks, so what it prints is the
+  state afterwards. Repairs are safe to run twice.
+- It repairs only what it can rebuild. A corrupt search index is deleted — it
+  is a cache. A corrupt config is reported and left alone, because it holds the
+  API key; likewise the brain, and skill files the user wrote.
+- Plain `doctor` never changes anything. A diagnostic command that silently
+  rewrites files is one nobody can predict.
+
+### MCP: tools from other programs
+
+- A Model Context Protocol client written directly against the wire format —
+  JSON-RPC over a subprocess — so support costs no new dependency.
+- Twelve servers in a catalogue with their commands, what they need and what
+  each can reach: Filesystem, Git, GitHub, Fetch, Memory, Sequential thinking,
+  SQLite, PostgreSQL, Puppeteer, Brave Search, Slack and Time.
+- `comodor mcp add <id>` for those; `comodor mcp custom <name> <command> …` for
+  anything else in the ecosystem. Both start the server and list its tools
+  before saving it as enabled — an entry that has never worked is not a
+  feature.
+- Servers connect lazily, on first use. One that fails is dropped once, with
+  its own stderr as the explanation, and the session continues.
+- MCP tools are namespaced by server and pass through the same permission gate
+  as the built-in ones; risk is inferred from the tool's description, rounding
+  up when unsure.
+- `/mcp` in the interface, and a doctor check that starts each enabled server
+  to confirm it answers.
+
 ### Setup, and an installer that finishes
 
 - Configuration is one JSON file written by a first-run wizard. The `.env` file
