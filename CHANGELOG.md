@@ -2,9 +2,21 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
-## 0.1.0 — unreleased
+## 0.2.0 — unreleased
 
-First public release.
+### Setup, and an installer that finishes
+
+- Configuration is one JSON file written by a first-run wizard. The `.env` file
+  is gone, and with it the `python-dotenv` dependency: **`rich` is now the only
+  one**.
+- The installer no longer stops on a Python that refuses `pip install`
+  ([PEP 668](https://peps.python.org/pep-0668/)). It builds a virtual
+  environment instead, or downloads `uv` when the machine has nothing usable,
+  and never passes `--break-system-packages`.
+- It also finds tools that are installed but not on PATH. A `curl | sh` shell
+  never reads your profile, so a perfectly good `uv` in `~/.local/bin` was
+  invisible; that was the reported failure.
+- PATH is set up for you rather than described to you.
 
 ### The agent
 
@@ -110,3 +122,10 @@ First public release.
   the ranking while you are still typing.
 - `tests/test_performance.py` enforces these as ceilings, so a change that makes
   memory slow fails the suite.
+
+## 0.1.0 — 2026-08-19
+
+First public release: the agent loop, Reflex, `/progress`, the responsive Rich
+interface, the safety model and the performance work described above.
+Configuration was a `.env` file at this point, and skills, session search and
+the provider catalogue did not exist yet.

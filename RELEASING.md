@@ -3,14 +3,28 @@
 Two workflows do the work. `ci.yml` runs on every push and pull request;
 `release.yml` builds and publishes when a version tag is pushed.
 
+## The version lives in one place
+
+`src/comodor/__init__.py` holds `__version__`; `pyproject.toml` reads it from
+there. Two copies drift, and the one that drifts is the one `comodor --version`
+prints — so the tag check would pass while users were told something else.
+
+Bump it there, and the tag must match:
+
+```bash
+git tag v0.2.0 && git push --tags
+```
+
 ## One-time setup: PyPI trusted publishing
 
 `release.yml` publishes with **trusted publishing** — GitHub mints a short-lived
 OIDC token that PyPI verifies. No API token is stored in the repository, so
 there is nothing to leak and nothing to rotate.
 
-Because `comodor` does not exist on PyPI yet, register it as a *pending*
-publisher before the first release:
+`comodor` is already on PyPI, so this is a normal publisher rather than a
+pending one — and **0.1.0 cannot be republished**. PyPI never lets a version
+number be reused, even after a delete, so shipping a change always means
+bumping the version first.
 
 1. Sign in to <https://pypi.org> → **Your account** → **Publishing**.
 2. Under **Add a new pending publisher**, choose GitHub and fill in:
