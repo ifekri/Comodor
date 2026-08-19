@@ -164,7 +164,8 @@ comodor --demo                              # offline walkthrough, no key needed
 comodor run "fix the failing test" --yes    # one task, headless, for scripts
 comodor run "audit this module" --json      # machine-readable result
 comodor setup                               # change provider, model or approvals
-comodor doctor                              # what is configured and what is reachable
+comodor doctor                              # check everything; --fix repairs it
+comodor mcp catalogue                       # MCP servers Comodor can set up
 ```
 
 ### Keys
@@ -184,8 +185,8 @@ message. Buttons and the sidebar are clickable where the terminal supports it.
 ### Commands
 
 `/help` `/model` `/provider` `/mode` `/loop` `/gw` `/rules` `/progress` `/memory`
-`/teach` `/skills` `/search` `/good` `/bad` `/undo` `/cost` `/export` `/theme`
-`/settings` `/approve` `/save` `/attach` `/clear` `/resume` `/quit`
+`/teach` `/skills` `/search` `/mcp` `/good` `/bad` `/undo` `/cost` `/export`
+`/theme` `/settings` `/approve` `/save` `/attach` `/clear` `/resume` `/quit`
 
 ## The three switches
 
@@ -297,6 +298,80 @@ matches, so an agent quietly authoring its own instructions would be changing
 its behaviour in a way you never agreed to and would struggle to find. What it
 writes is an ordinary file in your folder, marked `origin: learned`, and yours
 to edit or delete.
+
+## When something is wrong: `comodor doctor`
+
+```
+Checks
+  ok    config file     ~/.comodor/config.json
+  ok    provider        Anthropic · claude-sonnet-4-5
+  warn  session search  the index is corrupt
+              → delete it — it is a cache built from the transcripts
+  ok    skills          4 loaded
+  ok    mcp servers     2 enabled and reachable
+
+1 of these can be repaired automatically: comodor doctor --fix
+```
+
+`--fix` applies them and re-checks, so what it prints afterwards is the state
+now rather than the state that prompted the repair.
+
+**It repairs what it can rebuild, and refuses the rest.** A corrupt search
+index is deleted, because it is a cache derived from your transcripts. A
+corrupt *config* is reported and left alone, because it holds your API key —
+the one thing on the machine that cannot be regenerated. Same for the brain,
+and for a skill file you wrote: doctor names the file and the first problem
+rather than guessing at what you meant.
+
+Every repair is safe to run twice.
+
+## Tools from elsewhere: MCP
+
+Comodor's own tools are built in and audited. The
+[Model Context Protocol](https://modelcontextprotocol.io) is the other
+arrangement — a separate program offering capabilities Comodor never has to
+implement: a browser, a database, an issue tracker.
+
+```bash
+comodor mcp catalogue                    # twelve servers, ready to set up
+comodor mcp add filesystem --path ~/work
+comodor mcp add github --env GITHUB_PERSONAL_ACCESS_TOKEN=…
+comodor mcp list                         # what you have, and what is on
+comodor mcp test github                  # start it and list what it offers
+```
+
+| | |
+|---|---|
+| **Files and code** | Filesystem · Git · GitHub |
+| **Data** | SQLite · PostgreSQL |
+| **The web** | Fetch · Brave Search · Browser (Puppeteer) |
+| **Other** | Memory (knowledge graph) · Sequential thinking · Slack · Time |
+
+Anything else in the ecosystem works too — the catalogue is a shortcut, not a
+limit:
+
+```bash
+comodor mcp custom my-server uvx my-mcp-package --flag value
+```
+
+Four things worth knowing:
+
+- **Nothing starts until it is used.** Servers connect the first time a tool
+  list is asked for, so one you never use costs nothing and a slow one does not
+  delay startup.
+- **They go through the same permission gate as everything else.** An MCP tool
+  that says it writes, deletes or posts is treated as a write; one that
+  mentions the network is treated like a shell command. The description is all
+  there is to judge by, so it is read generously — an unnecessary prompt costs
+  a keypress, the opposite runs somebody else's code unannounced.
+- **A server that will not start is dropped, once, with the reason.** Its own
+  stderr is what gets shown, because you did not write it and that is the only
+  thing that explains it. The rest of the session carries on.
+- **What each one can reach is stated before you enable it.** "Only the
+  directory you name" and "everything your token can reach" are different kinds
+  of permission, and the difference belongs in front of the person deciding.
+
+`/mcp` inside the interface shows what is connected and every tool it brought.
 
 ## Reflex — a two-speed brain
 
@@ -454,6 +529,7 @@ src/comodor/
 ├─ agent/       the reason/act loop, context budgeting, prompts
 ├─ tools/       files, search, shell, python, web, task list
 ├─ safety/      permissions, checkpoints, redaction
+├─ mcp/         the Model Context Protocol client, and a server catalogue
 ├─ learning/    the brain: hot index, async writer, signals, rules, progress
 ├─ skills/      authored skills: the open format, matching, drafts
 ├─ session/     persistence, export, and full-text search over transcripts

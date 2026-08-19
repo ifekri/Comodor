@@ -29,6 +29,8 @@ from ..providers.gateway import Gateway
 from ..safety import CheckpointStore, PermissionEngine, Redactor
 from ..session import (SessionIndex, SessionMeta, SessionStore,
                        derive_title, new_session_id)
+from ..mcp import MCPManager
+from ..mcp.manager import SEPARATOR
 from ..skills import candidates as skill_candidates
 from ..skills import load_for as skills_for
 from ..tools import ToolRegistry
@@ -93,6 +95,11 @@ class App:
         # on disk, so it costs nothing to have and can be deleted at any time.
         self.history = SessionIndex(self.sessions)
         self.history.refresh()
+
+        # MCP servers, if any are enabled. Nothing is spawned here: the manager
+        # connects the first time a tool list is asked for, so a server the
+        # user never uses costs nothing and a slow one does not delay startup.
+        self.mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
 
         # Authored skills: the user's own procedures, loaded from their folder
         # and from the project's. Separate from the learned brain on purpose —
@@ -177,12 +184,14 @@ class App:
         """
         self.skills = skills_for(self.config)
         self.tools = ToolRegistry(skills=self.skills, history=self.history,
-                                  session_id=self.session.id)
+                                  session_id=self.session.id, mcp=self.mcp)
         return len(self.skills)
 
     def _shutdown(self) -> None:
         self.agent.interrupt()
         self.history.close()
+        if self.mcp is not None:
+            self.mcp.close()
         if self.worker and self.worker.is_alive():
             self.worker.join(timeout=2.0)
         # Flush whatever the agent produced after the last event we pumped —
@@ -1012,6 +1021,55 @@ class App:
         self.state.entries.append(
             Entry("notice", f"skill saved: {path}  (edit it freely; it is yours)"))
 
+    def cmd_mcp(self, args: str) -> None:
+        """Which MCP servers are connected, and what they brought."""
+        if self.mcp is None:
+            self._toast("MCP is switched off (mcp.enabled is false)", "warn")
+            return
+
+        words = args.strip().split()
+        verb = words[0].lower() if words else ""
+
+        if verb in ("reload", "refresh", "connect"):
+            self.mcp.close()
+            self.mcp = MCPManager(self.config.mcp.servers)
+            count = self._load_skills()          # rebuilds the tool set with it
+            self.agent.tools = self.tools
+            offered = sum(1 for tool in self.tools.all()
+                          if SEPARATOR in tool.name)
+            self._toast(f"reconnected · {offered} MCP tool(s), {count} skill(s)",
+                        "good", ttl=6.0)
+            return
+
+        body = ["## MCP servers", ""]
+        rows = self.mcp.report()
+        if not rows:
+            body.append("None configured yet. From a terminal:")
+            body.append("")
+            body.append("```")
+            body.append("comodor mcp catalogue      what Comodor can set up for you")
+            body.append("comodor mcp add github     add one of them")
+            body.append("comodor mcp custom <name> <command> [args...]")
+            body.append("```")
+            self.state.overlay = info_overlay("MCP", "\n".join(body))
+            return
+
+        for name, status, detail in rows:
+            mark = {"ready": "●", "failed": "✗", "off": "○"}.get(status, "◐")
+            body.append(f"- {mark} **{name}** — {status}. {detail}")
+
+        tools = [tool for tool in self.tools.all() if SEPARATOR in tool.name]
+        body += ["", f"### {len(tools)} tool(s) available", ""]
+        for tool in tools[:30]:
+            first = tool.description.split("\n")[0][:70]
+            body.append(f"- `{tool.name}` — {first}")
+        if len(tools) > 30:
+            body.append(f"- … and {len(tools) - 30} more")
+
+        body += ["", "`/mcp reload` reconnects after changing the configuration.",
+                 "`comodor mcp add <name>` adds one from a terminal."]
+        self.state.overlay = info_overlay("MCP", "\n".join(body))
+
     def cmd_good(self, args: str) -> None:
         self.memory.feedback(self.agent._recalled, good=True, note=args)
         self._toast("thanks — reinforced", "good")
@@ -1329,5 +1387,6 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/clear": ("cmd_clear", "start a fresh conversation"),
     "/resume": ("cmd_resume", "reopen an earlier session"),
     "/search": ("cmd_search", "find something in an earlier conversation"),
+    "/mcp": ("cmd_mcp", "MCP servers and the tools they provide"),
     "/quit": ("cmd_quit", "exit"),
 }
