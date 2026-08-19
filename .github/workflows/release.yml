@@ -47,8 +47,15 @@ jobs:
 
       - name: Read the package version
         id: version
+        # From `__init__.py`, because that is where the version lives — the
+        # `project` table declares it dynamic and hatchling reads it from there.
+        # Reading pyproject instead is how this step failed on v0.2.0.
         run: |
-          version=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          version=$(python -c "import pathlib,re; print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', pathlib.Path('src/comodor/__init__.py').read_text()).group(1))")
+          if [ -z "$version" ]; then
+            echo "::error::Could not read __version__ from src/comodor/__init__.py"
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Package version: $version"
 
