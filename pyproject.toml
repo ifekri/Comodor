@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "comodor"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Comodor — a self-improving terminal coding agent with a Rich TUI"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,6 +36,9 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 comodor = "comodor.cli:main"
+
+[tool.hatch.version]
+path = "src/comodor/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/comodor"]

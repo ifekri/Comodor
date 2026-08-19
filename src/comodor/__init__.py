@@ -12,7 +12,7 @@ The package is layered so each piece can be used on its own:
     comodor.ui         the Rich terminal interface
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 APP_NAME = "Comodor"
 
 __all__ = ["__version__", "APP_NAME"]
