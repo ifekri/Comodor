@@ -36,7 +36,7 @@ class ToolRegistry:
 
     def __init__(self, tools: Iterable[Tool] | None = None,
                  skills: Any = None, history: Any = None,
-                 session_id: str = "") -> None:
+                 session_id: str = "", mcp: Any = None) -> None:
         self._tools: dict[str, Tool] = {}
         for tool in tools if tools is not None else (cls() for cls in DEFAULT_TOOLS):
             self.add(tool)
@@ -50,6 +50,11 @@ class ToolRegistry:
         # keep asking.
         if history is not None and history.stats()["turns"]:
             self.add(SearchHistory(history, current_session=session_id))
+        # Whatever the enabled MCP servers offer, alongside the built-in tools
+        # and subject to exactly the same permission gate.
+        if mcp is not None:
+            for tool in mcp.tools():
+                self.add(tool)
 
     def add(self, tool: Tool) -> None:
         self._tools[tool.name] = tool

@@ -176,6 +176,48 @@ class SkillsConfig:
 
 
 @dataclass
+class MCPServerConfig:
+    """One Model Context Protocol server the user has added."""
+
+    name: str = ""
+    command: str = ""
+    args: list[str] = field(default_factory=list)
+    env: dict[str, str] = field(default_factory=dict)
+    #: Working directory for the process; empty means the project root.
+    cwd: str = ""
+    enabled: bool = False
+    #: The catalogue entry it came from, when it came from one.
+    spec: str = ""
+
+    def to_json(self) -> dict[str, Any]:
+        data: dict[str, Any] = {"command": self.command, "enabled": self.enabled}
+        if self.args:
+            data["args"] = list(self.args)
+        if self.env:
+            data["env"] = dict(self.env)
+        if self.cwd:
+            data["cwd"] = self.cwd
+        if self.spec:
+            data["spec"] = self.spec
+        return data
+
+
+@dataclass
+class MCPConfig:
+    """Servers, and the master switch over all of them."""
+
+    enabled: bool = True
+    servers: dict[str, MCPServerConfig] = field(default_factory=dict)
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "servers": {name: server.to_json()
+                        for name, server in sorted(self.servers.items())},
+        }
+
+
+@dataclass
 class SafetyConfig:
     auto_approve_safe: bool = True       # read-only tools never prompt
     auto_approve_writes: bool = False
@@ -206,6 +248,7 @@ class Config:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
+    mcp: MCPConfig = field(default_factory=MCPConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     paths: Paths = field(default_factory=resolve_paths)
@@ -281,6 +324,9 @@ class Config:
             for entry in self.providers.values()
             if entry.configured or entry.api_key
         }
+        # Not one of SECTIONS: it holds a map of dataclasses rather than flat
+        # settings, so the generic reader would flatten it into nonsense.
+        document["mcp"] = self.mcp.to_json()
         return document
 
     def save(self, path: Path | None = None) -> Path:
@@ -421,6 +467,7 @@ def load(cwd: Path | str | None = None, overrides: dict[str, Any] | None = None,
             if isinstance(values, dict):
                 _apply(getattr(config, name), values)
         _apply_provider_settings(config.providers, document.get("providers", {}))
+        _apply_mcp(config.mcp, document.get("mcp"))
         if document.get("provider"):
             config.provider = str(document["provider"])
         if document.get("model"):
@@ -435,6 +482,28 @@ def load(cwd: Path | str | None = None, overrides: dict[str, Any] | None = None,
 
     _choose_active(config)
     return config
+
+
+def _apply_mcp(settings: MCPConfig, document: Any) -> None:
+    """Merge the mcp block. A project may add servers; it may not remove yours."""
+    if not isinstance(document, dict):
+        return
+    if isinstance(document.get("enabled"), bool):
+        settings.enabled = document["enabled"]
+
+    for name, values in (document.get("servers") or {}).items():
+        if not isinstance(values, dict) or not values.get("command"):
+            continue
+        settings.servers[str(name)] = MCPServerConfig(
+            name=str(name),
+            command=str(values["command"]),
+            args=[str(item) for item in values.get("args") or []],
+            env={str(key): str(value)
+                 for key, value in (values.get("env") or {}).items()},
+            cwd=str(values.get("cwd") or ""),
+            enabled=bool(values.get("enabled")),
+            spec=str(values.get("spec") or ""),
+        )
 
 
 def _apply_environment_sections(config: Config) -> None:
