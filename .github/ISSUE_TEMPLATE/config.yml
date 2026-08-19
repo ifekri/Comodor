@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or idea
+    url: https://github.com/ifekri/Comodor/discussions
+    about: For anything that is not a bug report or a concrete request.
+  - name: Security vulnerability
+    url: https://github.com/ifekri/Comodor/security/advisories/new
+    about: Please report privately rather than in a public issue.

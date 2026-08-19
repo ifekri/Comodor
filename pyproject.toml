@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "comodor"
+version = "0.1.0"
+description = "Comodor — a self-improving terminal coding agent with a Rich TUI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "MMDRZA", email = "mohammadreza.fekri.mojdehi@gmail.com" }]
+keywords = ["agent", "llm", "tui", "rich", "coding-assistant", "terminal", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Code Generators",
+]
+# One dependency. The HTTP client, SSE reader and config loader are
+# all part of the package, so installing Comodor pulls in nothing else.
+dependencies = ["rich>=13.7"]
+
+[project.urls]
+Homepage = "https://comodor.ai"
+Repository = "https://github.com/ifekri/Comodor"
+Issues = "https://github.com/ifekri/Comodor/issues"
+Changelog = "https://github.com/ifekri/Comodor/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+comodor = "comodor.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/comodor"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/comodor", "tests", "pyproject.toml", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

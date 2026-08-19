@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest something Comodor should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What are you trying to do that is awkward or impossible today? Describe
+        the situation rather than the solution — it often turns out there is a
+        smaller change that solves it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you had in mind
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      description: >
+        Comodor is deliberately small — one runtime dependency, no framework.
+        Features that make it larger have to earn it.
+      options:
+        - label: This can be done without adding a runtime dependency, or it is worth one and I have said why.

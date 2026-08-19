@@ -1,0 +1,162 @@
+"""Finding the right skill for the task in front of the agent.
+
+Skills come from two places, and both matter for different reasons. The user
+folder travels with the person — how they like commits written, which checks
+they always want run. The project folder travels with the code and can be
+committed, so a team's conventions arrive with a clone rather than in an
+onboarding document.
+
+Matching reuses the same index the learning brain uses, so a skill is selected
+in microseconds and the cost does not grow as a collection does.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from ..learning.hotindex import HotIndex
+from .loader import Skill, SkillError, load
+
+SKILL_SUFFIXES = (".md", ".markdown")
+#: A skill must clear this share of the request's terms to be worth injecting.
+MATCH_FLOOR = 0.34
+
+
+class SkillRegistry:
+    """Every skill available in this session, and which ones fit a request."""
+
+    def __init__(self) -> None:
+        self.skills: dict[str, Skill] = {}
+        self.errors: list[tuple[Path, str]] = []
+        self._index = HotIndex()
+        self._next_id = 1
+        self._ids: dict[int, str] = {}
+
+    # -- discovery -------------------------------------------------------- #
+
+    def load_from(self, directory: Path, scope: str = "user") -> int:
+        """Read every skill file in a directory. Returns how many loaded."""
+        if not directory.is_dir():
+            return 0
+
+        found = 0
+        for path in sorted(directory.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in SKILL_SUFFIXES:
+                continue
+            if path.name.upper() in ("README.MD", "README.MARKDOWN"):
+                continue
+            try:
+                skill = load(path, scope=scope)
+            except (SkillError, OSError) as error:
+                # Reported, never fatal: one malformed file must not take the
+                # rest of somebody's collection out of service.
+                self.errors.append((path, str(error)))
+                continue
+            self.add(skill)
+            found += 1
+        return found
+
+    def add(self, skill: Skill) -> Skill:
+        """Register a skill. A project skill shadows a user one of the name."""
+        existing = self.skills.get(skill.name)
+        if existing is not None and existing.scope == "project" and skill.scope != "project":
+            return existing
+
+        self.skills[skill.name] = skill
+        identifier = self._next_id
+        self._next_id += 1
+        self._ids[identifier] = skill.name
+        self._index.add("skill", identifier, skill.text, skill.scope)
+        return skill
+
+    def discover(self, user_dir: Path, project_dir: Path) -> int:
+        """Load user skills, then project skills, which take precedence."""
+        self.skills.clear()
+        self.errors.clear()
+        self._index.clear()
+        self._ids.clear()
+        self._next_id = 1
+
+        total = self.load_from(user_dir, scope="user")
+        total += self.load_from(project_dir, scope="project")
+        return total
+
+    # -- selection -------------------------------------------------------- #
+
+    def match(self, query: str, limit: int = 2) -> list[Skill]:
+        """The skills worth spending context on for this request."""
+        always = [skill for skill in self.skills.values()
+                  if skill.enabled and skill.always]
+        if not query.strip():
+            return always[:limit]
+
+        chosen: list[Skill] = list(always)
+        seen = {skill.name for skill in chosen}
+
+        for doc, score in self._index.coverage_scan(query, kind="skill", limit=limit * 4):
+            if score < MATCH_FLOOR:
+                continue
+            name = self._ids.get(doc.id)
+            skill = self.skills.get(name) if name else None
+            if skill is None or not skill.enabled or skill.name in seen:
+                continue
+            chosen.append(skill)
+            seen.add(skill.name)
+            if len(chosen) >= limit:
+                break
+        return chosen[:limit]
+
+    def render(self, skills: list[Skill], max_tokens: int = 1200) -> str:
+        """The block injected into the system prompt, within a budget."""
+        if not skills:
+            return ""
+
+        header = ("Skills — procedures this user has written for situations like "
+                  "this one. Follow them unless the request says otherwise.")
+        blocks = [header]
+        used = len(header) // 4
+
+        for skill in skills:
+            rendered = skill.render()
+            cost = len(rendered) // 4 + 2
+            if used + cost > max_tokens:
+                break
+            blocks.append(rendered)
+            used += cost
+
+        return "\n\n".join(blocks) if len(blocks) > 1 else ""
+
+    # -- introspection ---------------------------------------------------- #
+
+    def get(self, name: str) -> Skill | None:
+        return self.skills.get(name)
+
+    def all(self) -> list[Skill]:
+        return sorted(self.skills.values(), key=lambda skill: skill.name)
+
+    def __len__(self) -> int:
+        return len(self.skills)
+
+
+def load_for(config) -> SkillRegistry:
+    """The registry a session should use, given a configuration.
+
+    Both entry points call this, so a skill applies whether the agent was
+    started as an interface or invoked from a script. Skills that only worked
+    interactively would be worse than no skills at all: a team convention that
+    holds at a prompt and lapses in CI is a convention nobody can rely on.
+    """
+    from . import examples
+
+    registry = SkillRegistry()
+    if not config.skills.enabled:
+        return registry
+
+    user_dir = config.paths.skills
+    if config.skills.install_examples and not user_dir.exists():
+        try:
+            examples.install(user_dir)
+        except OSError:
+            pass                      # a read-only home is not worth failing over
+    registry.discover(user_dir, config.paths.project_skills)
+    return registry

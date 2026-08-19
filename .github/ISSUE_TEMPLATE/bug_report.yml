@@ -1,0 +1,43 @@
+name: Bug report
+description: Something does not work the way it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `comodor doctor`
+      description: >
+        This prints the configuration, provider status, terminal capabilities
+        and paths in use. It answers most of the questions we would otherwise
+        have to ask. Redact anything you would rather not share — keys are
+        already masked.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal
+      description: >
+        Which terminal, and roughly what size. Layout bugs are almost always
+        specific to both.
+      placeholder: Windows Terminal, about 90 columns
+    validations:
+      required: false
+
+  - type: input
+    id: provider
+    attributes:
+      label: Provider and model
+      placeholder: openrouter / anthropic/claude-sonnet-4.5
+    validations:
+      required: false

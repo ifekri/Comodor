@@ -1,0 +1,173 @@
+name: Release
+
+# Two ways to release:
+#
+#   * push a tag `vX.Y.Z` — the normal path, so what ships is a specific,
+#     immutable commit;
+#   * run it by hand and untick "dry run" — for the first publish, or to
+#     recover from a failed one.
+#
+# Every run ends with a summary saying exactly what it did, because a workflow
+# called "Release" that finishes green without publishing anything is the most
+# confusing outcome available.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — build and verify only, publish nothing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  # Publishing happens on a tag push, or on a manual run with dry run turned
+  # off. Written once here so the jobs cannot drift apart.
+  SHOULD_PUBLISH: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) }}
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ env.SHOULD_PUBLISH }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Read the package version
+        id: version
+        run: |
+          version=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Package version: $version"
+
+      - name: The tag must match the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="${{ steps.version.outputs.version }}"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag v$tag does not match pyproject version $version."
+            {
+              echo "Bump the version in pyproject.toml, or move the tag."
+              echo "Publishing a mismatched pair is not recoverable: PyPI never"
+              echo "lets a version number be reused, even after a delete."
+            } >&2
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Check the metadata PyPI will render
+        run: twine check --strict dist/*
+
+      - name: The wheel installs and runs from a clean environment
+        run: |
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --quiet dist/*.whl
+          /tmp/verify/bin/comodor --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+          if-no-files-found: error
+
+      - name: Say what this run is going to do
+        run: |
+          {
+            echo "## Comodor ${{ steps.version.outputs.version }}"
+            echo
+            echo '```'
+            ls -1 dist/
+            echo '```'
+            echo
+            if [ "$SHOULD_PUBLISH" = "true" ]; then
+              echo "**Publishing to PyPI.**"
+            else
+              echo "### Dry run — nothing was published"
+              echo
+              echo "The distributions above were built and verified, and that is all."
+              echo "To publish for real:"
+              echo
+              echo "- push a tag: \`git tag v${{ steps.version.outputs.version }} && git push --tags\`, or"
+              echo "- run this workflow again with **dry run** unticked."
+              echo
+              echo "PyPI also needs a trusted publisher configured first — see RELEASING.md."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: needs.build.outputs.publish == 'true'
+
+    # The environment is what PyPI's trusted publisher is scoped to, and it is
+    # also where a required reviewer can be added if you want releases to pause
+    # for a human.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/comodor
+
+    permissions:
+      # Trusted publishing: GitHub mints a short-lived OIDC token that PyPI
+      # verifies. No API token is stored anywhere, so there is nothing to leak
+      # and nothing to rotate.
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Record what shipped
+        run: |
+          {
+            echo "## Published"
+            echo
+            echo "comodor ${{ needs.build.outputs.version }} is on PyPI."
+            echo
+            echo '```bash'
+            echo "pipx install comodor==${{ needs.build.outputs.version }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  github-release:
+    name: Attach to the GitHub release
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            ```bash
+            curl -fsSL https://comodor.ai/install.sh | sh     # macOS / Linux
+            irm https://comodor.ai/install.ps1 | iex          # Windows
+            pipx install comodor==${{ needs.build.outputs.version }}
+            ```
