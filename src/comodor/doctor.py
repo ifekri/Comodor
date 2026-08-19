@@ -96,7 +96,8 @@ def run_checks(config: Config) -> Report:
     """Every check, in the order a person would want to read them."""
     report = Report()
     for check in (_check_config, _check_config_permissions, _check_provider,
-                  _check_model, _check_brain, _check_search_index,
+                  _check_saved_provider, _check_model, _check_brain,
+                  _check_search_index,
                   _check_skills, _check_leftovers, _check_mcp):
         try:
             finding = check(config)
@@ -185,6 +186,41 @@ def _check_provider(config: Config) -> Finding:
                    "variable")
 
     return Finding("provider", Status.OK, f"{entry.display} · {entry.model}")
+
+
+def _check_saved_provider(config: Config) -> Finding | None:
+    """The file can name a provider that no longer exists.
+
+    Loading quietly falls back to one that works, which is the right thing to
+    do at startup and the wrong thing to leave unmentioned: the file still says
+    something untrue, and every future run repeats the guess. Nothing is broken,
+    so this is a warning — but it is a warning doctor can act on.
+    """
+    import json
+
+    path = config.paths.config_file
+    if not path.exists():
+        return None
+
+    try:
+        saved = str(json.loads(path.read_text(encoding="utf-8")).get("provider") or "")
+    except (ValueError, OSError):
+        return None                       # the config check already reported it
+
+    if not saved or saved == config.provider:
+        return None
+    if saved in config.providers:
+        return None                       # a real provider, just not selected now
+
+    def repair() -> str:
+        config.save()
+        return f"replaced {saved!r} in the config with {config.provider!r}"
+
+    return Finding(
+        "saved provider", Status.WARN,
+        f"the config names {saved!r}, which does not exist; "
+        f"{config.provider!r} is being used instead",
+        remedy="write the one actually in use back to the file", repair=repair)
 
 
 def _check_model(config: Config) -> Finding | None:
@@ -318,14 +354,18 @@ def _quick_check(path: Path) -> Any:
 
 def _check_leftovers(config: Config) -> Finding:
     """Temporary files from an interrupted write, and stale probe folders."""
-    stale: list[Path] = []
     root = config.paths.user
+    found: set[Path] = set()
     if root.exists():
-        stale.extend(root.glob("*.tmp"))
-        stale.extend(root.glob("*.json.tmp"))
+        # `config.json.tmp` matches both patterns, so a list would report two
+        # files and then remove one — a count that contradicts itself is worse
+        # than no count.
+        found.update(root.glob("*.tmp"))
+        found.update(root.glob("*.json.tmp"))
     probe = root / ".venv-probe"
     if probe.exists():
-        stale.append(probe)
+        found.add(probe)
+    stale = sorted(found)
 
     if not stale:
         return Finding("leftover files", Status.OK, "none")
@@ -333,6 +373,11 @@ def _check_leftovers(config: Config) -> Finding:
     def repair() -> str:
         removed = 0
         for path in stale:
+            if not path.exists():
+                # An earlier repair may have taken it: saving the config writes
+                # through `config.json.tmp` and replaces it. Reporting "removed
+                # 0" for a file that is correctly gone reads like a failure.
+                continue
             try:
                 if path.is_dir():
                     shutil.rmtree(path)
@@ -341,6 +386,8 @@ def _check_leftovers(config: Config) -> Finding:
                 removed += 1
             except OSError:
                 pass
+        if not removed:
+            return "the leftover files were already gone"
         return f"removed {removed} leftover file(s)"
 
     return Finding(
