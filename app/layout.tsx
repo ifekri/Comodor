@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Instrument_Serif, Inter, JetBrains_Mono } from 'next/font/google';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { site } from '@/lib/site.config';
 import '@/styles/globals.css';
 import '@/styles/components.css';
@@ -69,8 +70,30 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: '#faf8f4',
-  colorScheme: 'light',
+  // Both, so form controls and scrollbars follow whichever theme is applied.
+  colorScheme: 'light dark',
 };
+
+/*
+ * Applied before the first paint, which is why it is a blocking inline script
+ * and not a component. React runs after the browser has already painted; on a
+ * page that is either near-white or near-black, that one frame of the wrong
+ * theme is the most visible bug the feature could have.
+ *
+ * Deliberately tiny and deliberately wrapped in try/catch: localStorage throws
+ * in some private modes, and a theme preference is not worth a blank page.
+ */
+const NO_FLASH = `
+try {
+  var stored = localStorage.getItem('comodor-theme');
+  var dark = stored
+    ? stored === 'dark'
+    : matchMedia('(prefers-color-scheme: dark)').matches;
+  var root = document.documentElement;
+  root.dataset.theme = dark ? 'dark' : 'light';
+  root.style.colorScheme = dark ? 'dark' : 'light';
+} catch (e) {}
+`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -78,10 +101,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       lang="en"
       className={`${serif.variable} ${sans.variable} ${mono.variable}`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
+      </head>
       <body>
         <a className="skip-link" href="#install">
           Skip to the install command
         </a>
+        <ThemeToggle />
         {children}
       </body>
     </html>

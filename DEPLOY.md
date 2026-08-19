@@ -143,11 +143,41 @@ GSAP appears four times, and each one does something the static page cannot:
 Everything else is still, and that is the point. Adding a fifth is how a page
 starts to feel automated.
 
+## Light and dark
+
+Dark is a second design, not an inversion, and the reason is the central device:
+the terminal is a dark figure on pale paper. Flipping the page dissolves exactly
+that — a near-black panel on a near-black page is one smudge, not a figure and a
+ground.
+
+So the relationship is rebuilt. The page becomes a **warm charcoal** (`#282420`),
+the terminal goes **deeper than it** (`#080705`), and a warmer border carries the
+edge that tone alone no longer can. The accent moves too: `#bf3d0b` is picked for
+contrast against paper and turns muddy on charcoal, so dark uses `#ff7d3c`.
+
+The first attempt had the page at `#13110d` and the terminal at `#0a0906` — two
+tones that are both "very dark". They measured **1.06:1** apart. `tools/themes.mjs`
+asserts at least 1.25:1, which is what forced the page to lift.
+
+Three things the switch has to get right:
+
+- **No flash.** An inline blocking script in `<head>` applies the stored choice
+  before the first paint. React cannot do this job: by the time a component
+  mounts, the wrong theme has already been on screen for a frame, and on a page
+  this pale or this dark, one frame is very visible.
+- **A default that is not a guess.** Until somebody chooses, the system
+  preference wins and nothing is stored — so a reader who changes their OS
+  setting later is not stuck with what they had in January.
+- **Contrast in both.** `themes.mjs` measures real WCAG ratios on five text
+  roles per theme. It caught `--ink-3` at **3.73:1** in light — a bug that had
+  already shipped, affecting every label, eyebrow and note on the page.
+
 ## Checking it
 
 ```bash
 npm start &
 node tools/a11y.mjs http://localhost:3300    # the checks that matter
+node tools/themes.mjs                         # both themes: contrast, no flash
 node tools/shots.mjs                          # screenshots at four widths
 sh tools/check-scripts.sh                     # the installers
 ```
