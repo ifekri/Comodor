@@ -282,3 +282,45 @@ def test_doctor_offers_the_fix_without_applying_it(home, capsys):
     assert "doctor --fix" in output
     assert (config.paths.user / "stale.tmp").exists(), \
         "a diagnostic command must not silently change files"
+
+
+def test_a_stale_provider_in_the_file_is_written_back(home):
+    """Loading falls back silently, which leaves the file saying something untrue.
+
+    Nothing is broken — but every future run repeats the guess, and doctor is
+    the one place that should notice.
+    """
+    config = configured(home)
+    document = json.loads(config.paths.config_file.read_text(encoding="utf-8"))
+    document["provider"] = "a-provider-that-no-longer-exists"
+    config.paths.config_file.write_text(json.dumps(document), encoding="utf-8")
+
+    reloaded = load(cwd=home / "project", use_environment=False)
+    assert reloaded.provider == "openai", "loading should still work"
+
+    report = run_checks(reloaded)
+    assert finding(report, "saved provider").status is Status.WARN
+
+    apply_fixes(report)
+    written = json.loads(reloaded.paths.config_file.read_text(encoding="utf-8"))
+    assert written["provider"] == "openai"
+    assert written["providers"]["openai"]["api_key"] == "sk-test", \
+        "repairing the provider must not lose the key"
+
+
+def test_a_provider_that_exists_but_is_not_selected_is_not_flagged(home):
+    """Switching with --provider for one run is not a fault in the file."""
+    config = configured(home)
+    config.provider = "groq"
+
+    assert all(f.name != "saved provider" for f in run_checks(config).findings)
+
+
+def test_one_file_matching_two_patterns_is_counted_once(home):
+    """`config.json.tmp` matches both globs; saying 2 and removing 1 is worse
+    than saying nothing."""
+    config = configured(home)
+    (config.paths.user / "config.json.tmp").write_text("x", encoding="utf-8")
+
+    entry = finding(run_checks(config), "leftover files")
+    assert entry.detail.startswith("1 ")
