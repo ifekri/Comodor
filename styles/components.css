@@ -1,0 +1,896 @@
+/*
+ * Components.
+ *
+ * Two textures, and the whole page is the contrast between them: paper, which
+ * is type and hairlines and space, and the terminal, which is the only dark
+ * surface and the only place the ember is loud. There are no drop shadows and
+ * no rounded cards on the paper side — depth here comes from the figures being
+ * a genuinely different material, not from every box floating.
+ */
+
+/* ================================================================== hero == */
+
+.hero {
+  padding-block: clamp(3rem, 8vh, 6rem) clamp(4rem, 10vh, 8rem);
+}
+
+.hero__rule {
+  height: 1px;
+  background: var(--ink);
+  transform-origin: left center;
+  margin-bottom: clamp(2.5rem, 7vh, 5rem);
+}
+
+.hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(2.5rem, 6vw, 4.5rem);
+  align-items: start;
+}
+
+@media (min-width: 980px) {
+  .hero__grid {
+    /* Deliberately uneven. A 50/50 split reads as a template; the text wants a
+       measure it can hold and the figure takes what is left. */
+    grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
+    gap: clamp(3rem, 5vw, 5rem);
+  }
+}
+
+.hero__title {
+  margin-bottom: 1.6rem;
+}
+
+/* Each line is its own clipping window, so the type is uncovered rather than
+   faded — closer to how a printed line would be revealed. */
+.hero__line {
+  display: block;
+  overflow: hidden;
+}
+
+.hero__line > span {
+  display: block;
+}
+
+.hero__title em {
+  font-style: italic;
+  color: var(--ember);
+}
+
+.hero__lede {
+  margin-bottom: 2.2rem;
+}
+
+.hero__install {
+  margin-bottom: 2.6rem;
+}
+
+.hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem clamp(1.6rem, 4vw, 3rem);
+  margin: 0;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--rule);
+}
+
+.hero__meta dt {
+  font-size: 0.7rem;
+  font-weight: 560;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 0.25rem;
+}
+
+.hero__meta dd {
+  margin: 0;
+  font-size: 0.94rem;
+  color: var(--ink);
+}
+
+.hero__caption {
+  margin-top: 0.9rem;
+  font-size: 0.83rem;
+  color: var(--ink-3);
+  font-style: italic;
+  font-family: var(--serif);
+}
+
+.hero__figure {
+  margin: 0;
+}
+
+/* ============================================================== terminal == */
+
+/*
+ * The dark figure. Everything inside uses the product's real palette, which is
+ * the one place that is right: this is a picture of the program.
+ */
+.term {
+  background: var(--term-bg);
+  border: 1px solid var(--term-rule);
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: clamp(0.72rem, 0.95vw, 0.82rem);
+  line-height: 1.85;
+  color: var(--term-text);
+  /* The only shadow on the page, and only because this is a physical object
+     set into paper. Warm, not neutral, so it belongs to the palette. */
+  box-shadow: 0 22px 50px -30px rgba(35, 22, 10, 0.5);
+}
+
+.term__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.85rem;
+  background: var(--term-panel);
+  border-bottom: 1px solid var(--term-rule);
+}
+
+.term__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--term-rule);
+}
+
+.term__title {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--term-dim);
+  letter-spacing: 0.03em;
+}
+
+.term__body {
+  padding: 1.15rem 1.1rem 1.35rem;
+}
+
+.term__body--tight {
+  padding: 0.9rem 1rem;
+}
+
+.term__row {
+  display: flex;
+  gap: 0.6rem;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.term__row--gap {
+  margin-top: 0.75rem;
+}
+
+.term__row--indent {
+  padding-left: 2.6rem;
+}
+
+.term__row--dim {
+  color: var(--term-dim);
+}
+
+.term__row--learn {
+  color: var(--term-amber);
+}
+
+.term__prompt {
+  color: var(--term-ember);
+  flex: none;
+}
+
+.term__prompt--edit {
+  color: var(--term-teal);
+}
+
+.term__gut {
+  color: var(--term-dim);
+  flex: none;
+  width: 1.1rem;
+  text-align: right;
+  user-select: none;
+}
+
+.term__dim {
+  color: var(--term-dim);
+}
+
+.term__amber {
+  color: var(--term-amber);
+}
+
+.term__was {
+  color: var(--term-dim);
+  text-decoration: line-through;
+}
+
+.term__now {
+  color: var(--term-green);
+}
+
+/* Let the content set the height. A fixed minimum on a short file is how the
+   panel came to be mostly empty. */
+.term--tall .term__body {
+  padding-block: 1.35rem 1.6rem;
+}
+
+.term--wide {
+  width: 100%;
+}
+
+.term__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.4rem;
+  margin-top: 1.1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--term-rule);
+  font-size: 0.95em;
+}
+
+.term__status__right {
+  margin-left: auto;
+}
+
+/* ================================================================ layout == */
+
+.split {
+  row-gap: 1.5rem;
+  margin-bottom: clamp(2.2rem, 5vh, 3.4rem);
+}
+
+.split__text,
+.split__aside {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 860px) {
+  .split__text {
+    grid-column: 1 / span 6;
+  }
+  .split__aside {
+    /* Starts at 8, not 7. The gap between heading and note is what stops the
+       two columns reading as a table. */
+    grid-column: 8 / span 5;
+    padding-top: 0.5rem;
+  }
+}
+
+.pullquote {
+  max-width: 44rem;
+  margin-top: clamp(2rem, 5vh, 3rem);
+  padding-left: 1.4rem;
+  border-left: 2px solid var(--ember);
+  font-size: clamp(1rem, 1.35vw, 1.12rem);
+}
+
+.pullquote code,
+.doctor__text code,
+.split__aside code,
+.verify code,
+.hero__meta code {
+  background: var(--paper-3);
+  padding: 0.1em 0.38em;
+  white-space: nowrap;
+}
+
+/* =============================================================== signals == */
+
+.signals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  margin: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.signal {
+  padding: 1.35rem 1.4rem 1.5rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+@media (min-width: 720px) {
+  .signal {
+    border-right: 1px solid var(--rule);
+    padding-left: 1.4rem;
+  }
+  .signal:first-child {
+    padding-left: 0;
+  }
+  .signal:last-child {
+    border-right: 0;
+  }
+}
+
+.signal dt {
+  font-weight: 560;
+  font-size: 0.92rem;
+  margin-bottom: 0.4rem;
+  color: var(--ink);
+}
+
+.signal dd {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+/* ================================================================ reflex == */
+
+.reflex__stage {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding-block: clamp(2rem, 5vh, 3.5rem);
+  background: var(--paper-2);
+  border-block: 1px solid var(--rule);
+}
+
+.reflex__inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(2rem, 5vw, 4rem);
+  align-items: center;
+  width: 100%;
+}
+
+@media (min-width: 900px) {
+  .reflex__inner {
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
+  }
+}
+
+.reflex__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1.6rem;
+}
+
+.reflex__step {
+  border-left: 1px solid var(--rule-strong);
+  padding-left: 1.1rem;
+}
+
+.reflex__n {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 0.85rem;
+  color: var(--ember);
+}
+
+.reflex__step h3 {
+  margin: 0.15rem 0 0.3rem;
+  font-size: 1.05rem;
+}
+
+.reflex__step p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-2);
+  line-height: 1.5;
+  max-width: 26rem;
+}
+
+.reflex__code {
+  position: relative;
+}
+
+.reflex__key {
+  color: var(--term-teal);
+}
+
+.reflex__num {
+  color: var(--term-amber);
+}
+
+/* Both spellings occupy the same box, so one replaces the other in place
+   rather than the line reflowing under the reader. */
+.reflex__quote {
+  position: relative;
+  display: inline-block;
+  color: var(--term-green);
+}
+
+.reflex__single {
+  position: absolute;
+  inset: 0;
+}
+
+.reflex__cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 0.15em;
+  background: var(--term-teal);
+  vertical-align: text-bottom;
+  opacity: 0;
+}
+
+.reflex__learned {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 1.6rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--term-rule);
+  color: var(--term-amber);
+}
+
+.reflex__evidence {
+  margin: 0.3rem 0 0 1.2rem;
+  font-size: 0.92em;
+  color: var(--term-dim);
+}
+
+.reflex__next {
+  display: flex;
+  gap: 0.6rem;
+  margin: 1.4rem 0 0;
+}
+
+.reflex__now {
+  color: var(--term-green);
+}
+
+/* ================================================================ skills == */
+
+.skill-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(2rem, 4vw, 3rem);
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .skill-layout {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  }
+}
+
+.skill-file {
+  margin: 0;
+  background: var(--term-bg);
+  border: 1px solid var(--term-rule);
+  padding: 1.2rem 1.25rem 0.9rem;
+  box-shadow: 0 22px 50px -30px rgba(35, 22, 10, 0.5);
+}
+
+.skill-file figcaption {
+  margin-top: 1rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--term-rule);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--term-dim);
+}
+
+.skill-file__body {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: clamp(0.7rem, 0.9vw, 0.79rem);
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--term-text);
+}
+
+.skill-file__rule {
+  color: var(--term-dim);
+}
+
+.skill-file__key {
+  color: var(--term-amber);
+}
+
+.notes {
+  border-top: 1px solid var(--rule);
+}
+
+.note {
+  padding: 1.15rem 0 1.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.note h3 {
+  margin-bottom: 0.3rem;
+}
+
+.note p {
+  margin: 0;
+  font-size: 0.89rem;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+/* =============================================================== figures == */
+
+.figures {
+  border-top: 1px solid var(--ink);
+}
+
+.figure {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.95rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.figure__label {
+  font-size: 0.94rem;
+  color: var(--ink-2);
+}
+
+.figure__reading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  flex: none;
+}
+
+.figure__value {
+  font-family: var(--serif);
+  font-size: clamp(1.5rem, 3vw, 2.1rem);
+  line-height: 1;
+  color: var(--ink);
+}
+
+.figure__unit {
+  font-size: 0.85rem;
+  color: var(--ink-3);
+}
+
+.figure__flat {
+  margin-left: 0.5rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ember);
+  background: var(--ember-soft);
+  padding: 0.15rem 0.45rem;
+}
+
+/* ================================================================= cards == */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  border-top: 1px solid var(--rule);
+}
+
+.card {
+  padding: 1.2rem 1.4rem 1.4rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+@media (min-width: 760px) {
+  .card {
+    border-right: 1px solid var(--rule);
+    padding-left: 1.4rem;
+  }
+  .card:first-child {
+    padding-left: 0;
+  }
+  .card:last-child {
+    border-right: 0;
+  }
+}
+
+.card h3 {
+  margin-bottom: 0.35rem;
+}
+
+.card p {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+/* ================================================================ doctor == */
+
+.doctor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(1.8rem, 4vw, 3rem);
+  align-items: center;
+  margin-top: clamp(2.5rem, 6vh, 4rem);
+}
+
+@media (min-width: 900px) {
+  .doctor {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  }
+}
+
+.doctor__text h3 {
+  font-size: 1.15rem;
+  margin-bottom: 0.6rem;
+}
+
+.doctor__text p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.95rem;
+  max-width: 30rem;
+}
+
+.doctor__ok {
+  color: var(--term-green);
+  flex: none;
+  width: 2.4rem;
+}
+
+.doctor__warn {
+  color: var(--term-amber);
+  flex: none;
+  width: 2.4rem;
+}
+
+.doctor__name {
+  flex: none;
+  width: 8.5rem;
+  color: var(--term-text);
+}
+
+/* =============================================================== servers == */
+
+.servers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  list-style: none;
+  margin: 0 0 2rem;
+  padding: 0;
+}
+
+.servers li {
+  border: 1px solid var(--rule);
+  background: var(--paper-2);
+  padding: 0.38rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--ink-2);
+}
+
+.snippet {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: var(--term-bg);
+  border: 1px solid var(--term-rule);
+  padding: 0.85rem 0.9rem 0.85rem 1rem;
+  max-width: 42rem;
+}
+
+.snippet code {
+  color: var(--term-text);
+  font-size: 0.85rem;
+  overflow-x: auto;
+}
+
+/* =============================================================== install == */
+
+.install__tabs {
+  display: flex;
+  border-bottom: 1px solid var(--rule);
+}
+
+.install__tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 0.5rem 0.9rem;
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: color 0.16s ease, border-color 0.16s ease;
+}
+
+.install__tab:first-child {
+  padding-left: 0;
+}
+
+.install__tab:hover {
+  color: var(--ink);
+}
+
+.install__tab[data-active='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--ember);
+  font-weight: 540;
+}
+
+.install__badge {
+  margin-left: 0.4rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ember);
+}
+
+.install__command {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: var(--term-bg);
+  border: 1px solid var(--term-rule);
+  border-top: 0;
+  padding: 1rem 0.9rem 1rem 1.05rem;
+}
+
+.install__command code {
+  display: flex;
+  gap: 0.7rem;
+  align-items: baseline;
+  font-size: clamp(0.78rem, 1.05vw, 0.92rem);
+  color: var(--term-text);
+  min-width: 0;
+}
+
+.install__text {
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 620px) {
+  /* Wide enough to hold the line, so keep it on one and let it scroll if a
+     future command is longer. */
+  .install__command code {
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .install__text {
+    overflow-wrap: normal;
+  }
+}
+
+.install__prompt {
+  color: var(--term-ember);
+  flex: none;
+}
+
+.install__note {
+  margin: 0.7rem 0 0;
+  font-size: 0.82rem;
+  color: var(--ink-3);
+}
+
+.install__fallback {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.install__fallback code {
+  display: block;
+  color: var(--ink-2);
+}
+
+/* ---------------------------------------------------------------- copy -- */
+
+.copy {
+  appearance: none;
+  background: none;
+  border: 1px solid var(--term-rule);
+  color: var(--term-dim);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.4rem 0.65rem;
+  cursor: pointer;
+  flex: none;
+  transition: color 0.16s ease, border-color 0.16s ease;
+}
+
+.copy:hover {
+  color: var(--term-amber);
+  border-color: var(--term-amber);
+}
+
+.copy[data-copied='true'] {
+  color: var(--term-green);
+  border-color: var(--term-green);
+}
+
+/* =============================================================== closing == */
+
+.closing__install {
+  max-width: 46rem;
+  margin-bottom: 2.6rem;
+}
+
+.alts {
+  border-top: 1px solid var(--rule);
+  margin-bottom: 2rem;
+}
+
+.alt {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--rule);
+  flex-wrap: wrap;
+}
+
+.alt__label {
+  flex: none;
+  width: 7rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.alt__command {
+  flex: 1 1 16rem;
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+
+.alt .copy {
+  border-color: var(--rule-strong);
+  color: var(--ink-3);
+}
+
+.alt .copy:hover {
+  color: var(--ember);
+  border-color: var(--ember);
+}
+
+.verify {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+  max-width: 40rem;
+}
+
+/* ================================================================ footer == */
+
+.footer {
+  border-top: 1px solid var(--ink);
+  padding-block: 2.2rem 3rem;
+}
+
+.footer__inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.footer__mark {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.footer__mark strong {
+  font-family: var(--serif);
+  font-size: 1.15rem;
+  font-weight: 400;
+}
+
+.footer__mark span {
+  font-size: 0.85rem;
+  color: var(--ink-3);
+  font-style: italic;
+  font-family: var(--serif);
+}
+
+.footer__links {
+  display: flex;
+  gap: 1.4rem;
+  font-size: 0.86rem;
+}

@@ -1,0 +1,16 @@
+# Line endings are load-bearing here.
+#
+# `install.sh` is served to `curl … | sh`. A CRLF in it makes /bin/sh read the
+# carriage return as part of the last token, so `set -eu` becomes `set -eu\r`
+# and dash dies on line 21 with "Illegal option -" before printing anything.
+# That shipped once. Without this file, a clone on Windows recreates it.
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.ps1   text eol=crlf
+
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
