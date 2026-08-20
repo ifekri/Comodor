@@ -6,28 +6,33 @@ name: Pages
 # somebody lands on when they come to read the agent — is untouched by any of
 # this.
 #
-# Two settings decide whether the result works at all, and both are here rather
-# than in a README because getting either wrong produces a page that loads
-# without its stylesheet and looks broken rather than misconfigured:
+# Where the site lives decides how it is built, and getting it wrong produces a
+# page that loads without its stylesheet — broken-looking rather than obviously
+# misconfigured. So there is one switch and it defaults to the real thing:
 #
-#   base_path   Empty for a custom domain, `/Comodor` for the github.io URL.
-#               Every absolute asset URL is built against it.
-#   custom_domain  Writes a CNAME. Pages needs the file to keep the domain
-#                  across deployments; without it, the setting is dropped.
+#   push (or manual, preview off)  built for SITE_DOMAIN — assets at the root,
+#                                  and a CNAME, without which Pages drops the
+#                                  domain on the next deploy.
+#   manual with preview: true      built for the github.io URL, assets under
+#                                  /<repo>.
+#
+# Both directions are asserted before the artifact is uploaded.
 
 on:
   push:
     branches: [site]
   workflow_dispatch:
     inputs:
-      base_path:
-        description: 'Path prefix — leave empty when using a custom domain'
-        type: string
-        default: '/Comodor'
-      custom_domain:
-        description: 'Custom domain, e.g. comodor.ai — empty for the github.io URL'
-        type: string
-        default: ''
+      preview:
+        description: 'Build for the github.io URL instead of the custom domain'
+        type: boolean
+        default: false
+
+# The domain this site is for. A push builds for it, because that is the target
+# state — building for the github.io preview by default would mean every
+# ordinary commit shipped a version that is broken on the real domain.
+env:
+  SITE_DOMAIN: comodor.ai
 
 permissions:
   contents: read
@@ -57,17 +62,15 @@ jobs:
       - name: Decide where the site will live
         id: where
         run: |
-          domain="${{ inputs.custom_domain }}"
-          base="${{ inputs.base_path }}"
-          # A push, rather than a manual run, has no inputs — default to the
-          # github.io URL, which is the one being previewed.
-          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+          # A custom domain serves from the root; the github.io URL serves from
+          # /<repo>. The two are mutually exclusive and getting it wrong ships
+          # a page with no stylesheet, so it is decided once, here.
+          if [ "${{ inputs.preview }}" = "true" ]; then
             base="/${{ github.event.repository.name }}"
             domain=""
-          fi
-          # A custom domain serves from the root, so a base path would break it.
-          if [ -n "$domain" ]; then
+          else
             base=""
+            domain="${SITE_DOMAIN}"
           fi
           echo "base=$base" >> "$GITHUB_OUTPUT"
           echo "domain=$domain" >> "$GITHUB_OUTPUT"
@@ -117,10 +120,21 @@ jobs:
           fi
           sh -n out/install.sh
 
+          # Assets have to match wherever the site is about to live. Both
+          # directions are checked, because both failures look identical to a
+          # visitor: a page that renders with no stylesheet.
           base='${{ steps.where.outputs.base }}'
-          if [ -n "$base" ] && ! grep -q "$base/_next/" out/index.html; then
-            echo "::error::assets are not prefixed with $base — the page would load unstyled"
-            exit 1
+          if [ -n "$base" ]; then
+            grep -q "$base/_next/" out/index.html || {
+              echo "::error::assets are not prefixed with $base — unstyled on the github.io URL"
+              exit 1
+            }
+          else
+            grep -q '"/_next/' out/index.html || {
+              echo "::error::assets are not root-relative — unstyled on the custom domain"
+              exit 1
+            }
+            test -f out/CNAME || { echo "::error::no CNAME; Pages would drop the domain"; exit 1; }
           fi
 
           {
