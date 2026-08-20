@@ -1,0 +1,154 @@
+name: Pages
+
+# Builds the site as a static export and publishes it to GitHub Pages.
+#
+# Lives on the `site` branch and only ever runs from it, so `main` — the branch
+# somebody lands on when they come to read the agent — is untouched by any of
+# this.
+#
+# Two settings decide whether the result works at all, and both are here rather
+# than in a README because getting either wrong produces a page that loads
+# without its stylesheet and looks broken rather than misconfigured:
+#
+#   base_path   Empty for a custom domain, `/Comodor` for the github.io URL.
+#               Every absolute asset URL is built against it.
+#   custom_domain  Writes a CNAME. Pages needs the file to keep the domain
+#                  across deployments; without it, the setting is dropped.
+
+on:
+  push:
+    branches: [site]
+  workflow_dispatch:
+    inputs:
+      base_path:
+        description: 'Path prefix — leave empty when using a custom domain'
+        type: string
+        default: '/Comodor'
+      custom_domain:
+        description: 'Custom domain, e.g. comodor.ai — empty for the github.io URL'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one in flight: a half-published
+# site is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Decide where the site will live
+        id: where
+        run: |
+          domain="${{ inputs.custom_domain }}"
+          base="${{ inputs.base_path }}"
+          # A push, rather than a manual run, has no inputs — default to the
+          # github.io URL, which is the one being previewed.
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            base="/${{ github.event.repository.name }}"
+            domain=""
+          fi
+          # A custom domain serves from the root, so a base path would break it.
+          if [ -n "$domain" ]; then
+            base=""
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "domain=$domain" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Publishing"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| base path | \`${base:-(root)}\` |"
+            echo "| custom domain | \`${domain:-(none)}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the install scripts before shipping them
+        run: sh tools/check-scripts.sh
+
+      - name: Build
+        env:
+          NEXT_STATIC_EXPORT: '1'
+          NEXT_BASE_PATH: ${{ steps.where.outputs.base }}
+        run: npm run build
+
+      - name: Make it servable by Pages
+        run: |
+          # Without this, Pages runs the output through Jekyll, which ignores
+          # every directory beginning with an underscore — including `_next`,
+          # which is the entire stylesheet and every script.
+          touch out/.nojekyll
+
+          if [ -n "${{ steps.where.outputs.domain }}" ]; then
+            echo "${{ steps.where.outputs.domain }}" > out/CNAME
+          fi
+
+      - name: The build actually produced a site
+        run: |
+          # A green deploy of an empty directory is the failure that wastes the
+          # most time, so the artifact is inspected rather than trusted.
+          test -f out/index.html || { echo "::error::no index.html"; exit 1; }
+          test -f out/.nojekyll || { echo "::error::no .nojekyll"; exit 1; }
+          test -f out/install.sh || { echo "::error::no install.sh"; exit 1; }
+          test -f out/install-sh.txt || { echo "::error::no install-sh.txt"; exit 1; }
+
+          # CRLF here is fatal and silent: /bin/sh reads the carriage return as
+          # part of the last token and dies before printing anything.
+          if grep -q $'\r' out/install.sh; then
+            echo "::error::install.sh has CRLF line endings"
+            exit 1
+          fi
+          sh -n out/install.sh
+
+          base='${{ steps.where.outputs.base }}'
+          if [ -n "$base" ] && ! grep -q "$base/_next/" out/index.html; then
+            echo "::error::assets are not prefixed with $base — the page would load unstyled"
+            exit 1
+          fi
+
+          {
+            echo
+            echo "\`\`\`"
+            ls -1 out
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Say where it went
+        run: |
+          {
+            echo "### Deployed"
+            echo
+            echo "${{ steps.deployment.outputs.page_url }}"
+          } >> "$GITHUB_STEP_SUMMARY"

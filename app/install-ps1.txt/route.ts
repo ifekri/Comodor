@@ -1,6 +1,6 @@
 import { PLAIN_TEXT, readScript } from '@/lib/scripts';
 
-/** The PowerShell installer. See `app/install.sh/route.ts` for the reasoning. */
+/** The PowerShell installer, readable in a browser on any host. */
 export const dynamic = 'force-static';
 
 export async function GET() {
