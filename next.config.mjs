@@ -21,6 +21,11 @@ const basePath = process.env.NEXT_BASE_PATH || '';
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+
+  // The client fetches the hero artwork by absolute path, and an absolute path
+  // is wrong the moment the site lives in a repository subpath. This is the
+  // only way the browser gets told what that prefix is.
+  env: { NEXT_PUBLIC_BASE_PATH: basePath },
   poweredByHeader: false,
   compress: true,
 
