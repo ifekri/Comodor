@@ -2,6 +2,11 @@
 
 **A coding agent that lives in your terminal — and learns the way you correct it.**
 
+[![PyPI](https://img.shields.io/pypi/v/comodor?label=pypi&color=c4441e)](https://pypi.org/project/comodor/)
+[![Python](https://img.shields.io/pypi/pyversions/comodor)](https://pypi.org/project/comodor/)
+[![CI](https://github.com/ifekri/Comodor/actions/workflows/ci.yml/badge.svg)](https://github.com/ifekri/Comodor/actions/workflows/ci.yml)
+[![Licence](https://img.shields.io/pypi/l/comodor?color=555)](LICENSE)
+
 [comodor.ai](https://comodor.ai) · [Install](#install) · [What it can do](#what-it-can-do)
 
 ---
