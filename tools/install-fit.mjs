@@ -15,6 +15,7 @@ import { chromium } from 'playwright';
 
 const base = process.argv[2] || 'http://localhost:3300';
 const WIDTHS = [360, 390, 414, 500, 620, 700, 768, 820, 900, 1024, 1180, 1280, 1440, 1680];
+const TABS = ['macOS', 'Linux', 'Windows', 'uv', 'pipx', 'pip', 'source'];
 
 let failures = 0;
 const browser = await chromium.launch();
@@ -27,9 +28,28 @@ for (const width of WIDTHS) {
   await page.setViewportSize({ width, height: 900 });
   await page.waitForTimeout(260);
 
-  for (const tab of ['macOS', 'Linux', 'Windows']) {
+  for (const tab of TABS) {
     await page.click(`.install__tab:has-text("${tab}")`);
-    await page.waitForTimeout(140);
+    await page.waitForTimeout(180);
+
+    // The fading right edge must mean something. It is set from a measurement
+    // rather than left on permanently, because a command that fits had its
+    // last characters ghosted for no reason — `| sh` read as truncated when
+    // the whole line was there.
+    const fade = await page.evaluate(() => {
+      const text = document.querySelector('.hero__install .install__text');
+      return {
+        over: text.scrollWidth - text.clientWidth,
+        flag: text.dataset.clipped === 'true',
+      };
+    });
+    if (fade.flag !== fade.over > 1) {
+      failures += 1;
+      console.log(
+        `  FAIL  ${String(width).padEnd(5)} ${tab.padEnd(8)} ` +
+        `the fade is ${fade.flag ? 'on' : 'off'} with ${fade.over}px past the edge`,
+      );
+    }
 
     const state = await page.evaluate(() => {
       const results = [];
@@ -86,4 +106,5 @@ if (failures) {
   console.log(`\n${failures} failed\n`);
   process.exit(1);
 }
-console.log(`\nthe command fits at every width, on every tab\n`);
+console.log(`\nthe command fits at every width, on every tab, and the fade is only
+on where something is genuinely behind it\n`);
