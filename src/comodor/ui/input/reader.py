@@ -10,7 +10,7 @@ This is the part Rich does not do. The reader owns three responsibilities:
 
 * **Restoration.** Every exit path restores the console: normal exit, exception,
   Ctrl+C, or a crash. A terminal left in raw mode with mouse reporting on is
-  unusable afterwards, so restoration is registered with ``atexit`` as well as
+  unusable afterward, so restoration is registered with ``atexit`` as well as
   the context manager.
 
 * **Idle flush.** A lone ``Esc`` is indistinguishable from the start of an arrow
@@ -118,6 +118,29 @@ class TerminalInput:
             fd = self.stream.fileno()
             self._saved_mode = termios.tcgetattr(fd)
             tty.setraw(fd)
+
+            # Raw mode also switches off output post-processing, and that part
+            # is not wanted. A terminal line discipline is a property of the
+            # device, not of one file descriptor, so turning off OPOST for
+            # input turns it off for *output* as well: a newline stops being
+            # translated into carriage-return-newline on the way out.
+            #
+            # Every frame this interface draws is exactly as wide as the
+            # terminal. Write the last cell of a full-width row and the cursor
+            # is left in the deferred-wrap state; send a bare line feed into
+            # that state and terminals disagree about what happens, several of
+            # them performing the pending wrap *and* the feed. The result is
+            # one blank row between every drawn row, a picture twice as tall as
+            # the screen, and the top half of it scrolled away — which is
+            # exactly what it looked like.
+            #
+            # Restoring OPOST and ONLCR makes the line ending an unambiguous
+            # "column zero, one row down" again. It costs nothing on input:
+            # the flags that matter for reading keys - canonical mode, echo,
+            # signal generation - stay off.
+            output = termios.tcgetattr(fd)
+            output[1] |= termios.OPOST | getattr(termios, "ONLCR", 0)
+            termios.tcsetattr(fd, termios.TCSADRAIN, output)
         except Exception:
             self._saved_mode = None
 
