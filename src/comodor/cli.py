@@ -9,6 +9,8 @@ Three ways in:
 * ``comodor setup`` — the first-run questions again, on demand.
 * ``comodor doctor`` — what is configured, what is reachable, what the terminal
   can do. The first thing to run when something is not working.
+* ``comodor uninstall`` — takes every file, folder and PATH line back off the
+  machine, after showing you the list.
 
 There is no configuration file to write by hand. The first run asks a handful
 of questions and saves the answers to ``~/.comodor/config.json``.
@@ -61,6 +63,14 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor", help="check everything, and repair what can be repaired")
     doctor.add_argument("--fix", action="store_true",
                         help="apply every repair the check found")
+
+    remove = sub.add_parser(
+        "uninstall",
+        help="remove Comodor and everything it has written, completely")
+    remove.add_argument("--dry-run", action="store_true",
+                        help="list what would go, and remove nothing")
+    remove.add_argument("--yes", action="store_true",
+                        help="do not ask; for scripts")
 
     from .mcp.commands import register as register_mcp
 
@@ -293,6 +303,106 @@ def run_doctor(config: Config, fix: bool = False) -> int:
     return 1 if report.worst is Status.FAIL else 0
 
 
+def run_uninstall(config: Config, dry_run: bool = False,
+                  assume_yes: bool = False) -> int:
+    """Show everything that would go, then go.
+
+    The prompt asks for the word rather than for a letter. `y` is what a hand
+    presses on the way past; this deletes an API key, every rule the agent has
+    learned and every conversation it has had, and none of it can be undone.
+    Typing it out takes a second, and it is the difference between meaning to
+    and not.
+    """
+    from rich.padding import Padding
+    from rich.text import Text
+
+    from .ui import console as console_module
+    from .uninstall import _size, apply, survey
+
+    theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
+                                         no_color=False)
+    console = console_module.build(theme)
+
+    def indented(text: str, indent: int) -> Padding:
+        """Wrapped text whose second line lines up with its first.
+
+        Rich wraps to the console width and starts the continuation at column
+        zero, which turns a two-line note into something that looks like two
+        notes. Padding wraps inside its own box instead.
+        """
+        return Padding(Text(text, style=theme.style("dim")), (0, 0, 0, indent))
+
+    # The project this was run in counts whether or not a session recorded it:
+    # somebody uninstalling from inside a project means that one.
+    found = survey(config, config.paths.project)
+
+    console.print(f"[title]Uninstalling Comodor {__version__}[/title]\n")
+
+    if not found.items:
+        console.print("Nothing to remove — there is no trace of it on this "
+                      "machine to begin with.")
+        return 0
+
+    headings = {
+        "data": "Your data",
+        "project": "In your projects",
+        "program": "The program",
+        "launcher": "The command",
+        "path": "Your shell",
+    }
+    for kind, heading in headings.items():
+        group = [item for item in found.items if item.kind == kind]
+        if not group:
+            continue
+        console.print(f"[title]{heading}[/title]")
+        for item in group:
+            size = f"  [dim]{_size(item.size)}[/dim]" if item.size else ""
+            console.print(f"  {item.label}{size}")
+            if item.path:
+                console.print(indented(str(item.path), 4))
+            if item.detail:
+                console.print(indented(item.detail, 4))
+        console.print("")
+
+    for note in found.notes:
+        console.print(indented(f"· {note}", 2))
+
+    console.print(f"\n[warn]{_size(found.total_bytes)} across "
+                  f"{len(found.items)} place(s). None of it can be undone.[/warn]")
+
+    if dry_run:
+        console.print("\n[dim]Nothing was removed: this was --dry-run.[/dim]")
+        return 0
+
+    if not assume_yes:
+        console.print("\nType [accent]uninstall[/accent] to confirm, or "
+                      "anything else to stop.")
+        try:
+            answer = input("> ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            console.print("\nStopped. Nothing was removed.")
+            return 130
+        if answer != "uninstall":
+            console.print("Stopped. Nothing was removed.")
+            return 1
+
+    apply(found)
+
+    console.print("")
+    for done in found.removed:
+        console.print(f"  [good]removed[/good]  [dim]{done}[/dim]")
+    for failure in found.failed:
+        console.print(f"  [bad]left[/bad]     [dim]{failure}[/dim]")
+
+    if found.failed:
+        console.print(f"\n[bad]{len(found.failed)} thing(s) could not be "
+                      "removed.[/bad] They are listed above with the reason.")
+        return 1
+
+    console.print("\nGone. Thank you for trying it.")
+    return 0
+
+
 def run_preview(config: Config, args: argparse.Namespace) -> int:
     """Render one frame at a fixed size — for screenshots and layout checks."""
     from .ui import console as console_module
@@ -338,6 +448,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         return run_doctor(config, fix=getattr(args, "fix", False))
+    if args.command == "uninstall":
+        return run_uninstall(config, dry_run=args.dry_run, assume_yes=args.yes)
     if args.command == "mcp":
         from .mcp.commands import run as run_mcp
 

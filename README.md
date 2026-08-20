@@ -207,6 +207,44 @@ cache gets deleted. A corrupt config is reported and left exactly as it was,
 because it holds your API key — the one thing on your machine that cannot be
 regenerated.
 
+### It leaves when you ask it to
+
+```
+$ comodor uninstall
+
+Your data
+  everything it has learned and everything you told it   14 MB
+    ~/.comodor
+    settings and your API key · learned rules and lessons · 62 sessions · 4 skills
+
+In your projects
+  api-server                                            1.2 MB
+    ~/work/api-server/.comodor
+
+The program
+  the isolated environment                               112 MB
+    ~/.local/share/comodor
+
+Your shell
+  the PATH line the installer added
+    ~/.bashrc
+
+127 MB across 5 places. None of it can be undone.
+
+Type uninstall to confirm, or anything else to stop.
+```
+
+It shows the list before it touches anything, and `--dry-run` stops there. What
+goes is the data directory, the `.comodor` folder in every project it was used
+in, the environment the installer built, the `comodor` command, and the line
+the installer put in your shell profile. Afterwards there is nothing of it left
+on the machine.
+
+It knows which projects to clean because every session records where it ran —
+not by searching your disk. Three things it will not do: touch a source
+checkout, take a directory off your PATH that other programs are still using,
+or claim to have deleted a file the operating system would not let go of.
+
 ### It can prove it is improving
 
 Every tool claims to get better over time. Comodor shows the numbers.
@@ -275,6 +313,7 @@ comodor --demo                              # offline walkthrough, no key needed
 comodor run "fix the failing test" --yes    # one task, headless, for scripts
 comodor run "audit this module" --json      # machine-readable, for pipelines
 comodor doctor                              # check everything; --fix repairs it
+comodor uninstall                           # remove it completely; --dry-run first
 ```
 
 | Key | |
