@@ -6,6 +6,8 @@ terminals emit can be replayed exactly, without a terminal.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from comodor.config import Config, ProviderConfig
@@ -244,3 +246,49 @@ def test_a_local_provider_is_ready_without_a_key():
     assert not hosted.ready
     hosted.api_key = "sk-x"
     assert hosted.ready
+
+
+# --------------------------------------------------------------------------- #
+# the terminal itself
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX line discipline")
+def test_reading_keys_raw_leaves_the_output_translation_alone():
+    """Raw input must not switch off output post-processing.
+
+    The line discipline belongs to the terminal device, not to one descriptor,
+    so clearing OPOST in order to read keys also stops a newline being turned
+    into carriage-return-newline on the way *out*.
+
+    That is not cosmetic here. Every frame this interface draws is exactly as
+    wide as the terminal, which leaves the cursor in the deferred-wrap state at
+    the end of each row; terminals disagree about what a bare line feed does
+    from there, and several of them perform the pending wrap as well as the
+    feed. The picture comes out twice as tall as the screen with a blank row
+    between every drawn row, and the top half of it — the panel borders and
+    titles — scrolls away before anyone sees it.
+
+    It never showed up on Windows, which does not use this code path at all.
+    """
+    import pty
+    import termios
+
+    from comodor.ui.input.reader import TerminalInput
+
+    primary, secondary = pty.openpty()
+    try:
+        stream = os.fdopen(secondary, "r")
+        before = termios.tcgetattr(secondary)
+
+        with TerminalInput(stream=stream, mouse=False, paste=False):
+            during = termios.tcgetattr(secondary)
+            assert during[1] & termios.OPOST, "OPOST was cleared"
+            assert during[1] & termios.ONLCR, "ONLCR was cleared"
+            # Still raw enough to read a keystroke the moment it arrives.
+            assert not during[3] & termios.ICANON
+            assert not during[3] & termios.ECHO
+
+        assert termios.tcgetattr(secondary) == before
+    finally:
+        os.close(primary)
