@@ -241,10 +241,7 @@ export default function Home() {
 
         <div className="snippet" data-reveal>
           <code>comodor mcp add filesystem --path ~/work</code>
-          <CopyButton
-            value="comodor mcp add filesystem --path ~/work"
-            label="copy"
-          />
+          <CopyButton value="comodor mcp add filesystem --path ~/work" />
         </div>
 
         <p className="lede pullquote" data-reveal>

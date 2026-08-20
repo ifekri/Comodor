@@ -62,7 +62,7 @@
 }
 
 .hero__install {
-  margin-top: clamp(2.5rem, 6vh, 4rem);
+  margin-bottom: 2.4rem;
 }
 
 .hero__meta {
@@ -752,23 +752,6 @@
 }
 
 /*
- * The command never scrolls.
- *
- * It used to: `overflow-x: auto` with `white-space: nowrap`, on the theory
- * that a one-line command should stay on one line. What that produced was a
- * scrollbar inside the box — ugly, and worse than ugly, because it hid the end
- * of the one string this page exists to deliver with nothing on screen saying
- * so. It only appeared on the long commands (macOS and Linux) in the narrow
- * band of widths where the hero has just gone two-column, which is why it
- * survived: the Windows tab is short and always looked right.
- *
- * Wrapping instead. A wrapped shell command is ordinary in documentation, the
- * copy button means nobody is selecting it by hand, and it cannot break again
- * at some width nobody tested. `pre-wrap` keeps the wrap at the spaces, so the
- * line divides between arguments rather than through a URL; `break-word` is
- * only the fallback for a token wider than the box.
- */
-/*
  * One line, no scrollbar, and the same height whatever happens.
  *
  * Three things had to be true at once and each ruled out the obvious fix.
@@ -785,38 +768,30 @@
   align-items: baseline;
   color: var(--term-text);
   min-width: 0;
-  font-size: clamp(0.76rem, 1.7cqw, 0.95rem);
+  font-size: clamp(0.8rem, 1.05vw, 0.92rem);
   line-height: 1.7;
 }
 
-.install {
-  /* So the command can size itself against the box it actually has, rather
-     than against the viewport — the hero column is much narrower than the
-     window it sits in, which is what made a vw-based size wrong. */
-  container-type: inline-size;
-}
-
 /*
- * One line wherever one line is legible.
+ * Always one line, always the same height.
  *
- * Below roughly 560px of container there is no honest way to fit 44 characters
- * plus a button at a readable size, so it wraps there instead. Wrapping no
- * longer moves anything: the copy button is a fixed size, which is what used
- * to tip the command onto a second line the moment it was clicked.
+ * When the column is too narrow the end of the command is clipped rather than
+ * wrapped or scrolled. That is a deliberate trade: the box never changes
+ * shape, and the copy button hands over the whole string regardless of how
+ * much of it is on screen. A fading edge marks where it continues, so nothing
+ * is cut off without saying so.
  */
 .install__text {
   white-space: nowrap;
+  overflow: hidden;
   min-width: 0;
 }
 
-@container (max-width: 560px) {
-  .install__text {
-    white-space: pre-wrap;
-    overflow-wrap: break-word;
-  }
-  .install__command code {
-    align-items: flex-start;
-  }
+/* Fades the last few characters instead of guillotining them — but only when
+   there are characters past the edge to fade into. Set from a measurement,
+   because no CSS query can ask whether a box is overflowing. */
+.install__text[data-clipped='true'] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.6rem), transparent);
 }
 
 .install__prompt {
@@ -854,29 +829,47 @@
   font-size: 0.72rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 0.4rem 0.65rem;
+  padding: 0.45rem;
   cursor: pointer;
   flex: none;
+  display: grid;
+  place-items: center;
   transition: color 0.16s ease, border-color 0.16s ease;
 }
 
 /*
- * The label sits on top of an invisible copy of the longest label it could
- * ever show, so the button is already the size it will need to be. Without
- * this it grew on click, which pushed the command onto a second line and made
- * pressing copy rearrange the page.
+ * The three icons share one cell, so swapping between them cannot change the
+ * button's size — which is what made pressing copy rearrange the page when it
+ * held a word instead.
  */
 .copy__slot {
   display: grid;
   place-items: center;
+  width: 14px;
+  height: 14px;
 }
 
-.copy__slot > * {
+.copy__icon {
   grid-area: 1 / 1;
+  display: flex;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.14s ease, transform 0.14s ease;
 }
 
-.copy__sizer {
-  visibility: hidden;
+.copy__icon[data-show='true'] {
+  opacity: 1;
+  transform: none;
+}
+
+.copy[data-state='copied'] {
+  color: var(--term-green);
+  border-color: var(--term-green);
+}
+
+.copy[data-state='failed'] {
+  color: var(--term-amber);
+  border-color: var(--term-amber);
 }
 
 .copy:hover {
@@ -1057,5 +1050,79 @@ div.theme {
 @media (max-width: 560px) {
   div.theme {
     width: 2rem;
+  }
+}
+
+/* ================================================================= earth == */
+
+/*
+ * The supplied artwork, recoloured without being touched.
+ *
+ * The file is inlined exactly as it was handed over: 468 paths carrying two
+ * hard-coded greens, `#129355` for the mesh and `#00ba3e` for the live nodes.
+ * Rewriting those to the site's palette would have meant editing the drawing,
+ * and would have baked in one theme — a colour that works on paper is not the
+ * colour that works on ink.
+ *
+ * So the selector matches the greens instead. A CSS declaration outranks a
+ * presentation attribute of the same property, so `stroke="#129355"` in the
+ * markup loses to `stroke: var(--earth-line)` here, in both themes, and the
+ * artwork on disk stays byte-for-byte what it was. The attributes are still
+ * there; they are simply no longer what gets painted.
+ */
+
+.earth {
+  display: block;
+  width: 100%;
+  /* Sized in viewport units with a generous cap rather than fixed pixels: it
+     has to hold the right-hand column at 1440px and still be the largest thing
+     on a phone. A globe that shrinks to a bauble is worse than no globe. */
+  max-width: min(34rem, 78vw);
+  margin-inline: auto;
+
+  --earth-line: color-mix(in srgb, var(--ink) 34%, transparent);
+  --earth-node: color-mix(in srgb, var(--ink) 58%, transparent);
+  /* Pulled back from full strength: seventy of these dots carry the
+     accent, and ember at full saturation seventy times over stops being
+     an accent and starts being an alarm. */
+  --earth-live: color-mix(in srgb, var(--ember) 86%, transparent);
+}
+
+:root[data-theme='dark'] .earth {
+  --earth-line: color-mix(in srgb, var(--ink) 30%, transparent);
+  --earth-node: color-mix(in srgb, var(--ink) 62%, transparent);
+  --earth-live: color-mix(in srgb, var(--ember) 78%, transparent);
+}
+
+/* The attributes give the element its aspect ratio; the box gives it its
+   size. `height: auto` lets the viewBox settle the rest. */
+.earth > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* The mesh: every chord, and the small dots sitting on it. */
+.earth [stroke='#129355'] {
+  stroke: var(--earth-line);
+}
+
+.earth [fill='#129355'] {
+  fill: var(--earth-node);
+}
+
+/* The bright green: the handful of live nodes and their haloes. Ember, because
+   on this page ember is what marks something as happening. */
+.earth [stroke='#00ba3e'] {
+  stroke: var(--earth-live);
+}
+
+.earth [fill='#00ba3e'] {
+  fill: var(--earth-live);
+}
+
+@media (max-width: 979px) {
+  .earth {
+    max-width: min(26rem, 72vw);
   }
 }

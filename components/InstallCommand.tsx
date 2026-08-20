@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { detectOs } from '@/lib/detect-os';
 import { installTargets, type InstallId } from '@/lib/site.config';
 import { CopyButton } from './CopyButton';
@@ -23,6 +23,8 @@ import { CopyButton } from './CopyButton';
 export function InstallCommand() {
   const [selected, setSelected] = useState<InstallId>('macos');
   const [detected, setDetected] = useState<InstallId | null>(null);
+  const [clipped, setClipped] = useState(false);
+  const text = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     const os = detectOs();
@@ -34,6 +36,30 @@ export function InstallCommand() {
 
   const active =
     installTargets.find((target) => target.id === selected) ?? installTargets[0];
+
+  /*
+   * Does the command actually run past the end of the box?
+   *
+   * The fading right edge is the honest way to show that a clipped command
+   * continues, but it was applied unconditionally, so a command that fitted
+   * perfectly well still had its last two characters ghosted — `| sh` read as
+   * though something had been cut off when nothing had. It is measured now:
+   * the fade appears only when there is something behind it. Fonts settle
+   * after first paint and change the answer, hence the second measurement.
+   */
+  useEffect(() => {
+    const node = text.current;
+    if (!node) return undefined;
+
+    const measure = () => setClipped(node.scrollWidth - node.clientWidth > 1);
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    document.fonts?.ready.then(measure).catch(() => {});
+
+    return () => observer.disconnect();
+  }, [active.command]);
   const auto = installTargets.filter((target) => target.kind === 'auto');
   const manual = installTargets.filter((target) => target.kind === 'manual');
 
@@ -79,7 +105,9 @@ export function InstallCommand() {
           <span className="install__prompt" aria-hidden="true">
             {active.shell}
           </span>
-          <span className="install__text">{active.command}</span>
+          <span className="install__text" ref={text} data-clipped={clipped}>
+            {active.command}
+          </span>
         </code>
         <CopyButton value={active.command} />
       </div>

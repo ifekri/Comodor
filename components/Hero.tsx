@@ -1,73 +1,23 @@
-'use client';
-
-import { useRef } from 'react';
-import { EASE, gsap, useGSAP } from './motion';
+import { Earth } from './Earth';
+import { HeroEntrance } from './HeroEntrance';
 import { InstallCommand } from './InstallCommand';
-import { site } from '@/lib/site.config';
 
 /**
  * The opening.
  *
- * One idea, held for the whole viewport: the sentence, then the thing itself.
- * The terminal is set dark against the paper so it reads as a figure rather
- * than as decoration, and it carries the transcript that proves the claim in
- * the headline — the agent was corrected once and obeyed on the next turn.
+ * One idea, held for the whole viewport: the claim, the command that acts on
+ * it, and the figure. The sentence and the install line sit together in the
+ * left column, because the visitor who has already decided should not have to
+ * go looking; the figure holds the right.
  *
- * The entrance is a single staged timeline rather than six independent fades.
- * Order carries meaning: rule, then title, then the transcript filling in line
- * by line, then the install command. A reader's eye is led once, deliberately,
- * and then left alone.
+ * Nothing here is interactive, so nothing here is a client component. The
+ * entrance lives in [HeroEntrance], a sibling that renders null, which is what
+ * keeps the inlined artwork from being serialised a second time.
  */
 export function Hero() {
-  const root = useRef<HTMLElement>(null);
-
-  useGSAP(
-    () => {
-      const media = gsap.matchMedia();
-
-      media.add(
-        {
-          motion: '(prefers-reduced-motion: no-preference)',
-          still: '(prefers-reduced-motion: reduce)',
-        },
-        (context) => {
-          if (!context.conditions?.motion) return;
-
-          // Brisk on purpose. An entrance is a way of establishing reading
-          // order, not a performance to sit through: the whole thing is over
-          // in about a second, and the install command — the reason anybody
-          // is here — arrives early rather than last.
-          const timeline = gsap.timeline({
-            defaults: { ease: EASE, duration: 0.55 },
-          });
-
-          timeline
-            .from('.hero__rule', { scaleX: 0, duration: 0.8 })
-            // Each line rises from behind its own overflow clip, so the type
-            // is uncovered rather than faded — closer to how a printed line
-            // would be revealed.
-            .from(
-              '.hero__line > span',
-              { yPercent: 108, duration: 0.75, stagger: 0.06 },
-              '-=0.62',
-            )
-            .from('.hero__lede', { opacity: 0, y: 10 }, '-=0.45')
-            .from('.hero__install', { opacity: 0, y: 10 }, '-=0.36')
-            .from('.hero__figure', { opacity: 0, y: 18, duration: 0.7 }, '-=0.5')
-            .from(
-              '.hero__row',
-              { opacity: 0, x: -8, duration: 0.34, stagger: 0.05 },
-              '-=0.45',
-            )
-            .from('.hero__meta > *', { opacity: 0, stagger: 0.05 }, '-=0.5');
-        },
-      );
-    },
-    { scope: root },
-  );
-
   return (
-    <header className="hero" ref={root} id="top">
+    <header className="hero" id="top">
+      <HeroEntrance />
       <div className="wrap">
         <div className="hero__rule" aria-hidden="true" />
 
@@ -91,6 +41,10 @@ export function Hero() {
               answer already obeys.
             </p>
 
+            <div className="hero__install">
+              <InstallCommand />
+            </div>
+
             <dl className="hero__meta">
               <div>
                 <dt>Providers</dt>
@@ -112,85 +66,14 @@ export function Hero() {
           </div>
 
           <figure className="hero__figure">
-            <div className="term">
-              <div className="term__bar" aria-hidden="true">
-                <span className="term__dot" />
-                <span className="term__dot" />
-                <span className="term__dot" />
-                <span className="term__title">{site.command}</span>
-              </div>
-
-              <div className="term__body">
-                <p className="hero__row term__row">
-                  <span className="term__prompt">›</span>
-                  <span>create defaults.py with 6 string constants</span>
-                </p>
-                <p className="hero__row term__row term__row--dim">
-                  <span className="term__prompt">⚙</span>
-                  <span>write src/defaults.py — 6 constants</span>
-                </p>
-                <p className="hero__row term__row term__row--gap">
-                  <span className="term__prompt term__prompt--edit">✎</span>
-                  <span className="term__dim">
-                    you edited the file:{' '}
-                    <span className="term__was">&quot;30s&quot;</span> →{' '}
-                    <span className="term__now">&apos;30s&apos;</span>
-                  </span>
-                </p>
-                <p className="hero__row term__row">
-                  <span className="term__prompt">›</span>
-                  <span>now add the timeout constants</span>
-                </p>
-                <p className="hero__row term__row term__row--learn">
-                  <span className="term__prompt">◈</span>
-                  <span>
-                    learned: <strong>Use single quotes for string literals.</strong>
-                  </span>
-                </p>
-                <p className="hero__row term__row term__row--dim">
-                  <span className="term__prompt">⚙</span>
-                  <span>
-                    write src/defaults.py —{' '}
-                    <span className="term__now">&apos;30s&apos;</span>,{' '}
-                    <span className="term__now">&apos;5m&apos;</span>
-                  </span>
-                </p>
-
-                <div className="term__status">
-                  <span>
-                    <span className="term__dim">Mode</span> Act
-                  </span>
-                  <span>
-                    <span className="term__dim">Loop</span> On
-                  </span>
-                  <span>
-                    <span className="term__dim">Rules</span>{' '}
-                    <span className="term__amber">7</span>
-                  </span>
-                  <span className="term__status__right term__dim">
-                    143K used · $0.041
-                  </span>
-                </div>
-              </div>
-            </div>
-
+            <Earth />
             <figcaption className="hero__caption">
-              A real transcript. Nobody told it anything — it read the edit.
+              Eighteen providers, your own endpoint, or a model on your own
+              machine.
             </figcaption>
           </figure>
         </div>
 
-        {/*
-          Full width, below both columns, rather than tucked into the text.
-          The command is 44 characters and the text column is barely 500px, so
-          inside it the choice was a scrollbar, a second line, or type too
-          small to read. Given the whole measure it is one legible line — and
-          it is the most important element on the page, so the prominence is
-          right anyway.
-        */}
-        <div className="hero__install">
-          <InstallCommand />
-        </div>
       </div>
     </header>
   );
