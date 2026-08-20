@@ -98,7 +98,7 @@ def run_checks(config: Config) -> Report:
     for check in (_check_config, _check_config_permissions, _check_provider,
                   _check_saved_provider, _check_model, _check_brain,
                   _check_search_index,
-                  _check_skills, _check_leftovers, _check_mcp):
+                  _check_skills, _check_leftovers, _check_mcp, _check_version):
         try:
             finding = check(config)
         except Exception as error:                # a check must never be the bug
@@ -450,3 +450,32 @@ def wait_for(condition: Callable[[], bool], timeout: float = 2.0,
             return True
         time.sleep(interval)
     return condition()
+
+
+def _check_version(config: Config) -> Finding | None:
+    """Is there a newer release than the one running?
+
+    Doctor is where people look when something is not working, and "you are
+    four versions behind" is often the whole answer. It is not a repair, though
+    — `--fix` must never reach out and change what is installed under somebody
+    without being asked, so this states the command and stops.
+
+    On a short timeout, and silent when the network is not there. A diagnostic
+    that hangs for fifteen seconds on an aeroplane is a worse diagnostic than
+    one with a line missing.
+    """
+    from . import __version__
+    from .update import is_newer, latest
+
+    release = latest(timeout=(2.0, 3.0))
+    if release is None:
+        return None                               # offline; not a fault to report
+
+    if not is_newer(release.version, __version__):
+        return Finding("version", Status.OK, f"{__version__} is current")
+
+    return Finding(
+        "version", Status.WARN,
+        f"{__version__} is installed; {release.version} is out",
+        remedy="comodor update",
+    )

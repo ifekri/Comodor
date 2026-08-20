@@ -324,3 +324,47 @@ def test_one_file_matching_two_patterns_is_counted_once(home):
 
     entry = finding(run_checks(config), "leftover files")
     assert entry.detail.startswith("1 ")
+
+
+# --------------------------------------------------------------------------- #
+# the version check
+# --------------------------------------------------------------------------- #
+
+
+def test_a_newer_release_is_reported_with_the_command_that_gets_it(monkeypatch):
+    """Doctor is where people look when something is wrong, and "four versions
+    behind" is often the whole answer."""
+    from comodor.doctor import Status, _check_version
+    from comodor.update import Release
+
+    monkeypatch.setattr("comodor.update.latest", lambda **_: Release("99.0.0"))
+
+    finding = _check_version(Config())
+
+    assert finding is not None
+    assert finding.status is Status.WARN
+    assert "99.0.0" in finding.detail
+    assert finding.remedy == "comodor update"
+    # Never a repair: --fix must not change what is installed unasked.
+    assert finding.repair is None
+
+
+def test_being_offline_is_not_a_fault_to_report(monkeypatch):
+    """A diagnostic that hangs, or invents a problem, on an aeroplane."""
+    from comodor.doctor import _check_version
+
+    monkeypatch.setattr("comodor.update.latest", lambda **_: None)
+
+    assert _check_version(Config()) is None
+
+
+def test_the_current_version_passes(monkeypatch):
+    from comodor import __version__
+    from comodor.doctor import Status, _check_version
+    from comodor.update import Release
+
+    monkeypatch.setattr("comodor.update.latest", lambda **_: Release(__version__))
+
+    finding = _check_version(Config())
+
+    assert finding is not None and finding.status is Status.OK
