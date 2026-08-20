@@ -33,15 +33,22 @@ for (const width of WIDTHS) {
 
     const state = await page.evaluate(() => {
       const results = [];
-      for (const code of document.querySelectorAll('.install__command code')) {
+      // Every block holding a command, not only the hero's. The bug was found
+      // in one of them and the rule that caused it was in two.
+      const blocks = document.querySelectorAll(
+        '.install__command code, .snippet code, .alt__command',
+      );
+      for (const code of blocks) {
         const overflow = code.scrollWidth - code.clientWidth;
-        const block = code.closest('.install__command');
+        const block = code.closest('.install__command, .snippet, .alt');
         results.push({
           overflow,
-          // The text must also stay inside the dark panel it sits in.
-          spills: Math.round(
-            code.getBoundingClientRect().right - block.getBoundingClientRect().right,
-          ),
+          // The text must also stay inside the panel it sits in.
+          spills: block
+            ? Math.round(
+                code.getBoundingClientRect().right - block.getBoundingClientRect().right,
+              )
+            : 0,
           text: code.textContent.trim().slice(0, 34),
         });
       }

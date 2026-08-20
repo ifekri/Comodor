@@ -125,14 +125,33 @@ https://ifekri.github.io/Comodor/
 `.github/workflows/pages.yml` does the whole thing on push. Two settings decide
 whether the result works at all:
 
-| | |
-|---|---|
-| `base_path` | `/Comodor` for the github.io URL, **empty** for a custom domain |
-| `custom_domain` | writes a `CNAME`; Pages drops the domain without that file |
+A push builds for `comodor.ai` — assets at the root, plus a `CNAME`, without
+which Pages drops the domain on the next deploy. That is the default because
+the alternative would mean every ordinary commit shipping a build that is
+broken on the real domain.
 
-A push defaults to the github.io preview. To switch to the real domain, run the
-workflow by hand with `base_path` empty and `custom_domain` set to `comodor.ai`,
-then point the DNS at Pages.
+To build the github.io preview instead, run the workflow by hand with
+**preview: true**.
+
+### DNS
+
+Pages needs these on the apex, replacing whatever the domain points at now:
+
+```
+A     @   185.199.108.153
+A     @   185.199.109.153
+A     @   185.199.110.153
+A     @   185.199.111.153
+AAAA  @   2606:50c0:8000::153
+AAAA  @   2606:50c0:8001::153
+AAAA  @   2606:50c0:8002::153
+AAAA  @   2606:50c0:8003::153
+CNAME www ifekri.github.io.
+```
+
+Until they are in place the Pages site cannot be reached at all: with a custom
+domain configured, Pages redirects its own `github.io` URL to that domain, so
+the preview address stops working the moment the domain is set.
 
 **The base path is the one that fails silently.** At
 `user.github.io/Repo/`, every absolute asset URL resolves a level too high; the

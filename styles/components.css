@@ -670,7 +670,12 @@
 .snippet code {
   color: var(--term-text);
   font-size: 0.85rem;
-  overflow-x: auto;
+  /* Wraps rather than scrolls, for the same reason the install command does.
+     This one is short enough that it never overflowed today — which is exactly
+     how the other one survived until somebody noticed it. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 
 /* =============================================================== install == */
