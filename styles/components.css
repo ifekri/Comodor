@@ -718,7 +718,7 @@
 
 .install__command {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
   background: var(--term-bg);
@@ -727,29 +727,38 @@
   padding: 1rem 0.9rem 1rem 1.05rem;
 }
 
+/*
+ * The command never scrolls.
+ *
+ * It used to: `overflow-x: auto` with `white-space: nowrap`, on the theory
+ * that a one-line command should stay on one line. What that produced was a
+ * scrollbar inside the box — ugly, and worse than ugly, because it hid the end
+ * of the one string this page exists to deliver with nothing on screen saying
+ * so. It only appeared on the long commands (macOS and Linux) in the narrow
+ * band of widths where the hero has just gone two-column, which is why it
+ * survived: the Windows tab is short and always looked right.
+ *
+ * Wrapping instead. A wrapped shell command is ordinary in documentation, the
+ * copy button means nobody is selecting it by hand, and it cannot break again
+ * at some width nobody tested. `pre-wrap` keeps the wrap at the spaces, so the
+ * line divides between arguments rather than through a URL; `break-word` is
+ * only the fallback for a token wider than the box.
+ */
 .install__command code {
   display: flex;
   gap: 0.7rem;
-  align-items: baseline;
+  /* Not baseline: on two lines that would drop the prompt to the last one. */
+  align-items: flex-start;
   font-size: clamp(0.78rem, 1.05vw, 0.92rem);
+  line-height: 1.6;
   color: var(--term-text);
   min-width: 0;
 }
 
 .install__text {
-  overflow-wrap: anywhere;
-}
-
-@media (min-width: 620px) {
-  /* Wide enough to hold the line, so keep it on one and let it scroll if a
-     future command is longer. */
-  .install__command code {
-    overflow-x: auto;
-    white-space: nowrap;
-  }
-  .install__text {
-    overflow-wrap: normal;
-  }
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 
 .install__prompt {
