@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
@@ -37,8 +37,15 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 comodor = "comodor.cli:main"
 
+# The tag is the version. Nothing in the tree carries a number to keep in step
+# with it, so nothing can fall out of step with it: `git tag v0.3.0` is the
+# whole of a release. `_version.py` is generated at build time - including by an
+# editable install - and is not committed.
 [tool.hatch.version]
-path = "src/comodor/__init__.py"
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/comodor/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/comodor"]

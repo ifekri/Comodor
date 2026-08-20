@@ -3,17 +3,30 @@
 Two workflows do the work. `ci.yml` runs on every push and pull request;
 `release.yml` builds and publishes when a version tag is pushed.
 
-## The version lives in one place
+## The tag is the version
 
-`src/comodor/__init__.py` holds `__version__`; `pyproject.toml` reads it from
-there. Two copies drift, and the one that drifts is the one `comodor --version`
-prints — so the tag check would pass while users were told something else.
+Nothing in the tree carries a version number. `hatch-vcs` derives it from the
+most recent tag at build time and writes `src/comodor/_version.py`, which is
+generated, git-ignored, and what `__version__` reads.
 
-Bump it there, and the tag must match:
+So a release is a tag and nothing else:
 
 ```bash
-git tag v0.2.0 && git push --tags
+git tag v0.2.1 && git push --tags
 ```
+
+There is no file to bump, which means there is no file to forget. That was not
+theoretical: the first `v0.2.1` tag failed its release twelve seconds in,
+because the literal in `__init__.py` still said `0.2.0` and the workflow —
+correctly — refused to publish a mismatched pair.
+
+Between releases the version reads as `0.2.2.dev4+g56b14a7`: the next patch
+number, how many commits past the tag you are, and which commit. A source tree
+that has never been built reports `0.0.0+source`.
+
+**The checkout must be deep.** `actions/checkout` fetches one commit by default,
+which has no tags in it, and every build would come out as `0.1.dev1`.
+`release.yml` sets `fetch-depth: 0` for exactly this reason.
 
 ## One-time setup: PyPI trusted publishing
 
@@ -61,30 +74,24 @@ and drop the `id-token: write` permission.
 ## Cutting a release
 
 ```bash
-# 1. Bump the version — this is the number the tag must match.
-#    pyproject.toml → [project] version = "0.2.0"
-
-# 2. Commit it.
-git add pyproject.toml
-git commit -m "Release 0.2.0"
-
-# 3. Tag and push.
-git tag v0.2.0
+git tag v0.2.1
 git push origin main --tags
 ```
 
-Pushing the tag runs `release.yml`, which:
+That is the whole of it. Pushing the tag runs `release.yml`, which:
 
-1. reads the version out of `pyproject.toml`;
-2. **refuses to continue if the tag and the version disagree** — PyPI never lets
-   a version number be reused, even after a delete, so a mismatched pair is not
-   something you can take back;
-3. builds the sdist and the wheel;
-4. runs `twine check --strict` over the metadata PyPI will render;
-5. installs the wheel into a clean virtual environment and runs
-   `comodor --version`, so a distribution that cannot start never ships;
-6. publishes to PyPI;
-7. attaches the files to a GitHub release with generated notes.
+1. builds the sdist and the wheel, with the version taken from the tag;
+2. reads the version back off the wheel filename — the answer that is actually
+   going to PyPI — and **refuses to continue if it is not the tag**. It cannot
+   disagree unless something is badly wrong, such as a shallow checkout; PyPI
+   never lets a version number be reused, even after a delete, so the cost of
+   finding out afterwards is a number gone for good;
+3. runs `twine check --strict` over the metadata PyPI will render;
+4. installs the wheel into a clean virtual environment and runs
+   `comodor --version`, so a distribution that cannot start never ships, and
+   checks that what it prints is the tag;
+5. publishes to PyPI;
+6. attaches the files to a GitHub release with generated notes.
 
 ## Two ways to run it
 

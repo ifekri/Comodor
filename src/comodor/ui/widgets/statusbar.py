@@ -80,9 +80,22 @@ def gauge(fill: float, width: int, theme: Theme) -> Text:
 
 
 def status_block(model: StatusModel, rect: Rect, theme: Theme) -> RenderableType:
-    """The left-hand block: Context / GW / Mode / Loop, plus Settings."""
-    inner = max(10, rect.width - 4)
-    rows: list[RenderableType] = []
+    """The left-hand block: Context / GW / Mode / Loop, plus Settings.
+
+    Built against a budget rather than by appending and hoping. The rows used
+    to be assembled in the order somebody thought of them and handed to Rich,
+    which crops whatever does not fit — and what did not fit was the last row,
+    which is the bottom edge of the Settings box. A control drawn with three of
+    its four sides is worse than no control: it reads as a rendering fault
+    rather than as a button, and there is nothing on screen to say the button
+    is even there.
+
+    So the height is divided up first. The four facts are not negotiable, the
+    Settings control gets a box if there is room for one and a solid bar if
+    there is not, and the meter takes what is left over.
+    """
+    inner_width = max(10, rect.width - 4)
+    inner_height = max(1, rect.height - 2)
 
     context = _pair("Context:", humanise(model.context_limit), theme)
     gateway = _pair("GW: ", model.gateway, theme,
@@ -91,48 +104,81 @@ def status_block(model: StatusModel, rect: Rect, theme: Theme) -> RenderableType
     loop = _pair("Loop : ", "On" if model.loop else "Off", theme,
                  _state_style(model.loop))
 
-    if inner < 20:
+    if inner_width < 20:
         # Two columns here would wrap every value onto its own line anyway, and
         # a wrapped "Disable" under "GW:" reads worse than four clean rows.
-        rows.extend([context, gateway, mode, loop])
+        core: list[RenderableType] = [context, gateway, mode, loop]
     else:
         grid = Table.grid(padding=(0, 1), expand=True)
         grid.add_column(justify="left", ratio=1)
         grid.add_column(justify="left", ratio=1)
         grid.add_row(context, gateway)
         grid.add_row(mode, loop)
-        rows.append(grid)
+        core = [grid]
+    core_height = len(core) if inner_width < 20 else 2
 
-    # The gauge and the counters only appear when the panel is tall enough;
-    # below that the four core facts matter more than the detail.
-    if rect.height >= 7:
-        rows.append(gauge(model.fill, inner, theme))
-    if rect.height >= 8:
-        detail = Text()
-        detail.append(f"{humanise(model.context_used)} used", style=theme.style("dim"))
-        if model.cost_usd is not None and model.cost_usd > 0:
-            detail.append("  ", style=theme.style("dim"))
-            detail.append(f"${model.cost_usd:.3f}", style=theme.style("accent"))
-        # The rule count is the visible sign that Reflex is doing something,
-        # so it earns a place even on a cramped panel.
-        if model.rules:
-            detail.append(f"  {theme.glyphs.memory}{model.rules}",
-                          style=theme.style("good"))
-        elif model.lessons:
-            detail.append(f"  {theme.glyphs.memory}{model.lessons}",
-                          style=theme.style("tool"))
-        rows.append(detail)
+    # A box costs three rows. Below that the same control is a solid bar, which
+    # is the shape the other buttons take anyway.
+    boxed = inner_height - core_height >= 4
+    button_height = 3 if boxed else 1
 
-    rows.append(settings_button(inner, theme))
+    spare = inner_height - core_height - button_height
+    rows: list[RenderableType] = list(core)
+
+    if spare > 0:
+        rows.append(meter(model, inner_width, theme))
+        spare -= 1
+
+    # Whatever is still going spare pushes Settings to the bottom edge, where a
+    # button belongs, instead of leaving a gap under it.
+    rows.extend(Text("") for _ in range(max(0, spare)))
+    rows.append(settings_button(inner_width, theme, boxed=boxed))
     return Group(*rows)
 
 
-def settings_button(width: int, theme: Theme) -> RenderableType:
-    """The bordered Settings control, drawn as its own small box."""
+def meter(model: StatusModel, width: int, theme: Theme) -> RenderableType:
+    """The context bar and its numbers, on one row.
+
+    They were two rows, and two rows is one more than the panel has to spare
+    once the Settings box is drawn whole. A bar with its reading beside it is
+    the ordinary way to show this, and it costs half as much.
+    """
+    detail = Text()
+    detail.append(f"{humanise(model.context_used)} used", style=theme.style("dim"))
+    if model.cost_usd is not None and model.cost_usd > 0:
+        detail.append("  ")
+        detail.append(f"${model.cost_usd:.3f}", style=theme.style("accent"))
+    # The rule count is the visible sign that Reflex is doing something, so it
+    # earns its place even on a cramped panel.
+    if model.rules:
+        detail.append(f" {theme.glyphs.memory}{model.rules}", style=theme.style("good"))
+    elif model.lessons:
+        detail.append(f" {theme.glyphs.memory}{model.lessons}",
+                      style=theme.style("tool"))
+
+    bar_width = width - detail.cell_len - 1
+    if bar_width < 4:
+        # No room for both; the numbers say more than the bar does.
+        return detail
+
+    row = Table.grid(padding=(0, 1), expand=True)
+    row.add_column(width=bar_width)
+    row.add_column(justify="right")
+    row.add_row(gauge(model.fill, bar_width, theme), detail)
+    return row
+
+
+def settings_button(width: int, theme: Theme, boxed: bool = True) -> RenderableType:
+    """The Settings control: a small box, or a solid bar where one will not fit."""
+    label = "Settings"
+    if not boxed:
+        return Text(label.center(max(10, width))[:max(10, width)],
+                    style=theme.style("button"))
+
     from rich.panel import Panel
 
     return Panel(
-        Text("Settings", justify="center", style=theme.style("value")),
+        Text(label, justify="center", style=theme.style("value")),
         box=theme.box,
         border_style=theme.style("border"),
         width=max(10, width),

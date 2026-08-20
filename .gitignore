@@ -31,3 +31,6 @@ npm-debug.log*
 dist/
 
 TODO
+
+# Written by the build from the git tag.
+src/comodor/_version.py

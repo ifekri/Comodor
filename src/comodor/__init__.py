@@ -12,7 +12,15 @@ The package is layered so each piece can be used on its own:
     comodor.ui         the Rich terminal interface
 """
 
-__version__ = "0.2.0"
+# Written by the build from the git tag - see [tool.hatch.version] in
+# pyproject.toml. Read from a generated file rather than from package metadata
+# because `importlib.metadata.version` costs a few milliseconds of import time
+# on every start, and this is a program that measures its startup.
+try:
+    from ._version import __version__
+except ImportError:                       # a source tree that was never built
+    __version__ = "0.0.0+source"
+
 APP_NAME = "Comodor"
 
 __all__ = ["__version__", "APP_NAME"]

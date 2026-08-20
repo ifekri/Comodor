@@ -216,6 +216,8 @@ class Theme:
                 "title": Style(bold=True), "user": Style(bold=True),
                 "assistant": Style(), "tool": Style(dim=True),
                 "button": Style(reverse=True), "button.primary": Style(reverse=True, bold=True),
+                "markdown.code": Style(bold=True),
+                "markdown.code_block": Style(),
             }, inherit=True)
 
         return RichTheme({
@@ -236,6 +238,11 @@ class Theme:
             "button": Style(color=palette.button_fg, bgcolor=palette.button_bg, bold=True),
             "button.primary": Style(color=palette.button_primary_fg,
                                     bgcolor=palette.button_primary_bg, bold=True),
+            # Inline `code` inside a sentence. Rich's own default for this is
+            # bright cyan on black, which is a hole punched in the paragraph;
+            # a name in the accent colour reads as a name.
+            "markdown.code": Style(color=palette.accent),
+            "markdown.code_block": Style(color=palette.text),
         }, inherit=True)
 
 
