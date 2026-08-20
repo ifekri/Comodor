@@ -112,6 +112,67 @@ actually fix it.
 Line endings matter: `install.sh` must stay LF (a CRLF shebang is reported as
 `bad interpreter`) and `install.ps1` stays CRLF.
 
+## GitHub Pages
+
+The site also builds as a static export and publishes to Pages from the `site`
+branch of `ifekri/Comodor`. `main` — the branch somebody lands on to read the
+agent — never contains any of this.
+
+```
+https://ifekri.github.io/Comodor/
+```
+
+`.github/workflows/pages.yml` does the whole thing on push. Two settings decide
+whether the result works at all:
+
+| | |
+|---|---|
+| `base_path` | `/Comodor` for the github.io URL, **empty** for a custom domain |
+| `custom_domain` | writes a `CNAME`; Pages drops the domain without that file |
+
+A push defaults to the github.io preview. To switch to the real domain, run the
+workflow by hand with `base_path` empty and `custom_domain` set to `comodor.ai`,
+then point the DNS at Pages.
+
+**The base path is the one that fails silently.** At
+`user.github.io/Repo/`, every absolute asset URL resolves a level too high; the
+page arrives with no stylesheet and looks broken rather than misconfigured. The
+workflow asserts that `out/index.html` actually references the prefix before it
+deploys.
+
+### Three things that bite
+
+**Jekyll eats `_next`.** Pages runs static output through Jekyll unless
+`.nojekyll` is present, and Jekyll ignores every directory starting with an
+underscore — which is the entire stylesheet and every script. The workflow
+creates the file; do not remove it.
+
+**The environment only allows `main` by default.** Enabling Pages creates a
+`github-pages` environment whose deployment branch policy lists the default
+branch and nothing else. Deploying from `site` fails with a job that has *no
+steps at all* and no error message, because it never starts. Fixed once with:
+
+```bash
+gh api -X POST repos/ifekri/Comodor/environments/github-pages/deployment-branch-policies   -f name=site -f type=branch
+```
+
+**No headers, ever.** A static host assigns content types from the extension.
+`/install.sh` arrives as `application/x-sh`, which browsers download — hence the
+`.txt` copies described above. `curl` is unaffected either way.
+
+### Checking a Pages build without deploying one
+
+```bash
+NEXT_STATIC_EXPORT=1 NEXT_BASE_PATH=/Comodor npm run build
+node tools/serve-export.mjs 4300 /Comodor
+node tools/a11y.mjs   http://localhost:4300/Comodor/
+node tools/themes.mjs http://localhost:4300/Comodor/
+```
+
+`serve-export.mjs` imitates Pages rather than Next: the subpath, the
+directory-index resolution, and the MIME map. Testing an export against
+`next start` proves nothing about the host it is going to.
+
 ## The design, and what the motion is for
 
 Warm paper, ink, hairlines — and the terminal set into it as a dark figure, the
