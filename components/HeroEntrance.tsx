@@ -29,17 +29,6 @@ export function HeroEntrance() {
         still: '(prefers-reduced-motion: reduce)',
       },
       (context) => {
-        // The artwork animates itself, in SMIL, which no media query can
-        // reach. `pauseAnimations` is the one lever the DOM offers, and
-        // honouring the preference matters more here than anywhere else on
-        // the page: 698 simultaneous animations is exactly the kind of thing
-        // the setting exists to switch off.
-        const drawing = document.querySelector('.earth svg');
-        if (drawing instanceof SVGSVGElement) {
-          if (context.conditions?.motion) drawing.unpauseAnimations();
-          else drawing.pauseAnimations();
-        }
-
         if (!context.conditions?.motion) return;
 
         // Brisk on purpose. An entrance is a way of establishing reading
