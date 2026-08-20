@@ -484,6 +484,22 @@ def main(argv: list[str] | None = None) -> int:
         if config.needs_setup:
             return 1
 
+    # Which directory is this about? Asked once per folder, before the agent
+    # exists — the project root is worked out by walking upwards, and the
+    # answer is occasionally a surprise worth seeing before anything reads it.
+    # `--cwd` is the user naming it themselves, so it does not ask again.
+    if not args.cwd:
+        from .ui import console as console_module
+        from .workspace import confirm
+
+        theme = console_module.prepare_theme(config.ui.theme,
+                                             config.ui.ascii_borders, no_color=False)
+        chosen = confirm(config, console_module.build(theme), theme)
+        if chosen is None:
+            return 0
+        if chosen != config.paths.project:
+            config = apply_overrides(load_config(str(chosen)), args)
+
     from .ui.app import App
 
     resume = None

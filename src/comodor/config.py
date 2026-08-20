@@ -227,6 +227,9 @@ class SafetyConfig:
     deny_commands: list[str] = field(default_factory=lambda: list(DEFAULT_DENY))
     workspace_only: bool = True
     max_file_read_bytes: int = 512_000
+    #: Directories the user has confirmed as a workspace. Exact paths, never
+    #: prefixes: approving ~/work/api must not quietly approve ~/work.
+    trusted_folders: list[str] = field(default_factory=list)
 
 
 # Patterns that are never worth running from an agent, however it is prompted.

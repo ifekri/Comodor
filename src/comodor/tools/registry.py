@@ -14,6 +14,7 @@ from typing import Any, Iterable
 from ..providers.base import ToolSpec
 from ..safety import Risk
 from .base import Tool, ToolContext, ToolResult
+from .browser import Browser
 from .fs import EditFile, ListDir, ReadFile, WriteFile
 from .history import SearchHistory
 from .search import Glob, Grep
@@ -26,7 +27,7 @@ DEFAULT_TOOLS: tuple[type[Tool], ...] = (
     ReadFile, WriteFile, EditFile, ListDir,
     Glob, Grep,
     RunShell, RunPython,
-    WebFetch, WebSearch,
+    Browser, WebFetch, WebSearch,
     TodoWrite,
 )
 
@@ -58,6 +59,23 @@ class ToolRegistry:
 
     def add(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
+
+    def close(self) -> None:
+        """Let go of anything a tool is holding open.
+
+        The browser keeps a connection pool and a cookie jar for the length of
+        a session, which is the point of it; leaving them to the garbage
+        collector means a socket that outlives the program's own shutdown
+        message. A tool with nothing to release simply has no `close`.
+        """
+        for tool in self._tools.values():
+            closer = getattr(tool, "close", None)
+            if closer is None:
+                continue
+            try:
+                closer()
+            except Exception:
+                pass
 
     def remove(self, name: str) -> None:
         self._tools.pop(name, None)
