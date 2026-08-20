@@ -256,6 +256,34 @@ cache gets deleted. A corrupt config is reported and left exactly as it was,
 because it holds your API key — the one thing on your machine that cannot be
 regenerated.
 
+### It updates itself
+
+```
+$ comodor update
+
+Comodor 0.2.3
+  0.3.0 is available.  https://pypi.org/project/comodor/0.3.0/
+  installed as a uv tool
+  uv tool upgrade comodor
+
+  updating…
+  now on 0.3.0
+```
+
+It uses whatever put it there — uv, pipx, pip, or the environment the installer
+built — because guessing wrong is worse than not offering the command: a `pip
+install --upgrade` inside a uv environment appears to work and leaves uv's
+record pointing at a version that is gone.
+
+Afterwards it runs the new one and asks what it is, and *that* is what gets
+printed. An upgrade that reports success by echoing the number it was aiming at
+is how a silently failed install goes unnoticed for a week. `--check` says
+what is available and changes nothing, and `comodor doctor` mentions a new
+release without ever installing one.
+
+A source checkout is left alone: `git pull` is the upgrade, and overwriting a
+working tree with a release throws away work that was never committed.
+
 ### It leaves when you ask it to
 
 ```
@@ -346,6 +374,7 @@ comodor --demo                              # offline walkthrough, no key needed
 comodor run "fix the failing test" --yes    # one task, headless, for scripts
 comodor run "audit this module" --json      # machine-readable, for pipelines
 comodor doctor                              # check everything; --fix repairs it
+comodor update                              # move to the newest release; --check first
 comodor uninstall                           # remove it completely; --dry-run first
 ```
 

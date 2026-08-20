@@ -2,6 +2,32 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.3.1 — 2026-08-21
+
+### `comodor update`
+
+- Moves to the newest published version using whatever put this copy here — uv,
+  pipx, pip, or the environment the installer built. Guessing wrong is worse
+  than not offering the command: `pip install --upgrade` inside a uv tool
+  environment appears to work and leaves uv's record pointing at a version that
+  is gone.
+- It runs the new one afterwards and asks what version it is, and that answer is
+  what gets printed. That check earned its place immediately: `uv tool upgrade`
+  on a tool installed as `comodor==0.2.3` exits zero having done nothing, because
+  the recorded requirement pins it. When the version does not move, it
+  reinstalls from the index and says that is what happened.
+- `--check` reports what is available and changes nothing.
+- A source checkout is refused, with the directory named: `git pull` is the
+  upgrade there, and overwriting a working tree with a release throws away work
+  that was never committed.
+- On Windows the upgrade is handed to a detached process that waits for this one
+  to exit, because a running program cannot replace its own executable — and is
+  reported as started rather than finished, because nothing here can see how it
+  ends.
+- `comodor doctor` now mentions a newer release, on a short timeout and silently
+  when there is no network. It is never a `--fix`: a diagnostic must not change
+  what is installed under somebody unasked.
+
 ## 0.3.0 — 2026-08-20
 
 ### A browser, not a fetcher
