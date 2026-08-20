@@ -11,8 +11,9 @@ export const dynamic = 'force-static';
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
     {
-      url: site.url,
-      lastModified: new Date(),
+      // With the trailing slash, so it is the same URL the canonical names.
+      url: `${site.url}/`,
+      lastModified: site.updated,
       changeFrequency: 'weekly',
       priority: 1,
     },

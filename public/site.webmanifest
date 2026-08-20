@@ -1,0 +1,14 @@
+{
+  "name": "Comodor",
+  "short_name": "Comodor",
+  "description": "A coding agent for your terminal that learns from the edits you make to its output.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#faf8f4",
+  "theme_color": "#faf8f4",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

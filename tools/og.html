@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  /*
+   * The social card. Rendered once to public/og.png by tools/og.mjs.
+   *
+   * Not an ImageResponse route: those need a server or the edge runtime, and
+   * this site is a static export served by GitHub Pages. A PNG committed to
+   * the repository is one file, one request, and cannot fail at share time —
+   * which matters, because a card that 404s is how a link ends up rendering as
+   * a bare grey rectangle on every platform at once.
+   *
+   * 1200x630 is the size Open Graph, X, LinkedIn, Slack and Discord all crop
+   * from. Everything important sits well inside the middle, because several of
+   * them crop to a square without asking.
+   */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 1200px;
+    height: 630px;
+    background: #faf8f4;
+    color: #17150f;
+    font-family: Inter, system-ui, sans-serif;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 56px;
+    padding: 72px 80px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* The rule that opens the page itself. */
+  body::before {
+    content: '';
+    position: absolute;
+    inset: 40px 80px auto 80px;
+    height: 1px;
+    background: #17150f;
+  }
+
+  .name {
+    font-size: 19px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #6f6960;
+    margin-bottom: 26px;
+  }
+
+  h1 {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-weight: 400;
+    font-size: 82px;
+    line-height: 1.02;
+    letter-spacing: -0.015em;
+  }
+
+  h1 em { font-style: italic; color: #c4441e; }
+
+  p {
+    margin-top: 26px;
+    font-size: 25px;
+    line-height: 1.45;
+    color: #4a453d;
+    max-width: 19em;
+  }
+
+  .command {
+    margin-top: 38px;
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    background: #17150f;
+    color: #f6f2ea;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    padding: 16px 22px;
+  }
+
+  .command span { color: #e2703a; }
+
+  /* The artwork, reduced to the one thing that reads at card size: a sphere of
+     connected points. The real one is 468 paths of SMIL; this is the still it
+     would land on. */
+  svg { display: block; }
+</style>
+</head>
+<body>
+  <div>
+    <div class="name">Comodor</div>
+    <h1>It learns the way<br>you <em>correct</em> it.</h1>
+    <p>A terminal coding agent that turns the edits you make into rules.</p>
+    <div class="command"><span>$</span>curl -fsSL comodor.ai/install.sh | sh</div>
+  </div>
+
+  <svg id="mark" width="360" height="360" viewBox="-128 -128 256 256" aria-hidden="true"></svg>
+
+<script>
+/* The same lattice and projection the site's own figure uses, drawn once. */
+const R = 100, TILT = 21 * Math.PI / 180, N = 84, TURN = 0.9;
+const points = [];
+const golden = Math.PI * (3 - Math.sqrt(5));
+for (let i = 0; i < N; i += 1) {
+  const y = 1 - (2 * (i + 0.5)) / N;
+  const r = Math.sqrt(Math.max(0, 1 - y * y));
+  points.push({ x: Math.cos(i * golden) * r, y, z: Math.sin(i * golden) * r });
+}
+
+const project = (p) => {
+  const c = Math.cos(TURN), s = Math.sin(TURN);
+  const x = p.x * c + p.z * s, z = p.z * c - p.x * s;
+  return {
+    x: R * x,
+    y: -R * (p.y * Math.cos(TILT) - z * Math.sin(TILT)),
+    d: p.y * Math.sin(TILT) + z * Math.cos(TILT),
+  };
+};
+
+const dot = (v, i, j) => v[i].x * v[j].x + v[i].y * v[j].y + v[i].z * v[j].z;
+const edges = [];
+const seen = new Set();
+for (let i = 0; i < N; i += 1) {
+  const near = points.map((_, j) => j).filter((j) => j !== i)
+    .sort((a, b) => dot(points, i, b) - dot(points, i, a)).slice(0, 3);
+  for (const j of near) {
+    const key = i < j ? i + ':' + j : j + ':' + i;
+    if (!seen.has(key)) { seen.add(key); edges.push([i, j]); }
+  }
+}
+/* The long chords that make it a network rather than a dome. */
+for (let i = 0; i < N; i += 4) {
+  let best = -1, closest = Infinity;
+  for (let j = 0; j < N; j += 1) {
+    if (j === i) continue;
+    const gap = Math.abs(dot(points, i, j) - Math.cos(72 * Math.PI / 180));
+    if (gap < closest) { closest = gap; best = j; }
+  }
+  edges.push([i, best]);
+}
+
+const screen = points.map(project);
+const svg = document.getElementById('mark');
+const ns = 'http://www.w3.org/2000/svg';
+const band = (d) => Math.min(4, Math.max(0, Math.floor(((d + 1) / 2) * 5)));
+const EDGE = [0.10, 0.19, 0.30, 0.44, 0.58];
+const NODE = [0.14, 0.26, 0.44, 0.66, 0.85];
+
+for (let b = 0; b < 5; b += 1) {
+  const path = document.createElementNS(ns, 'path');
+  path.setAttribute('d', edges
+    .filter(([a, c]) => band((screen[a].d + screen[c].d) / 2) === b)
+    .map(([a, c]) => `M${screen[a].x.toFixed(1)} ${screen[a].y.toFixed(1)}L${screen[c].x.toFixed(1)} ${screen[c].y.toFixed(1)}`)
+    .join(''));
+  path.setAttribute('stroke', '#17150f');
+  path.setAttribute('stroke-width', '0.8');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('opacity', String(EDGE[b]));
+  svg.appendChild(path);
+}
+
+for (let b = 0; b < 5; b += 1) {
+  const group = screen.filter((p) => band(p.d) === b);
+  if (!group.length) continue;
+  const path = document.createElementNS(ns, 'path');
+  path.setAttribute('d', group.map((p) => {
+    const r = 1.2 + 1.4 * Math.max(p.d, 0);
+    return `M${(p.x - r).toFixed(1)} ${p.y.toFixed(1)}a${r} ${r} 0 1 0 ${(r * 2).toFixed(1)} 0a${r} ${r} 0 1 0 ${(-r * 2).toFixed(1)} 0`;
+  }).join(''));
+  path.setAttribute('fill', '#17150f');
+  path.setAttribute('opacity', String(NODE[b]));
+  svg.appendChild(path);
+}
+
+for (const i of [3, 17, 31, 46, 58, 71]) {
+  const p = screen[i];
+  if (p.d <= 0.1) continue;
+  const circle = document.createElementNS(ns, 'circle');
+  circle.setAttribute('cx', p.x.toFixed(1));
+  circle.setAttribute('cy', p.y.toFixed(1));
+  circle.setAttribute('r', '3.2');
+  circle.setAttribute('fill', '#c4441e');
+  svg.appendChild(circle);
+}
+document.documentElement.dataset.ready = 'yes';
+</script>
+</body>
+</html>
