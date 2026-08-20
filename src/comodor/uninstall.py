@@ -439,7 +439,7 @@ def survey(config: Config | None = None, cwd: Path | None = None) -> Survey:
             detail=install.detail,
             path=install.root,
             size=directory_size(install.root) if install.root else 0,
-            remove=lambda tool=tool: _run_uninstaller(tool),
+            remove=lambda tool=tool, root=install.root: _run_uninstaller(tool, root),
             deferred=sys.platform == "win32",
         ))
     elif install.method == "venv" and install.owned:
@@ -490,9 +490,17 @@ def survey(config: Config | None = None, cwd: Path | None = None) -> Survey:
 
     others = _other_launchers(BIN_DIR)
     if others:
+        # Named, not counted. "2 other programs live there" leaves the reader
+        # with a decision they have no information for; `uv, uvx` tells them
+        # whether the line is worth keeping, and those two in particular were
+        # very likely fetched by this installer in the first place.
+        listed = ", ".join(others[:4])
+        if len(others) > 4:
+            listed += f" and {len(others) - 4} more"
         found.notes.append(
-            f"{BIN_DIR} stays on your PATH: {others} other program"
-            f"{'s' if others != 1 else ''} live there")
+            f"{BIN_DIR} stays on your PATH, and so does the line that put it "
+            f"there: {listed} still live in it. Remove the line by hand if "
+            f"none of those matter to you.")
     else:
         for profile, _ in profile_edits(BIN_DIR):
             found.add(Item(
@@ -525,30 +533,84 @@ def _within(path: Path, root: Path) -> bool:
         return False
 
 
-def _other_launchers(directory: Path) -> int:
-    """How many programs besides ours live in the launcher directory."""
+def _other_launchers(directory: Path) -> list[str]:
+    """What else lives in the launcher directory, by name."""
     if not directory.is_dir():
-        return 0
+        return []
     ours = {"comodor", "comodor.exe", "comodor.cmd", "comodor-script.py"}
     try:
-        return sum(1 for entry in directory.iterdir() if entry.name not in ours)
+        return sorted(entry.name for entry in directory.iterdir()
+                      if entry.name not in ours)
     except OSError:
-        return 0
+        return []
 
 
-def _run_uninstaller(tool: str) -> str:
-    """Hand the package back to whatever installed it."""
-    commands = {
-        "uv": ["uv", "tool", "uninstall", "comodor"],
-        "pipx": ["pipx", "uninstall", "comodor"],
-        "pip": [sys.executable, "-m", "pip", "uninstall", "-y", "comodor"],
-    }
-    command = commands[tool]
+#: Where a tool manager lives when it is not on PATH. The same list the
+#: installer searches, and for the same reason: `curl | sh` runs without the
+#: user's profile, so `uv` gets bootstrapped into ~/.local/bin and nothing in
+#: that session ever puts it on PATH.
+TOOL_DIRS = (
+    Path.home() / ".local" / "bin",
+    Path.home() / ".cargo" / "bin",
+    Path.home() / "bin",
+    Path("/opt/homebrew/bin"),
+    Path("/usr/local/bin"),
+    Path("/home/linuxbrew/.linuxbrew/bin"),
+)
+
+
+def find_tool(name: str) -> str | None:
+    """`name` on PATH, or in the places an installer would have put it."""
+    found = shutil.which(name)
+    if found:
+        return found
+    suffixes = (".exe", ".cmd", "") if sys.platform == "win32" else ("",)
+    for directory in TOOL_DIRS:
+        for suffix in suffixes:
+            candidate = directory / f"{name}{suffix}"
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+def _run_uninstaller(tool: str, root: Path | None = None) -> str:
+    """Hand the package back to whatever installed it.
+
+    And if that is not possible, take it off anyway.
+
+    uv and pipx keep a record of the tools they manage, so asking them is the
+    tidy way: it removes the environment *and* the entry. But the installer
+    fetches `uv` into `~/.local/bin` when the machine has none, and a shell
+    that ran `curl | sh` never read a profile, so `uv` is frequently installed
+    and simultaneously not on PATH — which is how a real uninstall reported
+    "No such file or directory: 'uv'" and left seventy megabytes behind.
+
+    So the tool is looked for where an installer would have put it, and if it
+    genuinely is not there the environment is deleted directly. That leaves uv
+    with an entry for something that is gone, which is worth saying out loud —
+    and is a great deal better than leaving the thing itself.
+    """
+    if tool == "pip":
+        command = [sys.executable, "-m", "pip", "uninstall", "-y", "comodor"]
+    else:
+        executable = find_tool(tool)
+        if executable is None:
+            if root is None:
+                raise RuntimeError(f"{tool} is not installed any more")
+            _rmtree(root)
+            return f"{root} (removed directly: {tool} is not on this machine)"
+        command = ([executable, "tool", "uninstall", "comodor"] if tool == "uv"
+                   else [executable, "uninstall", "comodor"])
+
     result = subprocess.run(command, capture_output=True, text=True, timeout=180)
     if result.returncode != 0:
+        if root is not None and root.exists():
+            _rmtree(root)
+            reason = (result.stderr or result.stdout).strip().splitlines()
+            return f"{root} (removed directly: {reason[-1][:80] if reason else tool})"
         raise RuntimeError((result.stderr or result.stdout).strip()[:200]
                            or f"{tool} exited {result.returncode}")
-    return " ".join(command[-3:] if tool != "pip" else command[1:])
+    return " ".join(command[1:])
 
 
 # --------------------------------------------------------------------------- #

@@ -2,6 +2,21 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.2.3 — 2026-08-20
+
+### Uninstall left the environment behind when uv was not on PATH
+
+- **Fixed:** the installer fetches `uv` into `~/.local/bin` when the machine has
+  none, and a shell that ran `curl | sh` never read a profile — so `uv` is
+  frequently installed and not on PATH at the same time. `uv tool uninstall`
+  could not be run, and a real uninstall reported "No such file or directory:
+  'uv'" and left seventy megabytes on disk. The tool is now looked for where an
+  installer would have put it, and if it genuinely is not there the environment
+  is removed directly.
+- The PATH line the installer added is still kept when other programs live in
+  the same directory, but the note now names them — `uv, uvx` says more than "2
+  other programs" about whether the line is worth keeping.
+
 ## 0.2.2 — 2026-08-20
 
 ### Setup is a keyboard, not a numbered list
