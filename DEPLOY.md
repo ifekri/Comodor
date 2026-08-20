@@ -165,9 +165,17 @@ gh api -X POST repos/ifekri/Comodor/environments/github-pages/deployment-branch-
 ```bash
 NEXT_STATIC_EXPORT=1 NEXT_BASE_PATH=/Comodor npm run build
 node tools/serve-export.mjs 4300 /Comodor
-node tools/a11y.mjs   http://localhost:4300/Comodor/
-node tools/themes.mjs http://localhost:4300/Comodor/
+node tools/a11y.mjs        http://localhost:4300/Comodor/
+node tools/themes.mjs      http://localhost:4300/Comodor/
+node tools/install-fit.mjs http://localhost:4300/Comodor/
 ```
+
+`install-fit.mjs` checks the one string this page exists to deliver at fourteen
+widths on all three tabs. It exists because the command used to grow a
+horizontal scrollbar — only on the long macOS and Linux commands, and only in
+the narrow band of widths where the hero has just gone two-column. Nine pixels
+of overflow, hiding the end of the command with nothing on screen to say so.
+The Windows tab is short and always looked fine, which is how it survived.
 
 `serve-export.mjs` imitates Pages rather than Next: the subpath, the
 directory-index resolution, and the MIME map. Testing an export against
