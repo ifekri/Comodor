@@ -1079,6 +1079,10 @@ div.theme {
      on a phone. A globe that shrinks to a bauble is worse than no globe. */
   max-width: min(34rem, 78vw);
   margin-inline: auto;
+  /* The artwork arrives over the network, a moment after the text. Holding
+     its square from the first paint means the hero does not jump when it
+     lands. The drawing is 800x800. */
+  aspect-ratio: 1;
 
   --earth-line: color-mix(in srgb, var(--ink) 34%, transparent);
   --earth-node: color-mix(in srgb, var(--ink) 58%, transparent);

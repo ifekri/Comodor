@@ -103,6 +103,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
+        {/*
+          The hero artwork is fetched by [Earth] rather than inlined, so that
+          the page itself stays small on a host that only speaks gzip. Starting
+          it here means it is in flight from the first byte of the document,
+          instead of waiting for React to mount.
+        */}
+        <link
+          rel="preload"
+          as="fetch"
+          type="image/svg+xml"
+          href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/earth.svg`}
+          crossOrigin="anonymous"
+        />
       </head>
       <body>
         <a className="skip-link" href="#install">

@@ -1,47 +1,78 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
+'use client';
+
+import { useEffect, useRef } from 'react';
 
 /**
  * The hero figure: the supplied artwork, unaltered.
  *
- * `assets/earth.svg` is byte-for-byte what was handed over — 468 paths and 698
- * SMIL animations — and nothing here edits it. It is read once at build time
- * and inlined into the page, which matters for two reasons: an `<img>` would
- * seal the drawing inside its own document where no stylesheet can reach it,
- * and inlining costs no second request.
+ * `public/earth.svg` is byte-for-byte what was handed over — 468 paths and 698
+ * SMIL animations, md5 b39560c3 — and nothing here edits it. It is fetched and
+ * placed into the document rather than pointed at with an `<img>`, because an
+ * `<img>` seals a drawing inside its own document where no stylesheet can
+ * reach it. Inside the page it is ordinary markup, and the recolouring is a
+ * few CSS rules matching the two greens the file already carries. See `.earth`
+ * in components.css.
  *
- * 474 KB of markup sounds alarming and is not. It is almost entirely repeated
- * coordinate data, and App Router puts the rendered server tree in the flight
- * payload as well as the HTML, so the page really does carry the drawing
- * twice — 1.0 MB of it. Measured on the wire, that whole page is **48 KB under
- * Brotli**, because the second copy is a back-reference to the first and costs
- * almost nothing; 164 KB gzipped is the floor for a client too old to ask for
- * better. Both hosts serve Brotli.
+ * **Why it is fetched rather than inlined at build time.** Inlining was tried
+ * and measured. App Router carries the rendered server tree in the flight
+ * payload as well as in the HTML, so the page shipped the drawing twice — 1.0
+ * MB of markup. That is nearly free under Brotli, where the second copy is one
+ * back-reference, and it is not free at all under gzip, whose window is 32 KB
+ * and cannot see back across half a megabyte to find the first copy. GitHub
+ * Pages serves gzip and does not serve Brotli. Measured on the live site:
  *
- * The recolouring is done entirely in the stylesheet, by matching the two
- * greens the file already carries — see `.earth` in components.css. A CSS rule
- * outranks a presentation attribute, so `stroke="#129355"` becomes the site's
- * ink without a single character of the artwork being rewritten, and the
- * colours can still differ between the light and dark themes. Editing the file
- * would have baked one palette in and left the other impossible.
+ *     inlined      168 KB on the wire, one request
+ *     fetched       41 KB of HTML, plus 74 KB of artwork
  *
- * Read with `readFileSync` deliberately: this is a server component and the
- * page is statically generated, so it runs once during the build and never at
- * request time.
+ * Fetching also gives the artwork its own cache entry, and lets the sentence
+ * and the install command paint without waiting for it.
+ *
+ * The fetch is started by a `<link rel="preload">` in the document head, so it
+ * is in flight long before this effect runs.
  */
 
-const artwork = readFileSync(
-  path.join(process.cwd(), 'assets', 'earth.svg'),
-  'utf8',
-);
+const source = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/earth.svg`;
 
 export function Earth() {
+  const host = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const node = host.current;
+    if (!node || node.firstChild) return undefined;
+
+    const abort = new AbortController();
+
+    fetch(source, { signal: abort.signal })
+      .then((response) => (response.ok ? response.text() : Promise.reject(response.status)))
+      .then((markup) => {
+        node.innerHTML = markup;
+
+        // The drawing animates itself, in SMIL, which no media query can
+        // reach and no stylesheet can switch off. `pauseAnimations` is the
+        // only lever the DOM offers, and honouring the preference matters
+        // more here than anywhere else on this page: 698 simultaneous
+        // animations is exactly what the setting exists to stop.
+        const drawing = node.firstElementChild;
+        if (
+          drawing instanceof SVGSVGElement &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ) {
+          drawing.pauseAnimations();
+        }
+      })
+      // A hero illustration that fails to arrive leaves a gap. Nothing else on
+      // the page depends on it, and an error in the console helps nobody.
+      .catch(() => {});
+
+    return () => abort.abort();
+  }, []);
+
   return (
     <div
+      ref={host}
       className="earth"
       role="img"
       aria-label="A globe drawn as a network of connected points"
-      dangerouslySetInnerHTML={{ __html: artwork }}
     />
   );
 }
