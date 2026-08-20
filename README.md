@@ -87,11 +87,26 @@ Four questions, once. Nothing to create beforehand — no config file, no
 environment variable, no documentation to read first.
 
 ```
- 1/4  Which model provider?      18 to choose from, numbered
- 2/4  API key                    masked, with a link to the page that issues one
- 3/4  Which model?               read live from the provider you just chose
- 4/4  How much should it ask?    ask first · writes allowed · full autonomy
+ ✓ provider  Ollama (local)
+ ✓ api key   not needed
+
+ 3/4 Which model?
+┌─  Models  ──────────────────────────────────────────────┐
+│ ›  qwen2.5-coder:14b  recommended                       │
+│    llama3.3                                             │
+│    deepseek-r1:14b                                      │
+└─────────────────────────────────────────────────────────┘
+  ↑↓ move   enter choose   type filter   esc cancel
 ```
+
+One question per screen, answered with the arrow keys. Where a provider offers
+sixty models, typing filters them. Piped or scripted, the same questions arrive
+as a numbered list, so it can still be automated.
+
+Then it shows you the directory it is about to work in and asks once — the
+project root is found by walking upwards, and the answer is occasionally a
+surprise worth seeing before anything reads it. Approved folders are
+remembered.
 
 You are not asked again. Change your mind later with `comodor setup`.
 
@@ -164,6 +179,35 @@ Everything you have ever asked is searchable.
 
 The agent searches it too, on its own, when you refer to earlier work — *"like
 we did last time"*, *"that bug from last week"*.
+
+### It can browse, not just fetch
+
+Most agents get one page at a time: download a URL, strip the markup, and the
+links go with it — so the only way onward is guessing another URL. Comodor
+browses.
+
+```
+› find out how the GitHub MCP server handles rate limits
+
+⚙ search: github mcp server rate limit          1.2s
+⚙ browse https://github.com/modelcontextprotocol/servers   0.8s
+    Links on this page:
+      1. src/github  →  …/tree/main/src/github
+⚙ follow link 1                                  0.6s
+⚙ find "rate limit" on the page                  0.0s
+```
+
+The links come back numbered and resolved, so the next move is `follow 4`
+rather than a guess — and links inside the content rank above the navigation
+bar that every page of a documentation site repeats. It is one session, so
+cookies, redirects and consent pages survive the hop. Long pages are handed
+over a screenful at a time with `find` to jump, instead of being cut off at
+40,000 characters. Moving around a page it has already fetched touches no
+network and asks no permission; a new host does.
+
+There is no JavaScript engine, and there is not going to be one — that means a
+real browser, which means a real dependency. A page that draws itself in the
+client says so and points at the Puppeteer server below rather than pretending.
 
 ### It connects to other tools
 
@@ -244,22 +288,6 @@ It knows which projects to clean because every session records where it ran —
 not by searching your disk. Three things it will not do: touch a source
 checkout, take a directory off your PATH that other programs are still using,
 or claim to have deleted a file the operating system would not let go of.
-
-### It can prove it is improving
-
-Every tool claims to get better over time. Comodor shows the numbers.
-
-```
-◈ Steps per task down 40% since the first tasks in this project.
-
-metric                trend                            now  vs first
-Steps per task        ▇██▇▇▆▇▅▅▅▅▆▄▅▄▅▄▄▂▄▂▁▂▂▂▁▁▁▁▁   5.3      ↓40%
-Corrections per task  ████▆▇▆█▆▆▆▇▆▆▅▃▃▅▆▆▅▃▆▃▆▃▂▁▁▃   0.9      ↓65%
-Approvals asked       █▇▇▇▇▇▇▇▇▇▅▅▅▅▅▅▅▅▅▅▃▃▃▃▃▃▃▃▃▁   0.8      ↓73%
-```
-
-The panel is built to under-claim: with too little history it says so, and a
-fall from 0.4 to 0 is never allowed to headline as "down 100%".
 
 ---
 

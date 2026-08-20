@@ -189,6 +189,7 @@ class App:
 
     def _shutdown(self) -> None:
         self.agent.interrupt()
+        self.tools.close()
         self.history.close()
         if self.mcp is not None:
             self.mcp.close()
