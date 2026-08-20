@@ -2,7 +2,83 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
-## 0.2.0 — unreleased
+## 0.2.2 — 2026-08-20
+
+### Setup is a keyboard, not a numbered list
+
+- Each question gets a screen of its own. What has already been answered stays
+  as three quiet lines at the top; everything else goes. The questions used to
+  stack, so by the fourth one the terminal was a transcript of decisions
+  already made.
+- One framed list at a time, moved through with the arrow keys. The frame never
+  grows past the terminal: however many options there are, the list is windowed
+  to what fits and travels with the cursor, with a count of what is above and
+  below.
+- Typing filters. With sixty models on offer, `son` beats sixty presses of the
+  down arrow.
+- The numbered prompt is still there for anywhere without a terminal — a pipe,
+  a test, an editor's console — and is what the caller falls back to if raw
+  mode cannot be had.
+
+### Code in an answer looks like code
+
+- Fenced blocks are framed in the interface's own border colour with the
+  language on the top edge, rather than being an unlabelled darker rectangle in
+  a panel that is also carrying prose, tool output and diffs.
+- Inline `code` was bright cyan on black, which is a hole punched in a
+  paragraph. It is the accent colour.
+- **Fixed:** `balance`, which closes a fence the stream has not finished,
+  closed it and then stripped a backtick off the fence it had just written.
+  Every streaming answer containing code reached the parser with a
+  two-backtick fence, which closes nothing, so the code was laid out as prose
+  until the model happened to finish the block.
+
+### The footer
+
+- **Fixed:** the Settings control was drawn with three sides. The status block
+  handed Rich more rows than the panel had and Rich cropped the last one, which
+  was the bottom edge of the box.
+- **Fixed:** a two-row button put its label on the lower row and left the upper
+  one blank, so SEND was a coloured bar with a word under it. The rows now
+  carry the label and the keystroke that does the same thing — a shortcut the
+  interface has always known and had nowhere to print.
+
+### Releasing
+
+- The tag is the version. Nothing in the tree carries a number any more:
+  `hatch-vcs` derives it from the tag and writes a generated, git-ignored
+  `_version.py`. There is no file to bump, so there is no file to forget.
+- The release workflow builds first and reads the version back off the wheel
+  filename — the answer actually going to PyPI — and checks it against the tag.
+
+## 0.2.1 — 2026-08-20
+
+### The interface drew every other row on POSIX
+
+- **Fixed:** `tty.setraw` clears `OPOST`, and a line discipline belongs to the
+  terminal device rather than to one descriptor, so switching it off in order
+  to read keystrokes also stopped a newline becoming carriage-return-newline on
+  the way *out*. Every frame is exactly as wide as the terminal, which leaves
+  the cursor in the deferred-wrap state at the end of each row, and terminals
+  do not agree on what a bare line feed does from there — several perform the
+  pending wrap as well as the feed. The result was a blank row between every
+  drawn row, a picture twice the height of the screen, and the top half of it
+  scrolled away before anyone saw it. Never visible on Windows, which does not
+  use that code path.
+
+### `comodor uninstall`
+
+- Removes the data directory, the `.comodor` folder in every project it was
+  used in, the environment the installer built, the `comodor` command, and the
+  line the installer wrote into a shell profile.
+- Shows the list before it touches anything; `--dry-run` stops there. The
+  prompt asks for the word, not a letter.
+- It knows which projects to clean because every session records where it ran,
+  rather than by searching the disk. It will not take a directory off PATH that
+  other programs are still using, will not touch a source checkout, and does
+  not claim to have deleted a file the operating system would not let go of.
+
+## 0.2.0 — 2026-08-19
 
 ### `comodor doctor` repairs what it finds
 
