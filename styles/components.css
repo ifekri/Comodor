@@ -62,7 +62,7 @@
 }
 
 .hero__install {
-  margin-bottom: 2.6rem;
+  margin-top: clamp(2.5rem, 6vh, 4rem);
 }
 
 .hero__meta {
@@ -682,6 +682,9 @@
 
 .install__tabs {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 0.15rem;
   border-bottom: 1px solid var(--rule);
 }
 
@@ -711,6 +714,22 @@
   color: var(--ink);
   border-bottom-color: var(--ember);
   font-weight: 540;
+}
+
+/* The line between "this sorts everything out" and "you already have the
+   tools". The manual options are quieter, because they are the second answer. */
+.install__divider {
+  align-self: center;
+  width: 1px;
+  height: 1rem;
+  margin: 0 0.7rem;
+  background: var(--rule);
+  flex: none;
+}
+
+.install__tab[data-kind='manual'] {
+  font-size: 0.8rem;
+  padding-inline: 0.6rem;
 }
 
 .install__badge {
@@ -749,21 +768,55 @@
  * line divides between arguments rather than through a URL; `break-word` is
  * only the fallback for a token wider than the box.
  */
+/*
+ * One line, no scrollbar, and the same height whatever happens.
+ *
+ * Three things had to be true at once and each ruled out the obvious fix.
+ * `overflow-x: auto` gave a scrollbar that hid the end of the command.
+ * Wrapping was stable but changed the box height, so pressing copy visibly
+ * moved the page — the copy button used to widen on click, which was what
+ * tipped a one-line command onto two. The button is a fixed size now, and the
+ * type is sized in `ch` against the longest command so it fits the column it
+ * is given rather than hoping.
+ */
 .install__command code {
   display: flex;
-  gap: 0.7rem;
-  /* Not baseline: on two lines that would drop the prompt to the last one. */
-  align-items: flex-start;
-  font-size: clamp(0.78rem, 1.05vw, 0.92rem);
-  line-height: 1.6;
+  gap: 0.55rem;
+  align-items: baseline;
   color: var(--term-text);
+  min-width: 0;
+  font-size: clamp(0.76rem, 1.7cqw, 0.95rem);
+  line-height: 1.7;
+}
+
+.install {
+  /* So the command can size itself against the box it actually has, rather
+     than against the viewport — the hero column is much narrower than the
+     window it sits in, which is what made a vw-based size wrong. */
+  container-type: inline-size;
+}
+
+/*
+ * One line wherever one line is legible.
+ *
+ * Below roughly 560px of container there is no honest way to fit 44 characters
+ * plus a button at a readable size, so it wraps there instead. Wrapping no
+ * longer moves anything: the copy button is a fixed size, which is what used
+ * to tip the command onto a second line the moment it was clicked.
+ */
+.install__text {
+  white-space: nowrap;
   min-width: 0;
 }
 
-.install__text {
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  min-width: 0;
+@container (max-width: 560px) {
+  .install__text {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+  }
+  .install__command code {
+    align-items: flex-start;
+  }
 }
 
 .install__prompt {
@@ -805,6 +858,25 @@
   cursor: pointer;
   flex: none;
   transition: color 0.16s ease, border-color 0.16s ease;
+}
+
+/*
+ * The label sits on top of an invisible copy of the longest label it could
+ * ever show, so the button is already the size it will need to be. Without
+ * this it grew on click, which pushed the command onto a second line and made
+ * pressing copy rearrange the page.
+ */
+.copy__slot {
+  display: grid;
+  place-items: center;
+}
+
+.copy__slot > * {
+  grid-area: 1 / 1;
+}
+
+.copy__sizer {
+  visibility: hidden;
 }
 
 .copy:hover {

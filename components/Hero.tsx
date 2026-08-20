@@ -91,15 +91,11 @@ export function Hero() {
               answer already obeys.
             </p>
 
-            <div className="hero__install">
-              <InstallCommand />
-            </div>
-
             <dl className="hero__meta">
               <div>
-                <dt>Dependencies</dt>
+                <dt>Providers</dt>
                 <dd>
-                  <span className="tabular">1</span> — just <code>rich</code>
+                  <span className="tabular">18</span>, or your own
                 </dd>
               </div>
               <div>
@@ -109,8 +105,8 @@ export function Hero() {
                 </dd>
               </div>
               <div>
-                <dt>Providers</dt>
-                <dd className="tabular">18</dd>
+                <dt>Runs</dt>
+                <dd>anywhere with a terminal</dd>
               </div>
             </dl>
           </div>
@@ -182,6 +178,18 @@ export function Hero() {
               A real transcript. Nobody told it anything — it read the edit.
             </figcaption>
           </figure>
+        </div>
+
+        {/*
+          Full width, below both columns, rather than tucked into the text.
+          The command is 44 characters and the text column is barely 500px, so
+          inside it the choice was a scrollbar, a second line, or type too
+          small to read. Given the whole measure it is one legible line — and
+          it is the most important element on the page, so the prominence is
+          right anyway.
+        */}
+        <div className="hero__install">
+          <InstallCommand />
         </div>
       </div>
     </header>
