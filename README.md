@@ -1,24 +1,38 @@
 # Comodor
 
-**It learns the way you correct it.** — [comodor.ai](https://comodor.ai)
+**A coding agent that lives in your terminal — and learns the way you correct it.**
 
-A terminal coding agent that reads and edits your files, runs your tests,
-searches the web, and works through multi-step tasks on its own — inside a Rich
-interface that reflows cleanly from a 40-column SSH window to an ultrawide
-monitor.
+[comodor.ai](https://comodor.ai) · [Install](#install) · [What it can do](#what-it-can-do)
 
-What makes it different is **Reflex**: Comodor watches what you *do* — the code
-you rewrite, the edits you undo, the commands you refuse — and turns that into
-rules, with no model call and no perceptible delay. Fix something once, and the
-next answer already obeys.
+---
+
+## What this is
+
+Comodor is a program you run in your terminal and talk to in plain language.
+You describe a job — *fix the failing test*, *add a health endpoint*, *work out
+why the deploy broke* — and it does the work: reads your files, writes changes,
+runs your tests, searches the web, and keeps going until the job is done or it
+needs you.
+
+It asks before it changes anything, shows you exactly what it is about to do,
+and can undo it.
+
+What makes it different from every other tool of this kind is what happens
+afterwards. **When you fix something it wrote, it notices, and it does not make
+that mistake again.** Not because you configured it. Because it watched.
 
 ```
 › create defaults.py with 6 string constants
-◈ learned: Use single quotes for string literals.   (/rules forget 1 to undo)
+⚙ write src/defaults.py — 6 constants
+
+  … you open the file and change "30s" to '30s' …
+
+› now add the timeout constants
+◈ learned: Use single quotes for string literals.   (31 of 34 literals)
+⚙ write src/defaults.py — '30s', '5m'
 ```
 
-That is a real transcript. The turn before it, Comodor wrote double quotes and
-the file was edited by hand. Nobody told it anything.
+That is a real transcript. Nobody told it anything.
 
 ```
 ┌─ History ──────────────┐ ┌─ Chat ───────────────────────────────────────────────┐
@@ -32,21 +46,13 @@ the file was edited by hand. Nobody told it anything.
 │                        │ │ ⚙ run: pytest -q  3.4s                               │
 │                        │ │   4 passed in 0.42s                                  │
 └────────────────────────┘ └──────────────────────────────────────────────────────┘
-┌────────────────────────┐ ┌──────────────────────────────────────────┐
-│ Context:1M GW: Disable │ │ Prompt Here ...                          │    SEND
-│ Mode : Act Loop : On   │ │ ──────────────────────────────────────── │
-│ ███░░░░░░░░░░░░░░░░░░░ │ │ Provider : Openrouter | Model : …        │   ATTACH
-│ 143K used $0.041  ◈7   │ │                                          │
-│ ┌────────────────────┐ │ │                                          │    MODE
-│ │      Settings      │ │ └──────────────────────────────────────────┘
-└────────────────────────┘
 ```
 
 ---
 
 ## Install
 
-**macOS / Linux**
+**macOS and Linux**
 
 ```bash
 curl -fsSL https://comodor.ai/install.sh | sh
@@ -58,34 +64,27 @@ curl -fsSL https://comodor.ai/install.sh | sh
 irm https://comodor.ai/install.ps1 | iex
 ```
 
-**The installer finishes the job.** It uses `uv` or `pipx` if you have them,
-builds an isolated environment if you have a working Python, and downloads what
-it needs if you have neither — then puts `comodor` on your PATH and runs it once
-to prove it works. It will not leave you with a half-install or a wall of
-Python packaging errors.
+**The installer finishes the job.** It finds a Python or fetches one, builds an
+isolated environment so nothing on your machine is disturbed, puts `comodor` on
+your PATH, and runs it once to prove it worked. You do not need Python
+installed, and you will not be handed a wall of packaging errors.
 
-In particular it handles the case that stops most one-line installers: a
-distribution or tool-managed Python that refuses `pip install` under
-[PEP 668](https://peps.python.org/pep-0668/). It builds an environment instead,
-and it never passes `--break-system-packages`.
-
-If you would rather run one yourself:
+Already have a package manager? Any of these work:
 
 ```bash
-uv tool install comodor          # fastest; fetches a Python if you have none
-pipx install comodor             # isolated and on your PATH
-pip install comodor              # into the current environment
+uv tool install comodor
+pipx install comodor
+pip install comodor
 ```
 
-Requires Python 3.11 or newer — or nothing at all, since the installer can fetch
-one. **`rich` is the only dependency**: the HTTP client, the streaming reader
-and the configuration loader are all part of the package.
+Then type `comodor`.
+
+---
 
 ## First run
 
-Type `comodor`. It asks four questions and writes the answers down. There is
-nothing to prepare first: no dotfile to copy, no environment variable to export,
-no documentation to read before your first task.
+Four questions, once. Nothing to create beforehand — no config file, no
+environment variable, no documentation to read first.
 
 ```
  1/4  Which model provider?      18 to choose from, numbered
@@ -94,331 +93,67 @@ no documentation to read before your first task.
  4/4  How much should it ask?    ask first · writes allowed · full autonomy
 ```
 
-That is the whole setup, and you are not asked again. Press Enter at any
-question to take the sensible default; enter something invalid and it asks
-again rather than quietly choosing for you.
+You are not asked again. Change your mind later with `comodor setup`.
 
-To change your mind later: `/settings` inside the interface, or `comodor setup`
-to run the questions again.
+**No API key?** `comodor --demo` runs the whole interface offline — every
+panel, every command, no account required.
 
-No key yet? `comodor --demo` runs the entire interface against a scripted
-offline provider — every panel, every command, no account required.
+---
 
-## Providers
+## What it can do
 
-Pick one during setup and switch whenever you like. Comodor speaks the
-OpenAI-compatible protocol and the native Anthropic Messages API, so the list is
-open-ended rather than a fixed integration for each.
+### It learns from your corrections
 
-| | |
+Most assistants remember what you *tell* them. Comodor learns from what you
+*fix*. It reads five things, all of which you produce just by working:
+
+| what you did | what it means |
 |---|---|
-| **Hosted** | OpenRouter · Anthropic · OpenAI · Google Gemini · DeepSeek · xAI · Mistral · Groq · Cerebras · Moonshot (Kimi) · Z.AI (GLM) · Qwen · Together · Fireworks · Xiaomi MiMo |
-| **Local** | Ollama · LM Studio — no key, no cost, no network |
-| **Anything else** | any OpenAI-compatible endpoint; you supply the URL |
+| you rewrote a file it wrote | the diff is the preference — quotes, indentation, verbosity |
+| you pressed `/undo` | an outright rejection |
+| you refused a command | one thing you do not want run |
+| you asked the same thing twice | the answer missed |
+| a tool failed the same way twice | a real pitfall in this environment |
 
-Each entry knows its own endpoint, its model list and where to get a key, so
-choosing one is a single number. Switch with `/provider` in the interface, with
-`comodor setup`, or per-run with `comodor --provider groq --model …`.
+Each becomes a **rule with its evidence attached** — not *"I think you prefer
+single quotes"* but `31 of 34 literals`. How much evidence a rule needs depends
+on where it came from: four agreeing observations to trust your codebase, two
+for an edit you made, one for something you said outright.
 
-## Configuration
+It happens with **no extra model call and no waiting**, and it is announced
+rather than silent. `/rules` shows every rule, what convinced it, and lets you
+drop any of them.
 
-One JSON file, written by setup and safe to edit by hand:
+### It follows procedures you write down
 
-| | |
-|---|---|
-| Linux / macOS | `~/.comodor/config.json` |
-| Windows | `%APPDATA%\Comodor\config.json` |
-
-```json
-{
-  "version": 1,
-  "provider": "deepseek",
-  "model": "deepseek-reasoner",
-  "agent":    { "mode": "act", "loop": true, "max_steps": 24, "max_cost_usd": 2.0 },
-  "learning": { "enabled": true, "corrections": true, "announce": true },
-  "skills":   { "enabled": true, "top_k": 2 },
-  "safety":   { "auto_approve_writes": false, "workspace_only": true },
-  "providers": {
-    "deepseek": { "configured": true, "api_key": "sk-…", "model": "deepseek-reasoner" }
-  }
-}
-```
-
-Setup writes every section, defaults included, so the file doubles as the
-reference for what can be changed. It is written atomically and, on Unix, with
-owner-only permissions, because it holds your key.
-
-**Per project.** A `.comodor/config.json` in a repository is merged over your
-personal file — pin the mode, the step budget or a house theme for everyone
-working on it. Keep keys out of it; that file is meant to be committed.
-
-**For CI.** Provider environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`OPENROUTER_API_KEY`, …) are still honoured and take precedence, so a build
-agent needs no config file at all. `COMODOR_HOME` relocates everything.
-
-## Use
-
-```bash
-comodor                                     # the interface
-comodor --demo                              # offline walkthrough, no key needed
-comodor run "fix the failing test" --yes    # one task, headless, for scripts
-comodor run "audit this module" --json      # machine-readable result
-comodor setup                               # change provider, model or approvals
-comodor doctor                              # check everything; --fix repairs it
-comodor mcp catalogue                       # MCP servers Comodor can set up
-```
-
-### Keys
-
-| Key | Action |
-|---|---|
-| `Enter` | send · `Ctrl+J` newline |
-| `Esc` | stop the agent |
-| `F1` … `F5` | help · sidebar · mode · loop · gateway |
-| `Ctrl+O` | attach a file |
-| `PgUp` / `PgDn` | scroll the transcript |
-| `Ctrl+C` | stop; twice to quit |
-
-`!command` runs a shell command directly. `@path` attaches a file to your
-message. Buttons and the sidebar are clickable where the terminal supports it.
-
-### Commands
-
-`/help` `/model` `/provider` `/mode` `/loop` `/gw` `/rules` `/progress` `/memory`
-`/teach` `/skills` `/search` `/mcp` `/good` `/bad` `/undo` `/cost` `/export`
-`/theme` `/settings` `/approve` `/save` `/attach` `/clear` `/resume` `/quit`
-
-## The three switches
-
-**Mode** decides what the agent may touch.
-
-- **Act** — the full tool set; it can change your project.
-- **Plan** — read-only. Write tools are not merely blocked, they are never shown
-  to the model, so you get a plan rather than a thwarted attempt to edit.
-- **Chat** — no tools at all.
-
-**Loop** decides whether it keeps going. On, the agent iterates until the task is
-done or a guard trips (steps, wall clock, spend). Off, it answers once.
-
-**GW** is the model gateway. Disabled — the default — every request goes to the
-provider you picked, so what the status bar says is what answered. Enabled, it
-ranks healthy providers by cost, speed or quality and fails over when a call
-breaks. A stream that has already produced output is never retried elsewhere:
-duplicating half an answer is worse than reporting the failure.
-
-## Skills
-
-A skill is a Markdown file that says how *you* want a kind of work done — the
-review checklist your team actually uses, your commit-message conventions, the
-deployment steps nobody remembers. Comodor loads one only when the request calls
-for it, so twenty skills cost no more per turn than one.
-
-| | |
-|---|---|
-| `~/.comodor/skills/` | yours, in every project |
-| `.comodor/skills/` | this project's, committed with it — wins on a name clash |
-
-A skill is either a single Markdown file, or a folder holding a `SKILL.md` — the
-[Agent Skills](https://agentskills.io) open format. That means a skill written
-for another agent runs here unchanged, and one you write here runs there. The
-folder form can also bundle files:
-
-```
-~/.comodor/skills/pdf-processing/
-├─ SKILL.md              the instructions, loaded when the skill matches
-├─ references/           documents read only when the task calls for one
-├─ scripts/              code the agent can run
-└─ assets/               templates and data
-```
-
-Bundled files are **named in the prompt, never inlined**. A skill can carry a
-thousand-line API reference and cost nothing until the one turn that needs it,
-at which point the agent asks for it by name. Nothing outside a loaded skill's
-own folder is reachable that way.
+A **skill** is a plain Markdown file describing how you want a kind of work
+done — your review checklist, your commit conventions, the deploy steps nobody
+remembers.
 
 ```markdown
 ---
 name: review
 description: Review a change for correctness before it is committed
-triggers: [review, diff, pull request, pr]
-tools: [read_file, grep, glob, run_shell]
 ---
 
 Read the whole change before saying anything about it.
-
-Look for, in this order:
-
-1. **Correctness** — off-by-one errors, unhandled failure paths, a condition
-   that is inverted.
-2. **Silent failures** — an exception swallowed, an error return ignored.
-3. **Tests that assert the implementation** rather than the behaviour.
-
-Report only what would genuinely block a merge. A review that lists twenty
-nitpicks buries the one thing that mattered.
+Report only what would block a merge.
 ```
 
-| field | |
-|---|---|
-| `name` | required; lowercase letters, digits and single hyphens |
-| `description` | required; what the skill does **and when to use it** — this is what gets matched against your request |
-| `triggers` | extra words that should select it |
-| `always` | `true` to apply it to every turn — house rules, style guides |
-| `enabled` | `false` to keep the file but stop using it |
-| `license` `compatibility` `metadata` | optional, from the open format |
+Drop it in `~/.comodor/skills/` for everywhere, or `.comodor/skills/` to commit
+it with the project so your whole team gets it. Comodor loads one only when the
+request calls for it, so twenty skills cost no more than one.
 
-A skill that departs from the format still loads — it is your file, and Comodor
-can run it perfectly well. What `/skills` tells you is where another agent would
-disagree, before you have shared it with anyone.
+It uses the [Agent Skills](https://agentskills.io) open format, so a skill
+written for another tool works here, and yours work there.
 
-The description and triggers are matched against what you asked; nothing
-relevant means nothing injected, and the transcript names any skill that was
-used. `/skills` lists what is loaded and where from, `/skills reload` re-reads
-the folder after an edit, and a file with a broken header is reported by name
-rather than silently ignored.
+**It also writes them for you.** When it has solved the same shape of problem
+three times, `/skills draft` offers the procedure back as a finished file — with
+the evidence — and writes nothing until you say yes.
 
-Three worked examples are written into your skills folder the first time
-Comodor runs, so there is something to read before there is something to write.
+### It remembers every session
 
-### Skills it drafts for you
-
-Comodor also notices when it has solved the same shape of problem several times.
-Once a procedure has worked at least three times, `/skills draft` offers it back
-as a finished `SKILL.md` — with the evidence attached, and the exact text it
-would write:
-
-```
-### add-a-rest-endpoint
-worked 4 of 5 times
-
-/skills adopt add-a-rest-endpoint  to keep it.
-```
-
-**Nothing is written until you say so.** A skill shapes every future answer it
-matches, so an agent quietly authoring its own instructions would be changing
-its behaviour in a way you never agreed to and would struggle to find. What it
-writes is an ordinary file in your folder, marked `origin: learned`, and yours
-to edit or delete.
-
-## When something is wrong: `comodor doctor`
-
-```
-Checks
-  ok    config file     ~/.comodor/config.json
-  ok    provider        Anthropic · claude-sonnet-4-5
-  warn  session search  the index is corrupt
-              → delete it — it is a cache built from the transcripts
-  ok    skills          4 loaded
-  ok    mcp servers     2 enabled and reachable
-
-1 of these can be repaired automatically: comodor doctor --fix
-```
-
-`--fix` applies them and re-checks, so what it prints afterwards is the state
-now rather than the state that prompted the repair.
-
-**It repairs what it can rebuild, and refuses the rest.** A corrupt search
-index is deleted, because it is a cache derived from your transcripts. A
-corrupt *config* is reported and left alone, because it holds your API key —
-the one thing on the machine that cannot be regenerated. Same for the brain,
-and for a skill file you wrote: doctor names the file and the first problem
-rather than guessing at what you meant.
-
-Every repair is safe to run twice.
-
-## Tools from elsewhere: MCP
-
-Comodor's own tools are built in and audited. The
-[Model Context Protocol](https://modelcontextprotocol.io) is the other
-arrangement — a separate program offering capabilities Comodor never has to
-implement: a browser, a database, an issue tracker.
-
-```bash
-comodor mcp catalogue                    # twelve servers, ready to set up
-comodor mcp add filesystem --path ~/work
-comodor mcp add github --env GITHUB_PERSONAL_ACCESS_TOKEN=…
-comodor mcp list                         # what you have, and what is on
-comodor mcp test github                  # start it and list what it offers
-```
-
-| | |
-|---|---|
-| **Files and code** | Filesystem · Git · GitHub |
-| **Data** | SQLite · PostgreSQL |
-| **The web** | Fetch · Brave Search · Browser (Puppeteer) |
-| **Other** | Memory (knowledge graph) · Sequential thinking · Slack · Time |
-
-Anything else in the ecosystem works too — the catalogue is a shortcut, not a
-limit:
-
-```bash
-comodor mcp custom my-server uvx my-mcp-package --flag value
-```
-
-Four things worth knowing:
-
-- **Nothing starts until it is used.** Servers connect the first time a tool
-  list is asked for, so one you never use costs nothing and a slow one does not
-  delay startup.
-- **They go through the same permission gate as everything else.** An MCP tool
-  that says it writes, deletes or posts is treated as a write; one that
-  mentions the network is treated like a shell command. The description is all
-  there is to judge by, so it is read generously — an unnecessary prompt costs
-  a keypress, the opposite runs somebody else's code unannounced.
-- **A server that will not start is dropped, once, with the reason.** Its own
-  stderr is what gets shown, because you did not write it and that is the only
-  thing that explains it. The rest of the session carries on.
-- **What each one can reach is stated before you enable it.** "Only the
-  directory you name" and "everything your token can reach" are different kinds
-  of permission, and the difference belongs in front of the person deciding.
-
-`/mcp` inside the interface shows what is connected and every tool it brought.
-
-## Reflex — a two-speed brain
-
-Skills are what you write down. Reflex is what you never got round to writing
-down. Most agents remember what you *tell* them; Comodor learns from what you
-*fix*.
-
-**Reflex is the fast lane.** Deterministic, model-free, sub-millisecond, always
-on. It reads five signals, all of them free because you produce them just by
-working:
-
-| signal | what it means |
-|---|---|
-| you rewrite a file the agent wrote | the diff *is* the preference — quotes, indentation, annotations, verbosity |
-| you `/undo` a change | an outright rejection |
-| you deny a permission | one command this user does not want run |
-| you ask the same thing twice | the answer missed |
-| a tool fails the same way twice | a pitfall in this environment, verified |
-
-Each becomes a **rule** with its evidence attached — not "I think you prefer
-single quotes" but `31 of 34 literals` — and how much evidence a rule needs
-depends on where it came from. Watching your codebase is weak proof, so it takes
-four agreeing observations. You editing the agent's output is a deliberate
-statement, so it takes two. Telling it outright takes one.
-
-Detection runs at the *start* of a turn, not the end. That is what makes the
-correction land immediately rather than a task later.
-
-**Reflection is the slow lane** — an LLM pass that distils prose lessons from a
-finished episode. It runs in the background and it is optional. Switch it off,
-work offline, use a cheap model: Reflex keeps learning either way, because it
-never needed a model at all.
-
-Everything is inspectable and reversible:
-
-```
-/rules              browse rules with their evidence; pin, disable or drop one
-/rules teach Never add comments unless asked.
-/rules export       writes .comodor/house-rules.md for the team to commit
-/memory             the distilled lessons, same controls
-/teach  /good  /bad
-```
-
-## Everything you have ever asked
-
-Rules are what Comodor generalises. Transcripts are what actually happened, and
-they are searchable:
+Everything you have ever asked is searchable.
 
 ```
 /search cursor pagination
@@ -427,18 +162,54 @@ they are searchable:
   > add cursor pagination to the results endpoint
 ```
 
-The agent can search them too, and does so on its own when you refer to earlier
-work — "like we did last time", "that bug from last week". Nothing from history
-enters the context until it decides a question needs it, so four hundred stored
-sessions cost nothing on the turns that do not.
+The agent searches it too, on its own, when you refer to earlier work — *"like
+we did last time"*, *"that bug from last week"*.
 
-The index is a cache built from the transcripts already on disk. Delete
-`search.db` and the next search rebuilds it; delete a session and it leaves
-search with it. There is no second copy of anything to keep in step.
+### It connects to other tools
 
-## Proof, not claims: `/progress`
+Comodor speaks the [Model Context Protocol](https://modelcontextprotocol.io),
+so it can use capabilities it does not implement itself: a browser, a database,
+your issue tracker.
 
-"Gets better over time" is what every tool says. Comodor shows the numbers.
+```bash
+comodor mcp catalogue                      # twelve servers, ready to go
+comodor mcp add filesystem --path ~/work
+comodor mcp add github --env GITHUB_PERSONAL_ACCESS_TOKEN=…
+comodor mcp custom my-server uvx my-package   # anything else
+```
+
+| | |
+|---|---|
+| **Files and code** | Filesystem · Git · GitHub |
+| **Data** | SQLite · PostgreSQL |
+| **The web** | Fetch · Brave Search · Browser (Puppeteer) |
+| **Other** | Memory · Sequential thinking · Slack · Time |
+
+Each entry says **what it can reach** before you enable it. Nothing starts
+until it is used.
+
+### It fixes itself
+
+```
+$ comodor doctor
+
+Checks
+  ok    provider        Anthropic · claude-sonnet-4-5
+  warn  session search  the index is corrupt
+              → delete it — it is a cache built from the transcripts
+  ok    mcp servers     2 enabled and reachable
+
+1 of these can be repaired automatically: comodor doctor --fix
+```
+
+`--fix` repairs what it can rebuild and **refuses what it cannot**. A corrupt
+cache gets deleted. A corrupt config is reported and left exactly as it was,
+because it holds your API key — the one thing on your machine that cannot be
+regenerated.
+
+### It can prove it is improving
+
+Every tool claims to get better over time. Comodor shows the numbers.
 
 ```
 ◈ Steps per task down 40% since the first tasks in this project.
@@ -447,92 +218,133 @@ metric                trend                            now  vs first
 Steps per task        ▇██▇▇▆▇▅▅▅▅▆▄▅▄▅▄▄▂▄▂▁▂▂▂▁▁▁▁▁   5.3      ↓40%
 Corrections per task  ████▆▇▆█▆▆▆▇▆▆▅▃▃▅▆▆▅▃▆▃▆▃▂▁▁▃   0.9      ↓65%
 Approvals asked       █▇▇▇▇▇▇▇▇▇▅▅▅▅▅▅▅▅▅▅▃▃▃▃▃▃▃▃▃▁   0.8      ↓73%
-Tokens per task       █▇████▇▇▆▆▆▆▆▆▅▅▄▄▅▃▃▄▄▃▂▂▂▂▂▁  6.4K      ↓29%
-First-try success     ██▁███████████████████████████  100%      ↑8pp
-
-brain  7 rules · 23 lessons · 70 corrections learned from
-history  40 tasks over 2 days
 ```
 
-The panel is built to be honest, which is what makes it worth showing: with too
-little history it says so, a metric that has not moved is reported as unchanged,
-a rate moves in percentage points rather than as a percentage of a percentage,
-and a fall from 0.4 to 0 is never allowed to headline as "down 100%".
+The panel is built to under-claim: with too little history it says so, and a
+fall from 0.4 to 0 is never allowed to headline as "down 100%".
 
-## Speed
+---
 
-Memory sits between pressing Enter and the first token, so it is measured and
-budgeted rather than assumed. On an ordinary laptop, against a deliberately
-worst-case corpus:
+## You stay in control
 
-| operation | corpus | time |
-|---|---|---|
-| recall | 3,000 lessons | 0.38 ms |
-| recall | 20,000 lessons | 0.38 ms — flat |
-| deduplication | 3,000 lessons | 0.25 ms |
-| pinned-rule lookup | 20,000 lessons | 0.10 ms |
-| recording reinforcement | — | 0.001 ms |
+- **Reads never interrupt you. Writes show a coloured diff and ask. Commands
+  and network calls always ask.**
+- **Checkpoints.** Every file is snapshotted before it changes; `/undo`
+  restores it.
+- **A deny list no prompt can talk past**, for commands that are never
+  acceptable — whatever the model, or you, may ask for in the moment.
+- **It stays inside your project.** Writes outside it are refused by default.
+- **Your keys never appear** in logs, transcripts or exports.
 
-Three things get it there. A **RAM mirror** holds every lesson with its tokens
-pre-computed and an inverted index over them, so a lookup touches only the
-documents sharing a word with the query — and the candidate set is capped, which
-is why the cost stops growing with the corpus. A **background writer** batches
-commits, so nothing user-facing ever waits on the disk. And **speculative
-recall** runs the whole ranking while you are still typing, so on the turn
-itself it costs nothing at all.
+Three switches decide how much rope it gets:
 
-`tests/test_performance.py` enforces these as ceilings. A change that makes
-memory slow fails the suite.
+| | |
+|---|---|
+| **Act** | the full tool set — it can change your project |
+| **Plan** | read-only, and the write tools are hidden from the model entirely, so you get a plan rather than a thwarted attempt to edit |
+| **Chat** | no tools at all |
 
-## Safety
+**Loop** decides whether it keeps going by itself until the job is done or a
+budget trips — steps, wall clock, or money. **Gateway** can spread work across
+providers and fail over when one breaks.
 
-- **Risk tiers.** Reads never prompt. Writes show a coloured diff and ask.
-  Commands and network calls always ask.
-- **Checkpoints.** Files are snapshotted before any change; `/undo` restores them.
-- **A deny list** no prompt can talk past, for the handful of commands that are
-  never acceptable.
-- **Workspace confinement.** Writes outside the project are refused by default.
-- **Redaction.** API keys and tokens are stripped from logs, transcripts and
-  exports.
-- `--yes` exists for CI. Headless runs refuse to change anything without it.
+---
+
+## Bring your own model
+
+| | |
+|---|---|
+| **Hosted** | OpenRouter · Anthropic · OpenAI · Google Gemini · DeepSeek · xAI · Mistral · Groq · Cerebras · Moonshot · Z.AI · Qwen · Together · Fireworks · Xiaomi MiMo |
+| **On your machine** | Ollama · LM Studio — no key, no cost, no network |
+| **Anything else** | any OpenAI-compatible endpoint |
+
+Each knows its own endpoint, model list and where to get a key, so choosing one
+is a single number. Switch any time with `/provider`, or per run:
+
+```bash
+comodor --provider groq --model llama-3.3-70b-versatile
+```
+
+---
+
+## Everyday use
+
+```bash
+comodor                                     # the interface
+comodor --demo                              # offline walkthrough, no key needed
+comodor run "fix the failing test" --yes    # one task, headless, for scripts
+comodor run "audit this module" --json      # machine-readable, for pipelines
+comodor doctor                              # check everything; --fix repairs it
+```
+
+| Key | |
+|---|---|
+| `Enter` | send · `Ctrl+J` for a newline |
+| `Esc` | stop the agent |
+| `F1` … `F5` | help · sidebar · mode · loop · gateway |
+| `Ctrl+O` | attach a file |
+| `Ctrl+C` | stop; twice to quit |
+
+`!command` runs a shell command directly. `@path` attaches a file.
+
+**Commands** — `/help` `/model` `/provider` `/mode` `/loop` `/rules`
+`/progress` `/memory` `/skills` `/search` `/mcp` `/undo` `/cost` `/export`
+`/settings` `/resume` `/quit`
+
+---
+
+## Configuration
+
+One JSON file, written for you and safe to edit by hand.
+
+| | |
+|---|---|
+| Linux and macOS | `~/.comodor/config.json` |
+| Windows | `%APPDATA%\Comodor\config.json` |
+
+It is written atomically and, on Unix, readable only by you, because it holds
+your key. A `.comodor/config.json` inside a repository is merged over your
+personal one, so a team can pin settings without sharing secrets. Provider
+environment variables still take precedence, which keeps CI working with no
+file at all.
+
+---
 
 ## Any terminal, any size
 
-The layout is recomputed every frame from the terminal size, so resizing just
-works.
+The layout is recomputed every frame, so resizing just works — from a
+40-column SSH window to an ultrawide monitor. Below the floor it says so
+plainly rather than drawing a corrupted screen, `--ascii` covers terminals
+without box-drawing glyphs, and a monochrome terminal gets a monochrome theme
+automatically.
 
-| Width | Layout |
-|---|---|
-| `< 60` | one column; sidebar on `F2` |
-| `60–99` | narrow sidebar, compact status |
-| `100–139` | the reference design |
-| `≥ 140` | wide sidebar, roomier transcript |
+Recall — the wait between pressing Enter and the first token — is **0.38 ms and
+stays there** whether the agent has learned three thousand things or twenty
+thousand. That is measured, not asserted: `tests/test_performance.py` enforces
+it as a ceiling, so a change that makes it slow fails the build.
 
-Below 40×12 it says so plainly rather than drawing a corrupted screen. `--ascii`
-drops box-drawing glyphs for terminals that cannot render them, and a monochrome
-terminal gets a monochrome theme automatically.
+---
 
 ## Development
 
 ```bash
-git clone https://github.com/ifekri/comodor && cd comodor
+git clone https://github.com/ifekri/Comodor && cd Comodor
 python -m venv .venv
 .venv/Scripts/activate        # Windows;  source .venv/bin/activate elsewhere
 pip install -e ".[dev]"
-pytest -q
+pytest -q                     # 472 tests, no network, no spend
 ```
 
 ```
 src/comodor/
-├─ net/         zero-dependency HTTP client + SSE reader
-├─ providers/   OpenAI-compatible, Anthropic, offline fake, and the gateway
 ├─ agent/       the reason/act loop, context budgeting, prompts
-├─ tools/       files, search, shell, python, web, task list
-├─ safety/      permissions, checkpoints, redaction
-├─ mcp/         the Model Context Protocol client, and a server catalogue
-├─ learning/    the brain: hot index, async writer, signals, rules, progress
+├─ learning/    the brain: rules, lessons, signals, progress
 ├─ skills/      authored skills: the open format, matching, drafts
-├─ session/     persistence, export, and full-text search over transcripts
+├─ mcp/         the Model Context Protocol client and server catalogue
+├─ providers/   every backend, and the gateway between them
+├─ safety/      permissions, checkpoints, redaction
+├─ session/     persistence, export, full-text search
+├─ tools/       files, search, shell, python, web, task list
 └─ ui/          layout, theme, widgets, raw input, the app loop
 ```
 
@@ -542,16 +354,15 @@ responsive layout holds.
 
 ```bash
 comodor preview 120x34            # render one frame at a fixed size
-comodor preview 60x20 --svg out.svg
 ```
+
+---
 
 ## Contributing
 
-Bug reports, especially about terminals — please include `comodor doctor`.
-[CONTRIBUTING.md](CONTRIBUTING.md) covers the setup and the two conventions
-that get a change merged quickly. Security issues go
-[here](SECURITY.md), privately.
-
+Bug reports welcome — please include `comodor doctor`, which prints everything
+we would otherwise have to ask for. [CONTRIBUTING.md](CONTRIBUTING.md) covers
+the setup. Security issues go [here](SECURITY.md), privately.
 [CHANGELOG.md](CHANGELOG.md) records what changed in each release.
 
 ## Licence
