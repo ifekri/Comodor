@@ -22,6 +22,7 @@ Comodor and then checks it starts failed with "command not found".
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -211,7 +212,8 @@ def test_a_shared_bin_directory_keeps_its_place_on_path(tmp_path, monkeypatch):
     found = survey(config)
 
     assert not [item for item in found.items if item.kind == "path"]
-    assert any("stays on your PATH" in note for note in found.notes)
+    # Named, so the reader can judge whether the line is worth keeping.
+    assert any("ruff" in note for note in found.notes)
 
 
 def test_a_directory_that_was_only_ours_gives_the_path_line_back(tmp_path,
@@ -303,6 +305,42 @@ def test_the_command_itself_goes_too(tmp_path, monkeypatch):
 
     assert not found.failed
     assert not launcher.exists()
+
+
+def test_a_tool_manager_off_the_path_is_still_found(tmp_path, monkeypatch):
+    """`curl | sh` bootstraps uv into ~/.local/bin and never reads a profile.
+
+    So the shell that installed Comodor frequently has uv installed and not on
+    PATH at the same time, and `shutil.which` says it is not there at all.
+    """
+    from comodor.uninstall import find_tool
+
+    tool = Path.home() / ".local" / "bin" / ("uv.exe" if os.name == "nt" else "uv")
+    tool.write_text("#!/bin/sh", encoding="utf-8")
+    monkeypatch.setattr("comodor.uninstall.TOOL_DIRS", (tool.parent,))
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    assert find_tool("uv") == str(tool)
+    assert find_tool("pipx") is None
+
+
+def test_a_missing_tool_manager_does_not_leave_the_environment_behind(tmp_path,
+                                                                     monkeypatch):
+    """Reported honestly and left on disk is still left on disk.
+
+    Deleting it directly leaves uv with an entry for something that is gone.
+    Seventy megabytes of environment is the worse of the two.
+    """
+    from comodor.uninstall import _run_uninstaller
+
+    environment = tmp_path / "uv" / "tools" / "comodor"
+    (environment / "bin").mkdir(parents=True)
+    monkeypatch.setattr("comodor.uninstall.find_tool", lambda name: None)
+
+    outcome = _run_uninstaller("uv", environment)
+
+    assert not environment.exists()
+    assert "removed directly" in outcome
 
 
 def test_a_removal_that_fails_is_reported_rather_than_raised(tmp_path):
