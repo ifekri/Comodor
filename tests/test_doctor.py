@@ -331,6 +331,21 @@ def test_one_file_matching_two_patterns_is_counted_once(home):
 # --------------------------------------------------------------------------- #
 
 
+def test_the_version_check_is_the_only_one_that_needs_a_network(monkeypatch):
+    """So a report can still be gathered from somewhere with no route out."""
+    from comodor.update import Release
+
+    monkeypatch.setattr("comodor.update.latest", lambda **_: Release("99.0.0"))
+    config = Config()
+
+    online = [f.name for f in run_checks(config).findings]
+    offline = [f.name for f in run_checks(config, online=False).findings]
+
+    assert "version" in online
+    assert "version" not in offline
+    assert offline == [name for name in online if name != "version"]
+
+
 def test_a_newer_release_is_reported_with_the_command_that_gets_it(monkeypatch):
     """Doctor is where people look when something is wrong, and "four versions
     behind" is often the whole answer."""

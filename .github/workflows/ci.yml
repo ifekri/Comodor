@@ -34,6 +34,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The version comes from the tag, so a one-commit checkout makes
+          # every build read as 0.1.dev1 - which is confusing in a log and
+          # wrong in anything that prints it.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
