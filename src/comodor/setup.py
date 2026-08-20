@@ -5,10 +5,19 @@ does not ask anybody to find a dotfile, learn an environment variable or read
 documentation before their first task — it asks what it needs, in the terminal,
 with the answers numbered, and writes them down.
 
-Everything here is deliberately plain input: numbered choices and one masked
-field. The full interface needs raw terminal mode and a running event loop, and
-neither is available yet at the point setup runs — nor should the first thing a
-new user meets be a mode their terminal might not support.
+Two ways of asking, and the second one is not optional.
+
+On a real terminal each question arrives on a screen of its own: what has
+already been answered is summarised in two or three quiet lines at the top, and
+below it one framed list you move through with the arrow keys. Questions no
+longer pile up — by the fourth one the terminal used to be a transcript of
+decisions already made — and a provider with sixty models is a list you can
+filter by typing rather than sixty numbered rows to read.
+
+Anywhere without a terminal — a pipe, a test, an editor's console — the
+numbered prompt is exactly what it was. A setup wizard that only works in one
+kind of terminal is a setup wizard that cannot be scripted, and the first thing
+a new user meets must not be a mode their terminal might not support.
 """
 
 from __future__ import annotations
@@ -24,6 +33,7 @@ from rich.text import Text
 
 from . import catalogue
 from .config import Config
+from .ui import chooser
 from .ui import console as console_module
 from .ui.theme import Theme
 
@@ -57,10 +67,26 @@ class SetupWizard:
         self.console = console or console_module.build(self.theme)
         self._prompt = prompt or (lambda message: input(message))
         self._secret = secret or (lambda message: getpass.getpass(message))
+        # An injected prompt means somebody is driving this without a keyboard,
+        # so the interactive list is off whatever the terminal says it can do.
+        self._keys = prompt is None and chooser.interactive(self.console)
+        #: What has been answered so far, shown at the top of each screen.
+        self._done: list[tuple[str, str]] = []
 
     # -- presentation ----------------------------------------------------- #
 
     def _rule(self, title: str, step: int, total: int) -> None:
+        """Start a question.
+
+        On a real terminal this is where the screen is cleared. The alternative
+        — letting the questions stack — meant that by the last one the useful
+        part of the screen was a few lines at the bottom under a wall of
+        choices already made. What replaces the wall is the same information in
+        one line each, which is all it was ever worth.
+        """
+        if self._keys:
+            self.console.clear()
+            self._recap()
         self.console.print()
         self.console.print(
             Text.assemble(
@@ -69,13 +95,50 @@ class SetupWizard:
             )
         )
 
-    def _choose(self, options: Sequence[tuple[str, str, str]], default: int = 1) -> str:
-        """Print a numbered list and return the chosen value.
+    def _recap(self) -> None:
+        """The questions already answered, one quiet line each."""
+        if not self._done:
+            self.console.print(
+                Text("  Comodor setup", style=self.theme.style("dim")))
+            return
+        for label, value in self._done:
+            self.console.print(Text.assemble(
+                ("  ✓ ", self.theme.style("good")),
+                (f"{label}  ", self.theme.style("dim")),
+                (value, self.theme.style("value")),
+            ))
 
-        ``options`` is ``(value, label, note)``. Re-asks on a bad answer rather
-        than falling through to a default the user did not pick — a silent
-        wrong choice here is one they would have to undo later.
+    def _answered(self, label: str, value: str) -> None:
+        self._done.append((label, value))
+        if not self._keys:
+            return
+        # Echoed once here, because the list it came from is erased on the way
+        # out: a choice that leaves no trace reads as a choice that did not
+        # register.
+        self.console.print(Text.assemble(
+            ("  ✓ ", self.theme.style("good")),
+            (value, self.theme.style("value", bold=True)),
+        ))
+
+    def _choose(self, options: Sequence[tuple[str, str, str]], default: int = 1,
+                title: str = "") -> str:
+        """Return the chosen value, by arrow key or by number.
+
+        ``options`` is ``(value, label, note)``. The numbered path re-asks on a
+        bad answer rather than falling through to a default the user did not
+        pick — a silent wrong choice here is one they would have to undo later.
         """
+        if self._keys:
+            picked = chooser.choose(
+                self.console, self.theme,
+                [chooser.Option(value, label, note) for value, label, note in options],
+                title=title, default=default - 1,
+            )
+            if picked is not None:
+                return picked
+            # The list could not run, or was escaped out of. Either way the
+            # question still needs an answer, so the numbered form takes over.
+
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="right", no_wrap=True)
         table.add_column(no_wrap=True)
@@ -124,6 +187,7 @@ class SetupWizard:
             self.console.print(
                 Text("  Not needed — this one runs on your machine.",
                      style=self.theme.style("dim")))
+            self._answered("api key", "not needed")
 
         answers.model = self._ask_model(3, total, spec, answers)
         answers.approvals = self._ask_approvals(4, total)
@@ -152,7 +216,9 @@ class SetupWizard:
             Text("  You can add more later; this is just the one to start with.\n",
                  style=self.theme.style("dim")))
         options = [(spec.id, spec.label, spec.blurb) for spec in catalogue.offered()]
-        return self._choose(options, default=1)
+        chosen = self._choose(options, default=1, title="Providers")
+        self._answered("provider", dict((v, l) for v, l, _ in options).get(chosen, chosen))
+        return chosen
 
     def _ask_endpoint(self) -> str:
         self.console.print()
@@ -175,24 +241,33 @@ class SetupWizard:
             # off screen recordings.
             key = self._secret("  key (input hidden): ").strip()
             if key:
+                self._answered("api key", "set, and never shown again")
                 return key
             self.console.print(Text("  a key is required for this provider",
                                     style=self.theme.style("bad")))
 
     def _ask_model(self, step: int, total: int,
                    spec: catalogue.ProviderSpec | None, answers: Answers) -> str:
-        self._rule("Which model?", step, total)
-
+        # Discovery first, and the question afterwards, because asking the
+        # provider what it has takes a second or two over the network. During
+        # that second the terminal is still in its ordinary mode, so anything
+        # impatient fingers press is echoed — an arrow key arrives on screen as
+        # `^[[B` and sits there. Clearing for the question is what wipes it, so
+        # the clearing has to come second. The keystrokes themselves are
+        # discarded when the reader takes the terminal.
         models = self._discover_models(spec, answers)
+
+        self._rule("Which model?", step, total)
         if not models:
             return self._ask("model id", spec.default_model if spec else "")
 
         options = [(model, model, "recommended" if index == 0 else "")
                    for index, model in enumerate(models)]
         options.append(("__other__", "something else", "type the model id"))
-        chosen = self._choose(options, default=1)
+        chosen = self._choose(options, default=1, title="Models")
         if chosen == "__other__":
-            return self._ask("model id", models[0])
+            chosen = self._ask("model id", models[0])
+        self._answered("model", chosen)
         return chosen
 
     def _discover_models(self, spec: catalogue.ProviderSpec | None,
@@ -231,16 +306,17 @@ class SetupWizard:
 
     def _ask_approvals(self, step: int, total: int) -> str:
         self._rule("How much should it ask before acting?", step, total)
-        return self._choose(
-            [
-                ("ask", "Ask before writing or running anything",
-                 "safest; you see a diff or the command first"),
-                ("writes", "Write files freely, ask before running commands",
-                 "a good middle ground"),
-                ("auto", "Do not ask", "fastest; everything is still checkpointed"),
-            ],
-            default=1,
-        )
+        options = [
+            ("ask", "Ask before writing or running anything",
+             "safest; you see a diff or the command first"),
+            ("writes", "Write files freely, ask before running commands",
+             "a good middle ground"),
+            ("auto", "Do not ask", "fastest; everything is still checkpointed"),
+        ]
+        chosen = self._choose(options, default=1, title="Approvals")
+        self._answered("approvals",
+                       dict((v, l) for v, l, _ in options).get(chosen, chosen))
+        return chosen
 
     # -- applying --------------------------------------------------------- #
 
