@@ -9,6 +9,8 @@ Three ways in:
 * ``comodor setup`` — the first-run questions again, on demand.
 * ``comodor doctor`` — what is configured, what is reachable, what the terminal
   can do. The first thing to run when something is not working.
+* ``comodor update`` — move to the newest published version, using whichever
+  of uv, pipx or pip put this copy here.
 * ``comodor uninstall`` — takes every file, folder and PATH line back off the
   machine, after showing you the list.
 
@@ -63,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor", help="check everything, and repair what can be repaired")
     doctor.add_argument("--fix", action="store_true",
                         help="apply every repair the check found")
+
+    upgrade = sub.add_parser(
+        "update", help="upgrade to the newest published version")
+    upgrade.add_argument("--check", action="store_true",
+                         help="say what is available and change nothing")
 
     remove = sub.add_parser(
         "uninstall",
@@ -303,6 +310,80 @@ def run_doctor(config: Config, fix: bool = False) -> int:
     return 1 if report.worst is Status.FAIL else 0
 
 
+def run_update(config: Config, check_only: bool = False) -> int:
+    """Move to the newest published version.
+
+    Four steps, and each one can stop the run with something the user can act
+    on: what is out there, whether it is newer than this, how this copy would
+    be upgraded, and what version answers afterwards.
+    """
+    from .ui import console as console_module
+    from . import update as updater
+
+    theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
+                                         no_color=False)
+    console = console_module.build(theme)
+    here = updater.current()
+
+    console.print(f"\n[title]Comodor {here}[/title]")
+
+    release = updater.latest()
+    if release is None:
+        console.print("  [bad]Could not reach the package index.[/bad] "
+                      "[dim]Check the connection and try again.[/dim]\n")
+        return 1
+
+    step = updater.plan()
+
+    if not updater.is_newer(release.version, here):
+        # Ahead of the index rather than behind it: a development build, which
+        # is a different sentence from "up to date".
+        ahead = updater.is_newer(here, release.version)
+        console.print(
+            f"  [good]{release.version} is the newest published version"
+            f"[/good][dim], and this is "
+            f"{'ahead of it' if ahead else 'it'}.[/dim]")
+        if step.detail:
+            console.print(f"  [dim]{step.detail}[/dim]")
+        console.print("")
+        return 0
+
+    console.print(f"  [accent]{release.version}[/accent] is available."
+                  f"  [dim]{release.url}[/dim]")
+
+    if step.blocked:
+        console.print(f"\n  [warn]{step.blocked}[/warn]\n")
+        return 1
+
+    if step.detail:
+        console.print(f"  [dim]{step.detail}[/dim]")
+    console.print(f"  [dim]{' '.join(step.command)}[/dim]")
+
+    if check_only:
+        console.print("\n[dim]Nothing was changed: this was --check.[/dim]\n")
+        return 0
+
+    console.print("\n  updating…")
+    # Run it, then ask what version answers. Asked, not assumed.
+    outcome = updater.upgrade(step, release.version)
+
+    if not outcome.ok:
+        console.print(f"  [bad]failed[/bad]  [dim]{outcome.message}[/dim]\n")
+        return 1
+    if outcome.deferred:
+        console.print(f"  [good]{outcome.message}[/good]\n")
+        return 0
+    if outcome.forced:
+        # Worth saying out loud: something was pinned, and now it is not.
+        console.print("  [dim]the recorded requirement pinned the version, so it "
+                      "was reinstalled from the index[/dim]")
+    if outcome.version:
+        console.print(f"  [good]now on {outcome.version}[/good]\n")
+    else:
+        console.print(f"  [good]done[/good] [dim]— {outcome.message}.[/dim]\n")
+    return 0
+
+
 def run_uninstall(config: Config, dry_run: bool = False,
                   assume_yes: bool = False) -> int:
     """Show everything that would go, then go.
@@ -448,6 +529,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         return run_doctor(config, fix=getattr(args, "fix", False))
+    if args.command == "update":
+        return run_update(config, check_only=args.check)
     if args.command == "uninstall":
         return run_uninstall(config, dry_run=args.dry_run, assume_yes=args.yes)
     if args.command == "mcp":
