@@ -48,24 +48,97 @@ export const metadata: Metadata = {
   description: site.description,
   applicationName: site.name,
   keywords: [
-    'terminal agent', 'coding agent', 'CLI', 'AI pair programmer',
-    'self-improving', 'developer tools', 'python', 'MCP',
+    'terminal coding agent', 'CLI coding assistant', 'AI pair programmer',
+    'self-improving agent', 'developer tools', 'python', 'open source',
+    'Model Context Protocol', 'MCP', 'local LLM', 'Ollama', 'agentic coding',
   ],
   authors: [{ name: site.name, url: site.url }],
   openGraph: {
     type: 'website',
-    url: site.url,
+    url: `${site.url}/`,
     siteName: site.name,
+    locale: 'en_GB',
     title: `${site.name} — ${site.tagline}`,
     description: site.description,
+    // A committed PNG rather than a generated route: this is a static export
+    // with no server to run one, and a card that 404s is how a link renders as
+    // a bare grey rectangle on every platform at once.
+    images: [{
+      url: '/og.png',
+      width: 1200,
+      height: 630,
+      type: 'image/png',
+      alt: `${site.name} — ${site.tagline}`,
+    }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `${site.name} — ${site.tagline}`,
     description: site.description,
+    images: ['/og.png'],
   },
-  alternates: { canonical: site.url },
-  robots: { index: true, follow: true },
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.ico', sizes: '32x32' },
+      { url: '/icon-192.png', type: 'image/png', sizes: '192x192' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
+  manifest: '/site.webmanifest',
+  alternates: { canonical: `${site.url}/` },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true, 'max-image-preview': 'large',
+                 'max-snippet': -1 },
+  },
+  category: 'technology',
+};
+
+/*
+ * What the page is, in a form a search engine will read rather than infer.
+ *
+ * Two things, deliberately: the software, and the site it lives on. Everything
+ * in here is checkable against the page — the price is free because it is, the
+ * version is the one on PyPI, the platforms are the ones the installer
+ * supports. There is no `aggregateRating`, because there are no ratings, and
+ * inventing them is both dishonest and the fastest way to lose a rich result.
+ */
+const STRUCTURED_DATA = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'SoftwareApplication',
+      '@id': `${site.url}/#software`,
+      name: site.name,
+      alternateName: `${site.name} — ${site.tagline}`,
+      description: site.description,
+      applicationCategory: 'DeveloperApplication',
+      applicationSubCategory: 'Command line tool',
+      operatingSystem: 'macOS, Linux, Windows',
+      url: `${site.url}/`,
+      downloadUrl: site.pypiUrl,
+      installUrl: `${site.url}/#install`,
+      softwareVersion: site.version,
+      programmingLanguage: 'Python',
+      softwareRequirements: `Python ${site.pythonFloor} or newer`,
+      license: 'https://opensource.org/licenses/MIT',
+      isAccessibleForFree: true,
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+      codeRepository: site.repo,
+      image: `${site.url}/og.png`,
+    },
+    {
+      '@type': 'WebSite',
+      '@id': `${site.url}/#website`,
+      url: `${site.url}/`,
+      name: site.name,
+      description: site.description,
+      inLanguage: 'en',
+      about: { '@id': `${site.url}/#software` },
+    },
+  ],
 };
 
 export const viewport: Viewport = {
@@ -103,6 +176,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
+        />
         {/*
           The hero artwork is fetched by [Earth] rather than inlined, so that
           the page itself stays small on a host that only speaks gzip. Starting

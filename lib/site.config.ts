@@ -11,14 +11,23 @@ export const site = {
   domain: 'comodor.ai',
   url: 'https://comodor.ai',
   tagline: 'It learns the way you correct it.',
+  // Under 155 characters, because that is where Google cuts a snippet, and a
+  // sentence that ends mid-clause in the result reads as a broken page.
   description:
-    'A terminal coding agent that learns from the edits you make to its output. ' +
-    'Deterministic, model-free, sub-millisecond — and it can prove it is improving.',
+    'A coding agent for your terminal that learns from the edits you make to ' +
+    'its output — fix something once and the next answer already obeys.',
+  // The date the page's content last changed, not the date it was last built.
+  // A sitemap that claims a change on every deploy teaches crawlers to ignore
+  // the field.
+  updated: '2026-08-21',
   repo: 'https://github.com/ifekri/Comodor',
   pypi: 'comodor',
   pypiUrl: 'https://pypi.org/project/comodor/',
   command: 'comodor',
   pythonFloor: '3.11',
+  // The release the page describes. Structured data quotes it, so it is
+  // checkable against PyPI rather than a rounded claim.
+  version: '0.3.0',
 } as const;
 
 export type OsId = 'macos' | 'linux' | 'windows';
