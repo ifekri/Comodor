@@ -2,6 +2,41 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.3.0 — 2026-08-20
+
+### A browser, not a fetcher
+
+- `browser` opens a page, lists its links numbered and resolved, follows one,
+  goes back, pages through a long document and finds text inside it. `web_fetch`
+  strips the markup and the links go with it, so the only way onward was
+  guessing a URL.
+- Links inside the content rank above the navigation bar every page of a
+  documentation site repeats.
+- One session for the visit — one cookie jar, one connection pool — so
+  redirects and consent pages survive the hop to the next page.
+- Long pages are handed over a screenful at a time rather than cut off at
+  40,000 characters, with `find` to jump to the part that matters.
+- Moving around a page already fetched touches no network and asks no
+  permission. A new host does.
+- No JavaScript engine, and no plans for one: that means a real browser, which
+  means a real dependency. A page that draws itself in the client says so and
+  names the Puppeteer server in the MCP catalogue instead of pretending.
+
+### It asks which directory this is about
+
+- The project root is found by walking upwards from where you started, and the
+  answer is occasionally a surprise. It is shown once per folder, with what is
+  in it, and confirmed before the agent exists.
+- Once. A prompt that appears every time is one people learn to dismiss without
+  reading. Approved folders are remembered in `safety.trusted_folders` — the
+  exact directory, never a prefix, so approving `~/work/api` does not quietly
+  approve `~/work`.
+- `--cwd` is you naming it yourself, so it does not ask.
+
+### Also
+
+- The `/progress` section is out of the README.
+
 ## 0.2.3 — 2026-08-20
 
 ### Uninstall left the environment behind when uv was not on PATH
