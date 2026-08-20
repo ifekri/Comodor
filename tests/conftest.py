@@ -21,6 +21,18 @@ from comodor.safety import CheckpointStore, PermissionEngine, Redactor  # noqa: 
 from comodor.tools import ToolContext, ToolRegistry        # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def no_package_index(monkeypatch):
+    """Nothing in this suite asks PyPI what the newest release is.
+
+    `doctor` does, which is useful in a report and useless in a test: it makes
+    the suite depend on a network, and in CI - where the checkout is shallow
+    and the version reads as `0.1.dev1` - it reports being out of date on every
+    single run. The tests that are about that check patch this themselves.
+    """
+    monkeypatch.setattr("comodor.update.latest", lambda *args, **kwargs: None)
+
+
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
     """A project root that is a *subdirectory* of tmp_path.

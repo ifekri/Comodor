@@ -92,13 +92,22 @@ class Report:
 # --------------------------------------------------------------------------- #
 
 
-def run_checks(config: Config) -> Report:
-    """Every check, in the order a person would want to read them."""
+def run_checks(config: Config, online: bool = True) -> Report:
+    """Every check, in the order a person would want to read them.
+
+    `online` exists because one check asks the package index whether there is a
+    newer release, and everything else here reads the local machine. A caller
+    that must not touch the network — a test, or a diagnostic being gathered
+    from somewhere with no route out — turns it off and gets the rest.
+    """
+    checks = [_check_config, _check_config_permissions, _check_provider,
+              _check_saved_provider, _check_model, _check_brain,
+              _check_search_index, _check_skills, _check_leftovers, _check_mcp]
+    if online:
+        checks.append(_check_version)
+
     report = Report()
-    for check in (_check_config, _check_config_permissions, _check_provider,
-                  _check_saved_provider, _check_model, _check_brain,
-                  _check_search_index,
-                  _check_skills, _check_leftovers, _check_mcp, _check_version):
+    for check in checks:
         try:
             finding = check(config)
         except Exception as error:                # a check must never be the bug
