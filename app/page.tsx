@@ -5,7 +5,7 @@ import { InstallCommand } from '@/components/InstallCommand';
 import { ReflexScroll } from '@/components/ReflexScroll';
 import { Section } from '@/components/Section';
 import { SkillFile } from '@/components/SkillFile';
-import { alternatives, site } from '@/lib/site.config';
+import { site } from '@/lib/site.config';
 
 export default function Home() {
   return (
@@ -265,26 +265,16 @@ export default function Home() {
           </div>
           <div className="split__aside">
             <p className="lede">
-              It uses <code>uv</code> or <code>pipx</code> if you have them,
-              builds an isolated environment if you have a working Python, and
-              fetches what it needs if you have neither — then runs{' '}
-              <code>{site.command}</code> once to prove it worked.
+              It finds or fetches a Python, builds an isolated environment, puts{' '}
+              <code>{site.command}</code> on your PATH, and runs it once to
+              prove it worked. If you would rather use your own package
+              manager, those are there too.
             </p>
           </div>
         </div>
 
         <div className="closing__install" data-reveal>
           <InstallCommand />
-        </div>
-
-        <div className="alts">
-          {alternatives.map((alternative) => (
-            <div className="alt" key={alternative.label} data-reveal>
-              <span className="alt__label">{alternative.label}</span>
-              <code className="alt__command">{alternative.command}</code>
-              <CopyButton value={alternative.command} label="copy" />
-            </div>
-          ))}
         </div>
 
         <p className="verify" data-reveal>
