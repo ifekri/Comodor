@@ -7,8 +7,16 @@ the profile line left alone because another program needs the directory, the
 source checkout left alone because it is not ours, the block removed from a
 shell profile without taking a neighbouring line with it.
 
-Nothing here runs the real uninstaller against the real machine. Every path is
-a temporary one.
+Nothing here runs the real uninstaller against the real machine, and that is
+enforced rather than intended. `survey()` reaches for the home directory, the
+launcher directory and `sys.prefix` on its own, so a test that only redirects
+the config is still pointed at whoever is running it — and `apply()` deletes
+what `survey()` found. The autouse fixture below moves all three somewhere
+temporary before any test runs.
+
+It is not a hypothetical: without it, this file deleted the `comodor` command
+off the machine running it, and the continuous integration job that installs
+Comodor and then checks it starts failed with "command not found".
 """
 
 from __future__ import annotations
@@ -31,6 +39,25 @@ from comodor.uninstall import (
     strip_profile,
     survey,
 )
+
+
+@pytest.fixture(autouse=True)
+def nowhere_near_the_real_machine(tmp_path, monkeypatch):
+    """Point every path this module can reach at the temporary tree."""
+    home = tmp_path / "elsewhere"
+    (home / ".local" / "bin").mkdir(parents=True)
+
+    monkeypatch.delenv("COMODOR_HOME", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr("comodor.uninstall.BIN_DIR", home / ".local" / "bin")
+    # Found by scanning real directories, including sys.prefix. A test that
+    # wants launchers says so.
+    monkeypatch.setattr("comodor.uninstall._launchers", lambda: [])
+    # Nothing here may spawn the detached Windows deleter.
+    monkeypatch.setattr("comodor.uninstall._schedule",
+                        lambda paths: (_ for _ in ()).throw(
+                            AssertionError(f"a test tried to schedule {paths}")))
+    return home
 
 
 def make_config(tmp_path: Path) -> Config:
@@ -64,8 +91,7 @@ def record_session(user: Path, session_id: str, cwd: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_data_directory_is_found_with_what_is_in_it(tmp_path, monkeypatch):
-    monkeypatch.delenv("COMODOR_HOME", raising=False)
+def test_the_data_directory_is_found_with_what_is_in_it(tmp_path):
     config = make_config(tmp_path)
     furnish(config.paths.user)
 
@@ -80,9 +106,7 @@ def test_the_data_directory_is_found_with_what_is_in_it(tmp_path, monkeypatch):
     assert "1 skill" in data[0].detail
 
 
-def test_a_machine_it_was_never_installed_on_offers_nothing_to_delete(tmp_path,
-                                                                     monkeypatch):
-    monkeypatch.delenv("COMODOR_HOME", raising=False)
+def test_a_machine_it_was_never_installed_on_offers_nothing_to_delete(tmp_path):
     config = make_config(tmp_path)
     # No data directory at all.
     (config.paths.user / "logs").rmdir()
@@ -123,9 +147,8 @@ def test_the_project_you_are_standing_in_counts_even_with_no_session(tmp_path):
     assert directories == [here / ".comodor"]
 
 
-def test_a_missing_session_history_is_reported_as_a_gap(tmp_path, monkeypatch):
+def test_a_missing_session_history_is_reported_as_a_gap(tmp_path):
     """Silence and "none" are different answers, and must read differently."""
-    monkeypatch.delenv("COMODOR_HOME", raising=False)
     config = make_config(tmp_path)
     furnish(config.paths.user)
     (config.paths.user / "sessions").rmdir()
@@ -163,8 +186,7 @@ def test_only_the_installers_own_block_leaves_the_profile(tmp_path):
 
 
 def test_a_profile_without_the_marker_is_not_touched(tmp_path, monkeypatch):
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    (tmp_path / ".bashrc").write_text(
+    (Path.home() / ".bashrc").write_text(
         'export PATH="/home/x/.local/bin:$PATH"\n', encoding="utf-8")
 
     # The directory is named, but nothing says the installer put it there, so
@@ -174,10 +196,8 @@ def test_a_profile_without_the_marker_is_not_touched(tmp_path, monkeypatch):
 
 def test_a_shared_bin_directory_keeps_its_place_on_path(tmp_path, monkeypatch):
     """The line is ours; the directory is not."""
-    monkeypatch.delenv("COMODOR_HOME", raising=False)
-    home = tmp_path / "home"
+    home = Path.home()
     bin_dir = home / ".local" / "bin"
-    bin_dir.mkdir(parents=True)
     (bin_dir / "comodor").write_text("#!/bin/sh\n", encoding="utf-8")
     (bin_dir / "ruff").write_text("#!/bin/sh\n", encoding="utf-8")
     (home / ".bashrc").write_text(
@@ -235,7 +255,6 @@ def test_the_install_method_is_read_from_the_prefix(prefix, expected, monkeypatc
 
 
 def test_a_source_checkout_is_never_deleted(tmp_path, monkeypatch):
-    monkeypatch.delenv("COMODOR_HOME", raising=False)
     monkeypatch.setattr("comodor.uninstall.detect_installation",
                         lambda: Installation("source", None, "from a checkout"))
     config = make_config(tmp_path)
@@ -253,7 +272,6 @@ def test_a_source_checkout_is_never_deleted(tmp_path, monkeypatch):
 
 
 def test_everything_it_listed_is_gone_afterwards(tmp_path, monkeypatch):
-    monkeypatch.delenv("COMODOR_HOME", raising=False)
     monkeypatch.setattr("comodor.uninstall.detect_installation",
                         lambda: Installation("source", None, "from a checkout"))
     config = make_config(tmp_path)
@@ -269,6 +287,22 @@ def test_everything_it_listed_is_gone_afterwards(tmp_path, monkeypatch):
     assert not (used / ".comodor").exists()
     # The project itself is not ours; only the folder inside it was.
     assert used.exists()
+
+
+def test_the_command_itself_goes_too(tmp_path, monkeypatch):
+    """Whatever else survives, `comodor` must stop being a word that works."""
+    launcher = Path.home() / ".local" / "bin" / "comodor"
+    launcher.write_text("#!/bin/sh", encoding="utf-8")
+    monkeypatch.setattr("comodor.uninstall._launchers", lambda: [launcher])
+    monkeypatch.setattr("comodor.uninstall.detect_installation",
+                        lambda: Installation("source", None, "from a checkout"))
+
+    config = make_config(tmp_path)
+    furnish(config.paths.user)
+    found = apply(survey(config))
+
+    assert not found.failed
+    assert not launcher.exists()
 
 
 def test_a_removal_that_fails_is_reported_rather_than_raised(tmp_path):
