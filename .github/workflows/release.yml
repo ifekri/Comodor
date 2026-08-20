@@ -37,6 +37,11 @@ jobs:
       publish: ${{ env.SHOULD_PUBLISH }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The version is derived from the tag, so the tag has to be here.
+          # A shallow checkout gets the commit and none of the history, and
+          # every build would come out as 0.1.dev1.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -45,46 +50,63 @@ jobs:
       - name: Install build tooling
         run: python -m pip install --upgrade pip build twine
 
-      - name: Read the package version
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Read the version off the artefact
         id: version
-        # From `__init__.py`, because that is where the version lives — the
-        # `project` table declares it dynamic and hatchling reads it from there.
-        # Reading pyproject instead is how this step failed on v0.2.0.
+        # Nothing in the tree carries a version number: hatch-vcs derives it
+        # from the tag, so the two cannot disagree - which is exactly what
+        # v0.2.1 did on its first attempt, failing the release because a
+        # literal in __init__.py had been left behind at 0.2.0.
+        #
+        # Read from the built wheel rather than by asking the build backend
+        # what it would do. The filename is the answer that is actually going
+        # to PyPI, and it needs no library to interpret.
         run: |
-          version=$(python -c "import pathlib,re; print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', pathlib.Path('src/comodor/__init__.py').read_text()).group(1))")
+          wheel=$(ls dist/*.whl | head -1)
+          version=$(basename "$wheel" | cut -d- -f2)
           if [ -z "$version" ]; then
-            echo "::error::Could not read __version__ from src/comodor/__init__.py"
+            echo "::error::No version in the wheel name: $wheel"
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Package version: $version"
 
-      - name: The tag must match the package version
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: A tag must produce its own version
+        if: github.ref_type == 'tag'
+        # It cannot fail without something being badly wrong - a shallow
+        # checkout, or a tag that is not an ancestor of this commit - but the
+        # cost of finding out afterwards is a version number PyPI will never
+        # let us use again.
         run: |
           tag="${GITHUB_REF_NAME#v}"
           version="${{ steps.version.outputs.version }}"
           if [ "$tag" != "$version" ]; then
-            echo "::error::Tag v$tag does not match pyproject version $version."
-            {
-              echo "Bump the version in pyproject.toml, or move the tag."
-              echo "Publishing a mismatched pair is not recoverable: PyPI never"
-              echo "lets a version number be reused, even after a delete."
-            } >&2
+            echo "::error::Tag v$tag built version $version."
+            echo "The checkout is probably shallow, or the tag is not an ancestor." >&2
             exit 1
           fi
-
-      - name: Build sdist and wheel
-        run: python -m build
 
       - name: Check the metadata PyPI will render
         run: twine check --strict dist/*
 
-      - name: The wheel installs and runs from a clean environment
+      - name: The wheel installs, runs, and agrees with the tag
+        # The last word on what is about to be published is the artefact
+        # itself, not the metadata that produced it.
         run: |
           python -m venv /tmp/verify
           /tmp/verify/bin/pip install --quiet dist/*.whl
-          /tmp/verify/bin/comodor --version
+          reported=$(/tmp/verify/bin/comodor --version | awk '{print $2}')
+          echo "The wheel reports: $reported"
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "$reported" != "$tag" ]; then
+              echo "::error::Tag v$tag produced a wheel reporting $reported."
+              echo "The checkout is probably shallow, or the tag is not an ancestor." >&2
+              exit 1
+            fi
+          fi
 
       - uses: actions/upload-artifact@v4
         with:

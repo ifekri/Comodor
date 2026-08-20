@@ -53,25 +53,37 @@ def button_style(spec: ButtonSpec, theme: Theme, active: bool = False,
 
 def render_button(spec: ButtonSpec, rect: Rect, theme: Theme, active: bool = False,
                   enabled: bool = True) -> RenderableType:
-    """One button: a solid colour block with the label centred inside it.
+    """One button: a solid colour block, filled by what is in it.
 
-    Drawn as filled rows rather than a bordered panel — that is the shape in the
-    design, and it also survives a two-row-high button, where a border would
-    leave no room at all for the label.
+    Drawn as filled rows rather than as a bordered panel — that is the shape in
+    the design, and a border would leave a two-row button no room at all for a
+    label.
+
+    The rows are earned rather than padded. A two-row button used to put the
+    label on the lower row and leave the upper one blank, which on screen is
+    not a button with a label in it: it is a coloured bar with a word under it,
+    and the gap reads as a mistake. Two rows is exactly enough for the label
+    and the keystroke that does the same thing, so that is what goes there —
+    and the shortcut, which the interface already knew and had nowhere to
+    print, stops being invisible.
     """
     style = button_style(spec, theme, active, enabled)
     width = max(4, rect.width)
     height = max(1, rect.height)
-    label_row = height // 2 if height > 1 else 0
 
-    rows: list[Text] = []
-    for index in range(height):
-        if index == label_row:
-            rows.append(Text(spec.label.center(width)[:width], style=style))
-        elif index == label_row + 1 and height >= 3:
-            rows.append(Text(spec.hint.center(width)[:width], style=style))
-        else:
-            rows.append(Text(" " * width, style=style))
+    def row(text: str) -> Text:
+        return Text(text.center(width)[:width], style=style)
+
+    if height == 1:
+        return row(spec.label)
+    if height == 2:
+        return Group(row(spec.label), row(spec.hint))
+
+    # Taller than it needs to be: centre the pair and fill around it.
+    top = (height - 2) // 2
+    rows = [row("") for _ in range(top)]
+    rows.extend((row(spec.label), row(spec.hint)))
+    rows.extend(row("") for _ in range(height - len(rows)))
     return Group(*rows)
 
 
