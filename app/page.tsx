@@ -288,8 +288,9 @@ export default function Home() {
         </div>
 
         <p className="verify" data-reveal>
-          Prefer to read before you run? <a href="/install.sh">install.sh</a>{' '}
-          and <a href="/install.ps1">install.ps1</a> are served as plain text.
+          Prefer to read before you run?{' '}
+          <a href="/install-sh.txt">install.sh</a> and{' '}
+          <a href="/install-ps1.txt">install.ps1</a> open as plain text.
           Everything Comodor does after that is on{' '}
           <a href={site.repo}>GitHub</a>.
         </p>
