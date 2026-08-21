@@ -69,12 +69,44 @@ def test_reading_a_binary_file_fails_cleanly(tools, tool_context, workspace):
     assert "binary" in result.content
 
 
-def test_reading_an_oversized_file_suggests_a_slice(tools, tool_context, workspace):
-    tool_context.config.safety.max_file_read_bytes = 100
-    (workspace / "big.txt").write_text("x" * 500, encoding="utf-8")
-    result = tools.invoke("read_file", tool_context, {"path": "big.txt"})
+def test_a_slice_of_a_very_large_file_can_actually_be_read(tools, tool_context,
+                                                           workspace):
+    """The tool used to refuse anything over the byte cap with "read a slice
+    with offset/limit instead", and then refuse the slice too — it loaded the
+    whole file before taking one. The advice could not be followed at any
+    offset, which made a large log unreadable by the tool that suggested how to
+    read it."""
+    (workspace / "big.txt").write_text(
+        "".join(f"line {n}\n" for n in range(200_000)), encoding="utf-8")
+    assert (workspace / "big.txt").stat().st_size > \
+        tool_context.config.safety.max_file_read_bytes
+
+    result = tools.invoke("read_file", tool_context,
+                          {"path": "big.txt", "offset": 150_000, "limit": 3})
+
+    assert result.ok, result.content
+    assert "line 149999" in result.content
+    assert result.meta["lines"] == 200_000
+
+
+def test_a_file_too_large_even_to_scan_says_so(tools, tool_context, workspace):
+    tool_context.config.safety.max_file_scan_bytes = 100
+    (workspace / "huge.txt").write_text("x" * 500, encoding="utf-8")
+
+    result = tools.invoke("read_file", tool_context, {"path": "huge.txt"})
+
     assert not result.ok
-    assert "offset" in result.content
+    assert "grep" in result.content
+
+
+def test_an_offset_past_the_end_is_not_an_error(tools, tool_context, workspace):
+    (workspace / "short.txt").write_text("one\ntwo\n", encoding="utf-8")
+
+    result = tools.invoke("read_file", tool_context,
+                          {"path": "short.txt", "offset": 900})
+
+    assert result.ok
+    assert "2 lines" in result.content
 
 
 def test_diff_and_stats_describe_the_change():

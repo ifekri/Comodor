@@ -131,6 +131,11 @@ class AgentConfig:
     compact_at: float = 0.75             # summarise history past this fraction
     temperature: float = 0.3
     max_output_tokens: int = 8192
+    #: Characters one tool result may add to the conversation before the rest
+    #: is moved aside. Not a truncation: what does not fit is written to a file
+    #: the agent is told how to read, so the cost is bounded and nothing is
+    #: lost. Four characters to a token, roughly.
+    max_tool_chars: int = 12_000
     system_prompt_extra: str = ""
     prompt_cache: bool = True            # let the provider re-serve the prefix
     prompt_cache_ttl: str = "5m"         # "5m" or "1h"; the hour costs more to write
@@ -202,12 +207,24 @@ class SkillsConfig:
 
 @dataclass
 class MCPServerConfig:
-    """One Model Context Protocol server the user has added."""
+    """One Model Context Protocol server the user has added.
+
+    Either a `command` to launch or a `url` to reach. The interesting servers
+    are increasingly the second kind — hosted, shared by a team, holding
+    credentials nobody wants on a laptop — and the difference stops at the
+    transport: the same tools arrive, under the same permission gate.
+    """
 
     name: str = ""
     command: str = ""
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
+    #: A Streamable HTTP endpoint, when this server is not a process.
+    url: str = ""
+    #: Sent as `Authorization: Bearer`. Kept apart from `headers` so it can be
+    #: read from the environment and never written to the config file.
+    token: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
     #: Working directory for the process; empty means the project root.
     cwd: str = ""
     enabled: bool = False
@@ -215,7 +232,13 @@ class MCPServerConfig:
     spec: str = ""
 
     def to_json(self) -> dict[str, Any]:
-        data: dict[str, Any] = {"command": self.command, "enabled": self.enabled}
+        data: dict[str, Any] = {"enabled": self.enabled}
+        if self.url:
+            data["url"] = self.url
+        else:
+            data["command"] = self.command
+        if self.headers:
+            data["headers"] = dict(self.headers)
         if self.args:
             data["args"] = list(self.args)
         if self.env:
@@ -252,6 +275,11 @@ class SafetyConfig:
     deny_commands: list[str] = field(default_factory=lambda: list(DEFAULT_DENY))
     workspace_only: bool = True
     max_file_read_bytes: int = 512_000
+    #: How large a file `read_file` will scan to find the lines asked for. It
+    #: streams, so this bounds time rather than memory, and it is far above the
+    #: read limit on purpose: a slice of a large log has to be reachable, or
+    #: the advice to take one is advice that cannot be followed.
+    max_file_scan_bytes: int = 64_000_000
     #: Directories the user has confirmed as a workspace. Exact paths, never
     #: prefixes: approving ~/work/api must not quietly approve ~/work.
     trusted_folders: list[str] = field(default_factory=list)
@@ -520,11 +548,17 @@ def _apply_mcp(settings: MCPConfig, document: Any) -> None:
         settings.enabled = document["enabled"]
 
     for name, values in (document.get("servers") or {}).items():
-        if not isinstance(values, dict) or not values.get("command"):
+        if not isinstance(values, dict):
+            continue
+        if not values.get("command") and not values.get("url"):
             continue
         settings.servers[str(name)] = MCPServerConfig(
             name=str(name),
-            command=str(values["command"]),
+            command=str(values.get("command") or ""),
+            url=str(values.get("url") or ""),
+            token=str(values.get("token") or ""),
+            headers={str(key): str(value)
+                     for key, value in (values.get("headers") or {}).items()},
             args=[str(item) for item in values.get("args") or []],
             env={str(key): str(value)
                  for key, value in (values.get("env") or {}).items()},

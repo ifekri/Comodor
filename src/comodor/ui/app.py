@@ -21,6 +21,7 @@ from typing import Any
 from rich.live import Live
 
 from ..agent import AgentLoop, Conversation
+from ..agent.spawn import spawner
 from ..config import Config, save_user_config
 from ..events import Cancelled, EventBus, EventQueue, Kind, Request
 from ..learning import LearningEngine
@@ -35,6 +36,7 @@ from ..mcp.manager import SEPARATOR
 from ..skills import candidates as skill_candidates
 from ..skills import load_for as skills_for
 from ..tools import ToolRegistry
+from ..tools.delegate import Delegate
 from . import console as console_module
 from . import layout as layout_module
 from .input import KeyEvent, MouseEvent, PasteEvent, TerminalInput
@@ -107,6 +109,8 @@ class App:
         # one is written by hand, the other is inferred.
         self._load_skills()
 
+        self.tools.add(Delegate(spawner(config, self.gateway, self.bus,
+                                        skills=self.skills, mcp=self.mcp)))
         self.agent = AgentLoop(config, self.gateway, self.tools, self.bus,
                                self.permissions, self.conversation, self.memory,
                                skills=self.skills)

@@ -123,6 +123,7 @@ def apply_overrides(config: Config, args: argparse.Namespace) -> Config:
 def run_headless(config: Config, args: argparse.Namespace) -> int:
     """One task, no TUI. Used by scripts, hooks and CI."""
     from .agent import AgentLoop, Conversation
+    from .agent.spawn import spawner
     from .events import EventBus, Kind
     from .learning import LearningEngine
     from .providers.gateway import Gateway
@@ -152,7 +153,9 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     permissions.on_denied = memory.on_denied
     skills = load_skills(config)
     mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
-    agent = AgentLoop(config, gateway, ToolRegistry(skills=skills, mcp=mcp), bus,
+    tools = ToolRegistry(skills=skills, mcp=mcp,
+                         spawn=spawner(config, gateway, bus, skills=skills, mcp=mcp))
+    agent = AgentLoop(config, gateway, tools, bus,
                       permissions, Conversation(), memory, skills=skills)
 
     if not args.json:
