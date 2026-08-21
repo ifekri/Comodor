@@ -411,6 +411,27 @@ file at all.
 
 ---
 
+## Persian, Arabic and Hebrew
+
+Right-to-left text is set to the right of its column, where a Persian or Arabic
+reader's line begins, and left-to-right text is left exactly where it was. A
+code block inside a right-to-left answer stays on the left, because code is
+left-to-right in every language there is.
+
+The part that needs saying: **a terminal application cannot choose a font.** It
+writes characters; the terminal emulator picks the glyphs. If Persian or Arabic
+comes out as boxes, the fix is in your terminal's own settings — set **Tahoma**,
+or any face with Arabic-script coverage. `comodor doctor` says so when it sees
+that writing in your history.
+
+What Comodor does do is stop the bidirectional algorithm reaching across
+boundaries it should not. A line is usually half ours and half yours —
+`learned` then a rule you wrote, `edit` then a path — and the neutral
+characters between the two halves resolve against whichever side wins, which is
+how `افزودن مسیر /health` ends up with the path in the wrong place. Each field
+is fenced in a Unicode isolate, which costs nothing: the marks are zero-width,
+so every column in the layout still lines up.
+
 ## Any terminal, any size
 
 The layout is recomputed every frame, so resizing just works — from a

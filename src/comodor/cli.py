@@ -484,6 +484,28 @@ def run_uninstall(config: Config, dry_run: bool = False,
     return 0
 
 
+def _use_font(path: str, family: str) -> None:
+    """Point the exported SVG at a font stack that covers Arabic script.
+
+    Rich writes `font-family` into the embedded stylesheet in more than one
+    place, and offers no option to choose it, so every declaration is rewritten
+    afterwards. Cruder than an argument would be, and it is the only place this
+    program picks a typeface at all.
+    """
+    import re
+    from pathlib import Path
+
+    file = Path(path)
+    try:
+        markup = file.read_text(encoding="utf-8")
+    except OSError:
+        return
+    file.write_text(
+        re.sub(r"font-family\s*:[^;}]*", f"font-family:{family}", markup),
+        encoding="utf-8",
+    )
+
+
 def run_preview(config: Config, args: argparse.Namespace) -> int:
     """Render one frame at a fixed size — for screenshots and layout checks."""
     from .ui import console as console_module
@@ -513,7 +535,12 @@ def run_preview(config: Config, args: argparse.Namespace) -> int:
     geometry = layout_module.compute(size[0], size[1])
     console.print(Screen(console, theme).render(state, geometry))
     if args.svg:
+        # The one place this program picks a typeface. Everywhere else it is
+        # the terminal's decision, and Tahoma here is what makes a snapshot
+        # containing Persian or Arabic legible to somebody who opens it in a
+        # browser rather than a terminal.
         console.save_svg(args.svg, title="Comodor")
+        _use_font(args.svg, console_module.SVG_FONT)
         print(f"wrote {args.svg}", file=sys.stderr)
     return 0
 
