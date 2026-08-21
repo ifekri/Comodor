@@ -9,6 +9,7 @@ Three ways in:
 * ``comodor setup`` — the first-run questions again, on demand.
 * ``comodor doctor`` — what is configured, what is reachable, what the terminal
   can do. The first thing to run when something is not working.
+* ``comodor skills`` — browse the library, and fetch the ones you want.
 * ``comodor update`` — move to the newest published version, using whichever
   of uv, pipx or pip put this copy here.
 * ``comodor uninstall`` — takes every file, folder and PATH line back off the
@@ -80,8 +81,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="do not ask; for scripts")
 
     from .mcp.commands import register as register_mcp
+    from .skills.commands import register as register_skills
 
     register_mcp(sub)
+    register_skills(sub)
 
     preview = sub.add_parser("preview",
                              help="render the interface at a given size and exit")
@@ -564,6 +567,10 @@ def main(argv: list[str] | None = None) -> int:
         from .mcp.commands import run as run_mcp
 
         return run_mcp(config, args)
+    if args.command == "skills":
+        from .skills.commands import run as run_skills
+
+        return run_skills(config, args)
     if args.command == "preview":
         return run_preview(config, args)
     if args.command == "setup":

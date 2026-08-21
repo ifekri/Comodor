@@ -174,6 +174,16 @@ class SkillsConfig:
     max_tokens: int = 1200
     #: Install the starter skills the first time the folder is created.
     install_examples: bool = True
+    #: Where the downloadable library is listed. A setting rather than a
+    #: constant because a team may keep its own on an internal host, and
+    #: should not have to fork the program to point at it.
+    catalogue_url: str = (
+        "https://raw.githubusercontent.com/ifekri/Comodor/skills/catalogue.json"
+    )
+    #: Seconds a cached catalogue is used without asking the server at all.
+    #: Past it the request is conditional, and the usual answer is 304 with no
+    #: body, so this is about round trips rather than bandwidth.
+    catalogue_ttl: int = 300
 
 
 @dataclass

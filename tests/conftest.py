@@ -22,6 +22,23 @@ from comodor.tools import ToolContext, ToolRegistry        # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def no_skill_library(monkeypatch):
+    """Nothing in this suite downloads the skills catalogue.
+
+    The first-run wizard offers the library, which means an unpatched test of
+    the wizard reaches out to raw.githubusercontent.com — a suite that needs a
+    network, and one whose results depend on what happens to be published. The
+    tests that are about the catalogue supply their own stand-in server.
+    """
+    def offline(*args, **kwargs):
+        from comodor.skills.catalogue import CatalogueError
+
+        raise CatalogueError("no network in the test suite")
+
+    monkeypatch.setattr("comodor.skills.catalogue.fetch", offline)
+
+
+@pytest.fixture(autouse=True)
 def no_package_index(monkeypatch):
     """Nothing in this suite asks PyPI what the newest release is.
 

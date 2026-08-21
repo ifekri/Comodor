@@ -23,7 +23,7 @@ a new user meets must not be a mode their terminal might not support.
 from __future__ import annotations
 
 import getpass
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 from rich.console import Console
@@ -53,6 +53,8 @@ class Answers:
     mode: str = "act"
     approvals: str = "ask"
     theme: str = "ember"
+    #: Skills chosen from the library, downloaded after the config is saved.
+    skills: list[str] = field(default_factory=list)
 
 
 class SetupWizard:
@@ -171,7 +173,7 @@ class SetupWizard:
     # -- the questions ---------------------------------------------------- #
 
     def run(self) -> Answers:
-        total = 4
+        total = 5
         self._banner()
 
         answers = Answers()
@@ -191,7 +193,55 @@ class SetupWizard:
 
         answers.model = self._ask_model(3, total, spec, answers)
         answers.approvals = self._ask_approvals(4, total)
+        answers.skills = self._ask_skills(5, total)
         return answers
+
+    def _ask_skills(self, step: int, total: int) -> list[str]:
+        """Offer the library, once, at the only moment it is not an interruption.
+
+        Skills are not in the package: they live on a branch and are fetched on
+        request, which keeps the install small and means adding one needs no
+        release. The cost of that is that nobody would ever find them, so they
+        are offered here — with nothing selected, because a setup wizard that
+        installs things you did not ask for is a setup wizard people learn to
+        distrust.
+
+        A network that is not there is not a reason to fail a first run. It
+        skips, and `comodor skills browse` is still there tomorrow.
+        """
+        self._rule("Any skills to start with?", step, total)
+        self.console.print(Text(
+            "  A skill is a written procedure the agent follows when the work "
+            "calls for it.\n  You can add more later with `comodor skills`.\n",
+            style=self.theme.style("dim")))
+
+        try:
+            from .skills.catalogue import fetch
+
+            catalogue = fetch(self.config.skills.catalogue_url,
+                              cache_root=self.config.paths.user,
+                              timeout=(4.0, 6.0))
+        except Exception:
+            self.console.print(Text("  (the library is not reachable right now)",
+                                    style=self.theme.style("dim")))
+            self._answered("skills", "none")
+            return []
+
+        if not catalogue.skills:
+            self._answered("skills", "none")
+            return []
+
+        options = [("__none__", "None for now",
+                    "comodor skills browse, whenever you want them")]
+        options += [(entry.id, entry.id, entry.description)
+                    for entry in catalogue.skills]
+
+        chosen = self._choose(options, default=1, title="Skills")
+        if chosen == "__none__":
+            self._answered("skills", "none")
+            return []
+        self._answered("skills", chosen)
+        return [chosen]
 
     def _banner(self) -> None:
         body = Text.assemble(
@@ -338,6 +388,41 @@ class SetupWizard:
         config.first_run = False
         return config
 
+    def install_skills(self, config: Config, answers: Answers) -> list[str]:
+        """Fetch what was chosen. Reported, never fatal.
+
+        A skill that will not download is a skill the user can fetch tomorrow.
+        Failing the whole first run over one is not a trade worth making, and
+        the configuration is already saved by the time this runs.
+        """
+        if not answers.skills:
+            return []
+
+        from .skills.catalogue import CatalogueError, fetch, install
+
+        done: list[str] = []
+        try:
+            catalogue = fetch(config.skills.catalogue_url,
+                              cache_root=config.paths.user)
+        except CatalogueError as error:
+            self.console.print(Text(f"  could not reach the library: {error}",
+                                    style=self.theme.style("warn")))
+            return []
+
+        config.paths.skills.mkdir(parents=True, exist_ok=True)
+        for skill_id in answers.skills:
+            entry = catalogue.get(skill_id)
+            if entry is None:
+                continue
+            try:
+                install(entry, catalogue, config.paths.skills)
+            except CatalogueError as error:
+                self.console.print(Text(f"  {skill_id}: {error}",
+                                        style=self.theme.style("warn")))
+                continue
+            done.append(skill_id)
+        return done
+
     def finish(self, config: Config) -> None:
         entry = config.active()
         body = Text.assemble(
@@ -389,5 +474,6 @@ def run_setup(config: Config, console: Console | None = None) -> Config:
     wizard = SetupWizard(config, console=console)
     answers = wizard.run()
     saved = wizard.apply(answers)
+    wizard.install_skills(saved, answers)
     wizard.finish(saved)
     return saved
