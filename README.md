@@ -60,6 +60,30 @@ be shown:
 exactly what the catalogue names and nothing else, so a file added here by
 accident cannot end up on somebody's machine.
 
+## How large a skill may be
+
+There are two ceilings, and a skill has to clear both.
+
+**64 KB, or it will not load at all.** `SKILL.md` is read whole; past that the
+loader refuses it with an error naming the file. This is a hard limit and there
+is no setting for it.
+
+**The turn's skill budget, or it is matched and then discarded.** A skill is
+injected into the request that needs it, so what a turn may spend on skills is
+capped by `skills.max_tokens` — 12,000 by default, shared between the
+`skills.top_k` matches. A skill that does not fit is skipped and says so; it
+does not silently vanish, and it no longer takes the skills ranked behind it
+with it.
+
+Roughly, 4 KB of Markdown is a thousand tokens. So a 40 KB skill costs ten
+thousand of the twelve thousand available and leaves no room for a second one.
+
+If a skill is too long for either, the format has an answer: keep `SKILL.md` to
+the procedure and move the detail into `references/`. Those files are named in
+the prompt and read on demand with `read_skill_file`, so they cost nothing
+until the turn actually needs them — which also means a long reference is
+*better* placed there than inline, whatever its size.
+
 ## The fields
 
 | field | what it is for |
