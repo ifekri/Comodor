@@ -2,6 +2,39 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.6.0 — 2026-08-21
+
+### Memory reads every script
+
+- **Fixed, and it was total:** the tokenizer behind every part of memory
+  matched `[A-Za-z0-9_]` and nothing else. For anyone working in Persian,
+  Arabic, Hebrew, Russian, Greek or Devanagari it returned an empty list —
+  nothing indexed, nothing recalled, no duplicate detection, and no error
+  anywhere to say the whole feature was a no-op. It reads words in any script
+  now, and keeps a Persian word whole across its zero-width non-joiner instead
+  of splitting it into two fragments.
+- Stopwords for Persian, Arabic and Hebrew, so the index does not fill with
+  their equivalents of "the".
+
+### It learns your vocabulary, by counting
+
+- Recall used to fail whenever the request and the lesson said the same thing
+  in different words. Every finished task is now read as a bag of words that
+  belonged to one piece of work, and terms that keep arriving together are
+  related — so `spec` reaches `pytest`, `auth` reaches `session` and
+  `src/auth.py`, and a Persian `تست` reaches `pytest`, with no synonym list, no
+  embedding model and no translation.
+- Normalised mutual information rather than raw counts, so a term that appears
+  in everything associates with nothing.
+- An inferred term is worth a third of one the user typed and never displaces a
+  real match; a pair seen once is coincidence and is ignored until it happens
+  twice.
+- Measured: expanding a query is 0.009 ms against a recall budget of 0.4 ms,
+  learning from a finished task is 0.019 ms, and the whole vocabulary is 169 KB
+  after four thousand tasks. All three are enforced as tests.
+- `comodor doctor` shows how many terms have been related, and from how many
+  tasks. `learning.associative` turns it off.
+
 ## 0.5.0 — 2026-08-21
 
 ### A library of skills, on a branch rather than in the package
