@@ -203,3 +203,65 @@ def test_the_vocabulary_stays_a_reasonable_size_on_disk():
     size = len(json.dumps(table.to_dict()))
 
     assert size < 2_000_000, f"{size / 1024:.0f} KB of associations"
+
+
+# --------------------------------------------------------------------------- #
+# what the store costs at a size nobody reaches by accident
+# --------------------------------------------------------------------------- #
+
+
+def test_the_hot_index_does_not_load_the_whole_table():
+    """Startup grows with the table if it does, and it is paid before the first
+    prompt: measured at 1.15 seconds for fifty thousand lessons.
+
+    The mirror is a cache of what can plausibly be recalled — recall multiplies
+    relevance by confidence and discards what scores near zero — so the decayed
+    tail cannot win however well it matches, and loading it finds nothing.
+    """
+    from comodor.learning.store import HOT_LESSONS
+
+    assert HOT_LESSONS < 50_000, "the cap is not a cap"
+
+
+def test_starting_up_with_a_large_brain_is_not_felt(tmp_path):
+    store = BrainStore(tmp_path / "brain.db")
+    for index in range(8000):
+        store.add_lesson(Lesson(kind="style", scope="global",
+                                trigger=f"trigger {index}",
+                                guidance=f"guidance {index} pytest fixture router"))
+    store.flush()
+    store.close()
+
+    start = time.perf_counter()
+    store = BrainStore(tmp_path / "brain.db")
+    elapsed = (time.perf_counter() - start) * 1000
+    store.close()
+
+    assert elapsed < WARM_BUDGET_MS, f"opening took {elapsed:.0f}ms"
+
+
+def test_a_common_word_is_dropped_from_the_full_text_query():
+    """One term matching most of the table makes the union enormous whatever
+    else is in the query — 20 ms against 0.12 ms once it is removed. Ordering
+    by rarity does nothing at all; the common ones have to go.
+    """
+    from comodor.learning.hotindex import HotIndex
+
+    index = HotIndex()
+    index.rebuild([("lesson", i, f"common word{i % 3} rare{i}", "global")
+                   for i in range(1000)])
+
+    kept = index.selective(["common", "rare7"])
+
+    assert "rare7" in kept
+    assert "common" not in kept, "a term in every document was kept"
+
+
+def test_a_query_of_only_common_words_still_searches_for_something():
+    """A search that returns nothing is worse than a slow one."""
+    from comodor.learning.hotindex import HotIndex
+
+    index = HotIndex()
+    index.rebuild([("lesson", i, "common everywhere", "global") for i in range(200)])
+
+    assert index.selective(["common", "everywhere"]), "everything was dropped"
