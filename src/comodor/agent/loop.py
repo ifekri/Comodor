@@ -416,10 +416,21 @@ class AgentLoop:
         if not matched:
             return ""
 
-        self._skills_used = matched
-        self.bus.emit(Kind.MEMORY, action="skills",
-                      items=[skill.as_dict() for skill in matched])
-        return self.skills.render(matched, max_tokens=settings.max_tokens)
+        kept, dropped = self.skills.fit(matched, settings.max_tokens)
+        for skill in dropped:
+            # Naming the setting, because the fix is one number and the user
+            # has no other way to discover that their skill never arrived.
+            self._note(f"{skill.name} matched but is too large for the "
+                       f"{settings.max_tokens:,}-token skill budget — raise "
+                       f"skills.max_tokens to use it.")
+
+        # Announced from what actually travelled. Announcing the match instead
+        # tells the user a skill is shaping the answer when it was discarded.
+        self._skills_used = kept
+        if kept:
+            self.bus.emit(Kind.MEMORY, action="skills",
+                          items=[skill.as_dict() for skill in kept])
+        return self.skills.render(kept, max_tokens=settings.max_tokens)
 
     def _learn(self, user_text: str, result: TurnResult) -> None:
         """Credit the lessons that were in play, then reflect on the episode."""

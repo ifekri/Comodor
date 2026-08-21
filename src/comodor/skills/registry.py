@@ -126,25 +126,43 @@ class SkillRegistry:
                 break
         return chosen[:limit]
 
-    def render(self, skills: list[Skill], max_tokens: int = 1200) -> str:
-        """The block injected into the system prompt, within a budget."""
-        if not skills:
-            return ""
+    HEADER = ("Skills — procedures this user has written for situations like "
+              "this one. Follow them unless the request says otherwise.")
 
-        header = ("Skills — procedures this user has written for situations like "
-                  "this one. Follow them unless the request says otherwise.")
-        blocks = [header]
-        used = len(header) // 4
+    def fit(self, skills: list[Skill], max_tokens: int = 1200
+            ) -> tuple[list[Skill], list[Skill]]:
+        """Split a match into what the budget admits and what it cannot.
+
+        Separated from :meth:`render` because the caller has to know. A skill
+        that matched and was then discarded for space is the one case where
+        saying nothing is worst: the user wrote it, it was the right skill, and
+        the answer comes back as though they had never written it.
+
+        A skill too large to fit is skipped rather than treated as the end of
+        the list. Ranking puts the best match first, not the smallest, so one
+        oversized skill at the top used to discard every skill behind it.
+        """
+        used = len(self.HEADER) // 4
+        kept: list[Skill] = []
+        dropped: list[Skill] = []
 
         for skill in skills:
-            rendered = skill.render()
-            cost = len(rendered) // 4 + 2
+            cost = len(skill.render()) // 4 + 2
             if used + cost > max_tokens:
-                break
-            blocks.append(rendered)
+                dropped.append(skill)
+                continue
+            kept.append(skill)
             used += cost
+        return kept, dropped
 
-        return "\n\n".join(blocks) if len(blocks) > 1 else ""
+    def render(self, skills: list[Skill], max_tokens: int = 1200) -> str:
+        """The block injected for this turn, within a budget."""
+        if not skills:
+            return ""
+        kept, _ = self.fit(skills, max_tokens)
+        if not kept:
+            return ""
+        return "\n\n".join([self.HEADER] + [skill.render() for skill in kept])
 
     # -- introspection ---------------------------------------------------- #
 
