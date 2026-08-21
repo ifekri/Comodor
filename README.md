@@ -431,6 +431,45 @@ comodor --provider groq --model llama-3.3-70b-versatile
 
 ---
 
+## In a browser, if you want one
+
+```bash
+comodor web
+```
+
+It opens a page, and the page is the same agent: the terminal interface was
+never the agent, it was one subscriber to an event bus, and a browser is a
+second one. Streaming answers, tool calls as they run, permission prompts you
+approve with a click, the mode switch and the running cost.
+
+No new dependency, and the page loads nothing from the internet — no CDN, no
+font host, no analytics — so it works on a machine that can reach the model and
+nothing else.
+
+**Read this part before you put it on a server.** Comodor runs shell commands
+and edits files. A web interface to it is, literally, a remote code execution
+endpoint: that *is* the feature. So
+
+- it listens on `127.0.0.1` and nothing outside your machine can reach it;
+- every request carries a token generated for that run and never written to
+  disk — it arrives once in the URL, then moves into an `HttpOnly`,
+  `SameSite=Strict` cookie so it leaves the address bar, your history and the
+  referrer of anything the page links to;
+- writing requests need a header no cross-origin form can set, and the
+  preflight grants nobody anything.
+
+There is no TLS. If you bind it anywhere else it says so in as many words and
+tells you what to do instead:
+
+```bash
+ssh -N -L 8765:127.0.0.1:8765 you@your-server    # then open it locally
+```
+
+Which is the right way to use it on a server: run it bound to loopback there,
+and reach it through the tunnel.
+
+---
+
 ## Reading that does not stay read
 
 Two of the ways a session gets expensive have nothing to do with the model and
