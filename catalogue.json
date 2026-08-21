@@ -1,7 +1,7 @@
 {
   "$schema": "https://comodor.ai/schema/skills-catalogue-1.json",
   "version": 1,
-  "updated": "2026-08-21",
+  "updated": "2026-08-22",
   "base": "https://raw.githubusercontent.com/ifekri/Comodor/skills/skills/",
   "skills": [
     {
@@ -43,6 +43,31 @@
         "SKILL.md"
       ],
       "bytes": 2641
+    },
+    {
+      "id": "taste",
+      "name": "design-taste-frontend",
+      "title": "Design taste",
+      "description": "Anti-slop frontend: reads the brief, ships something untemplated.",
+      "summary": "Anti-slop frontend skill for landing pages, portfolios and redesigns. The agent reads the brief, infers the right design direction, and ships interfaces that do not look templated. Real design systems when applicable, audit-first on redesigns, strict pre-flight check. The catalogues it consults — design systems, playbooks, vocabulary, AI tells, appendices — are bundled and read on demand.",
+      "tags": [
+        "design",
+        "frontend",
+        "anti-slop"
+      ],
+      "author": "Comodor",
+      "version": "1.1.0",
+      "updated": "2026-08-22",
+      "path": "taste/",
+      "files": [
+        "SKILL.md",
+        "references/ai-tells.md",
+        "references/appendices.md",
+        "references/design-systems.md",
+        "references/playbooks.md",
+        "references/vocabulary.md"
+      ],
+      "bytes": 88637
     },
     {
       "id": "taste-v1",
