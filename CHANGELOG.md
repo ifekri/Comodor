@@ -45,6 +45,44 @@ come. Reading one ordinary module in this repository cost **23,082 tokens**.
   if it applies cleanly and kept aside with its path if something moved
   underneath it.
 
+### A real browser, and the reason it is not screenshots
+
+Comodor drives Chrome, Chromium, Edge or Brave — whichever is already on the
+machine — over the DevTools protocol. Nothing is downloaded and there is no new
+dependency: CDP is JSON-RPC over a WebSocket, and a WebSocket client is a
+handshake and a frame format.
+
+The obvious design is a screenshot every step and a coordinate to click. It is
+wrong on precision, because a model judging pixels on a resized image misses
+and cannot say what it meant. And it is wrong on cost, which was measured:
+
+|  | whole tree | only what is on screen | a screenshot |
+|---|---|---|---|
+| Hacker News | 8,760 | 933 | 1,365 |
+| a GitHub repository | 18,681 | 778 | 1,365 |
+| a Wikipedia article | 32,342 | 414 | 1,365 |
+
+The page's own accessibility tree, sent whole, is *more* expensive than a
+picture — which was the surprise, and the reason the design is what it is. The
+advantage is filtering, available to text and not to pixels: half a screenshot
+answers nothing, but a list of controls can be cut to the ones a person could
+see and click. Numbered, so the model answers with a number.
+
+- **`browse`**, one tool with verbs — open, click, type, scroll, back, read,
+  look, script — rather than eight tools, because every schema is sent on every
+  request and eight descriptions of one browser is eight times the description.
+- **`look` is the screenshot**, for questions that are actually about
+  appearance, and it arrives as an image: inside the tool result on Anthropic,
+  in a following user turn on the OpenAI dialect, which is the only place that
+  one allows it.
+- A profile of its own, signed into nothing. `browser.port` attaches to a
+  Chrome you started yourself, for a session you are already logged into.
+- Where no browser is installed, the existing text browser is offered instead,
+  so the model always sees exactly one thing called a browser.
+- **Fixed on the way:** headless runs and the web session never closed their
+  tools, which cost nothing when the heaviest thing a tool held was a
+  connection pool and would now have left a Chrome behind on every invocation.
+
 ### And a browser, for when a terminal is not where you are
 
 ```bash

@@ -431,6 +431,57 @@ comodor --provider groq --model llama-3.3-70b-versatile
 
 ---
 
+## A browser, and the reason it is not screenshots
+
+Comodor drives a real Chrome — one that runs JavaScript, keeps cookies and can
+log in. It does not download one: it uses the Chrome, Chromium, Edge or Brave
+already on the machine, in a profile of its own that is signed into nothing.
+There is no Playwright, no Selenium, no node. The DevTools protocol is JSON-RPC
+over a WebSocket, and a WebSocket is a handshake and a frame format.
+
+The usual design is to send a screenshot every step and have the model click a
+coordinate. That is wrong twice, and the second time is measurable.
+
+It is wrong on precision, because a model judging pixels on a resized image
+misses — by a little on an empty page and by a whole button on a dense one, with
+nothing in its answer to say which control it meant.
+
+And it is wrong on cost:
+
+| | whole accessibility tree | **only what is on screen** | a screenshot |
+|---|---|---|---|
+| Hacker News | 8,760 | **933** | 1,365 |
+| a GitHub repository | 18,681 | **778** | 1,365 |
+| a Wikipedia article | 32,342 | **414** | 1,365 |
+
+Note the first column: the page's own accessibility tree, sent whole, costs
+*more* than a picture. The advantage comes from filtering, which is a thing you
+can do to text and cannot do to pixels — half a screenshot answers nothing. So
+what the agent gets is the controls a person could actually see and click: on
+screen, visible, not disabled, named, with the same link in the header and the
+footer counted once. Each one numbered, so the model answers with a number and
+cannot miss.
+
+Screenshots are still there, and still necessary — for the questions that are
+genuinely about appearance. *Does this look right. Is the layout broken. What
+does this chart say.* That is the `look` verb, taken when the question is
+visual rather than on every step, which is the difference between a browser an
+agent can afford and one it cannot.
+
+```
+browse open news.ycombinator.com     → title, text, 93 numbered controls
+browse click 7                       → clicks it, returns the new page
+browse type 3 "search terms" submit  → fills a field and presses Enter
+browse look                          → a screenshot, when that is the question
+browse script "…"                    → JavaScript, when nothing else will do
+```
+
+Set `browser.headless = false` to watch it work, or `browser.port` to a Chrome
+you started yourself — which is how you use one you are already logged into
+without handing over your everyday profile.
+
+---
+
 ## In a browser, if you want one
 
 ```bash
