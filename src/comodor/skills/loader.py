@@ -46,6 +46,24 @@ MAX_NAME = 64
 MAX_DESCRIPTION = 1024
 
 
+def _parts(text: str) -> str:
+    """The pieces of every hyphenated word in ``text``, as their own terms.
+
+    Additive: the whole term is still indexed, so an exact request for
+    `image-to-code` still matches it directly and scores higher for having
+    matched the whole thing.
+    """
+    pieces: list[str] = []
+    for word in (text or "").replace("_", "-").split():
+        if "-" not in word:
+            continue
+        for piece in word.split("-"):
+            piece = piece.strip(".,;:!?()[]\"\'").lower()
+            if len(piece) > 2:
+                pieces.append(piece)
+    return " ".join(dict.fromkeys(pieces))
+
+
 @dataclass
 class Skill:
     """One authored skill."""
@@ -83,8 +101,15 @@ class Skill:
 
     @property
     def text(self) -> str:
-        """What the matcher indexes."""
-        return " ".join([self.name, self.description, " ".join(self.triggers)])
+        """What the matcher indexes.
+
+        The parts of a compound term are added to the whole, because a skill is
+        looked for by what it does rather than by what it is called. Nobody
+        types `industrial-brutalist-ui`; they ask for a brutalist dashboard,
+        and without this that request matches nothing at all.
+        """
+        written = " ".join([self.name, self.description, " ".join(self.triggers)])
+        return " ".join([written, _parts(written)]).strip()
 
     @property
     def source(self) -> str:

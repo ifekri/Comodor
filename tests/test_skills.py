@@ -628,3 +628,82 @@ def test_the_tool_is_only_offered_when_a_skill_bundles_something(tmp_path):
     make_bundle(tmp_path / "bundled")
     bundled.discover(tmp_path / "bundled", tmp_path / "absent")
     assert "read_skill_file" in ToolRegistry(skills=bundled)
+
+
+# --------------------------------------------------------------------------- #
+# being found at all
+# --------------------------------------------------------------------------- #
+
+
+def compound(tmp_path, folder: str, name: str, description: str):
+    """A skill whose folder, name and subject are three different strings."""
+    root = tmp_path / folder
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n\nDo the thing.\n",
+        encoding="utf-8")
+    registry = SkillRegistry()
+    registry.discover(tmp_path, tmp_path / "absent")
+    return registry
+
+
+def test_a_skill_is_found_by_part_of_its_hyphenated_name(tmp_path):
+    """Nobody types `industrial-brutalist-ui`. They ask for a brutalist
+    dashboard, and the tokenizer keeps the name in one piece — so without the
+    parts being indexed too, the request matches nothing at all."""
+    registry = compound(tmp_path, "brutalist", "industrial-brutalist-ui",
+                        "Raw mechanical interfaces for data-heavy dashboards")
+
+    found = [skill.name for skill in registry.match("build a brutalist dashboard")]
+
+    assert "industrial-brutalist-ui" in found
+
+
+def test_the_whole_name_still_matches_after_the_parts_are_added(tmp_path):
+    """Additive. An exact request must not be made worse by the loose one."""
+    registry = compound(tmp_path, "image-to-code", "image-to-code",
+                        "Turn a design image into a website")
+
+    assert [s.name for s in registry.match("image-to-code")] == ["image-to-code"]
+
+
+def test_a_hyphenated_word_in_the_description_counts_too(tmp_path):
+    registry = compound(tmp_path, "minimalist", "minimalist-ui",
+                        "Clean editorial-style interfaces, warm monochrome")
+
+    found = [skill.name for skill in registry.match("an editorial layout please")]
+
+    assert "minimalist-ui" in found
+
+
+def test_an_unrelated_request_is_still_unrelated(tmp_path):
+    """Splitting names must not make everything match everything."""
+    registry = compound(tmp_path, "brutalist", "industrial-brutalist-ui",
+                        "Raw mechanical interfaces for data-heavy dashboards")
+
+    assert registry.match("what is the capital of France") == []
+
+
+def test_covering_one_term_in_three_is_enough(tmp_path):
+    """The floor was 0.34 and meant a third, and a third is 0.3333 — so the
+    case it was written to admit was the one it rejected."""
+    from comodor.skills.registry import MATCH_FLOOR
+
+    assert MATCH_FLOOR <= 1 / 3
+
+    registry = compound(tmp_path, "brutalist", "industrial-brutalist-ui",
+                        "Raw mechanical interfaces for data-heavy dashboards")
+    scores = [score for _, score in
+              registry._index.coverage_scan("build a brutalist dashboard",
+                                            kind="skill", limit=3)]
+
+    assert scores and min(scores) >= MATCH_FLOOR
+
+
+def test_the_learned_brain_still_keeps_a_path_in_one_piece():
+    """The same tokenizer serves memory, where the identifiers are file paths.
+    Splitting those would make every module in `src/` match every other."""
+    from comodor.learning.bm25 import tokenize
+
+    assert tokenize("src/comodor/app.py") == ["src/comodor/app.py"]
+    assert tokenize("snake_case_name") == ["snake_case_name"]

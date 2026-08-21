@@ -18,8 +18,13 @@ from ..learning.hotindex import HotIndex
 from .loader import MANIFEST, Skill, SkillError, load
 
 SKILL_SUFFIXES = (".md", ".markdown")
-#: A skill must clear this share of the request's terms to be worth injecting.
-MATCH_FLOOR = 0.34
+#: A skill must cover this share of the request's terms to be worth injecting.
+#:
+#: One term in three, written as the fraction rather than as 0.34. It was the
+#: decimal, and the decimal quietly excluded the case it was meant to admit:
+#: "build a brutalist dashboard" covers one of its three terms, scores 0.333,
+#: and was rejected by seven thousandths — while ranking first.
+MATCH_FLOOR = 1 / 3
 
 
 class SkillRegistry:
