@@ -26,6 +26,11 @@ RECALL_BUDGET_MS = 5.0
 DEDUP_BUDGET_MS = 5.0
 WRITE_BUDGET_MS = 1.0
 WARM_BUDGET_MS = 400.0
+#: The learned vocabulary runs on every recall, so it has to be a rounding
+#: error against the recall budget rather than a share of it. It measures
+#: around 0.01 ms.
+EXPAND_BUDGET_MS = 0.5
+OBSERVE_BUDGET_MS = 2.0
 
 WORDS = ("pytest docker migration endpoint router config deploy cache token schema "
          "fixture async lint typing build suite import module package venv alembic "
@@ -139,3 +144,62 @@ def test_the_writer_thread_absorbs_a_burst(big_store):
     assert queue_time < 50, f"queueing 100 writes took {queue_time:.0f}ms"
     assert big_store.flush(timeout=5.0), "queued writes should drain"
     assert big_store.writer is not None and big_store.writer.written > 0
+
+
+# --------------------------------------------------------------------------- #
+# the learned vocabulary
+# --------------------------------------------------------------------------- #
+
+
+def big_vocabulary():
+    """Four thousand finished tasks — more than a year of heavy use."""
+    from comodor.learning.associations import Associations
+
+    table = Associations()
+    for index in range(4000):
+        topic = index % 120
+        table.observe(f"task about topic{topic} and thing{index % 300}",
+                      f"src/module{topic}.py helper{index % 90} pytest")
+    return table
+
+
+def test_expanding_a_query_is_a_rounding_error():
+    """It sits inside recall, which sits between Enter and the first token."""
+    table = big_vocabulary()
+    query = "add a spec for topic17 in module17"
+
+    timings = []
+    for _ in range(200):
+        start = time.perf_counter()
+        table.enrich(query)
+        timings.append((time.perf_counter() - start) * 1000)
+
+    timings.sort()
+    p95 = timings[int(len(timings) * 0.95)]
+    assert p95 < EXPAND_BUDGET_MS, f"expansion p95 {p95:.3f}ms exceeds budget"
+
+
+def test_learning_from_a_finished_task_is_not_felt():
+    """It runs when a task ends, against work that has just taken seconds."""
+    table = big_vocabulary()
+
+    timings = []
+    for index in range(200):
+        start = time.perf_counter()
+        table.observe(f"another task {index}", "src/module3.py pytest helper3")
+        timings.append((time.perf_counter() - start) * 1000)
+
+    timings.sort()
+    p95 = timings[int(len(timings) * 0.95)]
+    assert p95 < OBSERVE_BUDGET_MS, f"observe p95 {p95:.3f}ms exceeds budget"
+
+
+def test_the_vocabulary_stays_a_reasonable_size_on_disk():
+    """It is one blob in the brain, read at start-up. Megabytes would be felt."""
+    import json
+
+    table = big_vocabulary()
+    table.prune()
+    size = len(json.dumps(table.to_dict()))
+
+    assert size < 2_000_000, f"{size / 1024:.0f} KB of associations"

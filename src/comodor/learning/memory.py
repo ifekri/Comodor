@@ -67,6 +67,8 @@ class LearningEngine:
         )
         self._prefetched: tuple[str, list[Lesson]] | None = None
         self._prefetch_lock = threading.Lock()
+        #: The learned vocabulary. Read on first recall, not on start-up.
+        self._associations = None
 
     # -- scoping ---------------------------------------------------------- #
 
@@ -164,8 +166,31 @@ class LearningEngine:
             return cached[1]
         return None
 
+    @property
+    def associations(self):
+        """The learned vocabulary, read once and kept.
+
+        Lazily, because a brain that is never asked to recall anything — a
+        `--version`, a `doctor` — should not pay to parse it.
+        """
+        if self._associations is None:
+            from .associations import Associations
+
+            try:
+                self._associations = self.store.load_associations()
+            except Exception:              # noqa: BLE001 - never fatal
+                self._associations = Associations()
+        return self._associations
+
     def recall(self, query: str) -> list[Lesson]:
-        """The lessons worth spending context on for this request."""
+        """The lessons worth spending context on for this request.
+
+        The query is searched as written *and* as the vocabulary implies. A
+        request for "tests for the parser" and a lesson reading "use pytest
+        fixtures" share no word at all, and without the second search the right
+        lesson is invisible — see `associations.py` for how the link between
+        them is learned by counting rather than guessed by a model.
+        """
         if not self.config.learning.enabled or not query.strip():
             return []
 
@@ -178,7 +203,12 @@ class LearningEngine:
             selected.append(lesson)
             seen.add(lesson.id)
 
+        # Both, and the results merged: an exact match must never be displaced
+        # by an inferred one, so the original query's hits are ranked first and
+        # the expansion only adds candidates the plain search never saw.
         ranked = self.store.search_lessons(query, self.scopes, limit=learning.top_k * 3)
+        if learning.associative:
+            ranked = self._with_associates(query, ranked, learning.top_k * 3)
         scored = sorted(
             ((lesson, score(relevance, lesson, learning.half_life_days, query))
              for lesson, relevance in ranked if lesson.id not in seen),
@@ -193,6 +223,33 @@ class LearningEngine:
             seen.add(lesson.id)
 
         return selected
+
+    def _with_associates(self, query: str, ranked: list, limit: int) -> list:
+        """Add what the learned vocabulary suggests, ranked below what matched.
+
+        The expansion's relevance is scaled down before it competes, so a
+        lesson found only by association can be recalled when nothing else was
+        and cannot outrank a lesson the user's own words found.
+        """
+        enriched = self.associations.enrich(query)
+        if enriched == query:
+            return ranked
+
+        try:
+            extra = self.store.search_lessons(enriched, self.scopes, limit=limit)
+        except Exception:                  # noqa: BLE001 - recall is best-effort
+            return ranked
+
+        from .associations import EXPANSION_WEIGHT
+
+        seen = {lesson.id for lesson, _ in ranked}
+        merged = list(ranked)
+        for lesson, relevance in extra:
+            if lesson.id in seen:
+                continue
+            merged.append((lesson, relevance * EXPANSION_WEIGHT))
+            seen.add(lesson.id)
+        return merged
 
     def recall_skills(self, query: str, limit: int = 2) -> list[Skill]:
         if not self.config.learning.enabled:
@@ -274,6 +331,12 @@ class LearningEngine:
             rules_active=len(self.active_rules()),
         ))
 
+        # One task is one bag of words that belonged together. This is where
+        # the vocabulary comes from, and it costs a few hundred microseconds
+        # against work that has just taken seconds.
+        if self.config.learning.associative:
+            self._learn_vocabulary(goal, tools_used, messages)
+
         if self.config.learning.corrections:
             self.detector.record_retries(messages, episode.id)
 
@@ -350,8 +413,32 @@ class LearningEngine:
 
     # -- 5. consolidate --------------------------------------------------- #
 
+    def _learn_vocabulary(self, goal: str, tools: list[str], messages: list) -> None:
+        """Relate the words of one finished task.
+
+        The goal, what the tools touched, and what the user said — not the
+        model's own prose, which is long, fluent and mostly filler, and would
+        swamp the counts with words nobody chose.
+        """
+        try:
+            said = [message.content for message in messages
+                    if getattr(message.role, "value", "") == "user"
+                    and message.content][:6]
+            targets = [message.name for message in messages
+                       if getattr(message.role, "value", "") == "tool"
+                       and message.name][:20]
+            self.associations.observe(goal, " ".join(tools), " ".join(targets), *said)
+        except Exception:                  # noqa: BLE001 - never fatal
+            pass
+
     def consolidate(self) -> int:
         learning = self.config.learning
+        if self._associations is not None:
+            try:
+                self._associations.prune()
+                self.store.save_associations(self._associations)
+            except Exception:              # noqa: BLE001 - never fatal
+                pass
         return self.store.consolidate(learning.min_confidence, learning.half_life_days)
 
     # -- user-facing controls --------------------------------------------- #

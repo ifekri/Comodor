@@ -909,6 +909,43 @@ class BrainStore:
 
     # -- housekeeping ----------------------------------------------------- #
 
+    # -- the association table --------------------------------------------- #
+
+    def load_associations(self) -> "Associations":
+        """The learned vocabulary, or an empty one on a first run.
+
+        Kept as one JSON blob in `meta` rather than as a table of pairs. It is
+        read once at start-up and written once at shutdown, never queried, so a
+        row per pair would buy nothing but an index to maintain — and a hundred
+        thousand tiny rows to vacuum.
+        """
+        from .associations import Associations
+
+        with self._lock, self.connection as connection:
+            row = connection.execute(
+                "SELECT value FROM meta WHERE key = 'associations'").fetchone()
+        if row is None:
+            return Associations()
+        try:
+            return Associations.from_dict(json.loads(row["value"]))
+        except (ValueError, TypeError, KeyError):
+            return Associations()          # unreadable is the same as absent
+
+    def save_associations(self, table: "Associations") -> None:
+        """Written directly, not queued.
+
+        This happens once, at shutdown, and it is the only copy of a month of
+        counting. The write queue exists to keep small frequent writes off the
+        hot path; handing it the one write that must not be lost — moments
+        before the queue is drained and closed — is the wrong side of that
+        trade.
+        """
+        with self._lock, self.connection as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('associations', ?)",
+                (json.dumps(table.to_dict(), ensure_ascii=False),),
+            )
+
     def consolidate(self, min_confidence: float, half_life_days: float) -> int:
         """Drop lessons that decayed below the floor. Returns how many went."""
         removed = 0

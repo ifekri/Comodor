@@ -242,6 +242,10 @@ def run_doctor(config: Config, fix: bool = False) -> int:
                   f"({stats['success_rate']:.0%} succeeded)")
     console.print(f"  index:   {'FTS5' if stats['fts'] else 'python BM25 fallback'}, "
                   f"{stats['indexed']} records in memory")
+    if config.learning.associative:
+        vocabulary = brain.load_associations()
+        console.print(f"  words:   {len(vocabulary.totals)} terms related "
+                      f"{vocabulary.size} ways, from {vocabulary.episodes} tasks")
     console.print(f"  file:    [dim]{stats['path']}[/dim]")
     brain.close()
 
