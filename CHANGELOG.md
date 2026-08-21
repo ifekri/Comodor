@@ -2,6 +2,36 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.7.1 — 2026-08-21
+
+### A skill that matched, and then never arrived
+
+The published library grew to thirteen authored skills. Eleven of them could
+not be used, and nothing said so — they downloaded, appeared as installed,
+matched the right question, were selected, and were then discarded before the
+request was built.
+
+- **Fixed: the turn's skill budget was 1,200 tokens**, which is the size of the
+  sample skill and nothing else. Real authored skills — a design system, an
+  image-direction brief — run from two to ten thousand. It is 12,000 now, which
+  admits any single skill in the library; a second large one in the same turn
+  is still refused, and now says which.
+- **Fixed: an oversized skill ended the list instead of being skipped.**
+  Ranking puts the best match first, not the smallest, so one large skill at
+  the top discarded every skill behind it — including ones that would have fit.
+- **Fixed: the drop was silent.** A skill the user wrote, that matched, that
+  never travelled, and an answer that came back as though they had never
+  written it. It now says what was too large and names the setting.
+- **Fixed: the interface announced skills that had already been thrown away.**
+  The "using this skill" event was emitted from the matched list rather than
+  from what was actually sent.
+- **Fixed: `comodor skills list` showed no version for most skills.** It looked
+  the install record up by the name a skill calls itself, which for most is not
+  the folder it lives in — `brutalist/` announces itself as
+  `industrial-brutalist-ui` — so a managed skill read as one written by hand.
+  Long descriptions are trimmed and hang under their entry rather than wrapping
+  back to the margin.
+
 ## 0.7.0 — 2026-08-21
 
 ### The same tokens, paid for once

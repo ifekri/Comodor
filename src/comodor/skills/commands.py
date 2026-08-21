@@ -184,6 +184,8 @@ def _list(console, theme, root: Path) -> int:
     Read off the disk rather than out of the catalogue, because a skill written
     locally is as real as a downloaded one and would otherwise be invisible.
     """
+    from rich.padding import Padding
+
     from .registry import SkillRegistry
 
     registry = SkillRegistry()
@@ -199,12 +201,42 @@ def _list(console, theme, root: Path) -> int:
 
     console.print(f"\n[title]Installed[/title]  [dim]{root}[/dim]\n")
     for skill in found:
-        state = library.installed(root, skill.name)
+        # By the folder it was downloaded into, not by the name it calls
+        # itself. The two are often different — a skill in `brutalist/` may
+        # announce itself as `industrial-brutalist-ui` — and looking the stamp
+        # up by the declared name simply misses, so a skill this program
+        # installed shows no version and reads as one the user wrote by hand.
+        state = library.installed(root, _folder_of(skill, root))
         version = f"  [dim]{state.version}[/dim]" if state.version else ""
-        console.print(f"  [value]{skill.name}[/value]{version}\n"
-                      f"    [dim]{skill.description}[/dim]")
+        console.print(f"  [value]{skill.name}[/value]{version}")
+        # Padding rather than a leading "    ", so the second line of a long
+        # description lands under the first instead of back at the margin.
+        console.print(Padding(f"[dim]{_trim(skill.description)}[/dim]",
+                              (0, 0, 0, 4)))
     console.print("")
     return 0
+
+
+#: How much of a skill's own description belongs in a list of skills. Some run
+#: to a full paragraph, and a paragraph an entry is not a list.
+DESCRIPTION_CHARS = 150
+
+
+def _folder_of(skill, root: Path) -> str:
+    """The directory a skill lives in, which is what an id names."""
+    if skill.root is not None:
+        return skill.root.name
+    if skill.path is not None and skill.path.parent != root:
+        return skill.path.parent.name
+    return skill.name
+
+
+def _trim(text: str) -> str:
+    """One paragraph of prose, cut to a line or two, on a word."""
+    text = " ".join((text or "").split())
+    if len(text) <= DESCRIPTION_CHARS:
+        return text
+    return text[:DESCRIPTION_CHARS].rsplit(" ", 1)[0] + "…"
 
 
 def _ago(seconds: float) -> str:
