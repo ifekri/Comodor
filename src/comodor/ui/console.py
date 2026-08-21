@@ -112,6 +112,30 @@ def build(theme: Theme | None = None, width: int | None = None,
     return console
 
 
+#: The typeface for anything this program renders itself: the SVG snapshot
+#: `preview --svg` writes, and nothing else.
+#:
+#: Inside a terminal the font is the terminal emulator's setting and no
+#: application can change it — a program writes characters, the terminal picks
+#: the glyphs. What that means in practice is that right-to-left text renders
+#: as boxes on a machine whose terminal font has no Arabic-script coverage, and
+#: the only fix is in the terminal's own settings. `comodor doctor` says so,
+#: and says where.
+#:
+#: Tahoma leads the stack because it is the face with the widest Persian and
+#: Arabic coverage already installed on a Windows machine, and the one most
+#: Persian users will recognise. The monospaced faces follow it for the Latin
+#: and box-drawing characters it draws less evenly.
+#:
+#: One limit worth knowing: an SVG of a terminal is a grid, and every cell is
+#: positioned on its own. Arabic script joins its letters, and letters that are
+#: each nailed to a cell cannot join — so a snapshot shows the right characters
+#: in the right order, unjoined. The terminal itself has no such problem; that
+#: is its own text shaping, and it is the reason this only affects the export.
+SVG_FONT = ("Tahoma, 'Segoe UI', 'DejaVu Sans Mono', 'Fira Code', "
+            "'Cascadia Code', Menlo, monospace")
+
+
 def prepare_theme(name: str, ascii_borders: bool, no_color: bool,
                   syntax: str = "") -> Theme:
     """Load a theme, downgrading it if the terminal cannot render it."""

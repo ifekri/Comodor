@@ -115,24 +115,33 @@ class _Markdown(Markdown):
                          "code_block": _code_element(theme)}
 
 
-def render_markdown(text: str, theme: Theme, streaming: bool = False) -> RenderableType:
-    """Markdown when we can, readable plain text when we cannot."""
+def render_markdown(text: str, theme: Theme, streaming: bool = False,
+                    justify: str | None = None) -> RenderableType:
+    """Markdown when we can, readable plain text when we cannot.
+
+    `justify` is how a right-to-left answer gets set against the right margin.
+    It reaches the paragraphs and leaves the code blocks alone, which is what
+    is wanted: a Persian explanation of a Python function belongs on the right,
+    and the function does not.
+    """
     if not text:
         return Text("")
     if theme.no_color:
-        return Text(text)
+        return Text(text, justify=justify)
 
     source = balance(text) if streaming else text
     try:
-        return _Markdown(source, theme, code_theme=theme.syntax, hyperlinks=False)
+        return _Markdown(source, theme, code_theme=theme.syntax, hyperlinks=False,
+                         justify=justify)
     except Exception:
         # Malformed markdown must never cost the user their answer.
-        return Text(text, style=theme.style("text"))
+        return Text(text, style=theme.style("text"), justify=justify)
 
 
-def render_streaming(text: str, theme: Theme, cursor: bool = True) -> RenderableType:
+def render_streaming(text: str, theme: Theme, cursor: bool = True,
+                     justify: str | None = None) -> RenderableType:
     """The in-flight assistant message, with a blinking cursor at the end."""
-    body = render_markdown(text, theme, streaming=True)
+    body = render_markdown(text, theme, streaming=True, justify=justify)
     if not cursor:
         return body
     return Group(body, Text(theme.glyphs.cursor, style=theme.style("accent")))
