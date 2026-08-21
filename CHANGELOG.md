@@ -32,6 +32,24 @@ request was built.
   Long descriptions are trimmed and hang under their entry rather than wrapping
   back to the margin.
 
+### And five of them could not be found either
+
+Reachability was measured across the whole library — one natural request per
+skill, the kind somebody would actually type. Eight of thirteen matched.
+
+- **Fixed: a skill could only be found by its whole name.** The tokenizer keeps
+  `industrial-brutalist-ui` in one piece, which is right — `src/app.py` and
+  `snake_case` are single terms and splitting them ruins recall — but it meant
+  "build a brutalist dashboard" matched nothing at all. The parts of a compound
+  term are now indexed alongside the whole of it, for skills only: the same
+  tokenizer serves the learned brain, where the identifiers are file paths.
+- **Fixed: the match floor excluded the case it was written to admit.** It was
+  0.34 and the comment said "a share of the request's terms" — a third. A third
+  is 0.3333, so a request covering exactly one term in three was rejected by
+  seven thousandths while ranking first. It is the fraction now.
+
+Thirteen of thirteen, measured the same way.
+
 ## 0.7.0 — 2026-08-21
 
 ### The same tokens, paid for once
