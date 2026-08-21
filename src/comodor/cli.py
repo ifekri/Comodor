@@ -82,9 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     from .mcp.commands import register as register_mcp
     from .skills.commands import register as register_skills
+    from .web.commands import register as register_web
 
     register_mcp(sub)
     register_skills(sub)
+    register_web(sub)
 
     preview = sub.add_parser("preview",
                              help="render the interface at a given size and exit")
@@ -578,6 +580,10 @@ def main(argv: list[str] | None = None) -> int:
         from .skills.commands import run as run_skills
 
         return run_skills(config, args)
+    if args.command == "web":
+        from .web.commands import run as run_web
+
+        return run_web(config, args)
     if args.command == "preview":
         return run_preview(config, args)
     if args.command == "setup":

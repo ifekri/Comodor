@@ -45,6 +45,30 @@ come. Reading one ordinary module in this repository cost **23,082 tokens**.
   if it applies cleanly and kept aside with its path if something moved
   underneath it.
 
+### And a browser, for when a terminal is not where you are
+
+```bash
+comodor web
+```
+
+The terminal interface was never the agent — it is one subscriber to an event
+bus. A browser is a second one, so this is a small amount of code: the standard
+library's HTTP server, one page that loads nothing from the internet, and
+long-polling rather than a websocket protocol to maintain. Streaming answers,
+tool calls as they run, permission prompts, the mode switch, the running cost.
+
+It is also a remote code execution endpoint, because that is what an agent is,
+so: loopback by default; a token per run, never written to disk, moved out of
+the URL into an `HttpOnly`, `SameSite=Strict` cookie; constant-time comparison;
+a header on writing requests that no cross-origin form can set; and a plain
+statement of what you have done, plus the SSH tunnel you should have used
+instead, if you bind it to a public address.
+
+- **Fixed while building it:** a `Request` carries a `kind` of its own —
+  `"permission"` — and spreading it into the event frame overwrote the event's
+  own kind. Every permission prompt arrived under a name the page was not
+  listening for, so none of them would ever have been shown.
+
 ### An MCP server can be a URL
 
 - **Streamable HTTP transport**, alongside the existing subprocess one. The
