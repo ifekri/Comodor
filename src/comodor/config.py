@@ -116,7 +116,8 @@ class UIConfig:
     max_fps: int = 20                    # streaming deltas are coalesced to this
     show_timestamps: bool = False
     sidebar: bool = True
-    syntax_theme: str = "monokai"
+    #: Empty means the colour theme picks one that suits it.
+    syntax_theme: str = ""
 
 
 @dataclass

@@ -110,11 +110,23 @@ def button_column(rects: dict[str, Rect], theme: Theme, busy: bool = False,
 
 
 def keyboard_hints(theme: Theme) -> list[tuple[str, str]]:
-    """Shown instead of buttons on a narrow terminal."""
-    return [
-        ("^↵", "send"),
-        ("^O", "attach"),
-        ("F3", "mode"),
-        ("F2", "history"),
-        ("^C", "quit"),
-    ]
+    """What the bottom right offers, in the order the geometry places it."""
+    from ..layout import HINTS
+
+    return [(label.split(" ", 1)[0], label.split(" ", 1)[1]) for _, label in HINTS]
+
+
+def hint_line(pairs: list[tuple[str, str]], theme: Theme) -> Text:
+    """``⏎ send   ^O attach   F3 mode`` — the key lit, the word quiet.
+
+    This is what the three coloured buttons became. They were the loudest
+    thing on the screen and the least often used; a word you can still click
+    costs one line and no attention.
+    """
+    line = Text()
+    for index, (key, what) in enumerate(pairs):
+        if index:
+            line.append("   ", style=theme.style("dim"))
+        line.append(key, style=theme.style("accent"))
+        line.append(f" {what}", style=theme.style("dim"))
+    return line

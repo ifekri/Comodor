@@ -113,7 +113,7 @@ def build(theme: Theme | None = None, width: int | None = None,
 
 
 def prepare_theme(name: str, ascii_borders: bool, no_color: bool,
-                  syntax: str = "monokai") -> Theme:
+                  syntax: str = "") -> Theme:
     """Load a theme, downgrading it if the terminal cannot render it."""
     from . import theme as theme_module
 
