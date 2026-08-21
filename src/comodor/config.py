@@ -177,7 +177,15 @@ class SkillsConfig:
     enabled: bool = True
     #: How many matching skills may be injected into one turn.
     top_k: int = 2
-    max_tokens: int = 1200
+    #: Tokens one turn may spend on skills.
+    #:
+    #: This was 1,200, which is the size of the sample skill and nothing else.
+    #: Real authored skills — a design system, a review procedure — run from
+    #: two to ten thousand, so the budget quietly discarded almost every skill
+    #: in the published library: matched, correct, never sent. Twelve thousand
+    #: admits any single one of them; a second large skill in the same turn is
+    #: still refused, and now says so rather than vanishing.
+    max_tokens: int = 12_000
     #: Install the starter skills the first time the folder is created.
     install_examples: bool = True
     #: Where the downloadable library is listed. A setting rather than a
