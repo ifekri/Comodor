@@ -68,6 +68,9 @@ class SessionStore:
         record = {
             "role": message.role.value,
             "content": message.content,
+            # Kept because a resumed session must send the same bytes it sent
+            # before, or the provider's cache misses on the whole history.
+            "briefing": message.briefing,
             "name": message.name,
             "tool_call_id": message.tool_call_id,
             "is_error": message.is_error,
@@ -97,6 +100,7 @@ class SessionStore:
                 messages.append(Message(
                     role=Role(record.get("role", "user")),
                     content=record.get("content", ""),
+                    briefing=record.get("briefing", ""),
                     name=record.get("name", ""),
                     tool_call_id=record.get("tool_call_id", ""),
                     is_error=bool(record.get("is_error")),

@@ -425,6 +425,63 @@ comodor --provider groq --model llama-3.3-70b-versatile
 
 ---
 
+## It pays for the same tokens once
+
+An agent loop has a shape that is unusually wasteful, and it is not obvious
+until you look at a bill. A model has no memory between requests, so every tool
+result has to be sent back with everything that came before it. Read a
+500-line file at step two and its tokens are charged again at step three, and
+four, and at every step until the task ends. The content is written once and
+paid for as many times as the task has steps.
+
+Every major provider will sell those resends at a discount, because their side
+of it is a cache hit rather than a forward pass — a tenth of the price at
+Anthropic and DeepSeek, half at OpenAI. The discount is not the hard part. The
+condition attached to it is:
+
+> the request must begin with bytes the provider has already seen — the same
+> ones, from the first character.
+
+One changed word near the front and the whole prefix is a miss, at full price,
+however identical the remaining hundred thousand tokens are. That single rule
+decides how a request has to be built, and it is where the obvious
+implementation loses most of the money: anything derived from what the user
+just typed — recalled lessons, matched skills — must not go in the system
+prompt, because the system prompt is the first thing the provider reads.
+
+So in Comodor it does not. The head of every request is the same from the first
+message of a session to the last, and what recall found for *this* turn travels
+with that turn, behind everything already cached. A real session,
+against a live endpoint — three questions about a source file, the agent
+reading and answering as it normally would:
+
+```
+turn 1   prompt 10,960   cached  8,128   paid 2,832
+turn 2   prompt 16,503   cached 13,568   paid 2,935
+turn 3   prompt 22,093   cached 19,072   paid 3,021
+
+  read by the model      22,093 tokens
+  served from cache      19,072            86%
+  paid for in full        3,021
+```
+
+Look at the third row rather than the percentage. The prompt has doubled, and
+what it costs has not moved — which is the property that matters, because it is
+the one that decides whether a long session is affordable.
+
+Nothing about the answer changes. Every lesson, every skill and every tool
+result still reaches the model, in the same words — only the order is
+different, and the order was never doing any work. There is a test that asserts
+the property literally: each request in a session must be a byte-exact
+extension of the one before it, so anything that quietly breaks it fails the
+suite instead of costing ten times the money.
+
+`/cost` reports what was actually saved, taken from what the provider says it
+served rather than from what was asked for — the two differ whenever a prefix
+has expired. Set `"prompt_cache": false` in the config to switch it off.
+
+---
+
 ## Everyday use
 
 ```bash

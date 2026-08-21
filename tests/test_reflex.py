@@ -17,7 +17,7 @@ from comodor.events import Kind
 from comodor.learning import LearningEngine
 from comodor.learning.rules import analyse_correction, analyse_text, scan_project
 from comodor.learning.store import Rule
-from comodor.providers.base import Role, ToolCall
+from comodor.providers.base import ToolCall
 from comodor.providers.fake import Script
 from comodor.providers.gateway import Gateway
 from comodor.safety import CheckpointStore, PermissionEngine
@@ -324,8 +324,8 @@ def test_a_correction_changes_the_very_next_turn(config, bus, workspace):
     agent.run("now create view.py the same way")
 
     provider = gateway.provider("fake")
-    system_prompts = [message.content for call in provider.calls
-                      for message in call if message.role is Role.SYSTEM]
+    system_prompts = [f"{message.content} {message.briefing}" for call in provider.calls
+                      for message in call]
     assert any("single quotes" in prompt for prompt in system_prompts), \
         "the correction should govern the very next turn"
 

@@ -68,12 +68,19 @@ class OpenAICompatProvider:
 
     @staticmethod
     def _content_blocks(message: Message) -> Any:
-        """A plain string unless the turn carries images."""
+        """A plain string unless the turn carries images.
+
+        The briefing leads, because it is context for what follows and because
+        these providers cache by matching the longest identical prefix — the
+        same reason it is not in the system prompt.
+        """
+        text = f"{message.briefing}\n\n{message.content}".strip() \
+            if message.briefing else message.content
         if not message.images:
-            return message.content
+            return text
         blocks: list[dict[str, Any]] = []
-        if message.content:
-            blocks.append({"type": "text", "text": message.content})
+        if text:
+            blocks.append({"type": "text", "text": text})
         for image in message.images:
             url = image if image.startswith("data:") else f"data:image/png;base64,{image}"
             blocks.append({"type": "image_url", "image_url": {"url": url}})
@@ -257,12 +264,15 @@ def _usage_from(raw: dict[str, Any], model: str) -> Usage:
     input_tokens = int(raw.get("prompt_tokens") or raw.get("input_tokens") or 0)
     output_tokens = int(raw.get("completion_tokens") or raw.get("output_tokens") or 0)
     details = raw.get("prompt_tokens_details") or {}
+    # Unlike Anthropic, this dialect counts the cached prefix *inside*
+    # `prompt_tokens`, so the plainly billed part is the difference.
     cached = int(details.get("cached_tokens") or 0)
+    input_tokens = max(0, input_tokens - cached)
     completion_details = raw.get("completion_tokens_details") or {}
     reasoning = int(completion_details.get("reasoning_tokens") or 0)
     cost = raw.get("cost")
     if cost is None:
-        cost = registry.estimate_cost(model, input_tokens, output_tokens)
+        cost = registry.estimate_cost(model, input_tokens, output_tokens, cached)
     return Usage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
