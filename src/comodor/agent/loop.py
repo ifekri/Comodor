@@ -93,14 +93,20 @@ class AgentLoop:
         self.cancel.reset()
         result = TurnResult()
 
-        self.conversation.add(Message.user(user_text, images=images or []))
+        # Recall runs before the message is stored, not after, so that what it
+        # finds travels *with* the turn instead of in the system prompt. That
+        # ordering is the whole of the caching win: the head of the request then
+        # never changes, and every request after the first is served from the
+        # provider's cache at a tenth of the price. See providers/caching.py.
+        playbook = self._recall(user_text)
+        self.conversation.add(
+            Message.user(user_text, images=images or [], briefing=playbook))
         self.bus.emit(Kind.TURN_START, text=user_text)
 
-        playbook = self._recall(user_text)
         deadline = started + self.config.agent.max_seconds
 
         try:
-            result = self._iterate(playbook, deadline)
+            result = self._iterate(deadline)
         except Cancelled:
             result.stopped = "cancelled"
             self.bus.emit(Kind.CANCELLED)
@@ -126,7 +132,7 @@ class AgentLoop:
 
     # -- the loop --------------------------------------------------------- #
 
-    def _iterate(self, playbook: str, deadline: float) -> TurnResult:
+    def _iterate(self, deadline: float) -> TurnResult:
         result = TurnResult()
         agent = self.config.agent
 
@@ -135,7 +141,7 @@ class AgentLoop:
             result.steps += 1
 
             specs = self.tools.specs(agent.mode)
-            system_prompt = build_system_prompt(self.config, playbook)
+            system_prompt = build_system_prompt(self.config)
             self._maybe_compact(system_prompt, specs)
 
             completion = self._stream_once(system_prompt, specs)
@@ -196,6 +202,8 @@ class AgentLoop:
             model=self.config.model,
             temperature=agent.temperature,
             max_tokens=agent.max_output_tokens,
+            cache=agent.prompt_cache,
+            cache_ttl=agent.prompt_cache_ttl,
         )
 
         for event in stream:
@@ -216,8 +224,11 @@ class AgentLoop:
                       tool_calls=[call.name for call in tool_calls])
 
         self.conversation.record_usage(usage)
-        if usage.input_tokens:
-            self.conversation.counter.observe_usage(payload, specs, usage.input_tokens)
+        if usage.prompt_tokens:
+            # What the model *read*, not what it was billed for. With caching on
+            # those differ by an order of magnitude, and it is the former the
+            # context gauge is measuring.
+            self.conversation.counter.observe_usage(payload, specs, usage.prompt_tokens)
         self._emit_usage(system_prompt, specs)
 
         message = Message.assistant(text, tool_calls)

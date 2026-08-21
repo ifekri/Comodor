@@ -24,6 +24,7 @@ from ..agent import AgentLoop, Conversation
 from ..config import Config, save_user_config
 from ..events import Cancelled, EventBus, EventQueue, Kind, Request
 from ..learning import LearningEngine
+from ..providers import registry
 from ..providers.fake import demo_scripts
 from ..providers.gateway import Gateway
 from ..safety import CheckpointStore, PermissionEngine, Redactor
@@ -1178,11 +1179,22 @@ class App:
         stats = self.memory.stats()
         body = [
             "**This session**", "",
-            f"- input tokens: {usage.input_tokens:,}",
+            f"- prompt tokens: {usage.prompt_tokens:,}",
             f"- output tokens: {usage.output_tokens:,}",
-            f"- cached: {usage.cached_tokens:,}",
+            f"- served from cache: {usage.cached_tokens:,}"
+            f" ({usage.cache_hit_rate:.0%} of the prompt)",
             f"- cost: ${usage.cost_usd:.4f}" if usage.cost_usd else
-            "- cost: not published for this model",
+            "- cost: not published for this model",]
+        # Reported from what the provider says it served, never from what we
+        # asked it to cache — the two differ whenever a prefix has expired.
+        if usage.cached_tokens and usage.cost_usd:
+            full = registry.estimate_cost(
+                self.state.status.model,
+                usage.prompt_tokens, usage.output_tokens) or 0.0
+            if full > usage.cost_usd:
+                body.append(f"- saved by caching: ${full - usage.cost_usd:.4f}"
+                            f" ({1 - usage.cost_usd / full:.0%})")
+        body += [
             f"- context used: {self.state.status.context_used:,}"
             f" / {self.state.status.context_limit:,}",
             f"- compactions: {self.conversation.compactions}",

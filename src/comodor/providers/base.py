@@ -57,14 +57,28 @@ class Message:
     is_error: bool = False
     images: list[str] = field(default_factory=list)   # base64 data, for vision
     meta: dict[str, Any] = field(default_factory=dict)
+    briefing: str = ""                   # see below
+
+    """``briefing`` is material the agent gathered *for this turn* — the lessons
+    recall matched against these words, the skills that fit them. It rides on
+    the message rather than the system prompt for one reason, which is money:
+    the system prompt is the first thing in every request, and a provider will
+    only serve a request from cache when it begins with bytes it has already
+    seen. Put something query-shaped at the front and nothing behind it can ever
+    match; put it here, after everything the last request cached, and the whole
+    conversation stays cheap. It is sent to the model, never shown in the
+    transcript, and it is not the user's words — which is why it is a separate
+    field and not a prefix on ``content``."""
 
     @classmethod
     def system(cls, content: str) -> "Message":
         return cls(role=Role.SYSTEM, content=content)
 
     @classmethod
-    def user(cls, content: str, images: list[str] | None = None) -> "Message":
-        return cls(role=Role.USER, content=content, images=images or [])
+    def user(cls, content: str, images: list[str] | None = None,
+             briefing: str = "") -> "Message":
+        return cls(role=Role.USER, content=content, images=images or [],
+                   briefing=briefing)
 
     @classmethod
     def assistant(cls, content: str = "", tool_calls: list[ToolCall] | None = None) -> "Message":
@@ -118,21 +132,48 @@ class EventType(str, Enum):
 
 @dataclass
 class Usage:
+    """What one request consumed.
+
+    The three input figures do not overlap, and keeping them apart is the whole
+    point: they are billed at different rates. ``input_tokens`` is what was sent
+    and paid for in full; ``cached_tokens`` is what the provider recognised from
+    an earlier request and served at a fraction of the price; ``written_tokens``
+    is what it stored for next time, at a small premium.
+
+    Note what this means for anything reading ``input_tokens`` on its own — it
+    is *not* the size of the prompt once caching is working, and on a long
+    session it is a small fraction of it. Use :attr:`prompt_tokens` for how much
+    the model read, and ``input_tokens`` only for what it cost.
+    """
+
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
+    written_tokens: int = 0
     reasoning_tokens: int = 0
     cost_usd: float = 0.0
 
     @property
+    def prompt_tokens(self) -> int:
+        """Everything the model read, however it was billed."""
+        return self.input_tokens + self.cached_tokens + self.written_tokens
+
+    @property
     def total(self) -> int:
-        return self.input_tokens + self.output_tokens
+        return self.prompt_tokens + self.output_tokens
+
+    @property
+    def cache_hit_rate(self) -> float:
+        """The share of the prompt that did not have to be sent again."""
+        prompt = self.prompt_tokens
+        return self.cached_tokens / prompt if prompt else 0.0
 
     def merge(self, other: "Usage") -> "Usage":
         return Usage(
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
             cached_tokens=self.cached_tokens + other.cached_tokens,
+            written_tokens=self.written_tokens + other.written_tokens,
             reasoning_tokens=self.reasoning_tokens + other.reasoning_tokens,
             cost_usd=self.cost_usd + other.cost_usd,
         )

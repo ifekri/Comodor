@@ -21,6 +21,14 @@ from typing import Any
 # --------------------------------------------------------------------------- #
 
 
+#: Multiples of the base input rate. Anthropic charges 0.1 to read a cached
+#: prefix and 1.25 to write one; DeepSeek reads at 0.1 with no write premium,
+#: OpenAI at 0.5. The Anthropic figures are used everywhere because they are the
+#: most conservative pair — a spend meter that guesses should guess high.
+CACHE_READ = 0.10
+CACHE_WRITE = 1.25
+
+
 @dataclass(frozen=True)
 class ModelInfo:
     """What we know about one model."""
@@ -38,10 +46,23 @@ class ModelInfo:
     def priced(self) -> bool:
         return self.input_per_mtok is not None and self.output_per_mtok is not None
 
-    def cost(self, input_tokens: int, output_tokens: int) -> float | None:
+    def cost(self, input_tokens: int, output_tokens: int,
+             cached_tokens: int = 0, written_tokens: int = 0) -> float | None:
+        """What one request cost, at the rates the providers actually charge.
+
+        Cached input is not free and it is not full price. Reading a prefix the
+        provider already holds costs a tenth of the input rate; storing one for
+        later costs a quarter more than sending it plainly, paid once. Ignoring
+        either — which is what counting only ``input_tokens`` does, since that
+        field excludes both — makes the spend meter understate a long session
+        badly, and the spend guard is built on that meter.
+        """
         if not self.priced:
             return None
-        return (input_tokens * self.input_per_mtok / 1_000_000
+        billable = (input_tokens
+                    + cached_tokens * CACHE_READ
+                    + written_tokens * CACHE_WRITE)
+        return (billable * self.input_per_mtok / 1_000_000
                 + output_tokens * self.output_per_mtok / 1_000_000)
 
 
@@ -105,8 +126,10 @@ def context_window(model: str) -> int:
     return lookup(model).context
 
 
-def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float | None:
-    return lookup(model).cost(input_tokens, output_tokens)
+def estimate_cost(model: str, input_tokens: int, output_tokens: int,
+                  cached_tokens: int = 0, written_tokens: int = 0) -> float | None:
+    return lookup(model).cost(input_tokens, output_tokens,
+                              cached_tokens, written_tokens)
 
 
 def supports_sampling(model: str) -> bool:

@@ -17,7 +17,7 @@ from typing import Any, Iterator
 
 from ..net import http
 from ..net.sse import iter_sse
-from . import registry
+from . import caching, registry
 from .base import (
     AuthError,
     EventType,
@@ -98,6 +98,8 @@ class AnthropicProvider:
                 continue
 
             blocks: list[dict[str, Any]] = []
+            if message.briefing:
+                blocks.append({"type": "text", "text": message.briefing})
             for image in message.images:
                 data = image.split(",", 1)[-1] if image.startswith("data:") else image
                 blocks.append({
@@ -118,6 +120,30 @@ class AnthropicProvider:
             encoded.append({"role": message.role.value, "content": blocks})
 
         return "\n\n".join(part for part in system_parts if part), encoded
+
+    def _cache(self, body: dict[str, Any], *, ttl: str = "5m",
+               model: str = "") -> None:
+        """Mark the parts of this request the provider has already seen.
+
+        Every message before the last is byte-identical to the request that
+        preceded this one — the conversation only ever grows at the end — so
+        everything up to the final mark is a cache read at a tenth of the price.
+        What that leaves at full price is exactly the new material: the tool
+        result that caused this request to be made.
+        """
+        head = caching.weigh(body.get("system")) + caching.weigh(body.get("tools"))
+        sizes = [caching.weigh(message) for message in body.get("messages") or []]
+        marks = caching.plan(head, sizes,
+                             minimum=caching.floor_for(model or self.model))
+        if not marks:
+            return
+        caching.apply(body, marks, ttl=ttl)
+        if ttl != "5m":
+            # Holding a prefix for longer than the default hour is gated behind
+            # an opt-in header; without it the request is rejected outright.
+            self.extra_headers["anthropic-beta"] = caching.LONG_TTL_BETA
+            self._session.headers.update(
+                {"anthropic-beta": caching.LONG_TTL_BETA})
 
     def _raise_for_status(self, response: http.Response) -> None:
         if response.ok:
@@ -162,20 +188,42 @@ class AnthropicProvider:
             body["thinking"] = {"type": "adaptive", "display": "summarized"}
         if kwargs.get("effort"):
             body["output_config"] = {"effort": kwargs["effort"]}
+        if kwargs.get("cache", True):
+            self._cache(body, ttl=str(kwargs.get("cache_ttl") or "5m"),
+                        model=target)
 
+        with self._post(body) as response:
+            yield from self._parse_stream(response, target)
+
+    def _post(self, body: dict[str, Any]) -> http.Response:
+        """Send the request, giving up the discount rather than the answer.
+
+        Not every endpoint speaking this protocol is Anthropic's — proxies and
+        self-hosted gateways use it too, and one that does not understand
+        ``cache_control`` rejects the whole request. A cheaper prompt is not
+        worth a broken agent, so a refusal that names the field costs the
+        session its caching and nothing else.
+        """
         try:
             response = self._session.post(f"{self.base_url}/messages", json=body, stream=True)
         except http.RequestError as exc:
             raise ProviderError(f"{self.label}: {exc}", provider=self.name) from exc
 
-        with response:
+        try:
             self._raise_for_status(response)
-            yield from self._parse_stream(response, target)
+        except ProviderError as exc:
+            response.close()
+            if not (exc.status == 400 and caching.refused(str(exc))
+                    and caching.strip(body)):
+                raise
+            return self._post(body)
+        return response
 
     def _parse_stream(self, response: http.Response, model: str) -> Iterator[StreamEvent]:
         blocks: dict[int, dict[str, Any]] = {}     # index -> partial content block
         input_tokens = 0
         cached_tokens = 0
+        written_tokens = 0
         output_tokens = 0
         stop_reason = ""
 
@@ -188,7 +236,10 @@ class AnthropicProvider:
             if event_type == "message_start":
                 usage = (payload.get("message") or {}).get("usage") or {}
                 input_tokens = int(usage.get("input_tokens") or 0)
+                # These three do not overlap: `input_tokens` excludes both
+                # the prefix served from cache and the one being stored.
                 cached_tokens = int(usage.get("cache_read_input_tokens") or 0)
+                written_tokens = int(usage.get("cache_creation_input_tokens") or 0)
 
             elif event_type == "content_block_start":
                 index = int(payload.get("index", 0))
@@ -240,11 +291,13 @@ class AnthropicProvider:
             elif event_type == "message_stop":
                 break
 
-        cost = registry.estimate_cost(model, input_tokens, output_tokens)
+        cost = registry.estimate_cost(model, input_tokens, output_tokens,
+                                      cached_tokens, written_tokens)
         yield StreamEvent(type=EventType.USAGE, usage=Usage(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
+            written_tokens=written_tokens,
             cost_usd=cost or 0.0,
         ))
         yield StreamEvent(type=EventType.DONE, finish_reason=stop_reason)
