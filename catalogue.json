@@ -17,6 +17,20 @@
       "path": "review/",
       "files": ["SKILL.md"],
       "bytes": 1600
+    },
+    {
+      "id": "brandkit",
+      "name": "brandkit",
+      "title": "Brandkit",
+      "description": "Premium brand-kit image generation skill for creating high-end brand-guidelines boards.",
+      "summary": "Generates brand-kit overview images with logo concepts, identity systems, color palettes, typography, and mockups.",
+      "tags": ["branding", "design", "image-generation"],
+      "author": "Comodor",
+      "version": "1.0.0",
+      "updated": "2026-08-21",
+      "path": "brandkit/",
+      "files": ["SKILL.md"],
+      "bytes": 1600
     }
   ]
 }
