@@ -167,6 +167,34 @@ request calls for it, so twenty skills cost no more than one.
 It uses the [Agent Skills](https://agentskills.io) open format, so a skill
 written for another tool works here, and yours work there.
 
+**There is a library, and it is not in the download.** Skills are Markdown;
+shipping a folder of them inside the package would put files nobody asked for
+on every machine and mean a release every time somebody fixed a typo. They live
+on a branch of their own and are fetched when you want one.
+
+```
+$ comodor skills browse
+
+Skills  2026-08-21
+
+  review     Review a change for correctness before it is committed   review quality git
+
+  ● installed   ↑ an update is available   · a skill of yours has this name
+
+$ comodor skills add review
+  ● review 1.0.0 → ~/.comodor/skills/review
+```
+
+The catalogue is cached and revalidated with an `ETag`, so the usual cost is
+one conditional request and no download at all — and when there is no network
+it shows the copy it has, with its age, because a list from this morning beats
+an error. `comodor skills update` refetches only what has moved.
+
+**It will not overwrite a skill you wrote.** A folder this program installed
+carries a stamp saying which version it is; one you wrote by hand does not, and
+`review` is a name you may well have used first. Same name, no stamp: it says
+so and stops, and `--force` is there when you mean it.
+
 **It also writes them for you.** When it has solved the same shape of problem
 three times, `/skills draft` offers the procedure back as a finished file — with
 the evidence — and writes nothing until you say yes.
@@ -373,6 +401,7 @@ comodor                                     # the interface
 comodor --demo                              # offline walkthrough, no key needed
 comodor run "fix the failing test" --yes    # one task, headless, for scripts
 comodor run "audit this module" --json      # machine-readable, for pipelines
+comodor skills browse                       # the library; add <id> to fetch one
 comodor doctor                              # check everything; --fix repairs it
 comodor update                              # move to the newest release; --check first
 comodor uninstall                           # remove it completely; --dry-run first

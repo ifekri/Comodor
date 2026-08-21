@@ -2,6 +2,41 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.5.0 — 2026-08-21
+
+### A library of skills, on a branch rather than in the package
+
+- `comodor skills browse` lists what is available and marks what is on this
+  machine; `add`, `remove` and `update` do the rest. Skills are Markdown, and
+  shipping a folder of them inside the wheel would put files nobody asked for
+  on every machine and mean a release every time somebody fixed a typo — so
+  they live on the `skills` branch and are fetched on request.
+- `catalogue.json` on that branch is the authority: it lists what exists, what
+  to show for it, and the exact files that make it up. `files` is an explicit
+  list rather than a wildcard, so a file added there by accident cannot reach
+  somebody's machine.
+- Cached, and revalidated rather than refetched. A copy younger than five
+  minutes is used without asking the server at all; past that the request
+  carries the `ETag` and the usual answer is `304` with no body. Three skill
+  commands in a row cost one request.
+- Offline shows the cached copy with its age rather than an error, up to a
+  month, because a list of skills from this morning is worth more than a stack
+  trace.
+- **It will not overwrite a skill you wrote.** A folder this program installed
+  carries a stamp; one written by hand does not, and `review` is a name a
+  person is likely to have used first. Same name and no stamp: refused, with
+  `--force` for when it is meant. `update` only touches what it installed.
+- A filename in the catalogue that climbs out of the skill folder is refused.
+  It is a file on the internet, and `../../.ssh/authorized_keys` is a perfectly
+  valid JSON string.
+- A download that fails halfway leaves nothing: files land in a staging folder
+  and are moved into place at the end. A skill directory with three of its four
+  files loads, and misbehaves.
+- The first-run wizard offers the library once, with nothing selected. A
+  network that is not there skips the question rather than failing the run.
+- `skills.catalogue_url` and `skills.catalogue_ttl` are settings, so a team can
+  point at its own without forking the program.
+
 ## 0.4.0 — 2026-08-21
 
 ### The interface is a page, not four boxes
