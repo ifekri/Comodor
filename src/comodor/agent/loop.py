@@ -257,10 +257,17 @@ class AgentLoop:
             results = [self._run_one(call, context) for call in calls]
 
         for call, result in zip(calls, results):
-            self.conversation.add(Message.tool(
+            message = Message.tool(
                 call_id=call.id, name=call.name,
                 content=result.content, is_error=not result.ok,
-            ))
+            )
+            # A tool that produced a picture — a screenshot of a page — sends
+            # it as one. Where the dialect allows an image beside a tool result
+            # it goes there; where it does not, the adapter moves it.
+            picture = result.meta.get("image")
+            if isinstance(picture, str) and picture:
+                message.images = [picture]
+            self.conversation.add(message)
 
     def _run_one(self, call: ToolCall, context: ToolContext) -> ToolResult:
         self.bus.emit(Kind.TOOL_START, id=call.id, name=call.name,

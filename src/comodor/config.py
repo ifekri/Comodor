@@ -176,6 +176,23 @@ class LearningConfig:
 
 
 @dataclass
+class BrowserConfig:
+    """The real browser: which one, how large, and whether it is visible."""
+
+    #: Path to a Chrome, Chromium, Edge or Brave. Empty means look in the
+    #: usual places. Nothing is ever downloaded.
+    executable: str = ""
+    #: Headless is the default because an agent browsing should not steal
+    #: focus; turn it off to watch what it is doing.
+    headless: bool = True
+    width: int = 1280
+    height: int = 800
+    #: A DevTools port of a browser you started yourself. Set this to use one
+    #: you are already logged into, rather than handing over your own profile.
+    port: int = 0
+
+
+@dataclass
 class SkillsConfig:
     """Authored skills: instructions the user writes once and reuses."""
 
@@ -304,6 +321,7 @@ class Config:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
+    browser: BrowserConfig = field(default_factory=BrowserConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
