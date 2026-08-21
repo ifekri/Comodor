@@ -259,7 +259,6 @@ def test_the_block_respects_its_token_budget(loaded):
 def test_a_matching_skill_reaches_the_system_prompt(config, bus, tmp_path):
     """The whole point: a skill the user wrote governs the next answer."""
     from comodor.agent import AgentLoop, Conversation
-    from comodor.providers.base import Role
     from comodor.providers.fake import Script
     from comodor.providers.gateway import Gateway
     from comodor.safety import PermissionEngine
@@ -280,14 +279,13 @@ def test_a_matching_skill_reaches_the_system_prompt(config, bus, tmp_path):
                       memory=None, skills=registry)
     agent.run("review this diff please")
 
-    prompts = [message.content for call in gateway.provider("fake").calls
-               for message in call if message.role is Role.SYSTEM]
+    prompts = [f"{message.content} {message.briefing}" for call in gateway.provider("fake").calls
+               for message in call]
     assert any("Read the whole diff before commenting" in prompt for prompt in prompts)
 
 
 def test_an_unrelated_request_leaves_the_prompt_alone(config, bus, tmp_path):
     from comodor.agent import AgentLoop, Conversation
-    from comodor.providers.base import Role
     from comodor.providers.fake import Script
     from comodor.providers.gateway import Gateway
     from comodor.safety import PermissionEngine
@@ -308,15 +306,14 @@ def test_an_unrelated_request_leaves_the_prompt_alone(config, bus, tmp_path):
                       memory=None, skills=registry)
     agent.run("what is six times seven")
 
-    prompts = [message.content for call in gateway.provider("fake").calls
-               for message in call if message.role is Role.SYSTEM]
+    prompts = [f"{message.content} {message.briefing}" for call in gateway.provider("fake").calls
+               for message in call]
     assert not any("Read the whole diff" in prompt for prompt in prompts)
 
 
 def test_skills_work_with_the_learning_brain_switched_off(config, bus, tmp_path):
     """The two systems are independent; one being off must not disable the other."""
     from comodor.agent import AgentLoop, Conversation
-    from comodor.providers.base import Role
     from comodor.providers.fake import Script
     from comodor.providers.gateway import Gateway
     from comodor.safety import PermissionEngine
@@ -338,8 +335,8 @@ def test_skills_work_with_the_learning_brain_switched_off(config, bus, tmp_path)
                       memory=None, skills=registry)
     agent.run("anything")
 
-    prompts = [message.content for call in gateway.provider("fake").calls
-               for message in call if message.role is Role.SYSTEM]
+    prompts = [f"{message.content} {message.briefing}" for call in gateway.provider("fake").calls
+               for message in call]
     assert any("under three sentences" in prompt for prompt in prompts)
 
 
@@ -349,7 +346,6 @@ def test_a_headless_run_loads_skills_too(tmp_path, monkeypatch, capsys):
 
     from comodor import cli
     from comodor.config import ProviderConfig, load
-    from comodor.providers.base import Role
     from comodor.providers.fake import Script
     from comodor.providers.gateway import Gateway
 
@@ -384,8 +380,8 @@ def test_a_headless_run_loads_skills_too(tmp_path, monkeypatch, capsys):
     cli.run_headless(config, args)
 
     assert recorded, "the run should have built a gateway"
-    prompts = [message.content for call in recorded[0].calls
-               for message in call if message.role is Role.SYSTEM]
+    prompts = [f"{message.content} {message.briefing}" for call in recorded[0].calls
+               for message in call]
     assert any("Read the whole diff before commenting" in prompt for prompt in prompts)
 
 

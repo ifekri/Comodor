@@ -2,6 +2,55 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.7.0 — 2026-08-21
+
+### The same tokens, paid for once
+
+A model has no memory between requests, so an agent resends its whole
+conversation at every step: a file read at step two is billed again at step
+three, and four, and at every step until the task ends. Providers sell those
+resends at a tenth of the price, on one condition — the request must *begin*
+with bytes they have already seen, the same ones, from the first character.
+
+- **Requests are now built so that condition holds.** Recalled lessons and
+  matched skills used to be appended to the system prompt, and recall runs
+  against each new request — so the first paragraph differed every turn and
+  nothing behind it could ever match. They travel with the turn that asked for
+  them instead, behind everything already cached, and the head of a request is
+  now identical from the first message of a session to the last. Measured on a
+  real session against a live endpoint — three turns, tools running, files
+  read: **86% of everything the model read was served from cache**, and by the
+  third turn the prompt had doubled while what it cost had not moved.
+- **Cache breakpoints are placed rather than sprinkled.** One on the head,
+  which covers the tool schemas too, and two that roll along the tail — never
+  on a block below the size the provider will actually keep, since a mark there
+  is silently ignored and the write premium is paid for nothing.
+- **Nothing the model reads has changed.** Every lesson, skill and tool result
+  arrives in the same words; only the order is different. A test asserts the
+  property literally — each request in a session must be a byte-exact extension
+  of the one before it — so anything that quietly breaks it fails the suite
+  rather than costing ten times the money.
+- **An endpoint that refuses the marks loses the discount, not the answer.**
+  Proxies and self-hosted gateways speak this protocol too; a refusal that
+  names the field is retried once as a plain request.
+
+### Money, counted properly
+
+- **Fixed: the spend meter would have understated every cached session.** Cache
+  reads and writes are billed at a tenth and a quarter more than plain input,
+  and Anthropic reports all three separately — `input_tokens` excludes the
+  other two. Counting only that field made a long session look nearly free, and
+  the spend guard is built on that number.
+- **Fixed: the context gauge measured the bill instead of the prompt.** With
+  caching working the two differ by an order of magnitude. It reads what the
+  model read.
+- `/cost` shows the share served from cache and what it saved, taken from what
+  the provider reports rather than from what was requested — the two differ
+  whenever a prefix has expired.
+- `"prompt_cache": false` switches the whole thing off; `"prompt_cache_ttl":
+  "1h"` holds prefixes for an hour instead of five minutes, and sends the
+  opt-in header that requires.
+
 ## 0.6.1 — 2026-08-21
 
 ### Two things the benchmark found

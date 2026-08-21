@@ -49,6 +49,7 @@ def estimate_text(text: str) -> int:
 
 def estimate_message(message: Message) -> int:
     total = _MESSAGE_OVERHEAD + estimate_text(message.content)
+    total += estimate_text(message.briefing)
     for call in message.tool_calls:
         total += _TOOL_OVERHEAD + estimate_text(call.name) + estimate_text(call.arguments_json())
     # An image costs far more than its base64 length suggests; this is the

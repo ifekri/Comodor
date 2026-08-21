@@ -132,6 +132,8 @@ class AgentConfig:
     temperature: float = 0.3
     max_output_tokens: int = 8192
     system_prompt_extra: str = ""
+    prompt_cache: bool = True            # let the provider re-serve the prefix
+    prompt_cache_ttl: str = "5m"         # "5m" or "1h"; the hour costs more to write
 
 
 @dataclass

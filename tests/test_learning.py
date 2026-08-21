@@ -12,7 +12,6 @@ from comodor.learning import BrainStore, LearningEngine
 from comodor.learning.bm25 import BM25Index, similarity, tokenize
 from comodor.learning.reflect import extract_json, parse_reflection
 from comodor.learning.store import Lesson, score
-from comodor.providers.base import Role
 from comodor.providers.fake import Script
 from comodor.providers.gateway import Gateway
 from comodor.safety import PermissionEngine
@@ -286,9 +285,9 @@ def test_a_task_teaches_a_lesson_that_the_next_task_recalls(config, bus):
 
     provider = gateway.provider("fake")
     system_prompts = [
-        message.content
+        f"{message.content} {message.briefing}"
         for call in provider.calls
-        for message in call if message.role is Role.SYSTEM
+        for message in call
     ]
     assert any("repository root" in prompt for prompt in system_prompts), \
         "the learned lesson should appear in the next turn's playbook"
