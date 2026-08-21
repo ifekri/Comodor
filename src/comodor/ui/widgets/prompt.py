@@ -210,13 +210,19 @@ class Editor:
 # rendering
 # --------------------------------------------------------------------------- #
 
-PLACEHOLDER = "Prompt Here ..."
+PLACEHOLDER = "Type a task, or / for commands"
 
 
 def render_editor(editor: Editor, rect: Rect, theme: Theme, placeholder: str = PLACEHOLDER,
                   focused: bool = True, rows: int = 3) -> RenderableType:
-    """Draw the buffer with a visible cursor, scrolled to keep it on screen."""
-    width = max(4, rect.width - 4)
+    """Draw the buffer with a visible cursor, scrolled to keep it on screen.
+
+    Always exactly ``rows`` rows. There is no border around the composer any
+    more, so nothing else is holding the space open: a one-line draft would
+    otherwise pull the footer up under it and the whole page would jump on
+    every newline.
+    """
+    width = max(4, rect.width)
 
     if editor.is_empty and not editor.text:
         body = Text(placeholder, style=theme.style("dim"))
@@ -225,7 +231,7 @@ def render_editor(editor: Editor, rect: Rect, theme: Theme, placeholder: str = P
                 (theme.glyphs.cursor, theme.style("accent")),
                 (placeholder, theme.style("dim")),
             )
-        return body
+        return _fill([body], rows)
 
     lines = editor.wrapped(width)
     cursor_row, cursor_column = editor.cursor_position(width)
@@ -251,7 +257,14 @@ def render_editor(editor: Editor, rect: Rect, theme: Theme, placeholder: str = P
                       f"/{len(lines)}", style=theme.style("dim"))
         rendered.append(marker)
 
-    return Group(*rendered)
+    return _fill(rendered, rows)
+
+
+def _fill(rendered: list[Text], rows: int) -> RenderableType:
+    """Pad out to the rows the geometry allotted, so the layout cannot move."""
+    while len(rendered) < rows:
+        rendered.append(Text(""))
+    return Group(*rendered[:rows])
 
 
 def _mark_cursor(text: Text, line: str, column: int, theme: Theme) -> None:

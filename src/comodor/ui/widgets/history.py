@@ -43,8 +43,9 @@ _STATE_GLYPH = {"done": "check", "active": "active", "blocked": "blocked",
 
 
 def render_history(model: HistoryModel, rect: Rect, theme: Theme) -> RenderableType:
-    width = max(8, rect.width - 4)
-    height = max(1, rect.height - 2)
+    """The task column. No frame; the space to its right is the separation."""
+    width = max(8, rect.width)
+    height = max(1, rect.height)
     blocks: list[RenderableType] = []
     used = 0
 
@@ -66,10 +67,19 @@ def render_history(model: HistoryModel, rect: Rect, theme: Theme) -> RenderableT
 
 
 def _heading(title: str, width: int, theme: Theme) -> Text:
+    """A small capital label with the count against the right edge.
+
+    It used to be a word followed by a rule running to the edge of the panel,
+    which was a second border inside a border. A column that already has
+    nothing else in it does not need a line drawn under its name.
+    """
+    name, _, count = title.partition(" ")
     text = Text()
-    text.append(title.upper(), style=theme.style("label", bold=True))
-    filler = max(0, width - len(title) - 1)
-    text.append(" " + theme.glyphs.divider * filler, style=theme.style("border.dim"))
+    text.append(name.upper(), style=theme.style("dim", dim=True))
+    if count:
+        gap = max(1, width - len(name) - len(count))
+        text.append(" " * gap)
+        text.append(count, style=theme.style("dim", dim=True))
     return text
 
 
@@ -98,6 +108,8 @@ def _task_list(todos: list[dict[str, Any]], width: int, theme: Theme,
         row.append(_fit(str(item.get("text", "")), width - 3),
                    style=style if state != "done" else theme.style("dim"))
         rows.append(row)
+    # A blank row under the heading, which is what separates it now.
+    rows.insert(1, Text(""))
     return Group(*rows), len(rows)
 
 
@@ -120,8 +132,11 @@ def _sessions(model: HistoryModel, width: int, theme: Theme,
 
 
 def _empty(theme: Theme, width: int) -> RenderableType:
-    return Text("no tasks yet\n\nthe agent writes its\nplan here as it works",
-                style=theme.style("dim"))
+    """Nothing yet, said once and quietly."""
+    body = Text("TASKS", style=theme.style("dim", dim=True))
+    body.append("\n\nthe plan appears here\nonce there is one",
+                style=theme.style("dim", dim=True))
+    return body
 
 
 def _fit(text: str, width: int) -> str:

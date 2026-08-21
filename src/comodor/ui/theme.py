@@ -46,19 +46,34 @@ class Palette:
     user: str
     assistant: str
     tool: str
+    #: Paint every cell, rather than drawing on whatever the terminal already
+    #: has behind it. Off for the dark palettes, which are designed to sit on
+    #: the user's own black and look wrong forcing a particular one. On for the
+    #: light ones, which are unreadable on a dark terminal and cannot ask the
+    #: terminal to change: a light theme that only works if you already had a
+    #: light theme is not a theme.
+    paint: bool = False
+    #: The pygments style for fenced code. It has to follow the palette: a dark
+    #: syntax theme on a light background renders half its tokens in near-white
+    #: on near-white, which is not "hard to read" but "gone".
+    syntax: str = "monokai"
 
 
+# Retuned for a page with no borders on it. The rules used to be the same
+# orange as the accent, which was fine when they were panel edges and loud now
+# that they are the only two lines on the screen: a rule is punctuation, not
+# content, and it should be the quietest mark there is.
 EMBER = Palette(
     name="ember",
     background="#000000",
-    border="#e8590c",
-    border_dim="#7a3208",
-    title="#e6e6e6",
-    label="#ff8c42",
-    value="#ededed",
-    text="#d4d4d4",
-    dim="#6b6b6b",
-    accent="#ffb15c",
+    border="#5a4636",
+    border_dim="#3a2e24",
+    title="#f2ede4",
+    label="#a8998a",
+    value="#ede7dc",
+    text="#c9c1b5",
+    dim="#8a8078",
+    accent="#ff9d5c",
     good="#3dd68c",
     warn="#ffcc66",
     bad="#ff4d4d",
@@ -74,8 +89,8 @@ EMBER = Palette(
 MIDNIGHT = Palette(
     name="midnight",
     background="#04070f",
-    border="#3b82f6",
-    border_dim="#1e3a5f",
+    border="#2b3a52",
+    border_dim="#1b2534",
     title="#e6edf7",
     label="#7aa2f7",
     value="#e6edf7",
@@ -97,8 +112,8 @@ MIDNIGHT = Palette(
 MATRIX = Palette(
     name="matrix",
     background="#000000",
-    border="#00b894",
-    border_dim="#065f46",
+    border="#1d5c48",
+    border_dim="#0f3a2c",
     title="#d1fae5",
     label="#34d399",
     value="#ecfdf5",
@@ -127,8 +142,63 @@ MONO = Palette(
     user="default", assistant="default", tool="default",
 )
 
+# Two new ones, for the layout the interface has now rather than the one it
+# used to have. Both are near-monochrome with a single warm accent, which is
+# what a page of text wants: colour reads as meaning when there is one of it
+# and as decoration when there are six.
+PAPER = Palette(
+    name="paper",
+    background="#faf8f4",
+    border="#d8d2c6",
+    border_dim="#e6e1d7",
+    title="#17150f",
+    label="#6f6960",
+    value="#17150f",
+    text="#302b23",
+    dim="#6f6960",
+    accent="#c4441e",
+    good="#2f7d4f",
+    warn="#a9741a",
+    bad="#b3261e",
+    button_primary_bg="#17150f",
+    button_primary_fg="#faf8f4",
+    button_bg="#ece7dc",
+    button_fg="#302b23",
+    user="#c4441e",
+    assistant="#302b23",
+    tool="#6f6960",
+    paint=True,
+    syntax="friendly",
+)
+
+#: The website's dark side, which is the same drawing with the values swapped.
+INK = Palette(
+    name="ink",
+    background="#151310",
+    border="#3a352d",
+    border_dim="#28241e",
+    title="#f2ede4",
+    label="#8f887d",
+    value="#f2ede4",
+    text="#cdc6b9",
+    dim="#8f887d",
+    accent="#e2703a",
+    good="#5cc47f",
+    warn="#d9a441",
+    bad="#e0604f",
+    button_primary_bg="#e2703a",
+    button_primary_fg="#151310",
+    button_bg="#28241e",
+    button_fg="#cdc6b9",
+    user="#e2703a",
+    assistant="#cdc6b9",
+    tool="#8f887d",
+    paint=True,
+)
+
 PALETTES: dict[str, Palette] = {
-    palette.name: palette for palette in (EMBER, MIDNIGHT, MATRIX, MONO)
+    palette.name: palette
+    for palette in (EMBER, INK, PAPER, MIDNIGHT, MATRIX, MONO)
 }
 
 
@@ -247,11 +317,14 @@ class Theme:
 
 
 def load(name: str = "ember", ascii_borders: bool = False, no_color: bool = False,
-         syntax: str = "monokai") -> Theme:
+         syntax: str = "") -> Theme:
     palette = PALETTES.get((name or "ember").lower(), EMBER)
     if no_color:
         palette = MONO
-    return Theme(palette=palette, ascii=ascii_borders, no_color=no_color, syntax=syntax)
+    # An empty string means "whatever this palette wants", which is what every
+    # caller should pass unless the user has picked a style themselves.
+    return Theme(palette=palette, ascii=ascii_borders, no_color=no_color,
+                 syntax=syntax or palette.syntax)
 
 
 def theme_names() -> list[str]:

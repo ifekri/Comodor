@@ -120,8 +120,8 @@ def test_a_click_on_send_works_through_the_loop(loop_app, monkeypatch):
     geometry = layout_module.compute(loop_app.console.size.width,
                                      loop_app.console.size.height)
     events = []
-    if geometry.buttons:
-        send = geometry.buttons["send"]
+    if geometry.hints:
+        send = geometry.hints["send"]
         events.append(MouseEvent(send.x + 1, send.y, "press"))
     else:
         events.append(KeyEvent("enter"))

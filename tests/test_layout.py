@@ -99,9 +99,10 @@ def test_regions_never_overlap_or_leave_the_screen(width, height):
     if geometry.too_small:
         return
 
-    rects = [rect for rect in (geometry.sidebar, geometry.chat, geometry.status,
-                               geometry.prompt) if rect is not None]
-    rects += list(geometry.buttons.values())
+    rects = [rect for rect in (geometry.sidebar, geometry.chat, geometry.header,
+                               geometry.footer, geometry.prompt)
+             if rect is not None]
+    rects += list(geometry.hints.values())
 
     for rect in rects:
         assert rect.x >= 0 and rect.y >= 0
@@ -127,18 +128,36 @@ def test_the_sidebar_disappears_when_there_is_no_room_for_it():
     assert layout_module.compute(128, 36).sidebar is not None
 
 
-def test_buttons_are_dropped_before_the_prompt_is_squeezed():
-    narrow = layout_module.compute(58, 20)
+def test_the_key_hints_are_dropped_before_the_composer_is_squeezed():
+    narrow = layout_module.compute(50, 20)
     assert not narrow.show_buttons
     assert narrow.prompt.width >= 40
 
 
-def test_hit_testing_finds_the_buttons():
+def test_hit_testing_finds_the_hints():
+    """The buttons are gone; what they did is not.
+
+    Somebody who reaches for the mouse should find that the words at the bottom
+    right are the words they were about to click.
+    """
     geometry = layout_module.compute(128, 36)
-    send = geometry.buttons["send"]
+
+    send = geometry.hints["send"]
     assert geometry.hit(send.x + 1, send.y) == "button:send"
     assert geometry.hit(geometry.chat.x + 5, geometry.chat.y + 5) == "chat"
-    assert geometry.hit(geometry.prompt.x + 2, geometry.prompt.y + 1) == "prompt"
+    assert geometry.hit(geometry.prompt.x + 2, geometry.prompt.y) == "prompt"
+    assert geometry.hit(geometry.header.x, geometry.header.y) == "header"
+
+
+def test_the_hints_sit_inside_the_footer_and_do_not_overlap():
+    geometry = layout_module.compute(128, 36)
+    rects = sorted(geometry.hints.values(), key=lambda rect: rect.x)
+
+    for rect in rects:
+        assert rect.y == geometry.footer.y
+        assert geometry.footer.x <= rect.x and rect.right <= geometry.footer.right
+    for earlier, later in zip(rects, rects[1:]):
+        assert earlier.right < later.x
 
 
 # --------------------------------------------------------------------------- #
@@ -165,19 +184,23 @@ def test_every_size_renders_when_the_session_is_empty(width, height):
 
 def test_the_reference_size_shows_the_designed_furniture():
     text = "\n".join(render(128, 36))
-    for expected in ("History", "Chat", "Context:", "GW:", "Mode :", "Loop :",
-                     "Settings", "Provider :", "Model :", "Status :",
-                     "SEND", "ATTACH", "MODE"):
+    for expected in ("Comodor", "TASKS", "act", "loop on",
+                     "send", "attach", "mode"):
         assert expected in text, f"{expected!r} is missing from the interface"
+
+    # Nothing but the rule character: a fenced code block in the transcript has
+    # a frame made of the same glyph, and that one has corners on it.
+    rules = [line for line in text.splitlines() if set(line.strip()) == {"─"}]
+    assert len(rules) == 2, "one rule under the name, one above the composer"
 
 
 def test_ascii_mode_avoids_box_drawing_characters():
     text = "\n".join(render(128, 36, ascii_borders=True))
     assert "─" not in text and "│" not in text and "┌" not in text
-    assert "History" in text
+    assert "Comodor" in text
 
 
-@pytest.mark.parametrize("name", ["ember", "midnight", "matrix", "mono"])
+@pytest.mark.parametrize("name", ["ember", "ink", "paper", "midnight", "matrix", "mono"])
 def test_every_theme_renders(name):
     lines = render(120, 34, theme_name=name)
     assert len(lines) <= 34
@@ -208,3 +231,59 @@ def test_wide_characters_are_measured_in_cells_not_code_points():
     state.entries = [Entry("user", "日本語のテキストです " * 20)]
     for line in render(80, 24, state):
         assert len(line) <= 80
+
+
+# --------------------------------------------------------------------------- #
+# the palettes
+# --------------------------------------------------------------------------- #
+
+
+def test_every_palette_is_offered_and_loads():
+    from comodor.ui.theme import PALETTES, load, theme_names
+
+    assert set(theme_names()) == set(PALETTES)
+    for name in theme_names():
+        assert load(name).palette.name in (name, "mono")
+
+
+def test_a_light_palette_paints_its_own_background():
+    """Dark ink on somebody's dark terminal is not a light theme.
+
+    No program can ask a terminal to change colour, so a light palette has to
+    fill every cell itself. A dark one must not: it should sit on whatever
+    black the user already chose.
+    """
+    from comodor.ui.theme import load
+
+    assert load("paper").palette.paint
+    assert load("ink").palette.paint
+    assert not load("ember").palette.paint
+    assert not load("midnight").palette.paint
+
+
+def test_a_light_palette_asks_for_a_light_syntax_theme():
+    """Monokai on paper renders half its tokens in near-white on near-white."""
+    from comodor.ui.theme import load
+
+    assert load("paper").syntax != "monokai"
+    assert load("ember").syntax == "monokai"
+    # An explicit choice still wins.
+    assert load("paper", syntax="dracula").syntax == "dracula"
+
+
+def test_the_painted_background_reaches_the_empty_rows():
+    """Half a painted page is worse than none: the seam is the whole problem."""
+    theme = theme_module.load("paper")
+    buffer = io.StringIO()
+    console = Console(file=buffer, width=100, height=30, theme=theme.rich_theme(),
+                      force_terminal=True, color_system="truecolor",
+                      legacy_windows=False, highlight=False, soft_wrap=False)
+    console.print(Screen(console, theme).render(
+        make_state(populated=False), layout_module.compute(100, 30)))
+
+    background = theme.palette.background.lstrip("#")
+    red, green, blue = (int(background[i:i + 2], 16) for i in (0, 2, 4))
+    wanted = f"48;2;{red};{green};{blue}"
+    rows = buffer.getvalue().splitlines()
+
+    assert all(wanted in row for row in rows if row.strip()), "a row went unpainted"

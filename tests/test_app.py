@@ -157,7 +157,7 @@ def test_clicking_send_submits(app, monkeypatch):
     monkeypatch.setattr(app, "_start_agent", lambda text: sent.append(text))
     type_text(app, "click me")
 
-    send = app.geometry.buttons["send"]
+    send = app.geometry.hints["send"]
     app._on_mouse(MouseEvent(send.x + 2, send.y, "press"))
     assert sent == ["click me"]
 
@@ -167,13 +167,13 @@ def test_clicking_send_while_busy_stops_the_agent(app):
     stopped = []
     app.agent.interrupt = lambda: stopped.append(True)
 
-    send = app.geometry.buttons["send"]
+    send = app.geometry.hints["send"]
     app._on_mouse(MouseEvent(send.x + 2, send.y, "press"))
     assert stopped == [True]
 
 
 def test_clicking_mode_cycles_it(app):
-    mode = app.geometry.buttons["mode"]
+    mode = app.geometry.hints["mode"]
     app._on_mouse(MouseEvent(mode.x + 2, mode.y, "press"))
     assert app.config.agent.mode == "plan"
 
