@@ -14,6 +14,7 @@ from typing import Any
 from rich.console import Group, RenderableType
 from rich.text import Text
 
+from ..bidi import isolate
 from ..layout import Rect
 from ..theme import Theme
 
@@ -105,7 +106,10 @@ def _task_list(todos: list[dict[str, Any]], width: int, theme: Theme,
                             bold=state == "active")
         row = Text()
         row.append(f"{glyph} ", style=style)
-        row.append(_fit(str(item.get("text", "")), width - 3),
+        # Trimmed first, then fenced: truncating an isolated string throws
+        # away its closing mark, and an unbalanced isolate leaks into the rest
+        # of the line, which is worse than not fencing it at all.
+        row.append(isolate(_fit(str(item.get("text", "")), width - 3)),
                    style=style if state != "done" else theme.style("dim"))
         rows.append(row)
     # A blank row under the heading, which is what separates it now.
@@ -121,7 +125,7 @@ def _sessions(model: HistoryModel, width: int, theme: Theme,
         row = Text()
         marker = theme.glyphs.arrow if selected else " "
         row.append(f"{marker} ", style=theme.style("accent"))
-        row.append(_fit(session.title or "(untitled)", width - 3),
+        row.append(isolate(_fit(session.title or "(untitled)", width - 3)),
                    style=theme.style("value" if selected or session.current else "text",
                                      bold=session.current))
         rows.append(row)

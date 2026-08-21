@@ -28,6 +28,7 @@ from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderR
 from rich.segment import Segment
 from rich.text import Text
 
+from ..bidi import is_rtl, isolate
 from ..layout import Rect
 from ..markdown import render_markdown, render_streaming
 from ..theme import Theme
@@ -82,12 +83,19 @@ def render_entry(entry: Entry, theme: Theme, width: int) -> RenderableType:
     if entry.kind == "memory":
         return _memory(entry, theme)
     if entry.kind == "error":
-        return _indented(Text(entry.text, style=theme.style("bad")), theme)
+        return _indented(_line(entry.text, theme, "bad"), theme)
     if entry.kind == "notice":
-        return _indented(Text(entry.text, style=theme.style("dim")), theme)
+        return _indented(_line(entry.text, theme, "dim"), theme)
     if entry.kind == "reasoning":
-        return _indented(Text(entry.text, style=theme.style("dim", dim=True)), theme)
-    return _indented(Text(entry.text, style=theme.style("text")), theme)
+        return _indented(Text(isolate(entry.text),
+                              style=theme.style("dim", dim=True)), theme)
+    return _indented(_line(entry.text, theme, "text"), theme)
+
+
+def _line(text: str, theme: Theme, style: str) -> Text:
+    """One line of somebody else's words, fenced and set to its own margin."""
+    return Text(isolate(text), style=theme.style(style),
+                justify="right" if is_rtl(text) else "left")
 
 
 def _indented(body: RenderableType, theme: Theme) -> RenderableType:
@@ -97,17 +105,32 @@ def _indented(body: RenderableType, theme: Theme) -> RenderableType:
 
 
 def _user(entry: Entry, theme: Theme) -> RenderableType:
-    """At the margin, with the caret. The only thing that starts a column."""
-    body = Text()
+    """At the margin, with the caret. The only thing that starts a column.
+
+    Right-to-left text is set to the right of the column, which is where a
+    Persian or Arabic reader's line begins. Left-aligning it would be the
+    equivalent of setting an English paragraph ragged-right against the wrong
+    margin: legible, and obviously not meant for you.
+    """
+    body = Text(justify="right" if is_rtl(entry.text) else "left")
     body.append(f"{theme.glyphs.arrow} ", style=theme.style("user", bold=True))
-    body.append(entry.text, style=theme.style("user"))
+    body.append(isolate(entry.text), style=theme.style("user"))
     return body
 
 
 def _assistant(entry: Entry, theme: Theme, width: int) -> RenderableType:
-    body = (render_streaming(entry.text, theme) if entry.streaming
-            else render_markdown(entry.text, theme))
-    return _indented(body, theme)
+    """Prose from the model, set to whichever margin its language starts at.
+
+    Only the prose. A fenced code block inside a right-to-left answer is still
+    code, and code is left-to-right in every language there is — the markdown
+    renderer keeps its own alignment, so a Persian explanation of a Python
+    function comes out with the sentence on the right and the function on the
+    left, which is exactly how it would be printed.
+    """
+    justify = "right" if is_rtl(entry.text) else None
+    if entry.streaming:
+        return _indented(render_streaming(entry.text, theme, justify=justify), theme)
+    return _indented(render_markdown(entry.text, theme, justify=justify), theme)
 
 
 def _memory(entry: Entry, theme: Theme) -> RenderableType:
@@ -119,7 +142,10 @@ def _memory(entry: Entry, theme: Theme) -> RenderableType:
     text = Text()
     text.append(entry.meta.get("verb", "recalled").ljust(VERB)[:VERB],
                 style=theme.style("tool"))
-    text.append(entry.text, style=theme.style("dim"))
+    # Isolated: the verb is ours and left-to-right, the rule is theirs and may
+    # not be. Without a fence between them the spaces in the middle resolve
+    # against the wrong side and the two halves swap.
+    text.append(isolate(entry.text), style=theme.style("dim"))
     if entry.meta.get("expanded"):
         for item in entry.meta.get("items", []):
             text.append(f"\n        {item.get('guidance', '')}",
@@ -145,7 +171,8 @@ def _tool(entry: Entry, theme: Theme, width: int) -> RenderableType:
                   style=theme.style("accent" if running else
                                     ("tool" if ok else "bad"), bold=True))
     header.append(" ")
-    header.append(target.strip() or "", style=theme.style("value" if ok else "bad"))
+    header.append(isolate(target.strip()),
+                  style=theme.style("value" if ok else "bad"))
 
     right = ""
     if running:

@@ -2,6 +2,52 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.4.0 — 2026-08-21
+
+### The interface is a page, not four boxes
+
+- The bordered panels are gone. A rule under the name, a rule above the
+  composer, and space between them. Four borders was four things competing to
+  be looked at first, and the transcript was framed exactly as loudly as the
+  context gauge.
+- The status block — six labelled pairs where half the characters were the
+  labels — is one line at the bottom, and it sheds from the right as the
+  terminal narrows.
+- The three coloured buttons are three quiet words, still clickable: the hit
+  rectangles sit on the words.
+- Indentation carries the speaker. Tool calls are aligned as the table they
+  already were: verb, target, and the time against the right margin.
+- The newest line is at the bottom, against the composer.
+- Two new palettes, `paper` and `ink`. Light palettes paint their own
+  background, because dark ink on somebody's dark terminal is not a light
+  theme, and no program can ask a terminal to change colour. They ask for a
+  light syntax theme too — the first render of `paper` came out with half the
+  code block missing, monokai putting its identifiers in near-white on a page
+  that was now near-white.
+- **Fixed:** the footer line could run one cell past the measure and wrap,
+  taking the whole layout down a row. There is no border clipping it now.
+- **Fixed:** the composer has to hold its own height, or a one-line draft pulls
+  the footer up the screen and every newline puts it back.
+
+### Right-to-left languages
+
+- Persian, Arabic and Hebrew are set to the right of their column, where the
+  line begins for that reader. Left-to-right text is untouched, and a code
+  block inside a right-to-left answer stays on the left.
+- Every field where the interface's own words meet the user's is fenced in a
+  Unicode isolate, so the bidirectional algorithm cannot resolve the neutral
+  characters between them against the wrong side — which is how a task titled
+  `افزودن مسیر /health` ends up with the path in the wrong place. The marks are
+  zero-width, so the layout still measures correctly.
+- Titles are trimmed before they are fenced. An isolate whose closing mark was
+  truncated away leaks into the rest of the line, which is worse than not
+  fencing at all.
+- `comodor doctor` mentions the terminal font when it sees right-to-left
+  writing in the history. It cannot be repaired from there: a program writes
+  characters and the terminal picks the glyphs, so the setting to change is the
+  terminal's own.
+- The SVG snapshot `preview --svg` writes now asks for Tahoma first.
+
 ## 0.3.1 — 2026-08-21
 
 ### `comodor update`
