@@ -1,0 +1,22 @@
+{
+  "$schema": "https://comodor.ai/schema/skills-catalogue-1.json",
+  "version": 1,
+  "updated": "2026-08-21",
+  "base": "https://raw.githubusercontent.com/ifekri/Comodor/skills/skills/",
+  "skills": [
+    {
+      "id": "review",
+      "name": "review",
+      "title": "Code review",
+      "description": "Review a change for correctness before it is committed.",
+      "summary": "Reads the whole change first, reports only what would block a merge, and orders findings by what actually breaks.",
+      "tags": ["review", "quality", "git"],
+      "author": "Comodor",
+      "version": "1.0.0",
+      "updated": "2026-08-21",
+      "path": "review/",
+      "files": ["SKILL.md"],
+      "bytes": 1600
+    }
+  ]
+}
