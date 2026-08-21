@@ -144,6 +144,37 @@ It happens with **no extra model call and no waiting**, and it is announced
 rather than silent. `/rules` shows every rule, what convinced it, and lets you
 drop any of them.
 
+### It learns your words, not just your rules
+
+Recall is term matching, and term matching fails in one way that matters: the
+request and the lesson mean the same thing in different words. Ask for *a spec
+for the parser* and a lesson reading *use pytest fixtures* shares not one word
+with it. Right lesson, invisible.
+
+The usual answer is an embedding model — a few hundred megabytes, a download,
+and a vocabulary somebody else learned from somebody else's code. Comodor
+counts instead. Every finished task is a bag of words that turned out to belong
+to one piece of work, and terms that keep arriving together mean something to
+each other **here**:
+
+```
+spec       → fixtures  pytest
+auth       → middleware  session  src/auth.py
+تست        → pytest
+startup    → import  profile  cProfile
+```
+
+Nobody wrote that. It is what a month of your own work says. Which means it
+knows *your* names — `auth` reaching `refresh_token` because that is what your
+repository does — and it crosses languages for the same reason: a task written
+in Persian whose lessons came out in English links the two, with no translation
+anywhere.
+
+The links are held deliberately weak. An inferred term is worth a third of one
+you typed, so a wrong guess costs a little relevance and can never outrank a
+real match. Expanding a query costs **0.009 ms**, and the whole learned
+vocabulary is 169 KB after four thousand tasks.
+
 ### It follows procedures you write down
 
 A **skill** is a plain Markdown file describing how you want a kind of work

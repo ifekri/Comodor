@@ -21,15 +21,40 @@ from dataclasses import dataclass, field
 # that make a lesson findable. Trailing punctuation is stripped afterwards —
 # leaving it on turns "unittest." and "unittest" into different terms, which
 # quietly destroys both retrieval and duplicate detection.
-_TOKEN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_\-./]*")
-_TRAILING = ".-/_"
+#: A word in any script, keeping the shapes a developer types: `src/app.py`,
+#: `snake_case`, `kebab-case`, `v1.2`.
+#:
+#: `\w` rather than `[A-Za-z0-9_]`, and that one character is the difference
+#: between a memory that works in Persian and one that has never stored a
+#: single thing. The ASCII class matched no Arabic, Cyrillic, Greek, Hebrew or
+#: Devanagari at all, so for a user working in any of them `tokenize` returned
+#: an empty list — nothing indexed, nothing recalled, and no error to say so.
+#:
+#: The zero-width non-joiner is inside a word rather than between two: Persian
+#: uses it constantly, and splitting `می‌خواهم` into two halves gives the index
+#: two fragments and neither of them the word.
+ZWNJ = "‌"
+_TOKEN = re.compile(rf"\w[\w{ZWNJ}\-./]*", re.UNICODE)
+_TRAILING = ".-/_" + ZWNJ
 
 STOPWORDS = frozenset("""
 a an and are as at be but by for from has have if in into is it its of on or
 that the their then there these this to was were will with you your do does
 i we they he she them our us me my than when over while after before also
 just so such not no yes can could should would may might must
+""".split()) | frozenset("""
+از به با در را که این آن های ها یک برای است بود شد می نمی هم یا تا بر هر چه
+کن کند کرد باید نباید ای اند ام ات اش شان مان تان روی مورد بین
+و في من على إلى عن مع هذا هذه ذلك التي الذي هو هي قد لم لا ما أن إن
+של את זה היא הוא עם אל כל לא כן אם
 """.split())
+"""Common words in the languages this is most often used in.
+
+English, Persian and a little Arabic and Hebrew. A stopword list is not
+linguistics — it is a list of terms so common that matching on them tells the
+ranking nothing, and every language a user writes in needs one or the index
+fills with its equivalents of "the".
+"""
 
 K1 = 1.5      # term-frequency saturation
 B = 0.75      # length normalisation

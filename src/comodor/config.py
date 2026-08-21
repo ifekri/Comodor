@@ -155,6 +155,10 @@ class LearningConfig:
     min_confidence: float = 0.15
     half_life_days: float = 45.0
     share_scope: str = "project"         # project | global
+    #: Learn which of your words belong together, from your own finished tasks,
+    #: and use it to find lessons phrased differently from the request. Costs
+    #: no tokens and no model call — it is counting. See learning/associations.
+    associative: bool = True
 
     # Reflex — the fast lane: deterministic, model-free, always on. It costs no
     # tokens, so it stays enabled even when reflection is switched off.
