@@ -54,6 +54,43 @@ def read_text(path: Path, limit: int) -> tuple[str, str]:
     return raw.decode("utf-8", errors="replace"), ""
 
 
+def read_window(path: Path, start: int, count: int, cap: int
+                ) -> tuple[list[str], int, str]:
+    """Lines ``start`` to ``start + count``, and how many there are in all.
+
+    Streamed rather than loaded. The point is that a slice of a very large file
+    must cost what the slice costs — the alternative is a tool whose advice for
+    an oversized file ("read a slice with offset/limit") it cannot itself
+    carry out.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return [], 0, str(exc)
+    if size > cap:
+        return [], 0, (f"file is {size:,} bytes, over the {cap:,} byte scan "
+                       f"limit — search it with grep instead")
+
+    try:
+        with path.open("rb") as handle:
+            if b"\x00" in handle.read(BINARY_SNIFF):
+                return [], 0, "file appears to be binary"
+    except OSError as exc:
+        return [], 0, str(exc)
+
+    window: list[str] = []
+    total = 0
+    try:
+        with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+            for index, line in enumerate(handle):
+                total = index + 1
+                if start <= total < start + count:
+                    window.append(line.rstrip("\n").rstrip("\r"))
+    except OSError as exc:
+        return [], 0, str(exc)
+    return window, total, ""
+
+
 def unified_diff(before: str, after: str, path: str) -> str:
     """A unified diff, capped so a huge rewrite cannot flood the screen."""
     lines = list(difflib.unified_diff(
@@ -121,23 +158,25 @@ class ReadFile(Tool):
         if target.is_dir():
             return ToolResult.failure(f"{ctx.relative(target)} is a directory — use list_dir")
 
-        text, error = read_text(target, ctx.config.safety.max_file_read_bytes)
+        start = max(1, int(offset))
+        count = max(1, int(limit))
+        window, total, error = read_window(
+            target, start, count, ctx.config.safety.max_file_scan_bytes)
         if error:
             return ToolResult.failure(error)
 
-        lines = text.splitlines()
-        start = max(1, int(offset)) - 1
-        end = min(len(lines), start + max(1, int(limit)))
-        window = lines[start:end]
-
-        numbered = "\n".join(f"{start + i + 1:6d}\t{line}" for i, line in enumerate(window))
+        numbered = "\n".join(f"{start + index:6d}\t{line}"
+                              for index, line in enumerate(window))
+        end = start + len(window) - 1
         note = ""
-        if end < len(lines):
-            note = f"\n\n[showing lines {start + 1}-{end} of {len(lines)}]"
+        if window and end < total:
+            note = f"\n\n[showing lines {start}-{end} of {total}]"
+        elif not window and total:
+            note = f"[the file has {total} lines; line {start} is past the end]"
         return ToolResult.success(
             content=numbered + note or "(empty file)",
             display="\n".join(window),
-            path=str(target), lines=len(lines), language=target.suffix.lstrip("."),
+            path=str(target), lines=total, language=target.suffix.lstrip("."),
         )
 
 

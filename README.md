@@ -284,7 +284,13 @@ comodor mcp catalogue                      # twelve servers, ready to go
 comodor mcp add filesystem --path ~/work
 comodor mcp add github --env GITHUB_PERSONAL_ACCESS_TOKEN=…
 comodor mcp custom my-server uvx my-package   # anything else
+comodor mcp remote team https://mcp.example.com/mcp --token …   # a hosted one
 ```
+
+A server can be a command to launch or a URL to reach. Hosted servers are
+spoken to over Streamable HTTP, session header and all, and a plain `http://`
+endpoint that is not on this machine is refused — the token and everything the
+tools return would cross in the clear.
 
 | | |
 |---|---|
@@ -422,6 +428,37 @@ is a single number. Switch any time with `/provider`, or per run:
 ```bash
 comodor --provider groq --model llama-3.3-70b-versatile
 ```
+
+---
+
+## Reading that does not stay read
+
+Two of the ways a session gets expensive have nothing to do with the model and
+everything to do with what is kept.
+
+**One tool result is paid for many times.** It is written into the conversation
+once and resent with every request after it, so its price is its size times the
+steps still to come. Reading one ordinary module here cost 23,082 tokens.
+Anything past the budget is now *moved* rather than cut: the whole of it goes
+to a file, and what comes back is the head, the tail and the path. Output that
+was already a file on disk is not copied — the pointer names the original.
+Nothing is lost, which truncation cannot say: the middle of a failing test run
+is exactly where the failure was.
+
+```
+one round of six ordinary calls    29,633 → 10,553 tokens
+```
+
+**Some questions take a lot of reading and very little to answer.** *Which
+module owns retries?* might mean opening nine files to produce one sentence,
+and in the main conversation those nine files are permanent. `delegate` hands
+that to a second agent with its own context and brings back only the sentence.
+
+It cannot write unless told to, and it cannot delegate. Told to, and in a git
+project, it works in a checkout of its own: a real worktree at the same commit,
+and what comes back is a patch — applied here if it applies cleanly, kept aside
+with its path if something moved underneath it. Your working tree is never what
+it experiments in.
 
 ---
 

@@ -6,8 +6,11 @@ approval prompt for everything else, a hard timeout, and cancellation that
 actually kills the process tree instead of orphaning it.
 
 Output is streamed to the UI as it arrives — a three-minute test run should show
-progress, not a frozen panel — while what goes back to the model is truncated
-from the middle, keeping the command's start and its all-important tail.
+progress, not a frozen panel. How much of it reaches the model is not decided
+here: an oversized result is bounded once, centrally, by writing the whole of
+it to a file and returning the ends with a pointer. See `overflow.py`. What
+this tool must not do is cut it first, which would leave that file holding an
+already-cut copy and the middle of a failing run unrecoverable.
 """
 
 from __future__ import annotations
@@ -26,17 +29,18 @@ from .base import Tool, ToolContext, ToolResult
 
 DEFAULT_TIMEOUT = 120.0
 MAX_TIMEOUT = 900.0
-MAX_OUTPUT_CHARS = 30_000
+#: A ceiling on what is held in memory from one command, not on what the model
+#: is shown. A process printing without end must not exhaust the machine; a
+#: process printing a great deal must still be saved in full.
+MAX_HELD_CHARS = 4_000_000
 
 
-def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
-    """Keep the head and the tail — errors almost always live at the end."""
+def _cap(text: str, limit: int = MAX_HELD_CHARS) -> str:
     if len(text) <= limit:
         return text
-    head = text[: limit // 2]
-    tail = text[-limit // 2:]
-    dropped = len(text) - len(head) - len(tail)
-    return f"{head}\n\n… [{dropped:,} characters omitted] …\n\n{tail}"
+    dropped = len(text) - limit
+    return text[:limit] + f"\n\n… [stopped after {limit:,} characters; " \
+                          f"{dropped:,} more were produced] …"
 
 
 def _kill_tree(process: subprocess.Popen) -> None:
@@ -159,7 +163,7 @@ class RunShell(Tool):
         collector_done.wait(timeout=2.0)
         reader.join(timeout=1.0)
         code = process.poll()
-        output = _truncate("".join(chunks).strip())
+        output = _cap("".join(chunks).strip())
         elapsed = time.monotonic() - started
 
         if cancelled:
@@ -226,7 +230,7 @@ class RunPython(Tool):
             except OSError:
                 pass
 
-        output = _truncate((completed.stdout or "") + (completed.stderr or "")).strip()
+        output = _cap((completed.stdout or "") + (completed.stderr or "")).strip()
         if completed.returncode == 0:
             return ToolResult.success(content=output or "(no output)", display=output)
         return ToolResult(ok=False,

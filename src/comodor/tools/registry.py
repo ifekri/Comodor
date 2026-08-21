@@ -13,6 +13,8 @@ from typing import Any, Iterable
 
 from ..providers.base import ToolSpec
 from ..safety import Risk
+from . import overflow
+from .delegate import Delegate
 from .base import Tool, ToolContext, ToolResult
 from .browser import Browser
 from .fs import EditFile, ListDir, ReadFile, WriteFile
@@ -37,7 +39,8 @@ class ToolRegistry:
 
     def __init__(self, tools: Iterable[Tool] | None = None,
                  skills: Any = None, history: Any = None,
-                 session_id: str = "", mcp: Any = None) -> None:
+                 session_id: str = "", mcp: Any = None,
+                 spawn: Any = None) -> None:
         self._tools: dict[str, Tool] = {}
         for tool in tools if tools is not None else (cls() for cls in DEFAULT_TOOLS):
             self.add(tool)
@@ -51,6 +54,11 @@ class ToolRegistry:
         # keep asking.
         if history is not None and history.stats()["turns"]:
             self.add(SearchHistory(history, current_session=session_id))
+        # Only where there is something to spawn *with*. A delegate needs a
+        # gateway, and a registry built without one — inside a delegate, for
+        # instance — must not advertise a tool that cannot run.
+        if spawn is not None:
+            self.add(Delegate(spawn))
         # Whatever the enabled MCP servers offer, alongside the built-in tools
         # and subject to exactly the same permission gate.
         if mcp is not None:
@@ -119,4 +127,7 @@ class ToolRegistry:
             return ToolResult.failure(
                 f"{name} is not available in {ctx.config.agent.mode} mode")
 
-        return tool.invoke(ctx, args)
+        # Bounded here rather than in each tool, so a tool added tomorrow —
+        # or one that arrived over MCP and was never written here at all — is
+        # covered by the same rule as the ones that exist today.
+        return overflow.contain(tool.invoke(ctx, args), ctx, name)

@@ -2,6 +2,64 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.8.0 — 2026-08-22
+
+Three things a much larger agent had and this one did not. A fourth — loading
+tool schemas on demand — was measured and rejected: the schemas sit in the
+cached prefix, so their real cost is 156 tokens a request, and varying them
+would forfeit the whole cache to save that.
+
+### One result no longer pays for the rest of the task
+
+A tool result is written into the conversation once and resent with every
+request that follows it, so its price is its size times the steps still to
+come. Reading one ordinary module in this repository cost **23,082 tokens**.
+
+- **What does not fit is moved, not cut.** Truncating bounds the cost and loses
+  the content: the middle of a failing test run is gone, and the agent answers
+  from the half it kept. Now the whole of it is written to a file and the
+  result carries the head, the tail, and the path — read a slice with
+  `read_file`, or search it with `grep`. Output that was *already* a file on
+  disk is not copied at all; the pointer names the original.
+- Six ordinary calls measured **29,633 → 10,553 tokens**.
+- **Fixed: the shell cut its output before anything could save it**, so the
+  saved copy was an already-cut one. It caps for memory now, not for the model.
+- **Fixed: `read_file` could not do what its own error message advised.** Over
+  the byte cap it said "read a slice with offset/limit instead" and then
+  refused the slice too — the whole file was loaded before one was taken, so a
+  large log was unreadable by the tool suggesting how to read it. Windows are
+  streamed now; a slice of a large file costs what the slice costs.
+
+### Work that costs its own context
+
+- **`delegate`** hands one self-contained piece of work to a second agent with
+  its own conversation, and returns only its answer. Surveying a subsystem may
+  mean opening nine files to produce one sentence; done in the main
+  conversation those nine files are permanent. Now the reading stays with the
+  delegate.
+- It cannot write unless told to, it cannot delegate, and it does not reflect —
+  its episode is half a task seen out of context, and learning from it would
+  teach the brain about a fragment. It stops when the parent does.
+- **With `write=true`, and a git project, it works in a worktree of its own.**
+  A real checkout at the same commit; what comes back is a patch, applied here
+  if it applies cleanly and kept aside with its path if something moved
+  underneath it.
+
+### An MCP server can be a URL
+
+- **Streamable HTTP transport**, alongside the existing subprocess one. The
+  interesting servers are increasingly hosted, shared by a team, and holding
+  credentials nobody wants on a laptop.
+- Both reply shapes are read — a JSON body, or an event stream carrying the
+  reply among the server's own progress and requests.
+- The `Mcp-Session-Id` a server issues is carried on every later request.
+  Without it a stateful server treats each call as a stranger's first: tools
+  listed, then unavailable a second later.
+- **`comodor mcp remote <name> <url>`**, with `--token` and `--header`. Probed
+  before it is enabled, and a plain `http://` endpoint that is not on this
+  machine is refused — the token and everything the tools return would cross in
+  the clear.
+
 ## 0.7.1 — 2026-08-21
 
 ### A skill that matched, and then never arrived
