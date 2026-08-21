@@ -19,7 +19,19 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+from .http import HTTPConnection
 from .protocol import MCPError, StdioConnection, ToolDescription
+
+
+def _connection_for(server: Any) -> Any:
+    """A process to launch, or a URL to reach. Nothing below here can tell."""
+    url = getattr(server, "url", "")
+    if url:
+        return HTTPConnection(url=url, headers=dict(getattr(server, "headers", {})),
+                              token=getattr(server, "token", ""))
+    return StdioConnection(
+        command=server.command, args=list(server.args),
+        env=dict(server.env), cwd=server.cwd or None)
 
 #: Tools arrive namespaced, because two servers can both offer `search` and the
 #: model needs to be able to say which. The separator has to survive whatever
@@ -35,7 +47,7 @@ class ServerState:
     """One configured server, and how it is getting on."""
 
     name: str
-    connection: StdioConnection | None = None
+    connection: Any = None      # stdio or http; same interface
     tools: list[ToolDescription] = field(default_factory=list)
     error: str = ""
     started: bool = False
@@ -75,9 +87,7 @@ class MCPManager:
                 state.error = "not configured"
                 return state
 
-            connection = StdioConnection(
-                command=server.command, args=list(server.args),
-                env=dict(server.env), cwd=server.cwd or None)
+            connection = _connection_for(server)
             try:
                 connection.start()
                 state.connection = connection

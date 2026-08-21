@@ -19,6 +19,7 @@ import sys
 
 from ..config import Config, MCPServerConfig
 from . import catalogue
+from .manager import _connection_for
 from .protocol import MCPError, StdioConnection
 
 
@@ -47,6 +48,15 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     custom.add_argument("--env", action="append", default=[], metavar="KEY=VALUE")
     custom.add_argument("--cwd", default="")
 
+    remote = actions.add_parser(
+        "remote", help="add a hosted MCP server by its URL")
+    remote.add_argument("name", help="what to call it")
+    remote.add_argument("url", help="its endpoint, for example https://host/mcp")
+    remote.add_argument("--token", default="",
+                        help="a bearer token, if it wants one")
+    remote.add_argument("--header", action="append", default=[],
+                        metavar="KEY=VALUE", help="any other header it wants")
+
     for name, help_text in (("enable", "turn a server on"),
                             ("disable", "turn a server off"),
                             ("remove", "forget a server entirely"),
@@ -59,6 +69,7 @@ def run(config: Config, args: argparse.Namespace) -> int:
     action = getattr(args, "mcp_action", None) or "list"
     handlers = {
         "list": _list, "catalogue": _catalogue, "add": _add, "custom": _custom,
+        "remote": _remote,
         "enable": _enable, "disable": _disable, "remove": _remove, "test": _test,
     }
     handler = handlers.get(action)
@@ -174,6 +185,41 @@ def _add(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _remote(config: Config, args: argparse.Namespace) -> int:
+    """Add a server reached over HTTP rather than launched.
+
+    Probed before it is enabled, for the same reason a command is: an entry
+    that cannot connect is worse than no entry, because it fails once per
+    session in a place nobody is looking.
+    """
+    name = args.name.strip()
+    url = args.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        print(f"{url!r} is not an http or https URL.", file=sys.stderr)
+        return 1
+    if url.lower().startswith("http://") and "localhost" not in url \
+            and "127.0.0.1" not in url:
+        print("Refusing a plain http:// endpoint that is not local — the token "
+              "and everything the tools return would cross the network in the "
+              "clear.", file=sys.stderr)
+        return 1
+
+    config.mcp.servers[name] = MCPServerConfig(
+        name=name, url=url, token=args.token,
+        headers=_parse_env(args.header), enabled=False)
+
+    print(f"Added {name}. Checking that it answers…\n")
+    if not _probe(config.mcp.servers[name]):
+        print(f"\nLeft disabled. Fix the above, then: comodor mcp enable {name}")
+        config.save()
+        return 1
+
+    config.mcp.servers[name].enabled = True
+    config.save()
+    print("\nEnabled.")
+    return 0
+
+
 def _custom(config: Config, args: argparse.Namespace) -> int:
     name = args.name.strip()
     arguments = [item for item in (args.args or []) if item != "--"]
@@ -249,16 +295,16 @@ def _test(config: Config, args: argparse.Namespace) -> int:
 
 def _probe(server: MCPServerConfig, verbose: bool = True) -> bool:
     """Start it, list its tools, stop it. Prints what happened."""
-    connection = StdioConnection(
-        command=server.command, args=list(server.args),
-        env=dict(server.env), cwd=server.cwd or None)
+    # Whichever transport the entry describes; a URL server has no command to
+    # launch and probing it as one would report the wrong failure.
+    connection = _connection_for(server)
     try:
         connection.start(timeout=90.0)
         result = connection.request("tools/list", {}, timeout=30.0)
         tools = result.get("tools") or []
 
         info = connection.server_info or {}
-        label = info.get("name") or server.command
+        label = info.get("name") or server.command or server.url
         print(f"  {label} {info.get('version', '')}".rstrip())
         print(f"  {len(tools)} tool(s)")
         if verbose:
