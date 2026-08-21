@@ -213,6 +213,10 @@ class Session:
                 request.answer(request.options[-1] if request.options else "no")
         self._pending.clear()
         try:
+            self.agent.tools.close()
+        except Exception:
+            pass
+        try:
             self.memory.close()
         except Exception:
             pass

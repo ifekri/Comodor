@@ -193,6 +193,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
         if result.error:
             print(f"\nerror: {result.error}", file=sys.stderr)
 
+    tools.close()
     memory.close()
     gateway.close()
     if mcp is not None:

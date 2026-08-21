@@ -95,6 +95,21 @@ class OpenAICompatProvider:
                     "tool_call_id": message.tool_call_id,
                     "content": message.content or "(no output)",
                 })
+                # This dialect has no room for an image in a tool message, so a
+                # screenshot follows as a user turn. It reads a little oddly in
+                # a transcript and it is the only way the model gets to look.
+                if message.images:
+                    encoded.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text",
+                             "text": "The image from the tool call above:"},
+                            *[{"type": "image_url", "image_url": {"url":
+                               image if image.startswith("data:")
+                               else f"data:image/png;base64,{image}"}}
+                              for image in message.images],
+                        ],
+                    })
                 continue
 
             entry: dict[str, Any] = {"role": message.role.value,

@@ -79,10 +79,23 @@ class AnthropicProvider:
                 continue
 
             if message.role is Role.TOOL:
+                # An image may sit inside a tool result here, which is the
+                # right place for it: the model sees the picture and the words
+                # describing it as one thing.
+                inner: Any = message.content or "(no output)"
+                if message.images:
+                    inner = [{"type": "text", "text": message.content or "(no output)"}]
+                    for image in message.images:
+                        data = image.split(",", 1)[-1] if image.startswith("data:") else image
+                        inner.append({
+                            "type": "image",
+                            "source": {"type": "base64",
+                                       "media_type": "image/png", "data": data},
+                        })
                 block = {
                     "type": "tool_result",
                     "tool_use_id": message.tool_call_id,
-                    "content": message.content or "(no output)",
+                    "content": inner,
                 }
                 if message.is_error:
                     block["is_error"] = True

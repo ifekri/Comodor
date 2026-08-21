@@ -29,9 +29,28 @@ DEFAULT_TOOLS: tuple[type[Tool], ...] = (
     ReadFile, WriteFile, EditFile, ListDir,
     Glob, Grep,
     RunShell, RunPython,
-    Browser, WebFetch, WebSearch,
+    WebFetch, WebSearch,
     TodoWrite,
 )
+
+
+def _browser_tool() -> Tool:
+    """The real browser where there is one, the text browser where there is not.
+
+    Both would be offered as something called "browser", and choosing between
+    two of those is a turn the model should not have to spend. The real one
+    needs Chrome, Chromium, Edge or Brave installed; the text one needs nothing
+    and still answers most questions about a page.
+    """
+    try:
+        from ..browser.launch import find
+
+        find()
+    except Exception:
+        return Browser()
+    from .browse import Browse
+
+    return Browse()
 
 
 class ToolRegistry:
@@ -42,8 +61,13 @@ class ToolRegistry:
                  session_id: str = "", mcp: Any = None,
                  spawn: Any = None) -> None:
         self._tools: dict[str, Tool] = {}
-        for tool in tools if tools is not None else (cls() for cls in DEFAULT_TOOLS):
-            self.add(tool)
+        if tools is not None:
+            for tool in tools:
+                self.add(tool)
+        else:
+            for cls in DEFAULT_TOOLS:
+                self.add(cls())
+            self.add(_browser_tool())
         # Only offered when a skill actually bundles files. A tool the model can
         # see but can never use successfully is worse than one that is absent:
         # it invites a wasted call on every turn.
