@@ -1,13 +1,22 @@
-"""The transcript panel.
+"""The transcript.
 
 Scrolling is done by rendering the recent entries to segment lines and slicing
 the window we want. It is the only approach that stays correct when content
 wraps: a markdown answer, a diff and a table each occupy an unpredictable number
 of rows, so counting entries would put the viewport in the wrong place.
 
-Tool calls render as compact cards rather than raw JSON. Seeing
-``⚙ edit_file(path=src/app.py)  0.2s`` with a coloured diff underneath tells the
-user what happened; seeing the arguments blob does not.
+**Indentation carries the speaker.** What you asked sits at the margin with a
+caret; everything the agent did in reply is indented under it, the way a reply
+is indented in a printed exchange. There is no coloured badge and no bracketed
+role name, because a page has never needed one.
+
+**The newest line is at the bottom**, against the composer, with the empty
+space above. That is where a conversation ends, and it is where the eye already
+is when the next line arrives.
+
+Tool calls render as a verb and a target with the time on the right, rather
+than as raw JSON: `edit  src/app.py    0.2s` with a coloured diff under it says
+what happened; an arguments blob does not.
 """
 
 from __future__ import annotations
@@ -56,83 +65,113 @@ class Lines:
 # --------------------------------------------------------------------------- #
 
 
+#: How far the agent's side of the exchange sits from what you asked.
+INDENT = "    "
+#: The verb column: `edit`, `run`, `learned`, `recalled`. One width, so a run
+#: of them reads as the table it already is.
+VERB = 8
+
+
 def render_entry(entry: Entry, theme: Theme, width: int) -> RenderableType:
     if entry.kind == "user":
         return _user(entry, theme)
     if entry.kind == "assistant":
-        return _assistant(entry, theme)
+        return _assistant(entry, theme, width)
     if entry.kind == "tool":
         return _tool(entry, theme, width)
     if entry.kind == "memory":
         return _memory(entry, theme)
     if entry.kind == "error":
-        return Text(f"{theme.glyphs.warn} {entry.text}", style=theme.style("bad"))
+        return _indented(Text(entry.text, style=theme.style("bad")), theme)
     if entry.kind == "notice":
-        return Text(f"  {entry.text}", style=theme.style("dim"))
+        return _indented(Text(entry.text, style=theme.style("dim")), theme)
     if entry.kind == "reasoning":
-        return Text(entry.text, style=theme.style("dim", dim=True))
-    return Text(entry.text, style=theme.style("text"))
+        return _indented(Text(entry.text, style=theme.style("dim", dim=True)), theme)
+    return _indented(Text(entry.text, style=theme.style("text")), theme)
+
+
+def _indented(body: RenderableType, theme: Theme) -> RenderableType:
+    from rich.padding import Padding
+
+    return Padding(body, (0, 0, 0, len(INDENT)))
 
 
 def _user(entry: Entry, theme: Theme) -> RenderableType:
+    """At the margin, with the caret. The only thing that starts a column."""
     body = Text()
     body.append(f"{theme.glyphs.arrow} ", style=theme.style("user", bold=True))
     body.append(entry.text, style=theme.style("user"))
     return body
 
 
-def _assistant(entry: Entry, theme: Theme) -> RenderableType:
-    if entry.streaming:
-        return render_streaming(entry.text, theme)
-    return render_markdown(entry.text, theme)
+def _assistant(entry: Entry, theme: Theme, width: int) -> RenderableType:
+    body = (render_streaming(entry.text, theme) if entry.streaming
+            else render_markdown(entry.text, theme))
+    return _indented(body, theme)
 
 
 def _memory(entry: Entry, theme: Theme) -> RenderableType:
+    """What it recalled, or what it just learned.
+
+    The word carries it. `learned` and `recalled` are what happened; a glyph
+    beside them was a second way of saying the same thing.
+    """
     text = Text()
-    text.append(f"{theme.glyphs.memory} ", style=theme.style("tool"))
+    text.append(entry.meta.get("verb", "recalled").ljust(VERB)[:VERB],
+                style=theme.style("tool"))
     text.append(entry.text, style=theme.style("dim"))
     if entry.meta.get("expanded"):
         for item in entry.meta.get("items", []):
-            text.append(f"\n   · {item.get('guidance', '')}", style=theme.style("dim", dim=True))
-    return text
+            text.append(f"\n        {item.get('guidance', '')}",
+                        style=theme.style("dim", dim=True))
+    return _indented(text, theme)
 
 
 def _tool(entry: Entry, theme: Theme, width: int) -> RenderableType:
+    """``edit  src/app.py                                          0.2s``
+
+    A verb, a target, and the time against the right margin. Aligned in
+    columns, because a run of tool calls is a table whether or not it is drawn
+    as one, and a ragged left edge makes it unreadable.
+    """
     meta = entry.meta
     ok = meta.get("ok", True)
     running = meta.get("running", False)
     elapsed = meta.get("elapsed", 0.0)
 
+    verb, _, target = (meta.get("summary") or entry.text).partition(" ")
     header = Text()
-    if running:
-        header.append(f"{theme.glyphs.tool} ", style=theme.style("accent"))
-    elif ok:
-        header.append(f"{theme.glyphs.tool} ", style=theme.style("tool"))
-    else:
-        header.append(f"{theme.glyphs.warn} ", style=theme.style("bad"))
+    header.append(verb.ljust(VERB - 1)[:VERB - 1],
+                  style=theme.style("accent" if running else
+                                    ("tool" if ok else "bad"), bold=True))
+    header.append(" ")
+    header.append(target.strip() or "", style=theme.style("value" if ok else "bad"))
 
-    header.append(meta.get("summary") or entry.text,
-                  style=theme.style("value" if ok else "bad"))
-    if elapsed:
-        header.append(f"  {elapsed:.1f}s", style=theme.style("dim"))
+    right = ""
     if running:
-        header.append("  running…", style=theme.style("dim"))
+        right = "running…"
+    elif elapsed:
+        right = f"{elapsed:.1f}s"
+    if right:
+        measure = max(0, width - len(INDENT) - header.cell_len - len(right))
+        header.append(" " * measure + right, style=theme.style("dim", dim=True))
 
     preview = meta.get("preview", "")
     if not preview:
-        return header
+        return _indented(header, theme)
 
-    if meta.get("diff"):
-        return Group(header, _diff(preview, theme))
-    return Group(header, _preview(preview, theme, TOOL_PREVIEW_LINES))
+    body = (_diff(preview, theme) if meta.get("diff")
+            else _preview(preview, theme, TOOL_PREVIEW_LINES))
+    return _indented(Group(header, body), theme)
 
 
 def _preview(text: str, theme: Theme, limit: int) -> Text:
     lines = text.splitlines()
     shown = lines[:limit]
-    body = Text("\n".join(f"  {line}" for line in shown), style=theme.style("dim"))
+    body = Text("\n".join(f"        {line}" for line in shown),
+                style=theme.style("dim"))
     if len(lines) > limit:
-        body.append(f"\n  … {len(lines) - limit} more lines",
+        body.append(f"\n        … {len(lines) - limit} more lines",
                     style=theme.style("dim", dim=True))
     return body
 
@@ -143,7 +182,7 @@ def _diff(text: str, theme: Theme) -> Text:
     lines = text.splitlines()[:DIFF_PREVIEW_LINES]
     for line in lines:
         if line.startswith("+++") or line.startswith("---"):
-            style = theme.style("dim")
+            style = theme.style("dim", dim=True)
         elif line.startswith("+"):
             style = theme.style("good")
         elif line.startswith("-"):
@@ -152,10 +191,16 @@ def _diff(text: str, theme: Theme) -> Text:
             style = theme.style("accent")
         else:
             style = theme.style("dim")
-        body.append(f"  {line}\n", style=style)
+        body.append(f"        {line}\n", style=style)
     remaining = len(text.splitlines()) - len(lines)
     if remaining > 0:
-        body.append(f"  … {remaining} more diff lines\n", style=theme.style("dim", dim=True))
+        body.append(f"        … {remaining} more diff lines",
+                    style=theme.style("dim", dim=True))
+    # No trailing newline: the transcript already puts a blank row between
+    # entries, and two of them reads as a gap somebody forgot to close.
+    # `Text.rstrip` edits in place and returns None, which is a very quiet way
+    # to hand the renderer nothing at all.
+    body.rstrip()
     return body
 
 
@@ -172,49 +217,77 @@ def render_transcript(entries: list[Entry], rect: Rect, theme: Theme,
     newest output — which is where a streaming interface should stay unless the
     user deliberately scrolls back.
     """
-    inner_width = max(10, rect.width - 4)
-    inner_height = max(1, rect.height - 2)
+    width = max(10, rect.width)
+    height = max(1, rect.height)
 
     if not entries:
-        return _welcome(theme, inner_height), 0
+        # Centred in the space, which needs the rows counted rather than
+        # guessed: the greeting wraps differently in a 48-column column than
+        # in a 110-column one.
+        options = console.options.update(width=width, height=None)
+        greeting = console.render_lines(_welcome(theme), options, pad=False)
+        lead = max(0, (height - len(greeting)) // 2)
+        return Lines(_exactly([[]] * lead + greeting, height)), 0
 
     recent = entries[-MAX_RENDERED_ENTRIES:]
     blocks: list[RenderableType] = []
     for index, entry in enumerate(recent):
         if index:
             blocks.append(Text(""))
-        blocks.append(render_entry(entry, theme, inner_width))
+        blocks.append(render_entry(entry, theme, width))
 
-    options = console.options.update(width=inner_width, height=None)
+    options = console.options.update(width=width, height=None)
     lines = console.render_lines(Group(*blocks), options, pad=False)
 
     total = len(lines)
-    if total <= inner_height:
-        return Lines(lines), total
+    if total <= height:
+        # Against the composer, with the space above it. There is no frame to
+        # hold the column open any more, so the padding has to be real rows —
+        # and a conversation that grows upward from the bottom is what every
+        # other one on the machine does.
+        return Lines(_exactly([[]] * (height - total) + lines, height)), total
 
-    scroll = max(0, min(scroll, total - inner_height))
+    scroll = max(0, min(scroll, total - height))
     end = total - scroll
-    start = max(0, end - inner_height)
-    return Lines(lines[start:end]), total
+    start = max(0, end - height)
+    return Lines(_exactly(lines[start:end], height)), total
 
 
-def _welcome(theme: Theme, height: int) -> RenderableType:
-    """The empty state — the first thing a new user reads."""
-    glyphs = theme.glyphs
-    body = Text()
-    body.append("Comodor\n", style=theme.style("accent", bold=True))
-    body.append("a terminal agent that learns from every session\n\n",
-                style=theme.style("dim"))
-    for key, description in (
+def _exactly(lines: list, height: int) -> list:
+    """Exactly this many rows, padded or cropped.
+
+    With the frames gone there is nothing else holding the column open, so the
+    transcript has to be its own full height — otherwise a short conversation
+    pulls the composer and the footer up the screen, and every reply moves them
+    back down again.
+    """
+    if len(lines) < height:
+        return lines + [[]] * (height - len(lines))
+    return lines[:height]
+
+
+def _welcome(theme: Theme) -> RenderableType:
+    """The empty state — the first thing a new user reads.
+
+    Centred rather than pinned to the bottom. A transcript grows upward from
+    the composer because that is where its last line belongs; an empty screen
+    has no last line, and a paragraph hanging off the bottom edge of an
+    otherwise blank page reads as a mistake.
+    """
+    rows = (
         ("type a task", "and press Enter"),
         ("/help", "every command"),
-        ("/mode", "switch Act / Plan / Chat"),
-        ("/memory", "see what it has learned"),
-        ("F2", "toggle the sidebar"),
-    ):
-        body.append(f"  {glyphs.bullet} ", style=theme.style("accent"))
+        ("/mode", "act, plan or chat"),
+        ("/memory", "what it has learned"),
+        ("F2", "the task list"),
+    )
+
+    body = Text()
+    body.append("It learns the way you correct it.\n\n", style=theme.style("title"))
+    for key, description in rows:
         body.append(key.ljust(14), style=theme.style("value"))
         body.append(f"{description}\n", style=theme.style("dim"))
+
     return body
 
 

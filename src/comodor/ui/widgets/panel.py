@@ -21,6 +21,22 @@ from ..layout import Rect
 from ..theme import Theme
 
 
+def rule(width: int, theme: Theme, style: str = "border.dim") -> Text:
+    """A hairline across the measure.
+
+    The whole of the chrome, now, along with the space either side of it. A
+    rule separates without enclosing, which is the difference between a page
+    and a form — and unlike a border it has no corners to get in the way of
+    what is next to it.
+    """
+    return Text(theme.glyphs.divider * max(1, width), style=theme.style(style))
+
+
+def heading(text: str, theme: Theme) -> Text:
+    """A small capitalised label over a column. Sits outside anything."""
+    return Text(text.upper(), style=theme.style("dim", dim=True))
+
+
 def framed(body: RenderableType, rect: Rect, theme: Theme, title: str = "",
            focused: bool = False, subtitle: str = "") -> Panel:
     """A titled panel sized exactly to ``rect``."""
@@ -72,18 +88,6 @@ def too_small_notice(width: int, height: int, theme: Theme) -> RenderableType:
         justify="center",
     )
     return Align.center(body, vertical="middle")
-
-
-def hint_line(pairs: list[tuple[str, str]], theme: Theme, separator: str = "  ") -> Text:
-    """A key-hint strip: ``^C quit   F2 history   Tab focus``."""
-    text = Text()
-    for index, (key, label) in enumerate(pairs):
-        if index:
-            text.append(separator, style=theme.style("dim"))
-        text.append(key, style=theme.style("accent", bold=True))
-        text.append(" ", style=theme.style("dim"))
-        text.append(label, style=theme.style("dim"))
-    return text
 
 
 def pad(body: RenderableType, top: int = 0, right: int = 0, bottom: int = 0,

@@ -1,13 +1,16 @@
-"""The status block under the sidebar, and the footer line under the prompt.
+"""The two lines that are not the conversation.
 
-Both exist to answer questions the user would otherwise have to guess at: which
-model is actually answering, how much of the context window is gone, whether the
-agent is allowed to change files, and what this turn has cost. Guessing wrong
-about any of those is expensive, so they are always on screen.
+One at the top: the name, and the model actually answering. One at the bottom:
+the mode, the loop, how much of the window is gone, what it has cost.
 
-``Context: 1M`` is a live gauge, not a label. It shows the window size and fills
-as the conversation grows, which is the earliest warning that compaction is
-about to happen.
+They exist to answer questions that are expensive to guess wrong about, and
+they are two lines because that is all the information needs. It used to be a
+bordered block of six labelled pairs beside the transcript — `Mode : Act`,
+`Context:1M`, `GW: Disable` — where half the characters were the labels and
+none of the information was. `act` says everything `Mode : Act` says.
+
+The context reading is live. It fills as the conversation grows, which is the
+earliest warning that compaction is about to happen.
 """
 
 from __future__ import annotations
@@ -18,8 +21,8 @@ from rich.console import Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 
+from ... import APP_NAME as APP
 from ...agent.tokens import humanise
-from ..layout import Rect
 from ..theme import Theme
 
 
@@ -79,138 +82,105 @@ def gauge(fill: float, width: int, theme: Theme) -> Text:
     return bar
 
 
-def status_block(model: StatusModel, rect: Rect, theme: Theme) -> RenderableType:
-    """The left-hand block: Context / GW / Mode / Loop, plus Settings.
+def header_line(model: StatusModel, width: int, theme: Theme) -> Text:
+    """The top line: the name, and what it is talking to.
 
-    Built against a budget rather than by appending and hoping. The rows used
-    to be assembled in the order somebody thought of them and handed to Rich,
-    which crops whatever does not fit — and what did not fit was the last row,
-    which is the bottom edge of the Settings box. A control drawn with three of
-    its four sides is worse than no control: it reads as a rendering fault
-    rather than as a button, and there is nothing on screen to say the button
-    is even there.
+    Two facts, one at each end. The name because a terminal window with six
+    tabs open needs to say which one this is, and the model because it is the
+    single thing most worth knowing and the thing people most often get wrong
+    about which one is answering.
 
-    So the height is divided up first. The four facts are not negotiable, the
-    Settings control gets a box if there is room for one and a solid bar if
-    there is not, and the meter takes what is left over.
+    Everything else that used to be up here — the mode, the loop, the gauge,
+    the cost — moved to the bottom line. None of it changes often enough to
+    earn the first row.
     """
-    inner_width = max(10, rect.width - 4)
-    inner_height = max(1, rect.height - 2)
+    name = Text(APP, style=theme.style("title", bold=True))
 
-    context = _pair("Context:", humanise(model.context_limit), theme)
-    gateway = _pair("GW: ", model.gateway, theme,
-                    "good" if model.gateway.lower() != "disable" else "bad")
-    mode = _pair("Mode : ", model.mode.title(), theme)
-    loop = _pair("Loop : ", "On" if model.loop else "Off", theme,
-                 _state_style(model.loop))
+    right = Text()
+    if model.provider and model.provider != "—":
+        right.append(model.provider, style=theme.style("dim"))
+        right.append(f" {theme.glyphs.dot} ", style=theme.style("dim", dim=True))
+    right.append(_fit_model(model.model, width), style=theme.style("value"))
 
-    if inner_width < 20:
-        # Two columns here would wrap every value onto its own line anyway, and
-        # a wrapped "Disable" under "GW:" reads worse than four clean rows.
-        core: list[RenderableType] = [context, gateway, mode, loop]
-    else:
-        grid = Table.grid(padding=(0, 1), expand=True)
-        grid.add_column(justify="left", ratio=1)
-        grid.add_column(justify="left", ratio=1)
-        grid.add_row(context, gateway)
-        grid.add_row(mode, loop)
-        core = [grid]
-    core_height = len(core) if inner_width < 20 else 2
+    # One row, always. A header that wraps pushes the rule off the top of the
+    # screen and takes a line of the transcript with it.
+    if name.cell_len + right.cell_len + 2 > width:
+        right = Text(_fit_model(model.model, max(8, width - name.cell_len - 2)),
+                     style=theme.style("value"))
 
-    # A box costs three rows. Below that the same control is a solid bar, which
-    # is the shape the other buttons take anyway.
-    boxed = inner_height - core_height >= 4
-    button_height = 3 if boxed else 1
-
-    spare = inner_height - core_height - button_height
-    rows: list[RenderableType] = list(core)
-
-    if spare > 0:
-        rows.append(meter(model, inner_width, theme))
-        spare -= 1
-
-    # Whatever is still going spare pushes Settings to the bottom edge, where a
-    # button belongs, instead of leaving a gap under it.
-    rows.extend(Text("") for _ in range(max(0, spare)))
-    rows.append(settings_button(inner_width, theme, boxed=boxed))
-    return Group(*rows)
+    gap = max(1, width - name.cell_len - right.cell_len)
+    line = Text()
+    line.append_text(name)
+    line.append(" " * gap)
+    line.append_text(right)
+    return line
 
 
-def meter(model: StatusModel, width: int, theme: Theme) -> RenderableType:
-    """The context bar and its numbers, on one row.
+def footer_line(model: StatusModel, width: int = 0, theme: Theme = None) -> Text:  # type: ignore[assignment]
+    """The bottom line: where you are, and what this turn has cost.
 
-    They were two rows, and two rows is one more than the panel has to spare
-    once the Settings box is drawn whole. A bar with its reading beside it is
-    the ordinary way to show this, and it costs half as much.
+    Written as a sentence of small facts rather than a table of labels. The
+    labels were half the characters and none of the information: `Mode : Act`
+    says nothing `act` does not.
+
+    It sheds from the right as the terminal narrows, in the order the facts
+    stop being worth the space — the cost first, the window size last, the mode
+    never. There is no border holding a row open any more, so a line one cell
+    too long does not get clipped: it wraps, and takes the whole layout down a
+    row with it.
     """
-    detail = Text()
-    detail.append(f"{humanise(model.context_used)} used", style=theme.style("dim"))
-    if model.cost_usd is not None and model.cost_usd > 0:
-        detail.append("  ")
-        detail.append(f"${model.cost_usd:.3f}", style=theme.style("accent"))
-    # The rule count is the visible sign that Reflex is doing something, so it
-    # earns its place even on a cramped panel.
+    dim = theme.style("dim", dim=True)
+    separator = f" {theme.glyphs.dot} "
+
+    mode = Text(model.mode.lower(), style=theme.style("value"))
+    loop = Text("loop " + ("on" if model.loop else "off"),
+                style=theme.style(_state_style(model.loop)))
+
+    fill = model.fill
+    tone = "dim" if fill < 0.6 else ("warn" if fill < 0.85 else "bad")
+    context = Text(f"{fill:.0%}", style=theme.style(tone))
+    context.append(" of ", style=dim)
+    context.append(humanise(model.context_limit), style=theme.style("dim"))
+
+    short_context = Text(f"{fill:.0%}", style=theme.style(tone))
+
+    # Least important last: this is the order they get dropped in.
+    parts: list[Text] = [mode, loop, context]
+    if model.gateway and model.gateway.lower() not in ("disable", "off", ""):
+        parts.append(Text(f"gw {model.gateway.lower()}", style=theme.style("good")))
     if model.rules:
-        detail.append(f" {theme.glyphs.memory}{model.rules}", style=theme.style("good"))
+        parts.append(Text(f"{theme.glyphs.memory}{model.rules}",
+                          style=theme.style("good")))
     elif model.lessons:
-        detail.append(f" {theme.glyphs.memory}{model.lessons}",
-                      style=theme.style("tool"))
+        parts.append(Text(f"{theme.glyphs.memory}{model.lessons}",
+                          style=theme.style("tool")))
+    if model.cost_usd:
+        parts.append(Text(f"${model.cost_usd:.3f}", style=theme.style("accent")))
 
-    bar_width = width - detail.cell_len - 1
-    if bar_width < 4:
-        # No room for both; the numbers say more than the bar does.
-        return detail
+    if width <= 0:
+        return _join(parts, separator, dim)
 
-    row = Table.grid(padding=(0, 1), expand=True)
-    row.add_column(width=bar_width)
-    row.add_column(justify="right")
-    row.add_row(gauge(model.fill, bar_width, theme), detail)
-    return row
+    while len(parts) > 1 and _joined_len(parts, len(separator)) > width:
+        parts.pop()
+    if len(parts) == 3 and _joined_len(parts, len(separator)) > width:
+        parts[2] = short_context
+    while len(parts) > 1 and _joined_len(parts, len(separator)) > width:
+        parts.pop()
 
-
-def settings_button(width: int, theme: Theme, boxed: bool = True) -> RenderableType:
-    """The Settings control: a small box, or a solid bar where one will not fit."""
-    label = "Settings"
-    if not boxed:
-        return Text(label.center(max(10, width))[:max(10, width)],
-                    style=theme.style("button"))
-
-    from rich.panel import Panel
-
-    return Panel(
-        Text(label, justify="center", style=theme.style("value")),
-        box=theme.box,
-        border_style=theme.style("border"),
-        width=max(10, width),
-        height=3,
-        padding=(0, 0),
-        expand=True,
-    )
+    return _join(parts, separator, dim)
 
 
-def footer_line(model: StatusModel, width: int, theme: Theme) -> Text:
-    """``Provider : Openrouter | Model : Claude Fable 5 | Status : Connected``."""
-    separator = Text(" | ", style=theme.style("dim"))
-    text = Text()
-    text.append_text(_pair("Provider : ", model.provider, theme))
-    text.append_text(separator)
-    text.append_text(_pair("Model : ", _fit_model(model.model, width), theme))
-    text.append_text(separator)
-    text.append_text(_pair(
-        "Status : ", model.status_word, theme,
-        "warn" if model.busy else _state_style(model.connected),
-    ))
+def _joined_len(parts: list[Text], separator: int) -> int:
+    return sum(part.cell_len for part in parts) + separator * (len(parts) - 1)
 
-    # On a narrow terminal the whole line will not fit; drop the provider first
-    # since the model name is the more useful half.
-    if text.cell_len > width and width > 24:
-        short = Text()
-        short.append_text(_pair("Model : ", _fit_model(model.model, width - 14), theme))
-        short.append_text(separator)
-        short.append_text(_pair("", model.status_word, theme,
-                                _state_style(model.connected)))
-        return short
-    return text
+
+def _join(parts: list[Text], separator: str, style) -> Text:
+    line = Text()
+    for index, part in enumerate(parts):
+        if index:
+            line.append(separator, style=style)
+        line.append_text(part)
+    return line
 
 
 def _fit_model(name: str, width: int) -> str:

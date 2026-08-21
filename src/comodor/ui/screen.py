@@ -7,6 +7,12 @@ used for hit-testing cannot drift apart.
 Rendering is pure: state in, renderable out. Nothing here reads input, touches
 the agent, or mutates anything, which is what allows the whole interface to be
 snapshot-tested at a dozen terminal sizes without a terminal.
+
+What changed is what does the holding-together. There used to be four bordered
+panels, and four borders is four things competing to be looked at first — the
+transcript was framed exactly as loudly as the context gauge. Now a rule under
+the name, a rule above the composer, and space between them. Everything that is
+not the conversation is one quiet line at the top or one at the bottom.
 """
 
 from __future__ import annotations
@@ -20,13 +26,13 @@ from rich.text import Text
 
 from .layout import Geometry, Rect
 from .theme import Theme
-from .widgets.buttons import button_column, keyboard_hints
+from .widgets.buttons import hint_line, keyboard_hints
 from .widgets.chat import Entry, render_transcript
 from .widgets.history import HistoryModel, render_history
 from .widgets.overlay import Overlay, render_overlay
-from .widgets.panel import framed, hint_line, too_small_notice
+from .widgets.panel import rule, too_small_notice
 from .widgets.prompt import Editor, completions, render_completions, render_editor
-from .widgets.statusbar import StatusModel, activity_line, footer_line, status_block
+from .widgets.statusbar import StatusModel, activity_line, footer_line, header_line
 from .widgets.toast import ToastQueue
 
 
@@ -63,123 +69,140 @@ class Screen:
             return render_overlay(state.overlay, geometry.width, geometry.height,
                                   self.theme)
 
-        body = self._body_row(state, geometry)
-        footer = self._footer_row(state, geometry)
-        frame = Group(body, Text(""), footer)
-        if geometry.margin:
-            return Padding(frame, (geometry.margin, geometry.margin))
-        return frame
+        inner = geometry.width - 2 * geometry.margin
+        rows: list[RenderableType] = [
+            header_line(state.status, inner, self.theme),
+            rule(inner, self.theme),
+            Text(""),
+            self._body(state, geometry),
+            Text(""),
+            rule(inner, self.theme),
+            self._composer(state, geometry),
+            Text(""),
+            self._footer(state, geometry, inner),
+        ]
 
-    # -- rows ------------------------------------------------------------- #
+        frame: RenderableType = Group(*rows)
+        if geometry.margin:
+            frame = Padding(frame, (0, geometry.margin))
+        return self._painted(frame)
+
+    def _painted(self, frame: RenderableType) -> RenderableType:
+        """Fill every cell, for the palettes that need to own the background.
+
+        A dark theme can leave the terminal's own black showing through and
+        look right on anybody's machine. A light one cannot: dark ink on
+        somebody's dark terminal is not a light theme, it is an unreadable one,
+        and no program can ask a terminal to change colour. So the light
+        palettes paint, and the dark ones stay out of the way.
+        """
+        palette = self.theme.palette
+        if not palette.paint or self.theme.no_color:
+            return frame
+
+        from rich.style import Style
+        from rich.styled import Styled
+
+        return Styled(frame, Style(bgcolor=palette.background,
+                                   color=palette.text))
+
+    # -- the body ---------------------------------------------------------- #
 
     @staticmethod
     def _columns(*widths: int) -> Table:
         """A grid whose columns are exactly the geometry's widths.
 
         Rich's own cell padding would silently steal columns and force the
-        panels to shrink, so gaps are explicit spacer columns instead.
+        content to shrink, so gaps are explicit spacer columns instead.
         """
         grid = Table.grid(padding=0, pad_edge=False, collapse_padding=True)
         for width in widths:
             grid.add_column(width=width, no_wrap=True)
         return grid
 
-    def _body_row(self, state: ScreenState, geometry: Geometry) -> RenderableType:
-        chat_panel = self._chat(state, geometry.chat)
+    def _body(self, state: ScreenState, geometry: Geometry) -> RenderableType:
+        transcript = self._chat(state, geometry.chat)
         if geometry.sidebar is None:
-            return chat_panel
+            return transcript
 
         gap = geometry.chat.x - geometry.sidebar.right
         grid = self._columns(geometry.sidebar.width, gap, geometry.chat.width)
-        grid.add_row(self._sidebar(state, geometry.sidebar), "", chat_panel)
+        grid.add_row(render_history(state.history, geometry.sidebar, self.theme),
+                     "", transcript)
         return grid
-
-    def _footer_row(self, state: ScreenState, geometry: Geometry) -> RenderableType:
-        prompt_panel = self._prompt(state, geometry.prompt)
-
-        right: RenderableType = prompt_panel
-        if geometry.show_buttons:
-            first = next(iter(geometry.buttons.values()))
-            gap = first.x - geometry.prompt.right
-            columns = self._columns(geometry.prompt.width, gap, first.width)
-            columns.add_row(prompt_panel, "",
-                            Group(*button_column(geometry.buttons, self.theme,
-                                                 busy=state.status.busy)))
-            right = columns
-
-        if geometry.status is None:
-            return right
-
-        gap = geometry.prompt.x - geometry.status.right
-        grid = self._columns(geometry.status.width, gap, geometry.chat.width)
-        grid.add_row(self._status(state, geometry.status), "", right)
-        return grid
-
-    # -- panels ----------------------------------------------------------- #
-
-    def _sidebar(self, state: ScreenState, rect: Rect) -> RenderableType:
-        body = render_history(state.history, rect, self.theme)
-        return framed(body, rect, self.theme, title="History",
-                      focused=state.focus == "sidebar")
 
     def _chat(self, state: ScreenState, rect: Rect) -> RenderableType:
         body, total = render_transcript(state.entries, rect, self.theme,
                                         self.console, state.scroll)
         state.transcript_rows = total
+        return body
 
-        subtitle = ""
-        if state.scroll > 0:
-            subtitle = f"scrolled {state.scroll}"
-        return framed(body, rect, self.theme, title="Chat",
-                      focused=state.focus == "chat", subtitle=subtitle)
+    # -- the composer ------------------------------------------------------ #
 
-    def _status(self, state: ScreenState, rect: Rect) -> RenderableType:
-        return framed(status_block(state.status, rect, self.theme), rect, self.theme)
+    def _composer(self, state: ScreenState, geometry: Geometry) -> RenderableType:
+        """What you are typing, and the commands it might mean.
 
-    def _prompt(self, state: ScreenState, rect: Rect) -> RenderableType:
-        theme = self.theme
-        inner_width = max(8, rect.width - 4)
-        # Panel chrome takes two rows; the footer line takes one, the divider one.
-        editor_rows = max(1, rect.height - 4)
+        The completions sit *over* the editor's own rows rather than pushing
+        anything: a list that grows downwards moves the line you are typing on,
+        which is the one thing on screen that must not move while you type.
+        """
+        rect = geometry.prompt
+        rows = max(1, rect.height)
 
         matches = completions(state.editor.text, state.slash_commands)
-        if matches and rect.height >= 6:
-            editor_rows = max(1, editor_rows - min(len(matches), 4) - 1)
+        listed = min(len(matches), max(0, rows - 1), 4) if matches else 0
 
-        editor = render_editor(state.editor, rect, theme,
-                               focused=state.focus == "prompt", rows=editor_rows)
-        blocks: list[RenderableType] = [editor]
+        editor = render_editor(state.editor, rect, self.theme,
+                               focused=state.focus == "prompt",
+                               rows=max(1, rows - listed))
+        if not listed:
+            return editor
+        return Group(editor, render_completions(matches, self.theme,
+                                                state.completion_index,
+                                                limit=listed))
 
-        if matches and rect.height >= 6:
-            blocks.append(render_completions(matches, theme, state.completion_index,
-                                             limit=4))
+    # -- the footer -------------------------------------------------------- #
 
-        # The divider and the status line sit on the panel's bottom edge, so the
-        # editor grows downward into the empty space rather than leaving a gap
-        # under the footer.
-        drawn = self._measure(Group(*blocks), inner_width)
-        for _ in range(max(0, editor_rows - drawn)):
-            blocks.append(Text(""))
+    def _footer(self, state: ScreenState, geometry: Geometry,
+                width: int) -> RenderableType:
+        """Where you are on the left, what the keys do on the right.
 
-        blocks.append(Text(theme.glyphs.divider * inner_width,
-                           style=theme.style("border.dim")))
-
+        One row. It used to be a bordered block on the left of the screen
+        holding six labelled values, three of which never changed during a
+        session — and a column of coloured buttons on the right. Both are the
+        same information, and neither needed to be the second thing you saw.
+        """
         if state.status.busy:
-            blocks.append(activity_line(state.status, theme, state.spinner))
+            left: RenderableType = activity_line(state.status, self.theme,
+                                                 state.spinner)
         elif state.toasts.active:
-            blocks.append(state.toasts.render(theme, inner_width))
+            left = state.toasts.render(self.theme, width)
         else:
-            blocks.append(footer_line(state.status, inner_width, theme))
+            left = footer_line(state.status, width, self.theme)
 
-        return framed(Group(*blocks), rect, theme,
-                      focused=state.focus == "prompt")
+        if not geometry.hints:
+            return left
+
+        keys = hint_line(keyboard_hints(self.theme), self.theme)
+        gap = max(1, width - _measure(left, self.console) - _measure(keys, self.console))
+        grid = self._columns(width - gap - _measure(keys, self.console), gap,
+                             _measure(keys, self.console))
+        grid.add_row(left, "", keys)
+        return grid
+
+    # -- narrow-terminal extras -------------------------------------------- #
+
+    def hints(self) -> RenderableType:
+        return hint_line(keyboard_hints(self.theme), self.theme)
 
     def _measure(self, renderable: RenderableType, width: int) -> int:
         """How many rows something will occupy once wrapped to ``width``."""
         options = self.console.options.update(width=max(1, width), height=None)
         return len(self.console.render_lines(renderable, options, pad=False))
 
-    # -- narrow-terminal extras -------------------------------------------- #
 
-    def hints(self) -> RenderableType:
-        return hint_line(keyboard_hints(self.theme), self.theme)
+def _measure(renderable: RenderableType, console: Console) -> int:
+    """How many cells wide something wants to be."""
+    if isinstance(renderable, Text):
+        return renderable.cell_len
+    return console.measure(renderable).maximum
