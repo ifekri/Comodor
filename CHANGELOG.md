@@ -2,6 +2,28 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.6.1 — 2026-08-21
+
+### Two things the benchmark found
+
+- **Fixed: starting up loaded the whole brain.** The RAM mirror read every
+  lesson in the table, so start-up grew linearly with it — 1.15 seconds at
+  fifty thousand lessons, paid before the first prompt appeared. The mirror is
+  a cache of what can plausibly be recalled, not the record: recall multiplies
+  relevance by confidence and discards what scores near zero, so the decayed
+  tail cannot win however well it matches. The strongest six thousand are held
+  in memory and the tail stays reachable through FTS. **1154 ms → 195 ms.**
+- **Fixed: one common word made the full-text query enormous.** Twelve terms
+  were unioned across the table and it measured at 20 ms. Ordering them by
+  rarity changed nothing — a single term matching most of the table dominates
+  whatever is ranked ahead of it — so the common ones are dropped rather than
+  demoted, which is what an IDF floor says from the other direction. **20.3 ms
+  → 0.12 ms**, and recall quality is unchanged: twelve planted lessons, twelve
+  found, among twenty thousand.
+- Both are budgets in the suite now, along with a test that two processes can
+  write to one brain — which is the normal way to work, and the thing a plain
+  file cannot do.
+
 ## 0.6.0 — 2026-08-21
 
 ### Memory reads every script
