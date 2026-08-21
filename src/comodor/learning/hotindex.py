@@ -103,6 +103,30 @@ class HotIndex:
             self._docs, self._terms = docs, terms
         return len(docs)
 
+    def selective(self, terms: list[str], ceiling: float = 0.1) -> list[str]:
+        """The terms worth searching on, rarest first, commonest dropped.
+
+        Ordering alone does nothing, which was worth finding out by measuring
+        rather than assuming: a single term that appears in most of the table
+        makes the union enormous whatever else is in the query, so ranking the
+        others ahead of it changes neither the rows scanned nor the time. It
+        has to be *removed*.
+
+        Which is the same thing IDF says — a term in most documents separates
+        nothing — arrived at from the cost side. The posting lists are already
+        in memory, so knowing which terms those are is a dictionary lookup.
+
+        Everything is dropped only if everything is common; then the caller
+        gets the rarest few back, because a search that returns nothing is
+        worse than a slow one.
+        """
+        with self._lock:
+            total = max(1, len(self._docs))
+            ranked = sorted(terms, key=lambda term: len(self._terms.get(term, ())))
+            keep = [term for term in ranked
+                    if len(self._terms.get(term, ())) <= ceiling * total]
+        return keep or ranked
+
     def clear(self) -> None:
         with self._lock:
             self._docs.clear()

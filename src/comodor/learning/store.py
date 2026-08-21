@@ -41,6 +41,16 @@ FLOORS: dict[str, int] = {
 # WAL keeps readers from blocking the writer; the memory settings matter because
 # recall reads the same few pages thousands of times in a session and there is no
 # reason for them ever to leave RAM.
+#: How many lessons the RAM mirror holds. It is a cache of what can plausibly
+#: be recalled, not the record: recall multiplies relevance by confidence and
+#: throws away anything scoring near zero, so the decayed tail of a large table
+#: cannot win however well it matches. Loading it anyway cost 1.15 seconds of
+#: startup at fifty thousand lessons, paid before every first prompt.
+HOT_LESSONS = 6_000
+#: How many terms of a query reach FTS5. Twelve unioned across a large table
+#: measured at 20 ms; the rarest five find the same rows in a fraction of it.
+FTS_TERMS = 5
+
 PRAGMAS: dict[str, str] = {
     "journal_mode": "WAL",
     "synchronous": "NORMAL",
@@ -291,13 +301,41 @@ class BrainStore:
 
     # -- the RAM mirror --------------------------------------------------- #
 
-    def warm(self) -> int:
-        """Load every record into the hot index. Milliseconds, once, at startup."""
+    def warm(self, limit: int = HOT_LESSONS) -> int:
+        """Load what can plausibly win into the hot index.
+
+        Not everything, which is what this used to do. Startup cost grows
+        linearly with the table, and measured at fifty thousand lessons that
+        was 1.15 seconds before the first prompt appeared — felt, and paid on
+        every single run.
+
+        The mirror is a cache of what is likely to be recalled, not the record.
+        Recall multiplies relevance by confidence and discards anything scoring
+        near zero, so a decayed lesson at the bottom of the table cannot win
+        however well it matches; loading fifty thousand of those to find six is
+        work with no possible outcome. The strongest and most recently useful
+        are held in memory, and the tail stays reachable through FTS, which is
+        consulted exactly when the mirror comes up short.
+
+        Rules are loaded whole. There are tens of them, not thousands.
+        """
         records = [("lesson", lesson.id, lesson.text, lesson.scope)
-                   for lesson in self.all_lessons()]
+                   for lesson in self.hot_lessons(limit)]
         records += [("rule", rule.id, rule.text, rule.scope)
                     for rule in self.all_rules()]
         return self.hot.rebuild(records)
+
+    def hot_lessons(self, limit: int = HOT_LESSONS) -> list[Lesson]:
+        """The lessons worth keeping in memory, best first.
+
+        Pinned before anything else — the user asked for those every time —
+        then by confidence, then by how recently one earned its place.
+        """
+        rows = self.connection.execute(
+            """SELECT * FROM lessons
+               ORDER BY pinned DESC, confidence DESC, last_used DESC, updated_at DESC
+               LIMIT ?""", (limit,))
+        return [self._row_to_lesson(row) for row in rows]
 
     # -- schema ----------------------------------------------------------- #
 
@@ -592,7 +630,7 @@ class BrainStore:
 
     def _search_fts(self, query: str, scopes: list[str] | None,
                     limit: int) -> list[tuple[Lesson, float]]:
-        match = _to_fts_query(query)
+        match = _to_fts_query(query, self.hot)
         if not match:
             return []
         sql = ["""SELECT lessons.*, bm25(lessons_fts) AS rank
@@ -994,7 +1032,7 @@ class BrainStore:
 # --------------------------------------------------------------------------- #
 
 
-def _to_fts_query(text: str) -> str:
+def _to_fts_query(text: str, index: Any = None) -> str:
     """Turn free text into a safe FTS5 MATCH expression.
 
     Every term is quoted so that user text containing FTS operators (``AND``,
@@ -1003,12 +1041,24 @@ def _to_fts_query(text: str) -> str:
     """
     from .bm25 import tokenize
 
-    # Longer terms are the selective ones; a query of two dozen common words
-    # makes FTS union half the table for no gain in ranking quality.
-    terms = sorted(set(tokenize(text)), key=len, reverse=True)[:12]
+    terms = list(set(tokenize(text)))
     if not terms:
         return ""
-    return " OR ".join(f'"{term}"' for term in terms)
+
+    # The selective terms, and few of them. Length used to stand in for
+    # selectivity, which is only loosely true — `middleware` is long and common
+    # in a web project — and twelve terms unioned across a large table measured
+    # at 20 ms.
+    #
+    # Ordering them by rarity turned out to change nothing at all, which is
+    # why the ceiling is here: one term appearing in most of the table makes
+    # the union enormous whatever is ranked ahead of it. The common ones are
+    # dropped, not demoted.
+    if index is not None:
+        terms = index.selective(terms)
+    else:
+        terms.sort(key=len, reverse=True)
+    return " OR ".join(f'"{term}"' for term in terms[:FTS_TERMS])
 
 
 def score(relevance: float, lesson: Lesson, half_life_days: float,
