@@ -2,6 +2,21 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.8.5 — 2026-08-22
+
+### An answer nobody offered was accepted, and meant no
+
+- **Fixed: `/api/answer` took any string and reported success.** It handed the
+  word to the waiting worker; the permission engine compared it against the
+  choices it knows — `allow`, `allow_always`, `deny` — did not recognise it,
+  and treated the turn as refused. So a caller could send `"yes"`, be told
+  `{"answered": true}`, and watch nothing happen.
+
+  The page was never affected: it builds its buttons from the options in the
+  event. Anything else driving the API had no such protection, and "accepted,
+  and silently meant no" is the worst answer an interface can give. The choice
+  must now be one the request offered, and a refusal says which they were.
+
 ## 0.8.4 — 2026-08-22
 
 ### The sandbox retry read only the first line

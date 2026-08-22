@@ -282,9 +282,10 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 return
 
             if route == "/api/answer":
-                done = server.session.answer(str(body.get("id") or ""),
-                                             str(body.get("choice") or ""))
-                self._json(200 if done else 410, {"answered": done})
+                done, why = server.session.answer(str(body.get("id") or ""),
+                                                  str(body.get("choice") or ""))
+                self._json(200 if done else 409,
+                           {"answered": done, "error": why})
                 return
 
             if route == "/api/interrupt":
