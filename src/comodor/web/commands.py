@@ -35,6 +35,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run(config: Config, args: argparse.Namespace) -> int:
+    config = _configured_or_explain(config)
+    if config is None:
+        return 1
+
     server = Server(config, host=args.host, port=args.port, token=args.token)
 
     try:
@@ -59,6 +63,43 @@ def run(config: Config, args: argparse.Namespace) -> int:
     finally:
         server.stop()
     return 0
+
+
+def _configured_or_explain(config: Config) -> Config | None:
+    """A usable configuration, or None having said what is missing.
+
+    The browser interface has no way to enter an API key -- it can change the
+    mode and that is all -- so starting without one produces a URL, a browser
+    window, and a failure on the first task with nothing on screen to act on.
+    """
+    if not config.needs_setup:
+        return config
+
+    if sys.stdin.isatty():
+        from ..setup import run_setup
+
+        try:
+            config = run_setup(config)
+        except (KeyboardInterrupt, EOFError):
+            print("\nSetup cancelled. Run `comodor setup` when you are ready.",
+                  file=sys.stderr)
+            return None
+        return None if config.needs_setup else config
+
+    # Nobody to ask: a container, a service unit, a pipeline. This message is
+    # the only thing that person will see, so it has to carry the answer.
+    print("Comodor has no provider configured, and the browser interface has "
+          "no way to add one.", file=sys.stderr)
+    print(file=sys.stderr)
+    print("  In Docker, pass a key in as an environment variable:",
+          file=sys.stderr)
+    print("    -e ANTHROPIC_API_KEY=...    -e OPENAI_API_KEY=...",
+          file=sys.stderr)
+    print("  or mount a config file at "
+          f"{config.paths.config_file}.", file=sys.stderr)
+    print("  Anywhere with a terminal, `comodor setup` asks a few questions.",
+          file=sys.stderr)
+    return None
 
 
 def banner_shown(server: Server) -> bool:
