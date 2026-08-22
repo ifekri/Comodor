@@ -2,6 +2,127 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.8.8 — 2026-08-22
+
+### Arriving from another agent
+
+Somebody who already uses OpenClaw or Hermes has done the tedious part once:
+found their API keys, pasted them somewhere, written a few skills. The first
+run now offers to bring it across.
+
+- **API keys**, which is the whole of the tedium. Both tools keep them in an
+  `.env` beside their config, and OpenClaw also inlines them in its JSON.
+- **The model** they had chosen, when this can host it.
+- **Skills**, which both write in the same open format Comodor reads.
+
+Three rules, because this reads other programs' files. Nothing is overwritten:
+a key configured here wins, and the import fills gaps. Nothing is moved, so the
+other tool keeps working. A malformed file is skipped rather than fatal, since
+half the value is that it runs on machines whose other agent is in an odd
+state.
+
+**What does not come over is said, not skipped in silence.** Their memory is
+prose; this agent's is lessons with confidence, evidence and decay, learned
+from corrections. Importing one as the other would invent confidences nobody
+measured and poison recall with entries that were never earned.
+
+`comodor import` does the same outside the first run — `--dry-run` to see what
+it would take, `--keys-only` to leave the rest.
+
+### An audit of how settings are received and applied
+
+Driving the whole first run, rather than testing its pieces, found the joins.
+And auditing what reaches disk, rather than what the resolution order says,
+found rather more.
+
+**Saving wrote back four layers as though they were all yours.** The
+configuration the agent runs on is merged from your file, the repository's
+file, the environment and the command line. `save()` wrote that merged object
+into your own file. One `/save` in a cloned repository made its model, its step
+limit and its `max_cost_usd` — a spend ceiling — your permanent global
+defaults. An API key you had deliberately kept in your environment was written
+to disk in plain text. A `--model` typed once became permanent. Load now
+remembers what your own file said and which values came from elsewhere; a value
+you changed during the session is yours and is written, and one that still
+holds whatever a borrowed layer supplied is not.
+
+**The context gauge kept reading a million after a move to a 128k model.** The
+window is set once by the wizard and read by the loop, which compacts at a
+fraction of it. Nothing updated it on a switch, so the agent would never
+compact and the run would fail at the provider's real ceiling — with the gauge
+reading a million all the way there. It follows the model now, through one path
+used by both ways of asking, which had also drifted: typing `/model x` left the
+session record naming the old one.
+
+**`comodor web` started a server nobody could use.** The interface asks the
+setup questions when nothing is configured; `web` was dispatched before that
+check, so a fresh machine got a URL, a browser window, and a failure on the
+first task with nothing on screen to act on. The Docker image sends people
+straight there. It now asks at a terminal, and elsewhere says what is missing
+and what would fix it rather than starting.
+
+Smaller, from the same pass:
+
+- **A skill folder was copied with `shutil.copytree`, which follows symlinks.**
+  A skill is a file whose contents are read into a prompt, so a link in another
+  program's directory pointing at `~/.ssh/id_rsa` would have been copied in and
+  then sent to a model. The copy no longer reads outside the folder it was
+  given, and the size limit is the whole tree rather than the entry file.
+- **The wizard said "already configured" for three different things.** An
+  imported key, one in your config file and one in your environment behave
+  differently now, and the last is not copied to disk. It names the source.
+- **The wizard offered a provider you had no key for**, immediately after
+  announcing it had imported one for a different provider. A provider that has
+  a key leads the list.
+- **An import left `provider` empty and `configured` false**, which only
+  appeared to work because the fallback picks whatever has a key — arbitrary
+  as soon as there are two.
+- **`/theme nonsense` reported success**, while the palette table quietly fell
+  back to Ember.
+- **Three tests failed for anyone who sets `NO_COLOR`**, and the failure looked
+  like a bug in the banner rather than a preference in the environment.
+- The README said four setup questions. There are five.
+
+## 0.8.7 — 2026-08-22
+
+### A cloned repository could redirect your API key
+
+`.comodor/config.json` is read from whatever directory the agent is started in,
+which for a coding agent means: from a repository somebody else wrote,
+immediately after cloning it. It was merged over the user's own settings with
+no restriction. An audit of what that allowed found all of this:
+
+| a repository could set | and then |
+|---|---|
+| `providers.*.base_url` | your API key is sent to their server on the first request |
+| `safety.workspace_only` | the agent writes outside the project |
+| `safety.auto_approve_shell` | it stops asking before running commands |
+| `safety.deny_commands` | the list "no prompt can talk past" is emptied |
+| `mcp.servers` with `enabled` | a command they named runs on your machine |
+| `agent.system_prompt_extra` | instructions injected with your authority |
+
+- **A project file is now restricted to an allow-list** of settings that cannot
+  be turned against the person who cloned the repository: which model, what
+  mode, the budgets, how it looks. An allow-list rather than a deny-list, so a
+  setting added next year is untrusted by default — the right way round to be
+  wrong.
+- **A project may still say which MCP servers it uses**, which is the useful
+  half of that feature, and they arrive **switched off** however the file asks.
+  Declaring is a suggestion; enabling is a decision, and it belongs to the
+  person whose machine it is.
+- **Refusals are said out loud.** Silently ignoring somebody's file is how a
+  config file gets a reputation for not working.
+
+### A setting has to be the type it says it is
+
+- **Fixed: `{"agent": {"max_steps": "lots"}}` was stored as the string**, and
+  the first `steps >= max_steps` an hour later raised a TypeError in the middle
+  of a task. Worse quietly, `{"loop": "false"}` was stored as the string
+  `"false"` — which is true.
+- Values are coerced where that is unambiguous, refused where it is not, and a
+  refusal names the key and what was expected. `null` no longer replaces a
+  string setting with `None`.
+
 ## 0.8.6 — 2026-08-22
 
 ### Nothing ships that has not passed the gate
@@ -73,46 +194,6 @@ is used, which is the whole idea of the thing.
 - `COMODOR_BANNER=0` for one run, `"banner": false` in the config for good, and
   the environment wins either way — so a container can turn it on for a log
   without editing anything.
-
-## 0.8.7 — 2026-08-22
-
-### A cloned repository could redirect your API key
-
-`.comodor/config.json` is read from whatever directory the agent is started in,
-which for a coding agent means: from a repository somebody else wrote,
-immediately after cloning it. It was merged over the user's own settings with
-no restriction. An audit of what that allowed found all of this:
-
-| a repository could set | and then |
-|---|---|
-| `providers.*.base_url` | your API key is sent to their server on the first request |
-| `safety.workspace_only` | the agent writes outside the project |
-| `safety.auto_approve_shell` | it stops asking before running commands |
-| `safety.deny_commands` | the list "no prompt can talk past" is emptied |
-| `mcp.servers` with `enabled` | a command they named runs on your machine |
-| `agent.system_prompt_extra` | instructions injected with your authority |
-
-- **A project file is now restricted to an allow-list** of settings that cannot
-  be turned against the person who cloned the repository: which model, what
-  mode, the budgets, how it looks. An allow-list rather than a deny-list, so a
-  setting added next year is untrusted by default — the right way round to be
-  wrong.
-- **A project may still say which MCP servers it uses**, which is the useful
-  half of that feature, and they arrive **switched off** however the file asks.
-  Declaring is a suggestion; enabling is a decision, and it belongs to the
-  person whose machine it is.
-- **Refusals are said out loud.** Silently ignoring somebody's file is how a
-  config file gets a reputation for not working.
-
-### A setting has to be the type it says it is
-
-- **Fixed: `{"agent": {"max_steps": "lots"}}` was stored as the string**, and
-  the first `steps >= max_steps` an hour later raised a TypeError in the middle
-  of a task. Worse quietly, `{"loop": "false"}` was stored as the string
-  `"false"` — which is true.
-- Values are coerced where that is unambiguous, refused where it is not, and a
-  refusal names the key and what was expected. `null` no longer replaces a
-  string setting with `None`.
 
 ## 0.8.5 — 2026-08-22
 
