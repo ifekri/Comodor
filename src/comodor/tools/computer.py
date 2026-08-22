@@ -26,6 +26,11 @@ One thing the tool says out loud that most do not: **typed is not the same as
 arrived**. Windows 11's Notepad autocorrected `ümlaut` into `umlaut` while this
 was being built. Applications rewrite what is typed into them, and a model that
 assumes otherwise will believe a field contains something it does not.
+
+Verified end to end against `anthropic/claude-sonnet-5` driving a real Notepad:
+screenshot, ask, click, type, screenshot to check - four calls, and again with
+a task needing `ctrl+a`, `Delete` and a retype, which took seven. Both landed
+the exact text, first attempt.
 """
 
 from __future__ import annotations
