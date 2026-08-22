@@ -372,3 +372,92 @@ def test_closing_takes_the_permission_away(tool):
     tool.close()
 
     assert not tool.guard.active
+
+
+# --------------------------------------------------------------------------- #
+# /computer, for the moments the tool does not ask
+# --------------------------------------------------------------------------- #
+
+
+def app_with_computer(config, machine):
+    from comodor.ui import layout as layout_module
+    from comodor.ui.app import App
+
+    config.computer.enabled = True
+    instance = App(config, demo=True)
+    instance.geometry = layout_module.compute(128, 36)
+    return instance
+
+
+def said(app) -> str:
+    return " ".join(str(toast.text) for toast in app.state.toasts.items)
+
+
+@pytest.mark.parametrize("words, seconds", [
+    ("15m", 900), ("1h", 3600), ("90s", 90), ("15", 900), ("2.5m", 150),
+])
+def test_a_duration_is_read_the_way_people_write_them(words, seconds):
+    from comodor.ui.app import _read_grant
+
+    assert _read_grant(words)[0] == seconds
+
+
+def test_a_bare_number_means_minutes():
+    """Which is what somebody means by `/computer 15`. Seconds would be an odd
+    thing to ask for and hours a dangerous thing to assume."""
+    from comodor.ui.app import _read_grant
+
+    assert _read_grant("15") == (900, "")
+
+
+def test_a_scope_can_follow_the_duration():
+    from comodor.ui.app import _read_grant
+
+    assert _read_grant("1h this app") == (3600, "this app")
+
+
+@pytest.mark.parametrize("words", ["", "forever", "0m", "99h", "-5m"])
+def test_nonsense_and_eternity_are_refused(words):
+    from comodor.ui.app import _read_grant
+
+    assert _read_grant(words)[0] is None
+
+
+def test_the_command_grants_and_reports(config, machine):
+    app = app_with_computer(config, machine)
+    tool = app.tools.get("computer")
+    if tool is None:
+        pytest.skip("no desktop backend on this platform")
+    tool.wants_overlay = False
+
+    app.cmd_computer("15m")
+
+    assert tool.guard.active
+    assert "14m" in said(app) or "15m" in said(app)
+
+
+def test_the_command_ends_it(config, machine):
+    """The corner works while the pointer is being driven. This is for when it
+    is not, and the agent is not asking anything."""
+    app = app_with_computer(config, machine)
+    tool = app.tools.get("computer")
+    if tool is None:
+        pytest.skip("no desktop backend on this platform")
+    tool.wants_overlay = False
+    tool.guard.allow(600)
+
+    app.cmd_computer("stop")
+
+    assert not tool.guard.active
+    assert "ended" in said(app)
+
+
+def test_asking_with_no_argument_says_how_things_stand(config, machine):
+    app = app_with_computer(config, machine)
+    tool = app.tools.get("computer")
+    if tool is None:
+        pytest.skip("no desktop backend on this platform")
+
+    app.cmd_computer("")
+
+    assert "not allowed" in said(app)

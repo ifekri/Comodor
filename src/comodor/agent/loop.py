@@ -318,6 +318,15 @@ class AgentLoop:
 
     def _maybe_compact(self, system_prompt: str, specs: list[ToolSpec]) -> None:
         agent = self.config.agent
+
+        # Before measuring anything. Screenshots are the largest thing in a
+        # desktop run's history and the fastest to go stale, and dropping them
+        # is exact and free - where compaction is a model call. Doing it first
+        # also means the measurement below is of what will actually be sent.
+        gone = self.conversation.forget_old_pictures(
+            getattr(agent, "keep_screenshots", 2))
+        if gone:
+            self._emit_usage(system_prompt, specs)
         limit = agent.context_limit or 128_000
         if not self.conversation.needs_compaction(limit, agent.compact_at,
                                                   system_prompt, specs):
