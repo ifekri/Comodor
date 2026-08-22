@@ -1,3 +1,10 @@
 # The folder the agent works in. Yours, not the branch's.
 work/*
 !work/.gitkeep
+
+# A key file, if you keep yours there rather than in your shell. Compose reads
+# this for variable substitution, and the README suggests it - so it must never
+# be something you can commit by accident.
+.env
+.env.*
+!.env.example
