@@ -2,6 +2,22 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.8.2 — 2026-08-22
+
+### A refused request broke the connection it arrived on
+
+- **Fixed: the web server decided before it read the body.** A POST rejected
+  for a missing token or a missing header was answered without its body ever
+  being read, which leaves those bytes in the socket. This server speaks
+  HTTP/1.1, so every connection is kept alive and the *next* request reads that
+  leftover as its own request line; and a socket closed with unread data sends
+  a reset rather than a close, which the caller sees as an aborted connection
+  instead of the 401 that was actually sent.
+
+  The body is read first now and the verdict comes after — including a body
+  over the size cap, which is drained and discarded rather than left unread,
+  because it is what goes unread that breaks the connection.
+
 ## 0.8.1 — 2026-08-22
 
 ### A delegate's changes never applied on Windows

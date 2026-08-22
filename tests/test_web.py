@@ -373,3 +373,89 @@ def test_an_events_own_fields_cannot_overwrite_its_kind(served):
 
     assert frames and frames[0]["kind"] == "request"
     assert frames[0]["about"] == "permission"
+
+
+# --------------------------------------------------------------------------- #
+# a refusal must still leave the connection usable
+# --------------------------------------------------------------------------- #
+
+
+def test_a_refused_post_leaves_the_connection_clean(served):
+    """The bug this exists for. A verdict reached before the body is read
+    leaves those bytes in the socket; the next request on the connection reads
+    them as its own request line, and a socket closed with unread data sends a
+    reset — which the caller sees as an aborted connection rather than the 401
+    that was actually sent."""
+    import http.client
+
+    connection = http.client.HTTPConnection("127.0.0.1", served.port, timeout=15)
+    try:
+        payload = json.dumps({"text": "x" * 50_000})
+        # Rejected for the missing guard header, with a body already in flight.
+        connection.request("POST", "/api/send", body=payload,
+                           headers={"Content-Type": "application/json",
+                                    "Cookie": f"{COOKIE}={served.token}"})
+        first = connection.getresponse()
+        first.read()
+        assert first.status == 403
+
+        # The same connection, reused. If the body was not drained this reads
+        # the leftover as a request line and fails.
+        connection.request("GET", "/api/state",
+                           headers={"Cookie": f"{COOKIE}={served.token}"})
+        second = connection.getresponse()
+        state = json.loads(second.read())
+
+        assert second.status == 200
+        assert "mode" in state
+    finally:
+        connection.close()
+
+
+def test_an_unauthorised_post_leaves_the_connection_clean(served):
+    import http.client
+
+    connection = http.client.HTTPConnection("127.0.0.1", served.port, timeout=15)
+    try:
+        connection.request("POST", "/api/send",
+                           body=json.dumps({"text": "y" * 20_000}),
+                           headers={"Content-Type": "application/json",
+                                    "X-Comodor": "1"})
+        first = connection.getresponse()
+        first.read()
+        assert first.status == 401
+
+        connection.request("GET", "/api/state",
+                           headers={"Cookie": f"{COOKIE}={served.token}"})
+        second = connection.getresponse()
+        second.read()
+
+        assert second.status == 200
+    finally:
+        connection.close()
+
+
+def test_a_body_over_the_cap_is_drained_rather_than_left_in_the_socket(served):
+    """Refusing to read is what breaks the connection, so an oversized body is
+    read and dropped instead."""
+    import http.client
+
+    from comodor.web.server import MAX_BODY
+
+    connection = http.client.HTTPConnection("127.0.0.1", served.port, timeout=30)
+    try:
+        connection.request("POST", "/api/send", body="z" * (MAX_BODY + 5_000),
+                           headers={"Content-Type": "application/json",
+                                    "Cookie": f"{COOKIE}={served.token}",
+                                    "X-Comodor": "1"})
+        first = connection.getresponse()
+        first.read()
+
+        connection.request("GET", "/api/state",
+                           headers={"Cookie": f"{COOKIE}={served.token}"})
+        second = connection.getresponse()
+        second.read()
+
+        assert second.status == 200
+    finally:
+        connection.close()
