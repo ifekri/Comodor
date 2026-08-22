@@ -37,6 +37,7 @@ from ..skills import candidates as skill_candidates
 from ..skills import load_for as skills_for
 from ..tools import ToolRegistry
 from ..tools.delegate import Delegate
+from . import banner
 from . import console as console_module
 from . import layout as layout_module
 from .input import KeyEvent, MouseEvent, PasteEvent, TerminalInput
@@ -152,6 +153,7 @@ class App:
     def run(self) -> int:
         """Draw the interface until the user quits."""
         self.running = True
+        self._greet()
         self._refresh_sessions()
         # Read the project's existing conventions once, in the background, so
         # the first answer already matches how this codebase is written.
@@ -196,6 +198,22 @@ class App:
         self.tools = ToolRegistry(skills=self.skills, history=self.history,
                                   session_id=self.session.id, mcp=self.mcp)
         return len(self.skills)
+
+    def _greet(self) -> None:
+        """The wordmark, and what the brain has accumulated.
+
+        Printed before the full-screen loop takes over, so it lands in the
+        scrollback the user can scroll back to rather than being painted over
+        by the first frame.
+        """
+        from .. import __version__ as release
+
+        banner.show(
+            self.console, self.theme, self.config,
+            version=release, model=self.config.active_model(),
+            project=str(self.config.paths.project),
+            standing=banner.gather(self.memory, self.skills),
+        )
 
     def _shutdown(self) -> None:
         self.agent.interrupt()

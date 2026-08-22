@@ -2,6 +2,37 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.8.6 — 2026-08-22
+
+### A wordmark, and a line that earns its place
+
+Starting the interface, a headless run or the browser server now opens with the
+Comodor wordmark — and under it, the thing that makes it worth the space:
+
+```
+  412 lessons · 7 skills · 3 rules you set   from 128 finished tasks
+```
+
+Most banners are a logo and a version nobody reads twice. That line is about
+*this* installation rather than about the program, and it goes up as the agent
+is used, which is the whole idea of the thing.
+
+- **It never reaches a pipe.** `comodor run … | jq` must see the answer and
+  nothing else, so in a headless run the wordmark goes to the error stream with
+  the progress, and nowhere at all when the destination is not a terminal —
+  nor in `--json`, nor in CI.
+- **It shrinks rather than wraps.** The art is 47 columns; below 51 it becomes
+  a single styled line, because ASCII art reflowed by a terminal is not a
+  smaller logo.
+- **It fades with the palette.** The shades are interpolated from the theme's
+  own accent and text colours rather than fixed, so it does not look wrong on
+  the light themes.
+- **A brain that will not open costs a line, not a session.** Every reading of
+  it is best-effort.
+- `COMODOR_BANNER=0` for one run, `"banner": false` in the config for good, and
+  the environment wins either way — so a container can turn it on for a log
+  without editing anything.
+
 ## 0.8.5 — 2026-08-22
 
 ### An answer nobody offered was accepted, and meant no

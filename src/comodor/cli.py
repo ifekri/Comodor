@@ -122,6 +122,33 @@ def apply_overrides(config: Config, args: argparse.Namespace) -> Config:
 # --------------------------------------------------------------------------- #
 
 
+def _greet_on_stderr(config: Config, memory: Any, skills: Any) -> None:
+    """The wordmark, on the error stream with the progress.
+
+    Same reason the progress is there: `comodor run … | jq` has to see the
+    answer and nothing else, and a logo in the middle of a JSON document is
+    somebody else's afternoon.
+    """
+    from rich.console import Console
+
+    from .ui import banner
+    from .ui import console as console_module
+
+    theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
+                                         no_color=False)
+    errors = Console(stderr=True, theme=theme.rich_theme())
+    banner.show(errors, theme, config,
+                version=_release(), model=config.active_model(),
+                project=str(config.paths.project),
+                standing=banner.gather(memory, skills))
+
+
+def _release() -> str:
+    from . import __version__
+
+    return __version__
+
+
 def run_headless(config: Config, args: argparse.Namespace) -> int:
     """One task, no TUI. Used by scripts, hooks and CI."""
     from .agent import AgentLoop, Conversation
@@ -161,6 +188,8 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
                       permissions, Conversation(), memory, skills=skills)
 
     if not args.json:
+        _greet_on_stderr(config, memory, skills)
+
         # Progress on stderr keeps stdout clean for the answer itself.
         def echo(event: Any) -> None:
             if event.kind is Kind.TOOL_START:
