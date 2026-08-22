@@ -88,14 +88,14 @@ Then type `comodor`.
 
 ## First run
 
-Four questions, once. Nothing to create beforehand — no config file, no
+Five questions, once. Nothing to create beforehand — no config file, no
 environment variable, no documentation to read first.
 
 ```
  ✓ provider  Ollama (local)
  ✓ api key   not needed
 
- 3/4 Which model?
+ 3/5 Which model?
 ┌─  Models  ──────────────────────────────────────────────┐
 │ ›  qwen2.5-coder:14b  recommended                       │
 │    llama3.3                                             │
@@ -114,6 +114,19 @@ surprise worth seeing before anything reads it. Approved folders are
 remembered.
 
 You are not asked again. Change your mind later with `comodor setup`.
+
+**Already using another agent?** If OpenClaw or Hermes is installed, the first
+screen offers to bring your API keys, your model and your skills across — the
+tedious part, which you have already done once. Nothing is moved and nothing
+already set here is replaced, so the other tool keeps working exactly as it
+did. What deliberately does not come over is said rather than skipped in
+silence: their memory is prose, and this agent's is lessons with confidence and
+evidence, so importing one as the other would poison recall with entries
+nothing earned.
+
+Afterwards, or if you install one of them later, `comodor import` does the same
+thing — with `--dry-run` to see what it would take, and `--keys-only` to leave
+the rest.
 
 **No API key?** `comodor --demo` runs the whole interface offline — every
 panel, every command, no account required.

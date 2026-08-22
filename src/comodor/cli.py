@@ -63,6 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-steps", type=int, help="override the step limit")
 
     sub.add_parser("setup", help="choose a provider and model, and save the answers")
+    brought = sub.add_parser(
+        "import", help="bring keys, model and skills over from another agent")
+    brought.add_argument("--dry-run", action="store_true",
+                         help="say what would come over, and change nothing")
+    brought.add_argument("--keys-only", action="store_true",
+                         help="leave the skills and the model where they are")
     doctor = sub.add_parser(
         "doctor", help="check everything, and repair what can be repaired")
     doctor.add_argument("--fix", action="store_true",
@@ -599,6 +605,91 @@ def run_preview(config: Config, args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 
 
+def _say_what_the_copy_refused(console, found: list, already: dict) -> None:
+    """Reasons the copy added after the listing was printed."""
+    for entry in found:
+        for note in entry.passed_over[already[id(entry)]:]:
+            console.print(f"[dim]  not imported: {note}[/dim]")
+
+
+def run_import(config: Config, args: argparse.Namespace) -> int:
+    """Bring another agent's settings over, outside the first run.
+
+    Same rules as the wizard's step: nothing already set here is replaced,
+    nothing is moved, and what was deliberately left behind is said rather than
+    skipped silently.
+    """
+    from . import migrate
+    from .ui import console as console_module
+
+    theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
+                                         no_color=False)
+    console = console_module.build(theme)
+
+    try:
+        found = migrate.discover()
+    except OSError as error:
+        console.print(f"[bad]could not look: {error}[/bad]")
+        return 1
+
+    if not found:
+        console.print("Nothing to import — no OpenClaw or Hermes installation "
+                      "was found in your home directory.")
+        return 0
+
+    for entry in found:
+        console.print(f"[accent]{entry.tool}[/accent]  {entry.summary()}")
+        console.print(f"[dim]{entry.root}[/dim]")
+        for note in entry.passed_over:
+            console.print(f"[dim]  not imported: {note}[/dim]")
+
+    # Anything the copy itself decides against - a skill folder holding a link
+    # out of itself, one far larger than a skill - is added to this list while
+    # applying, which is after the lines above. Remembering where each list
+    # ended is what lets those reasons reach the screen, rather than leaving
+    # the reader to wonder why a skill they can see did not arrive.
+    already = {id(entry): len(entry.passed_over) for entry in found}
+
+    if args.dry_run:
+        console.print("\n[dim]--dry-run: nothing was changed.[/dim]")
+        return 0
+
+    took = migrate.Outcome()
+    for entry in found:
+        try:
+            got = migrate.apply(entry, config, take_keys=True,
+                                take_skills=not args.keys_only,
+                                take_model=not args.keys_only)
+        except OSError as error:
+            console.print(f"[bad]could not read {entry.tool}: {error}[/bad]")
+            continue
+        took.keys += got.keys
+        took.skills += got.skills
+        took.skipped += got.skipped
+        took.model = took.model or got.model
+
+    if not took.anything:
+        console.print("\nNothing new — everything it found is already set here.")
+        for note in took.skipped:
+            console.print(f"[dim]  {note}[/dim]")
+        _say_what_the_copy_refused(console, found, already)
+        return 0
+
+    config.save()
+    console.print()
+    _say_what_the_copy_refused(console, found, already)
+    if took.keys:
+        console.print(f"[good]keys[/good]    {', '.join(took.keys)}")
+    if took.model:
+        console.print(f"[good]model[/good]   {took.model}")
+    if took.skills:
+        console.print(f"[good]skills[/good]  {', '.join(took.skills)}")
+    for note in took.skipped:
+        console.print(f"[dim]  kept as it was — {note}[/dim]")
+    console.print(f"\n[dim]saved to {config.paths.config_file}[/dim]")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config = apply_overrides(load_config(args.cwd), args)
@@ -625,6 +716,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_preview(config, args)
     if args.command == "setup":
         return run_setup_command(config)
+    if args.command == "import":
+        return run_import(config, args)
     if args.command == "run":
         return run_headless(config, args)
 
