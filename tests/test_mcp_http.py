@@ -278,6 +278,8 @@ def test_a_url_server_survives_being_written_and_read(tmp_path):
     assert entry.url == "https://example.invalid/mcp"
     assert entry.headers == {"X-Team": "platform"}
     assert entry.to_json()["url"] == "https://example.invalid/mcp"
+    # Declared by the project, so switched off until somebody says otherwise.
+    assert entry.enabled is False
 
 
 # --------------------------------------------------------------------------- #

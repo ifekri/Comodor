@@ -153,6 +153,7 @@ class App:
         """Draw the interface until the user quits."""
         self.running = True
         self._greet()
+        self._complain_about_the_config()
         self._refresh_sessions()
         # Read the project's existing conventions once, in the background, so
         # the first answer already matches how this codebase is written.
@@ -197,6 +198,22 @@ class App:
         self.tools = ToolRegistry(skills=self.skills, history=self.history,
                                   session_id=self.session.id, mcp=self.mcp)
         return len(self.skills)
+
+    def _complain_about_the_config(self) -> None:
+        """Anything the config asked for and did not get, said once, at the top.
+
+        A setting that does nothing and says nothing is worse than one that is
+        rejected loudly: the first teaches people the file is not read.
+        """
+        for note in self.config.complaints:
+            self.state.toasts.add(f"config: {note}")
+        refused = self.config.project_refused
+        if refused:
+            listed = ", ".join(sorted(refused)[:6])
+            more = f" (+{len(refused) - 6} more)" if len(refused) > 6 else ""
+            self.state.toasts.add(
+                f"this project's config cannot set {listed}{more} — "
+                f"only your own can")
 
     def _greet(self) -> None:
         """The wordmark, and what the brain has accumulated.

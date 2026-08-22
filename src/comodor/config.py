@@ -332,6 +332,12 @@ class Config:
     paths: Paths = field(default_factory=resolve_paths)
     #: True when the user file was missing — the wizard should run.
     first_run: bool = False
+    #: Keys a project's own config file asked for and was not allowed to set.
+    #: Kept so the interface can say so: silently ignoring somebody's file is
+    #: its own kind of unhelpful.
+    project_refused: list[str] = field(default_factory=list)
+    #: Settings that were the wrong type and were left at their default.
+    complaints: list[str] = field(default_factory=list)
 
     # -- helpers ---------------------------------------------------------- #
 
@@ -455,11 +461,120 @@ def _as_dict(obj: Any) -> Any:
     return obj
 
 
-def _apply(section: Any, values: dict[str, Any]) -> None:
+#: What a project's own `.comodor/config.json` is allowed to set.
+#:
+#: An allow-list, because this file comes from a repository the user has just
+#: cloned and has not read. Everything here is something a team might
+#: reasonably pin and nothing here can be turned against the person who cloned
+#: it: which model, what mode, the budgets, how it looks.
+#:
+#: Everything else is refused with a notice — in particular anything under
+#: `providers` (the address a key is sent to), anything under `safety` (the
+#: boundary and the deny list), `mcp` (process execution) and
+#: `agent.system_prompt_extra` (instructions in the user's name).
+PROJECT_SETTABLE: dict[str, frozenset[str] | None] = {
+    "provider": None,
+    "model": None,
+    "ui": frozenset({"theme", "ascii_borders", "syntax_theme", "show_timestamps",
+                     "sidebar", "banner", "max_fps", "mouse"}),
+    "agent": frozenset({"mode", "loop", "max_steps", "max_seconds", "max_cost_usd",
+                        "context_limit", "compact_at", "temperature",
+                        "max_output_tokens", "max_tool_chars"}),
+    "learning": frozenset({"enabled", "reflect", "top_k", "max_playbook_tokens"}),
+    "skills": frozenset({"enabled", "top_k", "max_tokens"}),
+    # Servers only, and they arrive switched off — a project saying what it
+    # uses is useful; a project starting a process is not its decision. The
+    # master switch is deliberately absent.
+    "mcp": frozenset({"servers"}),
+}
+
+
+def project_filtered(document: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """A project document reduced to what a project may set, and what was dropped."""
+    kept: dict[str, Any] = {}
+    refused: list[str] = []
+
+    for key, value in document.items():
+        if key not in PROJECT_SETTABLE:
+            refused.append(key)
+            continue
+        allowed = PROJECT_SETTABLE[key]
+        if allowed is None:
+            kept[key] = value
+            continue
+        if not isinstance(value, dict):
+            refused.append(key)
+            continue
+        inner = {name: item for name, item in value.items() if name in allowed}
+        refused.extend(f"{key}.{name}" for name in value if name not in allowed)
+        if inner:
+            kept[key] = inner
+    return kept, refused
+
+
+def _coerce(key: str, value: Any, current: Any) -> tuple[bool, Any, str]:
+    """Make a value match the type of the setting, or refuse it.
+
+    Returns ``(ok, value, why)``. Coercion is done only where it is
+    unambiguous: `1` is a fine float, and `"1"` is a fine int in a file typed
+    by hand. `"yes"` is not a bool, because `"false"` is also not one and
+    guessing there gets it exactly backwards.
+    """
+    if value is None:
+        return False, None, "is null"
+    if current is None:
+        return True, value, ""
+
+    wanted = type(current)
+    if wanted is bool:
+        if isinstance(value, bool):
+            return True, value, ""
+        return False, None, "must be true or false"
+    if isinstance(value, bool):
+        return False, None, f"must be {wanted.__name__}, not true/false"
+    if wanted is int:
+        if isinstance(value, int):
+            return True, value, ""
+        if isinstance(value, float) and value.is_integer():
+            return True, int(value), ""
+        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+            return True, int(value), ""
+        return False, None, "must be a whole number"
+    if wanted is float:
+        if isinstance(value, (int, float)):
+            return True, float(value), ""
+        if isinstance(value, str):
+            try:
+                return True, float(value), ""
+            except ValueError:
+                return False, None, "must be a number"
+        return False, None, "must be a number"
+    if wanted is str:
+        if isinstance(value, str):
+            return True, value, ""
+        return False, None, "must be text"
+    if wanted in (list, tuple):
+        if isinstance(value, list):
+            return True, value, ""
+        return False, None, "must be a list"
+    if wanted is dict:
+        if isinstance(value, dict):
+            return True, value, ""
+        return False, None, "must be an object"
+    return True, value, ""
+
+def _apply(section: Any, values: dict[str, Any], where: str = "",
+           complaints: list[str] | None = None) -> None:
     """Copy known keys onto a dataclass, ignoring unknown ones.
 
     Unknown keys are tolerated rather than fatal: a config written by a newer
     Comodor should not stop an older one from starting.
+
+    A key of the wrong type is *not* tolerated, and that is the difference
+    between a setting that does nothing and one that breaks an hour later:
+    `"max_steps": "lots"` used to be stored as the string and raise a
+    TypeError in the middle of a task, and `"loop": "false"` used to be stored
+    as a string that is true.
     """
     valid = {f.name for f in fields(section)}
     for key, value in values.items():
@@ -467,9 +582,14 @@ def _apply(section: Any, values: dict[str, Any]) -> None:
             continue
         current = getattr(section, key)
         if is_dataclass(current) and isinstance(value, dict):
-            _apply(current, value)
-        else:
-            setattr(section, key, value)
+            _apply(current, value, f"{where}{key}.", complaints)
+            continue
+        ok, coerced, why = _coerce(key, value, current)
+        if not ok:
+            if complaints is not None:
+                complaints.append(f"{where}{key} {why}; keeping {current!r}")
+            continue
+        setattr(section, key, coerced)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -537,15 +657,26 @@ def load(cwd: Path | str | None = None, overrides: dict[str, Any] | None = None,
     project_document = _read_json(paths.project_config_file)
     config.first_run = not paths.config_file.exists()
 
-    for document in (user_document, project_document):
+    # The project's file arrived with a repository and is read before anybody
+    # has looked at it, so it may only set what cannot be turned against the
+    # person who cloned it. The user's own file is theirs and is trusted.
+    if project_document:
+        project_document, refused = project_filtered(project_document)
+        config.project_refused = refused
+
+    for document, trusted in ((user_document, True), (project_document, False)):
         if not document:
             continue
         for name in SECTIONS:
             values = document.get(name)
             if isinstance(values, dict):
-                _apply(getattr(config, name), values)
-        _apply_provider_settings(config.providers, document.get("providers", {}))
-        _apply_mcp(config.mcp, document.get("mcp"))
+                _apply(getattr(config, name), values, f"{name}.",
+                       config.complaints)
+        if trusted:
+            _apply_provider_settings(config.providers,
+                                     document.get("providers", {}))
+        # A project may say which servers it uses; they arrive switched off.
+        _apply_mcp(config.mcp, document.get("mcp"), trusted=trusted)
         if document.get("provider"):
             config.provider = str(document["provider"])
         if document.get("model"):
@@ -562,11 +693,20 @@ def load(cwd: Path | str | None = None, overrides: dict[str, Any] | None = None,
     return config
 
 
-def _apply_mcp(settings: MCPConfig, document: Any) -> None:
-    """Merge the mcp block. A project may add servers; it may not remove yours."""
+def _apply_mcp(settings: MCPConfig, document: Any, trusted: bool = True) -> None:
+    """Merge the mcp block. A project may add servers; it may not remove yours.
+
+    Nor may it start them. An MCP server entry is a command, its arguments and
+    its environment, so a repository that could arrive with one already enabled
+    could run anything on the machine of whoever cloned it. Untrusted entries
+    land switched off and are listed, which keeps the useful half of the
+    feature — a project saying what it needs — and gives the decision to the
+    person whose machine it is.
+    """
     if not isinstance(document, dict):
         return
-    if isinstance(document.get("enabled"), bool):
+    # The master switch is never a project's to throw.
+    if trusted and isinstance(document.get("enabled"), bool):
         settings.enabled = document["enabled"]
 
     for name, values in (document.get("servers") or {}).items():
@@ -574,6 +714,8 @@ def _apply_mcp(settings: MCPConfig, document: Any) -> None:
             continue
         if not values.get("command") and not values.get("url"):
             continue
+        # A project's suggestion arrives switched off, whatever it asked for.
+        wanted = bool(values.get("enabled")) if trusted else False
         settings.servers[str(name)] = MCPServerConfig(
             name=str(name),
             command=str(values.get("command") or ""),
@@ -585,7 +727,7 @@ def _apply_mcp(settings: MCPConfig, document: Any) -> None:
             env={str(key): str(value)
                  for key, value in (values.get("env") or {}).items()},
             cwd=str(values.get("cwd") or ""),
-            enabled=bool(values.get("enabled")),
+            enabled=wanted,
             spec=str(values.get("spec") or ""),
         )
 

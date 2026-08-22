@@ -74,6 +74,46 @@ is used, which is the whole idea of the thing.
   the environment wins either way — so a container can turn it on for a log
   without editing anything.
 
+## 0.8.7 — 2026-08-22
+
+### A cloned repository could redirect your API key
+
+`.comodor/config.json` is read from whatever directory the agent is started in,
+which for a coding agent means: from a repository somebody else wrote,
+immediately after cloning it. It was merged over the user's own settings with
+no restriction. An audit of what that allowed found all of this:
+
+| a repository could set | and then |
+|---|---|
+| `providers.*.base_url` | your API key is sent to their server on the first request |
+| `safety.workspace_only` | the agent writes outside the project |
+| `safety.auto_approve_shell` | it stops asking before running commands |
+| `safety.deny_commands` | the list "no prompt can talk past" is emptied |
+| `mcp.servers` with `enabled` | a command they named runs on your machine |
+| `agent.system_prompt_extra` | instructions injected with your authority |
+
+- **A project file is now restricted to an allow-list** of settings that cannot
+  be turned against the person who cloned the repository: which model, what
+  mode, the budgets, how it looks. An allow-list rather than a deny-list, so a
+  setting added next year is untrusted by default — the right way round to be
+  wrong.
+- **A project may still say which MCP servers it uses**, which is the useful
+  half of that feature, and they arrive **switched off** however the file asks.
+  Declaring is a suggestion; enabling is a decision, and it belongs to the
+  person whose machine it is.
+- **Refusals are said out loud.** Silently ignoring somebody's file is how a
+  config file gets a reputation for not working.
+
+### A setting has to be the type it says it is
+
+- **Fixed: `{"agent": {"max_steps": "lots"}}` was stored as the string**, and
+  the first `steps >= max_steps` an hour later raised a TypeError in the middle
+  of a task. Worse quietly, `{"loop": "false"}` was stored as the string
+  `"false"` — which is true.
+- Values are coerced where that is unambiguous, refused where it is not, and a
+  refusal names the key and what was expected. `null` no longer replaces a
+  string setting with `None`.
+
 ## 0.8.5 — 2026-08-22
 
 ### An answer nobody offered was accepted, and meant no

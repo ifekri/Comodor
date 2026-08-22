@@ -190,6 +190,12 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
 
     if not args.json:
         _greet_on_stderr(config, memory, skills)
+        for note in config.complaints:
+            print(f"config: {note}", file=sys.stderr)
+        if config.project_refused:
+            print(f"config: this project cannot set "
+                  f"{', '.join(sorted(config.project_refused))} — only yours can",
+                  file=sys.stderr)
 
         # Progress on stderr keeps stdout clean for the answer itself.
         def echo(event: Any) -> None:
