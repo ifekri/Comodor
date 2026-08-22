@@ -59,7 +59,7 @@ class ToolRegistry:
     def __init__(self, tools: Iterable[Tool] | None = None,
                  skills: Any = None, history: Any = None,
                  session_id: str = "", mcp: Any = None,
-                 spawn: Any = None) -> None:
+                 spawn: Any = None, config: Any = None) -> None:
         self._tools: dict[str, Tool] = {}
         if tools is not None:
             for tool in tools:
@@ -83,11 +83,32 @@ class ToolRegistry:
         # instance — must not advertise a tool that cannot run.
         if spawn is not None:
             self.add(Delegate(spawn))
+        # The desktop, when this machine can be driven and the user has said
+        # so. Both conditions matter: a tool that answers "not on this
+        # platform" every time is the wasted call this rule exists to prevent,
+        # and a tool that can take the mouse is not something a default enables.
+        if config is not None and getattr(config, "computer", None) \
+                and config.computer.enabled:
+            self._add_computer(config)
+
         # Whatever the enabled MCP servers offer, alongside the built-in tools
         # and subject to exactly the same permission gate.
         if mcp is not None:
             for tool in mcp.tools():
                 self.add(tool)
+
+    def _add_computer(self, config: Any) -> None:
+        """The computer tool, if this platform has a backend for it."""
+        from ..desktop import available
+
+        if not available():
+            return
+        from ..desktop.guard import NEVER, Guard
+        from .computer import Computer
+
+        extra = tuple(str(entry).lower() for entry in
+                      getattr(config.computer, "never", ()) or ())
+        self.add(Computer(guard=Guard(deny=NEVER + extra)))
 
     def add(self, tool: Tool) -> None:
         self._tools[tool.name] = tool

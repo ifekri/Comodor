@@ -189,7 +189,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     permissions.on_denied = memory.on_denied
     skills = load_skills(config)
     mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
-    tools = ToolRegistry(skills=skills, mcp=mcp,
+    tools = ToolRegistry(skills=skills, mcp=mcp, config=config,
                          spawn=spawner(config, gateway, bus, skills=skills, mcp=mcp))
     agent = AgentLoop(config, gateway, tools, bus,
                       permissions, Conversation(), memory, skills=skills)

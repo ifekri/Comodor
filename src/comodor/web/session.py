@@ -62,7 +62,7 @@ class Session:
         self.conversation = Conversation()
         self.agent = AgentLoop(
             config, self.gateway,
-            ToolRegistry(skills=self.skills, mcp=self.mcp,
+            ToolRegistry(skills=self.skills, mcp=self.mcp, config=config,
                          spawn=spawner(config, self.gateway, self.bus,
                                        skills=self.skills, mcp=self.mcp)),
             self.bus, self.permissions, self.conversation, self.memory,

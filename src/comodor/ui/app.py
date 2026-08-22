@@ -197,6 +197,7 @@ class App:
         """
         self.skills = skills_for(self.config)
         self.tools = ToolRegistry(skills=self.skills, history=self.history,
+                                  config=self.config,
                                   session_id=self.session.id, mcp=self.mcp)
         return len(self.skills)
 

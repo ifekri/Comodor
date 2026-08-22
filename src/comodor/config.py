@@ -206,6 +206,35 @@ class BrowserConfig:
 
 
 @dataclass
+class ComputerConfig:
+    """Driving the screen, the mouse and the keyboard.
+
+    Off until switched on here, and then still not allowed until granted: this
+    only decides whether the tool is offered to the model at all. The grant -
+    how long, over what - is asked for at the moment it is needed and is never
+    written to a file.
+    """
+
+    #: Whether the model is offered the tool. Off by default, and deliberately
+    #: not something a first run turns on for you.
+    enabled: bool = False
+    #: What one screenshot may cost. The dial between legibility and price:
+    #: 1600 is readable on every screen tried, 700 is cheap and readable on a
+    #: laptop, 4784 is the most the model will accept.
+    screenshot_tokens: int = 1600
+    #: Seconds a grant lasts when the answer is the plain one.
+    grant_seconds: int = 900
+    #: How long the pointer takes to travel, in seconds. The reason a person
+    #: can see where it is going and stop it; 0 would work and be unwatchable.
+    travel_seconds: float = 0.32
+    #: Draw the halo, the trail and the caption on screen. Off only for a
+    #: machine nobody is sitting at.
+    overlay: bool = True
+    #: Extra window titles never to touch, on top of the built-in list.
+    never: list[str] = field(default_factory=list)
+
+
+@dataclass
 class SkillsConfig:
     """Authored skills: instructions the user writes once and reuses."""
 
@@ -322,7 +351,12 @@ DEFAULT_DENY: tuple[str, ...] = (
 )
 
 #: Sections that live in the JSON file, in the order they are written.
-SECTIONS = ("ui", "agent", "gateway", "learning", "skills", "safety")
+#: The sections `load` applies and `save` writes. A dataclass on `Config` that
+#: is not named here is silently ignored - which is what happened to `browser`
+#: for its whole existence: `headless: false` in a config file did nothing and
+#: said nothing.
+SECTIONS = ("ui", "agent", "gateway", "learning", "skills", "safety",
+            "browser", "computer")
 
 
 @dataclass
@@ -335,6 +369,7 @@ class Config:
     learning: LearningConfig = field(default_factory=LearningConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
+    computer: ComputerConfig = field(default_factory=ComputerConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
@@ -621,6 +656,11 @@ PROJECT_SETTABLE: dict[str, frozenset[str] | None] = {
     # uses is useful; a project starting a process is not its decision. The
     # master switch is deliberately absent.
     "mcp": frozenset({"servers"}),
+    # `browser` and `computer` are deliberately absent, and this is the note
+    # for whoever is tempted to add them. A project that could set
+    # `browser.executable` names a binary for the agent to launch. One that
+    # could set `computer.enabled` asks the machine it was just cloned onto
+    # for its mouse and keyboard. Neither belongs to a repository.
 }
 
 

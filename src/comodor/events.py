@@ -129,6 +129,17 @@ class EventBus:
         self.publish(event)
         return event
 
+    @property
+    def listening(self) -> bool:
+        """Whether anything would see an event published now.
+
+        A question needs somewhere to be answered. The bus existing is not the
+        same as somebody being there, and a request published into an empty
+        room waits for its full timeout before defaulting to no.
+        """
+        with self._lock:
+            return bool(self._subscribers) and not self._closed
+
     def publish(self, event: Event) -> None:
         with self._lock:
             if self._closed:
