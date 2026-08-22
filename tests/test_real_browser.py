@@ -480,14 +480,33 @@ def test_a_screenshot_is_a_real_png(tmp_path):
 def test_only_a_missing_sandbox_causes_a_retry():
     """Restarting a browser that failed for some other reason — with a weaker
     configuration, silently — would be a bad way to hide a real problem."""
-    from comodor.browser.launch import _refused_for_want_of_a_sandbox
+    from comodor.browser.launch import _looks_like_a_sandbox_problem
 
-    assert _refused_for_want_of_a_sandbox(
-        "No usable sandbox! If this is a Debian system…")
-    assert _refused_for_want_of_a_sandbox(
+    assert _looks_like_a_sandbox_problem(
+        "No usable sandbox! If this is a Debian system...")
+    assert _looks_like_a_sandbox_problem(
         "Failed to move to new namespace: Operation not permitted")
-    assert not _refused_for_want_of_a_sandbox("could not start: file not found")
-    assert not _refused_for_want_of_a_sandbox("the browser did not open a port")
+    assert not _looks_like_a_sandbox_problem("could not start: file not found")
+    assert not _looks_like_a_sandbox_problem("the browser did not open a port")
+
+
+def test_the_useful_line_is_not_always_the_first_one():
+    """Chromium under compose says the setuid helper failed, and only mentions
+    the namespace four lines later. Matching the first line alone made the same
+    bug appear or not depending on how the container was started."""
+    from comodor.browser.launch import _first_line, _looks_like_a_sandbox_problem
+
+    printed = "\n".join([
+        "The setuid sandbox is not running as root. Common causes:",
+        "  * An unprivileged process using ptrace on it, like a debugger.",
+        "  * A parent process set prctl(PR_SET_NO_NEW_PRIVS, ...)",
+        "Failed to move to new namespace: ... errno = Operation not permitted",
+    ])
+
+    assert _looks_like_a_sandbox_problem(printed)
+    # And what a person is shown stays one line.
+    assert "\n" not in _first_line(printed)
+    assert "setuid sandbox is not running as root" in _first_line(printed)
 
 
 def test_a_browser_that_fails_for_another_reason_is_not_restarted(tmp_path,
@@ -517,9 +536,11 @@ def test_a_missing_sandbox_is_retried_once_without_one(tmp_path, monkeypatch):
     attempts = []
 
     def once(cls, binary, profile, port, headless, window, sandboxed):
+        from comodor.browser.launch import SandboxUnavailable
+
         attempts.append(sandboxed)
         if sandboxed:
-            raise BrowserError("it exited. It said: No usable sandbox!")
+            raise SandboxUnavailable("it exited. It said: No usable sandbox!")
         return Browser("/bin/true", profile, port, sandboxed=False)
 
     monkeypatch.setattr(Browser, "_spawn", classmethod(once))

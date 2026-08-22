@@ -2,6 +2,28 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.8.4 — 2026-08-22
+
+### The sandbox retry read only the first line
+
+- **Fixed: the retry decided from a summary rather than from the output.** The
+  error a person sees is trimmed to one line — forty lines of Chromium logging
+  is a haystack, not a message — and the retry was matching that trimmed line.
+  Chromium does not put the useful part first:
+
+  ```
+  The setuid sandbox is not running as root. Common causes:
+    * An unprivileged process using ptrace on it, like a debugger.
+    * A parent process set prctl(PR_SET_NO_NEW_PRIVS, ...)
+  Failed to move to new namespace: ... errno = Operation not permitted
+  ```
+
+  Under a plain `docker run` the namespace line comes first and it worked;
+  under compose, which sets `no-new-privileges`, a different line does and it
+  did not — the same bug present or absent depending on how the container was
+  started. What a person is shown and what the decision is made from are two
+  things now, and only the second sees everything.
+
 ## 0.8.3 — 2026-08-22
 
 ### Running in a container
