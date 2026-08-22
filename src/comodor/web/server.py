@@ -140,20 +140,43 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
             return ""
 
         def _body(self) -> dict[str, Any]:
+            """Read the body, whatever is going to be done with it.
+
+            Always read, and read all of it. Bytes left in the socket are read
+            by the *next* request on the connection as its request line, and a
+            socket closed with unread data sends a reset instead of a close —
+            which the client sees as a connection aborted rather than as the
+            401 that was actually sent.
+            """
             try:
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
+                length = 0
+            if length <= 0:
                 return {}
-            if length <= 0 or length > MAX_BODY:
+
+            raw = b""
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                # Past the cap it is drained and dropped, not left unread.
+                if len(raw) < MAX_BODY:
+                    raw += chunk
+            if length > MAX_BODY:
                 return {}
             try:
-                return json.loads(self.rfile.read(length) or b"{}")
-            except (ValueError, OSError):
+                return json.loads(raw or b"{}")
+            except ValueError:
                 return {}
 
         # -- reading ------------------------------------------------------- #
 
         def do_GET(self) -> None:
+            if self.headers.get("Content-Length"):
+                self._body()               # rare, but the same rule applies
             parts = urlparse(self.path)
             query = parse_qs(parts.query)
             route = parts.path
@@ -202,6 +225,10 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
         # -- doing --------------------------------------------------------- #
 
         def do_POST(self) -> None:
+            # Before any verdict: an unread body breaks the connection it
+            # arrived on, and the caller sees a reset instead of the refusal.
+            body = self._body()
+
             if not server.authorised(self._token()):
                 self._json(401, {"error": "unauthorised"})
                 return
@@ -213,7 +240,6 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 return
 
             route = urlparse(self.path).path
-            body = self._body()
 
             if route == "/api/send":
                 started = server.session.send(str(body.get("text") or ""))
@@ -243,6 +269,8 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
         def do_OPTIONS(self) -> None:
             # No CORS for anyone. A preflight that gets no permissions means a
             # cross-origin fetch cannot send the header the POST routes want.
+            if self.headers.get("Content-Length"):
+                self._body()
             self._send(405)
 
     return Handler
