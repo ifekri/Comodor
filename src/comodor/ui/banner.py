@@ -135,7 +135,7 @@ def _shades(theme: Theme, count: int) -> list[str]:
     for index in range(count):
         weight = index / max(1, count - 1)
         blend = tuple(round(a + (b - a) * weight * 0.65)
-                      for a, b in zip(start, end))
+                      for a, b in zip(start, end, strict=True))
         shades.append("#%02x%02x%02x" % blend)
     return shades
 
@@ -156,7 +156,7 @@ def wordmark(theme: Theme, width: int = 80) -> Text:
         return Text("Comodor", style=theme.style("accent", bold=True))
     shades = _shades(theme, len(WORDMARK))
     art = Text()
-    for line, shade in zip(WORDMARK, shades):
+    for line, shade in zip(WORDMARK, shades, strict=True):
         art.append(line + "\n", style=shade)
     return art
 

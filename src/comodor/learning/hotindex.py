@@ -19,8 +19,8 @@ critical path.
 from __future__ import annotations
 
 import threading
-from itertools import islice
 from dataclasses import dataclass
+from itertools import islice
 from typing import Iterable, Iterator
 
 from .bm25 import tokenize

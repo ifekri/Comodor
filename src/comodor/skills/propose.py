@@ -183,4 +183,4 @@ def _triggers(procedure) -> list[str]:
     tags = [tag.strip().lower() for tag in procedure.tags if tag.strip()]
     if tags:
         return tags[:6]
-    return [word for word in _words(procedure.name)][:4]
+    return list(_words(procedure.name))[:4]

@@ -17,8 +17,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rich.console import Group, RenderableType
-from rich.table import Table
 from rich.text import Text
 
 from ... import APP_NAME as APP

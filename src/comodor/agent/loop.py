@@ -256,7 +256,7 @@ class AgentLoop:
         else:
             results = [self._run_one(call, context) for call in calls]
 
-        for call, result in zip(calls, results):
+        for call, result in zip(calls, results, strict=True):
             message = Message.tool(
                 call_id=call.id, name=call.name,
                 content=result.content, is_error=not result.ok,

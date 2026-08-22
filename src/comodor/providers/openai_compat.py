@@ -197,7 +197,8 @@ class OpenAICompatProvider:
                 continue
             if isinstance(payload, dict) and payload.get("error"):
                 error = payload["error"]
-                message = error.get("message", str(error)) if isinstance(error, dict) else str(error)
+                message = (error.get("message", str(error))
+                           if isinstance(error, dict) else str(error))
                 raise ProviderError(f"{self.label}: {message}", provider=self.name)
 
             for choice in payload.get("choices", []) or []:

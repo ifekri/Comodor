@@ -20,7 +20,7 @@ import sys
 from ..config import Config, MCPServerConfig
 from . import catalogue
 from .manager import _connection_for
-from .protocol import MCPError, StdioConnection
+from .protocol import MCPError
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -147,7 +147,7 @@ def _add(config: Config, args: argparse.Namespace) -> int:
         # something and the entry would otherwise sit there not working.
         print(f"{spec.command!r} is not installed, and {spec.label} needs it "
               f"({spec.requires}).", file=sys.stderr)
-        print(f"Install it, then run this again.", file=sys.stderr)
+        print("Install it, then run this again.", file=sys.stderr)
         return 1
 
     environment = _parse_env(args.env)

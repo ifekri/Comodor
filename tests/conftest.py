@@ -14,11 +14,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from comodor.config import Config, ProviderConfig          # noqa: E402
-from comodor.events import EventBus                        # noqa: E402
-from comodor.paths import Paths                            # noqa: E402
+from comodor.config import Config, ProviderConfig  # noqa: E402
+from comodor.events import EventBus  # noqa: E402
+from comodor.paths import Paths  # noqa: E402
 from comodor.safety import CheckpointStore, PermissionEngine, Redactor  # noqa: E402
-from comodor.tools import ToolContext, ToolRegistry        # noqa: E402
+from comodor.tools import ToolContext, ToolRegistry  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

@@ -267,7 +267,8 @@ class SetupWizard:
                  style=self.theme.style("dim")))
         options = [(spec.id, spec.label, spec.blurb) for spec in catalogue.offered()]
         chosen = self._choose(options, default=1, title="Providers")
-        self._answered("provider", dict((v, l) for v, l, _ in options).get(chosen, chosen))
+        labels = {value: label for value, label, _ in options}
+        self._answered("provider", labels.get(chosen, chosen))
         return chosen
 
     def _ask_endpoint(self) -> str:
@@ -365,7 +366,7 @@ class SetupWizard:
         ]
         chosen = self._choose(options, default=1, title="Approvals")
         self._answered("approvals",
-                       dict((v, l) for v, l, _ in options).get(chosen, chosen))
+                       {value: label for value, label, _ in options}.get(chosen, chosen))
         return chosen
 
     # -- applying --------------------------------------------------------- #

@@ -203,7 +203,7 @@ def test_changes_that_do_not_apply_keep_the_checkout(config, bus, tool_context, 
     """Something moved underneath it. Discarding the work would be the worst
     of the available answers."""
     from comodor.tools.base import ToolResult
-    from comodor.tools.delegate import _Worktree, _with_changes
+    from comodor.tools.delegate import _with_changes, _Worktree
 
     tool_context.cwd = repo
     worktree = _Worktree.create(repo)
@@ -226,7 +226,7 @@ def test_changes_that_do_not_apply_keep_the_checkout(config, bus, tool_context, 
 
 def test_a_clean_patch_is_applied_to_the_parent(config, bus, tool_context, repo):
     from comodor.tools.base import ToolResult
-    from comodor.tools.delegate import _Worktree, _with_changes
+    from comodor.tools.delegate import _with_changes, _Worktree
 
     tool_context.cwd = repo
     worktree = _Worktree.create(repo)
@@ -279,7 +279,7 @@ def test_the_patch_reaches_git_as_the_bytes_it_was(config, bus, tool_context, re
     translated, so every delegate that changed a file worked here and reported
     an imaginary merge conflict on Windows."""
     from comodor.tools.base import ToolResult
-    from comodor.tools.delegate import _Worktree, _with_changes
+    from comodor.tools.delegate import _with_changes, _Worktree
 
     tool_context.cwd = repo
     worktree = _Worktree.create(repo)

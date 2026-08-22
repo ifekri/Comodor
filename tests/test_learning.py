@@ -17,7 +17,6 @@ from comodor.providers.gateway import Gateway
 from comodor.safety import PermissionEngine
 from comodor.tools import ToolRegistry
 
-
 # --------------------------------------------------------------------------- #
 # ranking primitives
 # --------------------------------------------------------------------------- #

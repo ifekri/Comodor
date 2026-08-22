@@ -23,9 +23,13 @@ import pytest
 
 from comodor.uninstall import Installation
 from comodor.update import (
-    Release, apply, is_newer, latest, parse, plan, upgrade,
+    apply,
+    is_newer,
+    latest,
+    parse,
+    plan,
+    upgrade,
 )
-
 
 # --------------------------------------------------------------------------- #
 # comparing

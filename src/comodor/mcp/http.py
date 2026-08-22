@@ -29,13 +29,12 @@ below it never learn that a server is remote.
 
 from __future__ import annotations
 
-import json
 import threading
 from typing import Any
 
 from ..net import http
 from ..net.sse import iter_sse
-from .protocol import MCPError, PROTOCOL_VERSION
+from .protocol import PROTOCOL_VERSION, MCPError
 
 #: Long enough for a cold serverless server to wake up.
 STARTUP_TIMEOUT = 60.0

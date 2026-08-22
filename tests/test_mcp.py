@@ -163,7 +163,7 @@ def test_a_server_that_will_not_start_does_not_take_the_others_down():
         assert any(name.startswith("fake__") for name in names)
         assert not any(name.startswith("broken__") for name in names)
 
-        rows = dict((row[0], row[1]) for row in made.report())
+        rows = {row[0]: row[1] for row in made.report()}
         assert rows["broken"] == "failed"
         assert rows["fake"] == "ready"
     finally:

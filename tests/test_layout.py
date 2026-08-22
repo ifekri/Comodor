@@ -8,6 +8,7 @@ the whole "works in any terminal" claim, checked mechanically.
 from __future__ import annotations
 
 import io
+from itertools import pairwise
 
 import pytest
 from rich.console import Console
@@ -156,7 +157,7 @@ def test_the_hints_sit_inside_the_footer_and_do_not_overlap():
     for rect in rects:
         assert rect.y == geometry.footer.y
         assert geometry.footer.x <= rect.x and rect.right <= geometry.footer.right
-    for earlier, later in zip(rects, rects[1:]):
+    for earlier, later in pairwise(rects):
         assert earlier.right < later.x
 
 

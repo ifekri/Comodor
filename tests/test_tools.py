@@ -10,7 +10,6 @@ from comodor.safety.redact import redact
 from comodor.tools.fs import change_stats, unified_diff
 from comodor.tools.web import html_to_text
 
-
 # --------------------------------------------------------------------------- #
 # files
 # --------------------------------------------------------------------------- #

@@ -208,7 +208,7 @@ def _diff(text: str, theme: Theme) -> Text:
     body = Text()
     lines = text.splitlines()[:DIFF_PREVIEW_LINES]
     for line in lines:
-        if line.startswith("+++") or line.startswith("---"):
+        if line.startswith(("+++", "---")):
             style = theme.style("dim", dim=True)
         elif line.startswith("+"):
             style = theme.style("good")

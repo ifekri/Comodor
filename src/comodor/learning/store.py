@@ -20,9 +20,9 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
-from .bm25 import BM25Index, coverage, similarity
+from .bm25 import BM25Index, coverage
 from .hotindex import HotIndex
 from .writer import AsyncWriter
 
@@ -59,6 +59,10 @@ PRAGMAS: dict[str, str] = {
     "mmap_size": "268435456",        # 256 MB
     "busy_timeout": "5000",
 }
+
+
+if TYPE_CHECKING:                      # a cycle at runtime, not to a type checker
+    from .associations import Associations
 
 
 # --------------------------------------------------------------------------- #

@@ -66,7 +66,8 @@ import uuid
 import zlib
 from collections import deque
 from collections.abc import Iterable, Iterator, Mapping, MutableMapping
-from dataclasses import dataclass, replace as _dc_replace
+from dataclasses import dataclass
+from dataclasses import replace as _dc_replace
 from datetime import timedelta
 from http.client import (
     BadStatusLine,
@@ -633,7 +634,13 @@ def _guess_content_type(filename: Optional[str]) -> str:
     return mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
 
-def _normalize_files(files: Any) -> list[tuple[str, tuple[Optional[str], Any, Optional[str], Optional[Mapping[str, str]]]]]:
+#: One part of a multipart body: the field name, then the filename, the
+#: payload, its content type, and any extra headers.
+_FilePart = tuple[str, tuple[Optional[str], Any, Optional[str],
+                             Optional[Mapping[str, str]]]]
+
+
+def _normalize_files(files: Any) -> list[_FilePart]:
     """Accept requests-style ``files=`` in all of its shapes."""
     if isinstance(files, Mapping):
         items = list(files.items())
@@ -705,7 +712,8 @@ def _encode_multipart(data: Any, files: Any) -> tuple[bytes, str]:
             else:
                 _write_field(str(name), value)
 
-    for field_name, (filename, payload, content_type, extra_headers) in _normalize_files(files or {}):
+    for field_name, (filename, payload, content_type, extra_headers) in \
+            _normalize_files(files or {}):
         if hasattr(payload, "read"):
             payload = payload.read()
         _write_field(
@@ -1152,7 +1160,7 @@ class Response:
                     self._encoding = charset
                     return charset
         media_type = content_type.split(";")[0].strip().lower()
-        if media_type.endswith("json") or media_type.endswith("+json"):
+        if media_type.endswith(("json", "+json")):
             self._encoding = "utf-8"
         elif media_type.startswith("text/"):
             # RFC 9110 default, but modern servers are almost always UTF-8.
@@ -1448,8 +1456,10 @@ class Session:
         params: Any = None,
         auth: Any = None,
         cookies: Optional[Union[CookieJar, Mapping[str, str]]] = None,
-        timeout: TimeoutValue = Timeout(),
-        retry: Retry = Retry(),
+        # Frozen dataclasses: one shared instance is the point, not a
+        # mutable default waiting to be scribbled on.
+        timeout: TimeoutValue = Timeout(),   # noqa: B008
+        retry: Retry = Retry(),              # noqa: B008
         verify: Union[bool, str] = True,
         cert: Union[None, str, tuple[str, str]] = None,
         proxies: Optional[Mapping[str, str]] = None,
@@ -1471,7 +1481,8 @@ class Session:
         self.proxies = dict(proxies or {})
         self.trust_env = trust_env
         self.max_redirects = max_redirects
-        self.hooks: dict[str, list[HookType]] = {"response": list((hooks or {}).get("response", []))}
+        self.hooks: dict[str, list[HookType]] = {
+            "response": list((hooks or {}).get("response", []))}
         self._pool = pool if pool is not None else ConnectionPool()
         self._owns_pool = pool is None
         self._cookie_lock = threading.Lock()

@@ -534,7 +534,8 @@ def test_a_container_binding_wide_is_not_called_reckless(config, monkeypatch, ca
     """A container has its own network namespace, so binding 127.0.0.1 there
     hides the port from the machine that started it. Binding everything is
     correct, and the boundary is how the port was published."""
-    from comodor.web import commands, server as module
+    from comodor.web import commands
+    from comodor.web import server as module
 
     monkeypatch.setattr(module, "in_a_container", lambda: True)
     served = module.Server(config, host="0.0.0.0", port=8765)
@@ -552,7 +553,8 @@ def test_a_container_binding_wide_is_not_called_reckless(config, monkeypatch, ca
 
 def test_a_real_machine_binding_wide_still_gets_the_warning(config, monkeypatch,
                                                             capsys):
-    from comodor.web import commands, server as module
+    from comodor.web import commands
+    from comodor.web import server as module
 
     monkeypatch.setattr(module, "in_a_container", lambda: False)
     served = module.Server(config, host="0.0.0.0", port=8765)

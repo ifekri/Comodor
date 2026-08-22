@@ -9,14 +9,12 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import stat
 
 import pytest
 
 from comodor.config import Config, MCPServerConfig, load
 from comodor.doctor import Status, apply_fixes, run_checks
-from comodor.paths import Paths
 
 
 @pytest.fixture

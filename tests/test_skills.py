@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from comodor.skills import SkillError, SkillRegistry, load, parse
-from comodor.skills import examples
+from comodor.skills import SkillError, SkillRegistry, examples, load, parse
 
 MINIMAL = """\
 ---
@@ -561,9 +560,8 @@ def test_a_name_that_disagrees_with_its_folder_warns(tmp_path):
 
 def read_tool(registry, tmp_path):
     from comodor.config import Config
-    from comodor.events import EventBus
+    from comodor.events import Cancellation, EventBus
     from comodor.paths import Paths
-    from comodor.events import Cancellation
     from comodor.safety import CheckpointStore, PermissionEngine, Redactor
     from comodor.tools.base import ToolContext
     from comodor.tools.skills import ReadSkillFile

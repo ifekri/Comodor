@@ -139,7 +139,7 @@ class Conversation:
     # -- introspection ---------------------------------------------------- #
 
     def summary_line(self) -> str:
-        roles = {role: 0 for role in ("user", "assistant", "tool")}
+        roles = dict.fromkeys(("user", "assistant", "tool"), 0)
         for message in self.messages:
             key = message.role.value
             if key in roles:

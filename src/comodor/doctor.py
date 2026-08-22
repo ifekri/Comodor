@@ -320,7 +320,7 @@ def _check_search_index(config: Config) -> Finding:
 
 
 def _check_skills(config: Config) -> Finding:
-    from .skills import SkillRegistry, examples
+    from .skills import SkillRegistry
 
     directory = config.paths.skills
     if not directory.exists():

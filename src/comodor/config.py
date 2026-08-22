@@ -29,7 +29,8 @@ from pathlib import Path
 from typing import Any
 
 from . import catalogue
-from .paths import Paths, resolve as resolve_paths
+from .paths import Paths
+from .paths import resolve as resolve_paths
 
 CONFIG_VERSION = 1
 

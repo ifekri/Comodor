@@ -308,7 +308,8 @@ class ListDir(Tool):
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Directory path. Defaults to the workspace root."},
+            "path": {"type": "string",
+                     "description": "Directory path. Defaults to the workspace root."},
             "all": {"type": "boolean", "description": "Include dotfiles."},
         },
     }

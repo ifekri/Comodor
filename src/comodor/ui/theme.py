@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from rich.box import ASCII, Box, HEAVY, ROUNDED, SQUARE
+from rich.box import ASCII, HEAVY, ROUNDED, SQUARE, Box
 from rich.style import Style
 from rich.theme import Theme as RichTheme
 
