@@ -622,3 +622,28 @@ def test_at_a_terminal_it_asks_instead(config, monkeypatch):
     assert commands.run(config, argparse.Namespace(
         host="127.0.0.1", port=0, token="", no_browser=True)) == 1
     assert asked, "it should have asked the setup questions"
+
+
+def test_a_container_is_never_asked_a_question(config, monkeypatch, capsys):
+    """Compose sets `tty: true`, so `isatty` is true inside a container whether
+    or not anybody is reading it. `docker compose up -d` would otherwise sit
+    forever on the first setup question - a hung container rather than a
+    message somebody can act on."""
+    import argparse
+
+    from comodor.web import commands
+
+    for entry in config.providers.values():
+        entry.api_key = ""
+        entry.configured = False
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("comodor.web.server.in_a_container", lambda: True)
+
+    def wizard(cfg):
+        raise AssertionError("a container was asked a question")
+
+    monkeypatch.setattr("comodor.setup.run_setup", wizard)
+
+    assert commands.run(config, argparse.Namespace(
+        host="127.0.0.1", port=0, token="", no_browser=True)) == 1
+    assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
