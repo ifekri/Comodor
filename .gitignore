@@ -1,0 +1,3 @@
+# The folder the agent works in. Yours, not the branch's.
+work/*
+!work/.gitkeep
