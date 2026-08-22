@@ -234,3 +234,61 @@ def test_the_bookkeeping_is_not_a_setting(home):
     config.save()
 
     assert not [key for key in written(home) if key.startswith("_")]
+
+
+# --------------------------------------------------------------------------- #
+# adopting something your file never held
+# --------------------------------------------------------------------------- #
+
+
+def test_enabling_a_project_server_saves_all_of_it(home):
+    """A repository may name an MCP server, and it arrives switched off. Turn
+    it on and save, and restoring borrowed values one at a time kept the
+    `enabled` that changed and dropped the command that did not - a server that
+    is named, enabled, and unrunnable."""
+    mine(home)
+    theirs(home, mcp={"servers": {"files": {
+        "command": "mcp-files", "args": ["--root", "/w"], "enabled": True}}})
+
+    config = load(cwd=home / "project")
+    assert not config.mcp.servers["files"].enabled, "it must arrive switched off"
+    config.mcp.servers["files"].enabled = True
+    config.save()
+
+    saved = written(home)["mcp"]["servers"]["files"]
+    assert saved["enabled"] is True
+    assert saved["command"] == "mcp-files"
+    assert saved["args"] == ["--root", "/w"]
+
+
+def test_leaving_a_project_server_alone_saves_none_of_it(home):
+    """Naming a server is the repository's suggestion, not the user's setting."""
+    mine(home)
+    theirs(home, mcp={"servers": {"files": {"command": "mcp-files"}}})
+
+    load(cwd=home / "project").save()
+
+    assert written(home)["mcp"]["servers"] == {}
+
+
+def test_a_provider_configured_only_by_the_environment_is_not_adopted(home,
+                                                                      monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-the-environment")
+    mine(home)
+
+    load(cwd=home / "project").save()
+
+    assert "anthropic" not in written(home).get("providers", {})
+
+
+def test_a_provider_you_set_up_yourself_is_saved_whole(home):
+    mine(home)
+
+    config = load(cwd=home / "project")
+    config.use("anthropic", api_key="sk-typed", model="claude-sonnet-5")
+    config.save()
+
+    saved = written(home)["providers"]["anthropic"]
+    assert saved["api_key"] == "sk-typed"
+    assert saved["model"] == "claude-sonnet-5"
+    assert saved["configured"] is True
