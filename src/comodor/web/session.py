@@ -189,12 +189,26 @@ class Session:
         threading.Thread(target=work, name="comodor-web-turn", daemon=True).start()
         return True
 
-    def answer(self, request_id: str, choice: str) -> bool:
-        request = self._pending.pop(request_id, None)
-        if request is None or request.answered:
-            return False
+    def answer(self, request_id: str, choice: str) -> tuple[bool, str]:
+        """Answer a waiting prompt. Returns whether it took, and why not.
+
+        The choice has to be one the request offered. Accepting anything else
+        and reporting success is the worst available behaviour: the permission
+        engine does not recognise the word, treats the turn as refused, and the
+        caller is told it worked.
+        """
+        request = self._pending.get(request_id)
+        if request is None:
+            return False, "nothing is waiting on that"
+        if request.answered:
+            return False, "that was already answered"
+        if request.options and choice not in request.options:
+            return False, (f"{choice!r} is not one of the choices: "
+                           f"{', '.join(request.options)}")
+
+        self._pending.pop(request_id, None)
         request.answer(choice)
-        return True
+        return True, ""
 
     def interrupt(self) -> None:
         self.agent.interrupt()

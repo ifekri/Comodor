@@ -341,8 +341,43 @@ def test_answering_something_nobody_asked_is_not_an_error_that_matters(served):
     status, body = call(served, "/api/answer", method="POST",
                         body={"id": "nope", "choice": "yes"}, token=served.token)
 
-    assert status == 410
+    assert status == 409
     assert body["answered"] is False
+    assert "nothing is waiting" in body["error"]
+
+
+def test_a_choice_that_was_never_offered_is_refused(served):
+    """It used to be accepted and reported as a success. The permission engine
+    then did not recognise the word, treated the turn as refused, and the
+    caller was told it had worked — found by driving the API by hand and
+    watching nothing happen."""
+    from comodor.events import Request
+
+    request = Request(id="r3", prompt="Run this?",
+                      options=["allow", "allow_always", "deny"])
+    served.session.bus.ask(request)
+
+    status, body = call(served, "/api/answer", method="POST",
+                        body={"id": "r3", "choice": "yes"}, token=served.token)
+
+    assert status == 409
+    assert body["answered"] is False
+    assert "not one of the choices" in body["error"]
+    assert "allow" in body["error"]
+    assert not request.answered, "the worker must still be waiting"
+
+
+def test_a_choice_that_was_offered_is_taken(served):
+    from comodor.events import Request
+
+    request = Request(id="r4", prompt="Run this?", options=["allow", "deny"])
+    served.session.bus.ask(request)
+
+    status, body = call(served, "/api/answer", method="POST",
+                        body={"id": "r4", "choice": "deny"}, token=served.token)
+
+    assert status == 200 and body["answered"] is True
+    assert request.wait(1.0) == "deny"
 
 
 def test_shutting_down_does_not_leave_a_worker_blocked_on_a_prompt(config):
