@@ -4,6 +4,47 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 ## 0.8.6 — 2026-08-22
 
+### Nothing ships that has not passed the gate
+
+Release triggered on a tag and CI triggered on a push. They were separate
+workflows with no relationship, so tagging a commit whose tests were failing
+published it — which is exactly what happened to 0.8.0 today, caught only by
+looking at the runs afterwards.
+
+- **Release now runs the gate itself**, as its own first job, and building,
+  publishing and the GitHub release all depend on it. Making Release *wait* for
+  CI is the obvious fix and the wrong one: workflows on different triggers
+  cannot depend on each other, and polling the other one's status is a race.
+- **The gate is the two commands a developer runs** — `ruff check` and the
+  whole suite. Not a subset, not "fast tests": a gate that runs something other
+  than what the developer runs is one nobody trusts and everybody eventually
+  bypasses.
+
+### A linter, chosen by counting
+
+Ruff can be pointed at some eight hundred rules; most of them, on a codebase
+with a settled voice, produce churn. Each family was run against the tree first
+and picked on what it actually found:
+
+| enabled | found | why |
+|---|---|---|
+| `F`, `E4`, `E7`, `E9` | 20 | unused imports, undefined names, a redefinition — every one real |
+| `I` | 32 | import order, all mechanical, noise in every diff until settled |
+| `B` | 6 | including four `zip()` calls that would silently truncate |
+| `W`, `C4`, `PIE` | 9 | trailing whitespace, needless comprehensions |
+| `E501` at 100 | 15 | past a hundred columns something has gone wrong, not just got untidy |
+
+Deliberately **not** enabled: `BLE001` and `S110`, which between them flag 110
+broad excepts — every one written on purpose, with a comment, around code that
+must not be able to take the agent down. A rule needing 110 suppressions is not
+finding a problem, it is disagreeing with a decision. `UP`, `SIM` and `RUF`
+likewise: 271 findings about how things are spelled.
+
+All 77 findings are fixed rather than suppressed, with two documented
+exceptions: the model table in `providers/registry.py`, whose columns line up
+across rows and which wrapping would make worse, and two frozen dataclasses
+used as argument defaults, where sharing one instance is the point.
+
 ### A wordmark, and a line that earns its place
 
 Starting the interface, a headless run or the browser server now opens with the

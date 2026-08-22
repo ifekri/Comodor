@@ -14,9 +14,9 @@ from typing import Any, Iterable
 from ..providers.base import ToolSpec
 from ..safety import Risk
 from . import overflow
-from .delegate import Delegate
 from .base import Tool, ToolContext, ToolResult
 from .browser import Browser
+from .delegate import Delegate
 from .fs import EditFile, ListDir, ReadFile, WriteFile
 from .history import SearchHistory
 from .search import Glob, Grep

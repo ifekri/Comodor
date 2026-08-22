@@ -27,7 +27,8 @@ import sys
 from typing import Any
 
 from . import __version__
-from .config import Config, load as load_config
+from .config import Config
+from .config import load as load_config
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -155,9 +156,9 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     from .agent.spawn import spawner
     from .events import EventBus, Kind
     from .learning import LearningEngine
+    from .mcp import MCPManager
     from .providers.gateway import Gateway
     from .safety import CheckpointStore, PermissionEngine, Redactor
-    from .mcp import MCPManager
     from .skills import load_for as load_skills
     from .tools import ToolRegistry
 
@@ -359,8 +360,8 @@ def run_update(config: Config, check_only: bool = False) -> int:
     on: what is out there, whether it is newer than this, how this copy would
     be upgraded, and what version answers afterwards.
     """
-    from .ui import console as console_module
     from . import update as updater
+    from .ui import console as console_module
 
     theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
                                          no_color=False)

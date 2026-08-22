@@ -24,7 +24,6 @@ from comodor.providers.gateway import Gateway
 from comodor.providers.openai_compat import OpenAICompatProvider
 from comodor.providers.registry import estimate_cost, lookup, supports_sampling
 
-
 # --------------------------------------------------------------------------- #
 # SSE
 # --------------------------------------------------------------------------- #
@@ -348,7 +347,6 @@ def test_gateway_never_replays_a_stream_that_already_produced_output(config):
 
 
 def test_an_auth_failure_is_not_retried_anywhere(config):
-    from comodor.providers.base import AuthError
 
     class Unauthorised:
         name = "bad"

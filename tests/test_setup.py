@@ -17,7 +17,7 @@ import pytest
 from rich.console import Console
 
 from comodor import catalogue
-from comodor.config import Config, ProviderConfig, load
+from comodor.config import Config, load
 from comodor.paths import Paths
 from comodor.setup import Answers, SetupWizard
 

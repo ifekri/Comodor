@@ -28,7 +28,7 @@ import threading
 import time
 from typing import TextIO
 
-from .keys import InputEvent, KeyDecoder, KeyEvent, WINDOWS_SPECIAL
+from .keys import WINDOWS_SPECIAL, InputEvent, KeyDecoder, KeyEvent
 
 IS_WINDOWS = os.name == "nt"
 ESC_FLUSH_SECONDS = 0.06

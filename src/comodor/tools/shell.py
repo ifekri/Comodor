@@ -74,8 +74,10 @@ class RunShell(Tool):
         "type": "object",
         "properties": {
             "command": {"type": "string", "description": "The command line to run."},
-            "cwd": {"type": "string", "description": "Working directory, relative to the workspace."},
-            "timeout": {"type": "number", "description": f"Seconds before it is killed (max {int(MAX_TIMEOUT)})."},
+            "cwd": {"type": "string",
+                    "description": "Working directory, relative to the workspace."},
+            "timeout": {"type": "number",
+                        "description": f"Seconds before it is killed (max {int(MAX_TIMEOUT)})."},
             "description": {"type": "string", "description": "One line on what this command does."},
         },
         "required": ["command"],

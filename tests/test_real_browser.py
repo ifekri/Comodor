@@ -530,7 +530,6 @@ def test_a_browser_that_fails_for_another_reason_is_not_restarted(tmp_path,
 
 
 def test_a_missing_sandbox_is_retried_once_without_one(tmp_path, monkeypatch):
-    from comodor.browser import BrowserError
     from comodor.browser.launch import Browser
 
     attempts = []

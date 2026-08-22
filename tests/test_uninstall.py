@@ -30,8 +30,8 @@ import pytest
 from comodor.config import Config
 from comodor.paths import Paths
 from comodor.uninstall import (
-    Installation,
     PROFILE_MARKER,
+    Installation,
     Survey,
     apply,
     detect_installation,
@@ -53,7 +53,7 @@ def nowhere_near_the_real_machine(tmp_path, monkeypatch):
     monkeypatch.setattr("comodor.uninstall.BIN_DIR", home / ".local" / "bin")
     # Found by scanning real directories, including sys.prefix. A test that
     # wants launchers says so.
-    monkeypatch.setattr("comodor.uninstall._launchers", lambda: [])
+    monkeypatch.setattr("comodor.uninstall._launchers", list)
     # Nothing here may spawn the detached Windows deleter.
     monkeypatch.setattr("comodor.uninstall._schedule",
                         lambda paths: (_ for _ in ()).throw(

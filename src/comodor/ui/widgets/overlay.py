@@ -171,7 +171,7 @@ def _detail(detail: str, rows: int, theme: Theme) -> RenderableType:
 
     for line in lines[:rows]:
         if is_diff:
-            if line.startswith("+++") or line.startswith("---"):
+            if line.startswith(("+++", "---")):
                 style = theme.style("dim")
             elif line.startswith("+"):
                 style = theme.style("good")

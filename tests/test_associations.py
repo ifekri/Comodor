@@ -17,7 +17,10 @@ from __future__ import annotations
 import pytest
 
 from comodor.learning.associations import (
-    EXPANSION_WEIGHT, MAX_EXPANSION, MIN_OBSERVATIONS, Associations,
+    EXPANSION_WEIGHT,
+    MAX_EXPANSION,
+    MIN_OBSERVATIONS,
+    Associations,
 )
 from comodor.learning.bm25 import tokenize
 from comodor.learning.store import coverage

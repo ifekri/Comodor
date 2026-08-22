@@ -32,7 +32,7 @@ Issues = "https://github.com/ifekri/Comodor/issues"
 Changelog = "https://github.com/ifekri/Comodor/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.14"]
 
 [project.scripts]
 comodor = "comodor.cli:main"
@@ -41,6 +41,29 @@ comodor = "comodor.cli:main"
 # with it, so nothing can fall out of step with it: `git tag v0.3.0` is the
 # whole of a release. `_version.py` is generated at build time - including by an
 # editable install - and is not committed.
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["src/comodor/_version.py"]
+
+[tool.ruff.lint]
+# Chosen by counting what each family actually found in this tree, not by
+# taking a preset. The reasoning is in the commit that added this.
+select = ["F", "E4", "E7", "E9", "E501", "W", "I", "B", "C4", "PIE"]
+
+[tool.ruff.lint.per-file-ignores]
+# A table of models, one per line, whose columns line up across rows.
+# That alignment is why it can be read at a glance, and wrapping every
+# row onto two lines to satisfy a column count would cost more than the
+# rule is worth here.
+"src/comodor/providers/registry.py" = ["E501"]
+# A test may import a name only to prove it is importable, and its fixtures
+# shadow each other by design.
+"tests/*" = ["B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["comodor"]
+
 [tool.hatch.version]
 source = "vcs"
 

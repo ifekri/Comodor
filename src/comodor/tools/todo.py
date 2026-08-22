@@ -12,7 +12,7 @@ from typing import Any
 
 from ..events import Kind
 from ..safety import Risk
-from .base import Tool, ToolContext, ToolResult, TodoItem
+from .base import TodoItem, Tool, ToolContext, ToolResult
 
 VALID_STATES = ("pending", "active", "done", "blocked")
 

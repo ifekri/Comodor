@@ -753,6 +753,23 @@ comodor preview 120x34            # render one frame at a fixed size
 
 ---
 
+## Checking it
+
+```bash
+pip install -e ".[dev]"
+ruff check src tests      # the linter
+pytest -q                 # the suite
+```
+
+Those two commands are the gate, and they are the same two the release runs
+before it builds anything. Nothing reaches PyPI that has not passed them: the
+release workflow's first job is the gate, and building, publishing and the
+GitHub release all depend on it.
+
+That is not a precaution against a hypothetical. Release triggers on a tag and
+CI on a push; before this they were unrelated, and 0.8.0 went to PyPI while CI
+was red.
+
 ## Contributing
 
 Bug reports welcome — please include `comodor doctor`, which prints everything

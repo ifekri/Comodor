@@ -115,10 +115,11 @@ def test_a_task_title_is_trimmed_before_it_is_fenced():
     """Truncating an isolated string throws away its closing mark, and an
     unbalanced isolate leaks into the rest of the line — which is worse than
     never fencing it."""
-    from comodor.ui.theme import load
-    from comodor.ui.layout import Rect
-    from comodor.ui.widgets.history import HistoryModel, render_history
     from rich.console import Console
+
+    from comodor.ui.layout import Rect
+    from comodor.ui.theme import load
+    from comodor.ui.widgets.history import HistoryModel, render_history
 
     long_title = PERSIAN * 6
     model = HistoryModel(todos=[{"text": long_title, "state": "active"}])

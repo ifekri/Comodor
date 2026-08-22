@@ -25,14 +25,13 @@ from ..agent.spawn import spawner
 from ..config import Config, save_user_config
 from ..events import Cancelled, EventBus, EventQueue, Kind, Request
 from ..learning import LearningEngine
+from ..mcp import MCPManager
+from ..mcp.manager import SEPARATOR
 from ..providers import registry
 from ..providers.fake import demo_scripts
 from ..providers.gateway import Gateway
 from ..safety import CheckpointStore, PermissionEngine, Redactor
-from ..session import (SessionIndex, SessionMeta, SessionStore,
-                       derive_title, new_session_id)
-from ..mcp import MCPManager
-from ..mcp.manager import SEPARATOR
+from ..session import SessionIndex, SessionMeta, SessionStore, derive_title, new_session_id
 from ..skills import candidates as skill_candidates
 from ..skills import load_for as skills_for
 from ..tools import ToolRegistry

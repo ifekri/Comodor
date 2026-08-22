@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 
-from rich.console import Console, ConsoleOptions, Group, RenderResult, RenderableType
+from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
 from rich.markdown import CodeBlock, Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
