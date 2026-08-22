@@ -566,3 +566,59 @@ def test_a_real_machine_binding_wide_still_gets_the_warning(config, monkeypatch,
         assert "ssh -N -L" in printed
     finally:
         served.session.close()
+
+
+# --------------------------------------------------------------------------- #
+# starting it with nothing configured
+# --------------------------------------------------------------------------- #
+
+
+def test_it_refuses_to_serve_when_no_provider_is_configured(config, monkeypatch,
+                                                            capsys):
+    """The browser interface can change the mode and nothing else, so a server
+    started without a key produces a URL, a browser window, and a failure on
+    the first task with nothing on screen to act on. The Docker image sends
+    people straight here, which is exactly the audience that has configured
+    nothing yet."""
+    import argparse
+
+    from comodor.web import commands
+
+    for entry in config.providers.values():
+        entry.api_key = ""
+        entry.configured = False
+    assert config.needs_setup
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    code = commands.run(config, argparse.Namespace(
+        host="127.0.0.1", port=0, token="", no_browser=True))
+
+    assert code == 1
+    said = capsys.readouterr().err
+    assert "no provider configured" in said
+    assert "ANTHROPIC_API_KEY" in said, "the message has to carry the answer"
+    assert str(config.paths.config_file) in said
+
+
+def test_at_a_terminal_it_asks_instead(config, monkeypatch):
+    """Somebody who typed `comodor web` is sitting in front of a prompt."""
+    import argparse
+
+    from comodor.web import commands
+
+    for entry in config.providers.values():
+        entry.api_key = ""
+        entry.configured = False
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    asked = []
+
+    def wizard(cfg):
+        asked.append(cfg)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("comodor.setup.run_setup", wizard)
+
+    assert commands.run(config, argparse.Namespace(
+        host="127.0.0.1", port=0, token="", no_browser=True)) == 1
+    assert asked, "it should have asked the setup questions"
