@@ -39,6 +39,35 @@ def no_skill_library(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def a_terminal_of_known_shape(monkeypatch):
+    """The suite decides what the terminal can do, not the shell that ran it.
+
+    `NO_COLOR` is a widely honoured convention and plenty of people set it
+    globally. `prepare_theme` respects it, so with it set the tests that assert
+    the banner is painted, or that the background reaches the empty rows, fail
+    on a working build — and the failure looks like a bug in the banner rather
+    than a preference in the environment. The colour-detection tests set these
+    for themselves.
+    """
+    for name in ("NO_COLOR", "TERM_PROGRAM", "COLORTERM", "WT_SESSION"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_importing_from_the_real_home(monkeypatch):
+    """Nothing in this suite reads another agent's real configuration.
+
+    The wizard's first screen offers to import from OpenClaw or Hermes, and
+    `discover` looks in `Path.home()`. On a machine that has either installed —
+    which is the machine this was written on — an unguarded test of the wizard
+    would copy a real API key into a temporary config and real skills into a
+    temporary directory, and still pass. The tests that are about the import
+    pass their own directory to look in.
+    """
+    monkeypatch.setenv("COMODOR_NO_IMPORT", "1")
+
+
+@pytest.fixture(autouse=True)
 def no_package_index(monkeypatch):
     """Nothing in this suite asks PyPI what the newest release is.
 

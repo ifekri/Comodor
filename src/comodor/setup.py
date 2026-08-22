@@ -23,7 +23,9 @@ a new user meets must not be a mode their terminal might not support.
 from __future__ import annotations
 
 import getpass
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Sequence
 
 from rich.console import Console
@@ -31,7 +33,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from . import catalogue
+from . import catalogue, migrate
 from .config import Config
 from .ui import chooser
 from .ui import console as console_module
@@ -62,8 +64,12 @@ class SetupWizard:
 
     def __init__(self, config: Config, console: Console | None = None,
                  theme: Theme | None = None, prompt: Prompt | None = None,
-                 secret: Secret | None = None) -> None:
+                 secret: Secret | None = None, home: Path | None = None) -> None:
         self.config = config
+        #: Where to look for another agent. An argument rather than
+        #: `Path.home()` reached for directly, so that a test can point it at a
+        #: temporary directory instead of reading the real one.
+        self.home = home
         self.theme = theme or console_module.prepare_theme(
             config.ui.theme, config.ui.ascii_borders, no_color=False)
         self.console = console or console_module.build(self.theme)
@@ -74,6 +80,7 @@ class SetupWizard:
         self._keys = prompt is None and chooser.interactive(self.console)
         #: What has been answered so far, shown at the top of each screen.
         self._done: list[tuple[str, str]] = []
+        self.imported = migrate.Outcome()
 
     # -- presentation ----------------------------------------------------- #
 
@@ -173,28 +180,145 @@ class SetupWizard:
     # -- the questions ---------------------------------------------------- #
 
     def run(self) -> Answers:
-        total = 5
         self._banner()
 
+        # Asked before anything else, because everything after it depends on
+        # the answer: an imported key is a key not to ask for, and an imported
+        # model is the default for the model question.
+        elsewhere = self._look_for_another_agent()
+        total = 5 + (1 if elsewhere else 0)
+        step = 1
+        if elsewhere:
+            self._offer_import(elsewhere, step, total)
+            step += 1
+
         answers = Answers()
-        answers.provider = self._ask_provider(1, total)
+        answers.provider = self._ask_provider(step, total)
         spec = catalogue.get(answers.provider)
+
+        step += 1
 
         if answers.provider == "custom":
             answers.base_url = self._ask_endpoint()
         if spec is not None and spec.needs_key or answers.provider == "custom":
-            answers.api_key = self._ask_key(2, total, spec)
+            answers.api_key = self._ask_key(step, total, spec)
         else:
-            self._rule("API key", 2, total)
+            self._rule("API key", step, total)
             self.console.print(
                 Text("  Not needed — this one runs on your machine.",
                      style=self.theme.style("dim")))
             self._answered("api key", "not needed")
 
-        answers.model = self._ask_model(3, total, spec, answers)
-        answers.approvals = self._ask_approvals(4, total)
-        answers.skills = self._ask_skills(5, total)
+        answers.model = self._ask_model(step + 1, total, spec, answers)
+        answers.approvals = self._ask_approvals(step + 2, total)
+        answers.skills = self._ask_skills(step + 3, total)
         return answers
+
+    # ---------------------------------------------------------------- import #
+
+    def _look_for_another_agent(self) -> list:
+        """Whether there is another agent here worth importing from.
+
+        Never fatal: somebody's first run is not the place to fail because
+        another program left a file in a state this could not read.
+        """
+        if os.environ.get("COMODOR_NO_IMPORT"):
+            return []
+        try:
+            return migrate.discover(self.home)
+        except Exception:
+            return []
+
+    def _offer_import(self, found: list, step: int, total: int) -> None:
+        names = " and ".join(entry.tool for entry in found)
+        self._rule(f"You already use {names}", step, total)
+
+        for entry in found:
+            self.console.print(Text.assemble(
+                ("  ", ""),
+                (entry.tool, self.theme.style("accent", bold=True)),
+                (f"  {entry.summary()}", self.theme.style("text")),
+            ))
+            self.console.print(Text(f"  {entry.root}",
+                                    style=self.theme.style("dim")))
+        self.console.print(Text(
+            "\n  Nothing is moved and nothing already set here is replaced.",
+            style=self.theme.style("dim")))
+        self.console.print(Text(
+            "  Keys are copied into your config; the other tool keeps working.\n",
+            style=self.theme.style("dim")))
+
+        chosen = self._choose([
+            ("all", "bring it over", "keys, model and skills"),
+            ("keys", "keys only", "leave the skills and the model"),
+            ("no", "start fresh", "import nothing"),
+        ], default=1, title="Import")
+
+        if chosen == "no":
+            self._answered("import", "nothing")
+            self._report_what_was_left(found)
+            return
+
+        taken = migrate.Outcome()
+        for entry in found:
+            try:
+                got = migrate.apply(entry, self.config, take_keys=True,
+                                    take_skills=chosen == "all",
+                                    take_model=chosen == "all")
+            except Exception as error:            # another program's files
+                self.console.print(Text(f"  could not read {entry.tool}: {error}",
+                                        style=self.theme.style("bad")))
+                continue
+            taken.keys += got.keys
+            taken.skills += got.skills
+            taken.skipped += got.skipped
+            taken.model = taken.model or got.model
+
+        self.imported = taken
+        self._show_what_came_over(taken)
+        self._report_what_was_left(found)
+
+        # Saved now rather than at the end of the wizard. Somebody who closes
+        # the terminal at the model question should not have to find their keys
+        # a second time.
+        if taken.anything:
+            try:
+                self.config.save()
+            except OSError:
+                pass
+
+    def _show_what_came_over(self, taken) -> None:
+        if not taken.anything:
+            self.console.print(Text("  nothing to bring over after all",
+                                    style=self.theme.style("dim")))
+            self._answered("import", "nothing new")
+            return
+        parts = []
+        if taken.keys:
+            parts.append(f"{len(taken.keys)} key"
+                         f"{'s' if len(taken.keys) != 1 else ''} "
+                         f"({', '.join(taken.keys)})")
+        if taken.model:
+            parts.append(f"model {taken.model}")
+        if taken.skills:
+            parts.append(f"{len(taken.skills)} skill"
+                         f"{'s' if len(taken.skills) != 1 else ''}")
+        self._answered("imported", "; ".join(parts))
+        for note in taken.skipped[:4]:
+            self.console.print(Text(f"  kept as it was — {note}",
+                                    style=self.theme.style("dim")))
+
+    def _report_what_was_left(self, found: list) -> None:
+        """What was seen and not taken, said rather than skipped silently.
+
+        Somebody who has a MEMORY.md in the other tool will look for it here.
+        Saying why it did not come is the difference between a decision and a
+        thing that appears to be broken.
+        """
+        notes = [note for entry in found for note in entry.passed_over]
+        for note in notes[:3]:
+            self.console.print(Text(f"  not imported: {note}",
+                                    style=self.theme.style("dim")))
 
     def _ask_skills(self, step: int, total: int) -> list[str]:
         """Offer the library, once, at the only moment it is not an interruption.
@@ -265,7 +389,27 @@ class SetupWizard:
         self.console.print(
             Text("  You can add more later; this is just the one to start with.\n",
                  style=self.theme.style("dim")))
-        options = [(spec.id, spec.label, spec.blurb) for spec in catalogue.offered()]
+        # A provider that already has a key — imported a moment ago, or found
+        # in the environment — leads. The key is the expensive part of setting
+        # this up, and offering a default that needs a new one, immediately
+        # after announcing that a key was imported, is the wizard contradicting
+        # itself. Order within each group stays the catalogue's own.
+        def keyed(spec: catalogue.ProviderSpec) -> bool:
+            entry = self.config.providers.get(spec.id)
+            return bool(entry is not None and entry.api_key)
+
+        offered = list(catalogue.offered())
+        ready = [spec for spec in offered if keyed(spec)]
+        rest = [spec for spec in offered if not keyed(spec)]
+
+        def blurb(spec: catalogue.ProviderSpec) -> str:
+            if not keyed(spec):
+                return spec.blurb
+            why = "key imported" if spec.label in self.imported.keys \
+                else "key already set"
+            return f"{why} — {spec.blurb}"
+
+        options = [(spec.id, spec.label, blurb(spec)) for spec in ready + rest]
         chosen = self._choose(options, default=1, title="Providers")
         labels = {value: label for value, label, _ in options}
         self._answered("provider", labels.get(chosen, chosen))
@@ -286,6 +430,23 @@ class SetupWizard:
         self.console.print(
             Text("  It is stored in your config file and never sent anywhere but "
                  "the provider.\n", style=self.theme.style("dim")))
+
+        # A key that arrived from another agent, or from the environment, is
+        # already a working answer to this question. Asking for it again is how
+        # an import announces itself and then makes no difference.
+        already = self.config.providers.get(spec.id) if spec else None
+        if already is not None and already.api_key:
+            source = "imported" if spec and spec.label in self.imported.keys \
+                else "already configured"
+            self.console.print(Text(f"  A key for this provider is {source}.",
+                                    style=self.theme.style("good")))
+            keep = self._choose([
+                ("keep", f"use the {source} key", "nothing to type"),
+                ("replace", "enter a different one", ""),
+            ], default=1, title="API key")
+            if keep == "keep":
+                self._answered("api key", f"{source}, kept")
+                return ""
 
         while True:
             # Masked: keys get pasted in shared terminals and shoulder-surfed
@@ -312,7 +473,15 @@ class SetupWizard:
         if not models:
             return self._ask("model id", spec.default_model if spec else "")
 
-        options = [(model, model, "recommended" if index == 0 else "")
+        # A model that came over from another agent is the one this person was
+        # already using. It leads the list rather than sitting somewhere in it.
+        brought = self.imported.model
+        if brought and brought in models:
+            models = [brought] + [m for m in models if m != brought]
+
+        options = [(model, model,
+                    "brought over" if model == brought
+                    else "recommended" if index == 0 else "")
                    for index, model in enumerate(models)]
         options.append(("__other__", "something else", "type the model id"))
         chosen = self._choose(options, default=1, title="Models")
