@@ -790,9 +790,7 @@ class App:
 
     def cmd_model(self, args: str) -> None:
         if args:
-            self.config.model = args
-            self.state.status.model = args
-            self._toast(f"model: {args}", "good")
+            self._pick_model(args.strip())
             return
         provider = self.gateway.provider(self.config.provider)
         models = provider.list_models() or [self.config.active_model()]
@@ -800,10 +798,40 @@ class App:
         self.state.overlay = select_overlay("Model", items, self._pick_model)
 
     def _pick_model(self, model: str) -> None:
+        """One path, whether the model was typed or chosen from the list.
+
+        They had drifted: typing `/model x` left the session record naming the
+        old one, so a transcript said whichever model had been chosen the other
+        way.
+        """
         self.config.model = model
         self.state.status.model = model
         self.session.model = model
+        self._follow_the_models_context_window(model)
         self._toast(f"model: {model}", "good")
+
+    def _follow_the_models_context_window(self, model: str) -> None:
+        """The window belongs to the model, not to the configuration.
+
+        It is set once by the setup wizard and then read by the loop, which
+        compacts the conversation at a fraction of it. Left at a million after
+        a switch to a 128k model, the agent never compacts and the run fails at
+        the provider's real ceiling -- with the gauge in the corner still
+        reading a million on the way there.
+        """
+        from ..providers import registry
+
+        # `lookup` never fails - it invents safe defaults for a model it has
+        # not heard of. Taking those would drop the window to a made-up 128k
+        # the moment somebody switched to a local model, which is worse than
+        # leaving the number they had.
+        if not registry.knows(model):
+            return
+        window = registry.lookup(model).context
+        if not window or window == self.config.agent.context_limit:
+            return
+        self.config.agent.context_limit = window
+        self.state.status.context_limit = window
 
     def cmd_provider(self, args: str) -> None:
         items = [
@@ -827,9 +855,13 @@ class App:
             return
         self.config.provider = name
         self.config.model = entry.model
+        self.session.model = entry.model
         self.state.status.provider = entry.display
         self.state.status.model = entry.model
         self.state.status.connected = True
+        # A different provider means a different model, and a different model
+        # means a different window.
+        self._follow_the_models_context_window(entry.model)
         self._toast(f"provider: {entry.display}", "good")
 
     def cmd_mode(self, args: str) -> None:
@@ -1272,6 +1304,15 @@ class App:
         self.state.overlay = select_overlay("Theme", items, self._apply_theme)
 
     def _apply_theme(self, name: str) -> None:
+        from .theme import theme_names
+
+        # The palette table falls back to Ember for anything it does not know,
+        # so without this `/theme nonsense` reported success while the screen
+        # showed something else entirely.
+        known = theme_names()
+        if name not in known:
+            self._toast(f"no theme called {name} - try {', '.join(known)}", "bad")
+            return
         self.config.ui.theme = name
         self.theme = console_module.prepare_theme(
             name, self.config.ui.ascii_borders, no_color=False,
