@@ -2,6 +2,23 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.8.1 — 2026-08-22
+
+### A delegate's changes never applied on Windows
+
+- **Fixed: the patch was mangled before git saw it.**
+  `subprocess.run(..., text=True)` wraps stdin in a stream with the platform's
+  newline handling, and on Windows every `\n` written becomes `\r\n`. For a
+  command's *output* that is harmless. For a patch it is fatal: every line of
+  the diff gains a carriage return, the context stops matching the file, and
+  git refuses the whole thing.
+
+  The failure was silent and one-platform in the worst way. On Linux and macOS
+  nothing is translated, so a delegate that edited a file worked — and on
+  Windows the same delegate reported that its changes would not apply cleanly,
+  kept the worktree, and looked exactly like a merge conflict that was never
+  there. Git is spoken to in bytes now, and only its output is decoded.
+
 ## 0.8.0 — 2026-08-22
 
 Three things a much larger agent had and this one did not. A fourth — loading

@@ -192,9 +192,11 @@ class _Worktree:
             return None
         return cls(path, branch, root)
 
-    def diff(self) -> str:
+    def diff(self) -> bytes:
+        """The patch, as bytes. Decoding it would ruin a binary diff and
+        re-encoding it is one more chance to change a line ending."""
         _git(self.path, "add", "-A")
-        return _git(self.path, "diff", "--cached") or ""
+        return _git_bytes(self.path, "diff", "--cached") or b""
 
     def remove(self) -> None:
         _git(self.origin, "worktree", "remove", "--force", str(self.path))
@@ -236,7 +238,7 @@ def _with_changes(outcome: ToolResult, worktree: _Worktree, ctx: ToolContext,
             content=outcome.content + "\n\n[it changed no files]",
             **outcome.meta)
 
-    applied = _git(ctx.cwd, "apply", "--3way", "-", stdin=patch + "\n")
+    applied = _git(ctx.cwd, "apply", "--3way", "-", stdin=patch + b"\n")
     if applied is None:
         worktree.keep = True
         return ToolResult.success(
@@ -246,7 +248,8 @@ def _with_changes(outcome: ToolResult, worktree: _Worktree, ctx: ToolContext,
                      f"read the files there, or discard it.]"),
             worktree=str(worktree.path), applied=False, **outcome.meta)
 
-    files = sorted({line.split("/", 1)[-1] for line in patch.splitlines()
+    listed = patch.decode("utf-8", "replace")
+    files = sorted({line.split("/", 1)[-1] for line in listed.splitlines()
                     if line.startswith("+++ b/")})
     listed = ", ".join(files[:12]) or "none"
     return ToolResult.success(
@@ -263,11 +266,23 @@ def _git_root(cwd: Path) -> Path | None:
     return root if root.is_dir() else None
 
 
-def _git(cwd: Path, *args: str, stdin: str | None = None) -> str | None:
+def _git(cwd: Path, *args: str, stdin: bytes | None = None) -> str | None:
     """Run one git command. ``None`` means it failed, and failure is expected."""
+    raw = _git_bytes(cwd, *args, stdin=stdin)
+    return None if raw is None else raw.decode("utf-8", "replace")
+
+
+def _git_bytes(cwd: Path, *args: str, stdin: bytes | None = None) -> bytes | None:
+    """The same, without decoding anything.
+
+    Deliberately not `text=True`. That wraps stdin in a stream with default
+    newline handling, and on Windows every `\n` written becomes `\r\n` — which
+    turns a patch into one git will not apply, on that platform only, with an
+    error that reads exactly like a merge conflict.
+    """
     try:
         done = subprocess.run(
-            ["git", *args], cwd=str(cwd), input=stdin, text=True,
+            ["git", *args], cwd=str(cwd), input=stdin,
             capture_output=True, timeout=120.0,
         )
     except (OSError, subprocess.SubprocessError):
