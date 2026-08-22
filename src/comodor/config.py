@@ -443,7 +443,25 @@ class Config:
         choice and is written.
         """
         document = self.to_json()
+
+        # Objects their file never held at all are settled whole. Restoring
+        # one value at a time inside such an object can leave half of it: an
+        # MCP server a repository named, switched on and saved, kept the
+        # `enabled` they changed and dropped the command they did not.
+        settled: set[str] = set()
+        for path in _adopted_wholesale(document, self._mine):
+            here = {dotted: value for dotted, value in _leaves(document).items()
+                    if _under(path, dotted)}
+            lent = {dotted: value for dotted, value in self._borrowed.items()
+                    if _under(path, dotted)}
+            settled.update(here)
+            settled.update(lent)
+            if here == lent:              # untouched: none of it is theirs
+                _put(document, path.split("."), None, keep=False)
+
         for dotted, lent in self._borrowed.items():
+            if dotted in settled:
+                continue
             steps = dotted.split(".")
             if _leaf(document, steps) != lent:
                 continue                  # changed since: the user means it
@@ -491,6 +509,32 @@ def _leaves(document: Any, prefix: str = "") -> dict[str, Any]:
             found.update(_leaves(value, f"{prefix}.{key}" if prefix else str(key)))
     elif prefix:
         found[prefix] = document
+    return found
+
+
+def _under(prefix: str, dotted: str) -> bool:
+    return dotted == prefix or dotted.startswith(prefix + ".")
+
+
+def _adopted_wholesale(document: Any, mine: Any, prefix: str = "") -> list[str]:
+    """The largest objects in `document` that `mine` does not have at all.
+
+    Descent stops at the first missing one: if their file has never heard of
+    `mcp.servers.files`, nothing inside it is theirs either, and the decision
+    belongs to the whole entry rather than to each of its values.
+    """
+    found: list[str] = []
+    if not isinstance(document, dict):
+        return found
+    for key, value in document.items():
+        if not isinstance(value, dict):
+            continue
+        here = f"{prefix}.{key}" if prefix else str(key)
+        theirs = mine.get(key) if isinstance(mine, dict) else None
+        if not isinstance(theirs, dict):
+            found.append(here)
+        else:
+            found.extend(_adopted_wholesale(value, theirs, here))
     return found
 
 

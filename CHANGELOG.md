@@ -2,6 +2,30 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.8.9 — 2026-08-22
+
+Two consequences of 0.8.8, found by following its own changes into the places
+they touch.
+
+**A container has a tty and nobody reading it.** Refusing to serve a browser
+interface with no provider asks the setup questions when there is a terminal
+and prints an actionable message when there is not — and `isatty()` decided
+which. The compose file sets `tty: true`, so a container has a terminal whether
+or not anyone is attached: `docker compose up -d` would have reached the first
+question and waited for an answer that was never coming. A hung container is a
+worse failure than the one being fixed, and it lands on exactly the path the
+image exists to serve. In a container the answer is always the message.
+
+**Restoring borrowed values one at a time could keep half an object.** A
+repository may name an MCP server, and it arrives switched off. Turn it on,
+press save, and the restore did as it was told: `enabled` had changed so it was
+kept, `command` had not so it went back to what the user's file said, which was
+nothing. The saved entry was a server that was named, enabled and unrunnable.
+For an object their own file never held — a server a repository named, a
+provider that exists only because the environment supplied its key — either
+they have adopted it and all of it is theirs, or they have not and none of it
+belongs in their file. Half of it is the one answer that cannot be right.
+
 ## 0.8.8 — 2026-08-22
 
 ### Arriving from another agent
