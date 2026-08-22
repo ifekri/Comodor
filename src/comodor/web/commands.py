@@ -75,7 +75,14 @@ def _configured_or_explain(config: Config) -> Config | None:
     if not config.needs_setup:
         return config
 
-    if sys.stdin.isatty():
+    # `isatty` is not enough on its own. Compose sets `tty: true`, so a
+    # container has one whether or not anybody is reading it - and
+    # `docker compose up -d` would sit forever on the first question, which is
+    # a hung container instead of a message. In a container the answer is
+    # always the message.
+    from .server import in_a_container
+
+    if sys.stdin.isatty() and not in_a_container():
         from ..setup import run_setup
 
         try:
