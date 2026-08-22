@@ -33,7 +33,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ..events import Request
+from ..events import Kind, Request
 from ..safety import Risk
 from .base import Tool, ToolContext, ToolResult
 
@@ -260,7 +260,7 @@ class Computer(Tool):
         if action == "mouse_move":
             x, y = self._point(args.get("coordinate"), "mouse_move")
             desk.move(x, y)
-            return self._moved(f"Moved to ({x}, {y}).", (x, y))
+            return self._moved(ctx, f"Moved to ({x}, {y}).", (x, y))
 
         if action in CLICKS:
             button, count = CLICKS[action]
@@ -273,7 +273,7 @@ class Computer(Tool):
                 x, y = desk.where()
                 desk.click(button=button, count=count,
                            modifiers=str(args.get("text") or ""))
-            return self._moved(f"{action.replace('_', ' ').capitalize()} "
+            return self._moved(ctx, f"{action.replace('_', ' ').capitalize()} "
                                f"at ({x}, {y}).", (x, y))
 
         if action in ("left_mouse_down", "left_mouse_up"):
@@ -285,7 +285,7 @@ class Computer(Tool):
             start = self._point(args.get("start_coordinate"), action)
             end = self._point(args.get("coordinate"), action)
             desk.drag(start, end, modifiers=str(args.get("text") or ""))
-            return self._moved(f"Dragged from {start} to {end}.", end)
+            return self._moved(ctx, f"Dragged from {start} to {end}.", end)
 
         if action == "scroll":
             direction = str(args.get("scroll_direction") or "down")
@@ -331,7 +331,10 @@ class Computer(Tool):
                      ctx.config.computer.screenshot_tokens or 0) or None
         shot = desk.look(budget or _default_budget(), whole_desktop=whole_desktop)
         self._last = shot
-        return self._picture(shot, "the screen")
+        result = self._picture(shot, "the screen")
+        self._announce(ctx, "looking at the screen",
+                       frame=result.meta.get("image", ""))
+        return result
 
     def _zoom(self, ctx: ToolContext, desk: Any, region: Any) -> ToolResult:
         if not region or len(region) != 4:
@@ -347,6 +350,34 @@ class Computer(Tool):
         # the wide shot, so the model can act on what it read without having to
         # convert anything back.
         return self._picture(shot, f"a close look at {list(region)}")
+
+    def _announce(self, ctx: ToolContext, caption: str,
+                  at: tuple[int, int] | None = None,
+                  frame: str = "") -> None:
+        """Tell the interfaces what is happening on the screen.
+
+        The overlay draws on the machine being driven; this reaches a browser
+        that is somewhere else entirely, which is the only way to watch a
+        container work. Coordinates are converted into the pixels of the frame
+        the browser will be showing, because that is the picture it has.
+        """
+        if ctx.bus is None:
+            return
+        payload: dict[str, Any] = {"caption": caption}
+        if at is not None and self._last is not None:
+            x, y = self._last.to_image(*at)
+            payload.update(x=x, y=y)
+        if frame:
+            # Stripped from the log by the session, which keeps it aside for
+            # `/api/screen`. A megabyte of base64 in an event log that a
+            # browser re-reads on every poll is not a picture, it is a leak.
+            payload["frame"] = frame
+            payload["width"] = self._last.width if self._last else 0
+            payload["height"] = self._last.height if self._last else 0
+        try:
+            ctx.bus.emit(Kind.SCREEN, **payload)
+        except Exception:
+            pass
 
     def _picture(self, shot: Any, what: str) -> ToolResult:
         import base64
@@ -409,9 +440,11 @@ class Computer(Tool):
                 "take a screenshot first - coordinates are the pixels of one")
         return self._last.to_screen(float(value[0]), float(value[1]))
 
-    def _moved(self, message: str, at: tuple[int, int]) -> ToolResult:
+    def _moved(self, ctx: ToolContext, message: str,
+               at: tuple[int, int]) -> ToolResult:
         """Remember where the pointer was left, so the corner means something."""
         self.guard.note_pointer(at)
+        self._announce(ctx, message.rstrip("."), at=at)
         return ToolResult.success(message)
 
     def close(self) -> None:

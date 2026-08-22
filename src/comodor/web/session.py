@@ -59,6 +59,10 @@ class Session:
         self.permissions.on_denied = self.memory.on_denied
         self.skills = load_skills(config)
         self.mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
+        #: The most recent screenshot, and a number that changes with it, so a
+        #: browser can tell whether the one it is showing is still current.
+        self._screen: str = ""
+        self._frames: int = 0
         self.conversation = Conversation()
         self.agent = AgentLoop(
             config, self.gateway,
@@ -102,6 +106,15 @@ class Session:
         payload = {key: value for key, value in event.payload.items()
                    if key != "request"}
 
+        if kind is Kind.SCREEN and payload.get("frame"):
+            # Held aside rather than logged. The log keeps hundreds of events
+            # and a browser re-reads it from a cursor; a megabyte of base64 in
+            # there would be downloaded again every time somebody reconnected.
+            with self._lock:
+                self._frames += 1
+                self._screen = payload.pop("frame")
+                payload["frame"] = self._frames
+
         if kind is Kind.REQUEST:
             request: Request | None = event.payload.get("request")
             if request is None:
@@ -120,6 +133,19 @@ class Session:
         return {**_plain(payload), "kind": kind.value, "at": time.time()}
 
     # -- what a browser asks for ------------------------------------------- #
+
+    def screen(self) -> tuple[bytes, int]:
+        """The latest frame as PNG bytes, and its number."""
+        import base64
+
+        with self._lock:
+            data, number = self._screen, self._frames
+        if not data:
+            return b"", 0
+        try:
+            return base64.b64decode(data), number
+        except Exception:
+            return b"", number
 
     def since(self, cursor: int) -> list[dict[str, Any]]:
         with self._lock:
