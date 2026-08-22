@@ -149,6 +149,10 @@ class AgentConfig:
     #: the agent is told how to read, so the cost is bounded and nothing is
     #: lost. Four characters to a token, roughly.
     max_tool_chars: int = 12_000
+    #: How many screenshots stay in the history. Each costs its full token
+    #: price every turn it remains, and a screen from twenty clicks ago is not
+    #: the screen now. Two is enough to compare before with after.
+    keep_screenshots: int = 2
     system_prompt_extra: str = ""
     prompt_cache: bool = True            # let the provider re-serve the prefix
     prompt_cache_ttl: str = "5m"         # "5m" or "1h"; the hour costs more to write
@@ -649,7 +653,8 @@ PROJECT_SETTABLE: dict[str, frozenset[str] | None] = {
                      "sidebar", "banner", "max_fps", "mouse"}),
     "agent": frozenset({"mode", "loop", "max_steps", "max_seconds", "max_cost_usd",
                         "context_limit", "compact_at", "temperature",
-                        "max_output_tokens", "max_tool_chars"}),
+                        "max_output_tokens", "max_tool_chars",
+                        "keep_screenshots"}),
     "learning": frozenset({"enabled", "reflect", "top_k", "max_playbook_tokens"}),
     "skills": frozenset({"enabled", "top_k", "max_tokens"}),
     # Servers only, and they arrive switched off — a project saying what it

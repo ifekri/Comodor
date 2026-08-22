@@ -1359,6 +1359,54 @@ class App:
         ]
         self.state.overlay = info_overlay("Settings", "\n".join(body))
 
+    def cmd_computer(self, args: str) -> None:
+        """Allow, refuse or ask after the agent's use of the screen.
+
+            /computer              how things stand
+            /computer 15m          allow it for fifteen minutes
+            /computer 1h this app  only while the current window is in front
+            /computer stop         end it now
+        """
+        tool = self.tools.get("computer")
+        if tool is None:
+            from ..desktop import available, why_not
+
+            reason = why_not() if not available() else (
+                "it is switched off. Set computer.enabled in your config, or "
+                "run `comodor computer`.")
+            self._toast(f"no screen control: {reason}", "warn", ttl=8.0)
+            return
+
+        words = (args or "").strip().lower()
+        if not words:
+            self._toast(f"screen control: {tool.guard.status()}",
+                        "good" if tool.guard.active else "dim", ttl=6.0)
+            return
+
+        if words in ("stop", "off", "no", "revoke", "end"):
+            tool.guard.revoke("you ended it from the interface")
+            teller = getattr(tool.watcher, "say", None)
+            if teller is not None:
+                teller("Screen control ended", alarm=False)
+            self._toast("screen control ended", "good")
+            return
+
+        seconds, scope = _read_grant(words)
+        if seconds is None:
+            self._toast("usage: /computer 15m | /computer 1h this app | "
+                        "/computer stop", "warn", ttl=8.0)
+            return
+
+        if scope == "this app":
+            try:
+                scope = tool._desk().foreground()
+            except Exception:
+                scope = ""
+
+        tool.guard.allow(seconds, scope=scope, reason="allowed from the interface")
+        tool._show()
+        self._toast(f"screen control: {tool.guard.status()}", "warn", ttl=8.0)
+
     def cmd_approve(self, args: str) -> None:
         """Toggle auto-approval — the difference between watching and trusting."""
         safety = self.config.safety
@@ -1494,6 +1542,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/theme": ("cmd_theme", "change the colours"),
     "/settings": ("cmd_settings", "current configuration"),
     "/approve": ("cmd_approve", "auto-approve writes or shell"),
+    "/computer": ("cmd_computer", "let it use your screen, for a while"),
     "/save": ("cmd_save", "persist settings"),
     "/attach": ("cmd_attach", "add a file to the prompt"),
     "/clear": ("cmd_clear", "start a fresh conversation"),
@@ -1502,3 +1551,25 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/mcp": ("cmd_mcp", "MCP servers and the tools they provide"),
     "/quit": ("cmd_quit", "exit"),
 }
+
+
+
+def _read_grant(words: str) -> tuple[float | None, str]:
+    """`15m`, `1h`, `90s`, and an optional scope after it.
+
+    Bare numbers are minutes, because that is what somebody means when they
+    type `/computer 15` - seconds would be a strange thing to ask for and hours
+    a dangerous thing to assume.
+    """
+    import re
+
+    match = re.match(r"^\s*(\d+(?:\.\d+)?)\s*([smh]?)\s*(.*)$", words)
+    if not match:
+        return None, ""
+    amount = float(match.group(1))
+    unit = match.group(2) or "m"
+    scope = match.group(3).strip()
+    seconds = amount * {"s": 1, "m": 60, "h": 3600}[unit]
+    if seconds <= 0 or seconds > 8 * 3600:
+        return None, ""
+    return seconds, scope

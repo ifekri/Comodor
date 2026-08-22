@@ -136,6 +136,32 @@ class Conversation:
         self.compactions += 1
         return len(middle)
 
+    def forget_old_pictures(self, keep: int = 2) -> int:
+        """Drop all but the newest screenshots. Returns how many went.
+
+        A picture costs the same every turn it stays in the history, and a
+        screen from twenty clicks ago is not what is on the screen now. The
+        message is left in place with a note where the image was, so the model
+        can see that it looked and when, without paying to look again.
+
+        `keep` is small on purpose. Two is enough to compare "before" with
+        "after"; a third is a screen two actions old, which is history.
+        """
+        seen = 0
+        dropped = 0
+        for message in reversed(self.messages):
+            if not message.images:
+                continue
+            seen += 1
+            if seen <= keep:
+                continue
+            dropped += len(message.images)
+            message.images = []
+            note = "[the screenshot from this step is no longer in context]"
+            if note not in message.content:
+                message.content = (message.content + "\n" + note).strip()
+        return dropped
+
     # -- introspection ---------------------------------------------------- #
 
     def summary_line(self) -> str:

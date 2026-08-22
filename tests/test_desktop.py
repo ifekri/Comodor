@@ -333,3 +333,78 @@ def test_the_status_reads_like_something_a_person_would_say():
 
 def test_a_grant_describes_itself_without_a_scope():
     assert "anywhere on screen" in Grant(seconds=30).describe()
+
+
+# --------------------------------------------------------------------------- #
+# the history forgets screens it has already acted on
+# --------------------------------------------------------------------------- #
+
+
+def conversation_with_shots(count: int):
+    from comodor.agent.context import Conversation
+    from comodor.providers.base import Message
+
+    talk = Conversation()
+    talk.add(Message.user("do the thing"))
+    for index in range(count):
+        message = Message.tool(call_id=f"c{index}", name="computer",
+                               content=f"A screenshot of the screen, step {index}.")
+        message.images = ["fake-base64-png"]
+        talk.add(message)
+        talk.add(Message.tool(call_id=f"k{index}", name="computer",
+                              content="Clicked."))
+    return talk
+
+
+def test_only_the_newest_screenshots_are_kept():
+    """A picture costs its full price every turn it stays, and a screen from
+    twenty clicks ago is not the screen now."""
+    talk = conversation_with_shots(6)
+
+    dropped = talk.forget_old_pictures(keep=2)
+
+    assert dropped == 4
+    with_images = [m for m in talk.messages if m.images]
+    assert len(with_images) == 2
+    assert "step 4" in with_images[0].content
+    assert "step 5" in with_images[1].content
+
+
+def test_the_message_stays_and_says_the_picture_went():
+    """The model should still know it looked, and when — losing the message
+    would lose the step, not just the pixels."""
+    talk = conversation_with_shots(4)
+
+    talk.forget_old_pictures(keep=1)
+
+    oldest = [m for m in talk.messages if "step 0" in m.content][0]
+    assert oldest.images == []
+    assert "no longer in context" in oldest.content
+
+
+def test_forgetting_twice_does_not_say_it_twice():
+    talk = conversation_with_shots(4)
+
+    talk.forget_old_pictures(keep=1)
+    talk.forget_old_pictures(keep=1)
+
+    oldest = [m for m in talk.messages if "step 0" in m.content][0]
+    assert oldest.content.count("no longer in context") == 1
+
+
+def test_a_history_with_no_pictures_is_untouched():
+    from comodor.agent.context import Conversation
+    from comodor.providers.base import Message
+
+    talk = Conversation()
+    talk.add(Message.user("hello"))
+
+    assert talk.forget_old_pictures() == 0
+    assert talk.messages[0].content == "hello"
+
+
+def test_keeping_more_than_there_are_drops_none():
+    talk = conversation_with_shots(2)
+
+    assert talk.forget_old_pictures(keep=5) == 0
+    assert len([m for m in talk.messages if m.images]) == 2
