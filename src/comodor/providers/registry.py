@@ -122,6 +122,22 @@ def lookup(model: str) -> ModelInfo:
                      max_output=DEFAULT_MAX_OUTPUT, label=name or "unknown")
 
 
+def knows(model: str) -> bool:
+    """Whether there are real facts for this model, or only invented ones.
+
+    `lookup` never fails - it synthesises safe defaults for anything it has not
+    heard of, which is right for pricing and wrong for a caller deciding
+    whether to overwrite a setting. Switching to a local model would otherwise
+    drop the context window to a made-up 128k.
+
+    Mirrors `lookup`, prefix match and all, so the two cannot disagree.
+    """
+    name = _normalise(model)
+    if name in _CATALOGUE:
+        return True
+    return any(name.startswith(known) for known in _CATALOGUE)
+
+
 def context_window(model: str) -> int:
     return lookup(model).context
 
