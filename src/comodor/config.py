@@ -332,6 +332,12 @@ class Config:
     paths: Paths = field(default_factory=resolve_paths)
     #: True when the user file was missing — the wizard should run.
     first_run: bool = False
+    #: The user's own file, as a document, before anything else was merged in.
+    #: What `save` falls back to for a value that came from somewhere else.
+    _mine: dict[str, Any] = field(default_factory=dict, repr=False)
+    #: Dotted path -> the value a borrowed layer supplied, recorded at load.
+    #: A value that still matches is one the user has not chosen for themselves.
+    _borrowed: dict[str, Any] = field(default_factory=dict, repr=False)
     #: Keys a project's own config file asked for and was not allowed to set.
     #: Kept so the interface can say so: silently ignoring somebody's file is
     #: its own kind of unhelpful.
@@ -413,11 +419,36 @@ class Config:
         document["mcp"] = self.mcp.to_json()
         return document
 
+    def mine_only(self) -> dict[str, Any]:
+        """The document to write: this configuration, minus what it borrowed.
+
+        A repository's `.comodor/config.json`, the environment and the command
+        line all merge into the object the agent runs on. Writing that object
+        into the user's own file would make a cloned repository's spend ceiling
+        their permanent default, and would copy an API key they kept in their
+        environment onto disk.
+
+        A borrowed value that is still exactly what the borrowed layer supplied
+        goes back to whatever their own file said. A value they changed during
+        the session -- `/model`, `/approve`, the setup wizard -- is their own
+        choice and is written.
+        """
+        document = self.to_json()
+        for dotted, lent in self._borrowed.items():
+            steps = dotted.split(".")
+            if _leaf(document, steps) != lent:
+                continue                  # changed since: the user means it
+            was, had = _leaf(self._mine, steps, missing=_ABSENT), True
+            if was is _ABSENT:
+                was, had = None, False
+            _put(document, steps, was, keep=had)
+        return document
+
     def save(self, path: Path | None = None) -> Path:
         """Write the user configuration, readable only by its owner."""
         target = Path(path) if path else self.paths.config_file
         target.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(self.to_json(), indent=2, ensure_ascii=False) + "\n"
+        payload = json.dumps(self.mine_only(), indent=2, ensure_ascii=False) + "\n"
 
         # Written via a temporary file so an interrupted save cannot leave a
         # truncated config behind — losing the API key to a crash mid-write
@@ -428,6 +459,52 @@ class Config:
         temporary.replace(target)
         _restrict(target)
         return target
+
+
+class _Absent:
+    """Distinguishes "their file said null" from "their file did not say"."""
+
+    def __repr__(self) -> str:                    # pragma: no cover - debugging
+        return "<absent>"
+
+
+_ABSENT = _Absent()
+
+
+def _leaves(document: Any, prefix: str = "") -> dict[str, Any]:
+    """Every scalar in a document, by dotted path.
+
+    A list is a leaf: half-merging one produces something nobody wrote.
+    """
+    found: dict[str, Any] = {}
+    if isinstance(document, dict):
+        for key, value in document.items():
+            found.update(_leaves(value, f"{prefix}.{key}" if prefix else str(key)))
+    elif prefix:
+        found[prefix] = document
+    return found
+
+
+def _leaf(document: Any, steps: list[str], missing: Any = None) -> Any:
+    for step in steps:
+        if not isinstance(document, dict) or step not in document:
+            return missing
+        document = document[step]
+    return document
+
+
+def _put(document: Any, steps: list[str], value: Any, keep: bool) -> None:
+    """Restore a value their file had, or remove one it never mentioned."""
+    for step in steps[:-1]:
+        if not isinstance(document, dict) or step not in document:
+            return
+        document = document[step]
+    if not isinstance(document, dict):
+        return
+    if keep:
+        document[steps[-1]] = value
+    else:
+        document.pop(steps[-1], None)
 
 
 def _restrict(path: Path) -> None:
@@ -664,6 +741,23 @@ def load(cwd: Path | str | None = None, overrides: dict[str, Any] | None = None,
         project_document, refused = project_filtered(project_document)
         config.project_refused = refused
 
+    # What their own file alone produces. Recorded before anything else is
+    # merged in, because `save` has to be able to put a borrowed value back to
+    # whatever they themselves had.
+    mine = Config(paths=paths)
+    mine.providers = _build_providers()
+    if user_document:
+        _apply_user_layer(mine, user_document)
+    # The same derived correction the real configuration gets. Without it, a
+    # saved provider that no longer exists reads as borrowed - `_choose_active`
+    # replaced it, and the merged document no longer matches their file - so
+    # `doctor --fix` would repair it in memory and then write the broken name
+    # back out. Correcting the baseline the same way makes the two agree, and
+    # leaves genuinely borrowed choices (a provider picked only because the
+    # environment supplied its key) still borrowed.
+    _choose_active(mine)
+    config._mine = mine.to_json()
+
     for document, trusted in ((user_document, True), (project_document, False)):
         if not document:
             continue
@@ -690,7 +784,29 @@ def load(cwd: Path | str | None = None, overrides: dict[str, Any] | None = None,
         _apply(config, overrides)
 
     _choose_active(config)
+
+    # Everything the merged configuration says that their own file did not.
+    # `save` uses this to tell a setting they chose from one a repository, the
+    # environment or a flag happened to supply.
+    theirs = _leaves(config._mine)
+    config._borrowed = {dotted: value
+                        for dotted, value in _leaves(config.to_json()).items()
+                        if dotted not in theirs or theirs[dotted] != value}
     return config
+
+
+def _apply_user_layer(config: Config, document: dict[str, Any]) -> None:
+    """The user's own file, applied on its own, with nothing merged over it."""
+    for name in SECTIONS:
+        values = document.get(name)
+        if isinstance(values, dict):
+            _apply(getattr(config, name), values, f"{name}.", [])
+    _apply_provider_settings(config.providers, document.get("providers", {}))
+    _apply_mcp(config.mcp, document.get("mcp"), trusted=True)
+    if document.get("provider"):
+        config.provider = str(document["provider"])
+    if document.get("model"):
+        config.model = str(document["model"])
 
 
 def _apply_mcp(settings: MCPConfig, document: Any, trusted: bool = True) -> None:
