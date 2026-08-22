@@ -25,9 +25,15 @@ def home(tmp_path, monkeypatch):
 
 
 def configured(home):
-    """A machine that has been set up and works."""
+    """A machine that has been set up and works.
+
+    The model matters: it has to be one the pricing registry knows a rate for,
+    or the spend-limit check quite correctly reports that the ceiling cannot be
+    enforced - and a fixture meant to represent a healthy machine would be
+    representing one with a real problem.
+    """
     config = load(cwd=home / "project", use_environment=False)
-    config.use("openai", api_key="sk-test", model="gpt-4o")
+    config.use("anthropic", api_key="sk-test", model="claude-sonnet-5")
     config.save()
     return load(cwd=home / "project", use_environment=False)
 
@@ -111,14 +117,14 @@ def test_a_selected_provider_that_does_not_exist_is_replaced(home):
     assert finding(report, "provider").status is Status.FAIL
 
     apply_fixes(report)
-    assert config.provider == "openai"
+    assert config.provider == "anthropic"
     assert finding(run_checks(config), "provider").status is Status.OK
 
 
 def test_a_missing_model_falls_back_to_the_provider_default(home):
     config = configured(home)
     config.model = ""
-    config.providers["openai"].model = ""
+    config.providers["anthropic"].model = ""
 
     report = run_checks(config)
     assert finding(report, "model").status is Status.FAIL
@@ -294,15 +300,15 @@ def test_a_stale_provider_in_the_file_is_written_back(home):
     config.paths.config_file.write_text(json.dumps(document), encoding="utf-8")
 
     reloaded = load(cwd=home / "project", use_environment=False)
-    assert reloaded.provider == "openai", "loading should still work"
+    assert reloaded.provider == "anthropic", "loading should still work"
 
     report = run_checks(reloaded)
     assert finding(report, "saved provider").status is Status.WARN
 
     apply_fixes(report)
     written = json.loads(reloaded.paths.config_file.read_text(encoding="utf-8"))
-    assert written["provider"] == "openai"
-    assert written["providers"]["openai"]["api_key"] == "sk-test", \
+    assert written["provider"] == "anthropic"
+    assert written["providers"]["anthropic"]["api_key"] == "sk-test", \
         "repairing the provider must not lose the key"
 
 
@@ -381,3 +387,53 @@ def test_the_current_version_passes(monkeypatch):
     finding = _check_version(Config())
 
     assert finding is not None and finding.status is Status.OK
+
+
+# --------------------------------------------------------------------------- #
+# a ceiling, or a decoration
+# --------------------------------------------------------------------------- #
+
+
+def test_a_spend_limit_that_cannot_fire_is_reported(home):
+    """The loop stops a task when the cost passes `max_cost_usd`, and the cost
+    comes from a table with no rate for most models. For one of those the meter
+    never leaves zero and the limit never fires - silently, which is the part
+    worth reporting."""
+    config = load(cwd=home / "project", use_environment=False)
+    config.use("openai", api_key="sk-test", model="gpt-4o")
+    config.agent.max_cost_usd = 5.0
+
+    found = finding(run_checks(config, online=False), "spend limit")
+
+    assert found.status is Status.WARN
+    assert "gpt-4o" in found.detail
+    assert "max_steps" in found.remedy, "say which ceilings do work"
+
+
+def test_a_spend_limit_on_a_priced_model_is_fine(home):
+    config = load(cwd=home / "project", use_environment=False)
+    config.use("anthropic", api_key="sk-test", model="claude-sonnet-5")
+    config.agent.max_cost_usd = 5.0
+
+    assert finding(run_checks(config, online=False),
+                   "spend limit").status is Status.OK
+
+
+def test_a_model_on_your_own_machine_needs_no_ceiling(home):
+    config = load(cwd=home / "project", use_environment=False)
+    config.use("ollama", model="qwen2.5-coder:14b")
+    config.agent.max_cost_usd = 5.0
+
+    found = finding(run_checks(config, online=False), "spend limit")
+
+    assert found.status is Status.OK
+    assert "your machine" in found.detail
+
+
+def test_no_ceiling_asked_for_means_nothing_to_check(home):
+    config = load(cwd=home / "project", use_environment=False)
+    config.use("openai", api_key="sk-test", model="gpt-4o")
+    config.agent.max_cost_usd = 0.0
+
+    names = [f.name for f in run_checks(config, online=False).findings]
+    assert "spend limit" not in names

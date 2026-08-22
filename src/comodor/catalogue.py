@@ -65,8 +65,12 @@ CATALOGUE: tuple[ProviderSpec, ...] = (
         base_url="https://api.anthropic.com/v1",
         keys_url="https://console.anthropic.com/settings/keys",
         blurb="Claude, direct from the source. Strongest at long agentic work.",
-        default_model="claude-sonnet-4-5",
-        models=("claude-opus-4-1", "claude-sonnet-4-5", "claude-haiku-4-5"),
+        # These have to be models the pricing registry knows. It did not know
+        # any of the three that were here, so the wizard's own default landed
+        # on an unpriced model: the context gauge read a fallback 128k instead
+        # of a million, and the spend limit could not be enforced at all.
+        default_model="claude-sonnet-5",
+        models=("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"),
         env_key="ANTHROPIC_API_KEY",
         rank=2,
     ),

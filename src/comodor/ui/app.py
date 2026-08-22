@@ -22,7 +22,7 @@ from rich.live import Live
 
 from ..agent import AgentLoop, Conversation
 from ..agent.spawn import spawner
-from ..config import Config, save_user_config
+from ..config import Config, save_user_config, unenforceable_budget
 from ..events import Cancelled, EventBus, EventQueue, Kind, Request
 from ..learning import LearningEngine
 from ..mcp import MCPManager
@@ -154,6 +154,7 @@ class App:
         self.running = True
         self._greet()
         self._complain_about_the_config()
+        self._warn_if_the_budget_is_a_decoration()
         self._refresh_sessions()
         # Read the project's existing conventions once, in the background, so
         # the first answer already matches how this codebase is written.
@@ -199,6 +200,19 @@ class App:
                                   session_id=self.session.id, mcp=self.mcp)
         return len(self.skills)
 
+    def _warn_if_the_budget_is_a_decoration(self) -> None:
+        """A spend ceiling that cannot fire, said before it fails to.
+
+        The loop stops a task when the running cost passes `max_cost_usd`, and
+        the cost comes from a table that has no rate for most models. For one
+        of those the meter never leaves zero and the limit never fires. Waiting
+        for `comodor doctor` to say so means saying it to somebody who already
+        suspected.
+        """
+        note = unenforceable_budget(self.config)
+        if note:
+            self._toast(note, "warn", ttl=10.0)
+
     def _complain_about_the_config(self) -> None:
         """Anything the config asked for and did not get, said once, at the top.
 
@@ -206,14 +220,14 @@ class App:
         rejected loudly: the first teaches people the file is not read.
         """
         for note in self.config.complaints:
-            self.state.toasts.add(f"config: {note}")
+            self._toast(f"config: {note}", "warn")
         refused = self.config.project_refused
         if refused:
             listed = ", ".join(sorted(refused)[:6])
             more = f" (+{len(refused) - 6} more)" if len(refused) > 6 else ""
-            self.state.toasts.add(
+            self._toast(
                 f"this project's config cannot set {listed}{more} — "
-                f"only your own can")
+                f"only your own can", "warn")
 
     def _greet(self) -> None:
         """The wordmark, and what the brain has accumulated.
