@@ -431,6 +431,35 @@ comodor --provider groq --model llama-3.3-70b-versatile
 
 ---
 
+## It tells you what it knows
+
+Starting Comodor — the interface, a headless run, or the browser server — puts
+this at the top:
+
+```
+   ______                          __
+  / ____/___  ____ ___  ____  ____/ /___  _____
+ / /   / __ \/ __ `__ \/ __ \/ __  / __ \/ ___/
+/ /___/ /_/ / / / / / / /_/ / /_/ / /_/ / /
+\____/\____/_/ /_/ /_/\____/\__,_/\____/_/
+
+  it learns the way you correct it   0.8.6  ·  claude-sonnet-5
+  412 lessons · 7 skills · 3 rules you set   from 128 finished tasks
+  ~/work/your-project
+```
+
+The second line is the one worth the space. Most banners are a logo and a
+version number nobody reads twice; this one says what *this* installation has
+accumulated, and that number goes up as you use it.
+
+It stays out of the way where a banner would be noise: never in a pipe, so
+`comodor run … | jq` sees the answer and nothing else; never in `--json`;
+never in CI. Below 51 columns the art is dropped rather than reflowed, because
+ASCII art wrapped by a terminal is not a smaller logo. `COMODOR_BANNER=0`
+switches it off for one run and `"banner": false` for good.
+
+---
+
 ## A browser, and the reason it is not screenshots
 
 Comodor drives a real Chrome — one that runs JavaScript, keeps cookies and can

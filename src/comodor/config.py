@@ -116,6 +116,9 @@ class UIConfig:
     max_fps: int = 20                    # streaming deltas are coalesced to this
     show_timestamps: bool = False
     sidebar: bool = True
+    #: The wordmark at startup. `COMODOR_BANNER=0` switches it off for one run;
+    #: this switches it off for good.
+    banner: bool = True
     #: Empty means the colour theme picks one that suits it.
     syntax_theme: str = ""
 

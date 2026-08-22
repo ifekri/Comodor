@@ -61,11 +61,49 @@ def run(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def banner_shown(server: Server) -> bool:
+    """Whether the wordmark went out, and with it the model's name."""
+    from ..ui import banner
+    from ..ui import console as console_module
+
+    theme = console_module.prepare_theme(server.config.ui.theme,
+                                         server.config.ui.ascii_borders,
+                                         no_color=False)
+    return banner.wanted(console_module.build(theme), server.config)
+
+
+def _wordmark(server: Server) -> None:
+    """The logo above the address, including in a container's logs.
+
+    `docker compose up` shows this, and a container that says what it is before
+    it says where it is reads as something that started, rather than as
+    something that emitted a URL.
+    """
+    from .. import __version__ as release
+    from ..ui import banner
+    from ..ui import console as console_module
+
+    theme = console_module.prepare_theme(server.config.ui.theme,
+                                         server.config.ui.ascii_borders,
+                                         no_color=False)
+    console = console_module.build(theme)
+    if not banner.wanted(console, server.config):
+        return
+    console.print()
+    console.print(banner.render(theme, version=release,
+                                model=server.config.active_model(),
+                                width=console.size.width))
+
+
 def _announce(server: Server) -> None:
+    _wordmark(server)
     print()
     print(f"  Comodor is at  {server.url}")
     print(f"  Working in     {server.config.paths.project}")
-    print(f"  Model          {server.config.active_model()}")
+    # The model is on the wordmark above; saying it twice reads as a template
+    # rather than as something written.
+    if not banner_shown(server):
+        print(f"  Model          {server.config.active_model()}")
     print()
 
     if server.local:
