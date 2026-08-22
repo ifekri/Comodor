@@ -94,6 +94,23 @@
   form button:hover { border-color: var(--accent); color: var(--accent); }
   .hint { color: var(--faint); font-size: 11.5px; margin-top: .45rem; }
 
+  /* The screen the agent is driving, when it is driving one. */
+  #screen { display: none; border-bottom: 1px solid var(--line);
+            background: #0b0908; position: relative; }
+  #screen.on { display: block; }
+  #screen img { display: block; width: 100%; height: auto; }
+  #screen .mark { position: absolute; width: 46px; height: 46px;
+                  margin: -23px 0 0 -23px; border: 2px solid var(--accent);
+                  border-radius: 50%; pointer-events: none;
+                  box-shadow: 0 0 0 2px rgba(0,0,0,.5); }
+  #screen .mark::after { content: ""; position: absolute; inset: 16px;
+                         border: 2px solid var(--accent); border-radius: 50%;
+                         opacity: .55; }
+  #screen .say { position: absolute; left: 0; right: 0; bottom: 0;
+                 padding: .4rem .6rem; font-size: 12px; color: var(--text);
+                 background: linear-gradient(transparent, rgba(0,0,0,.82) 40%); }
+  #screen .say b { color: var(--accent); font-weight: 600; }
+
   /* Right-to-left text is set to the right, where its line begins. */
   .rtl { direction: rtl; text-align: right; font-family: Tahoma, var(--mono); }
 </style>
@@ -111,6 +128,11 @@
   <span class="spacer"></span>
   <span class="stat" id="stat"></span>
 </header>
+
+<section id="screen" aria-label="the screen the agent is using">
+  <img id="frame" alt="what the agent last looked at">
+  <div class="say" id="doing"></div>
+</section>
 
 <main id="log"></main>
 
@@ -247,6 +269,7 @@ function apply(event) {
       tools.delete(event.id);
       break;
     }
+    case "screen":   showScreen(event); break;
     case "notice":   add("notice", event.text); break;
     case "error":    add("error", event.text); streaming = null; break;
     case "cancelled":add("notice", "stopped"); streaming = null; break;
@@ -261,6 +284,50 @@ function apply(event) {
       break;
     case "turn_end": setBusy(false); break;
   }
+}
+
+const screenBox = document.getElementById("screen");
+const frameImage = document.getElementById("frame");
+const doing = document.getElementById("doing");
+let markTimer = null;
+
+function showScreen(event) {
+  screenBox.classList.add("on");
+
+  if (event.frame) {
+    // The number is in the URL so the browser caches each frame for good: a
+    // given number is always the same picture, and re-fetching a megabyte on
+    // every reconnect is what putting it in the event log would have cost.
+    // No token in the URL - the page is authorised by a cookie the browser
+    // sends with the image request as it does with every other one, and a
+    // token in an <img> src ends up in history and in any referrer.
+    frameImage.src = "/api/screen?n=" + event.frame;
+  }
+
+  if (event.caption) {
+    doing.innerHTML = "";
+    const bold = document.createElement("b");
+    bold.textContent = event.caption;
+    doing.appendChild(bold);
+  }
+
+  const old = screenBox.querySelector(".mark");
+  if (old) old.remove();
+  if (typeof event.x !== "number" || typeof event.y !== "number") return;
+
+  // Percentages, so the marker stays put when the panel is resized. The
+  // coordinates arrive in the pixels of the frame, which is the one thing both
+  // ends agree about.
+  const width = event.width || frameImage.naturalWidth || 1;
+  const height = event.height || frameImage.naturalHeight || 1;
+  const mark = document.createElement("div");
+  mark.className = "mark";
+  mark.style.left = (100 * event.x / width) + "%";
+  mark.style.top = (100 * event.y / height) + "%";
+  screenBox.appendChild(mark);
+
+  clearTimeout(markTimer);
+  markTimer = setTimeout(() => mark.remove(), 4000);
 }
 
 function markMode(mode) {

@@ -253,6 +253,22 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                                  "busy": server.session.busy})
                 return
 
+            if route == "/api/screen":
+                data, number = server.session.screen()
+                if not data:
+                    self._json(404, {"error": "nothing has been looked at yet"})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(data)))
+                # The number is in the URL the page asks for, so the frame can
+                # be cached hard: a given number is always the same picture.
+                self.send_header("Cache-Control", "public, max-age=31536000")
+                self.send_header("X-Frame-Number", str(number))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+
             self._json(404, {"error": "no such thing"})
 
         # -- doing --------------------------------------------------------- #

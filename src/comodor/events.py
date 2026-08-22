@@ -42,6 +42,9 @@ class Kind(str, Enum):
     STEP = "step"                                # one loop iteration completed
     CANCELLED = "cancelled"
 
+    # the screen, when the agent is driving one
+    SCREEN = "screen"                            # a frame, or an action on one
+
     # side channels
     STATUS = "status"                            # provider/model/connection
     USAGE = "usage"                              # tokens + cost + context fill

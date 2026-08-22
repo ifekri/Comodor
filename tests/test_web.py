@@ -647,3 +647,78 @@ def test_a_container_is_never_asked_a_question(config, monkeypatch, capsys):
     assert commands.run(config, argparse.Namespace(
         host="127.0.0.1", port=0, token="", no_browser=True)) == 1
     assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# watching a screen that is not in front of you
+# --------------------------------------------------------------------------- #
+
+
+def test_a_frame_is_kept_aside_and_not_logged(config):
+    """A screenshot is around a megabyte of base64. The log keeps hundreds of
+    events and a browser re-reads it from a cursor, so a picture in there is
+    re-downloaded on every reconnect."""
+    import json as json_module
+
+    from comodor.events import Kind
+    from comodor.web.session import Session
+
+    session = Session(config)
+    try:
+        session.bus.emit(Kind.SCREEN, caption="looking at the screen",
+                         frame="QUJD", width=800, height=600)
+
+        frames = [f for f in session.since(0) if f["kind"] == "screen"]
+        assert frames, "the event never reached the log"
+        assert frames[0]["frame"] == 1, "the log should carry a number"
+        assert len(json_module.dumps(frames[0])) < 500, "the picture is in the log"
+
+        data, number = session.screen()
+        assert data == b"ABC" and number == 1
+    finally:
+        session.close()
+
+
+def test_each_frame_gets_its_own_number(config):
+    """The number is in the URL the page asks for, so a given number has to
+    always be the same picture — that is what lets the browser cache it."""
+    from comodor.events import Kind
+    from comodor.web.session import Session
+
+    session = Session(config)
+    try:
+        session.bus.emit(Kind.SCREEN, caption="one", frame="QUJD")
+        session.bus.emit(Kind.SCREEN, caption="two", frame="WFla")
+
+        numbers = [f["frame"] for f in session.since(0) if f["kind"] == "screen"]
+        assert numbers == [1, 2]
+        assert session.screen() == (b"XYZ", 2)
+    finally:
+        session.close()
+
+
+def test_an_action_carries_where_it_happened(config):
+    """Without the picture — the marker is drawn over the frame the browser
+    already has."""
+    from comodor.events import Kind
+    from comodor.web.session import Session
+
+    session = Session(config)
+    try:
+        session.bus.emit(Kind.SCREEN, caption="Moved to (400, 200)", x=120, y=60)
+
+        frame = [f for f in session.since(0) if f["kind"] == "screen"][0]
+        assert (frame["x"], frame["y"]) == (120, 60)
+        assert "frame" not in frame
+    finally:
+        session.close()
+
+
+def test_nothing_looked_at_yet_is_not_an_error_shaped_like_a_picture(config):
+    from comodor.web.session import Session
+
+    session = Session(config)
+    try:
+        assert session.screen() == (b"", 0)
+    finally:
+        session.close()
