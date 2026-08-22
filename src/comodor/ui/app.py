@@ -46,6 +46,11 @@ from .widgets.history import SessionRef
 from .widgets.overlay import info_overlay, permission_overlay, select_overlay
 from .widgets.statusbar import StatusModel
 
+#: How long quitting waits for a turn in flight. Quitting mid-task should give
+#: the agent a moment to stop rather than abandoning it, so shutting down can
+#: legitimately take this long — which is what anything timing the exit has to
+#: allow for.
+SHUTDOWN_JOIN_SECONDS = 2.0
 IDLE_SLEEP = 0.02
 SPINNER_INTERVAL = 0.1
 # How long the prompt must sit still before recall is warmed for the draft.
@@ -199,7 +204,7 @@ class App:
         if self.mcp is not None:
             self.mcp.close()
         if self.worker and self.worker.is_alive():
-            self.worker.join(timeout=2.0)
+            self.worker.join(timeout=SHUTDOWN_JOIN_SECONDS)
         # Flush whatever the agent produced after the last event we pumped —
         # quitting mid-turn must not lose the transcript.
         self._persist_new_messages()
