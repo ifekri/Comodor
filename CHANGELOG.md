@@ -18,6 +18,14 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
   over the size cap, which is drained and discarded rather than left unread,
   because it is what goes unread that breaks the connection.
 
+- **Fixed: the loop's exit test allowed less time than shutting down is
+  allowed to take.** Quitting waits up to two seconds for a turn still in
+  flight, deliberately, so that stopping mid-task gives the agent a moment
+  rather than abandoning it. The test asserted the loop exits within one. It
+  could always fail, and only did when a turn happened to still be running as
+  the budget expired — on a loaded machine. The budget has a name now and the
+  test reads it, so the two cannot drift apart again.
+
 ## 0.8.1 — 2026-08-22
 
 ### A delegate's changes never applied on Windows
