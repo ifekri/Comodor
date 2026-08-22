@@ -192,3 +192,45 @@ def test_saving_twice_is_stable(home):
     load(cwd=home / "project").save()
 
     assert written(home) == once
+
+
+# --------------------------------------------------------------------------- #
+# where a key must never appear
+# --------------------------------------------------------------------------- #
+
+
+def test_the_public_dict_carries_no_key(home):
+    """It is documented as safe to display, log or export, and it masks the
+    key it knows about. Remembering the user's own document so a borrowed value
+    can be put back added a second copy it had never heard of."""
+    import json as json_module
+
+    mine(home, providers={"anthropic": {"api_key": "sk-SECRET", "configured": True}})
+
+    config = load(cwd=home / "project")
+
+    assert "sk-SECRET" not in json_module.dumps(config.to_public_dict())
+
+
+def test_a_repr_carries_no_key(home):
+    """Any traceback naming a Config prints one, and pytest prints them on
+    every failure. A key in a bug report is a key in an issue tracker."""
+    mine(home, providers={"anthropic": {"api_key": "sk-SECRET", "configured": True}})
+
+    config = load(cwd=home / "project")
+
+    assert "sk-SECRET" not in repr(config)
+    assert "sk-SECRET" not in repr(config.providers["anthropic"])
+    assert "api_key=set" in repr(config.providers["anthropic"]), \
+        "debugging still needs to show whether there is one"
+
+
+def test_the_bookkeeping_is_not_a_setting(home):
+    """It must not reach the saved file either, or the next load would read it
+    back as configuration."""
+    mine(home, model="mine")
+
+    config = load(cwd=home / "project")
+    config.save()
+
+    assert not [key for key in written(home) if key.startswith("_")]

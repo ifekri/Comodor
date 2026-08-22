@@ -46,7 +46,10 @@ class ProviderConfig:
     name: str
     kind: str = "openai"                 # "openai" | "anthropic" | "fake"
     base_url: str = ""
-    api_key: str = ""
+    #: Out of the generated repr on purpose. Any traceback naming a Config
+    #: prints one, and pytest prints them on every failure; a key in a bug
+    #: report is a key in an issue tracker.
+    api_key: str = field(default="", repr=False)
     model: str = ""
     label: str = ""
     headers: dict[str, str] = field(default_factory=dict)
@@ -56,6 +59,12 @@ class ProviderConfig:
     #: need no key, so without this Comodor would happily auto-select an Ollama
     #: that is not running and fail with a connection error.
     configured: bool = False
+
+    def __repr__(self) -> str:                     # pragma: no cover - debugging
+        """Everything except the key, and whether there is one."""
+        inner = ", ".join(f"{f.name}={getattr(self, f.name)!r}"
+                          for f in fields(self) if f.repr)
+        return f"ProviderConfig({inner}, api_key={'set' if self.api_key else 'unset'})"
 
     @property
     def display(self) -> str:
@@ -528,7 +537,12 @@ def _restrict(path: Path) -> None:
 
 def _as_dict(obj: Any) -> Any:
     if is_dataclass(obj) and not isinstance(obj, type):
-        return {f.name: _as_dict(getattr(obj, f.name)) for f in fields(obj)}
+        # Underscored fields are bookkeeping, not settings. `_mine` in
+        # particular holds a second copy of the user's document -- API key
+        # included -- and `to_public_dict` masks the key it knows about, not
+        # one nested inside a field it has never heard of.
+        return {f.name: _as_dict(getattr(obj, f.name))
+                for f in fields(obj) if not f.name.startswith("_")}
     if isinstance(obj, dict):
         return {k: _as_dict(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):

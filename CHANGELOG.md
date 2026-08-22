@@ -76,6 +76,14 @@ the context gauge read a fallback 128k instead of a million, the spend limit
 could not be enforced, and `doctor` warned that the model you were running "is
 not in the known list".
 
+**An API key was reaching two places it should not.** `to_public_dict` is
+documented as safe to display, log or export, and masks the key it knows about
+— but remembering the user's own document, so a borrowed value could be put
+back, added a second copy nested where the mask never looked. And
+`ProviderConfig.api_key` was an ordinary field, so the generated `repr` printed
+it: every traceback naming a Config, and every pytest failure that shows one,
+carried the key into whatever captured that output.
+
 Smaller, from the same pass:
 
 - **A skill folder was copied with `shutil.copytree`, which follows symlinks.**
