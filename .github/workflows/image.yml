@@ -73,11 +73,41 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: It starts, and says where it is
+      # With no key it must stop and say why. The browser interface has no way
+      # to enter one, so a server without a provider is a URL that fails on the
+      # first task - and in a container this message is the only thing the
+      # person who ran `docker compose up` is going to see.
+      - name: With no key, it says what is missing and stops
         run: |
-          docker run --rm -d --name check \
-            -p 127.0.0.1:8765:8765 \
-            ghcr.io/${{ github.repository_owner }}/comodor:latest
+          image=ghcr.io/${{ github.repository_owner }}/comodor:latest
+          set +e
+          output=$(docker run --rm -t --name check-nokey "$image" 2>&1)
+          code=$?
+          set -e
+          echo "$output"
+          if [ "$code" -eq 0 ]; then
+            echo "::error::it started a server with no provider configured"
+            exit 1
+          fi
+          case "$output" in
+            *"no provider configured"*) ;;
+            *) echo "::error::it stopped without saying why"; exit 1 ;;
+          esac
+          case "$output" in
+            *ANTHROPIC_API_KEY*) ;;
+            *) echo "::error::the message does not say what would fix it"; exit 1 ;;
+          esac
+          echo "It stopped, and the message carries the answer."
+
+      # `-d` is the case that used to hang: compose sets `tty: true`, so a
+      # container has a terminal whether or not anybody is reading it, and the
+      # setup questions would have been asked of nobody.
+      - name: With a key, it serves and wants the token
+        run: |
+          image=ghcr.io/${{ github.repository_owner }}/comodor:latest
+          docker run --rm -d -t --name check \
+            -e ANTHROPIC_API_KEY=sk-not-a-real-key \
+            -p 127.0.0.1:8765:8765 "$image"
           for _ in $(seq 1 30); do
             sleep 2
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/ || true)
@@ -88,8 +118,9 @@ jobs:
               docker rm -f check
               exit 0
             fi
+            docker ps --filter name=check --format '{{.Names}}' | grep -q check || break
           done
-          echo "It never answered."
-          docker logs check || true
-          docker rm -f check || true
+          echo "::error::it never answered."
+          docker logs check 2>&1 | head -40 || true
+          docker rm -f check 2>/dev/null || true
           exit 1
