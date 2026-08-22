@@ -254,3 +254,52 @@ def test_another_agent_in_a_broken_state_is_not_fatal(config, tmp_path):
     drive(config, tmp_path, "1", "1", "1", "1", "1", "1")
 
     assert config.providers["anthropic"].api_key == "sk-survived"
+
+
+# --------------------------------------------------------------------------- #
+# where a key already is, said accurately
+# --------------------------------------------------------------------------- #
+
+
+def test_a_key_in_your_environment_is_named_as_such(config, tmp_path, capsys,
+                                                    monkeypatch):
+    """An environment key is deliberately not copied to disk. Somebody told
+    only "already configured" would unset the variable one day and find an
+    agent that stopped working and a config file that never held a key."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-in-the-environment")
+    config.providers["anthropic"].api_key = "sk-in-the-environment"
+
+    drive(config, tmp_path, "1", "1", "1", "1", "1")
+
+    out = capsys.readouterr().out
+    assert "set in your environment ($ANTHROPIC_API_KEY)" in out
+    assert "stays there rather than being copied" in out
+
+
+def test_a_key_in_your_config_file_is_named_as_such(config, tmp_path, capsys):
+    config.providers["anthropic"].api_key = "sk-already-saved"
+
+    drive(config, tmp_path, "1", "1", "1", "1", "1")
+
+    out = capsys.readouterr().out
+    assert "already in your config file" in out
+
+
+def test_an_imported_key_is_named_as_imported(config, tmp_path, capsys):
+    openclaw(tmp_path)
+
+    drive(config, tmp_path, "1", "1", "1", "1", "1", "1")
+
+    assert "A key for this provider is imported." in capsys.readouterr().out
+
+
+def test_the_promise_about_the_config_file_is_not_made_falsely(
+        config, tmp_path, capsys, monkeypatch):
+    """"It is stored in your config file" is true of a key you type and false
+    of one in your environment. It is only said where it holds."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-in-the-environment")
+    config.providers["anthropic"].api_key = "sk-in-the-environment"
+
+    drive(config, tmp_path, "1", "1", "1", "1", "1")
+
+    assert "It is stored in your config file" not in capsys.readouterr().out

@@ -422,30 +422,37 @@ class SetupWizard:
     def _ask_key(self, step: int, total: int,
                  spec: catalogue.ProviderSpec | None) -> str:
         self._rule("API key", step, total)
+
+        entry = self.config.providers.get(spec.id) if spec else None
         if spec and spec.keys_url:
             self.console.print(Text.assemble(
                 ("  Get one at ", self.theme.style("dim")),
                 (spec.keys_url, self.theme.style("accent")),
             ))
-        self.console.print(
-            Text("  It is stored in your config file and never sent anywhere but "
-                 "the provider.\n", style=self.theme.style("dim")))
+        # Only when there is nothing already, because it is not true of a key
+        # that lives in the environment - that one is deliberately not copied
+        # to disk, and the offer below says so instead.
+        if entry is None or not entry.api_key:
+            self.console.print(
+                Text("  It is stored in your config file and never sent "
+                     "anywhere but the provider.", style=self.theme.style("dim")))
+        self.console.print()
 
         # A key that arrived from another agent, or from the environment, is
         # already a working answer to this question. Asking for it again is how
         # an import announces itself and then makes no difference.
-        already = self.config.providers.get(spec.id) if spec else None
-        if already is not None and already.api_key:
-            source = "imported" if spec and spec.label in self.imported.keys \
-                else "already configured"
-            self.console.print(Text(f"  A key for this provider is {source}.",
+        if entry is not None and entry.api_key:
+            where, note = self._where_the_key_is(spec)
+            self.console.print(Text(f"  A key for this provider is {where}.",
                                     style=self.theme.style("good")))
+            if note:
+                self.console.print(Text(f"  {note}", style=self.theme.style("dim")))
             keep = self._choose([
-                ("keep", f"use the {source} key", "nothing to type"),
-                ("replace", "enter a different one", ""),
+                ("keep", f"use the key {where}", "nothing to type"),
+                ("replace", "enter a different one", "saved to your config file"),
             ], default=1, title="API key")
             if keep == "keep":
-                self._answered("api key", f"{source}, kept")
+                self._answered("api key", f"{where}, kept")
                 return ""
 
         while True:
@@ -457,6 +464,23 @@ class SetupWizard:
                 return key
             self.console.print(Text("  a key is required for this provider",
                                     style=self.theme.style("bad")))
+
+    def _where_the_key_is(self, spec) -> tuple[str, str]:
+        """Which of the three sources put this key here, and what it means.
+
+        They no longer behave alike. An imported key and one typed here are
+        written to the config file; one in the environment is deliberately not,
+        because exporting a key rather than saving it is a decision. Somebody
+        told only "already configured" would unset the variable one day and
+        find an agent that stopped working and a file that never held a key.
+        """
+        if spec and spec.label in self.imported.keys:
+            return "imported", ""
+        if spec and spec.env_key and os.environ.get(spec.env_key, "").strip():
+            return (f"set in your environment (${spec.env_key})",
+                    "It stays there rather than being copied into your config "
+                    "file.")
+        return "already in your config file", ""
 
     def _ask_model(self, step: int, total: int,
                    spec: catalogue.ProviderSpec | None, answers: Answers) -> str:
