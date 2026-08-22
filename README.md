@@ -29,8 +29,21 @@ export ANTHROPIC_API_KEY=…      # or OPENAI_API_KEY, OPENROUTER_API_KEY, …
 docker compose up
 ```
 
-If you would rather not set one now, it still starts — the interface will say
-no provider is configured.
+**It is not optional here.** The browser interface can change the mode and
+nothing else — there is no way to enter a key from it — so without one the
+container says what is missing and stops, rather than printing a URL that
+fails on the first task with nothing on screen to act on:
+
+```
+Comodor has no provider configured, and the browser interface has no way to
+add one.
+
+  In Docker, pass a key in as an environment variable:
+    -e ANTHROPIC_API_KEY=...    -e OPENAI_API_KEY=...
+```
+
+If you would rather keep your key in a file than in your shell, put it in a
+`.env` beside this one — compose reads that, and it is already git-ignored.
 
 ## Where it works
 
