@@ -470,3 +470,83 @@ def test_a_screenshot_is_a_real_png(tmp_path):
         page.close()
         close_tab(browser.port, session.target_id)
         browser.stop()
+
+
+# --------------------------------------------------------------------------- #
+# where the browser cannot have its own sandbox
+# --------------------------------------------------------------------------- #
+
+
+def test_only_a_missing_sandbox_causes_a_retry():
+    """Restarting a browser that failed for some other reason — with a weaker
+    configuration, silently — would be a bad way to hide a real problem."""
+    from comodor.browser.launch import _refused_for_want_of_a_sandbox
+
+    assert _refused_for_want_of_a_sandbox(
+        "No usable sandbox! If this is a Debian system…")
+    assert _refused_for_want_of_a_sandbox(
+        "Failed to move to new namespace: Operation not permitted")
+    assert not _refused_for_want_of_a_sandbox("could not start: file not found")
+    assert not _refused_for_want_of_a_sandbox("the browser did not open a port")
+
+
+def test_a_browser_that_fails_for_another_reason_is_not_restarted(tmp_path,
+                                                                  monkeypatch):
+    from comodor.browser import BrowserError
+    from comodor.browser.launch import Browser
+
+    attempts = []
+
+    def refuse(cls, binary, profile, port, headless, window, sandboxed):
+        attempts.append(sandboxed)
+        raise BrowserError("the browser did not open a debugging port")
+
+    monkeypatch.setattr(Browser, "_spawn", classmethod(refuse))
+    monkeypatch.setattr("comodor.browser.launch.find", lambda hint="": "/bin/true")
+
+    with pytest.raises(BrowserError):
+        Browser.start(tmp_path / "profile")
+
+    assert attempts == [True], "it should not have tried again"
+
+
+def test_a_missing_sandbox_is_retried_once_without_one(tmp_path, monkeypatch):
+    from comodor.browser import BrowserError
+    from comodor.browser.launch import Browser
+
+    attempts = []
+
+    def once(cls, binary, profile, port, headless, window, sandboxed):
+        attempts.append(sandboxed)
+        if sandboxed:
+            raise BrowserError("it exited. It said: No usable sandbox!")
+        return Browser("/bin/true", profile, port, sandboxed=False)
+
+    monkeypatch.setattr(Browser, "_spawn", classmethod(once))
+    monkeypatch.setattr("comodor.browser.launch.find", lambda hint="": "/bin/true")
+
+    browser = Browser.start(tmp_path / "profile")
+
+    assert attempts == [True, False]
+    assert browser.sandboxed is False
+    assert "without its own renderer sandbox" in browser.note
+
+
+def test_a_browser_that_kept_its_sandbox_says_nothing_about_it(tmp_path):
+    from comodor.browser.launch import Browser
+
+    assert Browser("/bin/true", tmp_path, 9222).note == ""
+
+
+@needs_browser
+def test_on_a_real_machine_the_sandbox_is_kept(tmp_path):
+    """The retry must not fire where the sandbox works — that would give up a
+    real protection on every laptop to make one container convenient."""
+    from comodor.browser import Browser
+
+    browser = Browser.start(tmp_path / "profile", headless=True)
+    try:
+        assert browser.sandboxed is True
+        assert browser.note == ""
+    finally:
+        browser.stop()

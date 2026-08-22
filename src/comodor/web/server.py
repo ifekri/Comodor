@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import os
 import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -49,6 +50,25 @@ COOKIE = "comodor_token"
 #: request came from our own page rather than from somebody else's.
 GUARD = "X-Comodor"
 MAX_BODY = 1_000_000
+
+
+def in_a_container() -> bool:
+    """Docker, Podman or a Kubernetes pod, as best as can be told from inside.
+
+    Docker leaves a marker file; Podman sets an environment variable; both, and
+    Kubernetes, show it in the process control groups. Any one of them is
+    enough, and being wrong in either direction only changes the wording of a
+    warning, never what is bound or who can reach it.
+    """
+    if Path("/.dockerenv").exists() or Path("/run/.containerenv").exists():
+        return True
+    if os.environ.get("container"):
+        return True
+    try:
+        groups = Path("/proc/self/cgroup").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return any(marker in groups for marker in ("docker", "kubepods", "containerd"))
 
 
 def page() -> str:
@@ -70,6 +90,19 @@ class Server:
     @property
     def local(self) -> bool:
         return self.host in LOCAL
+
+    @property
+    def contained(self) -> bool:
+        """Whether this is running inside a container.
+
+        It changes what a wide bind means. A container has its own network
+        namespace, so binding 127.0.0.1 inside one hides the port from the
+        machine that started it — the interface becomes unreachable by the
+        person who asked for it. Binding everything is therefore the correct
+        thing to do, and who may reach it is decided one layer out, by how the
+        port was published.
+        """
+        return in_a_container()
 
     @property
     def url(self) -> str:

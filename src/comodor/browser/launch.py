@@ -21,6 +21,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -94,12 +95,42 @@ def free_port() -> int:
         return probe.getsockname()[1]
 
 
+#: What Chromium says when it will not run unprotected and cannot protect
+#: itself. Matched on the specifics, so a browser that failed for some other
+#: reason is not silently restarted with a weaker configuration.
+_NO_SANDBOX_SIGNS = (
+    "no usable sandbox",
+    "failed to move to new namespace",
+    "operation not permitted",
+    "sandboxhelper",
+    "chrome-sandbox",
+)
+
+
+def _refused_for_want_of_a_sandbox(message: str) -> bool:
+    text = message.lower()
+    return any(sign in text for sign in _NO_SANDBOX_SIGNS)
+
+
+def _said(handle) -> str:
+    """Whatever the browser printed before giving up, trimmed to one line."""
+    try:
+        handle.seek(0)
+        raw = handle.read(4000).decode("utf-8", "replace").strip()
+    except (OSError, ValueError):
+        return ""
+    if not raw:
+        return ""
+    first = next((line for line in raw.splitlines() if line.strip()), "")
+    return f" It said: {first.strip()[:300]}"
+
+
 class Browser:
     """A browser process we started, and are responsible for stopping."""
 
     def __init__(self, executable: str, profile: Path, port: int,
                  headless: bool = True, process: subprocess.Popen | None = None,
-                 ours: bool = True) -> None:
+                 ours: bool = True, sandboxed: bool = True) -> None:
         self.executable = executable
         self.profile = profile
         self.port = port
@@ -108,6 +139,11 @@ class Browser:
         #: False when we attached to something already running, in which case
         #: stopping it is not ours to do.
         self.ours = ours
+        #: False when the renderer sandbox had to be given up to start at all.
+        #: Worth knowing rather than assuming: it is the difference between a
+        #: bad page being contained by Chromium and being contained only by
+        #: whatever is around Chromium.
+        self.sandboxed = sandboxed
 
     @classmethod
     def start(cls, profile: Path, executable: str = "", headless: bool = True,
@@ -116,9 +152,25 @@ class Browser:
         profile.mkdir(parents=True, exist_ok=True)
         chosen = port or free_port()
 
+        try:
+            return cls._spawn(binary, profile, chosen, headless, window,
+                              sandboxed=True)
+        except BrowserError as error:
+            if not _refused_for_want_of_a_sandbox(str(error)):
+                raise
+        # It will not run its renderers in a user namespace here — almost
+        # always a container, whose own confinement is the stronger boundary
+        # anyway. Give up the inner one rather than weaken the outer one, and
+        # remember that this is what happened.
+        return cls._spawn(binary, profile, chosen, headless, window,
+                          sandboxed=False)
+
+    @classmethod
+    def _spawn(cls, binary: str, profile: Path, port: int, headless: bool,
+               window: tuple[int, int], sandboxed: bool) -> "Browser":
         arguments = [
             binary,
-            f"--remote-debugging-port={chosen}",
+            f"--remote-debugging-port={port}",
             # Loopback only. Without this Chrome will accept a debugging
             # connection from anything that can route to the port, which is a
             # remote code execution hole with a browser attached.
@@ -129,20 +181,33 @@ class Browser:
         ]
         if headless:
             arguments.append("--headless=new")
+        if not sandboxed:
+            arguments.append("--no-sandbox")
         arguments.append("about:blank")
 
+        # Kept, not discarded: when it exits at once the reason is in there,
+        # and the difference between "no sandbox available" and anything else
+        # decides whether retrying is sensible or dishonest.
+        complaints = tempfile.TemporaryFile()
         try:
             process = subprocess.Popen(
-                arguments, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                arguments, stdout=subprocess.DEVNULL, stderr=complaints,
                 stdin=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
                 if os.name == "nt" else 0,
             )
         except OSError as error:
+            complaints.close()
             raise BrowserError(f"could not start {binary}: {error}") from error
 
-        browser = cls(binary, profile, chosen, headless, process)
-        browser._await_port()
+        browser = cls(binary, profile, port, headless, process,
+                      sandboxed=sandboxed)
+        try:
+            browser._await_port()
+        except BrowserError as error:
+            raise BrowserError(f"{error}{_said(complaints)}") from None
+        finally:
+            complaints.close()
         return browser
 
     def _await_port(self) -> None:
@@ -170,6 +235,16 @@ class Browser:
         if not version(port):
             raise BrowserError(f"nothing is listening for DevTools on port {port}")
         return cls("", Path(), port, headless=False, process=None, ours=False)
+
+    @property
+    def note(self) -> str:
+        """What is worth saying about how it started, if anything."""
+        if self.sandboxed:
+            return ""
+        return ("Chromium is running without its own renderer sandbox: it "
+                "could not create a user namespace here, which is normal "
+                "inside a container. The container's confinement is what is "
+                "holding a bad page, rather than the browser's.")
 
     @property
     def label(self) -> str:
