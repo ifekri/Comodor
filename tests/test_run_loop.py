@@ -83,7 +83,13 @@ def run_with(app, events, monkeypatch, budget: float = 3.0):
         app.run()
     finally:
         watchdog.cancel()
-    assert time.monotonic() < deadline + 1.0, "the loop did not exit"
+    # Shutting down is allowed to wait for a turn still in flight, so the
+    # exit cannot be quicker than that however fast the loop itself is. The
+    # tolerance is that budget plus slack, taken from the source rather than
+    # guessed, or the two drift apart and the test fails on a loaded machine
+    # for a reason that is not a bug.
+    allowed = app_module.SHUTDOWN_JOIN_SECONDS + 1.5
+    assert time.monotonic() < deadline + allowed, "the loop did not exit"
     return terminal, live
 
 
