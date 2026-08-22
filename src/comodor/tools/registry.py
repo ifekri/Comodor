@@ -108,7 +108,8 @@ class ToolRegistry:
 
         extra = tuple(str(entry).lower() for entry in
                       getattr(config.computer, "never", ()) or ())
-        self.add(Computer(guard=Guard(deny=NEVER + extra)))
+        self.add(Computer(guard=Guard(deny=NEVER + extra),
+                          overlay=bool(getattr(config.computer, "overlay", True))))
 
     def add(self, tool: Tool) -> None:
         self._tools[tool.name] = tool

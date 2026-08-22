@@ -119,11 +119,13 @@ class Computer(Tool):
         "required": ["action"],
     }
 
-    def __init__(self, guard: Any = None, watcher: Any = None) -> None:
+    def __init__(self, guard: Any = None, watcher: Any = None,
+                 overlay: bool = True) -> None:
         from ..desktop.guard import Guard
 
         self.guard = guard if guard is not None else Guard()
         self.watcher = watcher
+        self.wants_overlay = overlay and watcher is None
         self._desktop: Any = None
         self._last: Any = None            # the most recent Shot, for coordinates
 
@@ -167,6 +169,11 @@ class Computer(Tool):
             result = self.run(ctx, **args)
         except PermissionError as refusal:
             # Refused by the guard: expiry, scope, deny-list, or the corner.
+            # Said on the screen too - somebody watching their own mouse is not
+            # reading the transcript at that moment.
+            teller = getattr(self.watcher, "say", None)
+            if teller is not None:
+                teller(str(refusal).split(".")[0], alarm=True)
             result = ToolResult.failure(str(refusal), denied=True)
         except TypeError as exc:
             result = ToolResult.failure(f"invalid arguments for computer: {exc}")
@@ -215,6 +222,7 @@ class Computer(Tool):
             if answer == label and seconds:
                 scope = self._desk().foreground() if this_app else ""
                 self.guard.allow(seconds, scope=scope, reason="asked for it")
+                self._show()
                 return
 
         # A timeout returns the last option, which is "no" - the right decision
@@ -362,6 +370,25 @@ class Computer(Tool):
             self._desktop = Desktop(watcher=self.watcher, guard=self._before)
         return self._desktop
 
+    def _show(self) -> None:
+        """Open the overlay, once a grant exists and not before.
+
+        Nothing is drawn until there is something to draw, and a transparent
+        window over the whole desk for a session that never uses the screen is
+        a window nobody asked for.
+        """
+        if not self.wants_overlay or self.watcher is not None:
+            return
+        from ..desktop.overlay import Overlay
+
+        overlay = Overlay(status=self.guard.status)
+        if not overlay.start():
+            self.wants_overlay = False       # said once, not attempted again
+            return
+        self.watcher = overlay
+        if self._desktop is not None:
+            self._desktop.watcher = overlay
+
     def _before(self, action: Any) -> None:
         """The guard, asked again for every single action."""
         machine = self._desk().machine
@@ -389,6 +416,9 @@ class Computer(Tool):
 
     def close(self) -> None:
         self.guard.revoke("the session ended")
+        closer = getattr(self.watcher, "close", None)
+        if closer is not None:
+            closer()
 
 
 class _Whatever:
