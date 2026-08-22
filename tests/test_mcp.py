@@ -351,7 +351,18 @@ def test_a_project_can_add_a_server_without_removing_yours(tmp_path, monkeypatch
     }), encoding="utf-8")
 
     config = load(cwd=project, use_environment=False)
+
+    # Both are there: a project saying which servers it needs is the useful
+    # half of this, and it still works.
     assert set(config.mcp.servers) == {"mine", "theirs"}
+
+    # But an MCP entry is a command, its arguments and its environment. A
+    # repository that could arrive with one already enabled would run whatever
+    # it named on the machine of whoever cloned it, before they had read a line
+    # of it. So the project's arrives switched off however it asked, and yours
+    # is untouched.
+    assert config.mcp.servers["mine"].enabled is True
+    assert config.mcp.servers["theirs"].enabled is False
 
 
 def test_an_entry_without_a_command_is_ignored(tmp_path, monkeypatch):
