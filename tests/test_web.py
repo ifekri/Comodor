@@ -459,3 +459,73 @@ def test_a_body_over_the_cap_is_drained_rather_than_left_in_the_socket(served):
         assert second.status == 200
     finally:
         connection.close()
+
+
+# --------------------------------------------------------------------------- #
+# inside a container, a wide bind is the correct one
+# --------------------------------------------------------------------------- #
+
+
+def test_a_container_is_recognised(monkeypatch, tmp_path):
+    from comodor.web import server as module
+
+    marker = tmp_path / "dockerenv"
+    marker.write_text("", encoding="utf-8")
+    monkeypatch.setattr(module, "Path", lambda p: marker if p == "/.dockerenv"
+                        else tmp_path / "absent")
+
+    assert module.in_a_container() is True
+
+
+def test_a_plain_machine_is_not_mistaken_for_one(monkeypatch, tmp_path):
+    from comodor.web import server as module
+
+    monkeypatch.setattr(module, "Path", lambda p: tmp_path / "absent")
+    monkeypatch.delenv("container", raising=False)
+
+    assert module.in_a_container() is False
+
+
+def test_the_environment_variable_podman_sets_counts(monkeypatch, tmp_path):
+    from comodor.web import server as module
+
+    monkeypatch.setattr(module, "Path", lambda p: tmp_path / "absent")
+    monkeypatch.setenv("container", "podman")
+
+    assert module.in_a_container() is True
+
+
+def test_a_container_binding_wide_is_not_called_reckless(config, monkeypatch, capsys):
+    """A container has its own network namespace, so binding 127.0.0.1 there
+    hides the port from the machine that started it. Binding everything is
+    correct, and the boundary is how the port was published."""
+    from comodor.web import commands, server as module
+
+    monkeypatch.setattr(module, "in_a_container", lambda: True)
+    served = module.Server(config, host="0.0.0.0", port=8765)
+    try:
+        commands._announce(served)
+        printed = capsys.readouterr().out
+
+        assert "public address" not in printed
+        assert "-p 127.0.0.1:8765:8765" in printed
+        # And it still says what the careless form costs.
+        assert "shell on the network" in printed
+    finally:
+        served.session.close()
+
+
+def test_a_real_machine_binding_wide_still_gets_the_warning(config, monkeypatch,
+                                                            capsys):
+    from comodor.web import commands, server as module
+
+    monkeypatch.setattr(module, "in_a_container", lambda: False)
+    served = module.Server(config, host="0.0.0.0", port=8765)
+    try:
+        commands._announce(served)
+        printed = capsys.readouterr().out
+
+        assert "public address" in printed
+        assert "ssh -N -L" in printed
+    finally:
+        served.session.close()

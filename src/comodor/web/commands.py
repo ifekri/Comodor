@@ -70,6 +70,22 @@ def _announce(server: Server) -> None:
 
     if server.local:
         print("  Only this machine can reach it. Ctrl-C to stop.")
+    elif server.contained:
+        # Correct, and the warning above would be both alarming and wrong. The
+        # real boundary is one layer out, so that is what gets explained.
+        print("  Listening on every address inside this container, which is")
+        print("  the only way the machine running it can reach the port.")
+        print()
+        print("  What decides who else can is how the port was published:")
+        print(f"    -p 127.0.0.1:{server.port}:{server.port}   only this machine")
+        print(f"    -p {server.port}:{server.port}             anyone who can route to it")
+        print()
+        print("  The second form puts a shell on the network, and there is no")
+        print("  TLS here — the token and everything the agent reads would")
+        print("  cross in the clear. Use the first, and an SSH tunnel to reach")
+        print("  a remote host.")
+        print()
+        print("  Ctrl-C to stop.")
     else:
         print("  ⚠  This is bound to a public address.")
         print()

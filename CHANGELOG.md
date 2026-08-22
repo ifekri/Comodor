@@ -2,6 +2,34 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.8.3 — 2026-08-22
+
+### Running in a container
+
+Both of these are what a container needs, and both were wrong in a way that
+only showed up inside one.
+
+- **A wide bind in a container is correct, and was warned about as if it were
+  reckless.** A container has its own network namespace, so binding 127.0.0.1
+  inside one hides the port from the machine running it — the interface becomes
+  unreachable by the person who started it. Binding everything is the right
+  thing to do there, and who may reach it is decided one layer out, by how the
+  port was published. `comodor web` now recognises a container and explains
+  that instead: `-p 127.0.0.1:8765:8765` is private, `-p 8765:8765` is a shell
+  on the network. The warning is not removed anywhere it is true.
+- **The browser could not start in a container at all.** Chromium isolates each
+  renderer in a user namespace, which Docker's default seccomp profile does not
+  allow, and it refuses to run rather than run unprotected. The usual answer is
+  to pass `--no-sandbox` everywhere, which throws away a real protection on
+  every machine where it works. The other answer is to relax the *container's*
+  seccomp so the inner sandbox can work, which is worse: it weakens the strong
+  outer boundary to enable the weaker inner one.
+
+  So it starts properly, and if it is refused for that specific reason — not
+  any other — it starts again without the inner sandbox and records that this
+  is what happened. Laptops keep the protection, containers work with no flag
+  from anyone, and the difference is reported rather than assumed.
+
 ## 0.8.2 — 2026-08-22
 
 ### A refused request broke the connection it arrived on
