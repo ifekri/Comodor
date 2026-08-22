@@ -184,7 +184,7 @@ def test_the_parents_working_tree_is_not_where_it_experiments(config, bus,
         (worktree.path / "app.py").write_text("value = 2\n", encoding="utf-8")
 
         assert (repo / "app.py").read_text() == "value = 1\n"
-        assert "value = 2" in worktree.diff()
+        assert b"value = 2" in worktree.diff()
     finally:
         worktree.remove()
 
@@ -267,3 +267,53 @@ def test_a_repository_gets_the_checkout_and_says_nothing_about_it(config, bus,
     result = tool.run(tool_context, task="Change something.", write=True)
 
     assert "directly in this project" not in result.content
+
+
+def test_the_patch_reaches_git_as_the_bytes_it_was(config, bus, tool_context, repo):
+    """`subprocess(text=True)` wraps stdin in a stream with default newline
+    handling, and on Windows every "\n" written becomes "\r\n". For output that
+    is harmless; for a patch it is fatal — every line of the diff gains a
+    carriage return, the context no longer matches, and git refuses all of it.
+
+    The failure was silent and one-platform: on Linux and macOS nothing is
+    translated, so every delegate that changed a file worked here and reported
+    an imaginary merge conflict on Windows."""
+    from comodor.tools.base import ToolResult
+    from comodor.tools.delegate import _Worktree, _with_changes
+
+    tool_context.cwd = repo
+    worktree = _Worktree.create(repo)
+    assert worktree is not None
+    try:
+        (worktree.path / "app.py").write_text("value = 2\nsecond = 3\n",
+                                              encoding="utf-8", newline="")
+        patch = worktree.diff()
+
+        assert isinstance(patch, bytes), "a patch is bytes, not text"
+        assert b"\r\n" not in patch, "the patch already has carriage returns"
+
+        result = _with_changes(ToolResult.success("did it"), worktree,
+                               tool_context, 1.0)
+
+        assert result.meta["applied"] is True, result.content
+        # Read as text: git applies the checkout's own line-ending policy when
+        # it writes, and on Windows that legitimately produces CRLF. What had
+        # to survive is the content, which is what the mangled patch destroyed.
+        assert (repo / "app.py").read_text() == "value = 2\nsecond = 3\n"
+    finally:
+        worktree.keep = False
+        worktree.remove()
+
+
+def test_git_is_never_asked_to_translate_anything():
+    """The one line that caused it, pinned so it cannot come back."""
+    import inspect
+
+    from comodor.tools import delegate
+
+    source = inspect.getsource(delegate._git_bytes)
+    # The docstring explains the trap by name, so look at the code only.
+    code = source.split('"""')[-1]
+
+    assert "text=True" not in code
+    assert "universal_newlines" not in code
