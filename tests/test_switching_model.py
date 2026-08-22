@@ -98,3 +98,61 @@ def test_a_real_theme_still_applies(app):
     app._apply_theme(name)
 
     assert app.config.ui.theme == name
+
+
+# --------------------------------------------------------------------------- #
+# what gets said at the top of a session
+# --------------------------------------------------------------------------- #
+
+
+def test_a_refused_project_setting_is_reported_without_crashing(config):
+    """This path had no test, and the method it called did not exist. The
+    interface would have raised AttributeError on startup - for exactly the
+    people the refusal was protecting."""
+    config.project_refused = ["safety", "providers"]
+    config.complaints = ["agent.max_steps must be a whole number; keeping 24"]
+    app_ = App(config, demo=True)
+    app_.geometry = layout_module.compute(128, 36)
+
+    app_._complain_about_the_config()
+
+    said = " ".join(str(toast.text) for toast in app_.state.toasts.items)
+    assert "safety" in said
+    assert "max_steps" in said
+
+
+def test_a_budget_that_cannot_fire_is_said_before_the_run(config):
+    """Waiting for `comodor doctor` to mention it means telling somebody who
+    already suspected. It belongs where the decision to walk away is made."""
+    config.agent.max_cost_usd = 5.0
+    config.use("openai", api_key="sk-x", model="gpt-4o")
+    app_ = App(config, demo=True)
+    app_.geometry = layout_module.compute(128, 36)
+
+    app_._warn_if_the_budget_is_a_decoration()
+
+    said = " ".join(str(toast.text) for toast in app_.state.toasts.items)
+    assert "cannot be enforced" in said and "gpt-4o" in said
+
+
+def test_nothing_is_said_when_the_budget_works(config):
+    config.agent.max_cost_usd = 5.0
+    config.use("anthropic", api_key="sk-x", model="claude-sonnet-5")
+    app_ = App(config, demo=True)
+    app_.geometry = layout_module.compute(128, 36)
+
+    app_._warn_if_the_budget_is_a_decoration()
+
+    assert not app_.state.toasts.items
+
+
+def test_nothing_is_said_for_a_model_on_your_own_machine(config):
+    """It costs nothing, so there is nothing to enforce."""
+    config.agent.max_cost_usd = 5.0
+    config.use("ollama", model="qwen2.5-coder:14b")
+    app_ = App(config, demo=True)
+    app_.geometry = layout_module.compute(128, 36)
+
+    app_._warn_if_the_budget_is_a_decoration()
+
+    assert not app_.state.toasts.items

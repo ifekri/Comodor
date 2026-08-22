@@ -101,7 +101,8 @@ def run_checks(config: Config, online: bool = True) -> Report:
     from somewhere with no route out — turns it off and gets the rest.
     """
     checks = [_check_config, _check_config_permissions, _check_provider,
-              _check_saved_provider, _check_model, _check_brain,
+              _check_saved_provider, _check_model, _check_spend_limit,
+              _check_brain,
               _check_search_index, _check_skills, _check_leftovers, _check_mcp]
     if online:
         checks.append(_check_version)
@@ -265,6 +266,41 @@ def _check_model(config: Config) -> Finding | None:
             remedy=f"if requests fail, try {spec.default_model}")
 
     return Finding("model", Status.OK, model)
+
+
+def _check_spend_limit(config: Config) -> Finding | None:
+    """Whether the money ceiling is a ceiling or a decoration.
+
+    The loop stops a task when the running cost passes `agent.max_cost_usd`.
+    That cost comes from the pricing registry, which leaves rates unset for
+    models it is not confident about. For one of those the cost is None, the
+    meter never leaves zero, and the limit never fires -- silently, which is
+    the part worth reporting.
+    """
+    limit = config.agent.max_cost_usd
+    if not limit:
+        return None                       # no ceiling asked for, none to check
+
+    model = config.active_model()
+    if not model:
+        return None                       # a different check already said so
+
+    entry = config.active()
+    if entry is not None and entry.local:
+        return Finding("spend limit", Status.OK,
+                       f"not needed - {entry.display} runs on your machine")
+
+    from .config import unenforceable_budget
+
+    if not unenforceable_budget(config):
+        return Finding("spend limit", Status.OK, f"${limit:.2f} per task")
+
+    return Finding(
+        "spend limit", Status.WARN,
+        f"${limit:.2f} per task cannot be enforced for {model}",
+        remedy="No published rate is known for this model, so the cost meter "
+               "reads zero and the limit never fires. The step and time limits "
+               "still apply: see agent.max_steps and agent.max_seconds.")
 
 
 def _check_brain(config: Config) -> Finding:

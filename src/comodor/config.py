@@ -875,6 +875,30 @@ def _choose_active(config: Config) -> None:
     config.model = config.model or ""
 
 
+def unenforceable_budget(config: Config) -> str:
+    """Why the spend ceiling cannot fire, or empty when it can.
+
+    Here rather than in either caller, because `doctor` and the interface both
+    have to answer it and an answer that drifts between the two is worse than
+    one place getting it wrong.
+    """
+    limit = config.agent.max_cost_usd
+    model = config.active_model()
+    if not limit or not model:
+        return ""
+    entry = config.active()
+    if entry is not None and entry.local:
+        return ""                          # runs on their machine; costs nothing
+
+    from .providers import registry
+
+    if registry.lookup(model).priced:
+        return ""
+    return (f"the ${limit:.2f} spend limit cannot be enforced for {model} - "
+            f"no published rate is known, so the cost meter reads zero. "
+            f"The step and time limits still apply.")
+
+
 def save_user_config(config: Config) -> Path:
     """Kept for callers that read better this way."""
     return config.save()
