@@ -61,6 +61,21 @@ first task with nothing on screen to act on. The Docker image sends people
 straight there. It now asks at a terminal, and elsewhere says what is missing
 and what would fix it rather than starting.
 
+**The spend limit was a decoration for every provider but one.**
+`agent.max_cost_usd` defaults to $2 and the loop stops a task when the running
+cost passes it — but that cost comes from a pricing table that deliberately
+leaves rates unset for models it is not confident about. For an unpriced model
+the cost is `None`, the meter never leaves zero, and the limit never fires. Of
+seventeen providers only Anthropic's models are priced, so almost everybody who
+set a ceiling and walked away did not have one. Nothing here invents a price;
+it now says which ceilings are real, at the start of a session and in `doctor`.
+
+**The setup catalogue and the pricing registry had drifted apart.** The
+wizard's default for Anthropic was a model the registry had never heard of, so
+the context gauge read a fallback 128k instead of a million, the spend limit
+could not be enforced, and `doctor` warned that the model you were running "is
+not in the known list".
+
 Smaller, from the same pass:
 
 - **A skill folder was copied with `shutil.copytree`, which follows symlinks.**
@@ -77,6 +92,10 @@ Smaller, from the same pass:
 - **An import left `provider` empty and `configured` false**, which only
   appeared to work because the fallback picks whatever has a key — arbitrary
   as soon as there are two.
+- **The config complaints added in 0.8.7 called a method that does not exist.**
+  Any user with a refused project setting would have met an `AttributeError` on
+  startup — exactly the user that change was written for. Found by writing the
+  first test of that path.
 - **`/theme nonsense` reported success**, while the palette table quietly fell
   back to Ember.
 - **Three tests failed for anyone who sets `NO_COLOR`**, and the failure looked
