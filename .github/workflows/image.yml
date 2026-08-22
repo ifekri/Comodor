@@ -1,0 +1,95 @@
+# Build the image and publish it, so `docker run ghcr.io/ifekri/comodor` works
+# without anyone cloning anything.
+#
+# Nothing to configure: GHCR accepts the token Actions already provides, so
+# there is no secret to add. It builds for both architectures, because half the
+# laptops this would run on are ARM and an amd64-only image runs there through
+# emulation at about a third of the speed.
+
+name: Image
+
+on:
+  push:
+    branches: [docker]
+    paths:
+      - Dockerfile
+      - start
+      - .github/workflows/image.yml
+  # And on demand, which is how a new Comodor release gets a new image.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Comodor version to install (empty means the newest)"
+        required: false
+        default: ""
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to the registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Which version
+        id: pick
+        run: |
+          version="${{ github.event.inputs.version }}"
+          if [ -z "$version" ]; then
+            # The one the Dockerfile pins, so a plain push to this branch
+            # builds exactly what the branch describes.
+            version=$(grep -oP 'ARG COMODOR_VERSION=\K.*' Dockerfile || true)
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building Comodor ${version:-latest}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            COMODOR_VERSION=${{ steps.pick.outputs.version }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/comodor:latest
+            ghcr.io/${{ github.repository_owner }}/comodor:${{ steps.pick.outputs.version || 'latest' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: It starts, and says where it is
+        run: |
+          docker run --rm -d --name check \
+            -p 127.0.0.1:8765:8765 \
+            ghcr.io/${{ github.repository_owner }}/comodor:latest
+          for _ in $(seq 1 30); do
+            sleep 2
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/ || true)
+            # 401 is the right answer to a request with no token: it is up.
+            if [ "$code" = "401" ]; then
+              echo "It is serving, and it refused a request without the token."
+              docker logs check | head -20
+              docker rm -f check
+              exit 0
+            fi
+          done
+          echo "It never answered."
+          docker logs check || true
+          docker rm -f check || true
+          exit 1
