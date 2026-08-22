@@ -254,6 +254,11 @@ def project_directories(root: Path, extra: Path | None = None) -> tuple[list[Pat
     found: list[Path] = []
     seen: set[Path] = set()
 
+    try:
+        home = root.resolve()
+    except OSError:
+        home = root
+
     def consider(candidate: Path | None) -> None:
         if candidate is None:
             return
@@ -262,6 +267,13 @@ def project_directories(root: Path, extra: Path | None = None) -> tuple[list[Pat
         if key in seen:
             return
         seen.add(key)
+        # Not if it is the data directory itself. Run the agent in your home
+        # folder - which people do - and the project root resolves to it, so
+        # `~/.comodor` is both. Listed twice on the screen that asks whether to
+        # delete it, and counted twice in the total, which is the one screen
+        # where an inflated number is worst.
+        if key == home:
+            return
         if directory.is_dir():
             found.append(directory)
 
