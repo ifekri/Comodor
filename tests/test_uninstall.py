@@ -383,3 +383,29 @@ def test_the_program_is_removed_last(tmp_path, monkeypatch):
     apply(found)
 
     assert order == ["data", "project", "launcher", "program"]
+
+
+def test_the_data_directory_is_not_also_listed_as_a_project(tmp_path):
+    """Run the agent in your home folder - which people do - and the project
+    root resolves to it, so `~/.comodor` is both the data directory and the
+    project's. It was listed twice on the screen that asks whether to delete
+    it, and counted twice in the total, which is the one screen where an
+    inflated number does the most harm."""
+    root = tmp_path / ".comodor"
+    root.mkdir()
+    (root / "config.json").write_text("{}", encoding="utf-8")
+
+    directories, _ = project_directories(root, tmp_path)
+
+    assert directories == []
+
+
+def test_a_real_project_is_still_listed(tmp_path):
+    root = tmp_path / ".comodor"
+    root.mkdir()
+    project = tmp_path / "work"
+    (project / ".comodor").mkdir(parents=True)
+
+    directories, _ = project_directories(root, project)
+
+    assert directories == [project / ".comodor"]
