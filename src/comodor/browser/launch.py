@@ -96,32 +96,47 @@ def free_port() -> int:
 
 
 #: What Chromium says when it will not run unprotected and cannot protect
-#: itself. Matched on the specifics, so a browser that failed for some other
-#: reason is not silently restarted with a weaker configuration.
+#: itself. Matched against everything it printed rather than the first line:
+#: it does not put the useful part first, and which line comes first depends on
+#: how the container was started.
 _NO_SANDBOX_SIGNS = (
     "no usable sandbox",
     "failed to move to new namespace",
-    "operation not permitted",
+    "setuid sandbox",
     "sandboxhelper",
     "chrome-sandbox",
+    "zygote_host",
 )
 
 
-def _refused_for_want_of_a_sandbox(message: str) -> bool:
-    text = message.lower()
-    return any(sign in text for sign in _NO_SANDBOX_SIGNS)
+class SandboxUnavailable(BrowserError):
+    """It will not start because it cannot isolate its renderers here.
+
+    Its own class rather than a string match at the call site, because the
+    decision belongs where the full output is: by the time this reaches a
+    caller the message has been trimmed to the one line worth showing.
+    """
 
 
-def _said(handle) -> str:
-    """Whatever the browser printed before giving up, trimmed to one line."""
+def _looks_like_a_sandbox_problem(output: str) -> bool:
+    lowered = output.lower()
+    return any(sign in lowered for sign in _NO_SANDBOX_SIGNS)
+
+
+def _read_all(handle) -> str:
     try:
         handle.seek(0)
-        raw = handle.read(4000).decode("utf-8", "replace").strip()
+        return handle.read(20_000).decode("utf-8", "replace").strip()
     except (OSError, ValueError):
         return ""
-    if not raw:
+
+
+def _first_line(output: str) -> str:
+    """One line for a person. Forty lines of Chromium logging is not an error
+    message, it is a haystack."""
+    if not output:
         return ""
-    first = next((line for line in raw.splitlines() if line.strip()), "")
+    first = next((line for line in output.splitlines() if line.strip()), "")
     return f" It said: {first.strip()[:300]}"
 
 
@@ -155,9 +170,8 @@ class Browser:
         try:
             return cls._spawn(binary, profile, chosen, headless, window,
                               sandboxed=True)
-        except BrowserError as error:
-            if not _refused_for_want_of_a_sandbox(str(error)):
-                raise
+        except SandboxUnavailable:
+            pass
         # It will not run its renderers in a user namespace here — almost
         # always a container, whose own confinement is the stronger boundary
         # anyway. Give up the inner one rather than weaken the outer one, and
@@ -205,7 +219,12 @@ class Browser:
         try:
             browser._await_port()
         except BrowserError as error:
-            raise BrowserError(f"{error}{_said(complaints)}") from None
+            printed = _read_all(complaints)
+            message = f"{error}{_first_line(printed)}"
+            # Judged on everything it printed; reported as one line.
+            if sandboxed and _looks_like_a_sandbox_problem(printed):
+                raise SandboxUnavailable(message) from None
+            raise BrowserError(message) from None
         finally:
             complaints.close()
         return browser
