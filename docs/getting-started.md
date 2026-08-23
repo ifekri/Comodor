@@ -11,13 +11,13 @@ One line. It works out the rest.
 **macOS · Linux · BSD**
 
 ```bash
-curl -fsSL https://comodor.ai/install.sh | sh
+curl -fsSL get.comodor.ai | sh
 ```
 
 **Windows** — PowerShell
 
 ```powershell
-irm https://comodor.ai/install.ps1 | iex
+irm get.comodor.ai | iex
 ```
 
 ```
@@ -36,6 +36,11 @@ Comodor — it learns the way you correct it.
   comodor --demo       try it offline, no API key needed
   comodor doctor       check what is configured
 ```
+
+**One address for both.** `get.comodor.ai` names no file. It reads which
+client is asking and sends `curl` and `wget` to the shell installer, PowerShell
+to the Windows one, and a browser to this page — so the line you paste is the
+same line on every system, and you never have to pick.
 
 **It finishes.** Somebody running one line from a web page has not agreed to
 debug anything, so the script installs what it needs — an isolated environment,
@@ -68,10 +73,13 @@ login, non-interactive, and a desktop session.
 
 ### If you would rather not pipe a script into a shell
 
-Entirely reasonable. Both scripts are plain text you can read first:
+Entirely reasonable. Both scripts are plain text you can read first — named
+directly, because the short address sends anything that is not a fetcher to the
+page:
 
 ```bash
-curl -fsSL https://comodor.ai/install.sh | less
+curl -fsSL https://comodor.ai/install.sh  | less
+curl -fsSL https://comodor.ai/install.ps1 | less
 ```
 
 Or use a package manager you already have:
@@ -104,7 +112,7 @@ the installer printed.
 | `COMODOR_INSTALL_REF` | install from a git ref or a local path instead of PyPI |
 
 ```bash
-COMODOR_NO_MODIFY_PATH=1 curl -fsSL https://comodor.ai/install.sh | sh
+COMODOR_NO_MODIFY_PATH=1 curl -fsSL get.comodor.ai | sh
 ```
 
 > **Not sure you want to install it yet?** `comodor --demo` runs the entire

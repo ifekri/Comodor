@@ -56,8 +56,8 @@ ends with the agent doing something useful.
 ## The shortest possible version
 
 ```bash
-curl -fsSL https://comodor.ai/install.sh | sh      # macOS, Linux
-irm https://comodor.ai/install.ps1 | iex           # Windows
+curl -fsSL get.comodor.ai | sh      # macOS, Linux
+irm get.comodor.ai | iex           # Windows
 
 comodor                  # it asks a few questions, once
 ```
