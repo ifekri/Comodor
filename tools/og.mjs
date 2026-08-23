@@ -75,33 +75,65 @@ const browser = await chromium.launch();
  * missing one is a broken icon in a tab rather than an error anybody sees.
  */
 /*
- * The one size the uploaded set does not carry.
+ * The icons, all of them, from `icon.svg`.
  *
- * It stops at 310 and a manifest wants 512, so this is rendered rather than
- * upscaled - the mark is exactly defined geometry and `icon.svg` is that
- * definition. Deriving it means it can be regenerated; upscaling would have
- * left a soft file nobody could reproduce.
+ * That file is the mark; everything raster is a rendering of it. Before this
+ * they were twenty-eight files uploaded by hand, which works until the logo
+ * changes - and then somebody has to remember every name, every size, and
+ * which ones a browser still asks for. The ones they miss stay wrong for as
+ * long as nobody notices, and nobody notices a favicon.
  *
- * Note what this does *not* touch: every other icon is artwork, not output.
- * The previous version of this tool drew its own mark and overwrote five files
- * on every run, which is how a placeholder ended up in every browser tab.
+ * The list is exactly what the page, the manifest and `browserconfig.xml` name,
+ * plus the two paths that get fetched without any HTML being read. Nothing is
+ * generated because a generator could: a folder of files nothing references is
+ * how there came to be twenty-eight.
+ *
+ * `favicon.ico` is left alone. It is a container format rather than a PNG, the
+ * one in place is right, and rebuilding it would mean hand-rolling an ICO
+ * around a render for no gain.
  */
+const RENDER = [
+  // what <link rel="icon"> asks for
+  [16, 'favicon-16x16.png'], [32, 'favicon-32x32.png'], [96, 'favicon-96x96.png'],
+  // the manifest
+  [36, 'android-icon-36x36.png'], [48, 'android-icon-48x48.png'],
+  [72, 'android-icon-72x72.png'], [96, 'android-icon-96x96.png'],
+  [144, 'android-icon-144x144.png'], [192, 'android-icon-192x192.png'],
+  [512, 'icon-512.png'],
+  // iOS, which picks the largest it is offered and ignores the rest - the
+  // smaller ones are what an older device takes instead of scaling badly
+  [57, 'apple-icon-57x57.png'], [60, 'apple-icon-60x60.png'],
+  [72, 'apple-icon-72x72.png'], [76, 'apple-icon-76x76.png'],
+  [114, 'apple-icon-114x114.png'], [120, 'apple-icon-120x120.png'],
+  [144, 'apple-icon-144x144.png'], [152, 'apple-icon-152x152.png'],
+  [180, 'apple-icon-180x180.png'], [192, 'apple-icon.png'],
+  [192, 'apple-icon-precomposed.png'],
+  // fetched by name, with or without a tag pointing at it
+  [180, 'apple-touch-icon.png'],
+  // browserconfig.xml
+  [70, 'ms-icon-70x70.png'], [150, 'ms-icon-150x150.png'],
+  [144, 'ms-icon-144x144.png'], [310, 'ms-icon-310x310.png'],
+];
+
 {
   const svg = await readFile(path.join(out, 'icon.svg'), 'utf8');
-  const size = 512;
-  const page = await browser.newPage({
-    viewport: { width: size, height: size },
-    deviceScaleFactor: 1,
-  });
-  await page.setContent(
-    `<body style="margin:0">${svg
-      .replace(/width="\d+"/, `width="${size}"`)
-      .replace(/height="\d+"/, `height="${size}"`)}</body>`,
-  );
-  await page.screenshot({ path: path.join(out, 'icon-512.png'),
-                          omitBackground: true });
-  await page.close();
-  console.log('  public/icon-512.png'.padEnd(28) + '512x512  from icon.svg');
+  // One page per size rather than one reused: a viewport resize leaves the
+  // previous render's layout behind often enough to matter, and these are
+  // cheap.
+  for (const [size, name] of RENDER) {
+    const page = await browser.newPage({
+      viewport: { width: size, height: size },
+      deviceScaleFactor: 1,
+    });
+    await page.setContent(
+      `<body style="margin:0">${svg
+        .replace(/width="\d+"/, `width="${size}"`)
+        .replace(/height="\d+"/, `height="${size}"`)}</body>`,
+    );
+    await page.screenshot({ path: path.join(out, name), omitBackground: true });
+    await page.close();
+  }
+  console.log(`  ${RENDER.length} icons rendered from icon.svg`);
 }
 
 await browser.close();
