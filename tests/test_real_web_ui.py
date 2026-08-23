@@ -55,11 +55,23 @@ def opened(config, tmp_path):
     page = Page(session)
     try:
         page.goto(server.url)
-        # The interface draws itself from `/api/state`, which is one more
-        # round trip after the document has loaded.
+        # Ready means three things, and waiting for one of them is how a test
+        # measures a half-built page: the stylesheet applied, the script's
+        # own state in place, and the first draw done — which is one more
+        # round trip after the document loads, because it comes from
+        # `/api/state`.
         page.evaluate(
-            "new Promise(r => { const go = () => document.getElementById('blank')"
-            " || document.querySelector('.turn') ? r(1) : setTimeout(go, 50); go(); })",
+            "new Promise((resolve, reject) => {"
+            "  const started = Date.now();"
+            "  const go = () => {"
+            "    if (document.styleSheets.length"
+            "        && typeof applyTheme === 'function'"
+            "        && (document.getElementById('blank')"
+            "            || document.querySelector('.turn'))) return resolve(1);"
+            "    if (Date.now() - started > 20000) return reject('never settled');"
+            "    setTimeout(go, 50);"
+            "  }; go();"
+            "})",
             await_promise=True)
         yield page, server
     finally:
@@ -172,14 +184,26 @@ def test_persian_is_set_in_vazirmatn_and_english_is_not(opened):
     """
     page, _ = opened
 
-    loaded = page.evaluate(
-        "document.fonts.ready.then(() => document.fonts.check('16px Vazirmatn', "
-        "'سلام'))", await_promise=True)
-    assert loaded is True
+    # `fonts.load` rather than `fonts.check`: check reports whether a face is
+    # already loaded, and nothing on the empty state is Persian, so the face
+    # has never been fetched and the answer is no — on a runner with no other
+    # Persian anywhere, which is every one of them.
+    persian = page.evaluate(
+        "document.fonts.load('16px Vazirmatn', 'سلام')"
+        ".then(faces => faces.map(f => f.family))", await_promise=True)
+    assert persian == ["Vazirmatn"], persian
 
+    # The half that matters more, and that no `font-family` string can show:
+    # the face does not match Latin at all, so declaring it cannot change the
+    # interface's own type. That is `unicode-range`, asserted.
     latin = page.evaluate(
+        "document.fonts.load('16px Vazirmatn', 'hello')"
+        ".then(faces => faces.map(f => f.family))", await_promise=True)
+    assert latin == [], latin
+
+    heading = page.evaluate(
         "getComputedStyle(document.querySelector('#blank h1')).fontFamily")
-    assert "Vazirmatn" not in latin.split(",")[0]
+    assert "Vazirmatn" not in heading.split(",")[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -316,15 +340,65 @@ def test_the_model_never_gets_to_write_markup(opened):
 
 
 @needs_browser
-def test_the_theme_survives_being_chosen(opened):
-    """Light, dark, and what the machine asked for — and the choice is kept."""
+def test_each_theme_is_defined_rather_than_left_over(opened):
+    """Both themes, whatever the machine underneath prefers.
+
+    Read as the token rather than the painted colour: a custom property is
+    resolved by the style engine, so there is no compositor between the
+    question and the answer. And reported as a dict, so a failure says which
+    of the two went wrong instead of that two strings matched.
+    """
     page, _ = opened
 
-    dark = page.evaluate("(applyTheme('dark'), getComputedStyle(document.body)"
-                         ".backgroundColor)")
-    light = page.evaluate("(applyTheme('light'), getComputedStyle(document.body)"
-                          ".backgroundColor)")
-    assert dark != light
+    seen = page.evaluate("""
+      (() => {
+        const out = {};
+        for (const choice of ['dark', 'light']) {
+          applyTheme(choice);
+          document.documentElement.offsetHeight;        // settle the styles
+          const root = getComputedStyle(document.documentElement);
+          out[choice] = {
+            attr: document.documentElement.getAttribute('data-theme'),
+            bg: root.getPropertyValue('--bg').trim(),
+            ink: root.getPropertyValue('--ink').trim(),
+          };
+        }
+        return out;
+      })()
+    """)
+
+    assert seen["dark"]["attr"] == "dark"
+    assert seen["light"]["attr"] == "light"
+    assert seen["dark"]["bg"] != seen["light"]["bg"], seen
+    assert seen["dark"]["ink"] != seen["light"]["ink"], seen
+
+
+@needs_browser
+def test_dark_holds_even_where_the_machine_prefers_light(opened):
+    """The case the runners disagreed with this machine about.
+
+    Dark used to be reachable only by the light rules failing to match. It is
+    a definition now, and this is the arrangement that would have caught its
+    absence: an explicit choice of dark, on a machine asking for light.
+    """
+    page, _ = opened
+
+    for prefers in ("light", "dark"):
+        page.session.call("Emulation.setEmulatedMedia", features=[
+            {"name": "prefers-color-scheme", "value": prefers}])
+        chosen = page.evaluate(
+            "(applyTheme('dark'), document.documentElement.offsetHeight,"
+            " getComputedStyle(document.documentElement)"
+            ".getPropertyValue('--bg').trim())")
+        assert chosen == "#171615", f"system prefers {prefers}, got {chosen}"
+    page.session.call("Emulation.setEmulatedMedia", features=[])
+
+
+@needs_browser
+def test_the_choice_is_remembered(opened):
+    page, _ = opened
 
     page.evaluate("localStorage.setItem('comodor-theme', 'light')")
     assert page.evaluate("readTheme()") == "light"
+    page.evaluate("localStorage.clear()")
+    assert page.evaluate("readTheme()") == "system"
