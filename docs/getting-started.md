@@ -30,7 +30,11 @@ Comodor — it learns the way you correct it.
 
 ✓ comodor 0.9.0
 
-  Added /root/.local/bin to your PATH in /root/.profile
+  Linked into /usr/local/bin, which is on your PATH.
+
+  comodor              start the interface
+  comodor --demo       try it offline, no API key needed
+  comodor doctor       check what is configured
 ```
 
 **It finishes.** Somebody running one line from a web page has not agreed to
@@ -39,8 +43,28 @@ a package manager, a Python — rather than stopping to explain what you should
 have had already. Verified on a bare `debian:bookworm-slim` with no Python on it
 at all.
 
-It gives up only when it genuinely cannot proceed, and then it names exactly one
-thing to do next.
+### Nothing to type afterwards, almost always
+
+Where it can, it puts `comodor` somewhere your shell is already looking, so it
+works in the terminal you ran it from — no `export`, no new window. That covers
+root, containers, CI, and any Mac with Homebrew.
+
+Where it cannot — an ordinary Linux account, where nothing on `PATH` is
+writable — no installer can help, because a child process cannot change the
+environment of the shell that ran it. So it says so:
+
+```
+  Every new terminal can run comodor already.
+  This one started before the install, and no installer
+  can reach back into the shell that ran it. For this
+  terminal only:
+
+    export PATH="/home/you/.local/bin:$PATH"
+```
+
+Open a new terminal and it simply works. The line goes into both your shell's
+rc file and your login profile, so every kind of shell finds it — interactive,
+login, non-interactive, and a desktop session.
 
 ### If you would rather not pipe a script into a shell
 
