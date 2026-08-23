@@ -113,7 +113,7 @@ trying to do.
 | | |
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, choose a model, first task |
-| [The interface](docs/interface.md) | Panels, keys, and all 27 commands |
+| [The interface](docs/interface.md) | Panels, keys, and all 29 commands |
 | [From the terminal](docs/cli.md) | Every command and flag |
 | [What the agent can do](docs/tools.md) | The 13 tools, and when it uses each |
 | [Safety and permissions](docs/safety.md) | What it can do, and what it never does |

@@ -799,6 +799,12 @@ class App:
                   "- `Enter` send · `Ctrl+J` newline · `Esc` stop",
                   "- `F1` help · `F2` sidebar · `F3` mode · `F4` loop · `F5` gateway",
                   "- `Ctrl+O` attach · `Ctrl+L` clear · `PgUp/PgDn` scroll",
+                  "",
+                  "**Copying text**", "",
+                  "- `/copy` the last answer · `/copy all` the conversation",
+                  "- `/mouse` turns mouse tracking off so you can select "
+                  "with the mouse as usual",
+                  "- most terminals also select with `Shift` held down",
                   "- `!command` run a shell command directly",
                   "- `Ctrl+C` stop, twice to quit"]
         self.state.overlay = info_overlay("Help", "\n".join(lines))
@@ -1359,6 +1365,91 @@ class App:
         ]
         self.state.overlay = info_overlay("Settings", "\n".join(body))
 
+    def cmd_copy(self, args: str) -> None:
+        """Copy without selecting anything.
+
+            /copy        the last answer
+            /copy all    the whole conversation
+            /copy task   the last thing you asked for
+        """
+        from . import clipboard
+
+        what = (args or "").strip().lower()
+        if what in ("all", "everything", "session"):
+            body = self._transcript_text()
+            label = "the conversation"
+        elif what in ("task", "prompt", "mine"):
+            body = self._last_of("user")
+            label = "your last message"
+        else:
+            body = self._last_of("assistant")
+            label = "the last answer"
+
+        if not body.strip():
+            self._toast(f"nothing to copy — {label} is empty", "warn")
+            return
+
+        try:
+            how = clipboard.copy(body)
+        except clipboard.Unavailable as why:
+            self._toast(str(why), "bad", ttl=10.0)
+            return
+
+        lines = body.count("\n") + 1
+        self._toast(f"copied {label} — {lines} line{'s' if lines != 1 else ''}, "
+                    f"via {how}", "good")
+
+    def _last_of(self, kind: str) -> str:
+        for entry in reversed(self.state.entries):
+            if entry.kind == kind:
+                return entry.text
+        return ""
+
+    def _transcript_text(self) -> str:
+        """The conversation as plain text, the way you would paste it.
+
+        Not the rendered panels: those carry glyphs and alignment that mean
+        something on screen and nothing in a bug report.
+        """
+        parts: list[str] = []
+        for entry in self.state.entries:
+            if entry.kind == "user":
+                parts.append(f"> {entry.text}")
+            elif entry.kind == "assistant":
+                parts.append(entry.text)
+            elif entry.kind == "tool":
+                parts.append(f"[{entry.text}]")
+            elif entry.kind == "error":
+                parts.append(f"error: {entry.text}")
+        return "\n\n".join(part for part in parts if part.strip())
+
+    def cmd_mouse(self, args: str) -> None:
+        """Turn mouse tracking off, so the terminal can select text again.
+
+        Nothing else gives it back: while tracking is on, a drag belongs to
+        this program and the terminal never sees it.
+        """
+        want = (args or "").strip().lower()
+        terminal = getattr(self, "terminal", None)
+        if terminal is None or not hasattr(terminal, "set_mouse"):
+            self._toast("no terminal to ask", "warn")
+            return
+
+        if want in ("on", "yes"):
+            enable = True
+        elif want in ("off", "no"):
+            enable = False
+        else:
+            enable = not getattr(terminal, "mouse_enabled", True)
+
+        now = terminal.set_mouse(enable)
+        self.config.ui.mouse = now
+        if now:
+            self._toast("mouse on — clicking works, selecting does not", "accent")
+        else:
+            self._toast("mouse off — select and copy as usual; /mouse to "
+                        "switch it back", "good", ttl=8.0)
+
     def cmd_computer(self, args: str) -> None:
         """Allow, refuse or ask after the agent's use of the screen.
 
@@ -1543,6 +1634,8 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/settings": ("cmd_settings", "current configuration"),
     "/approve": ("cmd_approve", "auto-approve writes or shell"),
     "/computer": ("cmd_computer", "let it use your screen, for a while"),
+    "/copy": ("cmd_copy", "the last answer, or all of it, to the clipboard"),
+    "/mouse": ("cmd_mouse", "mouse tracking off, so you can select text"),
     "/save": ("cmd_save", "persist settings"),
     "/attach": ("cmd_attach", "add a file to the prompt"),
     "/clear": ("cmd_clear", "start a fresh conversation"),

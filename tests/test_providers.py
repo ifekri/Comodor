@@ -489,3 +489,43 @@ def test_a_failed_summary_leaves_the_conversation_intact():
 
     assert conversation.compact(broken) == 0
     assert conversation.messages == before
+
+
+# --------------------------------------------------------------------------- #
+# saying who is calling
+# --------------------------------------------------------------------------- #
+
+
+def test_openrouter_is_told_which_application_is_calling():
+    """OpenRouter attributes a request to an app by these two headers and shows
+    it on its model pages and leaderboards. The icon beside the name is the
+    favicon of the referer, which is why that is the site and not the repo."""
+    from comodor import catalogue
+
+    headers = catalogue.get("openrouter").headers
+
+    assert headers["HTTP-Referer"] == catalogue.SITE
+    assert headers["X-Title"] == catalogue.APP_NAME
+    assert catalogue.SITE.startswith("https://")
+
+
+def test_the_attribution_survives_into_the_provider_entry(config):
+    """Three places it could be lost between the catalogue and the socket, and
+    none of them raises if it is."""
+    from comodor import catalogue
+    from comodor.config import provider_from_spec
+
+    entry = provider_from_spec(catalogue.get("openrouter"))
+
+    assert entry.headers["X-Title"] == "Comodor"
+
+
+def test_the_user_agent_says_comodor():
+    """This client is API-compatible with `requests` and was naming itself as
+    `requests` because of it — a statement about a library nobody is using,
+    made to every provider on every request."""
+    from comodor.net.http import DEFAULT_USER_AGENT
+
+    assert DEFAULT_USER_AGENT.startswith("Comodor/")
+    assert "comodor.ai" in DEFAULT_USER_AGENT
+    assert "requests/" not in DEFAULT_USER_AGENT

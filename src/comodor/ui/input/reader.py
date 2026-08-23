@@ -158,6 +158,25 @@ class TerminalInput:
         except Exception:
             pass
 
+    def set_mouse(self, enable: bool) -> bool:
+        """Turn mouse tracking on or off while running. Returns the new state.
+
+        The reason this exists: while tracking is on the terminal hands drags
+        to the program instead of drawing a selection, so text cannot be copied
+        the ordinary way. Somebody who wants to select a paragraph should not
+        have to restart with a flag.
+        """
+        if not self.vt_input:
+            return self.mouse_enabled
+        try:
+            self.output.write(ENABLE_MOUSE if enable else DISABLE_MOUSE)
+            self.output.flush()
+        except OSError:
+            return self.mouse_enabled
+        self.want_mouse = enable
+        self.mouse_enabled = enable
+        return enable
+
     def _write_modes(self, enable: bool) -> None:
         parts: list[str] = []
         if enable:

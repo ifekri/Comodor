@@ -127,6 +127,21 @@ except ImportError:  # pragma: no cover
         _zstd_decompressor_factory = None
 
 
+def _comodor_version() -> str:
+    """The installed version, without importing the package into this module.
+
+    `net.http` is imported by the package itself, so asking it for its own
+    version at import time is a cycle. Read lazily, and never fatal - a user
+    agent is not worth failing a request over.
+    """
+    try:
+        from importlib.metadata import version
+
+        return version("comodor")
+    except Exception:
+        return "0"
+
+
 def _supported_encodings() -> str:
     encodings = ["gzip", "deflate"]
     if _brotli is not None:
@@ -136,9 +151,15 @@ def _supported_encodings() -> str:
     return ", ".join(encodings)
 
 
+#: Who is calling. This client is API-compatible with `requests` and was
+#: naming itself as `requests` because of it - which is a statement about a
+#: library nobody here is using, made to every provider on every request. A
+#: user agent is an identity, not a compatibility shim, and a provider trying
+#: to work out where its traffic comes from deserves the true answer.
 DEFAULT_USER_AGENT = (
-    f"requests/{__version__} (python/{sys.version_info.major}.{sys.version_info.minor}; "
-    f"{sys.platform})"
+    f"Comodor/{_comodor_version()} "
+    f"(+https://comodor.ai; python/{sys.version_info.major}."
+    f"{sys.version_info.minor}; {sys.platform})"
 )
 DEFAULT_ACCEPT_ENCODING = _supported_encodings()
 DEFAULT_CHUNK_SIZE = 64 * 1024

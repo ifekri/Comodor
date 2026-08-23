@@ -28,6 +28,7 @@ next-env.d.ts
 *.tsbuildinfo
 .env*.local
 npm-debug.log*
+CLAUDE.md
 dist/
 
 TODO

@@ -70,14 +70,24 @@ burst of work.
 ```json
 {
   "agent": {
-    "max_steps": 24,
-    "max_seconds": 900,
+    "max_steps": 0,
+    "max_seconds": 3600,
     "max_cost_usd": 2.0
   }
 }
 ```
 
-Whichever comes first stops the task. `stopped` in `--json` says which.
+Whichever comes first stops the task, and `0` means no limit. `stopped` in
+`--json` says which one it was.
+
+**There is no step limit by default.** Twenty-four steps is nothing on a real
+codebase — a refactor across a dozen files ran out of them mid-thought — and a
+step count has no relationship to harm: ten steps reading files cost almost
+nothing. The ceilings that do correspond to harm are time and money, and those
+stay on. Set `max_steps` to a number if you want a hard stop back.
+
+When one of them does stop a task, the message says how to go past it, and
+saying "continue" carries on from where it was.
 
 ### When the limit cannot fire
 

@@ -21,7 +21,7 @@ ends with the agent doing something useful.
 
 | | |
 |---|---|
-| [The interface](interface.md) | Panels, keys, modes, and all 27 commands |
+| [The interface](interface.md) | Panels, keys, modes, and all 29 commands |
 | [From the terminal](cli.md) | Every command and flag, with examples |
 | [What the agent can do](tools.md) | The 13 tools it has, and when it uses each |
 | [Skills](skills.md) | Procedures you write once and it follows |

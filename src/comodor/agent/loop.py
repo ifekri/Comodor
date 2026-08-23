@@ -165,22 +165,29 @@ class AgentLoop:
                 result.text = assistant.content
                 return result
 
-            if result.steps >= agent.max_steps:
+            # Zero means no limit, for each of these. A step count is not a
+            # measure of risk, so it is off by default; the two that follow
+            # are, and stay on.
+            if agent.max_steps and result.steps >= agent.max_steps:
                 result.stopped = "max_steps"
-                self._note(f"Stopped after {agent.max_steps} steps — the step limit "
-                           f"for one task. Say 'continue' to keep going.")
+                self._note(f"Stopped after {agent.max_steps} steps — the step "
+                           f"limit for one task. Say 'continue' to keep going, "
+                           f"or set agent.max_steps to 0 for no limit.")
                 return result
 
-            if time.monotonic() > deadline:
+            if agent.max_seconds and time.monotonic() > deadline:
                 result.stopped = "budget"
-                self._note(f"Stopped after {agent.max_seconds:.0f}s — the time limit "
-                           f"for one task.")
+                self._note(f"Stopped after {agent.max_seconds:.0f}s — the time "
+                           f"limit for one task. Say 'continue' to keep going, "
+                           f"or raise agent.max_seconds.")
                 return result
 
             spent = self.conversation.usage.cost_usd
             if agent.max_cost_usd and spent >= agent.max_cost_usd:
                 result.stopped = "budget"
-                self._note(f"Stopped at ${spent:.2f} — the spend limit for one task.")
+                self._note(f"Stopped at ${spent:.2f} — the spend limit for one "
+                           f"task. Say 'continue' to keep going, or raise "
+                           f"agent.max_cost_usd.")
                 return result
 
     # -- model call ------------------------------------------------------- #
