@@ -24,6 +24,11 @@ class Toast:
     tone: str = "dim"               # dim | good | warn | bad | accent
     born: float = field(default_factory=time.monotonic)
     ttl: float = DEFAULT_TTL
+    #: What this notice is *about*, when it reports a setting rather than an
+    #: event. A second notice with the same key replaces the first: there is
+    #: only ever one current mode, and showing three of them is showing two
+    #: that are no longer true.
+    key: str = ""
 
     @property
     def expired(self) -> bool:
@@ -37,8 +42,18 @@ class ToastQueue:
         self.limit = limit
         self.items: list[Toast] = []
 
-    def push(self, text: str, tone: str = "dim", ttl: float = DEFAULT_TTL) -> None:
-        self.items.append(Toast(text=text, tone=tone, ttl=ttl))
+    def push(self, text: str, tone: str = "dim", ttl: float = DEFAULT_TTL,
+             key: str = "") -> None:
+        """Add a notice. A keyed one replaces the last with the same key.
+
+        Without that, pressing F3 three times filled the line with
+        `mode: chat  ·  mode: act  ·  mode: plan` - a history of what the mode
+        used to be, with the true answer last. An event ("copied 14 lines")
+        wants to queue; a setting does not, because there is one of it.
+        """
+        if key:
+            self.items = [item for item in self.items if item.key != key]
+        self.items.append(Toast(text=text, tone=tone, ttl=ttl, key=key))
         del self.items[:-self.limit]
 
     def prune(self) -> bool:
