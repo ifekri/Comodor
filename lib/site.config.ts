@@ -10,6 +10,16 @@ export const site = {
   name: 'Comodor',
   domain: 'comodor.ai',
   url: 'https://comodor.ai',
+  // One address that names no file. It reads which client is asking and sends
+  // curl and wget to the shell installer, PowerShell to the Windows one, and a
+  // browser here. So the line on the page is the same line on every system,
+  // and nobody has to pick.
+  //
+  // Not served from this host: a static export gives the same bytes to every
+  // caller by definition, so it cannot answer curl and PowerShell differently.
+  // The dispatcher is a small PHP file on the subdomain's own document root,
+  // which is the only part of the stack that can read a request.
+  installUrl: 'get.comodor.ai',
   tagline: 'It learns the way you correct it.',
   // Under 155 characters, because that is where Google cuts a snippet, and a
   // sentence that ends mid-clause in the result reads as a broken page.
@@ -65,7 +75,7 @@ export const installTargets: InstallTarget[] = [
   {
     id: 'macos',
     label: 'macOS',
-    command: `curl -fsSL ${site.url}/install.sh | sh`,
+    command: `curl -fsSL ${site.installUrl} | sh`,
     shell: '$',
     note: 'Sets up Python, an isolated environment and your PATH.',
     kind: 'auto',
@@ -73,7 +83,7 @@ export const installTargets: InstallTarget[] = [
   {
     id: 'linux',
     label: 'Linux',
-    command: `curl -fsSL ${site.url}/install.sh | sh`,
+    command: `curl -fsSL ${site.installUrl} | sh`,
     shell: '$',
     note: `Any distribution with Python ${site.pythonFloor}+, or none at all.`,
     kind: 'auto',
@@ -81,7 +91,7 @@ export const installTargets: InstallTarget[] = [
   {
     id: 'windows',
     label: 'Windows',
-    command: `irm ${site.url}/install.ps1 | iex`,
+    command: `irm ${site.installUrl} | iex`,
     shell: '>',
     note: 'PowerShell 5.1 or newer. Windows Terminal recommended.',
     kind: 'auto',
