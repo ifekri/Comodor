@@ -227,6 +227,11 @@ class Glyphs:
     arrow: str = "›"
     check: str = "●"
     pending: str = "○"
+    #: A box you can tick, which is a different thing from the filled and
+    #: hollow dots above: those report whether a step has happened, these
+    #: report whether you have asked for something.
+    ticked: str = "☑"
+    unticked: str = "☐"
     active: str = "◐"
     blocked: str = "✗"
     spinner: tuple[str, ...] = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
@@ -245,6 +250,7 @@ class Glyphs:
 
 ASCII_GLYPHS = Glyphs(
     bullet="*", arrow=">", check="[x]", pending="[ ]", active="[~]", blocked="[!]",
+    ticked="[x]", unticked="[ ]",
     spinner=("|", "/", "-", "\\"), gauge_full="#", gauge_empty=".", cursor="_",
     divider="-", tool="*", memory="+", warn="!",
     rise="^", fall="v", dot="-", dash="-",

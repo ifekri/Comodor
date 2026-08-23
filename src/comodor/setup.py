@@ -172,6 +172,54 @@ class SetupWizard:
                 Text(f"  enter a number between 1 and {len(options)}",
                      style=self.theme.style("bad")))
 
+    def _choose_many(self, options: Sequence[tuple[str, str, str]],
+                     title: str = "", verb: str = "choose") -> list[str]:
+        """Return every chosen value. An empty list is a real answer.
+
+        The list is tried first; without a terminal to take over, the numbered
+        form asks the same question. Both accept "none", because a question
+        offering four things has to accept zero as an answer without a fifth
+        option that means nothing.
+        """
+        if self._keys:
+            picked = chooser.choose_many(
+                self.console, self.theme,
+                [chooser.Option(value, label, note) for value, label, note in options],
+                title=title, verb=verb,
+            )
+            if picked is not None:
+                return picked
+            # Escaped, or the list would not run. Either way the question is
+            # still unanswered, so the numbered form takes over.
+
+        table = Table.grid(padding=(0, 2))
+        table.add_column(justify="right", no_wrap=True)
+        table.add_column(no_wrap=True)
+        table.add_column()
+        for index, (_, label, note) in enumerate(options, start=1):
+            table.add_row(
+                Text(f"{index}.", style=self.theme.style("accent")),
+                Text(label, style=self.theme.style("value")),
+                Text(note, style=self.theme.style("dim")),
+            )
+        self.console.print(table)
+
+        while True:
+            raw = self._prompt("  numbers, separated by commas "
+                               "(enter for none): ").strip()
+            if not raw:
+                return []
+            wanted = [part for part in raw.replace(",", " ").split() if part]
+            if all(part.isdigit() and 1 <= int(part) <= len(options)
+                   for part in wanted):
+                # Deduplicated, and in the order they were offered — the same
+                # order the list hands back, so the two paths agree.
+                taken = {int(part) - 1 for part in wanted}
+                return [options[index][0] for index in sorted(taken)]
+            self.console.print(
+                Text(f"  numbers between 1 and {len(options)}, "
+                     f"or enter for none", style=self.theme.style("bad")))
+
     def _ask(self, message: str, default: str = "") -> str:
         suffix = f" [{default}]" if default else ""
         answer = self._prompt(f"  {message}{suffix}: ").strip()
@@ -326,9 +374,13 @@ class SetupWizard:
         Skills are not in the package: they live on a branch and are fetched on
         request, which keeps the install small and means adding one needs no
         release. The cost of that is that nobody would ever find them, so they
-        are offered here — with nothing selected, because a setup wizard that
+        are offered here — with nothing ticked, because a setup wizard that
         installs things you did not ask for is a setup wizard people learn to
         distrust.
+
+        As many as you like. Wanting the review skill and the test skill is the
+        ordinary case, not an unusual one, and a list that took a single answer
+        made the second of them somebody else's problem for another day.
 
         A network that is not there is not a reason to fail a first run. It
         skips, and `comodor skills browse` is still there tomorrow.
@@ -336,7 +388,8 @@ class SetupWizard:
         self._rule("Any skills to start with?", step, total)
         self.console.print(Text(
             "  A skill is a written procedure the agent follows when the work "
-            "calls for it.\n  You can add more later with `comodor skills`.\n",
+            "calls for it.\n  Take as many as you like — you can add more "
+            "later with `comodor skills`.\n",
             style=self.theme.style("dim")))
 
         try:
@@ -355,17 +408,15 @@ class SetupWizard:
             self._answered("skills", "none")
             return []
 
-        options = [("__none__", "None for now",
-                    "comodor skills browse, whenever you want them")]
-        options += [(entry.id, entry.id, entry.description)
-                    for entry in catalogue.skills]
+        options = [(entry.id, entry.id, entry.description)
+                   for entry in catalogue.skills]
 
-        chosen = self._choose(options, default=1, title="Skills")
-        if chosen == "__none__":
+        chosen = self._choose_many(options, title="Skills", verb="install")
+        if not chosen:
             self._answered("skills", "none")
             return []
-        self._answered("skills", chosen)
-        return [chosen]
+        self._answered("skills", ", ".join(chosen))
+        return chosen
 
     def _banner(self) -> None:
         body = Text.assemble(

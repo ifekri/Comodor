@@ -102,13 +102,21 @@ def test_the_process_is_dpi_aware(machine):
 
 
 def test_the_pointer_goes_where_it_is_sent(machine):
+    """This one moves the real mouse, so it can lose a race with a hand.
+
+    It failed once during a run while somebody was using the machine, and a
+    person's hand on the mouse is not a defect in `move_to`. Asked twice: a
+    move that is genuinely wrong is wrong both times, and interference is not.
+    """
     area = machine.active_monitor()
     target = (area.left + area.width // 3, area.top + area.height // 3)
 
-    machine.move_to(*target)
-
-    at = machine.cursor()
-    assert abs(at[0] - target[0]) <= 1 and abs(at[1] - target[1]) <= 1
+    for _attempt in (1, 2):
+        machine.move_to(*target)
+        at = machine.cursor()
+        if abs(at[0] - target[0]) <= 1 and abs(at[1] - target[1]) <= 1:
+            return
+    raise AssertionError(f"asked for {target}, pointer sat at {at} twice")
 
 
 def test_it_travels_rather_than_teleporting(machine):

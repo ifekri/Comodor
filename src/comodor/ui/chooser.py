@@ -20,6 +20,10 @@ What is here instead is one framed list at a time.
   editor's console, `curl | sh` — the numbered prompt is still there. A setup
   wizard that requires a particular kind of terminal is a setup wizard that
   cannot be scripted.
+* **Some questions take more than one answer.** In that mode each row carries
+  a box, space ticks the one under the cursor, and enter takes everything
+  ticked. The ticks are held by value rather than by row, so filtering the
+  list down and clearing the filter again leaves them where they were.
 """
 
 from __future__ import annotations
@@ -74,7 +78,8 @@ class Chooser:
     """One list, one choice."""
 
     def __init__(self, console: Console, theme: Theme, options: Sequence[Option],
-                 title: str = "", default: int = 0) -> None:
+                 title: str = "", default: int = 0, multi: bool = False,
+                 verb: str = "choose") -> None:
         self.console = console
         self.theme = theme
         self.options = list(options)
@@ -82,6 +87,14 @@ class Chooser:
         self.cursor = max(0, min(default, len(self.options) - 1))
         self.filter = ""
         self.offset = 0
+        #: Whether enter takes one row or every ticked one.
+        self.multi = multi
+        #: What enter is going to do, for the hint line. "install" rather than
+        #: "choose" when that is what happens next.
+        self.verb = verb
+        #: Ticked values, not ticked rows. Filtering changes which options are
+        #: on screen and at which index; it must not change what was asked for.
+        self.picked: set[str] = set()
 
     # -- what is currently visible ---------------------------------------- #
 
@@ -114,28 +127,37 @@ class Chooser:
         self._scroll_into_view()
         visible = items[self.offset:self.offset + window]
 
+        box_width = max(len(theme.glyphs.ticked), len(theme.glyphs.unticked))
+
         table = Table.grid(padding=(0, 1))
         table.add_column(width=2, no_wrap=True)
+        if self.multi:
+            table.add_column(width=box_width, no_wrap=True)
         table.add_column(no_wrap=True)
         table.add_column(overflow="ellipsis")
 
         if not items:
-            table.add_row("", Text("nothing matches", style=theme.style("bad")),
-                          Text(""))
+            blank = ["", Text("nothing matches", style=theme.style("bad")), Text("")]
+            table.add_row(*([blank[0], ""] + blank[1:] if self.multi else blank))
 
         for index, option in enumerate(visible, start=self.offset):
             chosen = index == self.cursor
             # The arrow, not just a colour: a highlighted row that relies on
             # background alone disappears on a terminal that renders it faintly,
             # and this is the only thing on screen saying where you are.
-            table.add_row(
-                Text(theme.glyphs.arrow if chosen else " ",
-                     style=theme.style("accent", bold=True)),
-                Text(option.label,
-                     style=theme.style("accent" if chosen else "value",
-                                       bold=chosen)),
-                Text(option.note, style=theme.style("dim")),
-            )
+            cells = [Text(theme.glyphs.arrow if chosen else " ",
+                          style=theme.style("accent", bold=True))]
+            if self.multi:
+                ticked = option.value in self.picked
+                cells.append(Text(
+                    theme.glyphs.ticked if ticked else theme.glyphs.unticked,
+                    style=theme.style("good" if ticked else "dim",
+                                      bold=ticked)))
+            cells.append(Text(
+                option.label,
+                style=theme.style("accent" if chosen else "value", bold=chosen)))
+            cells.append(Text(option.note, style=theme.style("dim")))
+            table.add_row(*cells)
 
         blocks: list[RenderableType] = []
         above = self.offset
@@ -149,6 +171,9 @@ class Chooser:
         subtitle = None
         if self.filter:
             subtitle = Text(f" filter: {self.filter} ", style=theme.style("accent"))
+        elif self.multi and self.picked:
+            subtitle = Text(f" {len(self.picked)} selected ",
+                            style=theme.style("good"))
         elif len(items) != len(self.options):
             subtitle = Text(f" {len(items)} of {len(self.options)} ",
                             style=theme.style("dim"))
@@ -168,17 +193,32 @@ class Chooser:
 
     def _hint(self) -> Text:
         theme = self.theme
+        if self.multi:
+            # The count is on the hint rather than only in the corner, because
+            # this is the line that says what enter will do and "install"
+            # without a number is a question.
+            taking = (f"{self.verb} {len(self.picked)}" if self.picked
+                      else f"{self.verb} nothing")
+            keys = (("↑↓", "move"), ("space", "select"), ("enter", taking),
+                    ("type", "filter"), ("esc", "cancel"))
+        else:
+            keys = (("↑↓", "move"), ("enter", "choose"),
+                    ("type", "filter"), ("esc", "cancel"))
         hint = Text("  ", style=theme.style("dim"))
-        for key, what in (("↑↓", "move"), ("enter", "choose"),
-                          ("type", "filter"), ("esc", "cancel")):
+        for key, what in keys:
             hint.append(key, style=theme.style("accent"))
             hint.append(f" {what}   ", style=theme.style("dim"))
         return hint
 
     # -- the loop ----------------------------------------------------------- #
 
-    def run(self) -> str | None:
-        """Returns the chosen value, or None if the user backed out."""
+    def run(self) -> str | list[str] | None:
+        """The chosen value, or the chosen values, or None if backed out.
+
+        A list when `multi` is set — possibly an empty one, which is an answer
+        of "none of them" rather than a refusal to answer. None is only ever
+        escape or ctrl-c.
+        """
         from rich.live import Live
 
         items = self.matching
@@ -210,7 +250,18 @@ class Chooser:
         if event.matches("ctrl+c") or event.key == "escape":
             return _CANCEL
         if event.key == "enter":
+            if self.multi:
+                # In the order they were offered, not the order they were
+                # ticked: the list on screen is what the reader remembers.
+                return [option.value for option in self.options
+                        if option.value in self.picked]
             return items[self.cursor].value if items else _CANCEL
+        if self.multi and event.key == "char" and event.char == " " \
+                and not event.ctrl and not event.alt:
+            if items:
+                value = items[self.cursor].value
+                self.picked.symmetric_difference_update({value})
+            return None
 
         if event.key in ("up", "down", "pgup", "pgdn", "home", "end"):
             self._move(event.key, len(items))
@@ -260,10 +311,30 @@ _CANCEL = _Cancel()
 def choose(console: Console, theme: Theme, options: Sequence[Option],
            title: str = "", default: int = 0) -> str | None:
     """The whole interaction, or None if there is no terminal to run it in."""
+    picked = _run(console, theme, options, title=title, default=default)
+    return picked if isinstance(picked, str) else None
+
+
+def choose_many(console: Console, theme: Theme, options: Sequence[Option],
+                title: str = "", verb: str = "choose") -> list[str] | None:
+    """Tick as many as you like. None means the list could not run.
+
+    An empty list is a real answer — nothing ticked, enter pressed — and the
+    caller must tell it apart from None, which means fall back to asking some
+    other way.
+    """
+    picked = _run(console, theme, options, title=title, multi=True, verb=verb)
+    return picked if isinstance(picked, list) else None
+
+
+def _run(console: Console, theme: Theme, options: Sequence[Option],
+         title: str = "", default: int = 0, multi: bool = False,
+         verb: str = "choose") -> str | list[str] | None:
     if not interactive(console) or not options:
         return None
     try:
-        return Chooser(console, theme, options, title=title, default=default).run()
+        return Chooser(console, theme, options, title=title, default=default,
+                       multi=multi, verb=verb).run()
     except Exception:
         # A terminal that will not do raw mode, a reader that will not start:
         # the caller still has the numbered prompt, and a failed experiment
