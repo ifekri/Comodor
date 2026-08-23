@@ -77,15 +77,20 @@ export const metadata: Metadata = {
     description: site.description,
     images: ['/og.png'],
   },
-  // The uploaded mark, at the sizes browsers actually ask for. No SVG: there
-  // is no vector of it, and one traced by eye would be a different logo.
+  // The mark itself, and then the raster sizes browsers ask for.
+  //
+  // The SVG leads because a browser that takes it has a crisp icon at every
+  // size and pixel ratio from one file; the PNGs are what everything else
+  // walks down to, and `favicon.ico` is what asks for no HTML at all.
   icons: {
     icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
       { url: '/favicon.ico', sizes: '48x48' },
       { url: '/favicon-16x16.png', type: 'image/png', sizes: '16x16' },
       { url: '/favicon-32x32.png', type: 'image/png', sizes: '32x32' },
       { url: '/favicon-96x96.png', type: 'image/png', sizes: '96x96' },
       { url: '/android-icon-192x192.png', type: 'image/png', sizes: '192x192' },
+      { url: '/icon-512.png', type: 'image/png', sizes: '512x512' },
     ],
     // iOS picks the largest it is offered and ignores the rest, but the
     // smaller ones are what an older device downloads instead of scaling the

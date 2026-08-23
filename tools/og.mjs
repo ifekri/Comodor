@@ -13,7 +13,7 @@
  */
 
 import { chromium } from 'playwright';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -74,7 +74,40 @@ const browser = await chromium.launch();
  * What is left is a check, since the metadata promises these by name and a
  * missing one is a broken icon in a tab rather than an error anybody sees.
  */
+/*
+ * The one size the uploaded set does not carry.
+ *
+ * It stops at 310 and a manifest wants 512, so this is rendered rather than
+ * upscaled - the mark is exactly defined geometry and `icon.svg` is that
+ * definition. Deriving it means it can be regenerated; upscaling would have
+ * left a soft file nobody could reproduce.
+ *
+ * Note what this does *not* touch: every other icon is artwork, not output.
+ * The previous version of this tool drew its own mark and overwrote five files
+ * on every run, which is how a placeholder ended up in every browser tab.
+ */
+{
+  const svg = await readFile(path.join(out, 'icon.svg'), 'utf8');
+  const size = 512;
+  const page = await browser.newPage({
+    viewport: { width: size, height: size },
+    deviceScaleFactor: 1,
+  });
+  await page.setContent(
+    `<body style="margin:0">${svg
+      .replace(/width="\d+"/, `width="${size}"`)
+      .replace(/height="\d+"/, `height="${size}"`)}</body>`,
+  );
+  await page.screenshot({ path: path.join(out, 'icon-512.png'),
+                          omitBackground: true });
+  await page.close();
+  console.log('  public/icon-512.png'.padEnd(28) + '512x512  from icon.svg');
+}
+
+await browser.close();
+
 const PROMISED = [
+  'icon.svg', 'icon-512.png',
   'favicon.ico',
   'favicon-16x16.png', 'favicon-32x32.png', 'favicon-96x96.png',
   'android-icon-192x192.png',
@@ -103,4 +136,3 @@ const PROMISED = [
   }
 }
 
-await browser.close();
