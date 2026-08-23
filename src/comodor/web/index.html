@@ -1,397 +1,242 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#171615">
 <title>Comodor</title>
-<style>
-  :root {
-    --bg: #0d0c0b;      --panel: #141210;   --line: #26221e;
-    --ink: #e8e2d8;     --dim: #8a8177;     --faint: #5c554d;
-    --accent: #e8a44c;  --good: #7fb069;    --bad: #d1656b;
-    --user: #d8cfc2;
-    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
-  body {
-    background: var(--bg); color: var(--ink);
-    font: 14px/1.65 var(--mono);
-    display: flex; flex-direction: column;
-  }
-
-  header {
-    display: flex; align-items: baseline; gap: 1.5rem;
-    padding: .7rem 1.2rem; border-bottom: 1px solid var(--line);
-    flex-wrap: wrap;
-  }
-  header .name { color: var(--accent); letter-spacing: .04em; }
-  header .where { color: var(--faint); font-size: 12px; }
-  header .spacer { flex: 1; }
-  header .stat { color: var(--dim); font-size: 12px; white-space: nowrap; }
-  header .stat b { color: var(--ink); font-weight: 500; }
-
-  #modes { display: flex; gap: .3rem; }
-  #modes button {
-    background: none; border: 1px solid var(--line); color: var(--dim);
-    font: inherit; font-size: 12px; padding: .1rem .55rem; cursor: pointer;
-    border-radius: 2px;
-  }
-  #modes button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
-
-  main {
-    flex: 1; overflow-y: auto; padding: 1.4rem 1.2rem 2rem;
-    display: flex; flex-direction: column; gap: 1.1rem;
-  }
-  .turn { max-width: 92ch; }
-  .turn.user { color: var(--user); }
-  .turn.user::before { content: "› "; color: var(--accent); }
-  .turn.agent { white-space: pre-wrap; word-break: break-word; }
-  .turn.notice { color: var(--dim); font-size: 12.5px; }
-  .turn.error { color: var(--bad); }
-
-  .tool {
-    display: grid; grid-template-columns: 8ch 1fr auto; gap: .8rem;
-    align-items: baseline; color: var(--dim); font-size: 13px;
-  }
-  .tool .verb { color: var(--accent); }
-  .tool .target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tool .time { color: var(--faint); font-size: 12px; }
-  .tool pre {
-    grid-column: 2 / -1; margin: .3rem 0 0; padding: .5rem .7rem;
-    background: var(--panel); border-left: 2px solid var(--line);
-    color: var(--faint); font-size: 12.5px; max-height: 14em;
-    overflow: auto; white-space: pre-wrap;
-  }
-
-  #ask {
-    border: 1px solid var(--accent); background: var(--panel);
-    padding: .9rem 1.1rem; max-width: 92ch;
-  }
-  #ask p { margin: 0 0 .3rem; }
-  #ask pre {
-    margin: .4rem 0 .8rem; color: var(--dim); font-size: 12.5px;
-    max-height: 16em; overflow: auto; white-space: pre-wrap;
-  }
-  #ask button {
-    background: none; border: 1px solid var(--line); color: var(--ink);
-    font: inherit; padding: .25rem .9rem; margin-right: .4rem; cursor: pointer;
-  }
-  #ask button:hover { border-color: var(--accent); color: var(--accent); }
-
-  footer { border-top: 1px solid var(--line); padding: .8rem 1.2rem 1rem; }
-  form { display: flex; gap: .8rem; align-items: flex-end; max-width: 92ch; }
-  textarea {
-    flex: 1; background: transparent; border: none; color: var(--ink);
-    font: inherit; resize: none; outline: none; max-height: 40vh;
-  }
-  textarea::placeholder { color: var(--faint); }
-  form button {
-    background: none; border: 1px solid var(--line); color: var(--dim);
-    font: inherit; font-size: 12px; padding: .25rem .9rem; cursor: pointer;
-  }
-  form button:hover { border-color: var(--accent); color: var(--accent); }
-  .hint { color: var(--faint); font-size: 11.5px; margin-top: .45rem; }
-
-  /* The screen the agent is driving, when it is driving one. */
-  #screen { display: none; border-bottom: 1px solid var(--line);
-            background: #0b0908; position: relative; }
-  #screen.on { display: block; }
-  #screen img { display: block; width: 100%; height: auto; }
-  #screen .mark { position: absolute; width: 46px; height: 46px;
-                  margin: -23px 0 0 -23px; border: 2px solid var(--accent);
-                  border-radius: 50%; pointer-events: none;
-                  box-shadow: 0 0 0 2px rgba(0,0,0,.5); }
-  #screen .mark::after { content: ""; position: absolute; inset: 16px;
-                         border: 2px solid var(--accent); border-radius: 50%;
-                         opacity: .55; }
-  #screen .say { position: absolute; left: 0; right: 0; bottom: 0;
-                 padding: .4rem .6rem; font-size: 12px; color: var(--text);
-                 background: linear-gradient(transparent, rgba(0,0,0,.82) 40%); }
-  #screen .say b { color: var(--accent); font-weight: 600; }
-
-  /* Right-to-left text is set to the right, where its line begins. */
-  .rtl { direction: rtl; text-align: right; font-family: Tahoma, var(--mono); }
-</style>
+<link rel="stylesheet" href="/ui.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%20512%20512%27%3E%3Cg%20fill%3D%27%23e2703a%27%3E%3Cpath%20d%3D%27M454.522%20272.294C463.462%20270.642%20471.591%20277.837%20470.309%20286.836C456.765%20381.854%20381.529%20456.99%20286.463%20470.383C277.514%20471.643%20270.342%20463.599%20271.908%20454.699L285.082%20379.826C286.027%20374.455%20290.032%20370.191%20295.182%20368.396C329.068%20356.584%20355.973%20329.883%20368.061%20296.127C369.869%20291.081%20374.053%20287.156%20379.324%20286.183L454.522%20272.294Z%27%2F%3E%3Cpath%20d%3D%27M132.745%20286.383C138.007%20287.355%20142.188%20291.269%20144%20296.304C156.005%20329.658%20182.485%20356.102%20215.862%20368.058C220.952%20369.881%20224.898%20374.122%20225.835%20379.447L239.05%20454.557C240.62%20463.483%20233.404%20471.539%20224.436%20470.23C129.944%20456.433%2055.2626%20381.6%2041.6942%20287.034C40.4024%20278.031%2048.5343%20270.829%2057.4784%20272.481L132.745%20286.383Z%27%2F%3E%3Cpath%20d%3D%27M271.729%2057.3014C270.164%2048.4058%20277.328%2040.3634%20286.273%2041.6155C381.787%2054.9853%20457.322%20130.674%20470.458%20226.263C471.693%20235.243%20463.575%20242.392%20454.662%20240.746L379.704%20226.901C374.387%20225.919%20370.179%20221.935%20368.4%20216.829C356.461%20182.566%20329.299%20155.437%20295.014%20143.545C289.854%20141.755%20285.838%20137.486%20284.891%20132.107L271.729%2057.3014Z%27%2F%3E%3Cpath%20d%3D%27M226.025%20132.484C225.087%20137.817%20221.13%20142.062%20216.03%20143.88C182.255%20155.921%20155.519%20182.791%20143.66%20216.652C141.876%20221.747%20137.672%20225.72%20132.363%20226.701L57.3382%20240.559C48.42%20242.206%2040.3001%20235.048%2041.5431%20226.065C54.7072%20130.929%20129.686%2055.5458%20224.624%2041.7694C233.589%2040.4685%20240.798%2048.5227%20239.228%2057.4443L226.025%20132.484Z%27%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
 </head>
 <body>
 
-<header>
-  <span class="name">Comodor</span>
-  <span class="where" id="where"></span>
-  <div id="modes">
-    <button data-mode="act">Act</button>
-    <button data-mode="plan">Plan</button>
-    <button data-mode="chat">Chat</button>
-  </div>
-  <span class="spacer"></span>
-  <span class="stat" id="stat"></span>
-</header>
+<!-- Icons, defined once and used by reference. Inline SVG so the page still
+     asks the internet for nothing, and one copy each so the file does not
+     carry the same path nine times. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-mark" viewBox="0 0 512 512">
+      <path d="M454.522 272.294C463.462 270.642 471.591 277.837 470.309 286.836C456.765 381.854 381.529 456.99 286.463 470.383C277.514 471.643 270.342 463.599 271.908 454.699L285.082 379.826C286.027 374.455 290.032 370.191 295.182 368.396C329.068 356.584 355.973 329.883 368.061 296.127C369.869 291.081 374.053 287.156 379.324 286.183L454.522 272.294Z"/>
+      <path d="M132.745 286.383C138.007 287.355 142.188 291.269 144 296.304C156.005 329.658 182.485 356.102 215.862 368.058C220.952 369.881 224.898 374.122 225.835 379.447L239.05 454.557C240.62 463.483 233.404 471.539 224.436 470.23C129.944 456.433 55.2626 381.6 41.6942 287.034C40.4024 278.031 48.5343 270.829 57.4784 272.481L132.745 286.383Z"/>
+      <path d="M271.729 57.3014C270.164 48.4058 277.328 40.3634 286.273 41.6155C381.787 54.9853 457.322 130.674 470.458 226.263C471.693 235.243 463.575 242.392 454.662 240.746L379.704 226.901C374.387 225.919 370.179 221.935 368.4 216.829C356.461 182.566 329.299 155.437 295.014 143.545C289.854 141.755 285.838 137.486 284.891 132.107L271.729 57.3014Z"/>
+      <path d="M226.025 132.484C225.087 137.817 221.13 142.062 216.03 143.88C182.255 155.921 155.519 182.791 143.66 216.652C141.876 221.747 137.672 225.72 132.363 226.701L57.3382 240.559C48.42 242.206 40.3001 235.048 41.5431 226.065C54.7072 130.929 129.686 55.5458 224.624 41.7694C233.589 40.4685 240.798 48.5227 239.228 57.4443L226.025 132.484Z"/>
+    </symbol>
+    <symbol id="i-rail" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M7.5 3.5v13"/>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.7" stroke-linecap="round">
+      <circle cx="9" cy="9" r="5.5"/><path d="m13.2 13.2 3.3 3.3"/>
+    </symbol>
+    <symbol id="i-new" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 4.5v11M4.5 10h11"/>
+    </symbol>
+    <symbol id="i-close" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.8" stroke-linecap="round">
+      <path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/>
+    </symbol>
+    <symbol id="i-trash" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3.5 5.5h13M8 5.5V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5"/>
+      <path d="M5.5 5.5 6.3 16a1 1 0 0 0 1 .9h5.4a1 1 0 0 0 1-.9l.8-10.5"/>
+    </symbol>
+    <symbol id="i-sun" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.6" stroke-linecap="round">
+      <circle cx="10" cy="10" r="3.6"/>
+      <path d="M10 2v1.8M10 16.2V18M18 10h-1.8M3.8 10H2M15.7 4.3l-1.3 1.3M5.6 14.4l-1.3 1.3M15.7 15.7l-1.3-1.3M5.6 5.6 4.3 4.3"/>
+    </symbol>
+    <symbol id="i-moon" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M16.5 12.4A7 7 0 0 1 7.6 3.5a7 7 0 1 0 8.9 8.9Z"/>
+    </symbol>
+    <symbol id="i-github" viewBox="0 0 20 20">
+      <path fill="currentColor" d="M10 1.3a8.7 8.7 0 0 0-2.75 16.96c.44.08.6-.19.6-.42v-1.5c-2.42.53-2.93-1.17-2.93-1.17-.4-1-.97-1.28-.97-1.28-.79-.54.06-.53.06-.53.87.06 1.33.9 1.33.9.78 1.33 2.04.95 2.53.72.08-.56.3-.95.55-1.17-1.93-.22-3.96-.97-3.96-4.3 0-.95.34-1.73.9-2.34-.1-.22-.4-1.1.08-2.3 0 0 .73-.23 2.4.9a8.3 8.3 0 0 1 4.36 0c1.66-1.13 2.39-.9 2.39-.9.48 1.2.18 2.08.09 2.3.56.61.9 1.39.9 2.34 0 3.34-2.04 4.08-3.98 4.3.31.27.59.8.59 1.62v2.4c0 .23.16.5.6.42A8.7 8.7 0 0 0 10 1.3Z"/>
+    </symbol>
+    <symbol id="i-tools" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12.4 3.6a3.5 3.5 0 0 0 4.4 4.5L9.4 15.5a1.9 1.9 0 1 1-2.7-2.7Z"/>
+      <path d="m6.2 3.3 1.6 1.6M3.3 6.2l1.6 1.6M4.4 3.4 7.7 6.7 6.3 8.1 3 4.8Z"/>
+    </symbol>
+    <symbol id="i-power" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.7" stroke-linecap="round">
+      <path d="M10 2.6v6.8"/><path d="M14.9 5.4a6.5 6.5 0 1 1-9.8 0"/>
+    </symbol>
+    <symbol id="i-send" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 16.5v-13M4.8 8.7 10 3.5l5.2 5.2"/>
+    </symbol>
+    <symbol id="i-stop" viewBox="0 0 20 20"><rect x="5" y="5" width="10"
+            height="10" rx="1.6" fill="currentColor"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.5" stroke-linejoin="round">
+      <path d="M2.6 5.4a1.4 1.4 0 0 1 1.4-1.4h3.1l1.5 1.8h6a1.4 1.4 0 0 1 1.4 1.4v7a1.4 1.4 0 0 1-1.4 1.4H4a1.4 1.4 0 0 1-1.4-1.4Z"/>
+    </symbol>
+    <symbol id="i-coins" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.5">
+      <ellipse cx="10" cy="5.4" rx="5.6" ry="2.4"/>
+      <path d="M4.4 5.4v4c0 1.3 2.5 2.4 5.6 2.4s5.6-1.1 5.6-2.4v-4"/>
+      <path d="M4.4 9.4v4c0 1.3 2.5 2.4 5.6 2.4s5.6-1.1 5.6-2.4v-4"/>
+    </symbol>
+    <symbol id="i-gauge" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.5" stroke-linecap="round">
+      <path d="M3.4 14.4a7.6 7.6 0 1 1 13.2 0"/><path d="m10 10.6 3.3-3.3"/>
+    </symbol>
+    <symbol id="i-brain" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8.4 3.2a2.3 2.3 0 0 0-2.3 2.3 2.2 2.2 0 0 0-1.5 3.8A2.4 2.4 0 0 0 6 13.1a2.2 2.2 0 0 0 4.3.6V4.7a1.5 1.5 0 0 0-1.9-1.5Z"/>
+      <path d="M11.6 3.2a2.3 2.3 0 0 1 2.3 2.3 2.2 2.2 0 0 1 1.5 3.8 2.4 2.4 0 0 1-1.4 3.8"/>
+    </symbol>
+  </defs>
+</svg>
 
-<section id="screen" aria-label="the screen the agent is using">
-  <img id="frame" alt="what the agent last looked at">
-  <div class="say" id="doing"></div>
-</section>
+<div id="shell" data-rail="open">
 
-<main id="log"></main>
+  <!-- ---------------------------------------------------------------- top -->
+  <header id="top">
+    <button class="icon-btn" id="rail-toggle" aria-label="Hide the chat list"
+            aria-expanded="true" aria-controls="rail" title="Chats">
+      <svg><use href="#i-rail"/></svg>
+    </button>
 
-<footer>
-  <div id="ask" hidden></div>
-  <form id="form">
-    <textarea id="input" rows="1" placeholder="Ask for something…"
-              autocomplete="off" spellcheck="false"></textarea>
-    <button type="submit" id="send">Send</button>
-    <button type="button" id="stop" hidden>Stop</button>
-  </form>
-  <div class="hint">Enter sends · Shift-Enter for a new line</div>
-</footer>
+    <a class="brand" href="/" aria-label="Comodor">
+      <svg viewBox="0 0 512 512" fill="var(--accent)" aria-hidden="true">
+        <use href="#i-mark"/></svg>
+      <span class="words">
+        <span class="name">Comodor</span>
+        <span class="tag">learns the way you correct it.</span>
+      </span>
+    </a>
 
-<script>
-"use strict";
+    <span class="divider" aria-hidden="true"></span>
 
-const log = document.getElementById("log");
-const input = document.getElementById("input");
-const stat = document.getElementById("stat");
-const ask = document.getElementById("ask");
-const stopButton = document.getElementById("stop");
-let cursor = 0, streaming = null, tools = new Map(), busy = false;
+    <button id="whoami" title="Change the model">
+      <span class="provider" id="who-provider">—</span>
+      <span class="sep" aria-hidden="true">›</span>
+      <span class="model" id="who-model">—</span>
+    </button>
 
-// Right-to-left scripts: Arabic, Hebrew, and the Persian range.
-const RTL = /[֐-׿؀-ۿ܀-ݏݐ-ݿﭐ-﷿ﹰ-﻿]/;
+    <span class="grow"></span>
 
-function post(path, body) {
-  return fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Comodor": "1" },
-    body: JSON.stringify(body || {}),
-  }).then(r => r.json().catch(() => ({})));
-}
+    <div id="tools-row">
+      <a class="icon-btn optional" id="repo" href="https://github.com/ifekri/Comodor"
+         target="_blank" rel="noreferrer noopener" title="Source" aria-label="Source">
+        <svg><use href="#i-github"/></svg></a>
+      <button class="icon-btn" id="admin-jump" title="What this agent can do"
+              aria-label="What this agent can do">
+        <svg><use href="#i-tools"/></svg></button>
+      <button class="icon-btn" id="theme" title="Light or dark"
+              aria-label="Switch to light theme">
+        <svg id="theme-icon"><use href="#i-sun"/></svg></button>
+      <button class="icon-btn danger" id="quit" title="Close this session"
+              aria-label="Close this session">
+        <svg><use href="#i-power"/></svg></button>
+    </div>
+  </header>
 
-function atBottom() {
-  return log.scrollHeight - log.scrollTop - log.clientHeight < 80;
-}
+  <!-- --------------------------------------------------------------- rail -->
+  <nav id="rail" aria-label="Chats and settings">
+    <div class="rail-top">
+      <div class="tabs" role="tablist" aria-label="Sidebar">
+        <button role="tab" id="tab-chat" aria-selected="true"
+                aria-controls="panel-chat">Chat</button>
+        <button role="tab" id="tab-admin" aria-selected="false"
+                aria-controls="panel-admin">Admin</button>
+      </div>
+      <button class="icon-btn" id="rail-close" aria-label="Close the chat list">
+        <svg><use href="#i-close"/></svg></button>
+    </div>
 
-function add(className, text) {
-  const stick = atBottom();
-  const node = document.createElement("div");
-  node.className = "turn " + className;
-  node.textContent = text || "";
-  if (RTL.test(text || "")) node.classList.add("rtl");
-  log.appendChild(node);
-  if (stick) log.scrollTop = log.scrollHeight;
-  return node;
-}
+    <div class="panel" id="panel-chat" role="tabpanel" aria-labelledby="tab-chat"
+         data-open="true">
+      <div class="finder">
+        <label class="field">
+          <svg aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="find" type="search" placeholder="Search chats"
+                 autocomplete="off" aria-label="Search chats">
+        </label>
+        <button class="ghost-btn" id="new-chat" title="New chat"
+                aria-label="New chat"><svg><use href="#i-new"/></svg></button>
+      </div>
+      <div id="chats" role="list"></div>
+    </div>
 
-function toolRow(id, verb, target) {
-  const stick = atBottom();
-  const row = document.createElement("div");
-  row.className = "tool";
-  row.innerHTML = '<span class="verb"></span><span class="target"></span>' +
-                  '<span class="time">…</span>';
-  row.children[0].textContent = verb;
-  row.children[1].textContent = target;
-  log.appendChild(row);
-  tools.set(id, row);
-  if (stick) log.scrollTop = log.scrollHeight;
-  return row;
-}
+    <div class="panel" id="panel-admin" role="tabpanel" aria-labelledby="tab-admin">
+      <div id="admin-body"></div>
+    </div>
+  </nav>
 
-function setBusy(value) {
-  busy = value;
-  stopButton.hidden = !value;
-  document.getElementById("send").disabled = value;
-}
+  <div id="scrim" aria-hidden="true"></div>
 
-function showStat(state) {
-  const u = state.usage || {};
-  const bits = [];
-  if (u.prompt) bits.push(`${u.prompt.toLocaleString()} in`);
-  if (u.output) bits.push(`${u.output.toLocaleString()} out`);
-  if (u.cached) bits.push(`${Math.round((u.hit_rate || 0) * 100)}% cached`);
-  if (u.cost) bits.push(`$${u.cost.toFixed(4)}`);
-  stat.innerHTML = bits.length ? bits.join(" · ") : "";
-}
+  <!-- --------------------------------------------------------------- main -->
+  <main id="main">
+    <section id="screen" data-on="false" aria-label="The screen the agent is using">
+      <img id="frame" alt="The last thing the agent looked at">
+      <p class="caption" id="caption"></p>
+    </section>
 
-function showAsk(event) {
-  ask.hidden = false;
-  ask.innerHTML = "";
-  const question = document.createElement("p");
-  question.textContent = event.prompt || "Allow this?";
-  ask.appendChild(question);
-  if (event.detail) {
-    const detail = document.createElement("pre");
-    detail.textContent = event.detail;
-    ask.appendChild(detail);
-  }
-  (event.options || ["yes", "no"]).forEach(option => {
-    const button = document.createElement("button");
-    button.textContent = option;
-    button.onclick = () => {
-      ask.hidden = true;
-      post("/api/answer", { id: event.id, choice: option });
-    };
-    ask.appendChild(button);
-  });
-  ask.scrollIntoView({ block: "nearest" });
-}
+    <div id="log" tabindex="0" aria-label="Conversation">
+      <div class="stream" id="stream" aria-live="polite"></div>
+    </div>
+  </main>
 
-function apply(event) {
-  switch (event.kind) {
-    case "user_message":
-      add("user", event.text); break;
-    case "assistant_start":
-      streaming = null; break;
-    case "assistant_delta":
-      if (!streaming) streaming = add("agent", "");
-      streaming.textContent += event.text || "";
-      if (RTL.test(streaming.textContent)) streaming.classList.add("rtl");
-      if (atBottom()) log.scrollTop = log.scrollHeight;
-      break;
-    case "assistant_end":
-      if (streaming && !streaming.textContent && event.text)
-        streaming.textContent = event.text;
-      streaming = null; break;
-    case "tool_start":
-      toolRow(event.id, event.name || "tool", event.summary || ""); break;
-    case "tool_end": {
-      const row = tools.get(event.id);
-      if (!row) break;
-      row.children[2].textContent = (event.elapsed || 0).toFixed(1) + "s";
-      row.children[2].style.color = event.ok === false ? "var(--bad)" : "";
-      const preview = (event.display || "").trim();
-      if (preview) {
-        const pre = document.createElement("pre");
-        pre.textContent = preview.length > 4000
-          ? preview.slice(0, 4000) + "\n…" : preview;
-        row.appendChild(pre);
-      }
-      tools.delete(event.id);
-      break;
-    }
-    case "screen":   showScreen(event); break;
-    case "notice":   add("notice", event.text); break;
-    case "error":    add("error", event.text); streaming = null; break;
-    case "cancelled":add("notice", "stopped"); streaming = null; break;
-    case "request":  showAsk(event); break;
-    case "usage":
-      showStat({ usage: { prompt: event.input_tokens, output: event.output_tokens,
-                          cost: event.cost_usd } });
-      break;
-    case "status":
-      if (typeof event.busy === "boolean") setBusy(event.busy);
-      if (event.mode) markMode(event.mode);
-      break;
-    case "turn_end": setBusy(false); break;
-  }
-}
+  <!-- --------------------------------------------------------------- foot -->
+  <footer id="foot">
+    <div id="ask" hidden role="alertdialog" aria-labelledby="ask-q"></div>
 
-const screenBox = document.getElementById("screen");
-const frameImage = document.getElementById("frame");
-const doing = document.getElementById("doing");
-let markTimer = null;
+    <div class="composer-wrap">
+      <form id="composer">
+        <label class="sr-only" for="prompt">What would you like done?</label>
+        <textarea id="prompt" rows="1" placeholder="Ask for something…"
+                  autocomplete="off" spellcheck="false"></textarea>
+        <div class="composer-bar">
+          <label class="sr-only" for="mode">What the agent is allowed to do</label>
+          <span class="mode-wrap">
+            <select id="mode">
+              <option value="act">Act</option>
+              <option value="plan">Plan</option>
+              <option value="chat">Chat</option>
+            </select>
+          </span>
+          <span id="mode-note"></span>
+          <span class="grow"></span>
+          <button type="button" id="stop" hidden>
+            <svg aria-hidden="true"><use href="#i-stop"/></svg> Stop</button>
+          <button type="submit" id="send" aria-label="Send">
+            <svg aria-hidden="true"><use href="#i-send"/></svg></button>
+        </div>
+      </form>
+    </div>
 
-function showScreen(event) {
-  screenBox.classList.add("on");
+    <p class="hint"><kbd>Enter</kbd> sends · <kbd>Shift</kbd>+<kbd>Enter</kbd>
+      for a new line · <kbd>Esc</kbd> stops</p>
 
-  if (event.frame) {
-    // The number is in the URL so the browser caches each frame for good: a
-    // given number is always the same picture, and re-fetching a megabyte on
-    // every reconnect is what putting it in the event log would have cost.
-    // No token in the URL - the page is authorised by a cookie the browser
-    // sends with the image request as it does with every other one, and a
-    // token in an <img> src ends up in history and in any referrer.
-    frameImage.src = "/api/screen?n=" + event.frame;
-  }
+    <div id="status" data-live="true">
+      <span class="bit"><span class="dot"></span>
+        <span class="link-word" id="link">connected</span></span>
+      <span class="bit"><svg aria-hidden="true"><use href="#i-folder"/></svg>
+        <span class="path mono" id="where">—</span></span>
+      <span class="bit optional" title="Context used">
+        <svg aria-hidden="true"><use href="#i-gauge"/></svg>
+        <span class="gauge" id="gauge" data-full="false"><i style="width:0"></i></span>
+        <b id="ctx">0%</b></span>
+      <span class="bit optional" id="spend-bit" hidden title="Spent this session">
+        <svg aria-hidden="true"><use href="#i-coins"/></svg>
+        <b id="spend">$0.00</b></span>
+      <span class="bit optional" id="reflex-bit" hidden title="What the brain holds">
+        <svg aria-hidden="true"><use href="#i-brain"/></svg>
+        <b id="reflex">0</b> rules</span>
+      <span class="grow"></span>
+      <span class="bit" id="tokens"></span>
+    </div>
+  </footer>
+</div>
 
-  if (event.caption) {
-    doing.innerHTML = "";
-    const bold = document.createElement("b");
-    bold.textContent = event.caption;
-    doing.appendChild(bold);
-  }
+<div id="toasts" aria-live="polite"></div>
 
-  const old = screenBox.querySelector(".mark");
-  if (old) old.remove();
-  if (typeof event.x !== "number" || typeof event.y !== "number") return;
-
-  // Percentages, so the marker stays put when the panel is resized. The
-  // coordinates arrive in the pixels of the frame, which is the one thing both
-  // ends agree about.
-  const width = event.width || frameImage.naturalWidth || 1;
-  const height = event.height || frameImage.naturalHeight || 1;
-  const mark = document.createElement("div");
-  mark.className = "mark";
-  mark.style.left = (100 * event.x / width) + "%";
-  mark.style.top = (100 * event.y / height) + "%";
-  screenBox.appendChild(mark);
-
-  clearTimeout(markTimer);
-  markTimer = setTimeout(() => mark.remove(), 4000);
-}
-
-function markMode(mode) {
-  document.querySelectorAll("#modes button").forEach(button => {
-    button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
-  });
-}
-
-async function poll() {
-  for (;;) {
-    try {
-      const response = await fetch("/api/events?cursor=" + cursor);
-      if (response.status === 401) { location.reload(); return; }
-      const data = await response.json();
-      (data.events || []).forEach(apply);
-      cursor = data.cursor || cursor;
-      if (typeof data.busy === "boolean") setBusy(data.busy);
-    } catch (error) {
-      // The server went away, or a proxy cut the connection. Wait, retry —
-      // a reload would lose nothing, but it would also lose the scroll.
-      await new Promise(resolve => setTimeout(resolve, 1500));
-    }
-  }
-}
-
-document.getElementById("form").addEventListener("submit", event => {
-  event.preventDefault();
-  const text = input.value.trim();
-  if (!text || busy) return;
-  input.value = "";
-  input.style.height = "auto";
-  post("/api/send", { text });
-});
-
-input.addEventListener("keydown", event => {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    document.getElementById("form").requestSubmit();
-  }
-});
-input.addEventListener("input", () => {
-  input.style.height = "auto";
-  input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + "px";
-  input.classList.toggle("rtl", RTL.test(input.value));
-});
-
-stopButton.onclick = () => post("/api/interrupt", {});
-document.querySelectorAll("#modes button").forEach(button => {
-  button.onclick = () => {
-    markMode(button.dataset.mode);
-    post("/api/mode", { mode: button.dataset.mode });
-  };
-});
-
-fetch("/api/state").then(r => r.json()).then(state => {
-  document.getElementById("where").textContent = state.project || "";
-  document.title = "Comodor — " + (state.model || "");
-  markMode(state.mode);
-  setBusy(state.busy);
-  showStat(state);
-  poll();
-});
-
-input.focus();
-</script>
+<script src="/ui.js"></script>
 </body>
 </html>

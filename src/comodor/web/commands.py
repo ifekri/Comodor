@@ -68,8 +68,9 @@ def run(config: Config, args: argparse.Namespace) -> int:
 def _configured_or_explain(config: Config) -> Config | None:
     """A usable configuration, or None having said what is missing.
 
-    The browser interface has no way to enter an API key -- it can change the
-    mode and that is all -- so starting without one produces a URL, a browser
+    The browser interface can switch between providers that are already set
+    up, but it has nowhere to type a key into and would be a poor place for
+    one anyway. Starting with none configured produces a URL, a browser
     window, and a failure on the first task with nothing on screen to act on.
     """
     if not config.needs_setup:

@@ -12,13 +12,15 @@ library's HTTP client. A mock would have been written to pass.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
-from comodor.web.server import COOKIE, GUARD, Server
+from comodor.web.server import ASSETS, COOKIE, GUARD, Server
 
 
 @pytest.fixture
@@ -166,14 +168,336 @@ def test_the_page_is_served_once_the_cookie_is_held(served):
 
 
 def test_the_page_needs_nothing_from_the_internet(served):
-    """No CDN, no font host, no analytics: it has to work on a machine that
-    cannot reach anything but the agent itself."""
-    _, body = call(served, "/", token=served.token)
+    """No CDN, no font host, no analytics.
 
-    assert "http://" not in body.replace("http://127.0.0.1", "")
-    assert "https://" not in body
-    assert "<script src" not in body
-    assert "<link" not in body
+    Comodor installs with one dependency so it works on a locked-down network,
+    and an interface that only looks right when it can reach a font host would
+    make that promise untrue in the most visible way available.
+
+    What is checked is what is *loaded*: stylesheets, scripts, fonts, images,
+    `@import`, `url()`, and anything fetched. Not every absolute URL in the
+    files - an XML namespace is an identifier that is never resolved, and a
+    link to the source is a place the reader may choose to go.
+    """
+    pieces = {"/": call(served, "/", token=served.token)[1]}
+    for route in ("/ui.css", "/ui.js"):
+        status, body = call(served, route, token=served.token)
+        assert status == 200, route
+        pieces[route] = body
+
+    off_machine = re.compile(r"\bhttps?://(?!127\.0\.0\.1|localhost)", re.I)
+
+    for name, body in pieces.items():
+        # Anything a browser fetches without being asked.
+        for loader in re.finditer(
+                r"""(?:src|href)\s*=\s*["\']([^"\']+)["\']""", body):
+            target = loader.group(1)
+            if name == "/" and "<a " in body[max(0, loader.start() - 400):loader.start()]:
+                continue                      # a link is not a dependency
+            assert not off_machine.match(target), f"{name} loads {target}"
+
+        assert "@import" not in body, f"{name} imports a stylesheet"
+        for used in re.finditer(r"url\(\s*['\"]?([^)'\"]+)", body):
+            assert not off_machine.match(used.group(1)), \
+                f"{name} uses {used.group(1)}"
+        for fetched in re.finditer(r"""fetch\(\s*['\"`]([^'\"`]+)""", body):
+            assert not off_machine.match(fetched.group(1)), \
+                f"{name} fetches {fetched.group(1)}"
+        assert "XMLHttpRequest" not in body
+
+    assert "<script src" in pieces["/"]        # the page does load its own
+    assert "vazirmatn.woff2" in pieces["/ui.css"]
+
+
+def test_the_font_is_served_from_here(served):
+    """Persian is set in Vazirmatn, and the file comes off this machine.
+
+    Loading it from a font host would have been one line shorter and would
+    have meant Persian rendering correctly only when the network allows it.
+    """
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{served.port}/vazirmatn.woff2")
+    request.add_header("Cookie", f"{COOKIE}={served.token}")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        raw = response.read()
+        kind = response.headers["Content-Type"]
+
+    assert raw[:4] == b"wOF2"                  # a real font, not a 404 page
+    assert kind == "font/woff2"
+    assert len(raw) > 20_000
+
+
+def test_the_font_only_ever_renders_arabic_script(served):
+    """`unicode-range` is what makes the whole thing invisible.
+
+    Without it, declaring the font would change the face of the entire
+    interface. With it, a message mixing Persian and an English identifier
+    gets the right face for each in the same line, with no detection and no
+    classes - and the Latin half of the interface is untouched.
+    """
+    _, css = call(served, "/ui.css", token=served.token)
+
+    block = css[css.index("@font-face"):css.index("}", css.index("@font-face"))]
+    assert "unicode-range" in block
+    assert "U+0600-06FF" in block               # Arabic and Persian
+    assert "U+FB50-FDFF" in block               # presentation forms
+    assert "U+0041" not in block and "U+0000" not in block
+
+
+def test_the_assets_are_a_fixed_table_not_a_folder(served):
+    """A path from the URL is one `..` away from serving anything readable."""
+    from comodor.web.server import ASSETS
+
+    for attempt in ("/../server.py", "/ui.css/../session.py", "/%2e%2e/server.py",
+                    "/..%2fserver.py", "/session.py", "/index.html"):
+        status, _ = call(served, attempt, token=served.token)
+        assert status == 404, attempt
+
+    assert set(ASSETS) == {"/ui.css", "/ui.js", "/vazirmatn.woff2"}
+
+
+def test_the_assets_need_the_token_too(served):
+    for route in ("/ui.css", "/ui.js", "/vazirmatn.woff2"):
+        status, _ = call(served, route)
+        assert status == 401, route
+
+
+# --------------------------------------------------------------------------- #
+# chats
+# --------------------------------------------------------------------------- #
+
+
+def test_a_conversation_is_written_down_and_comes_back(served):
+    """The browser used to keep nothing, so a reload lost the lot."""
+    from comodor.providers.base import Message, Role
+
+    served.session.conversation.extend([
+        Message(role=Role.USER, content="rename the parser"),
+        Message(role=Role.ASSISTANT, content="Renamed it to `tokenise`."),
+    ])
+    served.session.meta.title = "rename the parser"
+    served.session._persist()
+
+    status, listing = call(served, "/api/chats", token=served.token)
+
+    assert status == 200
+    assert [chat["title"] for chat in listing["chats"]] == ["rename the parser"]
+    assert listing["chats"][0]["current"] is True
+    assert listing["chats"][0]["messages"] == 2
+
+
+def test_a_new_chat_leaves_the_old_one_on_disk(served):
+    from comodor.providers.base import Message, Role
+
+    served.session.conversation.extend([Message(role=Role.USER, content="first")])
+    served.session.meta.title = "first"
+    served.session._persist()
+    was = served.session.meta.id
+
+    status, reply = call(served, "/api/chat", method="POST",
+                         body={"action": "new"}, token=served.token)
+
+    assert status == 200 and reply["ok"] is True
+    assert served.session.meta.id != was
+    assert served.session.conversation.messages == []
+    assert was in [chat["id"] for chat in served.session.chats()]
+
+
+def test_an_old_chat_opens_with_its_transcript(served):
+    from comodor.providers.base import Message, Role
+
+    served.session.conversation.extend([
+        Message(role=Role.USER, content="what does this do"),
+        Message(role=Role.ASSISTANT, content="It parses the log."),
+    ])
+    served.session.meta.title = "what does this do"
+    served.session._persist()
+    first = served.session.meta.id
+    call(served, "/api/chat", method="POST", body={"action": "new"},
+         token=served.token)
+
+    status, reply = call(served, "/api/chat", method="POST",
+                         body={"action": "open", "id": first}, token=served.token)
+
+    assert status == 200 and reply["opened"] is True
+    assert [turn["text"] for turn in reply["turns"]] == [
+        "what does this do", "It parses the log."]
+    # The conversation itself moved, not just the picture of it: the next turn
+    # continues the chat that was opened.
+    assert len(served.session.conversation.messages) == 2
+
+
+def test_opening_a_chat_moves_the_cursor_with_it(served):
+    """Otherwise the page draws the transcript and then replays the events of
+    the conversation it just left on top of it."""
+    from comodor.events import Kind
+    from comodor.providers.base import Message, Role
+
+    served.session.conversation.extend([Message(role=Role.USER, content="a")])
+    served.session.meta.title = "a"
+    served.session._persist()
+    first = served.session.meta.id
+    call(served, "/api/chat", method="POST", body={"action": "new"},
+         token=served.token)
+    for _ in range(5):
+        served.session.bus.emit(Kind.NOTICE, text="something happened")
+
+    _, reply = call(served, "/api/chat", method="POST",
+                    body={"action": "open", "id": first}, token=served.token)
+
+    assert reply["cursor"] == served.session.cursor >= 5
+
+
+def test_a_chat_can_be_deleted_but_not_the_one_you_are_in(served):
+    from comodor.providers.base import Message, Role
+
+    served.session.conversation.extend([Message(role=Role.USER, content="old")])
+    served.session.meta.title = "old"
+    served.session._persist()
+    old = served.session.meta.id
+    call(served, "/api/chat", method="POST", body={"action": "new"},
+         token=served.token)
+
+    status, refused = call(served, "/api/chat", method="POST",
+                           body={"action": "delete", "id": served.session.meta.id},
+                           token=served.token)
+    assert status == 409 and refused["ok"] is False
+
+    status, done = call(served, "/api/chat", method="POST",
+                        body={"action": "delete", "id": old}, token=served.token)
+    assert status == 200 and done["ok"] is True
+    assert old not in [chat["id"] for chat in served.session.chats()]
+
+
+def test_chats_can_be_searched_by_what_was_said(served):
+    from comodor.providers.base import Message, Role
+
+    for title, said in (("parser work", "the tokeniser is too slow"),
+                        ("docs", "write the installation page")):
+        served.session.conversation.clear()
+        served.session._saved = 0
+        served.session.conversation.extend([Message(role=Role.USER, content=said)])
+        served.session.meta.title = title
+        served.session._persist()
+        call(served, "/api/chat", method="POST", body={"action": "new"},
+             token=served.token)
+
+    status, found = call(served, "/api/chats?q=tokeniser", token=served.token)
+
+    assert status == 200
+    assert [chat["title"] for chat in found["chats"]] == ["parser work"]
+
+
+def test_nothing_moves_chat_while_a_turn_is_running(served):
+    """Swapping the conversation out from under a working agent would leave
+    the answer being written into a transcript nobody is looking at."""
+    served.session.busy = True
+    try:
+        for action in ("new", "open"):
+            status, reply = call(served, "/api/chat", method="POST",
+                                 body={"action": action, "id": "whatever"},
+                                 token=served.token)
+            assert status == 409, action
+            assert "running" in reply["error"]
+    finally:
+        served.session.busy = False
+
+
+# --------------------------------------------------------------------------- #
+# admin
+# --------------------------------------------------------------------------- #
+
+
+def test_the_admin_panel_describes_the_running_agent(served):
+    status, admin = call(served, "/api/admin", token=served.token)
+
+    assert status == 200
+    assert admin["model"]["model"]
+    assert admin["agent"]["mode"] in ("act", "plan", "chat")
+    assert [tool["name"] for tool in admin["tools"]]
+    assert admin["paths"]["project"]
+    assert "rules_active" in admin["reflex"]
+    assert set(admin["safety"]) >= {"auto_approve_safe", "auto_approve_writes",
+                                    "auto_approve_shell"}
+
+
+def test_the_admin_panel_never_carries_a_key(served):
+    """It lists providers so one can be chosen, which means it walks over the
+    objects the keys live on."""
+    name = served.config.provider
+    served.config.providers[name].api_key = "sk-or-v1-not-a-real-key"
+
+    _, admin = call(served, "/api/admin", token=served.token)
+
+    assert "sk-or-v1" not in json.dumps(admin)
+    ready = {entry["id"]: entry["ready"] for entry in admin["model"]["providers"]}
+    assert ready[name] is True                # said, without being shown
+
+
+def test_the_settings_a_page_may_change_are_the_ones_listed(served):
+    status, done = call(served, "/api/setting", method="POST",
+                        body={"key": "loop", "value": False}, token=served.token)
+    assert status == 200 and done["saved"] is True
+    assert served.config.agent.loop is False
+
+    for key in ("auto_approve_shell", "workspace_only", "deny_commands",
+                "api_key", "max_cost_usd"):
+        status, refused = call(served, "/api/setting", method="POST",
+                               body={"key": key, "value": True}, token=served.token)
+        assert status == 400, key
+        assert refused["saved"] is False
+
+
+def test_switching_model_moves_the_context_window_with_it(served):
+    """Left at the old model's number the loop never compacts, and the run
+    dies at the provider's real ceiling with the gauge still reading a
+    million on the way there."""
+    from comodor.providers import registry
+
+    known = next((name for name in ("claude-sonnet-5", "gpt-4o", "claude-opus-4.1")
+                  if registry.knows(name)), "")
+    if not known:
+        pytest.skip("no model with a published window in the registry")
+    served.config.agent.context_limit = 1_000_000
+
+    status, done = call(served, "/api/setting", method="POST",
+                        body={"key": "model", "value": known}, token=served.token)
+
+    assert status == 200 and done["saved"] is True
+    assert served.config.agent.context_limit == registry.lookup(known).context
+
+
+def test_a_provider_with_no_key_is_refused_rather_than_half_selected(served):
+    empty = next((name for name, entry in served.config.providers.items()
+                  if not entry.ready), "")
+    if not empty:
+        pytest.skip("every provider in this configuration has a key")
+    was = served.config.provider
+
+    status, refused = call(served, "/api/setting", method="POST",
+                           body={"key": "provider", "value": empty},
+                           token=served.token)
+
+    assert status == 400
+    assert "no API key" in refused["error"]
+    assert served.config.provider == was
+
+
+def test_the_pages_own_files_travel_with_it(served):
+    """They are loaded by name from beside the module.
+
+    A packaging rule that stops including them is a blank interface on
+    somebody else's machine and a working one here, which is the worst shape a
+    fault can have.
+    """
+    from comodor.web import server as server_module
+
+    beside = Path(server_module.__file__).parent
+    for name, _ in ASSETS.values():
+        assert (beside / name).is_file(), f"{name} is not next to the module"
+    assert (beside / "index.html").is_file()
+    # Redistributing the font means redistributing its licence with it.
+    assert (beside / "vazirmatn-OFL.txt").is_file()
 
 
 def test_the_default_bind_is_loopback(config):
