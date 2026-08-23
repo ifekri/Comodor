@@ -64,3 +64,31 @@ Comodor is deliberately small: one dependency, no framework, no plugin system
 that has to be maintained forever. Features that make it larger need to earn it
 against that. If you are planning something substantial, open an issue first —
 it is a much cheaper conversation than a rejected pull request.
+
+## Checking it against a real provider
+
+The test suite never touches the network — it has to run in CI, offline, on
+somebody else's machine. That leaves one thing it cannot answer: does this work
+against a real model?
+
+```bash
+uv run python scripts/live_check.py
+uv run python scripts/live_check.py --model anthropic/claude-sonnet-5
+```
+
+Four end-to-end runs — answering, reading a file, writing one, running a command
+— against whatever is configured in `src/.env`, which is git-ignored and yours:
+
+```
+XIAOMI_API_KEY=...
+XIAOMI_ENDPOINT=https://.../v1
+XIAOMI_MODEL=...
+```
+
+Any `<PROVIDER>_API_KEY` / `_ENDPOINT` / `_MODEL` trio works. Nothing from that
+file is printed: the key is redacted from every line of output and the endpoint
+appears only as its host, because this is the script most likely to be pasted
+into an issue.
+
+Run it before a tag. A release that passes 1100 offline tests and fails on the
+first real request is the exact failure a suite is meant to prevent and cannot.

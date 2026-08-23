@@ -2,6 +2,132 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.9.0 — 2026-08-23
+
+### It can use your computer
+
+Comodor can drive the machine the way a person does — look at the screen, move
+the mouse, click and type, in any application rather than only a browser.
+Windows so far; the packages are shaped so a second platform is a second file.
+
+**You watch it happen.** A halo marks where it is about to click *before* the
+pointer moves, it travels there over about a third of a second rather than
+teleporting, and a ripple marks where it landed. A panel at the top of the
+screen says how much of the permission is left and how to end it. The pause
+between the halo and the click is not decoration: it is the moment in which
+stopping it is still possible.
+
+When the agent is somewhere else — a server, the Docker image — the same thing
+appears in the browser interface instead: the frame it looked at, with a marker
+where it acted.
+
+**Permission is a grant with a scope, a clock and a way out**, checked again
+before every single action rather than once. Nothing is written to your config
+file; closing Comodor ends it, and there is deliberately no "always allow".
+
+    /computer 15m          fifteen minutes, anywhere
+    /computer 1h this app  only while that window is in front
+    /computer stop         end it now
+
+**The way out is the mouse in a screen corner.** Every other stop needs a
+keyboard the agent may be typing into, or a window it may be clicking on.
+Pulling the mouse away is what a person actually does when their screen starts
+moving on its own, and it cannot be intercepted. The agent may still click in a
+corner itself — it remembers where it left the pointer.
+
+Refused whatever you have allowed: a password manager, any window asking for a
+password, a wallet, a locked screen, and Comodor's own window — an agent that
+clicks into the terminal driving it types into its own prompt.
+
+**Said plainly, because it is true:** a screenshot goes to the model and
+everything on your screen goes with it. Redaction works on text and cannot read
+pixels.
+
+Verified end to end against `claude-sonnet-5` driving a real Notepad: four tool
+calls for "type this sentence", seven for one needing `ctrl+a`, `Delete` and a
+retype. Both landed the exact text, first attempt.
+
+Four things found by building it against a real screen rather than reasoning
+about one:
+
+- **"Capture at 1280 wide" makes an ultrawide unreadable.** That advice assumes
+  16:9. On a 3840x1080 display it is a three-times reduction, and the model is
+  handed text it cannot read — so it guesses instead of asking. The size is
+  fitted to the two limits that actually exist, which gives 2068x582 there and
+  1480x833 on an ordinary laptop.
+- **DPI awareness has to be set before anything reads a screen metric.** On a
+  display at 125% — the default on most Windows laptops — an unaware process is
+  told the screen is smaller than it is and every click lands short by the scale
+  factor. The cause is invisible; it looks like bad aim.
+- **The overlay stole the keyboard.** `WS_EX_NOACTIVATE` governs every
+  activation after the window exists, and `tk.Tk()` has already shown and
+  activated it before the next line of Python runs.
+- **An application can rewrite what the agent types.** Notepad turned `ümlaut`
+  into `umlaut`. Nothing was lost in transit — it was autocorrect. The tool now
+  says so on every `type`.
+
+A desktop run was also paying to look at screens it had already clicked past: a
+screenshot costs its full price on every turn it stays, so a thirty-step task
+carried close to fifty thousand tokens of stale pixels. Only the last two stay
+now.
+
+### Documentation that answers the question
+
+The README was 795 lines and still did not let somebody work out what the tool
+does or how to use one part of it. There is now a `docs/` folder — eighteen
+pages, organised by what you are trying to do rather than by how the code is
+laid out — and the README points at its index.
+
+[docs/README.md](docs/README.md) · [getting started](docs/getting-started.md)
+· [the interface](docs/interface.md) · [the terminal](docs/cli.md)
+· [tools](docs/tools.md) · [safety](docs/safety.md)
+· [learning](docs/learning.md) · [your screen](docs/computer.md)
+· [configuration](docs/configuration.md) · [cost](docs/cost.md)
+· [troubleshooting](docs/troubleshooting.md)
+
+Every link is checked by the test suite, in both directions: nothing points at a
+page that does not exist, and nothing exists that the index cannot reach.
+
+### A help page written rather than generated
+
+`comodor --help` printed argparse's list of flags. That answers "what arguments
+does this accept" and never answers what somebody typing it is asking, which is
+"what is this, and what do I do now".
+
+It is written now, organised the way you meet the program — start it, use it,
+drive it from a terminal, keep it working — with a command you can paste in
+every section. `comodor help <topic>` goes deeper on one thing.
+
+Tests check that every command and flag it names actually exists, that every
+documentation page it promises is there, and that it fits eighty columns. A help
+page naming a command that was renamed is worse than no help page.
+
+### `browser` settings have never worked
+
+`SECTIONS` is the list the loader walks, and `browser` was a field on `Config`
+that was not in it. Every `browser` setting anybody has ever written was read,
+ignored, and not complained about — including `headless: false`, whose whole
+purpose is to let you watch the browser work.
+
+Fixed, and `computer` registered the same way so it could not inherit the same
+silence. Neither may be set by a project: a repository that can set
+`browser.executable` names a binary for the agent to launch, and one that can
+set `computer.enabled` asks the machine it was just cloned onto for your mouse.
+
+### Smaller
+
+- **A live check before a release.** `scripts/live_check.py` runs four
+  end-to-end tasks against a real provider, reading credentials from a
+  git-ignored `src/.env` and printing none of them. The suite is offline by
+  design and cannot answer whether a release works against a real model.
+- **A bus can say whether anyone is listening.** A consent request went to an
+  empty room and waited out its timeout, then reported it as the user refusing.
+- **`comodor web` in a detached container would have hung.** Compose sets
+  `tty: true`, so a container has a terminal whether or not anybody is attached,
+  and the setup questions would have been asked of nobody.
+
+1100 tests on Linux, 1113 on Windows, ruff clean on both.
+
 ## 0.8.9 — 2026-08-22
 
 Two consequences of 0.8.8, found by following its own changes into the places
