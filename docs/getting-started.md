@@ -120,9 +120,18 @@ After a few sessions:
 ```
 
 ```
-  Corrections per task    ▁▂▂▁▁▁  0.8 → 0.2      falling, which is the point
-  Lessons recalled        ▂▃▄▅▆▆  61% of turns
-  Rules in force          7
+◈ Corrections per task down 100% since the first tasks in this project.
+
+metric                trend                       now  vs first
+Steps per task        ▁▃▅▇█▁▃▅▇█▁▃▅▇█▁▃▅▇█▁▃▅▇    6.1      ↑10%
+Corrections per task  ████████▅▅▅▅▅▅▅▅▁▁▁▁▁▁▁▁    0.0     ↓100%
+Approvals asked       ▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅    2.0         —
+Tokens per task       ▁▁▁▂▂▂▃▃▃▄▄▄▅▅▅▆▆▆▇▇▇███  12.0K      ↑40%
+First-try success     ▁██████▁██████▁██████▁██    86%         —
+
+brain    7 rules · 812 lessons · 24 corrections learned from
+history  24 tasks over 8 days
+success  83% overall
 ```
 
 That is evidence, not a claim. If the correction rate is not falling, the

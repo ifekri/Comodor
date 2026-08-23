@@ -76,14 +76,25 @@ signal the interface collects, and it is treated as one.
 /memory
 ```
 
+A searchable list — each lesson with what triggers it, what it says, its kind
+and its current confidence:
+
 ```
-  Lessons                                        confidence   seen
-  ─────────────────────────────────────────────────────────────────
-  single quotes in Python, not double                  0.91     14
-  tests go in tests/, mirroring the src layout         0.84      9
-  never add a dependency without asking                0.78      3
-  the parser must raise on empty input, not return []  0.62      2
+┌─  Memory (23)  ────────────────────────────────────────────────────┐
+│ ›  #41 writing Python strings                                      │
+│      Use single quotes for string literals.  [style 91%]           │
+│    #38 adding a test                                               │
+│      Tests go in tests/, mirroring the src layout.  [layout 84%]   │
+│    #29 adding a dependency                                         │
+│      Ask before adding one; this project has exactly one.  [78%]   │
+│    #12 parsing empty input                                         │
+│      Raise, do not return an empty list.  [behaviour 62%]          │
+└────────────────────────────────────────────────────────────────────┘
+  ↑↓ move   enter open   type filter   esc close
 ```
+
+`/memory <text>` searches. Opening one lets you pin it, so it stops decaying, or
+delete it if it was wrong.
 
 ```
 /rules
@@ -100,15 +111,24 @@ The house rules it drew from your code rather than from you telling it.
 ```
 
 ```
-  Corrections per task    ▁▂▂▁▁▁   0.8 → 0.2
-  Lessons recalled        ▂▃▄▅▆▆   61% of turns
-  Rules in force          7
-  Brain                   812 lessons · 4.2 MB
+◈ Corrections per task down 100% since the first tasks in this project.
+
+metric                trend                       now  vs first
+Steps per task        ▁▃▅▇█▁▃▅▇█▁▃▅▇█▁▃▅▇█▁▃▅▇    6.1      ↑10%
+Corrections per task  ████████▅▅▅▅▅▅▅▅▁▁▁▁▁▁▁▁    0.0     ↓100%
+Approvals asked       ▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅    2.0         —
+Tokens per task       ▁▁▁▂▂▂▃▃▃▄▄▄▅▅▅▆▆▆▇▇▇███  12.0K      ↑40%
+First-try success     ▁██████▁██████▁██████▁██    86%         —
+
+brain    7 rules · 812 lessons · 24 corrections learned from
+history  24 tasks over 8 days
+success  83% overall
 ```
 
-**The first line is the one that matters.** If corrections per task are not
-falling, the learning is not working — and the panel says so rather than
-claiming success. Everything else is activity; that one is outcome.
+**The line at the top is the one that matters.** If corrections per task are not
+falling, the learning is not working — and the panel leads with that either way,
+rather than burying it under activity. Everything else in the table is effort;
+that one is outcome.
 
 ---
 
