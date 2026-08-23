@@ -9,6 +9,28 @@ comodor help computer     # one topic in more detail
 
 ---
 
+## Installing and updating
+
+```bash
+curl -fsSL https://comodor.ai/install.sh | sh     # macOS, Linux, BSD
+```
+
+```powershell
+irm https://comodor.ai/install.ps1 | iex          # Windows
+```
+
+The same one line updates an existing install. Or, once it is on your machine:
+
+```bash
+comodor update --check    # what is out there
+comodor update            # move to it
+```
+
+[Getting started](getting-started.md#1-install) has the rest — the package
+managers, and what the installers accept.
+
+---
+
 ## Starting it
 
 ```bash

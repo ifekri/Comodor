@@ -56,7 +56,9 @@ ends with the agent doing something useful.
 ## The shortest possible version
 
 ```bash
-pip install comodor      # or: uv tool install comodor
+curl -fsSL https://comodor.ai/install.sh | sh      # macOS, Linux
+irm https://comodor.ai/install.ps1 | iex           # Windows
+
 comodor                  # it asks a few questions, once
 ```
 

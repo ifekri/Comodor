@@ -6,8 +6,51 @@ Five minutes, ending with the agent doing something useful.
 
 ## 1. Install
 
-Comodor needs **Python 3.11 or newer** and nothing else. Pick whichever of these
-you already use:
+One line. It works out the rest.
+
+**macOS · Linux · BSD**
+
+```bash
+curl -fsSL https://comodor.ai/install.sh | sh
+```
+
+**Windows** — PowerShell
+
+```powershell
+irm https://comodor.ai/install.ps1 | iex
+```
+
+```
+Comodor — it learns the way you correct it.
+
+  Linux x86_64
+> Installing uv, a package manager Comodor needs (about 15 MB)
+  from https://astral.sh/uv — it fetches a Python too, if one is missing
+> Installing with uv
+
+✓ comodor 0.9.0
+
+  Added /root/.local/bin to your PATH in /root/.profile
+```
+
+**It finishes.** Somebody running one line from a web page has not agreed to
+debug anything, so the script installs what it needs — an isolated environment,
+a package manager, a Python — rather than stopping to explain what you should
+have had already. Verified on a bare `debian:bookworm-slim` with no Python on it
+at all.
+
+It gives up only when it genuinely cannot proceed, and then it names exactly one
+thing to do next.
+
+### If you would rather not pipe a script into a shell
+
+Entirely reasonable. Both scripts are plain text you can read first:
+
+```bash
+curl -fsSL https://comodor.ai/install.sh | less
+```
+
+Or use a package manager you already have:
 
 ```bash
 uv tool install comodor      # isolated, and the fastest
@@ -15,10 +58,29 @@ pipx install comodor         # isolated
 pip install comodor          # into whatever environment you are in
 ```
 
-Check it arrived:
+Comodor needs **Python 3.11 or newer** and nothing else.
+
+### Check it arrived
 
 ```bash
 comodor --version
+```
+
+If the shell cannot find it, the installer added a directory to your `PATH` that
+this terminal does not know about yet. Open a new one, or run the `export` line
+the installer printed.
+
+### Options the installers understand
+
+| | |
+|---|---|
+| `COMODOR_FORCE_TOOL` | pin the method: `uv`, `pipx`, `venv` or `pip` |
+| `COMODOR_NO_BOOTSTRAP` | never download a tool; fail instead |
+| `COMODOR_NO_MODIFY_PATH` | do not touch your shell profile |
+| `COMODOR_INSTALL_REF` | install from a git ref or a local path instead of PyPI |
+
+```bash
+COMODOR_NO_MODIFY_PATH=1 curl -fsSL https://comodor.ai/install.sh | sh
 ```
 
 > **Not sure you want to install it yet?** `comodor --demo` runs the entire

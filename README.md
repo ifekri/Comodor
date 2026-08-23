@@ -27,8 +27,32 @@ that mistake again.** Not because you configured it.
 
 ## Install
 
+**macOS · Linux**
+
 ```bash
-uv tool install comodor      # or: pipx install comodor, or: pip install comodor
+curl -fsSL https://comodor.ai/install.sh | sh
+```
+
+**Windows**
+
+```powershell
+irm https://comodor.ai/install.ps1 | iex
+```
+
+That is the whole thing. It finds a Python, installs an isolated environment,
+puts `comodor` on your `PATH`, and tells you what to do next — and if there is
+no Python at all it fetches one. Verified on a bare `debian:bookworm-slim` with
+nothing installed.
+
+Already have a package manager you like?
+
+```bash
+uv tool install comodor       # or: pipx install comodor, or: pip install comodor
+```
+
+Then:
+
+```bash
 comodor
 ```
 
