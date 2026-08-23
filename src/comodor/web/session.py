@@ -31,8 +31,10 @@ from ..config import Config
 from ..events import Event, EventBus, Kind, Request
 from ..learning import LearningEngine
 from ..mcp import MCPManager
+from ..providers.base import Message
 from ..providers.gateway import Gateway
 from ..safety import CheckpointStore, PermissionEngine, Redactor
+from ..session import SessionIndex, SessionMeta, SessionStore, derive_title, new_session_id
 from ..skills import load_for as load_skills
 from ..tools import ToolRegistry
 
@@ -72,6 +74,27 @@ class Session:
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )
+
+        # Where conversations live. The same folder the terminal uses, on
+        # purpose: a chat begun at the prompt should be openable in the browser
+        # and the other way round, and two stores would have made the sidebar
+        # a list of half the work.
+        self.store = SessionStore(config.paths.user / "sessions")
+        self.meta = SessionMeta(
+            id=new_session_id(), cwd=str(config.paths.project),
+            provider=config.provider, model=config.active_model(),
+        )
+        #: How much of the conversation is already on disk, so appending is
+        #: appending rather than writing the whole thing again every turn.
+        self._saved = 0
+        #: Built on first use. Indexing every transcript takes a moment, and
+        #: paying it at startup would delay a page that may never be searched.
+        self._index: SessionIndex | None = None
+        #: Where in the event log this chat started. A page that reloads
+        #: replays from here: zero while nobody has switched chats, so the
+        #: whole session comes back, and the switch point afterwards, so one
+        #: chat's events are not drawn into another's transcript.
+        self._chat_from = 0
 
         self._log: list[dict[str, Any]] = []
         self._sequence = 0
@@ -147,6 +170,12 @@ class Session:
         except Exception:
             return b"", number
 
+    @property
+    def cursor(self) -> int:
+        """How far the event log has got, for a page that is about to redraw."""
+        with self._lock:
+            return self._sequence
+
     def since(self, cursor: int) -> list[dict[str, Any]]:
         with self._lock:
             return [frame for frame in self._log if frame["seq"] > cursor]
@@ -177,7 +206,7 @@ class Session:
             "mode": self.config.agent.mode,
             "loop": self.config.agent.loop,
             "busy": self.busy,
-            "cursor": self._sequence,
+            "cursor": self._chat_from,
             "usage": {
                 "prompt": usage.prompt_tokens,
                 "output": usage.output_tokens,
@@ -187,9 +216,271 @@ class Session:
             },
             "context": {
                 "limit": self.config.agent.context_limit,
+                "used": usage.prompt_tokens,
             },
             "project": str(self.config.paths.project),
+            "chat": {"id": self.meta.id, "title": self.meta.title,
+                     "messages": len(self.conversation.messages)},
         }
+
+    # -- chats -------------------------------------------------------------- #
+
+    def _persist(self) -> None:
+        """Write whatever the agent has said since the last time.
+
+        Called after every turn and again at shutdown, because a turn that
+        ends by the process being killed is exactly the one worth keeping.
+        """
+        messages = self.conversation.messages
+        for message in messages[self._saved:]:
+            try:
+                self.store.append(self.meta.id, message)
+            except OSError:
+                return                      # a full disk must not kill the turn
+        self._saved = len(messages)
+        self.meta.messages = len(messages)
+        self.meta.cost_usd = self.conversation.usage.cost_usd
+        self.meta.model = self.config.active_model()
+        self.meta.provider = self.config.provider
+        self.meta.updated_at = time.time()
+        try:
+            self.store.save_meta(self.meta)
+        except OSError:
+            pass
+
+    def chats(self, query: str = "", limit: int = 40) -> list[dict[str, Any]]:
+        """The sidebar's list: recent chats, or the ones matching a search."""
+        if query.strip():
+            return self._search(query.strip(), limit)
+        return [self._as_card(meta) for meta in self.store.list_sessions(limit)]
+
+    def _search(self, query: str, limit: int) -> list[dict[str, Any]]:
+        if self._index is None:
+            self._index = SessionIndex(self.store)
+            self._index.refresh()
+        seen: dict[str, dict[str, Any]] = {}
+        for hit in self._index.search(query, limit=limit * 3):
+            if hit.session_id in seen:
+                continue
+            meta = self.store.load_meta(hit.session_id)
+            card = self._as_card(meta) if meta else {
+                "id": hit.session_id, "title": hit.session_id, "when": hit.when,
+                "messages": 0, "cost": 0.0, "model": "", "current": False,
+            }
+            card["snippet"] = hit.snippet()
+            seen[hit.session_id] = card
+            if len(seen) >= limit:
+                break
+        return list(seen.values())
+
+    def _as_card(self, meta: SessionMeta) -> dict[str, Any]:
+        return {
+            "id": meta.id,
+            "title": meta.title or "Untitled",
+            "when": meta.when,
+            "updated_at": meta.updated_at,
+            "messages": meta.messages,
+            "cost": round(meta.cost_usd, 4),
+            "model": meta.model,
+            "current": meta.id == self.meta.id,
+        }
+
+    def new_chat(self) -> tuple[bool, str]:
+        """Put the current conversation away and start an empty one."""
+        if self.busy:
+            return False, "a turn is running"
+        self._persist()
+        self.conversation.clear()
+        self._saved = 0
+        self.meta = SessionMeta(
+            id=new_session_id(), cwd=str(self.config.paths.project),
+            provider=self.config.provider, model=self.config.active_model(),
+        )
+        self._chat_from = self.cursor
+        return True, ""
+
+    def open_chat(self, session_id: str) -> tuple[bool, str, list[dict[str, Any]]]:
+        """Load a stored chat, and hand the browser what to draw.
+
+        The event log is the *live* stream and a resumed transcript was never
+        in it, so the messages come back in this response rather than through
+        the poll. The page redraws from them and carries on from the cursor it
+        already has.
+        """
+        if self.busy:
+            return False, "a turn is running", []
+        meta = self.store.load_meta(session_id)
+        if meta is None:
+            return False, "no such chat", []
+        messages = self.store.load(session_id)
+        self._persist()
+        self.conversation.clear()
+        self.conversation.extend(messages)
+        self.meta = meta
+        self._saved = len(messages)
+        self._chat_from = self.cursor
+        return True, "", [_as_turn(message) for message in messages]
+
+    def delete_chat(self, session_id: str) -> tuple[bool, str]:
+        if session_id == self.meta.id:
+            return False, "that is the chat you are in"
+        if not self.store.delete(session_id):
+            return False, "no such chat"
+        if self._index is not None:
+            self._index.forget(session_id)
+        return True, ""
+
+    # -- what the agent is, right now ---------------------------------------- #
+
+    def admin(self) -> dict[str, Any]:
+        """Everything the Admin panel shows, gathered once.
+
+        Read-only apart from what `setting` accepts. Nothing here may raise:
+        the panel describing the agent must not be the thing that breaks it,
+        so each part that can fail is guarded and simply says less.
+        """
+        from .. import catalogue
+        from .._version import __version__
+
+        entry = self.config.providers.get(self.config.provider)
+        spec = catalogue.get(self.config.provider)
+        safety = self.config.safety
+
+        try:
+            models = sorted({
+                *(spec.models if spec else ()),
+                *( (entry.model,) if entry and entry.model else () ),
+                self.config.active_model(),
+            })
+        except Exception:
+            models = [self.config.active_model()]
+
+        try:
+            tools = [{"name": tool.name, "risk": int(tool.risk),
+                      "description": (tool.description or "").strip().split("\n")[0]}
+                     for tool in sorted(self.agent.tools.all(),
+                                        key=lambda item: item.name)]
+        except Exception:
+            tools = []
+
+        try:
+            reflex = self.memory.stats()
+        except Exception:
+            reflex = {}
+
+        return {
+            "app": {"version": __version__, "python": _python(),
+                    "platform": _platform()},
+            "model": {
+                "provider": self.config.provider,
+                "provider_label": entry.display if entry else self.config.provider,
+                "model": self.config.active_model(),
+                "models": models,
+                "providers": [{"id": name, "label": item.display,
+                               "model": item.model, "ready": item.ready}
+                              for name, item in self.config.providers.items()],
+            },
+            "agent": {
+                "mode": self.config.agent.mode,
+                "loop": self.config.agent.loop,
+                "max_steps": self.config.agent.max_steps,
+                "max_seconds": self.config.agent.max_seconds,
+                "max_cost_usd": self.config.agent.max_cost_usd,
+                "context_limit": self.config.agent.context_limit,
+                "compact_at": self.config.agent.compact_at,
+            },
+            "tools": tools,
+            "skills": [{"name": skill.name,
+                        "description": (getattr(skill, "description", "") or "")}
+                       for skill in self.skills.skills.values()],
+            "mcp": {
+                "enabled": bool(self.config.mcp.enabled),
+                "servers": list(getattr(self.config.mcp, "servers", {})),
+            },
+            "reflex": {
+                "lessons": reflex.get("lessons", 0),
+                "rules": reflex.get("rules", 0),
+                "rules_active": reflex.get("rules_active", 0),
+                "skills": reflex.get("skills", 0),
+                "episodes": reflex.get("episodes", 0),
+                "signals": reflex.get("signals", 0),
+                "success_rate": round(float(reflex.get("success_rate", 0.0)), 3),
+            },
+            "safety": {
+                "auto_approve_safe": safety.auto_approve_safe,
+                "auto_approve_writes": safety.auto_approve_writes,
+                "auto_approve_shell": safety.auto_approve_shell,
+                "checkpoints": safety.checkpoints,
+                "workspace_only": safety.workspace_only,
+                "grants": self.permissions.grants,
+                "denied": len(self.permissions.denials),
+            },
+            "paths": {
+                "project": str(self.config.paths.project),
+                "config": str(self.config.paths.config_file),
+                "sessions": str(self.store.root),
+                "brain": str(self.config.paths.brain_db),
+            },
+        }
+
+    def setting(self, key: str, value: Any) -> tuple[bool, str]:
+        """Change one thing from the browser.
+
+        Deliberately short. The three settings here change *which model
+        answers and how far it may go on its own* - the questions somebody
+        managing a run actually asks. What is missing is as considered as what
+        is here: nothing that widens what the agent may do to the machine can
+        be switched on from a web page, because the page is reachable by
+        anyone holding the token and the permission prompts already offer that
+        choice per action, in front of the person about to live with it.
+        """
+        if key == "mode":
+            return (True, "") if self.set_mode(str(value)) else (False, "unknown mode")
+
+        if key == "loop":
+            self.config.agent.loop = bool(value)
+            self.bus.emit(Kind.STATUS, loop=self.config.agent.loop)
+            return True, ""
+
+        if key == "model":
+            model = str(value).strip()
+            if not model:
+                return False, "no model given"
+            self.config.model = model
+            self.meta.model = model
+            self._follow_the_window(model)
+            self.bus.emit(Kind.STATUS, model=model)
+            return True, ""
+
+        if key == "provider":
+            entry = self.config.providers.get(str(value))
+            if entry is None:
+                return False, "unknown provider"
+            if not entry.ready:
+                return False, f"{entry.display} has no API key yet"
+            self.config.provider = str(value)
+            self.config.model = entry.model
+            self.meta.provider = str(value)
+            self.meta.model = entry.model
+            self._follow_the_window(entry.model)
+            self.bus.emit(Kind.STATUS, provider=entry.display, model=entry.model)
+            return True, ""
+
+        return False, f"{key!r} is not something this page may change"
+
+    def _follow_the_window(self, model: str) -> None:
+        """The context window belongs to the model, not to the configuration.
+
+        Left at the previous model's number after a switch, the loop never
+        compacts and the run dies at the provider's real ceiling instead.
+        """
+        from ..providers import registry
+
+        if not registry.knows(model):
+            return                          # invented defaults are worse
+        window = registry.lookup(model).context
+        if window:
+            self.config.agent.context_limit = window
 
     # -- what a browser does ------------------------------------------------ #
 
@@ -200,6 +491,9 @@ class Session:
         if not self._turn.acquire(blocking=False):
             return False
 
+        if not self.meta.title:
+            self.meta.title = derive_title(text)
+
         def work() -> None:
             self.busy = True
             self.bus.emit(Kind.STATUS, busy=True)
@@ -209,6 +503,12 @@ class Session:
                 self.bus.emit(Kind.ERROR, text=f"{type(error).__name__}: {error}")
             finally:
                 self.busy = False
+                # Saved before the lock is released, so the next turn cannot
+                # start writing messages into a store that is mid-append.
+                try:
+                    self._persist()
+                except Exception:
+                    pass
                 self.bus.emit(Kind.STATUS, busy=False)
                 self._turn.release()
 
@@ -247,6 +547,17 @@ class Session:
         return True
 
     def close(self) -> None:
+        # The transcript first: a session ended by the process going away is
+        # exactly the one somebody wanted to come back to.
+        try:
+            self._persist()
+        except Exception:
+            pass
+        if self._index is not None:
+            try:
+                self._index.close()
+            except Exception:
+                pass
         # Deny anything still waiting, or a worker thread blocks until timeout.
         for request in list(self._pending.values()):
             if not request.answered:
@@ -265,6 +576,33 @@ class Session:
                 self.mcp.close()
             except Exception:
                 pass
+
+
+def _as_turn(message: Message) -> dict[str, Any]:
+    """One stored message, in the shape the page already draws live events in.
+
+    Reusing the live shape means a resumed chat and a running one go through
+    the same renderer, so they cannot drift apart in the way that leaves an
+    old conversation looking subtly unlike a new one.
+    """
+    role = getattr(message.role, "value", str(message.role))
+    if role == "tool":
+        return {"kind": "tool", "name": message.name or "tool",
+                "ok": not message.is_error,
+                "text": (message.content or "")[:4000]}
+    return {"kind": role, "text": message.content or ""}
+
+
+def _python() -> str:
+    import sys
+
+    return f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
+
+def _platform() -> str:
+    import platform
+
+    return f"{platform.system()} {platform.release()}".strip()
 
 
 def _plain(value: Any) -> Any:

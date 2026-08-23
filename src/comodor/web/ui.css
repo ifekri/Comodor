@@ -1,0 +1,829 @@
+/* Comodor in a browser.
+ *
+ * Two ideas hold this file together.
+ *
+ * **Tokens, then components.** Every colour, radius, and spacing step is a
+ * custom property defined once. A theme is a different set of values for the
+ * same names, which is why light mode is forty lines rather than a second
+ * stylesheet.
+ *
+ * **Logical properties everywhere.** `padding-inline-start`, not
+ * `padding-left`. Text in this interface arrives in whatever language the
+ * person writes, and a message in Persian sets its own direction; physical
+ * properties would leave the padding on the wrong side of half of them.
+ */
+
+/* --------------------------------------------------------------------------
+ * Vazirmatn, for Arabic-script text
+ *
+ * Served from this machine rather than fetched from a font host. Comodor's
+ * one promise about dependencies is that it works on a locked-down network,
+ * and a page that only sets Persian properly when it can reach the internet
+ * would be a strange thing to ship with an offline agent. It is the Google
+ * Fonts build, arabic subset, one variable file for every weight: 46 KB.
+ *
+ * `unicode-range` is what makes this invisible. The font applies to
+ * Arabic-script codepoints and to nothing else, so a message mixing Persian
+ * with an English identifier gets Vazirmatn for one and the interface face
+ * for the other, in the same line, with no classes and no detection.
+ * ------------------------------------------------------------------------ */
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/vazirmatn.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891,
+                 U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F,
+                 U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+
+/* --------------------------------------------------------------------------
+ * tokens
+ * ------------------------------------------------------------------------ */
+:root {
+  /* The mark's orange, and the greys it sits on. */
+  --accent:        #e2703a;
+  --accent-soft:   #f0996d;
+  --accent-wash:   rgba(226, 112, 58, .12);
+  --accent-edge:   rgba(226, 112, 58, .38);
+
+  --bg:            #171615;
+  --bg-sunk:       #131211;
+  --bg-raised:     #1e1c1a;
+  --bg-hover:      #26231f;
+  --bg-active:     #2e2a25;
+
+  --line:          #2b2725;
+  --line-strong:   #3a3532;
+
+  /* Measured against the darkest surface each one lands on, which is the
+   * page rather than the rail here: 15.0, 7.8, 4.9 and 3.8 to one.
+   *
+   * The first three carry words, so they clear 4.5 - the floor for body copy.
+   * `--ink-faint` carries shapes: chevrons, the search glyph, a disabled
+   * control. It clears 3, which is the floor for those, and is used for
+   * nothing that has to be read. It used to be 2.6 and was carrying
+   * sentences. */
+  --ink:           #efe9e2;
+  --ink-soft:      #b3a99f;
+  --ink-dim:       #8d837a;
+  --ink-faint:     #7a716a;
+
+  --good:          #7ec17a;
+  --warn:          #e0b341;
+  --bad:           #e8736f;
+
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+          Arial, 'Noto Sans', sans-serif, 'Vazirmatn';
+  --mono: ui-monospace, SFMono-Regular, 'SF Mono', 'Cascadia Mono',
+          'Roboto Mono', Menlo, Consolas, monospace;
+
+  --r-sm: 6px;  --r-md: 10px;  --r-lg: 14px;  --r-full: 999px;
+  --pad:  16px;
+  --rail: 292px;
+
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.34);
+  --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+  --speed: 140ms;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.2 6 8.2l4-4' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  /* Darker than the dark theme's orange, and not by preference: the model
+   * name in the header is set in the accent and sits on the rail's shade,
+   * where #c2571f measured 3.98:1. This one is 5.0. */
+  --accent:        #ab4a17;
+  --accent-soft:   #8f3c10;
+  --accent-wash:   rgba(171, 74, 23, .09);
+  --accent-edge:   rgba(171, 74, 23, .34);
+
+  --bg:            #fbfaf8;
+  --bg-sunk:       #f3f1ed;
+  --bg-raised:     #ffffff;
+  --bg-hover:      #f0ede8;
+  --bg-active:     #e7e2db;
+
+  --line:          #e2ddd5;
+  --line-strong:   #cec7bd;
+
+  /* 16.4, 7.0, 5.4 and 3.8 to one against #f3f1ed, the rail and the footer,
+   * which is the least forgiving surface in this theme. */
+  --ink:           #1e1b19;
+  --ink-soft:      #5c554e;
+  --ink-dim:       #6e665f;
+  --ink-faint:     #877e75;
+
+  --good:          #2f7d3a;
+  --warn:          #94660a;
+  --bad:           #b3322e;
+
+  --shadow: 0 1px 2px rgba(28,22,16,.06), 0 8px 24px rgba(28,22,16,.08);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --accent: #ab4a17;  --accent-soft: #8f3c10;
+    --accent-wash: rgba(171, 74, 23, .09);
+    --accent-edge: rgba(171, 74, 23, .34);
+    --bg: #fbfaf8;  --bg-sunk: #f3f1ed;  --bg-raised: #ffffff;
+    --bg-hover: #f0ede8;  --bg-active: #e7e2db;
+    --line: #e2ddd5;  --line-strong: #cec7bd;
+    --ink: #1e1b19;  --ink-soft: #5c554e;  --ink-dim: #6e665f;
+    --ink-faint: #877e75;
+    --good: #2f7d3a;  --warn: #94660a;  --bad: #b3322e;
+    --shadow: 0 1px 2px rgba(28,22,16,.06), 0 8px 24px rgba(28,22,16,.08);
+    color-scheme: light;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --speed: 0ms; }
+  *, *::before, *::after { animation-duration: .01ms !important;
+                           animation-iteration-count: 1 !important;
+                           transition-duration: .01ms !important; }
+}
+
+/* --------------------------------------------------------------------------
+ * base
+ * ------------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 15px/1.6 var(--font);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;                       /* the panes scroll, the page does not */
+}
+
+/* `hidden` is an attribute and every component rule here is a class, so the
+ * class wins and the element stays on screen. That put Stop beside Send for
+ * the whole of the first run. Nothing is worth showing that has been hidden. */
+[hidden] { display: none !important; }
+
+:focus { outline: none; }
+:focus-visible { box-shadow: var(--ring); border-radius: var(--r-sm); }
+
+button, input, textarea, select {
+  font: inherit; color: inherit; background: none; border: none; margin: 0;
+}
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .45; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong); border-radius: var(--r-full);
+  border: 3px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ink-faint);
+                                  background-clip: content-box; }
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* --------------------------------------------------------------------------
+ * right-to-left
+ *
+ * The chrome is a left-to-right product and stays that way. What flips is
+ * content: a message, a chat title, the composer while Persian is being typed.
+ * `unicode-bidi: plaintext` gives each paragraph its own direction from its
+ * own first strong character, which is the behaviour a reader expects from a
+ * transcript that mixes languages -- an English paragraph inside a Persian
+ * answer stays left-aligned instead of being dragged to the right margin.
+ * ------------------------------------------------------------------------ */
+.bidi { unicode-bidi: plaintext; text-align: start; }
+
+[dir='rtl'] { font-family: 'Vazirmatn', Tahoma, var(--font); line-height: 1.85; }
+
+/* Code, paths and identifiers are left-to-right in every language. Isolating
+ * them stops a trailing bracket or slash from being pulled across the line. */
+code, pre, kbd, samp, .mono, .path {
+  direction: ltr; unicode-bidi: isolate; font-family: var(--mono);
+}
+
+/* --------------------------------------------------------------------------
+ * shell
+ * ------------------------------------------------------------------------ */
+#shell {
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'top    top'
+                       'rail   main'
+                       'rail   foot';
+  height: 100dvh;
+}
+#shell[data-rail='closed'] { --rail: 0px; }
+
+/* --------------------------------------------------------------------------
+ * top bar
+ * ------------------------------------------------------------------------ */
+#top {
+  grid-area: top;
+  display: flex; align-items: center; gap: 12px;
+  /* `viewport-fit=cover` puts the page under the status bar and the rounded
+   * corners. These are zero on anything without them. */
+  padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+  padding-inline-start: max(14px, env(safe-area-inset-left));
+  padding-inline-end: max(14px, env(safe-area-inset-right));
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sunk);
+  min-height: 58px;
+}
+
+.brand {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  color: inherit; text-decoration: none;
+}
+.brand:hover .name { color: var(--accent); }
+.brand svg { width: 30px; height: 30px; flex: none; }
+.brand .words { display: flex; flex-direction: column; line-height: 1.15; }
+.brand .name { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+.brand .tag { font-size: 11.5px; color: var(--ink-dim); }
+
+.divider { width: 1px; align-self: stretch; background: var(--line);
+           margin-inline: 4px; }
+
+/* The model breadcrumb is a button: it says what is answering and opens the
+ * place where that is changed, which is the question anyone reading it has. */
+#whoami {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 6px 10px; border-radius: var(--r-md);
+  border: 1px solid transparent; color: var(--ink-soft);
+  transition: background var(--speed), border-color var(--speed);
+}
+#whoami:hover { background: var(--bg-hover); border-color: var(--line); }
+#whoami .provider { font-size: 13px; white-space: nowrap; }
+#whoami .sep { color: var(--ink-faint); }
+#whoami .model {
+  font-family: var(--mono); font-size: 13px; color: var(--accent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.grow { flex: 1 1 auto; min-width: 0; }
+
+.icon-btn {
+  display: grid; place-items: center;
+  width: 34px; height: 34px; flex: none;
+  border-radius: var(--r-md); color: var(--ink-dim);
+  transition: background var(--speed), color var(--speed);
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--ink); }
+.icon-btn[aria-pressed='true'] { background: var(--accent-wash); color: var(--accent); }
+.icon-btn svg { width: 18px; height: 18px; }
+.icon-btn.danger:hover { color: var(--bad); }
+
+#tools-row { display: flex; align-items: center; gap: 2px; }
+
+/* --------------------------------------------------------------------------
+ * rail
+ * ------------------------------------------------------------------------ */
+#rail {
+  grid-area: rail;
+  display: flex; flex-direction: column; min-height: 0;
+  border-inline-end: 1px solid var(--line);
+  background: var(--bg-sunk);
+  overflow: hidden;
+}
+#shell[data-rail='closed'] #rail { display: none; }
+
+/* The close control lives here so it is inside the sheet on a phone, where
+ * the button that opened the sheet is behind it. On a wide screen the rail is
+ * not a sheet and there is nothing to close, so it is not shown. */
+.rail-top { display: flex; align-items: center; gap: 8px;
+            padding-inline-end: 12px; }
+.rail-top .tabs { flex: 1; }
+#rail-close { display: none; }
+
+.tabs {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  gap: 2px; margin: 12px; padding: 3px;
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.tabs button {
+  padding: 7px 10px; border-radius: 7px;
+  font-size: 12.5px; font-weight: 500; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-dim);
+  transition: background var(--speed), color var(--speed);
+}
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-selected='true'] { background: var(--bg-active); color: var(--ink); }
+
+.panel { display: none; flex-direction: column; min-height: 0; flex: 1; }
+.panel[data-open='true'] { display: flex; }
+
+/* -- search and new -------------------------------------------------------- */
+.finder { display: flex; gap: 8px; padding: 0 12px 12px; }
+.field {
+  flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 0 10px; height: 36px;
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  transition: border-color var(--speed);
+}
+.field:focus-within { border-color: var(--accent-edge); }
+.field svg { width: 15px; height: 15px; color: var(--ink-faint); flex: none; }
+.field input { flex: 1; min-width: 0; font-size: 13.5px; }
+.field input::placeholder { color: var(--ink-dim); }
+
+.ghost-btn {
+  display: grid; place-items: center; width: 36px; height: 36px; flex: none;
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--bg); color: var(--ink-soft);
+  transition: border-color var(--speed), color var(--speed), background var(--speed);
+}
+.ghost-btn:hover { border-color: var(--accent-edge); color: var(--accent);
+                   background: var(--accent-wash); }
+.ghost-btn svg { width: 16px; height: 16px; }
+
+/* -- the chat list --------------------------------------------------------- */
+#chats { flex: 1; overflow-y: auto; padding: 0 8px 16px; }
+
+.group-label {
+  padding: 12px 8px 6px; font-size: 11px; font-weight: 600;
+  letter-spacing: .07em; text-transform: uppercase; color: var(--ink-dim);
+}
+
+.chat-row {
+  display: block; width: 100%; text-align: start;
+  padding: 9px 10px; border-radius: var(--r-md);
+  color: var(--ink-soft); position: relative;
+  transition: background var(--speed), color var(--speed);
+}
+.chat-row:hover { background: var(--bg-hover); color: var(--ink); }
+.chat-row[aria-current='true'] { background: var(--bg-active); color: var(--ink); }
+.chat-row[aria-current='true']::before {
+  content: ''; position: absolute; inset-block: 9px; inset-inline-start: 0;
+  width: 2px; border-radius: var(--r-full); background: var(--accent);
+}
+.chat-row .title {
+  display: block; font-size: 13.5px; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-row .meta {
+  display: block; margin-top: 2px; font-size: 11.5px; color: var(--ink-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The highlighted row is a lighter surface, so the same grey on it is a
+ * weaker contrast: 3.84:1 on the selected row against 5.0 on the rail. The
+ * row that stands out is the one whose small print has to stay readable. */
+.chat-row:hover .meta,
+.chat-row[aria-current='true'] .meta { color: var(--ink-soft); }
+
+.chat-row .snippet {
+  display: block; margin-top: 3px; font-size: 12px; color: var(--ink-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-row .drop {
+  position: absolute; inset-block-start: 8px; inset-inline-end: 6px;
+  width: 24px; height: 24px; display: grid; place-items: center;
+  border-radius: var(--r-sm); color: var(--ink-dim); opacity: 0;
+}
+.chat-row:hover .drop, .chat-row .drop:focus-visible { opacity: 1; }
+.chat-row .drop:hover { background: var(--bg-active); color: var(--bad); }
+.chat-row .drop svg { width: 14px; height: 14px; }
+
+.empty-note { padding: 22px 12px; color: var(--ink-dim); font-size: 13px;
+              text-align: center; }
+
+/* -- admin ----------------------------------------------------------------- */
+#admin-body { flex: 1; overflow-y: auto; padding: 0 12px 20px; }
+
+.card {
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--bg); margin-bottom: 10px; overflow: hidden;
+}
+.card > h3 {
+  margin: 0; padding: 10px 12px 8px;
+  font-size: 11px; font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--ink-dim);
+}
+.card .body { padding: 0 12px 12px; }
+
+.kv { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+      gap: 4px 12px; font-size: 12.5px; }
+.kv dt { color: var(--ink-dim); white-space: nowrap; }
+.kv dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+
+.control { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.control:last-child { margin-bottom: 0; }
+.control > label { font-size: 12px; color: var(--ink-dim); }
+.control select {
+  height: 34px; padding: 0 8px; width: 100%;
+  background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: var(--r-sm); font-size: 13px;
+}
+.control select:hover { border-color: var(--line-strong); }
+
+.switch { display: flex; align-items: center; justify-content: space-between;
+          gap: 12px; font-size: 13px; }
+.switch .track {
+  width: 38px; height: 22px; flex: none; border-radius: var(--r-full);
+  background: var(--line-strong); position: relative;
+  transition: background var(--speed);
+}
+.switch .track::after {
+  content: ''; position: absolute; top: 3px; inset-inline-start: 3px;
+  width: 16px; height: 16px; border-radius: 50%; background: var(--bg-raised);
+  transition: transform var(--speed);
+}
+.switch input { position: absolute; opacity: 0; pointer-events: none; }
+.switch input:checked + .track { background: var(--accent); }
+.switch input:checked + .track::after { transform: translateX(16px); }
+[dir='rtl'] .switch input:checked + .track::after { transform: translateX(-16px); }
+.switch input:focus-visible + .track { box-shadow: var(--ring); }
+
+.pills { display: flex; flex-wrap: wrap; gap: 5px; }
+.pill {
+  font-size: 11.5px; padding: 3px 8px; border-radius: var(--r-full);
+  background: var(--bg-hover); color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+.pill[data-risk='2'] { color: var(--warn); border-color: rgba(224,179,65,.3); }
+.pill[data-risk='3'] { color: var(--bad); border-color: rgba(232,115,111,.3); }
+.pill.on  { color: var(--good); border-color: rgba(126,193,122,.35); }
+.pill.off { color: var(--ink-dim); }
+
+.stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+             gap: 8px; }
+.stat { background: var(--bg-hover); border-radius: var(--r-sm); padding: 8px; }
+.stat b { display: block; font-size: 17px; font-weight: 600;
+          font-variant-numeric: tabular-nums; }
+.stat span { font-size: 10.5px; color: var(--ink-dim);
+             text-transform: uppercase; letter-spacing: .05em; }
+
+/* --------------------------------------------------------------------------
+ * the conversation
+ * ------------------------------------------------------------------------ */
+#main { grid-area: main; min-height: 0; position: relative; display: flex;
+        flex-direction: column; }
+
+#log { flex: 1; overflow-y: auto; scroll-behavior: smooth; }
+.stream { max-width: 60rem; margin: 0 auto; padding: 26px 22px 34px;
+          display: flex; flex-direction: column; gap: 18px; }
+
+.turn { display: flex; gap: 12px; align-items: flex-start; }
+.turn .who {
+  flex: none; width: 26px; height: 26px; margin-top: 1px;
+  border-radius: var(--r-sm); display: grid; place-items: center;
+  font-size: 11px; font-weight: 600;
+}
+.turn.user .who { background: var(--bg-active); color: var(--ink-soft); }
+.turn.agent .who { background: var(--accent-wash); color: var(--accent); }
+.turn.agent .who svg { width: 17px; height: 17px; }
+
+.bubble { min-width: 0; flex: 1; }
+.bubble .text {
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  padding: 9px 13px; border-radius: var(--r-md);
+}
+.turn.user .bubble { display: flex; }
+/* A Persian message sits against the right margin, where its first word is.
+ * The avatar stays put: which side the speaker's mark is on is a convention
+ * of this interface, not a property of the language. */
+.turn.user .bubble:has(> [dir='rtl']) { justify-content: flex-end; }
+.turn.user .bubble .text {
+  background: var(--bg-raised); border: 1px solid var(--line);
+  max-width: min(100%, 46rem);
+}
+.turn.agent .bubble .text { background: transparent; padding-inline: 0; }
+
+.bubble code {
+  background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: 4px; padding: 1px 5px; font-size: .9em;
+}
+.bubble pre {
+  margin: 8px 0 0; padding: 11px 13px; overflow-x: auto;
+  background: var(--bg-sunk); border: 1px solid var(--line);
+  border-radius: var(--r-md); font-size: 13px; line-height: 1.55;
+}
+.bubble pre code { background: none; border: none; padding: 0; }
+
+/* -- tool calls ------------------------------------------------------------ */
+.tool {
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--bg-sunk); overflow: hidden; font-size: 13px;
+}
+.tool > summary {
+  display: flex; align-items: center; gap: 9px; padding: 8px 12px;
+  cursor: pointer; list-style: none; color: var(--ink-soft);
+}
+.tool > summary::-webkit-details-marker { display: none; }
+.tool > summary::after {
+  content: ''; flex: none; width: 9px; height: 9px; margin-inline-start: 2px;
+  background: var(--ink-faint);
+  -webkit-mask: var(--chevron) center / contain no-repeat;
+  mask: var(--chevron) center / contain no-repeat;
+  transition: transform var(--speed);
+}
+.tool[open] > summary::after { transform: rotate(180deg); }
+/* Nothing to open, so nothing that says it opens. */
+.tool:not(:has(pre)) > summary { cursor: default; }
+.tool:not(:has(pre)) > summary::after { visibility: hidden; }
+.tool > summary:hover { background: var(--bg-hover); }
+.tool .verb { color: var(--accent); font-family: var(--mono); font-size: 12.5px;
+              flex: none; }
+.tool .target {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--ink-dim); font-family: var(--mono);
+  font-size: 12.5px; direction: ltr; unicode-bidi: isolate;
+}
+.tool .took { flex: none; font-size: 11.5px; color: var(--ink-dim);
+              font-variant-numeric: tabular-nums; }
+.tool[data-ok='false'] .took { color: var(--bad); }
+.tool .spin { flex: none; width: 13px; height: 13px; color: var(--accent); }
+.tool pre {
+  margin: 0; padding: 10px 13px; max-height: 19em; overflow: auto;
+  border-top: 1px solid var(--line); color: var(--ink-dim);
+  font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* -- notices --------------------------------------------------------------- */
+.notice { font-size: 13px; color: var(--ink-dim);
+          padding-inline-start: 38px; }
+.notice.error { color: var(--bad); }
+
+/* -- the empty state ------------------------------------------------------- */
+#blank { padding: 8vh 22px; max-width: 46rem; margin: 0 auto; text-align: center; }
+#blank .mark { width: 46px; height: 46px; margin: 0 auto 18px; opacity: .9; }
+#blank h1 { margin: 0 0 8px; font-size: 22px; font-weight: 600;
+            letter-spacing: -.015em; }
+#blank p { margin: 0 auto 26px; max-width: 34rem; color: var(--ink-dim);
+           font-size: 14.5px; }
+.starters { display: grid; gap: 8px;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.starter {
+  text-align: start; padding: 12px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--line); background: var(--bg-raised);
+  color: var(--ink-soft); font-size: 13.5px; line-height: 1.5;
+  transition: border-color var(--speed), color var(--speed),
+              transform var(--speed);
+}
+.starter:hover { border-color: var(--accent-edge); color: var(--ink);
+                 transform: translateY(-1px); }
+
+/* -- the screen the agent is driving --------------------------------------- */
+#screen { display: none; border-bottom: 1px solid var(--line);
+          background: #000; position: relative; }
+#screen[data-on='true'] { display: block; }
+#screen img { display: block; width: 100%; max-height: 42vh;
+              object-fit: contain; }
+#screen .mark {
+  position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px;
+  border: 2px solid var(--accent); border-radius: 50%; pointer-events: none;
+  box-shadow: 0 0 0 2px rgba(0,0,0,.55);
+}
+#screen .mark::after { content: ''; position: absolute; inset: 15px;
+                       border: 2px solid var(--accent); border-radius: 50%;
+                       opacity: .55; }
+#screen .caption {
+  position: absolute; inset-inline: 0; bottom: 0; padding: 22px 14px 8px;
+  font-size: 12.5px; color: #fff; font-family: var(--mono);
+  background: linear-gradient(transparent, rgba(0,0,0,.85));
+}
+
+/* --------------------------------------------------------------------------
+ * asking permission
+ * ------------------------------------------------------------------------ */
+#ask[hidden] { display: none; }
+#ask {
+  max-width: 60rem; margin: 0 auto 12px; padding: 14px 16px;
+  border: 1px solid var(--accent-edge); border-radius: var(--r-lg);
+  background: var(--accent-wash);
+}
+#ask .q { font-size: 14px; margin-bottom: 4px; }
+#ask pre {
+  margin: 8px 0 12px; padding: 9px 11px; max-height: 15em; overflow: auto;
+  background: var(--bg-sunk); border: 1px solid var(--line);
+  border-radius: var(--r-sm); font-size: 12.5px; color: var(--ink-dim);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+#ask .choices { display: flex; flex-wrap: wrap; gap: 8px; }
+#ask button {
+  padding: 7px 16px; border-radius: var(--r-md); font-size: 13.5px;
+  border: 1px solid var(--line-strong); background: var(--bg-raised);
+  transition: border-color var(--speed), background var(--speed);
+}
+#ask button:hover { border-color: var(--accent); background: var(--bg-hover); }
+#ask button.primary { background: var(--accent); border-color: var(--accent);
+                      color: #fff; font-weight: 500; }
+#ask button.primary:hover { background: var(--accent-soft);
+                            border-color: var(--accent-soft); }
+
+/* --------------------------------------------------------------------------
+ * the composer
+ * ------------------------------------------------------------------------ */
+#foot { grid-area: foot; border-top: 1px solid var(--line);
+        background: var(--bg-sunk); }
+.composer-wrap { max-width: 60rem; margin: 0 auto; padding: 12px 22px 8px; }
+
+#composer {
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: var(--bg-raised); transition: border-color var(--speed);
+  box-shadow: var(--shadow);
+}
+#composer:focus-within { border-color: var(--accent-edge); }
+
+#prompt {
+  display: block; width: 100%; resize: none; padding: 13px 15px 4px;
+  font-size: 15px; line-height: 1.6; max-height: 34vh; overflow-y: auto;
+  unicode-bidi: plaintext; text-align: start;
+}
+#prompt::placeholder { color: var(--ink-dim); }
+#prompt[dir='rtl'] { font-family: 'Vazirmatn', Tahoma, var(--font); }
+
+.composer-bar { display: flex; align-items: center; gap: 6px;
+                padding: 6px 8px 8px 12px; }
+
+/* The mode control names what the agent is allowed to do. It is a real
+ * <select> because that is the control every platform already knows how to
+ * open with a keyboard, on a phone, and with a screen reader. */
+#mode {
+  height: 30px; padding-inline: 9px 26px; border-radius: var(--r-full);
+  border: 1px solid var(--accent-edge); background: var(--accent-wash);
+  color: var(--accent); font-size: 12px; font-weight: 600;
+  letter-spacing: .05em; text-transform: uppercase;
+  appearance: none; cursor: pointer; position: relative;
+}
+/* Drawn rather than set as a background image: an inline SVG has to name its
+ * stroke colour, and a named colour is the wrong one in the other theme. */
+.mode-wrap { position: relative; display: inline-flex; }
+.mode-wrap::after {
+  content: ''; position: absolute; inset-inline-end: 9px; top: 50%;
+  width: 9px; height: 9px; margin-top: -5px; pointer-events: none;
+  background: var(--accent);
+  -webkit-mask: var(--chevron) center / contain no-repeat;
+  mask: var(--chevron) center / contain no-repeat;
+}
+#mode option { background: var(--bg-raised); color: var(--ink);
+               text-transform: none; letter-spacing: normal; }
+
+#mode-note { font-size: 12px; color: var(--ink-dim); min-width: 0;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+#send {
+  width: 34px; height: 34px; flex: none; border-radius: var(--r-md);
+  background: var(--accent); color: #fff; display: grid; place-items: center;
+  transition: background var(--speed), transform var(--speed);
+}
+#send:hover:not(:disabled) { background: var(--accent-soft); }
+#send:active:not(:disabled) { transform: scale(.94); }
+#send:disabled { background: var(--bg-active); color: var(--ink-faint); }
+#send svg { width: 17px; height: 17px; }
+[dir='rtl'] #send svg { transform: scaleX(-1); }
+
+#stop {
+  height: 34px; padding-inline: 14px; border-radius: var(--r-md);
+  border: 1px solid var(--bad); color: var(--bad); font-size: 13px;
+  display: flex; align-items: center; gap: 7px;
+}
+#stop:hover { background: rgba(232,115,111,.1); }
+#stop svg { width: 12px; height: 12px; }
+
+.hint { padding: 0 22px 10px; max-width: 60rem; margin: 0 auto;
+        font-size: 11.5px; color: var(--ink-dim); }
+.hint kbd {
+  padding: 1px 5px; border-radius: 4px; font-size: 11px;
+  background: var(--bg-hover); border: 1px solid var(--line);
+}
+
+/* --------------------------------------------------------------------------
+ * the status strip
+ *
+ * The mockup had a row of unlabelled glyphs here. An icon with no word beside
+ * it is a thing you have to click to find out about, which on a bar that
+ * reports the state of an agent editing your files is the wrong way round --
+ * so this says what it means, and only the parts that are true right now.
+ * ------------------------------------------------------------------------ */
+#status {
+  display: flex; align-items: center; gap: 14px;
+  padding: 5px 14px calc(5px + env(safe-area-inset-bottom));
+  min-height: 30px;
+  border-top: 1px solid var(--line); background: var(--bg);
+  font-size: 11.5px; color: var(--ink-dim);
+  overflow-x: auto; scrollbar-width: none;
+}
+#status::-webkit-scrollbar { display: none; }
+#status .bit { display: flex; align-items: center; gap: 6px; flex: none;
+               white-space: nowrap; }
+#status .bit svg { width: 13px; height: 13px; opacity: .75; }
+#status .bit b { font-weight: 500; color: var(--ink-soft);
+                 font-variant-numeric: tabular-nums; }
+#status .path {
+  max-width: 34ch; overflow: hidden; text-overflow: ellipsis;
+  font-size: 11.5px; color: var(--ink-soft);
+}
+#status .dot { width: 7px; height: 7px; border-radius: 50%;
+               background: var(--good); flex: none; }
+#status[data-live='false'] .dot { background: var(--bad); }
+#status[data-live='false'] .link-word { color: var(--bad); }
+
+/* The context gauge: a bar, because a fraction is a length before it is a
+ * number, and the number nobody reads is the one that matters near the end. */
+.gauge { width: 54px; height: 4px; border-radius: var(--r-full);
+         background: var(--line-strong); overflow: hidden; flex: none; }
+.gauge i { display: block; height: 100%; background: var(--accent);
+           transition: width 400ms ease; }
+.gauge[data-full='true'] i { background: var(--bad); }
+
+/* --------------------------------------------------------------------------
+ * busy
+ * ------------------------------------------------------------------------ */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 900ms linear infinite; }
+
+@keyframes pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+.thinking { display: inline-flex; gap: 4px; padding-inline-start: 38px; }
+.thinking i { width: 5px; height: 5px; border-radius: 50%;
+              background: var(--accent); animation: pulse 1.3s infinite; }
+.thinking i:nth-child(2) { animation-delay: .18s; }
+.thinking i:nth-child(3) { animation-delay: .36s; }
+
+/* A toast, for the things that used to be printed into the transcript. */
+#toasts {
+  position: fixed; inset-block-end: 96px; inset-inline: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none; z-index: 40;
+}
+.toast {
+  padding: 7px 14px; border-radius: var(--r-full); font-size: 12.5px;
+  background: var(--bg-active); border: 1px solid var(--line-strong);
+  color: var(--ink); box-shadow: var(--shadow); max-width: 90vw;
+}
+.toast.bad { border-color: var(--bad); color: var(--bad); }
+.toast.good { border-color: var(--good); }
+
+/* --------------------------------------------------------------------------
+ * responsive
+ *
+ * Three shapes rather than a rail that merely shrinks. Below the tablet
+ * breakpoint the rail is a drawer over the conversation, because 292px taken
+ * out of a 390px phone leaves a column too narrow to read code in.
+ * ------------------------------------------------------------------------ */
+#scrim { display: none; }
+
+@media (max-width: 900px) {
+  #shell { grid-template-columns: minmax(0, 1fr);
+           grid-template-areas: 'top' 'main' 'foot'; }
+
+  #rail {
+    position: fixed; inset-block: 0; inset-inline-start: 0; z-index: 50;
+    width: min(86vw, 320px); border-inline-end: 1px solid var(--line-strong);
+    box-shadow: var(--shadow);
+    padding-block-start: env(safe-area-inset-top);
+    padding-block-end: env(safe-area-inset-bottom);
+    transform: translateX(-102%);
+    transition: transform var(--speed) ease-out;
+  }
+  #rail-close { display: grid; }
+  [dir='rtl'] #rail { transform: translateX(102%); }
+  #shell[data-rail='open'] #rail { display: flex; transform: translateX(0); }
+  #shell[data-rail='closed'] #rail { display: flex; }
+
+  #shell[data-rail='open'] #scrim {
+    display: block; position: fixed; inset: 0; z-index: 45;
+    background: rgba(0,0,0,.55);
+  }
+
+  .stream, .composer-wrap, .hint, #ask { padding-inline: 14px; }
+  .brand .tag { display: none; }
+  /* The separator goes with it, or the breadcrumb opens with a lone chevron
+   * pointing at nothing. */
+  #whoami .provider, #whoami .sep { display: none; }
+  #blank { padding-block: 6vh; }
+}
+
+@media (max-width: 620px) {
+  body { font-size: 14.5px; }
+  #top { gap: 8px; padding-inline: 10px; }
+  /* The overflow icons go; what is left is what a phone needs at a tap. */
+  #tools-row .optional { display: none; }
+  #mode-note { display: none; }
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #status .bit.optional { display: none; }
+  .hint { display: none; }
+  #toasts { inset-block-end: 120px; }
+}
+
+/* A pointer that is not a mouse has no hover, so the delete button on a chat
+ * row would never appear. It is always visible there instead. */
+@media (hover: none) {
+  .chat-row .drop { opacity: 1; }
+}
+
+@media print {
+  #rail, #foot, #top, #status, #toasts { display: none; }
+  #shell { display: block; height: auto; }
+  body { overflow: visible; background: #fff; color: #000; }
+}

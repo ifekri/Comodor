@@ -102,9 +102,10 @@ event log would download every frame it had ever seen.
 
 ## What it will not do
 
-**Start without a provider.** The browser interface can change the mode and
-nothing else — there is no way to enter an API key from it. Rather than serve a
-URL that fails on the first task, it says what is missing and stops:
+**Start without a provider.** It can switch between providers that are already
+set up, but there is nowhere in it to type a key, and a browser tab would be a
+poor place for one. Rather than serve a URL that fails on the first task, it
+says what is missing and stops:
 
 ```
 Comodor has no provider configured, and the browser interface has no way to
@@ -121,18 +122,99 @@ prints the message — a container has a terminal whether or not anybody is
 attached, and a detached one would otherwise wait forever on a question nobody
 can answer.
 
+**Widen what the agent may touch.** Auto-approval for writes and for commands
+is shown in Admin and cannot be changed there. The permission prompts already
+offer that choice per action, in front of the person who will live with it;
+a page reachable by anyone holding the link is the wrong place to make it
+standing policy. Change it where Comodor was started — see
+[Safety](safety.md).
+
 ---
 
-## What you get
+## What is on the screen
 
-Everything the terminal interface has, except the keyboard shortcuts:
+**The conversation**, streaming as it arrives, with fenced code kept as code
+and every tool call as a row you can open to see what it actually did.
 
-- Streaming replies
-- The tool rows, with what each one did
-- Approval prompts, answered in the page
-- The mode buttons — act, plan, chat
-- Stop
-- Right-to-left text, set correctly
+**The chat list**, on the left. Every conversation is written to
+`~/.comodor/sessions` — the same folder the terminal uses, so a chat begun at
+the prompt is openable in the browser and the other way round. Search looks
+inside them, not just at their titles.
+
+**Admin**, the second tab, which is the answer to "what is this thing about to
+do to my machine":
+
+| | |
+|---|---|
+| Model | which provider and model is answering, and switching between the ones you have keys for |
+| How it runs | the mode, whether it keeps going on its own, and the four ceilings — context, steps, time, spend |
+| Permissions | what it may do without asking, what it will ask about, and what has been granted this session |
+| What it has learned | rules, lessons, skills, tasks, and how many of them succeeded |
+| Tools | every tool it can reach, colour-coded by risk, plus your skills and any MCP servers |
+| This machine | version, Python, and where the settings, chats and brain live |
+
+**The status strip** along the bottom: whether the page is connected, the
+working folder, how full the context is, what the session has cost, and how
+many learned rules are in force.
+
+**The screen panel**, when the agent is driving one — the frame it last looked
+at, with a marker where it is about to click. See [Using your
+screen](computer.md).
+
+---
+
+## Keyboard
+
+| | |
+|---|---|
+| `Enter` | send |
+| `Shift`+`Enter` | new line |
+| `Esc` | stop the current task, or close the sidebar |
+| `Ctrl`/`⌘`+`K` | search the chats |
+| `Ctrl`/`⌘`+`B` | show or hide the sidebar |
+| `/` | jump to the message box |
+
+---
+
+## On a phone
+
+The same page. Below 900 pixels the chat list becomes a drawer over the
+conversation rather than a column beside it, because 292 pixels of sidebar on
+a 390-pixel screen leaves nothing wide enough to read code in. Tap outside it,
+press `Esc`, or use the close button to put it away.
+
+Reach it from your phone the way you would reach anything else on your
+machine — an SSH tunnel, not a public bind. [Binding to more than
+loopback](#binding-to-more-than-loopback) explains why.
+
+---
+
+## Writing in any language
+
+Type in Persian, Arabic or Hebrew and the message box turns around as you
+type; answers in those languages are set right-to-left when they arrive.
+Nothing is configured and there is no language setting: each message is
+judged on its own, so a conversation that moves between languages moves with
+it.
+
+The judgement is by counting rather than by first letter, which is what makes
+the two awkward cases come out right — a Persian sentence that opens with a
+package name is still Persian, and an English sentence quoting one Persian
+word is still English. Code, paths and URLs are set left-to-right inside a
+right-to-left paragraph, where they belong.
+
+Arabic-script text is set in Vazirmatn, which travels inside the package
+rather than being fetched from a font host: this has to work on a machine that
+cannot reach the internet. It applies to Arabic-script characters and to
+nothing else, so a line mixing Persian with an English identifier gets the
+right face for each.
+
+---
+
+## Light and dark
+
+Follows the system by default; the sun in the top right switches it and the
+choice is remembered in that browser.
 
 ---
 
@@ -150,4 +232,5 @@ and open the address it prints. [Docker](docker.md).
 
 - [Docker](docker.md) — the same thing in a container
 - [The interface](interface.md) — the terminal version
+- [Safety](safety.md) — the permissions the Admin tab reports
 - [Using your screen](computer.md) — what the frame panel is showing you

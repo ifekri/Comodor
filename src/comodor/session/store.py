@@ -12,6 +12,7 @@ Markdown or HTML is for reading and sharing, and has every secret stripped.
 from __future__ import annotations
 
 import json
+import secrets
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -44,7 +45,19 @@ class SessionMeta:
 
 
 def new_session_id() -> str:
-    return time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    """A readable id no other session has.
+
+    The stamp alone was the whole id, and to the second. That is safe at a
+    terminal, where a person cannot start two sessions inside the same second.
+    In a browser "new chat" is a button: two clicks in one second produced the
+    same id twice, and the second conversation was appended to the first one's
+    transcript - two chats in one file, neither readable back.
+
+    The suffix is short enough to keep the id something a person can say out
+    loud, and the stamp still sorts the way the filenames are listed.
+    """
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    return f"{stamp}-{secrets.token_hex(2)}"
 
 
 class SessionStore:

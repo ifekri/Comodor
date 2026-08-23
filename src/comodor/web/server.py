@@ -71,8 +71,24 @@ def in_a_container() -> bool:
     return any(marker in groups for marker in ("docker", "kubepods", "containerd"))
 
 
+#: The page's own files, by the exact name it asks for.
+#:
+#: A table, not a directory listing. Deriving a path from the URL is how a
+#: static handler ends up serving `../../.ssh/id_rsa`, and the whole security
+#: model of this server is about what a request can reach.
+ASSETS: dict[str, tuple[str, str]] = {
+    "/ui.css": ("ui.css", "text/css; charset=utf-8"),
+    "/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
+    "/vazirmatn.woff2": ("vazirmatn.woff2", "font/woff2"),
+}
+
+
 def page() -> str:
     return (Path(__file__).parent / "index.html").read_text(encoding="utf-8")
+
+
+def asset(name: str) -> bytes:
+    return (Path(__file__).parent / name).read_bytes()
 
 
 class Server:
@@ -238,8 +254,30 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 self._json(401, {"error": "unauthorised"})
                 return
 
+            if route in ASSETS:
+                name, kind = ASSETS[route]
+                try:
+                    body = asset(name)
+                except OSError:
+                    self._json(404, {"error": "no such thing"})
+                    return
+                # Revalidated rather than cached: the file is on this machine,
+                # the request costs nothing, and a stale stylesheet after an
+                # upgrade is a broken interface nobody can explain.
+                self._send(200, body, kind)
+                return
+
             if route == "/api/state":
                 self._json(200, server.session.state())
+                return
+
+            if route == "/api/chats":
+                wanted = (query.get("q") or [""])[0]
+                self._json(200, {"chats": server.session.chats(wanted)})
+                return
+
+            if route == "/api/admin":
+                self._json(200, server.session.admin())
                 return
 
             if route == "/api/events":
@@ -312,6 +350,53 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
             if route == "/api/mode":
                 changed = server.session.set_mode(str(body.get("mode") or ""))
                 self._json(200 if changed else 400, {"mode": config_mode(server)})
+                return
+
+            if route == "/api/quit":
+                # The page offers this because a browser tab is a strange
+                # place to be told to go and press Ctrl-C somewhere else.
+                # `stop` already hands the shutdown to its own thread, which
+                # it must: `serve_forever` cannot be stopped from inside one
+                # of the requests it is serving.
+                self._json(200, {"stopping": True})
+                try:
+                    self.wfile.flush()
+                except OSError:
+                    pass
+                server.stop()
+                return
+
+            if route == "/api/setting":
+                done, why = server.session.setting(str(body.get("key") or ""),
+                                                   body.get("value"))
+                self._json(200 if done else 400, {"saved": done, "error": why})
+                return
+
+            if route == "/api/chat":
+                action = str(body.get("action") or "")
+                chat_id = str(body.get("id") or "")
+
+                if action == "new":
+                    done, why = server.session.new_chat()
+                elif action == "open":
+                    done, why, turns = server.session.open_chat(chat_id)
+                    if done:
+                        # The cursor moves with the chat. Without it the page
+                        # would draw the transcript and then replay the events
+                        # of the conversation it just left on top of it.
+                        self._json(200, {"opened": True, "turns": turns,
+                                         "cursor": server.session.cursor,
+                                         "chat": server.session.state()["chat"]})
+                        return
+                elif action == "delete":
+                    done, why = server.session.delete_chat(chat_id)
+                else:
+                    done, why = False, "no such action"
+
+                self._json(200 if done else 409,
+                           {"ok": done, "error": why,
+                            "cursor": server.session.cursor,
+                            "chat": server.session.state()["chat"]})
                 return
 
             self._json(404, {"error": "no such thing"})
