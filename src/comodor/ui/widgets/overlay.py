@@ -123,7 +123,7 @@ def render_overlay(overlay: Overlay, width: int, height: int,
         body,
         title=Text(f" {overlay.title} ", style=theme.style("title")),
         title_align="left",
-        subtitle=Text(_footer_hint(overlay), style=theme.style("dim")),
+        subtitle=Text(_footer_hint(overlay, theme), style=theme.style("dim")),
         subtitle_align="right",
         box=theme.heavy_box,
         border_style=theme.style("bad" if overlay.kind == "permission" else "border"),
@@ -134,11 +134,18 @@ def render_overlay(overlay: Overlay, width: int, height: int,
     return Align.center(panel, vertical="middle")
 
 
-def _footer_hint(overlay: Overlay) -> str:
+def _footer_hint(overlay: Overlay, theme: Theme) -> str:
+    """The theme comes in because the arrows do.
+
+    Written as literals, this line stayed in `↑↓` on a terminal that had just
+    had its borders downgraded to `+-|` for being unable to draw them.
+    """
     if overlay.kind == "permission":
         return " y / a / n "
     if overlay.kind == "select":
-        return " ↑↓ select · enter confirm · esc cancel "
+        glyphs = theme.glyphs
+        return (f" {glyphs.rise}{glyphs.fall} select {glyphs.dot} enter confirm "
+                f"{glyphs.dot} esc cancel ")
     return " esc to close "
 
 

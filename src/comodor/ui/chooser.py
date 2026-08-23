@@ -193,16 +193,20 @@ class Chooser:
 
     def _hint(self) -> Text:
         theme = self.theme
+        # Through the glyph table, like everything else in the frame. Written
+        # as a literal, this line stayed in arrows on a terminal that had just
+        # had its borders downgraded for not being able to draw them.
+        updown = f"{theme.glyphs.rise}{theme.glyphs.fall}"
         if self.multi:
             # The count is on the hint rather than only in the corner, because
             # this is the line that says what enter will do and "install"
             # without a number is a question.
             taking = (f"{self.verb} {len(self.picked)}" if self.picked
                       else f"{self.verb} nothing")
-            keys = (("↑↓", "move"), ("space", "select"), ("enter", taking),
+            keys = ((updown, "move"), ("space", "select"), ("enter", taking),
                     ("type", "filter"), ("esc", "cancel"))
         else:
-            keys = (("↑↓", "move"), ("enter", "choose"),
+            keys = ((updown, "move"), ("enter", "choose"),
                     ("type", "filter"), ("esc", "cancel"))
         hint = Text("  ", style=theme.style("dim"))
         for key, what in keys:

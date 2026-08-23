@@ -372,3 +372,71 @@ def test_choose_many_gives_up_quietly_without_a_terminal():
 
     assert choose_many(console, theme, [Option("a", "A")]) is None
     assert choose(console, theme, [Option("a", "A")]) is None
+
+
+# --------------------------------------------------------------------------- #
+# terminals that cannot draw the glyphs
+#
+# `cmd.exe` still opens on cp437 for a lot of people, and cp437 has the
+# box-drawing characters the probe was testing but not the bullet, the tick,
+# or the arrow that marks which row the cursor is on.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_unicode_probe_asks_about_every_glyph_it_will_draw(monkeypatch):
+    from comodor.ui.console import supports_unicode
+    from comodor.ui.theme import Glyphs
+
+    class Stdout:
+        def __init__(self, encoding):
+            self.encoding = encoding
+
+    for encoding in ("cp437", "cp850", "cp1252", "latin-1", "ascii", "utf-8"):
+        monkeypatch.setattr("sys.stdout", Stdout(encoding))
+        answered = supports_unicode()
+
+        def encodable(value: str, page: str = encoding) -> bool:
+            try:
+                value.encode(page)
+                return True
+            except (UnicodeEncodeError, LookupError):
+                return False
+
+        everything = all(encodable(value) for value in vars(Glyphs()).values()
+                         if isinstance(value, str))
+        assert answered is everything, (
+            f"{encoding}: said {answered}, and the glyphs "
+            f"{'all fit' if everything else 'do not all fit'}")
+
+
+def test_a_glyph_added_later_widens_the_probe():
+    """The point of building it from the table. The old probe was a literal,
+    so every glyph added after it was outside what had been checked."""
+    import inspect
+
+    from comodor.ui import console as console_module
+
+    source = inspect.getsource(console_module.supports_unicode)
+    assert "Glyphs" in source, "the probe has gone back to a fixed string"
+
+
+def test_the_ticking_list_still_draws_where_unicode_will_not_go():
+    """The ASCII table has boxes of its own, and they have to be legible."""
+    import io
+
+    from rich.console import Console
+
+    theme = theme_module.load("ember", ascii_borders=True, no_color=True)
+    console = build(theme, width=76, height=20)
+    options = [Option(f"skill-{i}", f"skill-{i}", "") for i in range(3)]
+    chooser = Chooser(console, theme, options, title="Skills", multi=True,
+                      verb="install")
+    chooser.picked.add("skill-0")
+
+    buffer = Console(width=76, height=20, record=True, file=io.StringIO(),
+                     no_color=True)
+    buffer.print(chooser.render())
+    drawn = buffer.export_text()
+
+    assert "[x]" in drawn and "[ ]" in drawn
+    drawn.encode("ascii")            # every character of it, on a dumb terminal

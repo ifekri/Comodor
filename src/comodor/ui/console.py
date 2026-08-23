@@ -65,11 +65,27 @@ def force_utf8() -> bool:
 
 
 def supports_unicode() -> bool:
+    """Whether this terminal can encode what the interface actually draws.
+
+    The probe was three box-drawing characters. Those are in cp437 and cp850 -
+    still what a fresh `cmd.exe` gives a lot of people - so the answer came
+    back yes, and then fourteen glyphs those code pages do not have went to
+    the screen: the bullet, the tick, the warning triangle, and the arrow that
+    is the only thing marking which row the cursor is on.
+
+    Built from the glyph table rather than from a literal, so a glyph added
+    later widens the probe by existing rather than by somebody remembering.
+    """
     encoding = (getattr(sys.stdout, "encoding", "") or "").lower()
     if "utf" in encoding:
         return True
+
+    from .theme import Glyphs
+
+    wanted = "─┌│" + "".join(
+        value for value in vars(Glyphs()).values() if isinstance(value, str))
     try:
-        "─┌│".encode(encoding or "ascii")
+        wanted.encode(encoding or "ascii")
         return True
     except (UnicodeEncodeError, LookupError):
         return False
