@@ -20,9 +20,18 @@ repairs what is repairable. It never changes anything it did not report first.
 
 ## It will not start
 
-**`comodor: command not found`** — the install directory is not on your `PATH`.
-With `uv` or `pipx` that is usually `~/.local/bin`. `python -m comodor` confirms
-whether it is installed at all.
+**`comodor: command not found`, right after installing** — the installer put it
+on your `PATH`, but a child process cannot change the environment of the shell
+that started it. Every *new* terminal already works. For the one you are in, the
+installer printed the line to paste; or:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+**`comodor: command not found`, in a new terminal** — that is a real problem.
+`python -m comodor` confirms whether it is installed at all, and
+`ls ~/.local/bin/comodor` where it should be.
 
 **`No provider is configured`** — run `comodor setup`, or export a key:
 
@@ -39,7 +48,7 @@ export ANTHROPIC_API_KEY=sk-ant-…
 Comodor tells you when it refuses one:
 
 ```
-config: agent.max_steps must be a whole number; keeping 24
+config: agent.max_steps must be a whole number; keeping 0
 config: this project cannot set safety, computer — only your own can
 ```
 
