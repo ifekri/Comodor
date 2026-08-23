@@ -288,3 +288,77 @@ def test_the_painted_background_reaches_the_empty_rows():
     rows = buffer.getvalue().splitlines()
 
     assert all(wanted in row for row in rows if row.strip()), "a row went unpainted"
+
+
+# --------------------------------------------------------------------------- #
+# a setting has one value, not a history of them
+# --------------------------------------------------------------------------- #
+
+
+def test_changing_a_setting_replaces_the_notice_about_it():
+    """Pressing F3 three times filled the line with
+
+        • mode: chat (no tools)  • mode: act (full tools)  • mode: plan (read-only)
+
+    a history of what the mode used to be, with the one true answer last."""
+    from comodor.ui.widgets.toast import ToastQueue
+
+    queue = ToastQueue()
+    for mode in ("chat", "act", "plan"):
+        queue.push(f"mode: {mode}", "accent", key="mode")
+
+    assert len(queue.items) == 1
+    assert queue.items[0].text == "mode: plan"
+
+
+def test_two_different_settings_both_show():
+    """Replacing is per setting. Changing the mode should not silence the
+    notice about the model."""
+    from comodor.ui.widgets.toast import ToastQueue
+
+    queue = ToastQueue()
+    queue.push("mode: plan", key="mode")
+    queue.push("model: claude-sonnet-5", key="model")
+    queue.push("mode: act", key="mode")
+
+    said = {item.text for item in queue.items}
+    assert said == {"mode: act", "model: claude-sonnet-5"}
+
+
+def test_events_still_stack():
+    """"copied 14 lines" and "restored parser.py" each happened once and are
+    both worth seeing. Only settings collapse."""
+    from comodor.ui.widgets.toast import ToastQueue
+
+    queue = ToastQueue()
+    queue.push("copied 14 lines")
+    queue.push("restored src/parser.py")
+
+    assert len(queue.items) == 2
+
+
+def test_the_replacement_is_the_newest_and_sits_last():
+    from comodor.ui.widgets.toast import ToastQueue
+
+    queue = ToastQueue()
+    queue.push("mode: chat", key="mode")
+    queue.push("copied 3 lines")
+    queue.push("mode: act", key="mode")
+
+    assert [item.text for item in queue.items] == ["copied 3 lines", "mode: act"]
+
+
+def test_cycling_the_mode_shows_only_where_it_ended(config):
+    """Through the interface, the way F3 does it."""
+    from comodor.ui import layout as layout_module
+    from comodor.ui.app import App
+
+    app = App(config, demo=True)
+    app.geometry = layout_module.compute(120, 32)
+
+    for _ in range(3):
+        app._cycle_mode()
+
+    modes = [t for t in app.state.toasts.items if t.text.startswith("mode:")]
+    assert len(modes) == 1, f"the line carried {len(modes)} modes at once"
+    assert app.config.agent.mode in modes[0].text

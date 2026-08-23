@@ -829,7 +829,7 @@ class App:
         self.state.status.model = model
         self.session.model = model
         self._follow_the_models_context_window(model)
-        self._toast(f"model: {model}", "good")
+        self._toast(f"model: {model}", "good", key="model")
 
     def _follow_the_models_context_window(self, model: str) -> None:
         """The window belongs to the model, not to the configuration.
@@ -883,7 +883,7 @@ class App:
         # A different provider means a different model, and a different model
         # means a different window.
         self._follow_the_models_context_window(entry.model)
-        self._toast(f"provider: {entry.display}", "good")
+        self._toast(f"provider: {entry.display}", "good", key="provider")
 
     def cmd_mode(self, args: str) -> None:
         if args:
@@ -906,12 +906,13 @@ class App:
         self.config.agent.mode = mode
         self.state.status.mode = mode
         note = {"act": "full tools", "plan": "read-only", "chat": "no tools"}[mode]
-        self._toast(f"mode: {mode} ({note})", "accent")
+        self._toast(f"mode: {mode} ({note})", "accent", key="mode")
 
     def cmd_loop(self, args: str) -> None:
         self.config.agent.loop = not self.config.agent.loop
         self.state.status.loop = self.config.agent.loop
-        self._toast(f"loop: {'on' if self.config.agent.loop else 'off'}", "accent")
+        self._toast(f"loop: {'on' if self.config.agent.loop else 'off'}", "accent",
+                    key="loop")
 
     def cmd_gateway(self, args: str) -> None:
         gateway = self.config.gateway
@@ -921,7 +922,8 @@ class App:
         else:
             gateway.enabled = not gateway.enabled
         self.state.status.gateway = self.gateway.describe()
-        self._toast(f"gateway: {self.gateway.describe().lower()}", "accent")
+        self._toast(f"gateway: {self.gateway.describe().lower()}", "accent",
+                    key="gateway")
 
     def cmd_memory(self, args: str) -> None:
         lessons = self.memory.search(args, limit=40)
@@ -1340,7 +1342,7 @@ class App:
             syntax=self.config.ui.syntax_theme)
         self.console.push_theme(self.theme.rich_theme())
         self.screen = Screen(self.console, self.theme)
-        self._toast(f"theme: {name}", "good")
+        self._toast(f"theme: {name}", "good", key="theme")
 
     def cmd_settings(self, args: str) -> None:
         config = self.config
@@ -1445,10 +1447,11 @@ class App:
         now = terminal.set_mouse(enable)
         self.config.ui.mouse = now
         if now:
-            self._toast("mouse on — clicking works, selecting does not", "accent")
+            self._toast("mouse on — clicking works, selecting does not", "accent",
+                        key="mouse")
         else:
             self._toast("mouse off — select and copy as usual; /mouse to "
-                        "switch it back", "good", ttl=8.0)
+                        "switch it back", "good", ttl=8.0, key="mouse")
 
     def cmd_computer(self, args: str) -> None:
         """Allow, refuse or ask after the agent's use of the screen.
@@ -1471,7 +1474,7 @@ class App:
         words = (args or "").strip().lower()
         if not words:
             self._toast(f"screen control: {tool.guard.status()}",
-                        "good" if tool.guard.active else "dim", ttl=6.0)
+                        "good" if tool.guard.active else "dim", ttl=6.0, key="computer")
             return
 
         if words in ("stop", "off", "no", "revoke", "end"):
@@ -1479,7 +1482,7 @@ class App:
             teller = getattr(tool.watcher, "say", None)
             if teller is not None:
                 teller("Screen control ended", alarm=False)
-            self._toast("screen control ended", "good")
+            self._toast("screen control ended", "good", key="computer")
             return
 
         seconds, scope = _read_grant(words)
@@ -1496,7 +1499,8 @@ class App:
 
         tool.guard.allow(seconds, scope=scope, reason="allowed from the interface")
         tool._show()
-        self._toast(f"screen control: {tool.guard.status()}", "warn", ttl=8.0)
+        self._toast(f"screen control: {tool.guard.status()}",
+                        "warn", ttl=8.0, key="computer")
 
     def cmd_approve(self, args: str) -> None:
         """Toggle auto-approval — the difference between watching and trusting."""
@@ -1515,7 +1519,7 @@ class App:
             self._toast("usage: /approve writes | shell | all", "warn")
             return
         self._toast(f"auto-approve {target}: {'on' if state else 'off'}",
-                    "warn" if state else "good")
+                    "warn" if state else "good", key=f"approve-{target}")
 
     def cmd_save(self, args: str) -> None:
         path = save_user_config(self.config)
@@ -1588,8 +1592,15 @@ class App:
     # helpers
     # ------------------------------------------------------------------ #
 
-    def _toast(self, text: str, tone: str = "dim", ttl: float = 4.0) -> None:
-        self.state.toasts.push(text, tone, ttl)
+    def _toast(self, text: str, tone: str = "dim", ttl: float = 4.0,
+               key: str = "") -> None:
+        """Say something briefly. `key` for a setting, nothing for an event.
+
+        A keyed notice replaces the last one carrying the same key, so
+        switching a setting repeatedly shows what it is rather than a list of
+        what it has been.
+        """
+        self.state.toasts.push(text, tone, ttl, key=key)
         self.dirty = True
 
     def _provider_label(self) -> str:
