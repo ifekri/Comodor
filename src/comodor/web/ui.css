@@ -124,6 +124,41 @@
   color-scheme: light;
 }
 
+/* Dark, stated rather than left as the case where nothing else matched.
+ *
+ * The values are the ones at the top of the file and this block repeats them
+ * for one reason: without it there is no rule anywhere that says what dark
+ * *is*, and the toggle works only because the light rules happen not to
+ * apply. That is a true thing today and a fragile way to be true. With this,
+ * the choice wins in both directions by statement. */
+:root[data-theme='dark'] {
+  --accent:        #e2703a;
+  --accent-soft:   #f0996d;
+  --accent-wash:   rgba(226, 112, 58, .12);
+  --accent-edge:   rgba(226, 112, 58, .38);
+
+  --bg:            #171615;
+  --bg-sunk:       #131211;
+  --bg-raised:     #1e1c1a;
+  --bg-hover:      #26231f;
+  --bg-active:     #2e2a25;
+
+  --line:          #2b2725;
+  --line-strong:   #3a3532;
+
+  --ink:           #efe9e2;
+  --ink-soft:      #b3a99f;
+  --ink-dim:       #8d837a;
+  --ink-faint:     #7a716a;
+
+  --good:          #7ec17a;
+  --warn:          #e0b341;
+  --bad:           #e8736f;
+
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.34);
+  color-scheme: dark;
+}
+
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
     --accent: #ab4a17;  --accent-soft: #8f3c10;
