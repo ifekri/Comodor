@@ -77,15 +77,33 @@ export const metadata: Metadata = {
     description: site.description,
     images: ['/og.png'],
   },
+  // The uploaded mark, at the sizes browsers actually ask for. No SVG: there
+  // is no vector of it, and one traced by eye would be a different logo.
   icons: {
     icon: [
-      { url: '/icon.svg', type: 'image/svg+xml' },
-      { url: '/favicon.ico', sizes: '32x32' },
-      { url: '/icon-192.png', type: 'image/png', sizes: '192x192' },
+      { url: '/favicon.ico', sizes: '48x48' },
+      { url: '/favicon-16x16.png', type: 'image/png', sizes: '16x16' },
+      { url: '/favicon-32x32.png', type: 'image/png', sizes: '32x32' },
+      { url: '/favicon-96x96.png', type: 'image/png', sizes: '96x96' },
+      { url: '/android-icon-192x192.png', type: 'image/png', sizes: '192x192' },
     ],
-    apple: '/apple-touch-icon.png',
+    // iOS picks the largest it is offered and ignores the rest, but the
+    // smaller ones are what an older device downloads instead of scaling the
+    // big one badly.
+    apple: [
+      { url: '/apple-icon-180x180.png', sizes: '180x180' },
+      { url: '/apple-icon-152x152.png', sizes: '152x152' },
+      { url: '/apple-icon-120x120.png', sizes: '120x120' },
+      { url: '/apple-icon-76x76.png', sizes: '76x76' },
+    ],
   },
   manifest: '/site.webmanifest',
+  other: {
+    // Windows tiles are not part of Next's icon metadata and are read from
+    // this file, which the icon set already ships.
+    'msapplication-config': '/browserconfig.xml',
+    'msapplication-TileColor': '#e2703a',
+  },
   alternates: { canonical: `${site.url}/` },
   robots: {
     index: true,
