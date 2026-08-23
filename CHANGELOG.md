@@ -2,6 +2,90 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.10.0 — 2026-08-24
+
+### The browser interface, rebuilt
+
+`comodor web` was one column and a list of events. It now has the shape the
+terminal has had all along — chats on the left, the conversation in the middle,
+what the agent is and may do in a panel you can open.
+
+**Chats are kept.** They always were at the terminal, written to
+`~/.comodor/sessions`; the browser wrote nothing, so a reload lost the lot and
+the two interfaces could not see each other's work. Same folder now, so a chat
+begun at the prompt opens in the browser and the other way round. They can be
+listed, opened, deleted, and searched by what was said in them rather than by
+their titles.
+
+**Admin** is the answer to "what is this thing about to do to my machine":
+which model is answering, how far it will go on its own, the four ceilings,
+what it may touch without asking, what it has learned, every tool it can reach,
+and where the files are. Four settings can be changed from there — the model,
+the provider, the mode, and whether it keeps going without asking.
+
+The list is short on purpose. Nothing that widens what the agent may do to the
+machine is switchable from a page anyone holding the link can open. The
+permission prompts already offer that choice per action, in front of the person
+who will live with it.
+
+**Write in any language.** Type Persian, Arabic or Hebrew and the message box
+turns around as you type; answers arrive set the right way. There is no setting
+and no language menu — each message is judged on its own, so a conversation
+that moves between languages moves with it.
+
+The judgement is by counting rather than by first letter, which is what makes
+the two awkward cases come out right: a Persian sentence opening with a package
+name is still Persian, and an English sentence quoting one Persian word is
+still English. Code, paths and identifiers stay left-to-right inside a
+right-to-left paragraph. Arabic-script text is set in Vazirmatn, which travels
+inside the package rather than being fetched from a font host — this has to
+work on a machine that cannot reach the internet — and is scoped so it applies
+to Arabic script and to nothing else, leaving the Latin interface untouched in
+the same line.
+
+**It fits a phone.** Below 900 pixels the chat list becomes a drawer over the
+conversation rather than a column beside it, because 292 pixels of sidebar on a
+390-pixel screen leaves nothing wide enough to read code in.
+
+Also: a light theme that follows the system until you say otherwise, an empty
+state that suggests somewhere to start, a status strip that reports the
+connection, the working folder, how full the context is and what the session
+has cost, and keyboard shortcuts for search, the sidebar and the message box.
+
+### Two chats in the same second were one chat
+
+A session id was a timestamp to the second, which is safe at a terminal where
+nobody starts two sessions inside one. In the browser "new chat" is a button:
+two clicks in the same second produced the same id, and the second conversation
+was appended to the first one's transcript. Neither could be read back
+afterwards. Ids now carry a short suffix.
+
+### Changing a setting said it three times
+
+Pressing F3 three times filled the notice line with
+
+    mode: chat (no tools)  mode: act (full tools)  mode: plan (read-only)
+
+— a history of what the mode used to be, with the one true answer last and two
+that were no longer true in front of it. The queue was missing a distinction
+between an event and a state. "Copied 14 lines" happened once and is worth
+seeing beside the next thing; "mode: plan" is the current value of a setting,
+and there is only ever one of those. Notices that report a setting now replace
+the last one about the same setting. Events still stack, which is right for
+them.
+
+### Smaller
+
+- The dark theme had no definition of its own. There was a rule for light and a
+  rule for the system preferring light, and dark was whatever was left when
+  neither matched — true, and one mistyped selector from not being true.
+- Contrast across the browser interface is measured against the surface each
+  piece of text actually sits on. The rail, the footer and the composer are
+  their own shades, and text that cleared the floor on the page did not clear
+  it on the rail, which is where most of it appears.
+- Every icon on the site is rendered from one vector, so changing the logo is
+  replacing one file. Twenty-eight had been uploaded by hand.
+
 ## 0.9.0 — 2026-08-23
 
 ### It can use your computer
