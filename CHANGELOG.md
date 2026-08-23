@@ -33,6 +33,21 @@ the list, tick something, clear the filter, and it is still ticked. Without a
 terminal it can take over, the numbered form asks the same question and takes
 `1,3` or `1 3`.
 
+### Terminals that cannot draw the glyphs were told they could
+
+Adding the checkbox turned over a rock. Whether a terminal could handle the
+interface was decided by encoding three box-drawing characters — and cp437 and
+cp850 have those, which is still what a fresh `cmd.exe` gives a lot of people.
+So the answer came back yes, and then fourteen glyphs those code pages do not
+have went to the screen: the bullet, the tick, the warning triangle, and the
+arrow that is the only thing marking which row the cursor is on. The ASCII
+table had been there the whole time and was never reached for.
+
+The check is built from the glyph table now, so a glyph added later widens it
+by existing. And three hint lines that wrote `↑↓` as a literal go through the
+theme, so a terminal whose borders have just been downgraded to `+-|` is not
+still being sent arrows on the line underneath.
+
 ## 0.10.0 — 2026-08-24
 
 ### The browser interface, rebuilt
