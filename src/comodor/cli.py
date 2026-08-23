@@ -35,7 +35,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="comodor",
         description="Comodor — a terminal coding agent that learns as it works.",
+        # argparse's own help is a list of flags. That answers "what arguments
+        # does this take" and not "what is this, and what do I do now", which
+        # is what somebody typing --help is asking. See `help.py`. Only the top
+        # level is taken over: for one subcommand, the list of its flags really
+        # is the answer.
+        add_help=False,
     )
+    parser.add_argument("-h", "--help", action="store_true", dest="want_help",
+                        help="this page, or `comodor help <topic>` for one part")
     parser.add_argument("--version", action="version", version=f"comodor {__version__}")
 
     parser.add_argument("--provider", help="provider to use (openrouter, anthropic, …)")
@@ -61,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--yes", action="store_true",
                      help="approve file writes and commands automatically")
     run.add_argument("--max-steps", type=int, help="override the step limit")
+
+    written = sub.add_parser(
+        "help", help="what this is and how to use it, in full")
+    written.add_argument("topic", nargs="?", default="",
+                         help="one part of it, in more detail")
 
     sub.add_parser("setup", help="choose a provider and model, and save the answers")
     brought = sub.add_parser(
@@ -692,6 +705,15 @@ def run_import(config: Config, args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    # Before the configuration is loaded: somebody who cannot get the program
+    # to start is exactly the person who needs the help page, and loading a
+    # broken config first would deny it to them.
+    if getattr(args, "want_help", False) or args.command == "help":
+        from .help import render
+
+        return render(topic=getattr(args, "topic", "") or "")
+
     config = apply_overrides(load_config(args.cwd), args)
 
     if args.command == "doctor":
