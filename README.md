@@ -21,34 +21,7 @@ and can undo it.
 
 What makes it different from every other tool of this kind is what happens
 afterwards. **When you fix something it wrote, it notices, and it does not make
-that mistake again.** Not because you configured it. Because it watched.
-
-```
-› create defaults.py with 6 string constants
-⚙ write src/defaults.py — 6 constants
-
-  … you open the file and change "30s" to '30s' …
-
-› now add the timeout constants
-◈ learned: Use single quotes for string literals.   (31 of 34 literals)
-⚙ write src/defaults.py — '30s', '5m'
-```
-
-That is a real transcript. Nobody told it anything.
-
-```
-┌─ History ──────────────┐ ┌─ Chat ───────────────────────────────────────────────┐
-│ TASKS 2/4 ──────────── │ │ › add a health endpoint and a test for it            │
-│ ● read the app factory │ │ ◈ recalled 3 lessons · skill: review                 │
-│ ● add the /health rou… │ │                                                      │
-│ ◐ write the test       │ │ I'll add the route, then a test.                     │
-│ ○ run the suite        │ │                                                      │
-│                        │ │ ⚙ edit src/app.py  0.2s                              │
-│                        │ │   + @app.get('/health')                              │
-│                        │ │ ⚙ run: pytest -q  3.4s                               │
-│                        │ │   4 passed in 0.42s                                  │
-└────────────────────────┘ └──────────────────────────────────────────────────────┘
-```
+that mistake again.** Not because you configured it.
 
 ---
 

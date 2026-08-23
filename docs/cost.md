@@ -7,9 +7,21 @@ What a session costs, and how to make it cost less without making it worse.
 ```
 
 ```
-  This session      18,422 in · 640 out · $0.031
-  Cache             86% of input served from cache · saved ~$0.19
-  Brain             812 lessons · 4.2 MB
+This session
+
+- prompt tokens: 84,210
+- output tokens: 3,180
+- served from cache: 72,418 (86% of the prompt)
+- cost: $0.1904
+- saved by caching: $0.4126 (68%)
+- context used: 87,390 / 1,000,000
+- compactions: 0
+
+Brain
+
+- lessons: 812
+- skills: 4
+- episodes: 137 (83% succeeded)
 ```
 
 ---

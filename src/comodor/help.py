@@ -305,8 +305,37 @@ def _topic(console: Console, theme: Theme, name: str) -> int:
     console.print()
     console.print(Padding(Text(title, style=theme.style("accent", bold=True)),
                           (0, 0, 1, 2)))
-    console.print(Padding(Text(body, style=theme.style("text")), (0, 2, 1, 2)))
+    for block in _paragraphs(body):
+        # Wrapped, never clipped, even for the command tables. On a terminal
+        # too narrow for one of those rows, a wrapped line is untidy and a
+        # truncated one is wrong - "set computer.enabled: true in your con"
+        # is not an instruction anybody can follow.
+        console.print(Padding(Text(block, style=theme.style("text"),
+                                   overflow="fold"),
+                              (0, 2, 1, 2)))
     return 0
+
+
+def _paragraphs(body: str) -> list[str]:
+    """Prose reflowed to the terminal; indented blocks left exactly as written.
+
+    The body is hard-wrapped in the source so it is readable there. Handing
+    that to a renderer that wraps again produces a second break inside every
+    line - "look at the / screen, move / the mouse" on a narrow terminal. So
+    prose is joined back into one line and wrapped once, here, at the width
+    that actually exists.
+
+    An indented block is a small table of commands, where the line breaks and
+    the alignment are the content. Those are left alone.
+    """
+    blocks: list[str] = []
+    for chunk in body.split("\n\n"):
+        lines = chunk.split("\n")
+        if any(line.startswith("  ") for line in lines):
+            blocks.append(chunk)
+        else:
+            blocks.append(" ".join(line.strip() for line in lines if line.strip()))
+    return [block for block in blocks if block]
 
 
 def topics() -> list[str]:
