@@ -39,3 +39,6 @@ src/comodor/_version.py
 # uv writes this when it resolves an environment here. Comodor is a library
 # as well as an application; a lock file would pin its users, not just us.
 uv.lock
+
+# Local working notes: the reasoning behind the code, kept out of the package.
+PROJECT.md
