@@ -1,6 +1,6 @@
 # The interface
 
-What you see, what you press, and all 27 commands.
+What you see, what you press, and all 29 commands.
 
 ```bash
 comodor          # start it
@@ -139,6 +139,8 @@ Type `/` and the list filters as you go.
 | `/theme [name]` | ember, midnight, matrix, mono |
 | `/save` | write the current settings to your config file |
 | `/cost` | tokens, spend, and what the cache saved |
+| `/copy [all\|task]` | the last answer, or everything, to the clipboard |
+| `/mouse [on\|off]` | mouse tracking, so you can select text yourself |
 | `/help` | all of this, inside the interface |
 | `/quit` | leave |
 
@@ -180,6 +182,55 @@ To stop being asked at all:
 ```
 
 Everything is still checkpointed. `/undo` works regardless.
+
+---
+
+## Copying text out
+
+While the mouse is being tracked, a drag belongs to Comodor and the terminal
+never sees it — so the usual select-and-copy does not work. Three ways round it:
+
+```
+/copy              the last answer
+/copy all          the whole conversation
+/copy task         the last thing you asked for
+/mouse             mouse tracking off, so selection works as usual
+```
+
+`/copy` needs nothing installed on Windows or macOS. On Linux it uses
+`wl-copy`, `xclip` or `xsel`, whichever is there, and says which is missing if
+none is.
+
+Over SSH it falls back to an escape sequence that asks *your* terminal to set
+*your* clipboard — so text from an agent on a server lands where you can paste
+it, rather than on a server that has no clipboard.
+
+Most terminals also let you select with **Shift** held down, which bypasses
+mouse tracking without turning it off.
+
+---
+
+## Who is speaking
+
+Each turn sits on a quiet band — one shade behind what you typed, another
+behind the answer:
+
+```
+▌ › why does the parser drop the last field?              ← warm
+
+▌   Because split is called with a maxsplit of 2 …        ← neutral
+▌
+▌   ┌─ python ────────────────────────┐
+▌   │ return text.split(',', 2)       │
+▌   └─────────────────────────────────┘
+```
+
+Deliberately muted. This is behind body text you read for minutes at a time,
+and a background with any presence of its own competes with the words. Each
+theme has its own pair, a few percent from its background; `mono` has none,
+because a theme whose premise is no colour does not want two.
+
+They cost no vertical space — the change of colour is the boundary.
 
 ---
 

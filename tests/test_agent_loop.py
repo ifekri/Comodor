@@ -75,6 +75,7 @@ def test_loop_off_stops_after_one_round_of_tools(config, bus):
 
 
 def test_step_limit_stops_a_runaway_loop(config, bus):
+    """When it is asked for. It is not the default any more — see below."""
     config.agent.max_steps = 3
     runaway = Script(text="again", tool_calls=[
         ToolCall(id="c", name="list_dir", arguments={"path": "."})])
@@ -83,6 +84,47 @@ def test_step_limit_stops_a_runaway_loop(config, bus):
 
     assert result.stopped == "max_steps"
     assert result.steps == 3
+
+
+def test_there_is_no_step_limit_by_default():
+    """Twenty-four steps is nothing on a real codebase. A refactor across a
+    dozen files ran out of them mid-thought, and a step count has no
+    relationship to harm — ten steps reading files cost almost nothing. The
+    ceilings that do are time and money, and those stay on."""
+    from comodor.config import AgentConfig
+
+    assert AgentConfig().max_steps == 0
+    assert AgentConfig().max_seconds > 0
+    assert AgentConfig().max_cost_usd > 0
+
+
+def test_zero_steps_means_no_limit(config, bus):
+    config.agent.max_steps = 0
+    config.agent.max_seconds = 0            # and zero here too
+    scripts = [Script(text="again", tool_calls=[
+        ToolCall(id=f"c{i}", name="list_dir", arguments={"path": "."})])
+        for i in range(30)]
+    scripts.append(Script(text="done"))
+
+    result = make_agent(config, bus, scripts).run("keep going")
+
+    assert result.stopped == "done"
+    assert result.steps > 24, "it stopped somewhere it should not have"
+
+
+def test_a_ceiling_says_how_to_go_past_it(config, bus):
+    """Being stopped is only useful if the next move is obvious."""
+    notes: list[str] = []
+    bus.subscribe(lambda event: notes.append(event.payload.get("text", "")))
+    config.agent.max_steps = 2
+    runaway = Script(text="again", tool_calls=[
+        ToolCall(id="c", name="list_dir", arguments={"path": "."})])
+
+    make_agent(config, bus, [runaway]).run("go forever")
+
+    said = " ".join(notes)
+    assert "continue" in said
+    assert "max_steps" in said
 
 
 def test_plan_mode_hides_write_tools_from_the_model(config, bus):

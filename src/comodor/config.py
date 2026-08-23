@@ -137,8 +137,18 @@ class UIConfig:
 class AgentConfig:
     mode: str = "act"                    # act | plan | chat
     loop: bool = True                    # autonomous multi-step iteration
-    max_steps: int = 24                  # hard stop for one task
-    max_seconds: float = 900.0
+    #: Steps one task may take. `0` is no limit, and is the default: a
+    #: refactor across a dozen files runs out of twenty-four steps mid-thought,
+    #: and step count has no relationship to harm - ten steps reading files
+    #: cost almost nothing. The ceilings that do map onto harm are the two
+    #: below. Set a number here if you want the old behaviour back.
+    max_steps: int = 0
+    #: Seconds one task may take. `0` is no limit. An hour rather than the
+    #: fifteen minutes this used to be: fifteen minutes is an errand.
+    max_seconds: float = 3600.0
+    #: Dollars one task may spend. `0` is no limit. The ceiling that actually
+    #: corresponds to what going wrong costs - where the model has a published
+    #: rate. See `doctor`, which says when it cannot be enforced.
     max_cost_usd: float = 2.0
     context_limit: int = 1_000_000       # the "Context: 1M" gauge
     compact_at: float = 0.75             # summarise history past this fraction

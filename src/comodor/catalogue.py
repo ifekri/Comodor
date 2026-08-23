@@ -14,6 +14,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+#: How Comodor identifies itself to a provider that asks. OpenRouter shows both
+#: on its model pages and its leaderboards, and takes the icon beside the name
+#: from the favicon of the referer - so this is the site, not the repository.
+SITE = "https://comodor.ai"
+APP_NAME = "Comodor"
+
 
 @dataclass(frozen=True)
 class ProviderSpec:
@@ -57,6 +63,11 @@ CATALOGUE: tuple[ProviderSpec, ...] = (
                 "deepseek/deepseek-chat", "meta-llama/llama-3.3-70b-instruct"),
         env_key="OPENROUTER_API_KEY",
         rank=1,
+        # OpenRouter attributes a request to an application by these two
+        # headers and shows it on its model pages and leaderboards. The icon
+        # beside the name is the favicon of the referer, which is why that is
+        # the site rather than the repository.
+        headers={"HTTP-Referer": SITE, "X-Title": APP_NAME},
     ),
     ProviderSpec(
         id="anthropic",

@@ -115,7 +115,34 @@ def _user(entry: Entry, theme: Theme) -> RenderableType:
     body = Text(justify="right" if is_rtl(entry.text) else "left")
     body.append(f"{theme.glyphs.arrow} ", style=theme.style("user", bold=True))
     body.append(isolate(entry.text), style=theme.style("user"))
-    return body
+    return _banded(body, theme, "user_bg")
+
+
+def _banded(body: RenderableType, theme: Theme, token: str,
+            indent: int = 0) -> RenderableType:
+    """A quiet band behind a turn, the full width of the column.
+
+    Through `Padding` rather than a style on the text: a background applied to
+    `Text` covers the characters and stops, so a paragraph of uneven lines
+    comes out looking torn. The padding paints as well, which carries the
+    colour to both margins and across the blank lines inside a paragraph.
+
+    No vertical padding at all, and that is the interesting decision. A row
+    above and below looked better and cost two rows of the terminal for every
+    single turn - measured on a twenty-row window, it pushed half of a
+    four-turn exchange off the screen. One row still cost a turn.
+
+    The change of colour is the boundary. Two bands that touch are still two
+    bands, and a conversation you can see more of is worth more than a gap
+    between the blocks.
+    """
+    from rich.padding import Padding
+
+    colour = theme.palette_colour(token)
+    if not colour or colour == "default":
+        # A theme that wants no colour, or a terminal that was told not to.
+        return body if not indent else Padding(body, (0, 0, 0, indent))
+    return Padding(body, (0, 1, 0, indent + 1), style=f"on {colour}")
 
 
 def _assistant(entry: Entry, theme: Theme, width: int) -> RenderableType:
@@ -129,8 +156,10 @@ def _assistant(entry: Entry, theme: Theme, width: int) -> RenderableType:
     """
     justify = "right" if is_rtl(entry.text) else None
     if entry.streaming:
-        return _indented(render_streaming(entry.text, theme, justify=justify), theme)
-    return _indented(render_markdown(entry.text, theme, justify=justify), theme)
+        body = render_streaming(entry.text, theme, justify=justify)
+    else:
+        body = render_markdown(entry.text, theme, justify=justify)
+    return _banded(body, theme, "assistant_bg", indent=len(INDENT))
 
 
 def _memory(entry: Entry, theme: Theme) -> RenderableType:

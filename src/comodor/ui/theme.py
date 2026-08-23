@@ -46,6 +46,13 @@ class Palette:
     user: str
     assistant: str
     tool: str
+    #: Behind what you typed, and behind the answer. Muted on purpose: this
+    #: sits under body text somebody reads for minutes, and a background with
+    #: any presence of its own competes with the words. "default" means none,
+    #: which is what a colourless theme wants.
+    user_bg: str = "default"
+    assistant_bg: str = "default"
+
     #: Paint every cell, rather than drawing on whatever the terminal already
     #: has behind it. Off for the dark palettes, which are designed to sit on
     #: the user's own black and look wrong forcing a particular one. On for the
@@ -84,6 +91,8 @@ EMBER = Palette(
     user="#ffb15c",
     assistant="#d4d4d4",
     tool="#4ecdc4",
+    user_bg="#1a120b",
+    assistant_bg="#0d0d0f"
 )
 
 MIDNIGHT = Palette(
@@ -107,6 +116,8 @@ MIDNIGHT = Palette(
     user="#89b4fa",
     assistant="#c8d3e6",
     tool="#5eead4",
+    user_bg="#0b1120",
+    assistant_bg="#0a0d15"
 )
 
 MATRIX = Palette(
@@ -130,6 +141,8 @@ MATRIX = Palette(
     user="#6ee7b7",
     assistant="#a7f3d0",
     tool="#34d399",
+    user_bg="#04140d",
+    assistant_bg="#050a08"
 )
 
 MONO = Palette(
@@ -169,6 +182,8 @@ PAPER = Palette(
     tool="#6f6960",
     paint=True,
     syntax="friendly",
+    user_bg="#f0e9dd",
+    assistant_bg="#f5f2ec"
 )
 
 #: The website's dark side, which is the same drawing with the values swapped.
@@ -194,6 +209,8 @@ INK = Palette(
     assistant="#cdc6b9",
     tool="#8f887d",
     paint=True,
+    user_bg="#221c16",
+    assistant_bg="#1b1917"
 )
 
 PALETTES: dict[str, Palette] = {
@@ -264,6 +281,16 @@ class Theme:
         if self.no_color:
             return "default"
         return getattr(self.palette, token, "default")
+
+    def palette_colour(self, token: str) -> str:
+        """One colour by name, or empty when this theme has no colour.
+
+        `style` builds a Style; a caller that needs the colour itself - to put
+        it behind a whole block rather than behind some text - needs the string.
+        """
+        if self.no_color:
+            return ""
+        return getattr(self.palette, token, "") or ""
 
     def style(self, token: str, bold: bool = False, dim: bool = False,
               on: str = "") -> Style:

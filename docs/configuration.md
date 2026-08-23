@@ -73,8 +73,8 @@ See [Choosing a model](models.md).
   "agent": {
     "mode": "act",
     "loop": true,
-    "max_steps": 24,
-    "max_seconds": 900.0,
+    "max_steps": 0,
+    "max_seconds": 3600.0,
     "max_cost_usd": 2.0,
     "context_limit": 1000000,
     "compact_at": 0.75,
@@ -93,9 +93,9 @@ See [Choosing a model](models.md).
 |---|---|
 | `mode` | `act`, `plan` (read-only), `chat` (no tools) |
 | `loop` | keep working until done, or answer once |
-| `max_steps` | hard stop for one task |
-| `max_seconds` | ditto, in time |
-| `max_cost_usd` | ditto, in money — [only for a priced model](cost.md#when-the-limit-cannot-fire) |
+| `max_steps` | **`0` — no limit, and that is the default.** A refactor across a dozen files ran out of twenty-four steps mid-thought, and a step count has no relationship to harm. Set a number to bring it back |
+| `max_seconds` | an hour. `0` for no limit |
+| `max_cost_usd` | the ceiling that maps onto what going wrong costs — [where the model has a published rate](cost.md#when-the-limit-cannot-fire). `0` for no limit |
 | `context_limit` | the gauge. Follows the model automatically when you switch |
 | `compact_at` | summarise the history past this fraction of the limit |
 | `max_tool_chars` | how much of one tool result reaches the model. The rest is written to a file it is told how to read — not truncated |
