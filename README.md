@@ -123,3 +123,22 @@ already has, and a container has none.
 
 It runs as an ordinary user, not root, so a command the agent runs cannot
 rewrite the ownership of your files through the mount.
+
+## Everything else
+
+This branch is only the container. The agent itself is documented in full on
+`main`:
+
+- **[Documentation index](https://github.com/ifekri/Comodor/tree/main/docs)**
+- [Running it in Docker](https://github.com/ifekri/Comodor/blob/main/docs/docker.md)
+  — this page, with more of the reasoning
+- [From a browser](https://github.com/ifekri/Comodor/blob/main/docs/web.md)
+  — the interface you will be using
+- [Safety and permissions](https://github.com/ifekri/Comodor/blob/main/docs/safety.md)
+  — what the agent may do inside the container
+
+Or, once it is running:
+
+```bash
+docker compose run --rm comodor comodor help
+```

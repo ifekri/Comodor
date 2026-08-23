@@ -21,7 +21,7 @@ FROM python:3.13-slim-bookworm AS build
 
 # The version to install. Pinned by default so a rebuild is reproducible;
 # `--build-arg COMODOR_VERSION=` (empty) takes the newest release instead.
-ARG COMODOR_VERSION=0.8.9
+ARG COMODOR_VERSION=0.9.0
 
 RUN python -m venv /opt/comodor \
  && /opt/comodor/bin/pip install --no-cache-dir --upgrade pip \
