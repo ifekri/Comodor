@@ -30,13 +30,13 @@ that mistake again.** Not because you configured it.
 **macOS · Linux**
 
 ```bash
-curl -fsSL https://comodor.ai/install.sh | sh
+curl -fsSL get.comodor.ai | sh
 ```
 
 **Windows**
 
 ```powershell
-irm https://comodor.ai/install.ps1 | iex
+irm get.comodor.ai | iex
 ```
 
 That is the whole thing. It finds a Python, installs an isolated environment,

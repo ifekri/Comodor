@@ -12,14 +12,16 @@ comodor help computer     # one topic in more detail
 ## Installing and updating
 
 ```bash
-curl -fsSL https://comodor.ai/install.sh | sh     # macOS, Linux, BSD
+curl -fsSL get.comodor.ai | sh     # macOS, Linux, BSD
 ```
 
 ```powershell
-irm https://comodor.ai/install.ps1 | iex          # Windows
+irm get.comodor.ai | iex          # Windows
 ```
 
-The same one line updates an existing install. Or, once it is on your machine:
+`get.comodor.ai` names no file: it reads which client is asking and answers
+with the installer that client can run. The same one line updates an existing
+install. Or, once it is on your machine:
 
 ```bash
 comodor update --check    # what is out there
