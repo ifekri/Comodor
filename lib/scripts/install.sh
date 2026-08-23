@@ -32,6 +32,7 @@ BIN_DIR="$HOME/.local/bin"
 INSTALLED=""
 PROFILE_WRITTEN=""
 PATH_STATE=""
+LINKED=""
 TOOL=""
 UV=""
 PIPX=""
@@ -388,21 +389,76 @@ add_to_path() {
         *) line="export PATH=\"$directory:\$PATH\"" ;;
     esac
 
-    if [ -f "$profile" ] && grep -qF "$directory" "$profile" 2>/dev/null; then
-        PATH_STATE="present"           # already there, just not in this shell
-        PROFILE_WRITTEN="$profile"
-        return 0
-    fi
+    # Both files, and for different shells.
+    #
+    # The rc file is what the terminal in front of you reads. The login profile
+    # is what everything else reads - a new terminal, a desktop session, a
+    # script. Writing only the rc leaves those without it, and on Debian it is
+    # worse than that: `.bashrc` opens with a guard that returns immediately in
+    # a non-interactive shell, so a line appended at the end is unreachable
+    # even to something that sources the file deliberately. Measured.
+    #
+    # fish keeps its own path list and needs neither.
+    written=""
+    for target in "$profile" "$HOME/.profile"; do
+        case "$target" in
+            */config.fish) [ "$target" = "$profile" ] || continue ;;
+        esac
+        # Not twice, when the shell's rc *is* the login profile.
+        case " $written " in *" $target "*) continue ;; esac
 
-    mkdir -p "$(dirname "$profile")" 2>/dev/null || return 0
-    {
-        printf '\n# Added by the Comodor installer\n'
-        printf '%s\n' "$line"
-    } >> "$profile" 2>/dev/null || return 0
+        if [ -f "$target" ] && grep -qF "$directory" "$target" 2>/dev/null; then
+            written="$written $target"
+            [ -n "$PROFILE_WRITTEN" ] || PROFILE_WRITTEN="$target"
+            [ -n "$PATH_STATE" ] && [ "$PATH_STATE" != "manual" ] || PATH_STATE="present"
+            continue
+        fi
 
-    PATH_STATE="added"
-    PROFILE_WRITTEN="$profile"
+        mkdir -p "$(dirname "$target")" 2>/dev/null || continue
+        {
+            printf '\n# Added by the Comodor installer\n'
+            printf '%s\n' "$line"
+        } >> "$target" 2>/dev/null || continue
+
+        written="$written $target"
+        PROFILE_WRITTEN="$target"
+        PATH_STATE="added"
+    done
+
+    [ -n "$written" ] || PATH_STATE="manual"
     return 0
+}
+
+# Make the command work *now*, in the terminal that ran this, rather than in
+# the next one.
+#
+# No child process can change its parent shell's PATH; that is POSIX and not
+# something to code around. The way to avoid asking for `export` is therefore
+# not to change PATH but to not need to - to put the command somewhere the
+# shell is already looking.
+#
+# Measured before writing this: as root, which is how `curl | sh` usually runs,
+# /usr/local/bin is on PATH and writable. As an ordinary user in a login shell,
+# nothing on PATH is writable at all. The first case can be finished; the
+# second cannot be, by anything running here, and says so instead.
+link_into_path() {
+    # Preference, not "the first writable directory on PATH": /usr/bin is
+    # writable in a container and is not ours to put things in.
+    for candidate in /usr/local/bin /opt/homebrew/bin "$HOME/bin"; do
+        [ "$candidate" = "$BIN_DIR" ] && continue
+        on_path "$candidate" || continue
+        [ -d "$candidate" ] && [ -w "$candidate" ] || continue
+        ln -sf "$INSTALLED" "$candidate/$COMMAND" 2>/dev/null || continue
+        # Prove it rather than assume it. A link that does not run is worse
+        # than no link: the command appears to exist and fails on use.
+        "$candidate/$COMMAND" --version >/dev/null 2>&1 || {
+            rm -f "$candidate/$COMMAND" 2>/dev/null
+            continue
+        }
+        LINKED="$candidate/$COMMAND"
+        return 0
+    done
+    return 1
 }
 
 # --------------------------------------------------------------------- run --
@@ -513,26 +569,32 @@ main() {
     fi
 
     if ! on_path "$BIN_DIR"; then
-        add_to_path "$BIN_DIR"
-        say ""
-        case "$PATH_STATE" in
-            added)
-                note "Added $BIN_DIR to your PATH in $PROFILE_WRITTEN"
-                note "That applies to new terminals. For this one:"
-                say "    export PATH=\"$BIN_DIR:\$PATH\""
-                ;;
-            present)
-                note "$BIN_DIR is already on your PATH in $PROFILE_WRITTEN;"
-                note "this shell just started before that. For this one:"
-                say "    export PATH=\"$BIN_DIR:\$PATH\""
-                ;;
-            *)
-                say "  ${COMMAND} is installed at ${AMBER}${INSTALLED}${RESET}, which is not on your PATH."
-                say "  Add this to your shell profile:"
-                say ""
-                say "    export PATH=\"$BIN_DIR:\$PATH\""
-                ;;
-        esac
+        # A link into somewhere already on PATH finishes the job here, with
+        # nothing left for anybody to type. Tried first, for that reason.
+        if [ -z "${COMODOR_NO_MODIFY_PATH:-}" ] && link_into_path; then
+            add_to_path "$BIN_DIR"      # for the future, quietly
+            say ""
+            note "Linked into $(dirname "$LINKED"), which is on your PATH."
+        else
+            add_to_path "$BIN_DIR"
+            say ""
+            case "$PATH_STATE" in
+                added|present)
+                    note "Every new terminal can run ${BOLD}${COMMAND}${RESET} already."
+                    note "This one started before the install, and no installer"
+                    note "can reach back into the shell that ran it. For this"
+                    note "terminal only:"
+                    say ""
+                    say "    ${BOLD}export PATH=\"$BIN_DIR:\$PATH\"${RESET}"
+                    ;;
+                *)
+                    say "  ${COMMAND} is installed at ${AMBER}${INSTALLED}${RESET}, which is not on your PATH."
+                    say "  Add this to your shell profile:"
+                    say ""
+                    say "    export PATH=\"$BIN_DIR:\$PATH\""
+                    ;;
+            esac
+        fi
     fi
 
     printf '\n'

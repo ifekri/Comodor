@@ -400,10 +400,15 @@ if (-not $onPath) {
         Write-Host "  Add $BinDir to your PATH to run it by name."
     }
     elseif ($alreadyThere) {
+        # `irm | iex` runs in the caller's session, so this reaches the
+        # terminal somebody is standing in - which is the whole difference
+        # between an installer that finishes and one that hands over a command
+        # to type. The other branch already did this; this one printed the
+        # instruction instead, for no reason.
+        $env:PATH = "$BinDir;$env:PATH"
         Write-Host ''
-        Write-Note "$BinDir is already on your PATH; this terminal just started before that."
-        Write-Note 'Open a new terminal, or for this one:'
-        Write-Host "    `$env:PATH = `"$BinDir;`$env:PATH`""
+        Write-Note "$BinDir was already on your PATH; this terminal started before that."
+        Write-Note 'It has it now.'
     }
     else {
         try {
