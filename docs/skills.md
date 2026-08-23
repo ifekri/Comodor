@@ -7,6 +7,31 @@ matches.
 
 ---
 
+## Getting some
+
+`comodor setup` offers the library once, at the end. Move with the arrow keys,
+press **space** to tick as many as you want, and **enter** installs all of
+them. Nothing is ticked to begin with, and enter with nothing ticked takes
+none — you are never given something you did not ask for.
+
+```
+┌─ Skills ──────────────────────────────────────────────────┐
+│    ☑ review        Review a change before it is committed │
+│ ›  ☐ commit-style  Match the commit messages already here │
+│    ☑ python-tests  Write tests the way this project does  │
+└───────────────────────────────────── 2 selected ──────────┘
+  ↑↓ move   space select   enter install 2   type filter   esc cancel
+```
+
+Typing filters the list, which is faster than scrolling once there are more
+than a handful. Ticks are kept while you filter, so you can narrow the list,
+tick something, clear the filter and tick something else.
+
+Without a terminal it can take over — a pipe, a script, `curl | sh` — the same
+question is asked as a numbered list, and it takes several: `1,3` or `1 3`.
+
+---
+
 ## Using one
 
 ```bash

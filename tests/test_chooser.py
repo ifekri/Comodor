@@ -33,11 +33,24 @@ def make(count: int = 40, height: int = 24) -> Chooser:
 def press(chooser: Chooser, *keys: str) -> object:
     outcome = None
     for key in keys:
-        event = KeyEvent("char", char=key) if len(key) == 1 and key.isalnum() \
-            else KeyEvent(key)
+        if key == "space":
+            event = KeyEvent("char", char=" ")
+        elif len(key) == 1 and key.isalnum():
+            event = KeyEvent("char", char=key)
+        else:
+            event = KeyEvent(key)
         outcome = chooser._handle(event)
         chooser.render()          # what the loop does between keystrokes
     return outcome
+
+
+def ticking(count: int = 6, height: int = 24) -> Chooser:
+    theme = theme_module.load("ember")
+    console = build(theme, width=80, height=height)
+    options = [Option(f"skill-{i}", f"skill-{i}", f"does thing {i}")
+               for i in range(count)]
+    return Chooser(console, theme, options, title="Skills", multi=True,
+                   verb="install")
 
 
 # --------------------------------------------------------------------------- #
@@ -206,3 +219,156 @@ def _text(chooser: Chooser) -> str:
     with console.capture() as captured:
         console.print(chooser.render())
     return captured.get()
+
+
+# --------------------------------------------------------------------------- #
+# ticking more than one
+#
+# The skills question was a list you could take exactly one thing out of, which
+# is the wrong shape: wanting the review skill and the test skill is the
+# ordinary case.
+# --------------------------------------------------------------------------- #
+
+
+def test_space_ticks_the_row_under_the_cursor():
+    chooser = ticking()
+
+    press(chooser, "space")
+
+    assert chooser.picked == {"skill-0"}
+
+
+def test_space_again_unticks_it():
+    chooser = ticking()
+
+    press(chooser, "space", "space")
+
+    assert chooser.picked == set()
+
+
+def test_several_can_be_ticked_and_enter_takes_them_all():
+    chooser = ticking()
+
+    press(chooser, "space", "down", "down", "space", "down", "space")
+    taken = press(chooser, "enter")
+
+    assert taken == ["skill-0", "skill-2", "skill-3"]
+
+
+def test_they_come_back_in_the_order_they_were_offered():
+    """Not the order they were ticked: the list on screen is what a reader
+    remembers, and a summary line in a different order reads as a mistake."""
+    chooser = ticking()
+
+    press(chooser, "end", "space", "home", "space")
+    taken = press(chooser, "enter")
+
+    assert taken == ["skill-0", "skill-5"]
+
+
+def test_enter_with_nothing_ticked_is_an_answer_not_a_refusal():
+    """It is what the "None for now" row used to be for. An option meaning
+    "no options", among real ones, is a thing to explain rather than use."""
+    chooser = ticking()
+
+    taken = press(chooser, "enter")
+
+    assert taken == []
+    assert taken is not None
+
+
+def test_escape_is_still_a_refusal():
+    from comodor.ui.chooser import _CANCEL
+
+    chooser = ticking()
+    press(chooser, "space")
+
+    assert press(chooser, "escape") is _CANCEL
+
+
+def test_a_tick_survives_the_filter_that_hides_it():
+    """Ticks are held by value, not by row.
+
+    Type to narrow the list, tick something, clear the filter: holding an
+    index would have moved the mark onto whatever landed in that row.
+    """
+    chooser = ticking(count=6)
+
+    press(chooser, "space")                       # skill-0
+    for char in "5":                              # narrows to skill-5
+        press(chooser, char)
+    assert [option.value for option in chooser.matching] == ["skill-5"]
+    press(chooser, "space")
+    press(chooser, "backspace")
+
+    taken = press(chooser, "enter")
+    assert taken == ["skill-0", "skill-5"]
+
+
+def test_space_still_types_when_the_list_takes_one_answer():
+    """Only the ticking list steals it. Everywhere else it filters."""
+    chooser = make(count=6)
+
+    press(chooser, "space")
+
+    assert chooser.filter == " "
+    assert not hasattr(chooser, "picked") or chooser.picked == set()
+
+
+def test_the_hint_says_what_enter_will_do():
+    chooser = ticking()
+    chooser.render()
+    assert "install nothing" in chooser._hint().plain
+    assert "space" in chooser._hint().plain
+
+    press(chooser, "space", "down", "space")
+    assert "install 2" in chooser._hint().plain
+
+
+def test_the_boxes_are_drawn_and_change_when_ticked():
+    from rich.console import Console
+
+    chooser = ticking()
+    theme = chooser.theme
+
+    def drawn() -> str:
+        buffer = Console(width=80, height=24, record=True, file=open_devnull())
+        buffer.print(chooser.render())
+        return buffer.export_text()
+
+    before = drawn()
+    assert theme.glyphs.unticked in before
+    assert theme.glyphs.ticked not in before
+
+    press(chooser, "space")
+    assert theme.glyphs.ticked in drawn()
+
+
+def open_devnull():
+    import io
+
+    return io.StringIO()
+
+
+def test_the_count_of_what_is_taken_is_on_screen():
+    from rich.console import Console
+
+    chooser = ticking()
+    press(chooser, "space", "down", "space")
+
+    buffer = Console(width=80, height=24, record=True, file=open_devnull())
+    buffer.print(chooser.render())
+
+    assert "2 selected" in buffer.export_text()
+
+
+def test_choose_many_gives_up_quietly_without_a_terminal():
+    """The wizard has to answer in a pipe, so this returning None is the
+    signal to ask some other way — and it must not be confused with []."""
+    from comodor.ui.chooser import choose_many
+
+    theme = theme_module.load("ember")
+    console = build(theme, width=80, height=24)
+
+    assert choose_many(console, theme, [Option("a", "A")]) is None
+    assert choose(console, theme, [Option("a", "A")]) is None

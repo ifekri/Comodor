@@ -301,3 +301,88 @@ def test_an_unconfigured_local_provider_is_not_chosen_silently():
 
     config.use("ollama")
     assert not config.needs_setup
+
+
+# --------------------------------------------------------------------------- #
+# taking several skills
+#
+# The question offered a library and took exactly one thing out of it. Somebody
+# setting up for a Python project wants the review skill and the test skill,
+# and the list had no way to say so.
+# --------------------------------------------------------------------------- #
+
+THREE = [("a", "a", ""), ("b", "b", ""), ("c", "c", "")]
+
+
+def test_the_numbered_form_takes_several(blank):
+    """No terminal to take over, and the question still has to accept more
+    than one answer — the wizard runs in pipes, in tests and under curl | sh."""
+    assert wizard(blank, ["1, 3"])._choose_many(THREE, title="Skills") == ["a", "c"]
+
+
+def test_spaces_work_as_well_as_commas(blank):
+    assert wizard(blank, ["2 3"])._choose_many(THREE) == ["b", "c"]
+
+
+def test_an_empty_answer_is_none_of_them(blank):
+    """What the "None for now" row used to be for."""
+    assert wizard(blank, [""])._choose_many(THREE) == []
+
+
+def test_a_number_that_is_not_on_the_list_is_asked_again(blank):
+    """Not taken as a default. A silent wrong choice here is one the user has
+    to undo later, having never been told it happened."""
+    assert wizard(blank, ["9", "nonsense", "2"])._choose_many(THREE) == ["b"]
+
+
+def test_the_same_number_twice_is_one_skill(blank):
+    assert wizard(blank, ["1,1,2"])._choose_many(THREE) == ["a", "b"]
+
+
+def test_they_come_back_in_the_order_they_were_offered(blank):
+    """However they were typed. The list on screen is what a reader
+    remembers, and a summary in another order reads as a mistake."""
+    assert wizard(blank, ["3,1"])._choose_many(THREE) == ["a", "c"]
+
+
+def test_every_chosen_skill_is_installed(blank, monkeypatch):
+    """The loop was already there and had never been handed more than one."""
+    installed: list[str] = []
+
+    class Entry:
+        def __init__(self, name):
+            self.id, self.description = name, ""
+
+    class Catalogue:
+        skills = [Entry("one"), Entry("two"), Entry("three")]
+
+        def get(self, name):
+            return next((s for s in self.skills if s.id == name), None)
+
+    monkeypatch.setattr("comodor.skills.catalogue.fetch", lambda *a, **k: Catalogue())
+    monkeypatch.setattr("comodor.skills.catalogue.install",
+                        lambda entry, cat, root: installed.append(entry.id))
+
+    done = wizard(blank, []).install_skills(blank, Answers(skills=["one", "three"]))
+
+    assert installed == ["one", "three"]
+    assert done == ["one", "three"]
+
+
+def test_the_summary_names_every_skill_taken(blank, monkeypatch):
+    """One line saying "3 skills" and another naming one of them would be the
+    wizard disagreeing with itself about what it just did."""
+    class Entry:
+        def __init__(self, name):
+            self.id, self.description = name, f"the {name} procedure"
+
+    class Catalogue:
+        skills = [Entry("one"), Entry("two"), Entry("three")]
+
+    monkeypatch.setattr("comodor.skills.catalogue.fetch", lambda *a, **k: Catalogue())
+
+    it = wizard(blank, ["1,3"])
+    taken = it._ask_skills(1, 1)
+
+    assert taken == ["one", "three"]
+    assert ("skills", "one, three") in it._done
