@@ -2,6 +2,37 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.10.1 — 2026-08-24
+
+### Setup takes as many skills as you want
+
+The question offered a library and let you take exactly one thing out of it.
+Somebody setting up for a Python project wants the review skill and the test
+skill, and the list had no way to say so — they took one and either went
+looking for `comodor skills` afterwards or never got the rest.
+
+Move with the arrow keys, **space** to tick, **enter** to install everything
+ticked. The hint line counts what is waiting, so enter is never a guess.
+
+```
+┌─ Skills ──────────────────────────────────────────────────┐
+│    ☑ review        Review a change before it is committed │
+│ ›  ☐ commit-style  Match the commit messages already here │
+│    ☑ python-tests  Write tests the way this project does  │
+└───────────────────────────────────── 2 selected ──────────┘
+  ↑↓ move   space select   enter install 2   type filter   esc cancel
+```
+
+Nothing is ticked to begin with and enter with nothing ticked takes none, so
+the wizard still never installs anything you did not ask for. The "None for
+now" row is gone: an option meaning "no options", among real ones, is a thing
+to explain rather than a thing to use.
+
+Typing still filters, and ticks are held by value rather than by row — narrow
+the list, tick something, clear the filter, and it is still ticked. Without a
+terminal it can take over, the numbered form asks the same question and takes
+`1,3` or `1 3`.
+
 ## 0.10.0 — 2026-08-24
 
 ### The browser interface, rebuilt
