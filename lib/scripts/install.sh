@@ -55,6 +55,54 @@ fi
 
 say() { printf '%s\n' "$*"; }
 step() { printf '%s>%s %s\n' "$AMBER" "$RESET" "$*"; }
+
+# How wide the terminal is, for deciding whether the wordmark fits. `tput` is
+# not on every minimal image, and COLUMNS is not exported by every shell, so
+# both are tried and 80 is the answer when neither knows.
+term_width() {
+    _w=''
+    if command -v tput >/dev/null 2>&1; then
+        _w=$(tput cols 2>/dev/null || true)
+    fi
+    [ -n "$_w" ] || _w="${COLUMNS:-80}"
+    case "$_w" in ''|*[!0-9]*) _w=80 ;; esac
+    printf '%s' "$_w"
+}
+
+# The same wordmark the program draws, and the same rule about when to drop
+# it: 47 columns, below which ASCII art reflowed by a terminal is not a
+# smaller logo, it is rubble.
+banner() {
+    printf '\n'
+    if [ "$(term_width)" -lt 51 ]; then
+        printf '%s%sComodor%s %s— it learns the way you correct it%s\n\n' \
+            "$BOLD" "$AMBER" "$RESET" "$DIM" "$RESET"
+        return
+    fi
+    printf '%s%s' "$AMBER" "$BOLD"
+    printf '%s\n' '   ______                          __          '
+    printf '%s\n' '  / ____/___  ____ ___  ____  ____/ /___  _____'
+    printf '%s\n' ' / /   / __ \/ __ `__ \/ __ \/ __  / __ \/ ___/'
+    printf '%s\n' '/ /___/ /_/ / / / / / / /_/ / /_/ / /_/ / /    '
+    printf '%s\n' '\____/\____/_/ /_/ /_/\____/\__,_/\____/_/     '
+    printf '%s' "$RESET"
+    printf '%s  it learns the way you correct it%s\n\n' "$DIM" "$RESET"
+}
+
+# A rule with a name on it, so the phases of an install read as phases rather
+# than as a wall of lines that happen to have scrolled past.
+heading() {
+    _title="$1"
+    _width=$(term_width)
+    [ "$_width" -gt 72 ] && _width=72
+    _rule=''
+    _i=$(( _width - ${#_title} - 5 ))
+    [ "$_i" -lt 3 ] && _i=3
+    while [ "$_i" -gt 0 ]; do _rule="${_rule}\342\224\200"; _i=$(( _i - 1 )); done
+    printf '\n%s%s%s %s' "$DIM" "$(printf '\342\224\200\342\224\200')" "$RESET" "$BOLD"
+    printf '%s%s ' "$_title" "$RESET"
+    printf '%s%b%s\n\n' "$DIM" "$_rule" "$RESET"
+}
 note() { printf '%s  %s%s\n' "$DIM" "$*" "$RESET"; }
 # Octal, not \xNN: hex escapes are a bash extension, and /bin/sh on Debian and
 # Ubuntu is dash, which prints them literally.
@@ -487,7 +535,8 @@ choose_tool() {
 }
 
 main() {
-    printf '\n%s%sComodor%s — it learns the way you correct it.\n\n' "$BOLD" "$AMBER" "$RESET"
+    banner
+    heading "Checking this machine"
 
     detect_platform
     note "$PLATFORM $ARCH"
@@ -597,14 +646,72 @@ main() {
         fi
     fi
 
+    offer_setup
+}
+
+# Whether there is a terminal to ask a question on.
+#
+# Under `curl … | sh` stdin is the script itself, so `read` would swallow the
+# rest of the installer. The controlling terminal is a different file and can
+# be opened directly — where there is one. In a Dockerfile, in CI, in a
+# provisioning script, there is not, and the right thing there is to say what
+# to run rather than to ask a question nobody can answer.
+have_tty() {
+    [ -z "${COMODOR_NO_SETUP:-}" ] || return 1
+    [ -e /dev/tty ] || return 1
+    ( exec 3< /dev/tty ) 2>/dev/null || return 1
+    return 0
+}
+
+what_next() {
     printf '\n'
     say "  ${BOLD}${COMMAND}${RESET}              start the interface"
+    say "  ${BOLD}${COMMAND} setup${RESET}        choose a provider and a model"
     say "  ${BOLD}${COMMAND} --demo${RESET}       try it offline, no API key needed"
     say "  ${BOLD}${COMMAND} doctor${RESET}       check what is configured"
     printf '\n'
-    note "The first run asks which provider and model to use, once."
     note "$REPO"
     printf '\n'
+}
+
+offer_setup() {
+    if ! have_tty; then
+        # Nothing to ask on. Say what is left to do and finish cleanly, which
+        # is what a build needs from an installer.
+        what_next
+        note "Run ${BOLD}${COMMAND} setup${RESET}${DIM} once to choose a provider and a model."
+        printf '\n'
+        return 0
+    fi
+
+    banner
+    heading "One thing left"
+    say "  Comodor needs to know which provider and model to use."
+    say "  ${DIM}It is a handful of questions and it is saved, so it is asked once.${RESET}"
+    printf '\n'
+    say "    ${AMBER}1${RESET}  ${BOLD}Set it up now${RESET}${DIM}  — choose a provider and a model${RESET}"
+    say "    ${AMBER}2${RESET}  ${BOLD}Not right now${RESET}${DIM} — I will run \`${COMMAND} setup\` later${RESET}"
+    printf '\n'
+
+    _reply=''
+    printf '  %sChoice%s %s[1]%s: ' "$BOLD" "$RESET" "$DIM" "$RESET"
+    # From the terminal, not from stdin: stdin is the installer.
+    IFS= read -r _reply < /dev/tty || _reply=''
+    case "$(printf '%s' "$_reply" | tr -d '[:space:]')" in
+        ''|1|y|Y|yes|Yes|YES)
+            printf '\n'
+            # The terminal on its stdin too, for the same reason.
+            "$INSTALLED" setup < /dev/tty && return 0
+            printf '\n'
+            note "Setup did not finish. ${BOLD}${COMMAND} setup${RESET}${DIM} picks it up again."
+            what_next
+            ;;
+        *)
+            what_next
+            note "When you want it: ${BOLD}${COMMAND} setup${RESET}"
+            printf '\n'
+            ;;
+    esac
 }
 
 main "$@"

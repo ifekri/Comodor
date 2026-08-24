@@ -29,6 +29,49 @@ $Installed = ''
 # ----------------------------------------------------------------- output --
 
 function Write-Step { param([string]$Message) Write-Host "> " -ForegroundColor DarkYellow -NoNewline; Write-Host $Message }
+
+# How wide the window is, for deciding whether the wordmark fits. A host
+# with no raw UI - a build agent, a remote session - reports nothing, and
+# 80 is the answer there.
+function Get-Width {
+    try { return $Host.UI.RawUI.WindowSize.Width } catch { return 80 }
+}
+
+# The same wordmark the program draws, and the same rule about when to
+# drop it: 47 columns, below which ASCII art reflowed by a terminal is not
+# a smaller logo, it is rubble.
+function Show-Banner {
+    Write-Host ''
+    if ((Get-Width) -lt 51) {
+        Write-Host 'Comodor' -ForegroundColor DarkYellow -NoNewline
+        Write-Host ' - it learns the way you correct it' -ForegroundColor DarkGray
+        Write-Host ''
+        return
+    }
+    $mark = @(
+        '   ______                          __          ',
+        '  / ____/___  ____ ___  ____  ____/ /___  _____',
+        ' / /   / __ \/ __ `__ \/ __ \/ __  / __ \/ ___/',
+        '/ /___/ /_/ / / / / / / /_/ / /_/ / /_/ / /    ',
+        '\____/\____/_/ /_/ /_/\____/\__,_/\____/_/     '
+    )
+    foreach ($line in $mark) { Write-Host $line -ForegroundColor DarkYellow }
+    Write-Host '  it learns the way you correct it' -ForegroundColor DarkGray
+    Write-Host ''
+}
+
+# A rule with a name on it, so the phases of an install read as phases
+# rather than as a wall of lines that happen to have scrolled past.
+function Show-Heading {
+    param([string]$Title)
+    $width = [Math]::Min((Get-Width), 72)
+    $rule = [string]::new([char]0x2500, [Math]::Max(3, $width - $Title.Length - 5))
+    Write-Host ''
+    Write-Host ([string]::new([char]0x2500, 2)) -ForegroundColor DarkGray -NoNewline
+    Write-Host " $Title " -NoNewline
+    Write-Host $rule -ForegroundColor DarkGray
+    Write-Host ''
+}
 function Write-Note { param([string]$Message) Write-Host "  $Message" -ForegroundColor DarkGray }
 function Write-Ok { param([string]$Message) Write-Host "OK " -ForegroundColor Green -NoNewline; Write-Host $Message }
 
@@ -198,10 +241,8 @@ function Install-Uv {
 
 # ------------------------------------------------------------------- run --
 
-Write-Host ''
-Write-Host 'Comodor' -ForegroundColor DarkYellow -NoNewline
-Write-Host ' — it learns the way you correct it.'
-Write-Host ''
+Show-Banner
+Show-Heading 'Checking this machine'
 
 $edition = if ($PSVersionTable.PSEdition) { $PSVersionTable.PSEdition } else { 'Desktop' }
 $arch = if ([System.Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
@@ -429,14 +470,67 @@ if (-not $onPath) {
     }
 }
 
+function Show-WhatNext {
+    Write-Host ''
+    Write-Host "  $Command" -ForegroundColor White -NoNewline
+    Write-Host '              start the interface'
+    Write-Host "  $Command setup" -ForegroundColor White -NoNewline
+    Write-Host '        choose a provider and a model'
+    Write-Host "  $Command --demo" -ForegroundColor White -NoNewline
+    Write-Host '       try it offline, no API key needed'
+    Write-Host "  $Command doctor" -ForegroundColor White -NoNewline
+    Write-Host '       check what is configured'
+    Write-Host ''
+    Write-Note $Repo
+    Write-Host ''
+}
+
+# Whether there is somebody at the keyboard to answer.
+#
+# A build step, a provisioning script or a `-NonInteractive` session has
+# nobody, and asking there either hangs or is answered by whatever byte
+# arrives next. Both are worse than printing the one command that is left.
+function Test-CanAsk {
+    if ($env:COMODOR_NO_SETUP) { return $false }
+    if (-not [Environment]::UserInteractive) { return $false }
+    try { $null = $Host.UI.RawUI.WindowSize } catch { return $false }
+    return $true
+}
+
+if (-not (Test-CanAsk)) {
+    Show-WhatNext
+    Write-Note "Run $Command setup once to choose a provider and a model."
+    Write-Host ''
+    return
+}
+
+Show-Banner
+Show-Heading 'One thing left'
+Write-Host '  Comodor needs to know which provider and model to use.'
+Write-Host '  It is a handful of questions and it is saved, so it is asked once.' -ForegroundColor DarkGray
 Write-Host ''
-Write-Host "  $Command" -ForegroundColor White -NoNewline
-Write-Host '              start the interface'
-Write-Host "  $Command --demo" -ForegroundColor White -NoNewline
-Write-Host '       try it offline, no API key needed'
-Write-Host "  $Command doctor" -ForegroundColor White -NoNewline
-Write-Host '       check what is configured'
+Write-Host '    1' -ForegroundColor DarkYellow -NoNewline
+Write-Host '  Set it up now' -NoNewline
+Write-Host '  - choose a provider and a model' -ForegroundColor DarkGray
+Write-Host '    2' -ForegroundColor DarkYellow -NoNewline
+Write-Host '  Not right now' -NoNewline
+Write-Host " - I will run ``$Command setup`` later" -ForegroundColor DarkGray
 Write-Host ''
-Write-Note 'The first run asks which provider and model to use, once.'
-Write-Note $Repo
-Write-Host ''
+
+$answer = ''
+try { $answer = (Read-Host '  Choice [1]').Trim() } catch { $answer = '2' }
+
+if ($answer -eq '' -or $answer -eq '1' -or $answer -match '^(y|yes)$') {
+    Write-Host ''
+    & $Installed setup
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ''
+        Write-Note "Setup did not finish. $Command setup picks it up again."
+        Show-WhatNext
+    }
+}
+else {
+    Show-WhatNext
+    Write-Note "When you want it: $Command setup"
+    Write-Host ''
+}
