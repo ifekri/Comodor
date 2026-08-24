@@ -100,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument("--yes", action="store_true",
                         help="do not ask; for scripts")
 
+    from .acp.commands import register as register_acp
     from .mcp.commands import register as register_mcp
     from .skills.commands import register as register_skills
     from .web.commands import register as register_web
@@ -107,6 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_mcp(sub)
     register_skills(sub)
     register_web(sub)
+    register_acp(sub)
 
     preview = sub.add_parser("preview",
                              help="render the interface at a given size and exit")
@@ -734,6 +736,10 @@ def main(argv: list[str] | None = None) -> int:
         from .web.commands import run as run_web
 
         return run_web(config, args)
+    if args.command == "acp":
+        from .acp.commands import run as run_acp
+
+        return run_acp(config, args)
     if args.command == "preview":
         return run_preview(config, args)
     if args.command == "setup":

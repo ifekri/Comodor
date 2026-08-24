@@ -33,6 +33,7 @@ ends with the agent doing something useful.
 | [The real browser](browser.md) | A browser that runs JavaScript and can log in |
 | [Using your screen](computer.md) | Mouse and keyboard, in any application |
 | [From a browser](web.md) | The web interface, locally or on a server |
+| [In your editor](acp.md) | Drive Comodor from Zed or any Agent Client Protocol client |
 | [In Docker](docker.md) | One command, in a container |
 | [MCP servers](mcp.md) | Tools from the Model Context Protocol |
 

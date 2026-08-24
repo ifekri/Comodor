@@ -76,7 +76,7 @@ skills across. [How that works](docs/migrating.md).
 | **Use a real browser** | One that runs JavaScript, keeps cookies and can log in — not a page fetcher. [More](docs/browser.md) |
 | **Use your screen** | Mouse and keyboard, in any application, with a halo on screen showing where it is about to click. Windows so far. [More](docs/computer.md) |
 | **Follow your procedures** | Write a skill once; it loads it when the work matches. [More](docs/skills.md) |
-| **Run anywhere** | Terminal, browser, or a container. [Web](docs/web.md) · [Docker](docs/docker.md) |
+| **Run anywhere** | Terminal, browser, editor, or a container. [Web](docs/web.md) · [Editor](docs/acp.md) · [Docker](docs/docker.md) |
 | **Work with any model** | Seventeen providers, or anything with an OpenAI-compatible URL. Including ones on your own machine. [More](docs/models.md) |
 | **Cost less than it should** | 86% of input tokens served from cache, measured. [More](docs/cost.md) |
 
@@ -92,6 +92,7 @@ Comodor pulls in `rich` and nothing else.
 comodor                                    # the interface
 comodor run "fix the failing test" --yes   # one task, no interface
 comodor web                                # from a browser
+comodor acp                                # from your editor (ACP)
 comodor doctor                             # is everything alright?
 comodor help                               # a written help page, not a flag dump
 ```
