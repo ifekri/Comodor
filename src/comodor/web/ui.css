@@ -641,6 +641,113 @@ button.small.primary { background: var(--accent); border-color: var(--accent);
 button.small.primary:hover { background: var(--accent-soft); }
 button.small.danger:hover { border-color: var(--bad); color: var(--bad); }
 
+/* -- the model combobox ---------------------------------------------------- */
+.combo { position: relative; width: 100%; }
+.combo-button {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  height: 36px; padding: 0 10px; text-align: start;
+  background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: var(--r-sm); transition: border-color var(--speed);
+}
+.combo-button:hover { border-color: var(--line-strong); }
+.combo-button[aria-expanded='true'] { border-color: var(--accent); }
+.combo-button > .mono {
+  flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  direction: ltr; text-align: start;
+}
+.combo-button .placeholder { color: var(--ink-dim); font-family: var(--font); }
+.combo-caret {
+  flex: none; width: 9px; height: 9px; background: var(--ink-dim);
+  -webkit-mask: var(--chevron) center / contain no-repeat;
+  mask: var(--chevron) center / contain no-repeat;
+  transition: transform var(--speed);
+}
+.combo-button[aria-expanded='true'] .combo-caret { transform: rotate(180deg); }
+
+/* Against the window, not the parent: both places this is used scroll, and a
+ * panel inside a scrolling box is clipped by it — four hundred models opening
+ * into a one-row slot. */
+.combo-panel {
+  position: fixed; z-index: 60;
+  background: var(--bg-raised); border: 1px solid var(--line-strong);
+  border-radius: var(--r-md); box-shadow: var(--shadow); overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.combo-list { flex: 1; }
+.combo-search {
+  width: 100%; height: 36px; padding: 0 11px; font-size: 13px;
+  border-bottom: 1px solid var(--line); background: var(--bg-sunk);
+}
+.combo-search:focus-visible { box-shadow: none; }
+.combo-list { overflow-y: auto; }
+
+.combo-row {
+  display: block; width: 100%; text-align: start; padding: 7px 11px;
+  border-bottom: 1px solid var(--line);
+}
+.combo-row:last-child { border-bottom: none; }
+.combo-row:hover, .combo-row[data-cursor='true'] { background: var(--bg-hover); }
+.combo-row[aria-selected='true'] { background: var(--accent-wash); }
+.combo-row b {
+  display: block; font-family: var(--mono); font-size: 12px; font-weight: 500;
+  direction: ltr; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.combo-row > span {
+  display: block; margin-top: 2px; font-size: 11px; color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.combo-marks { display: flex; gap: 6px; margin-top: 3px; }
+.combo-marks em {
+  font-style: normal; font-size: 10px; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-dim);
+  border: 1px solid var(--line); border-radius: var(--r-full);
+  padding: 1px 6px;
+}
+/* A model that cannot call a tool cannot do this job at all, so it is marked
+ * rather than quietly listed among the ones that can. */
+.combo-marks em.bad { color: var(--bad); border-color: rgba(232,115,111,.4); }
+.combo-row[data-no-tools='true'] b { opacity: .75; }
+
+.combo-status {
+  display: flex; align-items: center; gap: 8px; padding: 6px 11px;
+  border-top: 1px solid var(--line); background: var(--bg-sunk);
+  font-size: 11px; color: var(--ink-dim);
+}
+.combo-status .warn { color: var(--warn); }
+.combo-status button {
+  margin-inline-start: auto; font-size: 11px; color: var(--ink-dim);
+  padding: 2px 7px; border: 1px solid var(--line); border-radius: var(--r-sm);
+}
+.combo-status button:hover { color: var(--ink); border-color: var(--accent-edge); }
+.combo-empty { margin: 0; padding: 14px 11px; text-align: center;
+               font-size: 12.5px; color: var(--ink-dim); }
+
+/* -- how to connect --------------------------------------------------------- */
+.how { display: grid; gap: 8px;
+       grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.how-option {
+  text-align: start; padding: 12px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--line); background: var(--bg-raised);
+  transition: border-color var(--speed);
+}
+.how-option:hover { border-color: var(--accent-edge); }
+.how-option[aria-pressed='true'] { border-color: var(--accent);
+                                   background: var(--accent-wash); }
+.how-option b { display: block; font-size: 14px; }
+.how-option span { display: block; margin-top: 4px; font-size: 12.5px;
+                   color: var(--ink-dim); line-height: 1.45; }
+
+.waiting {
+  border: 1px solid var(--accent-edge); border-radius: var(--r-md);
+  background: var(--accent-wash); padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+}
+.waiting p { margin: 0; font-size: 13.5px; }
+.waiting p.warn { color: var(--warn); }
+.waiting .key-row { width: 100%; }
+.waiting a { color: var(--accent); }
+
 /* -- four hundred models is a list you type into, not a dropdown ----------- */
 .model-status {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;

@@ -316,6 +316,10 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 self._json(200, server.session.folder())
                 return
 
+            if route == "/api/signin":
+                self._json(200, server.session.sign_in_state())
+                return
+
             if route == "/api/skills":
                 self._json(200, server.session.skill_shelf())
                 return
@@ -428,6 +432,30 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                     api_key=str(body.get("api_key") or ""),
                     model=str(body.get("model") or ""),
                     base_url=str(body.get("base_url") or ""))
+                self._json(200 if done else 400,
+                           {"ok": done, "error": why,
+                            "state": server.session.state()})
+                return
+
+            if route == "/api/signin":
+                # The key that comes back is a credential like any other, so
+                # this is behind the same rule as typing one in.
+                if not self._from_this_machine():
+                    self._json(403, {
+                        "ok": False,
+                        "error": "Signing in stores a key on the machine "
+                                 "Comodor is running on, and there is no TLS "
+                                 "here. Do it there, or through an SSH "
+                                 "tunnel."})
+                    return
+                step = str(body.get("step") or "start")
+                if step == "start":
+                    self._json(200, server.session.sign_in_start(
+                        str(body.get("provider") or ""),
+                        browser=bool(body.get("browser", True))))
+                    return
+                done, why = server.session.sign_in_finish(
+                    str(body.get("code") or ""))
                 self._json(200 if done else 400,
                            {"ok": done, "error": why,
                             "state": server.session.state()})

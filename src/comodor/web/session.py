@@ -92,6 +92,10 @@ class Session:
         #: Built on first use. Indexing every transcript takes a moment, and
         #: paying it at startup would delay a page that may never be searched.
         self._index: SessionIndex | None = None
+        #: A sign-in in progress, when one is. At most one at a time: a
+        #: second would leave the first holding a verifier for a code nobody
+        #: is going to redeem.
+        self._flow: Any = None
         #: Where in the event log this chat started. A page that reloads
         #: replays from here: zero while nobody has switched chats, so the
         #: whole session comes back, and the switch point afterwards, so one
@@ -351,6 +355,7 @@ class Session:
                 "model": spec.default_model,
                 "models": list(spec.models),
                 "needs_key": bool(spec.needs_key),
+                "can_sign_in": self.can_sign_in(spec.id),
                 "keys_url": spec.keys_url,
                 "base_url": spec.base_url,
                 "ready": bool(entry and entry.ready),
@@ -415,6 +420,80 @@ class Session:
         self.bus.emit(Kind.STATUS, provider=self.config.provider,
                       model=self.config.active_model())
         return True, ""
+
+    # -- signing in instead of pasting a key ----------------------------------- #
+
+    def can_sign_in(self, provider: str) -> bool:
+        from ..providers import oauth
+
+        return oauth.supports(provider)
+
+    def sign_in_start(self, provider: str, browser: bool = True) -> dict[str, Any]:
+        """Open a sign-in and hand back where to send the person.
+
+        Two shapes. With a browser, a loopback server catches the redirect and
+        the page polls until it lands. Without one — over SSH, in a container —
+        no callback is given, OpenRouter shows the code, and it is pasted back.
+        """
+        from ..providers import oauth
+
+        if not oauth.supports(provider):
+            return {"ok": False, "error": "that provider has no sign-in"}
+
+        self._end_any_sign_in()
+        flow = oauth.begin_with_a_browser() if browser else None
+        if flow is None:
+            flow = oauth.begin()
+        self._flow = flow
+        return {
+            "ok": True,
+            "url": flow.url,
+            # A headless flow needs the code typing back; the other resolves
+            # itself and the page only has to wait.
+            "paste_the_code": flow.headless,
+            "expires_in": oauth.GOOD_FOR,
+        }
+
+    def sign_in_finish(self, code: str = "") -> tuple[bool, str]:
+        """Redeem whatever the flow has, and save the key it returns."""
+        from ..providers import oauth
+
+        flow = self._flow
+        if flow is None:
+            return False, "no sign-in is in progress"
+        if flow.error:
+            self._end_any_sign_in()
+            return False, f"OpenRouter refused: {flow.error}"
+
+        try:
+            key = oauth.redeem(flow, code)
+        except oauth.OAuthError as error:
+            if not flow.headless or code:
+                self._end_any_sign_in()
+            return False, str(error)
+        finally:
+            if flow is self._flow and (code or flow.code):
+                self._end_any_sign_in()
+
+        done, why = self.set_up(flow.provider, api_key=key)
+        return (True, "") if done else (False, why)
+
+    def sign_in_state(self) -> dict[str, Any]:
+        """Whether the browser has come back yet."""
+        flow = self._flow
+        if flow is None:
+            return {"waiting": False, "ready": False, "error": ""}
+        return {
+            "waiting": not flow.code and not flow.error and not flow.expired,
+            "ready": bool(flow.code),
+            "error": flow.error or ("that took longer than ten minutes"
+                                    if flow.expired else ""),
+        }
+
+    def _end_any_sign_in(self) -> None:
+        flow, self._flow = self._flow, None
+        if flow is not None:
+            flow.close()
 
     # -- what a provider can actually run ------------------------------------- #
 
@@ -793,6 +872,7 @@ class Session:
                               for name, item in self.config.providers.items()],
                 # Whether there is one, never what it is.
                 "has_key": bool(entry and entry.api_key),
+                "can_sign_in": self.can_sign_in(self.config.provider),
             },
             "agent": {
                 "mode": self.config.agent.mode,
@@ -991,6 +1071,7 @@ class Session:
         return True
 
     def close(self) -> None:
+        self._end_any_sign_in()
         # The transcript first: a session ended by the process going away is
         # exactly the one somebody wanted to come back to.
         try:

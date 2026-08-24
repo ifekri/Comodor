@@ -54,15 +54,24 @@ class Model:
     id: str
     name: str = ""
     context: int = 0
+    #: The most it will write in one answer, where the provider says.
+    max_output: int = 0
     #: Dollars per million tokens, in and out. Zero means free; None means the
     #: provider did not say, which is different and is not shown as free.
     input_cost: float | None = None
     output_cost: float | None = None
+    #: Whether it can call a tool. The first question for an agent, not the
+    #: second: a model without this does not give you a slower Comodor, it
+    #: gives you one that cannot read a file.
+    tools: bool | None = None
+    #: Whether it can be shown a picture — what decides if screen control works.
+    vision: bool | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {"id": self.id, "name": self.name or self.id,
-                "context": self.context,
-                "input_cost": self.input_cost, "output_cost": self.output_cost}
+                "context": self.context, "max_output": self.max_output,
+                "input_cost": self.input_cost, "output_cost": self.output_cost,
+                "tools": self.tools, "vision": self.vision}
 
 
 @dataclass
@@ -187,19 +196,37 @@ def _parse(payload: Any) -> list[Model]:
         if not identifier:
             continue
         pricing = entry.get("pricing") if isinstance(entry.get("pricing"), dict) else {}
+        top = entry.get("top_provider") if isinstance(entry.get("top_provider"), dict) else {}
+        shape = entry.get("architecture") if isinstance(entry.get("architecture"), dict) else {}
+        parameters = entry.get("supported_parameters")
+
+        # `None` rather than `False` where the provider said nothing. "It
+        # cannot do this" and "nobody told us" are different, and only one of
+        # them is worth warning somebody about.
+        tools = None
+        if isinstance(parameters, list):
+            tools = "tools" in parameters
+        modalities = shape.get("input_modalities")
+        vision = "image" in modalities if isinstance(modalities, list) else None
+
         models.append(Model(
             id=identifier,
             name=str(entry.get("name") or entry.get("display_name") or ""),
             context=_as_int(entry.get("context_length")
                             or entry.get("context_window")
-                            or (entry.get("top_provider") or {}).get("context_length")
-                            if isinstance(entry.get("top_provider"), dict)
-                            else entry.get("context_length")),
+                            or top.get("context_length")),
+            max_output=_as_int(top.get("max_completion_tokens")
+                               or entry.get("max_output_tokens")),
             input_cost=_per_million(pricing.get("prompt")),
             output_cost=_per_million(pricing.get("completion")),
+            tools=tools,
+            vision=vision,
         ))
 
-    models.sort(key=lambda model: model.id)
+    # Sorted by id, case-insensitively, and by the parts around the slash so
+    # `anthropic/claude-opus-5` and `anthropic/claude-sonnet-5` sit together
+    # rather than wherever byte order puts a capital letter.
+    models.sort(key=lambda model: [part.lower() for part in model.id.split("/")])
     return models
 
 
