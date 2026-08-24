@@ -721,9 +721,26 @@ function drawSetup(offer) {
     + ', and you can change it later in Admin.';
   sheet.append(svg, head, sub);
 
+  // What the machine already has, above the list of billing pages. For
+  // somebody with Ollama running, or a key already exported, the list is the
+  // wrong first question: the answer is here and nobody asked it.
+  const here = new Map((offer.running || []).map((item) => [item.provider, item]));
+  const exported = new Map((offer.exported || []).map((item) => [item.provider, item]));
+  const ordered = [
+    ...offer.providers.filter((e) => here.has(e.id) || exported.has(e.id)),
+    ...offer.providers.filter((e) => !here.has(e.id) && !exported.has(e.id)),
+  ];
+
+  if (here.size || exported.size) {
+    const lead = document.createElement('p');
+    lead.className = 'found';
+    lead.textContent = 'Already on this machine — nothing to sign up for:';
+    sheet.appendChild(lead);
+  }
+
   const grid = document.createElement('div');
   grid.className = 'providers';
-  offer.providers.forEach((entry) => {
+  ordered.forEach((entry) => {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'provider';
@@ -733,15 +750,28 @@ function drawSetup(offer) {
     const what = document.createElement('span');
     what.textContent = entry.blurb;
     card.append(name, what);
-    if (!entry.needs_key) {
+    // What was found about it outranks what the catalogue says: "running
+    // here, three models" is the answer, and the sales line is what you read
+    // when there is no answer yet.
+    const found = here.get(entry.id);
+    const held = exported.get(entry.id);
+    if (found) {
+      what.textContent = found.usable ? found.summary
+        : 'running here, but no models are installed yet';
+      card.classList.add('here');
+    }
+    if (found && found.usable) {
+      const up = document.createElement('em');
+      up.textContent = 'running here';
+      card.appendChild(up);
+    } else if (held) {
+      const key = document.createElement('em');
+      key.textContent = 'key already in $' + held.variable;
+      card.appendChild(key);
+    } else if (!entry.needs_key) {
       const free = document.createElement('em');
       free.textContent = 'no key needed';
       card.appendChild(free);
-    }
-    if (entry.ready) {
-      const set = document.createElement('em');
-      set.textContent = 'already set up';
-      card.appendChild(set);
     }
     card.onclick = () => {
       chosen = entry.id;

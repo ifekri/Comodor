@@ -676,6 +676,11 @@ code, pre, kbd, samp, .mono, .path {
             letter-spacing: -.015em; }
 #setup .sub { margin: 0 0 24px; color: var(--ink-dim); font-size: 14px; }
 
+#setup .found { margin: 0 0 10px; font-size: 12px; font-weight: 600;
+                letter-spacing: .05em; text-transform: uppercase;
+                color: var(--good); }
+.provider.here { border-color: rgba(126,193,122,.4); }
+
 .providers { display: grid; gap: 8px;
              grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
 .provider {
