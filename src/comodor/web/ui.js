@@ -495,9 +495,14 @@ function setBusy(value) {
 }
 
 function drawWho() {
-  els.whoProvider.textContent = state.provider || '—';
-  els.whoModel.textContent = state.model || '—';
-  document.title = state.model ? 'Comodor · ' + state.model : 'Comodor';
+  // Nothing chosen yet is not "— › —", which reads as something that failed
+  // to load. The breadcrumb is about which model is answering, and until one
+  // is picked there is no answer to give.
+  const known = Boolean(state.model);
+  $('whoami').hidden = !known;
+  els.whoProvider.textContent = state.provider || '';
+  els.whoModel.textContent = state.model || '';
+  document.title = known ? 'Comodor · ' + state.model : 'Comodor';
 }
 
 function drawMode() {
@@ -683,6 +688,401 @@ function newChat() {
     closeRailIfNarrow();
   });
 }
+
+/* ------------------------------------------------------------- setting up
+ *
+ * Shown in place of the conversation, because there is no conversation to
+ * have until this is answered.
+ */
+
+let chosen = null;
+
+function drawSetup(offer) {
+  const box = $('setup');
+  box.hidden = false;
+  box.textContent = '';
+
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'mark');
+  svg.setAttribute('viewBox', '0 0 512 512');
+  svg.setAttribute('fill', 'var(--accent)');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', '#i-mark');
+  svg.appendChild(use);
+
+  const head = document.createElement('h1');
+  head.textContent = 'Which model should answer?';
+  const sub = document.createElement('p');
+  sub.className = 'sub';
+  sub.textContent = 'Asked once. The answer is saved to ' + offer.config_file
+    + ', and you can change it later in Admin.';
+  sheet.append(svg, head, sub);
+
+  const grid = document.createElement('div');
+  grid.className = 'providers';
+  offer.providers.forEach((entry) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'provider';
+    card.setAttribute('aria-pressed', String(chosen === entry.id));
+    const name = document.createElement('b');
+    name.textContent = entry.label;
+    const what = document.createElement('span');
+    what.textContent = entry.blurb;
+    card.append(name, what);
+    if (!entry.needs_key) {
+      const free = document.createElement('em');
+      free.textContent = 'no key needed';
+      card.appendChild(free);
+    }
+    if (entry.ready) {
+      const set = document.createElement('em');
+      set.textContent = 'already set up';
+      card.appendChild(set);
+    }
+    card.onclick = () => {
+      chosen = entry.id;
+      drawSetup(offer);
+      // Eighteen providers is more than a screen, so the form for the one
+      // just chosen is below the fold — and a form nobody can see reads as a
+      // click that did nothing.
+      const form = $('setup').querySelector('.form');
+      if (form) form.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    };
+    grid.appendChild(card);
+  });
+  sheet.appendChild(grid);
+
+  const entry = offer.providers.find((item) => item.id === chosen);
+  if (entry) sheet.appendChild(setupForm(offer, entry));
+
+  box.appendChild(sheet);
+}
+
+function setupForm(offer, entry) {
+  const form = document.createElement('form');
+  form.className = 'form';
+
+  // The key box is not drawn when a key cannot be taken safely. A warning
+  // beside a field is a warning next to a field somebody fills in anyway.
+  if (entry.needs_key && !offer.may_enter_a_key) {
+    const blocked = document.createElement('div');
+    blocked.className = 'blocked';
+    const why = document.createElement('p');
+    why.textContent = 'This page reached you across a network, and there is no '
+      + 'TLS here — a key typed in would cross that network in the clear. '
+      + 'Two ways to do it safely:';
+    const how = document.createElement('pre');
+    how.textContent = '# on the machine Comodor is running on\n'
+      + 'comodor setup\n\n'
+      + '# or bring the page to you through an SSH tunnel\n'
+      + `ssh -N -L ${offer.port}:127.0.0.1:${offer.port} you@host`;
+    blocked.append(why, how);
+    form.appendChild(blocked);
+    return form;
+  }
+
+  let key = null;
+  if (entry.needs_key) {
+    const line = document.createElement('label');
+    line.className = 'line';
+    line.append(document.createTextNode(`${entry.label} API key`));
+    key = document.createElement('input');
+    key.type = 'password';
+    key.className = 'mono';
+    key.autocomplete = 'off';
+    key.spellcheck = false;
+    key.placeholder = 'paste it here';
+    line.appendChild(key);
+    if (entry.keys_url) {
+      const aside = document.createElement('span');
+      aside.className = 'aside';
+      aside.append(document.createTextNode('Get one at '));
+      const link = document.createElement('a');
+      link.href = entry.keys_url;
+      link.target = '_blank';
+      link.rel = 'noreferrer noopener';
+      link.textContent = entry.keys_url.replace(/^https?:\/\//, '');
+      aside.appendChild(link);
+      line.appendChild(aside);
+    }
+    form.appendChild(line);
+  }
+
+  const line = document.createElement('label');
+  line.className = 'line';
+  line.append(document.createTextNode('Model'));
+  let model;
+  if (entry.models.length) {
+    model = document.createElement('select');
+    entry.models.forEach((name) => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      if (name === entry.model) option.selected = true;
+      model.appendChild(option);
+    });
+  } else {
+    model = document.createElement('input');
+    model.type = 'text';
+    model.className = 'mono';
+    model.value = entry.model || '';
+  }
+  line.appendChild(model);
+  form.appendChild(line);
+
+  let url = null;
+  if (!entry.base_url) {
+    const where = document.createElement('label');
+    where.className = 'line';
+    where.append(document.createTextNode('Endpoint URL'));
+    url = document.createElement('input');
+    url.type = 'url';
+    url.className = 'mono';
+    url.placeholder = 'https://…/v1';
+    where.appendChild(url);
+    form.appendChild(where);
+  }
+
+  const go = document.createElement('button');
+  go.type = 'submit';
+  go.className = 'go';
+  go.textContent = 'Save and start';
+  form.appendChild(go);
+
+  form.onsubmit = (event) => {
+    event.preventDefault();
+    go.disabled = true;
+    go.textContent = 'Saving…';
+    post('/api/setup', {
+      provider: entry.id,
+      api_key: key ? key.value : '',
+      model: model.value,
+      base_url: url ? url.value : '',
+    }).then((reply) => {
+      go.disabled = false;
+      go.textContent = 'Save and start';
+      if (!reply.ok) { toast(reply.error || 'That did not take', 'bad', 'setup'); return; }
+      $('setup').hidden = true;
+      takeState(reply.state);
+      showBlank();
+      refreshAdmin();
+      toast('Ready — ' + (reply.state.model || 'set up'), 'good', 'setup');
+      els.prompt.focus();
+    });
+  };
+  return form;
+}
+
+function askForSetup() {
+  els.prompt.disabled = true;
+  els.prompt.placeholder = 'Choose a model first';
+  get('/api/setup').then((offer) => {
+    if (!offer) return;
+    // Nothing is preselected. `ready` is true for a local provider by
+    // definition — it needs no key — so choosing the first ready one put
+    // Ollama in front of somebody who has never run it, and the highlighted
+    // card is read as a recommendation.
+    chosen = null;
+    drawSetup(offer);
+  });
+}
+
+/* ------------------------------------------------------------------ rules
+ *
+ * A rule is a standing instruction to the agent, and there are two kinds in
+ * one list. What you wrote is obeyed from the first time. What the agent
+ * noticed is obeyed once there is enough evidence, and carries that evidence
+ * as a count — a claim about how somebody works should be checkable rather
+ * than asserted.
+ *
+ * Yours sort first. Burying an instruction under forty inferences reads as the
+ * agent having opinions of its own.
+ */
+
+function icon(name, size) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', name);
+  svg.appendChild(use);
+  if (size) { svg.style.width = size; svg.style.height = size; }
+  return svg;
+}
+
+function ruleAction(action, id, then) {
+  post('/api/rules', { action, id }).then((reply) => {
+    if (!reply.ok) { toast(reply.error || 'That did not take', 'bad', 'rule'); return; }
+    if (then) toast(then, 'good', 'rule');
+    refreshRules();
+    refreshAdmin();
+  });
+}
+
+function drawRules(data) {
+  const body = $('rules-body');
+  body.textContent = '';
+
+  if (!data.enabled) {
+    const off = document.createElement('p');
+    off.className = 'empty-note';
+    off.textContent = 'Rules are switched off in your settings, so nothing '
+      + 'here is being applied.';
+    body.appendChild(off);
+  }
+
+  const lead = document.createElement('div');
+  lead.className = 'lead';
+  const count = document.createElement('span');
+  count.className = 'count';
+  count.textContent = data.rules.length
+    ? `${data.active} in force of ${data.rules.length}`
+    : 'No rules yet';
+  lead.appendChild(count);
+
+  if (data.rules.length) {
+    const out = document.createElement('button');
+    out.type = 'button';
+    out.title = 'Write them to .comodor/house-rules.md';
+    out.append(icon('#i-export'), document.createTextNode('Export'));
+    out.onclick = () => post('/api/rules', { action: 'export' }).then((reply) => {
+      toast(reply.ok ? 'Written to ' + reply.path
+                     : (reply.error || 'Could not write them'),
+            reply.ok ? 'good' : 'bad', 'rule');
+    });
+    lead.appendChild(out);
+  }
+  body.appendChild(lead);
+
+  if (!data.rules.length) {
+    const note = document.createElement('p');
+    note.className = 'empty-note';
+    note.style.textAlign = 'start';
+    note.textContent = 'Write one above and it applies from the next message. '
+      + 'Comodor also watches how this project is written and what you change '
+      + 'about its output, and proposes rules of its own once there is enough '
+      + 'evidence — those show their working.';
+    body.appendChild(note);
+    return;
+  }
+
+  data.rules.forEach((rule) => {
+    const box = document.createElement('article');
+    box.className = 'rule';
+    box.dataset.mine = String(rule.mine);
+    box.dataset.active = String(rule.active);
+    box.dataset.confident = String(rule.confident);
+
+    const said = document.createElement('p');
+    said.className = 'statement bidi';
+    said.style.margin = '0';
+    said.textContent = rule.statement;
+    orient(said, rule.statement);
+    box.appendChild(said);
+
+    const evidence = document.createElement('div');
+    evidence.className = 'evidence';
+    if (rule.mine) {
+      const who = document.createElement('span');
+      who.textContent = 'you wrote this';
+      evidence.appendChild(who);
+    } else {
+      // The count and the bar say the same thing twice on purpose: the
+      // fraction is the claim and the bar is how strong it is at a glance.
+      const bar = document.createElement('span');
+      bar.className = 'bar';
+      const fill = document.createElement('i');
+      fill.style.width = Math.round(rule.strength * 100) + '%';
+      bar.appendChild(fill);
+      const seen = document.createElement('span');
+      const total = rule.support + rule.against;
+      seen.textContent = total
+        ? `${rule.support} of ${total} times` : 'not seen yet';
+      evidence.append(bar, seen);
+      if (!rule.confident) {
+        const waiting = document.createElement('span');
+        waiting.textContent = '· still gathering evidence';
+        evidence.appendChild(waiting);
+      }
+    }
+    if (rule.detail && !rule.mine) {
+      const why = document.createElement('span');
+      why.textContent = '· ' + rule.detail;
+      why.style.overflow = 'hidden';
+      why.style.textOverflow = 'ellipsis';
+      evidence.appendChild(why);
+    }
+    box.appendChild(evidence);
+
+    const doings = document.createElement('div');
+    doings.className = 'doings';
+
+    const onoff = document.createElement('button');
+    onoff.type = 'button';
+    onoff.title = rule.active ? 'Switch this rule off' : 'Switch it back on';
+    if (!rule.active) onoff.style.color = 'var(--good)';
+    onoff.setAttribute('aria-label', onoff.title);
+    onoff.appendChild(icon(rule.active ? '#i-off' : '#i-on'));
+    onoff.onclick = () => ruleAction(rule.active ? 'disable' : 'enable', rule.id,
+                                     rule.active ? 'Rule switched off'
+                                                 : 'Rule switched on');
+
+    const pin = document.createElement('button');
+    pin.type = 'button';
+    pin.title = rule.pinned ? 'Stop always applying this' : 'Always apply this';
+    pin.setAttribute('aria-label', pin.title);
+    pin.setAttribute('aria-pressed', String(rule.pinned));
+    pin.appendChild(icon('#i-pin'));
+    pin.onclick = () => ruleAction(rule.pinned ? 'unpin' : 'pin', rule.id,
+                                   rule.pinned ? 'No longer pinned' : 'Pinned');
+
+    const drop = document.createElement('button');
+    drop.type = 'button';
+    drop.className = 'drop';
+    drop.title = 'Delete this rule';
+    drop.setAttribute('aria-label', 'Delete this rule');
+    drop.appendChild(icon('#i-trash'));
+    drop.onclick = () => {
+      if (!confirm('Delete this rule? Switching it off keeps it for later.')) return;
+      ruleAction('forget', rule.id, 'Rule deleted');
+    };
+
+    const spacer = document.createElement('span');
+    spacer.className = 'spacer';
+    const where = document.createElement('span');
+    where.className = 'where';
+    where.textContent = rule.scope === 'global' ? 'everywhere' : 'this project';
+
+    doings.append(onoff, pin, drop, spacer, where);
+    box.appendChild(doings);
+    body.appendChild(box);
+  });
+}
+
+function refreshRules() {
+  get('/api/rules').then((data) => { if (data) drawRules(data); });
+}
+
+$('rule-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const field = $('rule-text');
+  const statement = field.value.trim();
+  if (!statement) return;
+  post('/api/rules', { action: 'teach', statement }).then((reply) => {
+    if (!reply.ok) { toast(reply.error || 'That did not take', 'bad', 'rule'); return; }
+    field.value = '';
+    field.removeAttribute('dir');
+    toast('Rule added — it applies from your next message', 'good', 'rule');
+    refreshRules();
+    refreshAdmin();
+  });
+});
+
+$('rule-text').addEventListener('input', () => {
+  orient($('rule-text'), $('rule-text').value);
+});
 
 /* ------------------------------------------------------------------ admin */
 
@@ -931,6 +1331,11 @@ function drawAdmin(data) {
 
   els.reflexBit.hidden = !data.reflex.rules_active;
   els.reflex.textContent = data.reflex.rules_active;
+  // The number in the status strip is the way most people will find this
+  // panel, so it opens it rather than only reporting.
+  els.reflexBit.style.cursor = 'pointer';
+  els.reflexBit.title = 'The rules in force — click to see them';
+  els.reflexBit.onclick = () => { setRail(true); selectTab($('tab-rules')); };
 }
 
 function refreshAdmin() {
@@ -1016,7 +1421,8 @@ $('rail-close').onclick = () => setRail(false);
 
 /* Tabs. Arrow keys move between them, which is what a tablist is expected to
  * do and what a keyboard user will try. */
-const tabs = [$('tab-chat'), $('tab-admin')];
+const tabs = [$('tab-chat'), $('tab-rules'), $('tab-admin')];
+const ON_OPEN = { 'tab-rules': () => refreshRules(), 'tab-admin': () => refreshAdmin() };
 
 function selectTab(which) {
   tabs.forEach((tab) => {
@@ -1025,7 +1431,8 @@ function selectTab(which) {
     tab.tabIndex = on ? 0 : -1;
     $(tab.getAttribute('aria-controls')).dataset.open = String(on);
   });
-  if (which === tabs[1]) refreshAdmin();
+  const refresh = ON_OPEN[which.id];
+  if (refresh) refresh();
 }
 
 tabs.forEach((tab, index) => {
@@ -1042,7 +1449,7 @@ tabs.forEach((tab, index) => {
 
 $('admin-jump').onclick = () => {
   setRail(true);
-  selectTab(tabs[1]);
+  selectTab($('tab-admin'));
 };
 
 /* ---------------------------------------------------------------- composer */
@@ -1087,7 +1494,7 @@ els.stop.onclick = () => post('/api/interrupt', {});
 
 $('whoami').onclick = () => {
   setRail(true);
-  selectTab(tabs[1]);
+  selectTab($('tab-admin'));
   setTimeout(() => {
     const pick = $('pick-model');
     if (pick) pick.focus();
@@ -1115,7 +1522,7 @@ document.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault();
     setRail(true);
-    selectTab(tabs[0]);
+    selectTab($('tab-chat'));
     els.find.focus();
     els.find.select();
     return;
@@ -1143,6 +1550,10 @@ $('new-chat').onclick = newChat;
 
 function takeState(data) {
   if (!data) return;
+  if (data.needs_setup === false && els.prompt.disabled) {
+    els.prompt.disabled = false;
+    els.prompt.placeholder = 'Ask for something…';
+  }
   state.provider = data.provider || state.provider;
   state.model = data.model || state.model;
   state.mode = data.mode || state.mode;
@@ -1198,6 +1609,15 @@ async function poll() {
 get('/api/state').then((data) => {
   takeState(data);
   const chat = (data && data.chat) || {};
+
+  if (data && data.needs_setup) {
+    // Nothing to say to a model that has not been chosen. The questions take
+    // the place of the conversation rather than sitting over it.
+    askForSetup();
+    refreshChats();
+    poll();
+    return;
+  }
 
   if (!chat.messages) {
     showBlank();

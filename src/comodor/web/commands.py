@@ -66,12 +66,17 @@ def run(config: Config, args: argparse.Namespace) -> int:
 
 
 def _configured_or_explain(config: Config) -> Config | None:
-    """A usable configuration, or None having said what is missing.
+    """A usable configuration, or one the page will finish setting up.
 
-    The browser interface can switch between providers that are already set
-    up, but it has nowhere to type a key into and would be a poor place for
-    one anyway. Starting with none configured produces a URL, a browser
-    window, and a failure on the first task with nothing on screen to act on.
+    This used to refuse to start. That was right while the page had nowhere to
+    type a key, and it made the browser interface unreachable for the person
+    most likely to want it - somebody whose Comodor is on a server or in a
+    container, with no terminal in front of them.
+
+    So the terminal is still offered the wizard, because it is a nicer place
+    to answer questions, and declining it no longer stops anything: the page
+    asks instead. What decides whether a key may be typed there is where the
+    request comes from, which the server checks per request.
     """
     if not config.needs_setup:
         return config
@@ -89,25 +94,26 @@ def _configured_or_explain(config: Config) -> Config | None:
         try:
             config = run_setup(config)
         except (KeyboardInterrupt, EOFError):
-            print("\nSetup cancelled. Run `comodor setup` when you are ready.",
+            # Cancelled, not refused. The page can finish the job, and
+            # stopping here would leave somebody with nothing at all.
+            print("\nSetup cancelled — you can finish it in the browser.",
                   file=sys.stderr)
-            return None
-        return None if config.needs_setup else config
+        return config
 
-    # Nobody to ask: a container, a service unit, a pipeline. This message is
-    # the only thing that person will see, so it has to carry the answer.
-    print("Comodor has no provider configured, and the browser interface has "
-          "no way to add one.", file=sys.stderr)
+    # Nobody at a terminal: a container, a service unit, a pipeline. It starts
+    # anyway and the page asks. Said out loud, because a URL that opens onto a
+    # form is a surprise worth warning about.
+    print("No provider is configured yet — the page will ask when you open it.",
+          file=sys.stderr)
     print(file=sys.stderr)
-    print("  In Docker, pass a key in as an environment variable:",
+    print("  To skip that, pass a key in as an environment variable:",
           file=sys.stderr)
     print("    -e ANTHROPIC_API_KEY=...    -e OPENAI_API_KEY=...",
           file=sys.stderr)
-    print("  or mount a config file at "
-          f"{config.paths.config_file}.", file=sys.stderr)
-    print("  Anywhere with a terminal, `comodor setup` asks a few questions.",
+    print(f"  or mount a config file at {config.paths.config_file}.",
           file=sys.stderr)
-    return None
+    print(file=sys.stderr)
+    return config
 
 
 def banner_shown(server: Server) -> bool:

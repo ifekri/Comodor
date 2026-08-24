@@ -432,6 +432,63 @@ code, pre, kbd, samp, .mono, .path {
 .empty-note { padding: 22px 12px; color: var(--ink-dim); font-size: 13px;
               text-align: center; }
 
+/* -- rules ----------------------------------------------------------------- */
+#rules-body { flex: 1; overflow-y: auto; padding: 0 12px 20px; }
+
+.rule {
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--bg); padding: 10px 11px; margin-bottom: 8px;
+  position: relative;
+}
+/* Yours are marked down the edge rather than by a badge: an instruction you
+ * wrote is not a category of rule, it is the difference between a rule and a
+ * guess, and it should be legible before anything is read. */
+.rule[data-mine='true'] { border-inline-start: 2px solid var(--accent); }
+.rule[data-active='false'] { opacity: .55; }
+.rule[data-active='false'] .statement { text-decoration: line-through; }
+
+.rule .statement { font-size: 13.5px; line-height: 1.5; }
+.rule .evidence {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 6px; font-size: 11.5px; color: var(--ink-dim);
+}
+.rule .bar {
+  width: 40px; height: 3px; border-radius: var(--r-full);
+  background: var(--line-strong); overflow: hidden; flex: none;
+}
+.rule .bar i { display: block; height: 100%; background: var(--good); }
+.rule[data-confident='false'] .bar i { background: var(--warn); }
+
+.rule .doings {
+  display: flex; gap: 2px; margin-top: 8px;
+  padding-top: 8px; border-top: 1px solid var(--line);
+}
+.rule .doings button {
+  display: grid; place-items: center; width: 26px; height: 26px;
+  border-radius: var(--r-sm); color: var(--ink-dim);
+  transition: background var(--speed), color var(--speed);
+}
+.rule .doings button:hover { background: var(--bg-hover); color: var(--ink); }
+.rule .doings button[aria-pressed='true'] { color: var(--accent); }
+.rule .doings button.drop:hover { color: var(--bad); }
+.rule .doings button svg { width: 14px; height: 14px; }
+.rule .doings .spacer { flex: 1; }
+.rule .doings .where { font-size: 11px; color: var(--ink-dim);
+                       align-self: center; }
+
+#rules-body .lead {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 10px 2px 8px;
+}
+#rules-body .lead .count { font-size: 11px; font-weight: 600;
+  letter-spacing: .07em; text-transform: uppercase; color: var(--ink-dim); }
+#rules-body .lead button {
+  display: flex; align-items: center; gap: 6px; font-size: 12px;
+  color: var(--ink-dim); padding: 4px 8px; border-radius: var(--r-sm);
+}
+#rules-body .lead button:hover { background: var(--bg-hover); color: var(--ink); }
+#rules-body .lead button svg { width: 13px; height: 13px; }
+
 /* -- admin ----------------------------------------------------------------- */
 #admin-body { flex: 1; overflow-y: auto; padding: 0 12px 20px; }
 
@@ -607,6 +664,71 @@ code, pre, kbd, samp, .mono, .path {
 }
 .starter:hover { border-color: var(--accent-edge); color: var(--ink);
                  transform: translateY(-1px); }
+
+/* -- setting up ------------------------------------------------------------ */
+#setup {
+  position: absolute; inset: 0; overflow-y: auto; background: var(--bg);
+  padding: 5vh 22px 40px; z-index: 10;
+}
+#setup .sheet { max-width: 40rem; margin: 0 auto; }
+#setup .mark { width: 42px; height: 42px; display: block; margin-bottom: 18px; }
+#setup h1 { margin: 0 0 6px; font-size: 21px; font-weight: 600;
+            letter-spacing: -.015em; }
+#setup .sub { margin: 0 0 24px; color: var(--ink-dim); font-size: 14px; }
+
+.providers { display: grid; gap: 8px;
+             grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.provider {
+  text-align: start; padding: 12px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--line); background: var(--bg-raised);
+  transition: border-color var(--speed), transform var(--speed);
+}
+.provider:hover { border-color: var(--accent-edge); transform: translateY(-1px); }
+.provider[aria-pressed='true'] { border-color: var(--accent);
+                                 background: var(--accent-wash); }
+.provider b { display: block; font-size: 14px; font-weight: 600; }
+.provider span { display: block; margin-top: 3px; font-size: 12.5px;
+                 color: var(--ink-dim); line-height: 1.45; }
+.provider em { display: inline-block; margin-top: 6px; font-style: normal;
+               font-size: 11.5px; color: var(--good); }
+/* Two of these can be true at once — a local model needs no key and is
+ * therefore already usable — and they ran together into one word. */
+.provider em + em { margin-inline-start: 10px; }
+
+#setup .form { margin-top: 22px; display: flex; flex-direction: column;
+               gap: 14px; }
+#setup label.line { display: flex; flex-direction: column; gap: 6px;
+                    font-size: 13px; color: var(--ink-soft); }
+#setup input, #setup select {
+  height: 38px; padding: 0 12px; width: 100%;
+  background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: var(--r-md); font-size: 14px;
+}
+#setup input:focus-within, #setup input:focus { border-color: var(--accent-edge); }
+#setup input.mono { font-family: var(--mono); font-size: 13px; }
+#setup .aside { font-size: 12px; color: var(--ink-dim); }
+#setup .aside a { color: var(--accent); }
+
+#setup .go {
+  height: 40px; padding-inline: 22px; align-self: flex-start;
+  border-radius: var(--r-md); background: var(--accent); color: #fff;
+  font-size: 14px; font-weight: 500;
+}
+#setup .go:hover:not(:disabled) { background: var(--accent-soft); }
+#setup .go:disabled { background: var(--bg-active); color: var(--ink-faint); }
+
+/* When a key cannot be taken safely, the box is not drawn at all. A warning
+ * beside a field is a warning next to a field somebody fills in anyway. */
+#setup .blocked {
+  border: 1px solid var(--warn); border-radius: var(--r-md);
+  background: rgba(224,179,65,.08); padding: 14px 16px; margin-top: 20px;
+}
+#setup .blocked p { margin: 0 0 10px; font-size: 13.5px; }
+#setup .blocked pre {
+  margin: 0; padding: 9px 11px; overflow-x: auto; font-size: 12.5px;
+  background: var(--bg-sunk); border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
 
 /* -- the screen the agent is driving --------------------------------------- */
 #screen { display: none; border-bottom: 1px solid var(--line);

@@ -45,6 +45,8 @@ from .session import Session
 
 #: Loopback names, for deciding whether a warning is owed.
 LOCAL = ("127.0.0.1", "::1", "localhost")
+#: Addresses a request can arrive *from* and still be on this machine.
+LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 COOKIE = "comodor_token"
 #: A header no cross-origin form or image can set, so its presence proves the
 #: request came from our own page rather than from somebody else's.
@@ -180,6 +182,25 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
         def _json(self, status: int, payload: Any) -> None:
             self._send(status, json.dumps(payload).encode("utf-8"))
 
+        def _from_this_machine(self) -> bool:
+            """Whether this request never crossed a network.
+
+            Asked of the request, not of the bind: a server listening on every
+            address still answers loopback, and a rule about the bind would
+            have refused that. What it decides is whether an API key may be
+            typed into the page - there is no TLS here, and a key is a
+            credential with a bill attached.
+
+            A container is allowed as well. Its loopback is not the operator's
+            machine, but the operator chose how to publish the port and was
+            told at startup what that choice means.
+            """
+            try:
+                where = self.client_address[0]
+            except (AttributeError, IndexError):
+                return False
+            return where in LOOPBACK or server.contained
+
         def _token(self) -> str:
             cookies = self.headers.get("Cookie") or ""
             for part in cookies.split(";"):
@@ -280,6 +301,17 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 self._json(200, server.session.admin())
                 return
 
+            if route == "/api/rules":
+                self._json(200, server.session.rules())
+                return
+
+            if route == "/api/setup":
+                offer = server.session.offer()
+                offer["may_enter_a_key"] = self._from_this_machine()
+                offer["port"] = server.port
+                self._json(200, offer)
+                return
+
             if route == "/api/events":
                 try:
                     cursor = int((query.get("cursor") or ["0"])[0])
@@ -364,6 +396,40 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 except OSError:
                     pass
                 server.stop()
+                return
+
+            if route == "/api/setup":
+                if not self._from_this_machine():
+                    self._json(403, {
+                        "ok": False,
+                        "error": "There is no TLS here, so a key typed into "
+                                 "this page would cross the network in the "
+                                 "clear. Set it up on the machine Comodor is "
+                                 "running on, or reach this page through an "
+                                 "SSH tunnel."})
+                    return
+                done, why = server.session.set_up(
+                    str(body.get("provider") or ""),
+                    api_key=str(body.get("api_key") or ""),
+                    model=str(body.get("model") or ""),
+                    base_url=str(body.get("base_url") or ""))
+                self._json(200 if done else 400,
+                           {"ok": done, "error": why,
+                            "state": server.session.state()})
+                return
+
+            if route == "/api/rules":
+                action = str(body.get("action") or "")
+                if action == "export":
+                    done, why, where = server.session.export_rules()
+                    self._json(200 if done else 500,
+                               {"ok": done, "error": why, "path": where})
+                    return
+                done, why, extra = server.session.rule(
+                    action, id=body.get("id"),
+                    statement=body.get("statement"))
+                self._json(200 if done else 400,
+                           {"ok": done, "error": why, "rule": extra})
                 return
 
             if route == "/api/setting":
