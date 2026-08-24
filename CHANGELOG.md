@@ -2,6 +2,75 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.12.0 — 2026-08-24
+
+### The rule count was counting another folder's rules
+
+The status strip said eight and the Rules panel beside it listed none. The
+eight were real — learned in a different project — and the strip was counting
+every confident rule in the brain while the panel, correctly, showed only the
+ones that apply where you are. A number you cannot click through to is a
+number to distrust.
+
+They are the same number now. Rules learned in other folders are counted
+separately and named as such.
+
+### Model lists come from the provider
+
+The list of models was six names written into a file by hand. OpenRouter
+publishes four hundred and nineteen and will tell anybody who asks, without an
+API key.
+
+So it asks, caches the answer for six hours, and says which of those it is
+doing — "from the provider, just now", or "checked two hours ago". When it
+cannot ask it serves the built-in names and marks them as built-in. Each model
+shows its context window and what it costs per million tokens in and out; a
+price the provider did not state shows as *price not stated* rather than as
+free, because those are different and the difference costs money.
+
+### Admin manages things
+
+It listed the model, the mode, the ceilings and the paths, all of it true and
+none of it touchable — a status page with the wrong name on the tab. It now
+changes:
+
+- the **API key**, for the provider in use
+- the **model**, from the live list, searchable
+- the **provider**, the **mode**, and whether it keeps going on its own
+- **skills** — install from the library, remove, or switch one off
+- the **working folder**
+
+Switching a skill off is a setting rather than a deletion, and Comodor will
+not delete a skill it did not install.
+
+### The working folder can be changed, and it means what it says
+
+It is what confines every write, and until now it could only be set by
+starting Comodor somewhere else. Changing it is a project change: a different
+folder has its own learned rules, its own checkpoints and a conversation that
+starts empty. The page says so before it does it.
+
+Refused across a network, for the same reason a key is.
+
+### The sidebar resizes, and long titles end properly
+
+Drag the edge, or use the arrow keys, or double-click to reset; the width is
+remembered. Below the tablet breakpoint the rail is a drawer with a width of
+its own, so dragging is off there.
+
+A long chat title stays on one line and dissolves into the space the delete
+icon sits in, rather than wrapping to two lines or running underneath it. A
+title that fits is not faded.
+
+### Smaller
+
+- The focus ring was four solid pixels of accent, the loudest thing in an
+  interface built out of one-pixel borders. It is a hairline and a soft halo.
+- An empty path in the folder field resolved to the current directory, so
+  submitting a blank form moved the agent to wherever the process was started.
+- The model picker pre-filled its search box with the current model, so
+  opening it showed one row out of four hundred and nineteen.
+
 ## 0.11.0 — 2026-08-24
 
 ### Rules, in the browser
