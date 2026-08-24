@@ -28,6 +28,31 @@ npx wrangler deploy                                   # the site
 npx wrangler deploy --config workers/get/wrangler.jsonc   # the dispatcher
 ```
 
+### Routes, not Custom Domains — and why that is worth knowing
+
+A Custom Domain is the tidier mechanism: it owns the DNS record and provisions
+the certificate. It also **refuses to attach to a hostname that already has DNS
+records**, and the apex still carries the four A records that pointed at GitHub
+Pages:
+
+```
+100117: Hostname 'comodor.ai' already has externally managed DNS records
+```
+
+Deleting those needs a DNS-editing credential, and no Workers token is one —
+`wrangler login --scopes-list` tops out at `zone:read`. So the site is attached
+with routes instead. A route intercepts at the edge before the origin is
+dialled, so those A records are never followed and Pages never serves a byte,
+and switching over is atomic: there is no window with no site.
+
+**The trap:** the records still *say* GitHub Pages. Remove these routes and
+traffic silently falls back to Pages rather than breaking, which is a confusing
+way to find out. When somebody with DNS access deletes the four apex A records
+and the `www` CNAME, convert the entries in `wrangler.jsonc` to
+`custom_domain: true` and this footnote goes away.
+
+### The assets Worker
+
 `wrangler.jsonc` declares no `main`, which is the point: serving 85 exported
 files needs nothing to run, and Cloudflare's own wording for what that costs is
 *"requests to static assets are free and unlimited"*. Adding a Worker script

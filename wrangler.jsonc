@@ -31,6 +31,27 @@
     "not_found_handling": "404-page"
   },
 
+  // Routes rather than Custom Domains, and not by preference.
+  //
+  // A Custom Domain is the tidier mechanism — it owns the DNS record and the
+  // certificate — but it refuses to attach to a hostname that already has
+  // records, and the apex still carries the four A records that pointed at
+  // GitHub Pages. Deleting those needs a DNS-editing credential, which no
+  // Workers token has: `wrangler login` tops out at `zone:read`.
+  //
+  // A route does not care. It intercepts at the edge before the origin is
+  // dialled, so those A records are never followed and Pages never serves a
+  // byte. The switch is atomic and there is no window with no site.
+  //
+  // The one thing to know: the records still *say* GitHub Pages. Remove these
+  // routes and traffic silently falls back to it rather than breaking, which
+  // is a confusing way to find out. Once the apex records are gone these
+  // should become `custom_domain: true` entries.
+  "routes": [
+    { "pattern": "comodor.ai/*", "zone_name": "comodor.ai" },
+    { "pattern": "www.comodor.ai/*", "zone_name": "comodor.ai" }
+  ],
+
   "observability": {
     "enabled": true
   }
