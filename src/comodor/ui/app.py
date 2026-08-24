@@ -30,6 +30,7 @@ from ..mcp.manager import SEPARATOR
 from ..providers import registry
 from ..providers.fake import demo_scripts
 from ..providers.gateway import Gateway
+from ..questions import CANCELLED, encode_answers
 from ..safety import CheckpointStore, PermissionEngine, Redactor
 from ..session import SessionIndex, SessionMeta, SessionStore, derive_title, new_session_id
 from ..skills import candidates as skill_candidates
@@ -43,7 +44,7 @@ from .input import KeyEvent, MouseEvent, PasteEvent, TerminalInput
 from .screen import Screen, ScreenState
 from .widgets.chat import Entry, entries_from
 from .widgets.history import SessionRef
-from .widgets.overlay import info_overlay, permission_overlay, select_overlay
+from .widgets.overlay import info_overlay, permission_overlay, questions_overlay, select_overlay
 from .widgets.statusbar import StatusModel
 
 #: How long quitting waits for a turn in flight. Quitting mid-task should give
@@ -504,6 +505,9 @@ class App:
         if overlay is None:
             return False
 
+        if overlay.kind == "questions" and overlay.form is not None:
+            return self._form_key(overlay, event)
+
         if event.key == "escape":
             self._close_overlay(cancelled=True)
             return True
@@ -547,10 +551,85 @@ class App:
             return True
         return False
 
+    def _form_key(self, overlay, event: KeyEvent) -> bool:
+        """Keys inside a question form.
+
+        Typing comes first while the write-your-own row is open, and only then
+        do the navigation keys apply. The other way round, a question whose
+        answer contains the letter that happens to be a shortcut would be
+        unanswerable.
+        """
+        form = overlay.form
+
+        if form.writing:
+            if event.key == "escape":
+                form.stop_writing()
+                return True
+            if event.key == "enter":
+                form.stop_writing()
+                return True
+            if event.key == "backspace":
+                form.backspace()
+                return True
+            if event.key == "left":
+                form.move_caret(-1)
+                return True
+            if event.key == "right":
+                form.move_caret(1)
+                return True
+            if event.key == "char" and not event.ctrl:
+                form.type_char(event.char)
+                return True
+            return False
+
+        if event.key == "escape":
+            self._close_overlay(cancelled=True)
+            return True
+        if event.key == "up":
+            form.move(-1)
+            return True
+        if event.key == "down":
+            form.move(1)
+            return True
+        if event.key == "left" or event.matches("shift+tab"):
+            form.go(-1)
+            return True
+        if event.key == "right" or (event.key == "tab" and not event.shift):
+            form.go(1)
+            return True
+        if event.key == "char" and event.char == " ":
+            form.pick()
+            return True
+        if event.key == "char" and event.ctrl and event.char in ("s", ""):
+            self._send_form(overlay)
+            return True
+        if event.key == "enter":
+            form.pick()
+            if form.writing:
+                # Enter on the write-your-own row opens the editor; it does not
+                # also submit the empty answer it just opened.
+                return True
+            if not form.next_unanswered():
+                self._send_form(overlay)
+            return True
+        return False
+
+    def _send_form(self, overlay) -> None:
+        """Hand the answers back to the waiting tool."""
+        request = overlay.request
+        if request is not None:
+            request.answer(encode_answers(overlay.form.answers()))
+        self.state.overlay = None
+        self._next_request()
+
     def _close_overlay(self, cancelled: bool = False) -> None:
         overlay = self.state.overlay
         if overlay is not None and overlay.request is not None and cancelled:
-            overlay.request.answer("deny")
+            # A dismissed form is not a denied permission. The `ask` tool tells
+            # the model to carry on and choose for itself; "deny" would read as
+            # a refusal it should report back as a blocked step.
+            overlay.request.answer(
+                CANCELLED if overlay.kind == "questions" else "deny")
         self.state.overlay = None
         self._next_request()
 
@@ -561,11 +640,18 @@ class App:
         self.state.overlay = None
         self._next_request()
 
+    @staticmethod
+    def _overlay_for(request: Request):
+        """The dialog a request deserves, chosen by its kind."""
+        if request.kind == "questions":
+            return questions_overlay(request)
+        return permission_overlay(request)
+
     def _next_request(self) -> None:
         while self.pending_requests:
             request = self.pending_requests.pop(0)
             if not request.answered:
-                self.state.overlay = permission_overlay(request)
+                self.state.overlay = self._overlay_for(request)
                 return
 
     # ------------------------------------------------------------------ #
@@ -634,7 +720,7 @@ class App:
                 request = event.get("request")
                 if isinstance(request, Request):
                     if self.state.overlay is None:
-                        self.state.overlay = permission_overlay(request)
+                        self.state.overlay = self._overlay_for(request)
                     else:
                         self.pending_requests.append(request)
             elif kind is Kind.TURN_START:

@@ -71,6 +71,7 @@ skills across. [How that works](docs/migrating.md).
 
 | | |
 |---|---|
+| **Ask before it guesses** | When a request reads two ways, it settles what it can by reading and puts the rest to you as one short form — before it writes anything. [More](docs/questions.md) |
 | **Learn from your corrections** | Edit what it wrote, or say so, and the next answer follows. `/progress` shows whether that is actually working — falling correction rates, not a claim. [More](docs/learning.md) |
 | **Ask before it acts** | Reading is silent, writing shows a diff, commands ask. Every write is checkpointed; `/undo` puts it back. [More](docs/safety.md) |
 | **Use a real browser** | One that runs JavaScript, keeps cookies and can log in — not a page fetcher. [More](docs/browser.md) |

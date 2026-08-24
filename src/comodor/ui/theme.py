@@ -244,6 +244,11 @@ class Glyphs:
     warn: str = "▲"
     rise: str = "↑"
     fall: str = "↓"
+    #: The pair that names moving between tabs. Added with the question form,
+    #: which is the first thing in the interface where left and right mean
+    #: something different from up and down.
+    left: str = "←"
+    right: str = "→"
     dot: str = "·"
     dash: str = "—"
 
@@ -253,7 +258,7 @@ ASCII_GLYPHS = Glyphs(
     ticked="[x]", unticked="[ ]",
     spinner=("|", "/", "-", "\\"), gauge_full="#", gauge_empty=".", cursor="_",
     divider="-", tool="*", memory="+", warn="!",
-    rise="^", fall="v", dot="-", dash="-",
+    rise="^", fall="v", left="<", right=">", dot="-", dash="-",
 )
 
 

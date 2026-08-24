@@ -21,7 +21,9 @@ from rich.panel import Panel
 from rich.text import Text
 
 from ...events import Request
+from ...questions import decode
 from ..theme import Theme
+from .questions import Form, form_hint, render_form, rows_needed
 
 
 @dataclass
@@ -47,6 +49,9 @@ class Overlay:
     request: Request | None = None
     on_select: Callable[[str], None] | None = None
     meta: dict[str, Any] = field(default_factory=dict)
+    #: Set only for `questions`, which keeps far more state than a choice
+    #: index — a cursor and an answer per question, and an editor.
+    form: Form | None = None
 
     # -- navigation -------------------------------------------------------- #
 
@@ -91,6 +96,19 @@ def permission_overlay(request: Request) -> Overlay:
                    request=request)
 
 
+def questions_overlay(request: Request) -> Overlay:
+    """The form the `ask` tool put up.
+
+    Titled by count rather than by the first question. "3 questions" tells
+    somebody immediately how long this will take, which is the thing they most
+    want to know when a form appears over what they were reading.
+    """
+    questions = decode(request.meta.get("questions"))
+    title = "One question" if len(questions) == 1 else f"{len(questions)} questions"
+    return Overlay(kind="questions", title=title, request=request,
+                   form=Form(questions=questions))
+
+
 def select_overlay(title: str, items: list[tuple[str, str]],
                    on_select: Callable[[str], None], meta: dict | None = None) -> Overlay:
     return Overlay(kind="select", title=title, items=items, on_select=on_select,
@@ -109,13 +127,21 @@ def info_overlay(title: str, body: str) -> Overlay:
 def render_overlay(overlay: Overlay, width: int, height: int,
                    theme: Theme) -> RenderableType:
     panel_width = max(40, min(width - 4, 110))
-    panel_height = max(8, min(height - 4, 32))
+    if overlay.kind == "questions" and overlay.form is not None:
+        # Sized to the form. A fixed height drew a dozen rows of questions and
+        # then twenty-eight blank ones inside the same border.
+        wanted = rows_needed(overlay.form, panel_width - 6) + 4
+        panel_height = max(8, min(height - 4, wanted))
+    else:
+        panel_height = max(8, min(height - 4, 32))
     inner_height = panel_height - 4
 
     if overlay.kind == "permission":
         body = _permission_body(overlay, panel_width - 6, inner_height, theme)
     elif overlay.kind == "select":
         body = _select_body(overlay, panel_width - 6, inner_height, theme)
+    elif overlay.kind == "questions" and overlay.form is not None:
+        body = render_form(overlay.form, panel_width - 6, inner_height, theme)
     else:
         body = _info_body(overlay, inner_height, theme)
 
@@ -126,7 +152,9 @@ def render_overlay(overlay: Overlay, width: int, height: int,
         subtitle=Text(_footer_hint(overlay, theme), style=theme.style("dim")),
         subtitle_align="right",
         box=theme.heavy_box,
-        border_style=theme.style("bad" if overlay.kind == "permission" else "border"),
+        border_style=theme.style("bad" if overlay.kind == "permission"
+                                 else "accent" if overlay.kind == "questions"
+                                 else "border"),
         width=panel_width,
         height=panel_height,
         padding=(1, 2),
@@ -146,6 +174,8 @@ def _footer_hint(overlay: Overlay, theme: Theme) -> str:
         glyphs = theme.glyphs
         return (f" {glyphs.rise}{glyphs.fall} select {glyphs.dot} enter confirm "
                 f"{glyphs.dot} esc cancel ")
+    if overlay.kind == "questions" and overlay.form is not None:
+        return form_hint(overlay.form, theme)
     return " esc to close "
 
 
