@@ -2,6 +2,60 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.11.0 — 2026-08-24
+
+### Rules, in the browser
+
+The terminal has had house rules since the beginning — `/rules`, `/rules
+teach`, `/rules forget` — and the browser could not see them at all. That is
+the wrong half to be missing: a rule is a standing instruction to the agent,
+and somebody who cannot see what it has decided about them cannot correct it.
+
+There is a tab for them now, driving the same engine, so a rule written in one
+interface applies in the other. Two kinds sit in one list and the difference is
+the point of the panel: what you wrote is obeyed from the first time, what the
+agent noticed is obeyed once there is evidence and shows that evidence as a
+count. Yours sort first.
+
+A rule can now be switched off without being deleted, which is what people
+want more often — a rule that is right in general and wrong for this project is
+not a rule to throw away.
+
+### Comodor can be set up from the browser
+
+`comodor web` refused to start without a provider. That was right while the
+page had nowhere to type a key into, and it made the browser interface
+unreachable for exactly the person most likely to need it: somebody whose
+Comodor is on a server or in a container, with no terminal in front of them.
+
+It starts now and the page asks. Where a key may be typed is decided per
+request rather than by the bind: from loopback it is the same as typing it in
+the terminal on that machine; from inside a container it is allowed, because
+the operator chose how to publish the port and was told what that means; from
+anywhere else it is refused, because there is no TLS here and a key is a
+credential with a bill attached.
+
+Where it cannot be safe, the field is not drawn at all. A warning beside a box
+is a warning next to a box somebody fills in anyway. What is drawn instead is
+the two ways to do it safely, with the port already in the command.
+
+### It offers what your machine already has
+
+Setting an agent up means finding an API key: a billing page, a new secret, a
+decision about who to pay. For a lot of people none of that is needed — a local
+runtime is already running, or a key is already exported — and nothing asked.
+
+Both setup paths now lead with what was found. Ollama with three models pulled
+is offered as "running here — qwen2.5-coder:14b, llama3.3, deepseek-r1:14b",
+first, with everything else underneath. A runtime that is up with nothing
+pulled is reported and deliberately not offered: it would fail the first real
+request.
+
+Finding nothing takes about a third of a second, which matters because that is
+what everybody without a local model pays. The first version took 3.7 seconds
+— a refused connection was retried twice, and `localhost` resolves to two
+addresses so each attempt was paid twice over.
+
 ## 0.10.3 — 2026-08-24
 
 ### The setup wizard has the wordmark at the top of every screen
