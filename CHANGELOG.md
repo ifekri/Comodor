@@ -2,6 +2,38 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.14.0 — 2026-08-24
+
+### Comodor runs inside your editor
+
+```bash
+comodor acp
+```
+
+Comodor speaks the [Agent Client Protocol](https://agentclientprotocol.com), so
+Zed — or anything else that implements it — can drive it from its own panel.
+You will not type that command: the editor launches it. `comodor acp
+--print-config` prints the block your editor is asking for.
+
+The editor gets streaming replies, tool calls named and marked read / edit /
+execute so it can pick an icon, permission prompts asked and answered in the
+editor, task lists drawn as plans, a stop button that actually interrupts, and
+the same sessions the terminal resumes. The working folder is whichever project
+you have open, and that is what confines every write.
+
+It is the third interface and the smallest of the three, because the agent was
+never the interface. The terminal draws the events, the browser sends them as
+JSON, and this translates them into protocol notifications — all three watching
+the same thing.
+
+What it does not do is take a model provider from the editor. Comodor's
+provider, model, rules, skills and permissions stay its own, set up with
+`comodor setup` or in the browser. A Comodor that has never been configured
+says so in the editor and names the command to run, rather than failing on the
+first task.
+
+See [In your editor](https://github.com/ifekri/Comodor/blob/main/docs/acp.md).
+
 ## 0.13.0 — 2026-08-24
 
 ### Sign in to OpenRouter instead of finding a key
