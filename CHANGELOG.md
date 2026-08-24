@@ -2,6 +2,51 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.13.0 — 2026-08-24
+
+### Sign in to OpenRouter instead of finding a key
+
+Choose OpenRouter and you are asked how you want to connect: sign in, or paste
+a key. Both stay — neither is better for everybody. Signing in is fewer steps
+for somebody starting out; a key is what you want when Comodor is on a server,
+when it comes from a team vault, or when you already have one.
+
+Signing in opens OpenRouter in your browser and brings a key back on your own
+account. Nothing is registered with anybody: it is OAuth PKCE, where the proof
+is a random number Comodor invents and keeps rather than a credential a vendor
+issues — which is also why there is no secret in the package to leak.
+
+It works where there is no browser. Over SSH or in a container, OpenRouter
+shows a code and you paste it back. Refused across a network, for the same
+reason typing a key is: what comes back is a credential and there is no TLS
+here.
+
+### The model picker is a proper dropdown
+
+Four hundred and sixteen models is too many for a plain list. It opens when you
+ask, filters as you type, and moves with the arrow keys — the same picker in
+the setup screen and in Admin, so a search that works in one works in the
+other.
+
+Sorted by vendor and then by model, so `bytedance/…` comes before
+`bytedance-seed/…` rather than the other way round. Each row shows what
+decides a choice:
+
+```
+anthropic/claude-sonnet-4.5
+1M ctx · 64K out · $3.00/M in · $15.00/M out          VISION
+```
+
+A model that **cannot call tools** is marked in the warning colour. Seventy of
+those four hundred cannot, and one of them does not give you a slower Comodor
+— it gives you one that cannot read a file. A price the provider did not state
+still reads "price not stated", never "free".
+
+### Smaller
+
+- The dropdown is positioned against the window, so it is no longer clipped by
+  the panel it sits in — it opens upward where there is no room below.
+
 ## 0.12.0 — 2026-08-24
 
 ### The rule count was counting another folder's rules
