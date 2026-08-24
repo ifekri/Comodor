@@ -2,6 +2,37 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.10.3 — 2026-08-24
+
+### The setup wizard has the wordmark at the top of every screen
+
+Each question clears the terminal, so anything above it is gone by the first
+one — and from then on every step arrived on a blank screen headed
+`1/5 Which model provider?`, with nothing on it naming the program doing the
+asking. Five screens in a row, including the last one, which is the one you
+are left looking at.
+
+It shrinks to a single line on a terminal that is narrow *or* short: five rows
+of logo on a twenty-row screen is five rows the questions do not get.
+
+The installer got it too, and asks the question it used to leave as homework:
+
+```
+── One thing left ─────────────────────────────────────────
+
+  Comodor needs to know which provider and model to use.
+
+    1  Set it up now  — choose a provider and a model
+    2  Not right now  — I will run `comodor setup` later
+
+  Choice [1]:
+```
+
+Enter takes the first. Where there is no terminal to ask on — a Dockerfile, a
+CI step, a provisioning script — it is not asked at all and the commands are
+printed instead, because defaulting to yes without a terminal hangs a build on
+a wizard nobody can answer. `COMODOR_NO_SETUP=1` turns it off anywhere.
+
 ## 0.10.2 — 2026-08-24
 
 ### Terminals that cannot draw the glyphs were told they could
