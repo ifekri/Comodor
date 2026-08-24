@@ -799,19 +799,57 @@ function drawSetup(offer) {
   box.appendChild(sheet);
 }
 
+//: Which way the person said they want to connect, per provider.
+let connectVia = '';
+let signInPoll = 0;
+
 function setupForm(offer, entry) {
   const form = document.createElement('form');
   form.className = 'form';
 
-  // The key box is not drawn when a key cannot be taken safely. A warning
+  const needsSomething = entry.needs_key;
+  const canSignIn = entry.can_sign_in && offer.may_enter_a_key;
+
+  // Where a provider offers both, how to connect is a real question. Where it
+  // offers one, asking would be a question with one answer.
+  if (needsSomething && canSignIn) {
+    if (!connectVia) connectVia = 'signin';
+    const choice = document.createElement('div');
+    choice.className = 'how';
+    [['signin', 'Sign in with ' + entry.label,
+      'Opens ' + entry.label + ' in your browser and brings a key back. '
+      + 'Nothing to find, nothing to paste.'],
+     ['key', 'Paste an API key',
+      'If you already have one, or it comes from somewhere else.']
+    ].forEach(([value, title, note]) => {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'how-option';
+      option.setAttribute('aria-pressed', String(connectVia === value));
+      const name = document.createElement('b');
+      name.textContent = title;
+      const what = document.createElement('span');
+      what.textContent = note;
+      option.append(name, what);
+      option.onclick = () => { connectVia = value; drawSetup(offer); };
+      choice.appendChild(option);
+    });
+    form.appendChild(choice);
+  } else if (needsSomething) {
+    connectVia = 'key';
+  } else {
+    connectVia = 'none';
+  }
+
+  // A key cannot be taken safely here, so the box is not drawn. A warning
   // beside a field is a warning next to a field somebody fills in anyway.
-  if (entry.needs_key && !offer.may_enter_a_key) {
+  if (needsSomething && !offer.may_enter_a_key) {
     const blocked = document.createElement('div');
     blocked.className = 'blocked';
     const why = document.createElement('p');
     why.textContent = 'This page reached you across a network, and there is no '
-      + 'TLS here — a key typed in would cross that network in the clear. '
-      + 'Two ways to do it safely:';
+      + 'TLS here — a key typed in, or signed in for, would cross that network '
+      + 'in the clear. Two ways to do it safely:';
     const how = document.createElement('pre');
     how.textContent = '# on the machine Comodor is running on\n'
       + 'comodor setup\n\n'
@@ -823,7 +861,7 @@ function setupForm(offer, entry) {
   }
 
   let key = null;
-  if (entry.needs_key) {
+  if (connectVia === 'key') {
     const line = document.createElement('label');
     line.className = 'line';
     line.append(document.createTextNode(`${entry.label} API key`));
@@ -852,24 +890,11 @@ function setupForm(offer, entry) {
   const line = document.createElement('label');
   line.className = 'line';
   line.append(document.createTextNode('Model'));
-  let model;
-  if (entry.models.length) {
-    model = document.createElement('select');
-    entry.models.forEach((name) => {
-      const option = document.createElement('option');
-      option.value = name;
-      option.textContent = name;
-      if (name === entry.model) option.selected = true;
-      model.appendChild(option);
-    });
-  } else {
-    model = document.createElement('input');
-    model.type = 'text';
-    model.className = 'mono';
-    model.value = entry.model || '';
-  }
-  line.appendChild(model);
+  let picked = entry.model || '';
+  const combo = modelCombo(picked, (id) => { picked = id; });
+  line.appendChild(combo);
   form.appendChild(line);
+  loadModels(entry.id, false);
 
   let url = null;
   if (!entry.base_url) {
@@ -887,31 +912,128 @@ function setupForm(offer, entry) {
   const go = document.createElement('button');
   go.type = 'submit';
   go.className = 'go';
-  go.textContent = 'Save and start';
+  go.textContent = connectVia === 'signin'
+    ? 'Sign in with ' + entry.label : 'Save and start';
   form.appendChild(go);
 
   form.onsubmit = (event) => {
     event.preventDefault();
+    if (connectVia === 'signin') { signIn(entry, form, go); return; }
     go.disabled = true;
     go.textContent = 'Saving…';
     post('/api/setup', {
       provider: entry.id,
       api_key: key ? key.value : '',
-      model: model.value,
+      model: picked,
       base_url: url ? url.value : '',
     }).then((reply) => {
       go.disabled = false;
       go.textContent = 'Save and start';
       if (!reply.ok) { toast(reply.error || 'That did not take', 'bad', 'setup'); return; }
-      $('setup').hidden = true;
-      takeState(reply.state);
-      showBlank();
-      refreshAdmin();
-      toast('Ready — ' + (reply.state.model || 'set up'), 'good', 'setup');
-      els.prompt.focus();
+      settledIn(reply.state);
     });
   };
   return form;
+}
+
+/* -- signing in -------------------------------------------------------------
+ *
+ * Two shapes, decided by whether a loopback port could be taken. With one, the
+ * browser comes back on its own and this only has to wait. Without one — over
+ * SSH, in a container — the page shows a code and it is pasted back.
+ */
+
+function signIn(entry, form, go) {
+  go.disabled = true;
+  go.textContent = 'Opening ' + entry.label + '…';
+
+  post('/api/signin', { step: 'start', provider: entry.id, browser: true })
+    .then((reply) => {
+      go.disabled = false;
+      go.textContent = 'Sign in with ' + entry.label;
+      if (!reply.ok) { toast(reply.error || 'Could not start', 'bad', 'signin'); return; }
+
+      window.open(reply.url, '_blank', 'noopener');
+      drawWaiting(entry, form, reply);
+    });
+}
+
+function drawWaiting(entry, form, reply) {
+  const box = document.createElement('div');
+  box.className = 'waiting';
+
+  const said = document.createElement('p');
+  said.textContent = reply.paste_the_code
+    ? entry.label + ' will show you a code. Paste it here.'
+    : 'Waiting for ' + entry.label + ' — approve it in the tab that opened.';
+  box.appendChild(said);
+
+  const again = document.createElement('a');
+  again.href = reply.url;
+  again.target = '_blank';
+  again.rel = 'noreferrer noopener';
+  again.className = 'aside';
+  again.textContent = 'The tab did not open? Use this link.';
+  box.appendChild(again);
+
+  if (reply.paste_the_code) {
+    const row = document.createElement('div');
+    row.className = 'key-row';
+    const code = document.createElement('input');
+    code.type = 'text';
+    code.className = 'mono';
+    code.placeholder = 'paste the code';
+    code.setAttribute('aria-label', 'The code ' + entry.label + ' showed you');
+    const send = document.createElement('button');
+    send.type = 'button';
+    send.className = 'small primary';
+    send.textContent = 'Finish';
+    send.onclick = () => finishSignIn(code.value, box);
+    row.append(code, send);
+    box.appendChild(row);
+    code.focus();
+  } else {
+    clearInterval(signInPoll);
+    signInPoll = setInterval(() => {
+      get('/api/signin').then((state) => {
+        if (!state) return;
+        if (state.ready) { clearInterval(signInPoll); finishSignIn('', box); }
+        else if (state.error) {
+          clearInterval(signInPoll);
+          said.textContent = state.error;
+          said.className = 'warn';
+        }
+      });
+    }, 1200);
+  }
+
+  const stop = document.createElement('button');
+  stop.type = 'button';
+  stop.className = 'small';
+  stop.textContent = 'Cancel';
+  stop.onclick = () => { clearInterval(signInPoll); box.remove(); };
+  box.appendChild(stop);
+
+  form.appendChild(box);
+  box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+function finishSignIn(code, box) {
+  post('/api/signin', { step: 'finish', code }).then((reply) => {
+    if (!reply.ok) { toast(reply.error || 'That did not complete', 'bad', 'signin'); return; }
+    clearInterval(signInPoll);
+    box.remove();
+    settledIn(reply.state);
+  });
+}
+
+function settledIn(state) {
+  $('setup').hidden = true;
+  takeState(state);
+  showBlank();
+  refreshAdmin();
+  toast('Ready — ' + (state.model || 'set up'), 'good', 'setup');
+  els.prompt.focus();
 }
 
 function askForSetup() {
@@ -1168,117 +1290,30 @@ function money(value) {
                           : value.toFixed(2)) + '/M';
 }
 
-/* -- choosing from four hundred models ------------------------------------- */
+/* -- choosing from four hundred models --------------------------------------
+ *
+ * A combobox, not a `<select>` and not a permanent list: four hundred rows is
+ * too many to scroll and too many to render until somebody asks. It opens on
+ * demand, filters as you type, and moves with the arrow keys.
+ *
+ * One function, used by the setup screen and by Admin. Two pickers for the
+ * same job drift, and then only one of them gets the fix.
+ */
 
 let modelIndex = { provider: '', models: [], source: '', age: 0, error: '' };
-// Reachable from outside for the browser tests, which drive the real page.
 window.modelIndex = modelIndex;
 
-function drawModelPicker(body, data) {
-  const wrap = document.createElement('div');
-  wrap.className = 'control';
+function tokens(n) {
+  if (!n) return '';
+  if (n >= 1000000) return (n / 1000000).toFixed(n % 1000000 ? 1 : 0) + 'M';
+  if (n >= 1000) return Math.round(n / 1000) + 'K';
+  return String(n);
+}
 
-  const name = document.createElement('span');
-  name.className = 'label';
-  name.textContent = 'Model';
-
-  const search = document.createElement('input');
-  search.type = 'text';
-  search.className = 'mono';
-  search.setAttribute('aria-label', 'Search models');
-  // The current model is the placeholder, not the value. As a value it was
-  // also a filter, so the picker opened showing one row out of four hundred.
-  search.placeholder = data.model.model || 'search models';
-  search.spellcheck = false;
-
-  const list = document.createElement('div');
-  list.className = 'model-list';
-
-  const status = document.createElement('div');
-  status.className = 'model-status';
-
-  const say = () => {
-    status.textContent = '';
-    const count = document.createElement('span');
-    const total = modelIndex.models.length;
-    count.textContent = total ? `${total} models` : 'no list yet';
-    status.appendChild(count);
-
-    const where = document.createElement('span');
-    if (modelIndex.source === 'live') where.textContent = 'from the provider, just now';
-    else if (modelIndex.source === 'cached') where.textContent = 'checked ' + ago(modelIndex.age);
-    else if (modelIndex.source === 'stale') where.textContent = 'checked ' + ago(modelIndex.age)
-      + ' — could not reach the provider';
-    else where.textContent = modelIndex.error
-      ? 'built-in list only — ' + modelIndex.error : 'built-in list only';
-    where.className = modelIndex.source === 'live' || modelIndex.source === 'cached'
-      ? '' : 'warn';
-    status.appendChild(where);
-
-    const again = document.createElement('button');
-    again.type = 'button';
-    again.textContent = 'Refresh';
-    again.onclick = () => loadModels(data.model.provider, true);
-    status.appendChild(again);
-  };
-
-  const paint = () => {
-    const needle = search.value.trim().toLowerCase();
-    const matching = modelIndex.models
-      .filter((m) => !needle || m.id.toLowerCase().includes(needle)
-                     || (m.name || '').toLowerCase().includes(needle));
-    // The one in use first, wherever the alphabet would have put it.
-    matching.sort((a, b) => (b.id === data.model.model) - (a.id === data.model.model));
-    const shown = matching.slice(0, 60);
-    list.textContent = '';
-    if (!shown.length) {
-      const none = document.createElement('p');
-      none.className = 'empty-note';
-      none.textContent = modelIndex.models.length
-        ? 'Nothing matches that.' : 'No models to choose from yet.';
-      list.appendChild(none);
-      return;
-    }
-    shown.forEach((model) => {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'model-row';
-      if (model.id === data.model.model) row.setAttribute('aria-current', 'true');
-      const id = document.createElement('b');
-      id.textContent = model.id;
-      const facts = document.createElement('span');
-      const bits = [];
-      if (model.context) bits.push(model.context.toLocaleString() + ' ctx');
-      bits.push(money(model.input_cost) + ' in');
-      bits.push(money(model.output_cost) + ' out');
-      facts.textContent = bits.join('  ·  ');
-      row.append(id, facts);
-      row.onclick = () => {
-        search.value = '';
-        search.placeholder = model.id;
-        data.model.model = model.id;
-        change('model', model.id);
-        paint();
-      };
-      list.appendChild(row);
-    });
-    if (matching.length > shown.length) {
-      const more = document.createElement('p');
-      more.className = 'empty-note';
-      more.textContent = `${matching.length - shown.length} more — type to narrow`;
-      list.appendChild(more);
-    }
-  };
-
-  search.addEventListener('input', paint);
-  wrap.append(name, search, status, list);
-  body.appendChild(wrap);
-
-  wrap._paint = paint;
-  wrap._say = say;
-  say();
-  paint();
-  return wrap;
+function money(value) {
+  if (value === null || value === undefined) return null;
+  if (value === 0) return 'free';
+  return '$' + (value < 1 ? String(Number(value.toFixed(3))) : value.toFixed(2)) + '/M';
 }
 
 function ago(seconds) {
@@ -1287,6 +1322,251 @@ function ago(seconds) {
   if (seconds < 5400) return Math.round(seconds / 60) + ' minutes ago';
   if (seconds < 172800) return Math.round(seconds / 3600) + ' hours ago';
   return Math.round(seconds / 86400) + ' days ago';
+}
+
+/**
+ * @param onPick   called with the chosen model id
+ * @param current  the id to show when closed
+ */
+function modelCombo(current, onPick) {
+  const wrap = document.createElement('div');
+  wrap.className = 'combo';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'combo-button';
+  button.setAttribute('aria-haspopup', 'listbox');
+  button.setAttribute('aria-expanded', 'false');
+
+  const shown = document.createElement('span');
+  shown.className = 'mono';
+  const caret = document.createElement('span');
+  caret.className = 'combo-caret';
+  button.append(shown, caret);
+
+  const panel = document.createElement('div');
+  panel.className = 'combo-panel';
+  panel.hidden = true;
+
+  const search = document.createElement('input');
+  search.type = 'text';
+  search.className = 'combo-search';
+  search.placeholder = 'Search models';
+  search.setAttribute('aria-label', 'Search models');
+  search.spellcheck = false;
+
+  const list = document.createElement('div');
+  list.className = 'combo-list';
+  list.setAttribute('role', 'listbox');
+
+  const status = document.createElement('div');
+  status.className = 'combo-status';
+
+  panel.append(search, list, status);
+  wrap.append(button, panel);
+
+  let chosenId = current;
+  let cursor = 0;
+  let visible = [];
+
+  const label = () => {
+    shown.textContent = chosenId || 'choose a model';
+    shown.classList.toggle('placeholder', !chosenId);
+  };
+
+  const drawStatus = () => {
+    status.textContent = '';
+    const count = document.createElement('span');
+    count.textContent = modelIndex.models.length
+      ? `${modelIndex.models.length} models` : 'no list yet';
+    const where = document.createElement('span');
+    if (modelIndex.source === 'live') where.textContent = 'from the provider';
+    else if (modelIndex.source === 'cached') where.textContent = 'checked ' + ago(modelIndex.age);
+    else if (modelIndex.source === 'stale') {
+      where.textContent = 'checked ' + ago(modelIndex.age) + ', provider unreachable';
+      where.className = 'warn';
+    } else {
+      where.textContent = modelIndex.error
+        ? 'built-in list — ' + modelIndex.error : 'built-in list';
+      where.className = 'warn';
+    }
+    const again = document.createElement('button');
+    again.type = 'button';
+    again.textContent = 'Refresh';
+    again.onclick = (event) => {
+      event.stopPropagation();
+      loadModels(modelIndex.provider, true);
+    };
+    status.append(count, where, again);
+  };
+
+  const draw = () => {
+    const needle = search.value.trim().toLowerCase();
+    visible = modelIndex.models.filter(
+      (m) => !needle || m.id.toLowerCase().includes(needle)
+             || (m.name || '').toLowerCase().includes(needle));
+    // Alphabetical, with the one in use lifted to the top so it is where the
+    // eye already is rather than wherever the alphabet put it.
+    const here = visible.findIndex((m) => m.id === chosenId);
+    if (here > 0) visible.unshift(visible.splice(here, 1)[0]);
+
+    list.textContent = '';
+    if (!visible.length) {
+      const none = document.createElement('p');
+      none.className = 'combo-empty';
+      none.textContent = modelIndex.models.length
+        ? 'Nothing matches that.' : 'No models to choose from yet.';
+      list.appendChild(none);
+      drawStatus();
+      return;
+    }
+    if (cursor >= visible.length) cursor = 0;
+
+    visible.slice(0, 200).forEach((model, index) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'combo-row';
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', String(model.id === chosenId));
+      if (index === cursor) row.dataset.cursor = 'true';
+      if (model.tools === false) row.dataset.noTools = 'true';
+
+      const id = document.createElement('b');
+      id.textContent = model.id;
+
+      const facts = document.createElement('span');
+      const bits = [];
+      if (model.context) bits.push(tokens(model.context) + ' ctx');
+      if (model.max_output) bits.push(tokens(model.max_output) + ' out');
+      const inCost = money(model.input_cost);
+      const outCost = money(model.output_cost);
+      if (inCost === 'free' && outCost === 'free') bits.push('free');
+      else {
+        if (inCost) bits.push(inCost + ' in');
+        if (outCost) bits.push(outCost + ' out');
+      }
+      facts.textContent = bits.join('  ·  ');
+
+      row.append(id, facts);
+
+      const marks = document.createElement('span');
+      marks.className = 'combo-marks';
+      if (model.tools === false) {
+        const no = document.createElement('em');
+        no.className = 'bad';
+        no.textContent = 'no tools';
+        no.title = 'This model cannot call tools, so Comodor could not read or '
+          + 'edit files with it.';
+        marks.appendChild(no);
+      }
+      if (model.vision) {
+        const eye = document.createElement('em');
+        eye.textContent = 'vision';
+        eye.title = 'Can be shown images — needed for screen control.';
+        marks.appendChild(eye);
+      }
+      if (marks.childElementCount) row.appendChild(marks);
+
+      row.onclick = () => {
+        chosenId = model.id;
+        label();
+        close();
+        onPick(model.id);
+      };
+      list.appendChild(row);
+    });
+
+    if (visible.length > 200) {
+      const more = document.createElement('p');
+      more.className = 'combo-empty';
+      more.textContent = `${visible.length - 200} more — type to narrow`;
+      list.appendChild(more);
+    }
+    drawStatus();
+  };
+
+  const scrollToCursor = () => {
+    const row = list.querySelector('[data-cursor="true"]');
+    if (row) row.scrollIntoView({ block: 'nearest' });
+  };
+
+  // Where the panel goes, given where the button ended up. Below when there
+  // is room, above when there is not — in the rail the model card sits near
+  // the bottom, and a panel that always opens downward opens off the screen.
+  const place = () => {
+    const box = button.getBoundingClientRect();
+    if (box.bottom < 0 || box.top > window.innerHeight) { close(); return; }
+    const below = window.innerHeight - box.bottom - 12;
+    const above = box.top - 12;
+    const room = Math.max(below, above);
+    const height = Math.min(340, Math.max(180, room));
+    panel.style.left = box.left + 'px';
+    panel.style.width = box.width + 'px';
+    panel.style.height = height + 'px';
+    if (below >= height || below >= above) {
+      panel.style.top = (box.bottom + 4) + 'px';
+      panel.style.bottom = 'auto';
+    } else {
+      panel.style.top = (box.top - height - 4) + 'px';
+      panel.style.bottom = 'auto';
+    }
+  };
+
+  const open = () => {
+    panel.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    cursor = 0;
+    draw();
+    place();
+    search.focus();
+    search.select();
+    // `true` so it fires for any ancestor that scrolls, not only the window.
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+  };
+
+  const close = () => {
+    panel.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    search.value = '';
+    window.removeEventListener('scroll', place, true);
+    window.removeEventListener('resize', place);
+  };
+
+  button.onclick = () => (panel.hidden ? open() : close());
+
+  search.addEventListener('input', () => { cursor = 0; draw(); });
+  search.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { close(); button.focus(); return; }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const model = visible[cursor];
+      if (model) {
+        chosenId = model.id;
+        label();
+        close();
+        onPick(model.id);
+      }
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const count = Math.min(visible.length, 200);
+    if (!count) return;
+    cursor = (cursor + (event.key === 'ArrowDown' ? 1 : count - 1)) % count;
+    draw();
+    scrollToCursor();
+  });
+
+  // Clicking anywhere else puts it away, which is what a dropdown does.
+  document.addEventListener('pointerdown', (event) => {
+    if (!panel.hidden && !wrap.contains(event.target)) close();
+  });
+
+  wrap._redraw = () => { label(); if (!panel.hidden) draw(); else drawStatus(); };
+  wrap._setCurrent = (id) => { chosenId = id; label(); };
+  label();
+  return wrap;
 }
 
 function loadModels(provider, refresh) {
@@ -1298,11 +1578,9 @@ function loadModels(provider, refresh) {
       age: data.age_seconds || 0, error: data.error || '',
     };
     window.modelIndex = modelIndex;
-    const wrap = els.adminBody.querySelector('.control .model-list');
-    if (wrap && wrap.parentElement._paint) {
-      wrap.parentElement._say();
-      wrap.parentElement._paint();
-    }
+    document.querySelectorAll('.combo').forEach((combo) => {
+      if (combo._redraw) combo._redraw();
+    });
   });
 }
 
@@ -1329,7 +1607,8 @@ function drawAdmin(data) {
     providerPick.onchange = () => change('provider', providerPick.value);
     field(body, 'Provider', providerPick);
 
-    drawModelPicker(body, data);
+    const combo = modelCombo(data.model.model, (id) => change('model', id));
+    field(body, 'Model', combo);
 
     // The key. Somebody who set this up with the wrong one, or rotated it,
     // had to find a terminal.
