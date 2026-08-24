@@ -44,6 +44,7 @@ const els = {
   whoProvider: $('who-provider'), whoModel: $('who-model'),
   screen: $('screen'), frame: $('frame'), caption: $('caption'),
   toasts: $('toasts'), scrim: $('scrim'),
+  form: $('form'), formBack: $('form-back'),
 };
 
 const MODE_NOTE = {
@@ -415,6 +416,320 @@ function askFor(event) {
   if (first) first.focus();
 }
 
+/* --------------------------------------------------------------- questions */
+/*
+ * The form the `ask` tool puts up. One dialog, one tab per question, and one
+ * send.
+ *
+ * The state lives in `form` rather than being read back out of the DOM when
+ * the user presses send. Reading it back would mean the checked attribute is
+ * the record of what somebody answered, and the record would then be destroyed
+ * every time a tab is redrawn.
+ *
+ * Answers are kept per question index: `chosen` is a Set of option indices,
+ * `written` is whatever was typed into the last row. A single-answer question
+ * clears one when the other is used, because the two together would be an
+ * answer nobody gave.
+ */
+
+let form = null;
+
+function askQuestions(event) {
+  const questions = (event.questions || []).map(q => ({
+    prompt: q.prompt || '',
+    header: q.header || '',
+    multi: !!q.multi,
+    options: (q.options || []).map(o => ({
+      label: o.label || '', why: o.description || '', free: !!o.free,
+    })),
+  }));
+  if (!questions.length) return;
+
+  form = {
+    id: event.id,
+    questions,
+    at: 0,
+    chosen: questions.map(() => new Set()),
+    written: questions.map(() => ''),
+    // What had focus before the dialog took it, so it can be given back.
+    from: document.activeElement,
+  };
+
+  // The dialog takes the direction of the questions as a whole, which is what
+  // decides the layout: which end the tab strip starts at, which side the
+  // radio sits on, where the buttons go. Individual strings still decide their
+  // own — a Persian question whose options name English packages keeps those
+  // running left to right inside a right-to-left row.
+  orient(els.form, questions.map(q => `${q.prompt} ${q.header}`).join(' '));
+
+  els.formBack.hidden = false;
+  els.form.hidden = false;
+  drawForm();
+  document.addEventListener('keydown', formKeys, true);
+}
+
+function formAnswered(index) {
+  return form.chosen[index].size > 0 || form.written[index].trim() !== '';
+}
+
+function formGiven() {
+  return form.questions.reduce((n, _, i) => n + (formAnswered(i) ? 1 : 0), 0);
+}
+
+function drawForm() {
+  const many = form.questions.length > 1;
+  const question = form.questions[form.at];
+
+  $('form-title').textContent = many
+    ? `${form.questions.length} questions`
+    : 'One question';
+  els.form.querySelector('.count').textContent = many
+    ? `${formGiven()} of ${form.questions.length} answered`
+    : '';
+
+  drawTabs(many);
+  drawBody(question);
+  drawFoot();
+}
+
+function drawTabs(many) {
+  const tabs = els.form.querySelector('.tabs');
+  tabs.hidden = !many;
+  tabs.textContent = '';
+  if (!many) return;
+
+  form.questions.forEach((question, index) => {
+    const done = formAnswered(index);
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.role = 'tab';
+    tab.setAttribute('aria-selected', index === form.at ? 'true' : 'false');
+    // The mark is a shape; the state has to reach a screen reader as words.
+    tab.setAttribute('aria-label',
+      `${question.header} — ${done ? 'answered' : 'not answered yet'}`);
+
+    const mark = document.createElement('span');
+    mark.className = done ? 'mark done' : 'mark';
+    tab.appendChild(mark);
+
+    const name = document.createElement('span');
+    name.textContent = question.header;
+    orient(name, question.header);
+    tab.appendChild(name);
+
+    tab.onclick = () => { form.at = index; drawForm(); };
+    tabs.appendChild(tab);
+  });
+}
+
+function drawBody(question) {
+  const body = els.form.querySelector('.body');
+  body.textContent = '';
+
+  const prompt = document.createElement('p');
+  prompt.className = 'prompt bidi';
+  prompt.textContent = question.prompt;
+  orient(prompt, question.prompt);
+  body.appendChild(prompt);
+
+  if (question.multi) {
+    const note = document.createElement('p');
+    note.className = 'note';
+    note.textContent = 'Several answers may apply.';
+    body.appendChild(note);
+  }
+
+  const list = document.createElement('div');
+  list.className = 'options';
+  list.role = question.multi ? 'group' : 'radiogroup';
+
+  question.options.forEach((option, index) => {
+    list.appendChild(drawOption(question, option, index));
+    if (option.free) list.appendChild(drawOwn(option));
+  });
+
+  body.appendChild(list);
+}
+
+function drawOption(question, option, index) {
+  const picked = option.free
+    ? form.written[form.at].trim() !== ''
+    : form.chosen[form.at].has(index);
+
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'option'
+    + (question.multi ? ' many' : '')
+    + (option.free ? ' free' : '');
+  row.role = question.multi ? 'checkbox' : 'radio';
+  row.setAttribute('aria-checked', picked ? 'true' : 'false');
+
+  const box = document.createElement('span');
+  box.className = 'box';
+  row.appendChild(box);
+
+  const text = document.createElement('span');
+  text.className = 'text';
+
+  const label = document.createElement('span');
+  label.className = 'label bidi';
+  label.textContent = option.label;
+  orient(label, option.label);
+  text.appendChild(label);
+
+  if (option.why) {
+    const why = document.createElement('span');
+    why.className = 'why bidi';
+    why.textContent = option.why;
+    orient(why, option.why);
+    text.appendChild(why);
+  }
+
+  row.appendChild(text);
+  row.onclick = () => pickOption(index);
+  return row;
+}
+
+function drawOwn(option) {
+  const wrap = document.createElement('div');
+  wrap.className = 'own';
+  wrap.hidden = false;
+
+  const box = document.createElement('textarea');
+  box.rows = 2;
+  box.placeholder = 'Type your answer';
+  box.value = form.written[form.at];
+  box.oninput = () => {
+    form.written[form.at] = box.value;
+    // Typing is answering: for a one-of question the listed options are no
+    // longer the answer.
+    if (!form.questions[form.at].multi && box.value.trim()) {
+      form.chosen[form.at].clear();
+    }
+    orient(box, box.value);
+    refreshForm();
+  };
+  // Enter sends the form only from a control that is not a text box. Here it
+  // is a newline, because an answer somebody is writing out is often two
+  // sentences.
+  box.onkeydown = (e) => { if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) e.stopPropagation(); };
+  orient(box, box.value);
+  wrap.appendChild(box);
+  void option;
+  return wrap;
+}
+
+function pickOption(index) {
+  const question = form.questions[form.at];
+  const option = question.options[index];
+
+  if (option.free) {
+    const box = els.form.querySelector('.own textarea');
+    if (box) box.focus();
+    return;
+  }
+  if (question.multi) {
+    const chosen = form.chosen[form.at];
+    if (chosen.has(index)) chosen.delete(index); else chosen.add(index);
+  } else {
+    form.chosen[form.at] = new Set([index]);
+    form.written[form.at] = '';
+  }
+  drawForm();
+}
+
+/* Redraws the parts that reflect progress without rebuilding the options —
+ * rebuilding them while somebody is typing would take the caret away. */
+function refreshForm() {
+  const many = form.questions.length > 1;
+  els.form.querySelector('.count').textContent = many
+    ? `${formGiven()} of ${form.questions.length} answered`
+    : '';
+  if (many) drawTabs(true);
+  const free = els.form.querySelector('.option.free');
+  if (free) {
+    free.setAttribute('aria-checked',
+      form.written[form.at].trim() !== '' ? 'true' : 'false');
+  }
+  drawFoot();
+}
+
+function drawFoot() {
+  const foot = els.form.querySelector('.foot');
+  const keys = foot.querySelector('.keys');
+  const skip = foot.querySelector('.skip');
+  const send = foot.querySelector('.send');
+  const given = formGiven();
+  const total = form.questions.length;
+
+  keys.textContent = '';
+  if (total > 1) {
+    keys.append('Move between questions with ');
+    const left = document.createElement('kbd'); left.textContent = '←';
+    const right = document.createElement('kbd'); right.textContent = '→';
+    keys.append(left, ' ', right);
+  }
+
+  skip.textContent = 'Not now';
+  skip.onclick = () => closeForm(true);
+
+  send.className = given === total ? 'send' : 'send partial';
+  send.textContent = given === total
+    ? 'Send'
+    : given === 0 ? 'Send with nothing chosen' : `Send ${given} of ${total}`;
+  send.onclick = sendForm;
+}
+
+function formKeys(e) {
+  if (!form) return;
+  const typing = e.target && e.target.tagName === 'TEXTAREA';
+
+  if (e.key === 'Escape') {
+    if (typing) { e.target.blur(); e.stopPropagation(); return; }
+    e.stopPropagation();
+    closeForm(true);
+    return;
+  }
+  if (typing) return;
+
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    const step = e.key === 'ArrowRight' ? 1 : -1;
+    form.at = (form.at + step + form.questions.length) % form.questions.length;
+    e.preventDefault();
+    drawForm();
+    return;
+  }
+  if ((e.key === 'Enter' && (e.metaKey || e.ctrlKey))
+      || (e.key === 'Enter' && document.activeElement === els.form)) {
+    e.preventDefault();
+    sendForm();
+  }
+}
+
+function sendForm() {
+  const answers = form.questions.map((question, index) => ({
+    header: question.header,
+    prompt: question.prompt,
+    chosen: [...form.chosen[index]].sort((a, b) => a - b)
+      .map(slot => question.options[slot].label),
+    written: form.written[index].trim(),
+  }));
+  const id = form.id;
+  closeForm(false);
+  post('/api/answer', { id, choice: JSON.stringify(answers) });
+}
+
+function closeForm(dismissed) {
+  const id = form ? form.id : null;
+  const from = form ? form.from : null;
+  document.removeEventListener('keydown', formKeys, true);
+  els.form.hidden = true;
+  els.formBack.hidden = true;
+  form = null;
+  if (dismissed && id) post('/api/answer', { id, choice: 'cancelled' });
+  if (from && from.focus) from.focus();
+}
+
 /* ------------------------------------------------------------------ events */
 
 function apply(event) {
@@ -428,7 +743,10 @@ function apply(event) {
     case 'notice': notice(event.text); break;
     case 'error': endStream(); notice(event.text, true); break;
     case 'cancelled': endStream(); notice('Stopped.'); break;
-    case 'request': askFor(event); break;
+    case 'request':
+      if (event.about === 'questions') askQuestions(event);
+      else askFor(event);
+      break;
     case 'screen': showScreen(event); break;
     case 'turn_end': setBusy(false); break;
     case 'usage':

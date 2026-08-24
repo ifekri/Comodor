@@ -14,6 +14,7 @@ from typing import Any, Iterable
 from ..providers.base import ToolSpec
 from ..safety import Risk
 from . import overflow
+from .ask import Ask
 from .base import Tool, ToolContext, ToolResult
 from .browser import Browser
 from .delegate import Delegate
@@ -31,6 +32,7 @@ DEFAULT_TOOLS: tuple[type[Tool], ...] = (
     RunShell, RunPython,
     WebFetch, WebSearch,
     TodoWrite,
+    Ask,
 )
 
 

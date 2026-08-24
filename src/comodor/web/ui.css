@@ -1054,6 +1054,225 @@ button.small.danger:hover { border-color: var(--bad); color: var(--bad); }
                             border-color: var(--accent-soft); }
 
 /* --------------------------------------------------------------------------
+ * the question form
+ *
+ * A dialog rather than a card in the stream, and deliberately so: the agent is
+ * blocked on this, and a panel that scrolls away with the transcript is one
+ * somebody loses and then wonders why nothing is happening.
+ *
+ * The tab strip carries a state mark per question. Somebody who has answered
+ * two of three needs to see which one is outstanding without opening each in
+ * turn, and the strip is the only place that fits.
+ * ------------------------------------------------------------------------ */
+#form-back[hidden], #form[hidden] { display: none; }
+
+#form-back {
+  position: fixed; inset: 0; z-index: 70;
+  background: rgba(0, 0, 0, .55);
+  backdrop-filter: blur(2px);
+  animation: form-fade var(--speed) ease-out;
+}
+
+#form {
+  position: fixed; z-index: 71;
+  /* Physical, not logical. `inset-inline-start` flips to the right edge under
+   * `dir="rtl"` while `translate(-50%)` keeps moving left in real pixels, and
+   * the two together walked the whole dialog off the side of the screen.
+   * Centring is not a directional idea. */
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(46rem, calc(100vw - 32px));
+  max-height: min(42rem, calc(100vh - 48px));
+  display: flex; flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--accent-edge);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  animation: form-rise var(--speed) ease-out;
+}
+
+@keyframes form-fade { from { opacity: 0; } }
+@keyframes form-rise {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #form, #form-back { animation: none; }
+}
+
+/* -- the head ------------------------------------------------------------ */
+
+/* The head and the foot are the product's own words, and the product is in
+ * English. Left in a right-to-left dialog they reorder: "2 questions" came out
+ * as "questions 2", and the number is the part somebody reads first. The tab
+ * strip and the questions themselves still follow the form. */
+#form .head, #form .foot { direction: ltr; }
+
+#form .head {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 14px var(--pad) 0;
+}
+#form .head h2 {
+  font-size: 14.5px; font-weight: 600; margin: 0; color: var(--ink);
+}
+#form .head .count {
+  font-size: 12px; color: var(--ink-dim); margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* -- the tabs ------------------------------------------------------------
+ *
+ * `.tabs` on purpose, so this strip is the same object as the one over the
+ * chat list: same pill row, same uppercase labels, same selected treatment.
+ * Only the state mark is added here. Written as its own thing it was a second
+ * kind of tab in an interface that already had one.
+ * ---------------------------------------------------------------------- */
+#form .tabs { margin: 12px var(--pad) 0; }
+#form .tabs[hidden] { display: none; }
+/* The strip is a grid of equal columns, which is right for three short tabs
+ * and wrong for four long headers on a phone — those were squeezed to "ERR…"
+ * and "CO…", which name nothing. `max-content` as the floor means the columns
+ * stay equal while they fit and keep their words when they do not, and the
+ * strip scrolls instead. */
+#form .tabs {
+  grid-auto-columns: minmax(max-content, 1fr);
+  overflow-x: auto; scrollbar-width: thin;
+}
+#form .tabs button {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  min-width: 0;
+}
+#form .tabs button > span:last-child { white-space: nowrap; }
+/* The mark is a shape; the state reaches a screen reader through the
+ * button's aria-label instead. */
+#form .tabs .mark {
+  width: 12px; height: 12px; flex: 0 0 auto; border-radius: 50%;
+  border: 1.5px solid var(--ink-faint);
+}
+#form .tabs .mark.done {
+  border-color: var(--good); background: var(--good);
+  box-shadow: inset 0 0 0 2px var(--bg);
+}
+#form .tabs button[aria-selected='true'] .mark.done {
+  box-shadow: inset 0 0 0 2px var(--bg-active);
+}
+
+/* -- the body ------------------------------------------------------------ */
+
+#form .body {
+  flex: 1 1 auto; overflow-y: auto;
+  padding: var(--pad);
+  background: var(--bg-sunk);
+  border-block: 1px solid var(--line);
+}
+
+
+#form .prompt {
+  font-size: 14.5px; line-height: 1.45; color: var(--ink);
+  margin: 0 0 4px;
+}
+#form .note { font-size: 12px; color: var(--ink-dim); margin: 0 0 12px; }
+
+#form .options { display: flex; flex-direction: column; gap: 7px; }
+
+#form .option {
+  display: flex; align-items: flex-start; gap: 11px; width: 100%;
+  padding: 11px 13px; text-align: start;
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--bg-raised); color: var(--ink);
+  transition: border-color var(--speed), background var(--speed);
+}
+#form .option:hover { border-color: var(--line-strong); background: var(--bg-hover); }
+#form .option[aria-checked="true"] {
+  border-color: var(--accent); background: var(--accent-wash);
+}
+#form .option:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* A circle for one-of, a square for several-of. The shape is what says
+ * whether picking a second answer replaces the first. */
+#form .option .box {
+  width: 16px; height: 16px; flex: 0 0 auto; margin-block-start: 1px;
+  border: 1.5px solid var(--ink-faint); border-radius: 50%;
+  display: grid; place-items: center;
+  transition: border-color var(--speed);
+}
+#form .option.many .box { border-radius: 4px; }
+#form .option[aria-checked="true"] .box { border-color: var(--accent); }
+#form .option[aria-checked="true"] .box::after {
+  content: ''; width: 8px; height: 8px; border-radius: inherit;
+  background: var(--accent);
+}
+
+#form .option .text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+#form .option .label { font-size: 13.5px; line-height: 1.35; }
+#form .option[aria-checked="true"] .label { font-weight: 500; }
+#form .option .why {
+  font-size: 12px; line-height: 1.45; color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+/* -- writing your own ---------------------------------------------------- */
+
+#form .option.free .label { color: var(--ink-dim); }
+#form .option.free[aria-checked="true"] .label { color: var(--ink); }
+
+#form .own {
+  margin-block-start: 7px; margin-inline-start: 27px;
+}
+#form .own[hidden] { display: none; }
+#form .own textarea {
+  width: 100%; min-height: 4.5em; resize: vertical;
+  padding: 9px 11px; border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong); background: var(--bg-sunk);
+  color: var(--ink); font: inherit; font-size: 13px; line-height: 1.5;
+}
+#form .own textarea:focus-visible { outline: none; box-shadow: var(--ring); }
+#form .own textarea::placeholder { color: var(--ink-faint); }
+
+/* -- the foot ------------------------------------------------------------ */
+
+#form .foot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px var(--pad);
+}
+#form .foot .keys {
+  font-size: 11.5px; color: var(--ink-faint);
+}
+#form .foot .keys kbd {
+  font: inherit; font-family: var(--mono);
+  padding: 1px 5px; border-radius: 4px;
+  border: 1px solid var(--line-strong); background: var(--bg-sunk);
+  color: var(--ink-dim);
+}
+#form .foot .spacer { margin-inline-start: auto; }
+#form .foot button {
+  padding: 8px 18px; border-radius: var(--r-md); font-size: 13.5px;
+  border: 1px solid var(--line-strong); background: var(--bg-raised);
+  transition: border-color var(--speed), background var(--speed), opacity var(--speed);
+}
+#form .foot button:hover { border-color: var(--accent); background: var(--bg-hover); }
+#form .foot button:focus-visible { outline: none; box-shadow: var(--ring); }
+#form .foot button.send {
+  background: var(--accent); border-color: var(--accent);
+  color: #fff; font-weight: 500;
+}
+#form .foot button.send:hover {
+  background: var(--accent-soft); border-color: var(--accent-soft);
+}
+/* Dimmed, never disabled. A form can be sent with questions deliberately
+ * skipped — the agent is told which ones and decides those itself — and a
+ * button that refuses to be pressed cannot say that. */
+#form .foot button.send.partial { opacity: .72; }
+
+@media (max-width: 620px) {
+  #form { width: calc(100vw - 20px); max-height: calc(100vh - 24px); }
+  #form .foot { flex-wrap: wrap; }
+  #form .foot .keys { display: none; }
+  #form .foot .spacer { margin-inline-start: 0; }
+  #form .foot button { flex: 1 1 auto; }
+}
+
+/* --------------------------------------------------------------------------
  * the composer
  * ------------------------------------------------------------------------ */
 #foot { grid-area: foot; border-top: 1px solid var(--line);

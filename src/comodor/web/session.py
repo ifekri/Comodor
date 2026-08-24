@@ -35,6 +35,7 @@ from ..mcp import MCPManager
 from ..paths import Paths
 from ..providers.base import Message
 from ..providers.gateway import Gateway
+from ..questions import CANCELLED, decode_answers
 from ..safety import CheckpointStore, PermissionEngine, Redactor
 from ..session import SessionIndex, SessionMeta, SessionStore, derive_title, new_session_id
 from ..skills import load_for as load_skills
@@ -158,6 +159,10 @@ class Session:
                        # turning every permission prompt into an event of kind
                        # "permission" that the page was not listening for.
                        "about": request.kind}
+            # A question form is the whole point of its request and cannot be
+            # rebuilt from prompt and options, so it rides along.
+            if request.kind == "questions":
+                payload["questions"] = request.meta.get("questions", [])
 
         return {**_plain(payload), "kind": kind.value, "at": time.time()}
 
@@ -1052,7 +1057,15 @@ class Session:
             return False, "nothing is waiting on that"
         if request.answered:
             return False, "that was already answered"
-        if request.options and choice not in request.options:
+        # A form answers with a JSON document rather than one of a fixed set,
+        # so there is nothing to check membership against — the request carries
+        # no options at all. What it does need is to be readable: an answer
+        # that fails to parse would reach the tool as "cancelled" while the
+        # browser was told it had been sent.
+        if request.kind == "questions":
+            if decode_answers(choice) is None and choice != CANCELLED:
+                return False, "those answers could not be read"
+        elif request.options and choice not in request.options:
             return False, (f"{choice!r} is not one of the choices: "
                            f"{', '.join(request.options)}")
 

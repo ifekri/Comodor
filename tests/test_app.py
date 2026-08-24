@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from comodor.events import Kind, Request
+from comodor.events import Event, Kind, Request
 from comodor.providers.fake import Script
 from comodor.ui import layout as layout_module
 from comodor.ui.app import COMMANDS, App
@@ -532,3 +532,131 @@ def test_prefetch_ignores_commands_and_short_drafts(app, monkeypatch):
     time.sleep(0.05)
 
     assert warmed == []
+
+
+# --------------------------------------------------------------------------- #
+# the question form
+#
+# Driven through the same key path a person uses, because the bugs here are in
+# which handler sees a key first: escape inside the write-your-own editor
+# reached the generic overlay handler and threw the whole form away.
+# --------------------------------------------------------------------------- #
+
+
+def a_form_request() -> Request:
+    from comodor.questions import encode, parse
+
+    questions = parse([
+        {"question": "Which database?", "header": "Database",
+         "options": [{"label": "PostgreSQL"}, {"label": "SQLite"}]},
+        {"question": "Keep the old API?", "header": "Old API",
+         "options": [{"label": "Keep it"}, {"label": "Replace it"}]},
+    ])
+    return Request(id="ask-1", prompt="2 questions", options=[],
+                   kind="questions", meta={"questions": encode(questions)})
+
+
+@pytest.fixture
+def asked(app):
+    request = a_form_request()
+    app.bus.publish(Event(kind=Kind.REQUEST, payload={"request": request}))
+    app._pump_events()
+    return request
+
+
+def test_a_question_request_opens_a_form_not_a_permission_prompt(app, asked):
+    assert app.state.overlay is not None
+    assert app.state.overlay.kind == "questions"
+    assert app.state.overlay.form is not None
+
+
+def test_arrows_move_within_a_question_and_across_questions(app, asked):
+    form = app.state.overlay.form
+    app._on_key(key("down"))
+    assert form.cursor == 1
+    app._on_key(key("right"))
+    assert form.current == 1
+    app._on_key(key("left"))
+    assert form.current == 0
+    # And the cursor was kept where it was left.
+    assert form.cursor == 1
+
+
+def test_space_picks_and_enter_moves_to_the_next_unanswered(app, asked):
+    form = app.state.overlay.form
+    app._on_key(key("char", " "))
+    assert form.answers()[0].chosen == ["PostgreSQL"]
+    app._on_key(key("enter"))
+    assert form.current == 1
+
+
+def test_enter_on_the_last_answer_sends_the_form(app, asked):
+    from comodor.questions import decode_answers
+
+    app._on_key(key("char", " "))
+    app._on_key(key("enter"))
+    app._on_key(key("char", " "))
+    app._on_key(key("enter"))
+
+    assert asked.answered
+    assert app.state.overlay is None
+    answers = decode_answers(asked.wait(0.1))
+    assert answers is not None
+    assert [answer.text for answer in answers] == ["PostgreSQL", "Keep it"]
+
+
+def test_escape_inside_the_editor_stops_typing_and_keeps_the_form(app, asked):
+    form = app.state.overlay.form
+    form.cursor = len(form.question.options) - 1
+    app._on_key(key("char", " "))
+    assert form.writing
+    type_text(app, "DuckDB")
+
+    app._on_key(key("escape"))
+    assert not form.writing
+    assert app.state.overlay is not None, "the form was thrown away"
+    assert form.answers()[0].written == "DuckDB"
+
+
+def test_escape_outside_the_editor_dismisses_the_form(app, asked):
+    from comodor.questions import CANCELLED, decode_answers
+
+    app._on_key(key("escape"))
+    assert app.state.overlay is None
+    assert asked.wait(0.1) == CANCELLED
+    assert decode_answers(asked.wait(0.1)) is None
+
+
+def test_typing_a_letter_that_is_a_shortcut_reaches_the_editor(app, asked):
+    """A form whose answer contains "s" must not be unanswerable."""
+    form = app.state.overlay.form
+    form.cursor = len(form.question.options) - 1
+    app._on_key(key("char", " "))
+    type_text(app, "sqlite")
+    assert form.answers()[0].written == "sqlite"
+    assert app.state.overlay is not None
+
+
+def test_ctrl_s_sends_from_anywhere(app, asked):
+    from comodor.questions import decode_answers
+
+    app._on_key(key("char", " "))
+    app._on_key(key("char", "s", ctrl=True))
+    assert asked.answered
+    answers = decode_answers(asked.wait(0.1))
+    assert answers is not None and len(answers) == 2
+    assert answers[0].text == "PostgreSQL"
+    assert answers[1].text == "", "the unanswered one comes back unanswered"
+
+
+def test_a_second_request_waits_its_turn(app, asked):
+    second = a_form_request()
+    second.id = "ask-2"
+    app.bus.publish(Event(kind=Kind.REQUEST, payload={"request": second}))
+    app._pump_events()
+    assert app.state.overlay.request is asked
+    assert second in app.pending_requests
+
+    app._on_key(key("escape"))
+    assert app.state.overlay is not None
+    assert app.state.overlay.request is second
