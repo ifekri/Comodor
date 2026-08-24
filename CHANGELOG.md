@@ -2,6 +2,46 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.15.0 — 2026-08-24
+
+### It asks before it guesses
+
+When a request can be read more than one way, Comodor now settles what it can
+by reading the project and puts the rest to you as one short multiple-choice
+form — three or four questions, before it writes anything.
+
+Given *"add rate limiting to the web server"* it read ten files and then asked
+about client identity, the over-limit response and which routes to cover. One
+of its options read "By IP address (recommended) — the server already reads
+client_address for the loopback check", which is a line it had read a moment
+earlier. Then it built.
+
+Every question ends with a row you type your own answer into. Comodor adds that
+row, not the model, and the model cannot remove it — the point of it is
+covering what the model failed to think of.
+
+Sending a form with questions left blank is fine and is not the same as
+closing it. Comodor tells the agent which ones you skipped and that you have
+therefore not constrained them, so it decides those itself and says which way
+it went. Closing the form tells it to carry on with sensible defaults and not
+to ask again.
+
+In the terminal: tabs with a mark on each answered question, arrows to move,
+space to pick, `enter` to advance or send, `ctrl+s` to send from anywhere,
+`escape` to close. In the browser: the same form as a dialog.
+
+At most four questions and four options each — plus the write-your-own row,
+which does not use up one of the four. It never asks about something it could
+find out by reading, never asks permission to proceed, and never asks you to
+confirm its plan back to it. [Documentation](docs/questions.md).
+
+### Also
+
+- The editor page named only Zed. JetBrains and VS Code are where most people
+  will meet ACP, and both are now written up with where the configuration
+  actually goes — along with the error you will hit when a provider refuses
+  your key, which arrives looking like a broken agent rather than a dead key.
+
 ## 0.14.0 — 2026-08-24
 
 ### Comodor runs inside your editor
