@@ -95,6 +95,7 @@ class SetupWizard:
         """
         if self._keys:
             self.console.clear()
+            self._crown()
             self._recap()
         self.console.print()
         self.console.print(
@@ -103,6 +104,29 @@ class SetupWizard:
                 (title, self.theme.style("title", bold=True)),
             )
         )
+
+    def _crown(self) -> None:
+        """The wordmark, at the top of whatever is about to be drawn.
+
+        Every question clears the screen, so this is a header rather than a
+        repetition — without it each step arrives on a blank terminal with
+        nothing on it naming the program doing the asking.
+
+        It shrinks on a short terminal as well as on a narrow one. Five rows
+        of logo on a twenty-row screen is five rows the questions do not get,
+        which is the same trade the width rule already makes.
+        """
+        from .ui.banner import TAGLINE, wordmark
+
+        size = self.console.size
+        if size.height < 22 or size.width < 51:
+            self.console.print(Text.assemble(
+                ("Comodor", self.theme.style("accent", bold=True)),
+                (f"  {TAGLINE}", self.theme.style("dim")),
+            ))
+            return
+        self.console.print(wordmark(self.theme, size.width))
+        self.console.print(Text(f"  {TAGLINE}", style=self.theme.style("dim")))
 
     def _recap(self) -> None:
         """The questions already answered, one quiet line each."""
@@ -419,9 +443,10 @@ class SetupWizard:
         return chosen
 
     def _banner(self) -> None:
+
+        self.console.print()
+        self._crown()
         body = Text.assemble(
-            ("Comodor", self.theme.style("accent", bold=True)),
-            (" — it learns the way you correct it.\n\n", self.theme.style("text")),
             ("A few questions, once. The answers are saved to\n",
              self.theme.style("dim")),
             (str(self.config.paths.config_file), self.theme.style("value")),
@@ -430,7 +455,6 @@ class SetupWizard:
             ("/settings", self.theme.style("accent")),
             (".", self.theme.style("dim")),
         )
-        self.console.print()
         self.console.print(Panel(body, box=self.theme.box,
                                  border_style=self.theme.style("border"),
                                  padding=(1, 2)))
@@ -669,6 +693,9 @@ class SetupWizard:
         return done
 
     def finish(self, config: Config) -> None:
+        if self._keys:
+            self.console.clear()
+            self._crown()
         entry = config.active()
         body = Text.assemble(
             ("Ready.\n\n", self.theme.style("good", bold=True)),
