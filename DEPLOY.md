@@ -13,6 +13,78 @@ npm start         # next start, listening on $PORT (default 3000)
 Node 20 or newer. The server reads `PORT` from the environment — no port is
 hardcoded and no `-p` flag is passed, because `next start` already honours it.
 
+## Cloudflare (where it lives)
+
+Two Workers on one account, deployed from this repository.
+
+| | |
+|---|---|
+| `comodor-site` | the page, as static assets. No Worker code. |
+| `comodor-get` | `get.comodor.ai`, which needs code — see below |
+
+```bash
+NEXT_STATIC_EXPORT=1 npm run build
+npx wrangler deploy                                   # the site
+npx wrangler deploy --config workers/get/wrangler.jsonc   # the dispatcher
+```
+
+`wrangler.jsonc` declares no `main`, which is the point: serving 85 exported
+files needs nothing to run, and Cloudflare's own wording for what that costs is
+*"requests to static assets are free and unlimited"*. Adding a Worker script
+would route every request through a function with nothing to do and put the
+free plan's daily request ceiling in front of a marketing page.
+
+### `get.comodor.ai`
+
+The one address here that genuinely needs code at request time. Every install
+line on the page points at it:
+
+```
+curl -fsSL get.comodor.ai | sh
+irm get.comodor.ai | iex
+```
+
+So it has to read who is asking and answer differently, which a static export
+cannot do by definition. It fetches the scripts from the site rather than
+carrying copies, so editing `lib/scripts/install.sh` and deploying the site is
+enough — a copy would drift the first time somebody fixed the installer and
+forgot this Worker existed.
+
+**The order of its checks is the whole trick.** PowerShell's `Invoke-RestMethod`
+introduces itself as:
+
+```
+Mozilla/5.0 (Windows NT 10.0; Microsoft Windows 10.0.26100; en-US) PowerShell/7.4.6
+```
+
+It opens with `Mozilla/5.0`, exactly as a browser does. Check for a browser
+first and every Windows install is handed an HTML page to run. PowerShell is
+therefore tested first and the browser check is last. `workers/get/dispatch.test.mjs`
+holds the real agent strings:
+
+```bash
+node --test workers/get/dispatch.test.mjs
+```
+
+### After a DNS change, check this subdomain
+
+Moving `comodor.ai` on to Cloudflare's nameservers did not carry
+`get.comodor.ai` with it, and the record simply was not there afterwards — so
+every install line on the front page failed to resolve, while the site itself
+looked perfectly healthy. Nothing on the page can tell you this has happened.
+
+```bash
+curl -sS -m 20 https://get.comodor.ai | head -2                    # #!/bin/sh
+curl -sS -m 20 -A "Mozilla/5.0 (Windows NT 10.0) PowerShell/7.4.6"      https://get.comodor.ai | head -2                              # Windows installer
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}
+'      -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/141.0.0.0"      -H "sec-fetch-mode: navigate" https://get.comodor.ai          # 302 to the page
+```
+
+The Worker is attached with a **Custom Domain**, not a route: a custom domain
+creates its own DNS record and provisions the certificate, so the hostname is
+declared in `workers/get/wrangler.jsonc` rather than living only in a dashboard
+nobody thinks to check.
+
 ## Hostinger (Web App)
 
 Their Web App platform lists Next.js as a supported framework and offers Node
@@ -112,7 +184,13 @@ actually fix it.
 Line endings matter: `install.sh` must stay LF (a CRLF shebang is reported as
 `bad interpreter`) and `install.ps1` stays CRLF.
 
-## GitHub Pages
+## GitHub Pages (previous host)
+
+Kept because the constraints below are real and the export still has to satisfy
+most of them. The site moved off Pages for two reasons: its HTML is served
+`Cache-Control: max-age=600` and that number cannot be changed, and its terms
+exclude a site "primarily directed at ... providing commercial software as a
+service", which a product page drifts towards the moment anything is sold.
 
 The site also builds as a static export and publishes to Pages from the `site`
 branch of `ifekri/Comodor`. `main` — the branch somebody lands on to read the

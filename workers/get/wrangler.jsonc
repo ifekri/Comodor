@@ -1,0 +1,29 @@
+{
+  // get.comodor.ai — the installer dispatcher.
+  //
+  // The one part of this site that genuinely needs code at request time: it
+  // reads the User-Agent and answers curl, PowerShell and a browser
+  // differently. A static host cannot, which is why this used to be a PHP file
+  // on shared hosting.
+  //
+  //   npx wrangler deploy --config workers/get/wrangler.jsonc
+  //
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "comodor-get",
+  "main": "index.js",
+  "compatibility_date": "2026-08-01",
+
+  // A Custom Domain rather than a route: it creates its own DNS record and
+  // provisions the certificate, so the hostname is described here instead of
+  // in a dashboard nobody will remember to look at.
+  "routes": [
+    {
+      "pattern": "get.comodor.ai",
+      "custom_domain": true
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}

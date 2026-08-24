@@ -1,0 +1,37 @@
+{
+  // The site, as static assets on Workers.
+  //
+  // There is no Worker script here on purpose. Next exports 85 files and
+  // nothing about serving them needs code to run — so this is an assets-only
+  // Worker, and Cloudflare's own words for what that costs are "requests to
+  // static assets are free and unlimited". A script would put every request
+  // through a function that had nothing to do, and put the free tier's daily
+  // request ceiling in front of a marketing page.
+  //
+  // Build it first:
+  //
+  //   NEXT_STATIC_EXPORT=1 npm run build
+  //   npx wrangler deploy
+  //
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "comodor-site",
+  "compatibility_date": "2026-08-01",
+
+  "assets": {
+    "directory": "./out",
+
+    // Next writes `index.html` into each route's directory and links to the
+    // route without one. `auto-trailing-slash` serves `/about/index.html` for
+    // both `/about` and `/about/`, which is what those links expect.
+    "html_handling": "auto-trailing-slash",
+
+    // Anything unmatched gets the exported 404 page with a 404 status, rather
+    // than the single-page-app behaviour of returning index.html and 200 for
+    // every typo — which tells a crawler that a mistyped URL is a real page.
+    "not_found_handling": "404-page"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}
