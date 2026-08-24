@@ -897,69 +897,84 @@ def test_a_real_machine_binding_wide_still_gets_the_warning(config, monkeypatch,
 # --------------------------------------------------------------------------- #
 
 
-def test_it_refuses_to_serve_when_no_provider_is_configured(config, monkeypatch,
-                                                            capsys):
-    """The browser interface can change the mode and nothing else, so a server
-    started without a key produces a URL, a browser window, and a failure on
-    the first task with nothing on screen to act on. The Docker image sends
-    people straight here, which is exactly the audience that has configured
-    nothing yet."""
-    import argparse
-
-    from comodor.web import commands
-
+def unconfigured(config):
     for entry in config.providers.values():
         entry.api_key = ""
         entry.configured = False
     assert config.needs_setup
+    return config
+
+
+def test_it_starts_without_a_provider_so_the_page_can_ask(config, monkeypatch,
+                                                          capsys):
+    """It used to refuse, which was right while the page had nowhere to type a
+    key into. That left the browser interface unreachable for exactly the
+    person most likely to need it: somebody whose Comodor is on a server or in
+    a container, with no terminal in front of them."""
+    from comodor.web import commands
+
+    unconfigured(config)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
-    code = commands.run(config, argparse.Namespace(
-        host="127.0.0.1", port=0, token="", no_browser=True))
+    ready = commands._configured_or_explain(config)
 
-    assert code == 1
+    assert ready is config, "it should start and let the page finish the job"
     said = capsys.readouterr().err
-    assert "no provider configured" in said
-    assert "ANTHROPIC_API_KEY" in said, "the message has to carry the answer"
+    assert "the page will ask" in said
+    assert "ANTHROPIC_API_KEY" in said, "the shortcut is still worth naming"
     assert str(config.paths.config_file) in said
 
 
-def test_at_a_terminal_it_asks_instead(config, monkeypatch):
-    """Somebody who typed `comodor web` is sitting in front of a prompt."""
-    import argparse
-
+def test_at_a_terminal_it_asks_there_instead(config, monkeypatch):
+    """Somebody who typed `comodor web` is sitting in front of a prompt, and
+    that is a nicer place to answer questions than a form."""
     from comodor.web import commands
 
-    for entry in config.providers.values():
-        entry.api_key = ""
-        entry.configured = False
+    unconfigured(config)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("comodor.web.server.in_a_container", lambda: False)
 
     asked = []
 
     def wizard(cfg):
         asked.append(cfg)
+        return cfg
+
+    monkeypatch.setattr("comodor.setup.run_setup", wizard)
+    commands._configured_or_explain(config)
+
+    assert asked, "it should have asked the setup questions"
+
+
+def test_cancelling_the_wizard_no_longer_stops_everything(config, monkeypatch,
+                                                          capsys):
+    """Ctrl-C at the first question used to mean no server at all. It means
+    "not here", and the page is the other place to do it."""
+    from comodor.web import commands
+
+    unconfigured(config)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("comodor.web.server.in_a_container", lambda: False)
+
+    def wizard(cfg):
         raise KeyboardInterrupt
 
     monkeypatch.setattr("comodor.setup.run_setup", wizard)
 
-    assert commands.run(config, argparse.Namespace(
-        host="127.0.0.1", port=0, token="", no_browser=True)) == 1
-    assert asked, "it should have asked the setup questions"
+    ready = commands._configured_or_explain(config)
+
+    assert ready is config
+    assert "in the browser" in capsys.readouterr().err
 
 
-def test_a_container_is_never_asked_a_question(config, monkeypatch, capsys):
+def test_a_container_is_still_never_asked_a_question(config, monkeypatch,
+                                                     capsys):
     """Compose sets `tty: true`, so `isatty` is true inside a container whether
-    or not anybody is reading it. `docker compose up -d` would otherwise sit
-    forever on the first setup question - a hung container rather than a
-    message somebody can act on."""
-    import argparse
-
+    or not anybody is reading it. `docker compose up -d` reaching a question
+    is a hung container rather than a message somebody can act on."""
     from comodor.web import commands
 
-    for entry in config.providers.values():
-        entry.api_key = ""
-        entry.configured = False
+    unconfigured(config)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("comodor.web.server.in_a_container", lambda: True)
 
@@ -968,9 +983,150 @@ def test_a_container_is_never_asked_a_question(config, monkeypatch, capsys):
 
     monkeypatch.setattr("comodor.setup.run_setup", wizard)
 
-    assert commands.run(config, argparse.Namespace(
-        host="127.0.0.1", port=0, token="", no_browser=True)) == 1
+    assert commands._configured_or_explain(config) is config
     assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# setting it up from the page
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def blank_served(config):
+    """A running server with nothing configured."""
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from comodor.web.server import Server, _handler_for
+
+    unconfigured(config)
+    server = Server(config, host="127.0.0.1", port=0)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(server))
+    server.port = httpd.server_address[1]
+    server._httpd = httpd
+    thread = threading.Thread(target=httpd.serve_forever,
+                              kwargs={"poll_interval": 0.05}, daemon=True)
+    thread.start()
+    yield server
+    httpd.shutdown()
+    httpd.server_close()
+    server.session.close()
+
+
+def test_the_page_is_told_it_has_questions_to_ask(blank_served):
+    status, state = call(blank_served, "/api/state", token=blank_served.token)
+
+    assert status == 200
+    assert state["needs_setup"] is True
+
+
+def test_what_it_offers_is_the_catalogue(blank_served):
+    status, offer = call(blank_served, "/api/setup", token=blank_served.token)
+
+    assert status == 200
+    ids = {entry["id"] for entry in offer["providers"]}
+    assert {"openrouter", "anthropic", "openai", "ollama"} <= ids
+    local = next(e for e in offer["providers"] if e["id"] == "ollama")
+    assert local["needs_key"] is False, "a local model needs no key"
+    assert offer["config_file"]
+
+
+def test_a_key_typed_here_is_saved_and_used(blank_served):
+    status, done = call(blank_served, "/api/setup", method="POST",
+                        token=blank_served.token,
+                        body={"provider": "openrouter",
+                              "api_key": "sk-or-v1-" + "x" * 20,
+                              "model": "anthropic/claude-sonnet-4.5"})
+
+    assert status == 200 and done["ok"] is True
+    assert blank_served.config.needs_setup is False
+    assert blank_served.config.provider == "openrouter"
+    assert blank_served.config.active_model() == "anthropic/claude-sonnet-4.5"
+    assert done["state"]["needs_setup"] is False
+    # And on disk, or it is gone the moment this process ends.
+    saved = blank_served.config.paths.config_file.read_text(encoding="utf-8")
+    assert "openrouter" in saved
+
+
+def test_the_gateway_is_rebuilt_around_what_was_just_saved(blank_served):
+    """A client built for no provider is a client that cannot answer, and it
+    was built when the server started."""
+    was = blank_served.session.gateway
+
+    call(blank_served, "/api/setup", method="POST", token=blank_served.token,
+         body={"provider": "openrouter", "api_key": "sk-or-v1-" + "x" * 20})
+
+    assert blank_served.session.gateway is not was
+    assert blank_served.session.agent.gateway is blank_served.session.gateway
+
+
+def test_a_provider_that_needs_a_key_is_not_saved_without_one(blank_served):
+    status, refused = call(blank_served, "/api/setup", method="POST",
+                           token=blank_served.token,
+                           body={"provider": "anthropic", "api_key": "  "})
+
+    assert status == 400
+    assert "API key" in refused["error"]
+    assert blank_served.config.needs_setup is True
+
+
+def test_a_local_provider_needs_no_key(blank_served):
+    status, done = call(blank_served, "/api/setup", method="POST",
+                        token=blank_served.token, body={"provider": "ollama"})
+
+    assert status == 200 and done["ok"] is True
+    assert blank_served.config.provider == "ollama"
+
+
+def test_setup_needs_the_token_like_everything_else(blank_served):
+    status, _ = call(blank_served, "/api/setup")
+    assert status == 401
+    status, _ = call(blank_served, "/api/setup", method="POST",
+                     body={"provider": "openrouter", "api_key": "sneak"})
+    assert status == 401
+
+
+def test_a_key_may_not_be_typed_in_over_a_network(blank_served, monkeypatch):
+    """There is no TLS here. A key typed into a page served across a network
+    crosses that network in the clear, and it is a credential with a bill
+    attached.
+
+    Decided by where the request came *from*, not by the bind: a server
+    listening on every address still answers loopback, and a rule about the
+    bind would have refused that.
+    """
+    from comodor.web import server as server_module
+
+    monkeypatch.setattr(server_module, "LOOPBACK", ("10.10.10.10",))
+    monkeypatch.setattr(server_module, "in_a_container", lambda: False)
+
+    status, refused = call(blank_served, "/api/setup", method="POST",
+                           token=blank_served.token,
+                           body={"provider": "openrouter", "api_key": "sk-x"})
+
+    assert status == 403
+    assert "SSH tunnel" in refused["error"]
+    assert blank_served.config.needs_setup is True
+
+    _, offer = call(blank_served, "/api/setup", token=blank_served.token)
+    assert offer["may_enter_a_key"] is False, "the page must not offer the box"
+
+
+def test_a_container_may_still_be_set_up_through_the_page(blank_served,
+                                                          monkeypatch):
+    """Its loopback is not the operator's machine, but the operator chose how
+    to publish the port and was told at startup what that choice means."""
+    from comodor.web import server as server_module
+
+    monkeypatch.setattr(server_module, "LOOPBACK", ("10.10.10.10",))
+    monkeypatch.setattr(server_module, "in_a_container", lambda: True)
+
+    status, done = call(blank_served, "/api/setup", method="POST",
+                        token=blank_served.token,
+                        body={"provider": "ollama"})
+
+    assert status == 200 and done["ok"] is True
 
 
 # --------------------------------------------------------------------------- #
@@ -1046,3 +1202,140 @@ def test_nothing_looked_at_yet_is_not_an_error_shaped_like_a_picture(config):
         assert session.screen() == (b"", 0)
     finally:
         session.close()
+
+
+# --------------------------------------------------------------------------- #
+# rules
+#
+# The terminal has had these since the beginning and the browser could not see
+# them. That is the wrong half to be missing: a rule is a standing instruction
+# to the agent, and somebody who cannot see what it has decided about them
+# cannot correct it.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_rule_you_write_is_in_force_immediately(served):
+    """No evidence needed. You said it."""
+    status, written = call(served, "/api/rules", method="POST", token=served.token,
+                           body={"action": "teach",
+                                 "statement": "Always run the tests before saying done"})
+    assert status == 200 and written["ok"] is True
+
+    _, listing = call(served, "/api/rules", token=served.token)
+    mine = [rule for rule in listing["rules"] if rule["mine"]]
+
+    assert len(mine) == 1
+    assert mine[0]["statement"] == "Always run the tests before saying done"
+    assert mine[0]["confident"] is True
+    assert listing["active"] == 1
+
+
+def test_what_you_wrote_sorts_above_what_it_inferred(served):
+    """Burying an instruction under forty inferences reads as the agent having
+    opinions of its own."""
+    for _ in range(20):
+        served.session.memory.store.observe_rule(
+            key="python.quotes", scope="global", category="style",
+            statement="Use single quotes", detail="most literals",
+            source="observation", weight=1)
+    call(served, "/api/rules", method="POST", token=served.token,
+         body={"action": "teach", "statement": "Never add a dependency"})
+
+    _, listing = call(served, "/api/rules", token=served.token)
+
+    assert listing["rules"][0]["mine"] is True
+
+
+def test_an_inferred_rule_carries_its_evidence(served):
+    """A claim about how somebody works should be checkable rather than
+    asserted, which is the whole difference between a rule and a guess."""
+    for _ in range(6):
+        served.session.memory.store.observe_rule(
+            key="git.messages", scope="global", category="style",
+            statement="Imperative commit subjects", detail="22 of 24 commits",
+            source="observation", weight=1)
+
+    _, listing = call(served, "/api/rules", token=served.token)
+    inferred = next(rule for rule in listing["rules"] if not rule["mine"])
+
+    assert inferred["support"] == 6
+    assert inferred["detail"] == "22 of 24 commits"
+    assert 0 <= inferred["strength"] <= 1
+
+
+def test_a_rule_can_be_switched_off_without_being_deleted(served):
+    """The one people will reach for more often. A rule that is right in
+    general and wrong for this project is not a rule to throw away, and
+    deleting was the only thing on offer."""
+    call(served, "/api/rules", method="POST", token=served.token,
+         body={"action": "teach", "statement": "Prefer tabs"})
+    _, listing = call(served, "/api/rules", token=served.token)
+    rule_id = listing["rules"][0]["id"]
+
+    status, done = call(served, "/api/rules", method="POST", token=served.token,
+                        body={"action": "disable", "id": rule_id})
+    assert status == 200 and done["ok"] is True
+
+    _, after = call(served, "/api/rules", token=served.token)
+    assert after["rules"][0]["active"] is False
+    assert after["rules"][0]["statement"] == "Prefer tabs"   # still there
+    assert after["active"] == 0                              # but not counted
+
+    call(served, "/api/rules", method="POST", token=served.token,
+         body={"action": "enable", "id": rule_id})
+    _, back = call(served, "/api/rules", token=served.token)
+    assert back["rules"][0]["active"] is True
+
+
+def test_a_rule_can_be_deleted(served):
+    call(served, "/api/rules", method="POST", token=served.token,
+         body={"action": "teach", "statement": "Something wrong"})
+    _, listing = call(served, "/api/rules", token=served.token)
+    rule_id = listing["rules"][0]["id"]
+
+    status, gone = call(served, "/api/rules", method="POST", token=served.token,
+                        body={"action": "forget", "id": rule_id})
+
+    assert status == 200 and gone["ok"] is True
+    _, after = call(served, "/api/rules", token=served.token)
+    assert after["rules"] == []
+
+
+def test_an_empty_rule_is_refused(served):
+    """Silently storing one would put a blank instruction in every prompt."""
+    for statement in ("", "   ", "x" * 400):
+        status, refused = call(served, "/api/rules", method="POST",
+                               token=served.token,
+                               body={"action": "teach", "statement": statement})
+        assert status == 400, repr(statement[:20])
+        assert refused["ok"] is False
+
+
+def test_nonsense_asked_of_a_rule_is_refused(served):
+    for body in ({"action": "explode", "id": 1},
+                 {"action": "forget", "id": "not-a-number"},
+                 {"action": "pin", "id": 99999}):
+        status, refused = call(served, "/api/rules", method="POST",
+                               token=served.token, body=body)
+        assert status == 400, body
+        assert refused["error"]
+
+
+def test_rules_written_in_the_browser_are_the_same_ones_the_terminal_sees(served):
+    """One brain, two windows onto it. Two stores would be two agents."""
+    call(served, "/api/rules", method="POST", token=served.token,
+         body={"action": "teach", "statement": "Explain why, not what"})
+
+    from_engine = [rule.statement for rule in served.session.memory.all_rules()]
+
+    assert "Explain why, not what" in from_engine
+    assert any(rule.statement == "Explain why, not what"
+               for rule in served.session.memory.active_rules())
+
+
+def test_the_rules_need_the_token_like_everything_else(served):
+    status, _ = call(served, "/api/rules")
+    assert status == 401
+    status, _ = call(served, "/api/rules", method="POST",
+                     body={"action": "teach", "statement": "sneak"})
+    assert status == 401

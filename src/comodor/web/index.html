@@ -35,6 +35,28 @@
             stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
       <path d="M10 4.5v11M4.5 10h11"/>
     </symbol>
+    <symbol id="i-rule" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4.5 3.5h11v13h-11z"/><path d="M7 7h6M7 10h6M7 13h3.5"/>
+    </symbol>
+    <symbol id="i-off" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.6" stroke-linecap="round">
+      <circle cx="10" cy="10" r="6.6"/><path d="m5.6 5.6 8.8 8.8"/>
+    </symbol>
+    <symbol id="i-on" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m4.5 10.4 3.4 3.4 7.6-7.6"/>
+    </symbol>
+    <symbol id="i-pin" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12.4 2.6 17.4 7.6l-2.5 1.2-1.6 4.4-5.5-5.5 4.4-1.6z"/>
+      <path d="M7.8 12.2 3.4 16.6"/>
+    </symbol>
+    <symbol id="i-export" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 13V3.5M6.5 7 10 3.5 13.5 7"/>
+      <path d="M3.5 12.5v3a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-3"/>
+    </symbol>
     <symbol id="i-close" viewBox="0 0 20 20" fill="none" stroke="currentColor"
             stroke-width="1.8" stroke-linecap="round">
       <path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/>
@@ -143,6 +165,8 @@
       <div class="tabs" role="tablist" aria-label="Sidebar">
         <button role="tab" id="tab-chat" aria-selected="true"
                 aria-controls="panel-chat">Chat</button>
+        <button role="tab" id="tab-rules" aria-selected="false"
+                aria-controls="panel-rules">Rules</button>
         <button role="tab" id="tab-admin" aria-selected="false"
                 aria-controls="panel-admin">Admin</button>
       </div>
@@ -164,6 +188,20 @@
       <div id="chats" role="list"></div>
     </div>
 
+    <div class="panel" id="panel-rules" role="tabpanel" aria-labelledby="tab-rules">
+      <form class="finder" id="rule-form">
+        <label class="field">
+          <svg aria-hidden="true"><use href="#i-rule"/></svg>
+          <input id="rule-text" type="text" maxlength="300"
+                 placeholder="Always run the tests before saying done"
+                 autocomplete="off" aria-label="Write a rule">
+        </label>
+        <button class="ghost-btn" type="submit" id="rule-add" title="Add this rule"
+                aria-label="Add this rule"><svg><use href="#i-new"/></svg></button>
+      </form>
+      <div id="rules-body"></div>
+    </div>
+
     <div class="panel" id="panel-admin" role="tabpanel" aria-labelledby="tab-admin">
       <div id="admin-body"></div>
     </div>
@@ -181,6 +219,8 @@
     <div id="log" tabindex="0" aria-label="Conversation">
       <div class="stream" id="stream" aria-live="polite"></div>
     </div>
+
+    <section id="setup" hidden aria-label="Set Comodor up"></section>
   </main>
 
   <!-- --------------------------------------------------------------- foot -->

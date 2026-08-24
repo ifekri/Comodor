@@ -219,6 +219,7 @@ class Session:
                 "used": usage.prompt_tokens,
             },
             "project": str(self.config.paths.project),
+            "needs_setup": self.setup_needed(),
             "chat": {"id": self.meta.id, "title": self.meta.title,
                      "messages": len(self.conversation.messages)},
         }
@@ -329,6 +330,165 @@ class Session:
         if self._index is not None:
             self._index.forget(session_id)
         return True, ""
+
+    # -- setting up ----------------------------------------------------------- #
+
+    def setup_needed(self) -> bool:
+        return bool(self.config.needs_setup)
+
+    def offer(self) -> dict[str, Any]:
+        """What could be set up, and what is already."""
+        from .. import catalogue
+
+        def card(spec: Any) -> dict[str, Any]:
+            entry = self.config.providers.get(spec.id)
+            return {
+                "id": spec.id,
+                "label": spec.label,
+                "blurb": spec.blurb,
+                "model": spec.default_model,
+                "models": list(spec.models),
+                "needs_key": bool(spec.needs_key),
+                "keys_url": spec.keys_url,
+                "base_url": spec.base_url,
+                "ready": bool(entry and entry.ready),
+            }
+
+        return {
+            "needed": self.setup_needed(),
+            "providers": [card(spec) for spec in catalogue.offered()],
+            "config_file": str(self.config.paths.config_file),
+        }
+
+    def set_up(self, provider: str, api_key: str = "", model: str = "",
+               base_url: str = "") -> tuple[bool, str]:
+        """Save a provider, the way the wizard does, and start using it."""
+        from .. import catalogue
+        from ..providers import registry
+
+        spec = catalogue.get(provider)
+        if spec is None and provider not in self.config.providers:
+            return False, "no such provider"
+        if spec is not None and spec.needs_key and not api_key.strip():
+            return False, f"{spec.label} needs an API key"
+        if spec is not None and not spec.base_url and not base_url.strip():
+            return False, "that provider needs a URL"
+
+        chosen = model.strip() or (spec.default_model if spec else "")
+        if not chosen:
+            return False, "which model?"
+
+        try:
+            self.config.use(provider, api_key=api_key.strip(),
+                            model=chosen, base_url=base_url.strip())
+            if registry.knows(chosen):
+                window = registry.lookup(chosen).context
+                if window:
+                    self.config.agent.context_limit = window
+            self.config.save()
+        except OSError as error:
+            return False, f"could not write the settings: {error}"
+
+        self.config.first_run = False
+        self.meta.provider = self.config.provider
+        self.meta.model = self.config.active_model()
+        # The gateway holds a client built from the old settings, and a client
+        # built for no provider is a client that cannot answer.
+        try:
+            self.gateway.close()
+        except Exception:
+            pass
+        self.gateway = Gateway(self.config)
+        self.agent.gateway = self.gateway
+        self.bus.emit(Kind.STATUS, provider=self.config.provider,
+                      model=self.config.active_model())
+        return True, ""
+
+    # -- rules ---------------------------------------------------------------- #
+
+    def rules(self) -> dict[str, Any]:
+        """Every house rule, and enough about each to judge it.
+
+        Both kinds together, sorted with the ones the user wrote first: those
+        are not a guess about how somebody works, they are an instruction, and
+        burying them under forty counted observations reads as the agent
+        having opinions of its own.
+        """
+        try:
+            found = self.memory.all_rules()
+        except Exception:
+            return {"rules": [], "active": 0, "enabled": False}
+
+        def card(rule: Any) -> dict[str, Any]:
+            return {
+                "id": rule.id,
+                "statement": rule.statement,
+                "detail": rule.detail,
+                "category": rule.category,
+                "scope": rule.scope,
+                "source": rule.source,
+                "support": rule.support,
+                "against": rule.against,
+                "strength": round(rule.strength, 2),
+                "confident": rule.confident,
+                "pinned": rule.pinned,
+                "active": rule.active,
+                "mine": rule.source == "user",
+            }
+
+        cards = [card(rule) for rule in found]
+        cards.sort(key=lambda item: (not item["mine"], not item["confident"],
+                                     -item["support"]))
+        return {
+            "rules": cards,
+            "active": sum(1 for item in cards if item["confident"]
+                          and item["active"]),
+            "enabled": bool(self.config.learning.enabled
+                            and self.config.learning.rules),
+        }
+
+    def rule(self, action: str, **fields: Any) -> tuple[bool, str, Any]:
+        """Write, drop, pin or switch off one rule.
+
+        Returns whether it took, why not, and whatever the caller needs back —
+        the stored rule for a write, the path for an export.
+        """
+        if action == "teach":
+            statement = str(fields.get("statement") or "").strip()
+            if not statement:
+                return False, "a rule needs something to say", None
+            if len(statement) > 300:
+                return False, "that is longer than a rule should be", None
+            written = self.memory.teach_rule(statement)
+            return True, "", {"id": written.id, "statement": written.statement}
+
+        try:
+            rule_id = int(fields.get("id"))
+        except (TypeError, ValueError):
+            return False, "which rule?", None
+
+        if action == "forget":
+            return (True, "", None) if self.memory.forget_rule(rule_id) \
+                else (False, "no such rule", None)
+        if action in ("pin", "unpin"):
+            done = self.memory.set_rule(rule_id, pinned=action == "pin")
+            return (True, "", None) if done else (False, "no such rule", None)
+        if action in ("enable", "disable"):
+            # Off, not gone. A rule that is right in general and wrong for this
+            # project is not a rule to delete, and deleting was the only thing
+            # on offer.
+            done = self.memory.set_rule(rule_id, active=action == "enable")
+            return (True, "", None) if done else (False, "no such rule", None)
+
+        return False, f"{action!r} is not something to do to a rule", None
+
+    def export_rules(self) -> tuple[bool, str, str]:
+        """Write them where a team can read and commit them."""
+        try:
+            where = self.memory.export_rules()
+        except Exception as error:
+            return False, f"{type(error).__name__}: {error}", ""
+        return True, "", str(where)
 
     # -- what the agent is, right now ---------------------------------------- #
 
