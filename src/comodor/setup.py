@@ -392,6 +392,38 @@ class SetupWizard:
             self.console.print(Text(f"  not imported: {note}",
                                     style=self.theme.style("dim")))
 
+    def _already_here(self) -> dict[str, str]:
+        """What this machine can already do, said before anything is asked.
+
+        A local runtime that is up needs no key and no account, and an
+        exported key is one somebody found an hour ago. Opening with eighteen
+        billing pages when the answer is a port that is already open is asking
+        a question that has been answered.
+
+        Returns a note per provider, for the list to show beside it. Never
+        raises: this is on the path that draws the first screen anybody sees.
+        """
+        try:
+            from .providers import discover
+
+            running = discover.running_here()
+            exported = discover.keys_in_the_environment()
+        except Exception:
+            return {}
+
+        notes: dict[str, str] = {}
+        for item in running:
+            notes[item.provider] = (f"running here — {item.summary}"
+                                    if item.usable else
+                                    "running here, but no models installed yet")
+        for item in exported:
+            notes.setdefault(item.provider, f"key already in ${item.variable}")
+
+        # Returned rather than announced. The list leads with these and names
+        # their models, so a sentence above it saying the same thing is the
+        # same fact twice — and the second telling is the one nobody reads.
+        return notes
+
     def _ask_skills(self, step: int, total: int) -> list[str]:
         """Offer the library, once, at the only moment it is not an interruption.
 
@@ -464,6 +496,7 @@ class SetupWizard:
         self.console.print(
             Text("  You can add more later; this is just the one to start with.\n",
                  style=self.theme.style("dim")))
+        here = self._already_here()
         # A provider that already has a key — imported a moment ago, or found
         # in the environment — leads. The key is the expensive part of setting
         # this up, and offering a default that needs a new one, immediately
@@ -473,11 +506,24 @@ class SetupWizard:
             entry = self.config.providers.get(spec.id)
             return bool(entry is not None and entry.api_key)
 
+        def usable_now(spec: catalogue.ProviderSpec) -> bool:
+            """Nothing left to find before this one can answer.
+
+            A runtime already up on this machine is the same argument as a key
+            already set, taken further: it needs no key at all.
+            """
+            return keyed(spec) or spec.id in here
+
         offered = list(catalogue.offered())
-        ready = [spec for spec in offered if keyed(spec)]
-        rest = [spec for spec in offered if not keyed(spec)]
+        ready = [spec for spec in offered if usable_now(spec)]
+        rest = [spec for spec in offered if not usable_now(spec)]
 
         def blurb(spec: catalogue.ProviderSpec) -> str:
+            # What was found about this one outranks what the catalogue says
+            # about it: "running here, three models" is the answer, and the
+            # sales line is what you read when there is no answer yet.
+            if spec.id in here:
+                return here[spec.id]
             if not keyed(spec):
                 return spec.blurb
             why = "key imported" if spec.label in self.imported.keys \

@@ -354,10 +354,20 @@ class Session:
                 "ready": bool(entry and entry.ready),
             }
 
+        found_running, found_keys = _what_is_already_here()
         return {
             "needed": self.setup_needed(),
             "providers": [card(spec) for spec in catalogue.offered()],
             "config_file": str(self.config.paths.config_file),
+            # What the machine already has, so the first offer is not a list
+            # of billing pages when the answer is a port that is already open.
+            "running": [{"provider": item.provider, "label": item.label,
+                         "models": item.models, "summary": item.summary,
+                         "usable": item.usable}
+                        for item in found_running],
+            "exported": [{"provider": item.provider, "label": item.label,
+                          "variable": item.variable}
+                         for item in found_keys],
         }
 
     def set_up(self, provider: str, api_key: str = "", model: str = "",
@@ -736,6 +746,20 @@ class Session:
                 self.mcp.close()
             except Exception:
                 pass
+
+
+def _what_is_already_here() -> tuple[list[Any], list[Any]]:
+    """Local runtimes and exported keys, and never an exception.
+
+    This runs on the path that draws the first screen somebody sees. A
+    provider probe that raises there is a blank page instead of a question.
+    """
+    try:
+        from ..providers import discover
+
+        return discover.running_here(), discover.keys_in_the_environment()
+    except Exception:
+        return [], []
 
 
 def _as_turn(message: Message) -> dict[str, Any]:
