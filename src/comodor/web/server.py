@@ -305,6 +305,21 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 self._json(200, server.session.rules())
                 return
 
+            if route == "/api/models":
+                wanted = (query.get("provider") or [""])[0]
+                self._json(200, server.session.models_for(
+                    wanted or server.config.provider,
+                    refresh=(query.get("refresh") or [""])[0] == "1"))
+                return
+
+            if route == "/api/folder":
+                self._json(200, server.session.folder())
+                return
+
+            if route == "/api/skills":
+                self._json(200, server.session.skill_shelf())
+                return
+
             if route == "/api/setup":
                 offer = server.session.offer()
                 offer["may_enter_a_key"] = self._from_this_machine()
@@ -416,6 +431,29 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 self._json(200 if done else 400,
                            {"ok": done, "error": why,
                             "state": server.session.state()})
+                return
+
+            if route == "/api/folder":
+                # The same rule as a key: this decides which files the agent
+                # may touch, and pointing it somewhere new from across a
+                # network is not a thing to allow without TLS.
+                if not self._from_this_machine():
+                    self._json(403, {"ok": False,
+                                     "error": "The working folder can only be "
+                                              "changed from the machine "
+                                              "Comodor is running on."})
+                    return
+                done, why, where = server.session.change_folder(
+                    str(body.get("path") or ""))
+                self._json(200 if done else 400,
+                           {"ok": done, "error": why, "folder": where,
+                            "state": server.session.state()})
+                return
+
+            if route == "/api/skills":
+                done, why = server.session.skill(str(body.get("action") or ""),
+                                                 str(body.get("name") or ""))
+                self._json(200 if done else 400, {"ok": done, "error": why})
                 return
 
             if route == "/api/rules":

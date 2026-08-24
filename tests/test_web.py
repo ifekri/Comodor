@@ -440,12 +440,43 @@ def test_the_settings_a_page_may_change_are_the_ones_listed(served):
     assert status == 200 and done["saved"] is True
     assert served.config.agent.loop is False
 
+    # Still refused, and for the reason that has not changed: none of these
+    # widens what the agent may do to the machine from a page anyone holding
+    # the link can open.
     for key in ("auto_approve_shell", "workspace_only", "deny_commands",
-                "api_key", "max_cost_usd"):
+                "max_cost_usd", "trusted_folders"):
         status, refused = call(served, "/api/setting", method="POST",
                                body={"key": key, "value": True}, token=served.token)
         assert status == 400, key
         assert refused["saved"] is False
+
+
+def test_the_api_key_can_be_changed_from_the_page(served):
+    """Somebody who set Comodor up with the wrong key, or rotated one, had to
+    go and find a terminal. It is the same secret the setup form already
+    takes, under the same rule about where it may be typed."""
+    was = served.session.gateway
+
+    status, done = call(served, "/api/setting", method="POST", token=served.token,
+                        body={"key": "api_key", "value": "sk-rotated-0123456789"})
+
+    assert status == 200 and done["saved"] is True
+    assert served.config.active().api_key == "sk-rotated-0123456789"
+    assert served.session.gateway is not was, "the old key is still in the client"
+    assert served.session.agent.gateway is served.session.gateway
+    saved = served.config.paths.config_file.read_text(encoding="utf-8")
+    assert "sk-rotated-0123456789" in saved
+
+
+def test_an_empty_key_is_not_a_key(served):
+    was = served.config.active().api_key
+
+    status, refused = call(served, "/api/setting", method="POST",
+                           token=served.token,
+                           body={"key": "api_key", "value": "   "})
+
+    assert status == 400 and refused["saved"] is False
+    assert served.config.active().api_key == was
 
 
 def test_switching_model_moves_the_context_window_with_it(served):
@@ -1339,3 +1370,237 @@ def test_the_rules_need_the_token_like_everything_else(served):
     status, _ = call(served, "/api/rules", method="POST",
                      body={"action": "teach", "statement": "sneak"})
     assert status == 401
+
+
+# --------------------------------------------------------------------------- #
+# a number nobody can click through to is a number to distrust
+# --------------------------------------------------------------------------- #
+
+
+def test_the_rule_count_is_the_rules_this_folder_has(served):
+    """It said eight and the panel beside it listed none.
+
+    Not invented - eight real rules, learned in a different folder. The store
+    counts every confident rule it holds, which is the right answer for
+    `doctor` and the wrong one for a strip telling somebody what is shaping
+    the conversation in front of them.
+    """
+    # Six observations of two conventions, not six rules: the store keys a
+    # rule by what it is about and accumulates evidence on it, which is the
+    # whole difference between a counted fact and a tally of sightings.
+    elsewhere = "project:somewhere-else-entirely"
+    for key in ("other.style", "other.tests"):
+        for _ in range(6):
+            served.session.memory.store.observe_rule(
+                key=key, scope=elsewhere, category="style",
+                statement=f"Learned somewhere else ({key})", detail="",
+                source="observation", weight=1)
+
+    _, admin = call(served, "/api/admin", token=served.token)
+    _, listing = call(served, "/api/rules", token=served.token)
+
+    assert admin["reflex"]["rules_active"] == 0, "counted another folder's rules"
+    assert listing["rules"] == []
+    assert admin["reflex"]["rules_elsewhere"] == 2, "and says where they went"
+
+    call(served, "/api/rules", method="POST", token=served.token,
+         body={"action": "teach", "statement": "Mine, here"})
+    _, admin = call(served, "/api/admin", token=served.token)
+    _, listing = call(served, "/api/rules", token=served.token)
+
+    assert admin["reflex"]["rules_active"] == listing["active"] == 1
+
+
+def test_nothing_learned_is_reported_as_nothing(served):
+    """Every figure on that panel is a real count of something on this
+    machine. Zero is a fact, and putting anything else in its place is the one
+    thing a panel of numbers must never do."""
+    _, admin = call(served, "/api/admin", token=served.token)
+
+    assert admin["reflex"]["rules_active"] == 0
+    assert admin["reflex"]["lessons"] == 0
+    assert admin["reflex"]["episodes"] == 0
+    assert admin["reflex"]["success_rate"] == 0.0
+    assert call(served, "/api/rules", token=served.token)[1]["active"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# the model list, from the provider rather than from a file
+# --------------------------------------------------------------------------- #
+
+
+def test_the_model_list_falls_back_and_says_so(served, monkeypatch):
+    """With no way to ask, the built-in names are served - and marked as what
+    they are. A guess presented as a live list is the fault this exists to
+    fix."""
+    from comodor.providers import models as model_list
+
+    monkeypatch.setattr(model_list, "_ask", lambda *a, **k: ([], "no network"))
+
+    _, listing = call(served, "/api/models?provider=anthropic", token=served.token)
+
+    assert listing["source"] == "catalogue"
+    assert listing["error"] == "no network"
+    assert listing["models"], "the built-in names are better than nothing"
+
+
+def test_a_price_nobody_stated_is_not_shown_as_free():
+    """A model whose cost is unknown and a model that is free are different
+    facts, and showing the first as the second costs somebody money."""
+    from comodor.providers import models as model_list
+
+    parsed = model_list._parse({"data": [
+        {"id": "priced", "pricing": {"prompt": "0.000001",
+                                     "completion": "0.000002"}},
+        {"id": "free", "pricing": {"prompt": "0", "completion": "0"}},
+        {"id": "unsaid"},
+    ]})
+    by_id = {model.id: model for model in parsed}
+
+    assert by_id["priced"].input_cost == 1.0        # per million, not per token
+    assert by_id["free"].input_cost == 0.0
+    assert by_id["unsaid"].input_cost is None
+
+
+# --------------------------------------------------------------------------- #
+# the folder the agent works in
+# --------------------------------------------------------------------------- #
+
+
+def test_moving_folder_moves_what_the_agent_may_touch(served, tmp_path):
+    """The most consequential setting there is: it is what confines every
+    write."""
+    elsewhere = tmp_path / "another-project"
+    elsewhere.mkdir()
+
+    status, done = call(served, "/api/folder", method="POST", token=served.token,
+                        body={"path": str(elsewhere)})
+
+    assert status == 200 and done["ok"] is True
+    assert Path(served.config.paths.project) == elsewhere.resolve()
+
+    allowed, _ = served.session.permissions.path_allowed(elsewhere / "file.py")
+    refused, why = served.session.permissions.path_allowed(tmp_path / "outside.py")
+    assert allowed is True
+    assert refused is False and "outside the workspace" in why
+
+
+def test_moving_folder_is_a_different_project(served, tmp_path):
+    """Its own learned rules, its own conversation. A rule taught in one
+    folder must not follow the agent into another."""
+    from comodor.providers.base import Message, Role
+
+    call(served, "/api/rules", method="POST", token=served.token,
+         body={"action": "teach", "statement": "Only here"})
+    served.session.conversation.extend([Message(role=Role.USER, content="hello")])
+    was = served.session.meta.id
+
+    elsewhere = tmp_path / "other"
+    elsewhere.mkdir()
+    call(served, "/api/folder", method="POST", token=served.token,
+         body={"path": str(elsewhere)})
+
+    assert served.session.meta.id != was, "it should be a new conversation"
+    assert served.session.conversation.messages == []
+    _, listing = call(served, "/api/rules", token=served.token)
+    assert listing["rules"] == [], "the other folder's rule came along"
+
+
+def test_the_folder_is_not_moved_out_from_under_a_running_turn(served, tmp_path):
+    elsewhere = tmp_path / "busy"
+    elsewhere.mkdir()
+    served.session.busy = True
+    try:
+        status, refused = call(served, "/api/folder", method="POST",
+                               token=served.token, body={"path": str(elsewhere)})
+    finally:
+        served.session.busy = False
+
+    assert status == 400 and "running" in refused["error"]
+
+
+def test_a_folder_that_is_not_there_is_refused(served, tmp_path):
+    (tmp_path / "a-file.txt").write_text("x", encoding="utf-8")
+    for where in (str(tmp_path / "nope"), "", str(tmp_path / "a-file.txt")):
+        status, refused = call(served, "/api/folder", method="POST",
+                               token=served.token, body={"path": where})
+        assert status == 400, where
+        assert refused["ok"] is False
+
+
+def test_the_folder_cannot_be_moved_from_across_a_network(served, tmp_path,
+                                                          monkeypatch):
+    """It decides which files the agent may touch. Pointing it somewhere new
+    over a connection with no TLS is not a thing to allow."""
+    from comodor.web import server as server_module
+
+    elsewhere = tmp_path / "remote-move"
+    elsewhere.mkdir()
+    monkeypatch.setattr(server_module, "LOOPBACK", ("10.10.10.10",))
+    monkeypatch.setattr(server_module, "in_a_container", lambda: False)
+
+    status, refused = call(served, "/api/folder", method="POST",
+                           token=served.token, body={"path": str(elsewhere)})
+
+    assert status == 403
+    assert "machine Comodor is running on" in refused["error"]
+
+
+# --------------------------------------------------------------------------- #
+# skills
+# --------------------------------------------------------------------------- #
+
+
+def a_skill_file(root, name, description):
+    root.mkdir(parents=True, exist_ok=True)
+    (root / f"{name}.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n\nBody.\n",
+        encoding="utf-8")
+
+
+def test_a_skill_can_be_switched_off_without_being_deleted(served):
+    """A folder somebody wrote by hand over an afternoon is not deleted
+    because they wanted it out of the way today."""
+    root = served.config.paths.skills
+    a_skill_file(root, "review", "Review a change")
+    served.session._reload_skills()
+    assert "review" in served.session.skills.skills
+
+    status, done = call(served, "/api/skills", method="POST", token=served.token,
+                        body={"action": "disable", "name": "review"})
+
+    assert status == 200 and done["ok"] is True
+    assert "review" in served.config.skills.disabled
+    assert (root / "review.md").exists(), "switching off must not delete it"
+    assert served.session.skills.skills["review"].enabled is False
+    assert served.session.skills.match("review this change") == []
+
+    call(served, "/api/skills", method="POST", token=served.token,
+         body={"action": "enable", "name": "review"})
+    assert served.session.skills.skills["review"].enabled is True
+
+
+def test_comodor_will_not_delete_a_skill_it_did_not_install(served):
+    root = served.config.paths.skills
+    a_skill_file(root, "mine", "Handwritten")
+    served.session._reload_skills()
+
+    status, refused = call(served, "/api/skills", method="POST",
+                           token=served.token,
+                           body={"action": "remove", "name": "mine"})
+
+    assert status == 400
+    assert "not installed by Comodor" in refused["error"]
+    assert (root / "mine.md").exists()
+
+
+def test_the_shelf_lists_what_is_installed(served):
+    root = served.config.paths.skills
+    a_skill_file(root, "here", "Present")
+    served.session._reload_skills()
+
+    _, shelf = call(served, "/api/skills", token=served.token)
+    mine = [item for item in shelf["skills"] if item["id"] == "here"]
+
+    assert len(mine) == 1
+    assert mine[0]["installed"] is True and mine[0]["enabled"] is True

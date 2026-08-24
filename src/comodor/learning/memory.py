@@ -528,8 +528,23 @@ class LearningEngine:
         return destination
 
     def stats(self) -> dict[str, Any]:
+        """What the store holds, and what applies *here*.
+
+        `rules_active` is overridden on the way out. The store counts every
+        confident rule it has, across every project it has ever learned in,
+        which is the right answer for `doctor` and the wrong one for anything
+        telling somebody what is shaping the conversation in front of them.
+
+        The two disagreed by eight: rules learned in another folder, counted
+        in the status strip, and absent from the panel that lists them —
+        because the panel is scoped and the count was not. A number nobody can
+        click through to is a number to distrust, and rightly.
+        """
         data = self.store.stats()
         data["scope"] = self.project_scope
+        data["rules_everywhere"] = data.get("rules_active", 0)
+        data["rules_active"] = len(self.active_rules())
+        data["rules_here"] = len(self.store.all_rules(self.scopes))
         return data
 
     def close(self) -> None:
