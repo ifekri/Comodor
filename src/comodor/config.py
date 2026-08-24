@@ -264,6 +264,12 @@ class SkillsConfig:
     #: admits any single one of them; a second large skill in the same turn is
     #: still refused, and now says so rather than vanishing.
     max_tokens: int = 12_000
+    #: Skills present on disk that are not to be used, by name.
+    #:
+    #: Off rather than gone. A skill folder may have been written by hand over
+    #: an afternoon, and "I do not want this one just now" is a different
+    #: request from "delete this".
+    disabled: list[str] = field(default_factory=list)
     #: Install the starter skills the first time the folder is created.
     install_examples: bool = True
     #: Where the downloadable library is listed. A setting rather than a

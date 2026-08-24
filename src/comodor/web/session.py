@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from ..agent import AgentLoop, Conversation
@@ -31,6 +32,7 @@ from ..config import Config
 from ..events import Event, EventBus, Kind, Request
 from ..learning import LearningEngine
 from ..mcp import MCPManager
+from ..paths import Paths
 from ..providers.base import Message
 from ..providers.gateway import Gateway
 from ..safety import CheckpointStore, PermissionEngine, Redactor
@@ -414,6 +416,246 @@ class Session:
                       model=self.config.active_model())
         return True, ""
 
+    # -- what a provider can actually run ------------------------------------- #
+
+    def models_for(self, provider: str, refresh: bool = False) -> dict[str, Any]:
+        """Every model this provider offers, from the provider.
+
+        The catalogue's handful of names is a default for somebody who has not
+        chosen, and it was being used as the list of what exists — six names
+        where OpenRouter publishes four hundred, and will say so to anybody who
+        asks without a key.
+        """
+        from ..providers import models as model_list
+
+        entry = self.config.providers.get(provider)
+        try:
+            found = model_list.listing(
+                provider,
+                api_key=entry.api_key if entry else "",
+                base_url=entry.base_url if entry else "",
+                cache_root=self.config.paths.user,
+                refresh=refresh)
+        except Exception as error:
+            return {"provider": provider, "models": [], "source": "catalogue",
+                    "error": f"{type(error).__name__}", "age_seconds": 0}
+        return found.as_dict()
+
+    # -- where the agent works ------------------------------------------------ #
+
+    def folder(self) -> dict[str, Any]:
+        """The folder in use, and what is beside it to move to."""
+        here = Path(self.config.paths.project)
+        siblings: list[dict[str, Any]] = []
+        for candidate in (here.parent, Path.home()):
+            try:
+                for child in sorted(candidate.iterdir()):
+                    if not child.is_dir() or child.name.startswith("."):
+                        continue
+                    siblings.append({"path": str(child), "name": child.name,
+                                     "marked": _looks_like_a_project(child)})
+                    if len(siblings) >= 60:
+                        break
+            except OSError:
+                continue
+            if siblings:
+                break
+
+        return {
+            "current": str(here),
+            "name": here.name,
+            "is_project": _looks_like_a_project(here),
+            "parent": str(here.parent),
+            "home": str(Path.home()),
+            "siblings": siblings,
+            "confined": bool(self.config.safety.workspace_only),
+            "messages": len(self.conversation.messages),
+        }
+
+    def change_folder(self, where: str) -> tuple[bool, str, dict[str, Any]]:
+        """Work somewhere else, which means work on something else.
+
+        A different folder is a different project: its own learned rules, its
+        own checkpoints, its own conversation. So this is not a setting that is
+        edited in place — the chat is saved, the brain is re-scoped, and a new
+        conversation starts. The page asks before calling it, because losing
+        your place is not something to discover afterwards.
+        """
+        if self.busy:
+            return False, "a turn is running", {}
+
+        if not (where or "").strip():
+            # `Path("").resolve()` is the current directory, so an empty field
+            # would move the agent to wherever the process was started rather
+            # than being refused.
+            return False, "no folder given", {}
+
+        target = Path(where).expanduser()
+        try:
+            target = target.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return False, "there is no folder there", {}
+        if not target.is_dir():
+            return False, "that is a file, not a folder", {}
+        if target == Path(self.config.paths.project).resolve():
+            return True, "", self.folder()
+
+        # Everything said so far belongs to the folder it was said in.
+        self._persist()
+
+        self.config.paths = Paths(user=self.config.paths.user, project=target)
+
+        # The brain is scoped by project and reads that scope once, when it is
+        # built. Rebuilding it is what makes the move a move rather than a new
+        # label on the old memory.
+        try:
+            self.memory.close()
+        except Exception:
+            pass
+        self.memory = LearningEngine(
+            self.config, self.bus, self.gateway, checkpoints=self.checkpoints,
+            redact=Redactor([entry.api_key for entry in self.config.providers.values()
+                             if entry.api_key]),
+        )
+        self.permissions.on_denied = self.memory.on_denied
+        self.skills = load_skills(self.config)
+
+        self.conversation.clear()
+        self._saved = 0
+        self.meta = SessionMeta(
+            id=new_session_id(), cwd=str(target),
+            provider=self.config.provider, model=self.config.active_model(),
+        )
+        self._chat_from = self.cursor
+
+        self.agent = AgentLoop(
+            self.config, self.gateway,
+            ToolRegistry(skills=self.skills, mcp=self.mcp, config=self.config,
+                         spawn=spawner(self.config, self.gateway, self.bus,
+                                       skills=self.skills, mcp=self.mcp)),
+            self.bus, self.permissions, self.conversation, self.memory,
+            skills=self.skills,
+        )
+        self.bus.emit(Kind.STATUS, project=str(target))
+        return True, "", self.folder()
+
+    # -- skills ---------------------------------------------------------------- #
+
+    def skill_shelf(self, refresh: bool = False) -> dict[str, Any]:
+        """What is installed, what is available, and what is switched off."""
+        from ..skills import catalogue as library
+
+        disabled = set(self.config.skills.disabled)
+        root = self.config.paths.skills
+
+        mine: dict[str, dict[str, Any]] = {}
+        for skill in self.skills.skills.values():
+            mine[skill.name] = {
+                "id": skill.name,
+                "name": skill.name,
+                "description": skill.description,
+                "scope": skill.scope,
+                "installed": True,
+                # Both, because the file itself can say `enabled: false` and
+                # the setting can too, and a panel that showed only one of
+                # them would have a switch that appears not to work.
+                "enabled": bool(skill.enabled) and skill.name not in disabled,
+                "managed": False,
+                "available": False,
+            }
+
+        offered: list[dict[str, Any]] = []
+        error = ""
+        try:
+            shelf = library.fetch(self.config.skills.catalogue_url,
+                                  cache_root=self.config.paths.user,
+                                  timeout=(4.0, 8.0))
+        except Exception as problem:
+            shelf, error = None, f"{type(problem).__name__}"
+
+        if shelf is not None:
+            for entry in shelf.skills:
+                state = library.installed(root, entry.id)
+                card = {
+                    "id": entry.id,
+                    "name": entry.id,
+                    "description": entry.description,
+                    "scope": "user",
+                    "installed": bool(state.present),
+                    "enabled": entry.id not in disabled,
+                    "managed": bool(state.managed),
+                    "available": True,
+                }
+                if entry.id in mine:
+                    mine[entry.id].update({"available": True,
+                                           "managed": bool(state.managed),
+                                           "description": entry.description
+                                           or mine[entry.id]["description"]})
+                else:
+                    offered.append(card)
+
+        return {
+            "skills": sorted(mine.values(), key=lambda item: item["id"]) + offered,
+            "error": error,
+            "folder": str(root),
+        }
+
+    def skill(self, action: str, name: str) -> tuple[bool, str]:
+        """Install, remove, or switch one off."""
+        from ..skills import catalogue as library
+
+        name = (name or "").strip()
+        if not name:
+            return False, "which skill?"
+
+        if action in ("enable", "disable"):
+            disabled = [item for item in self.config.skills.disabled if item != name]
+            if action == "disable":
+                disabled.append(name)
+            self.config.skills.disabled = sorted(set(disabled))
+            try:
+                self.config.save()
+            except OSError as error:
+                return False, f"could not write the settings: {error}"
+            self._reload_skills()
+            return True, ""
+
+        if action == "install":
+            try:
+                shelf = library.fetch(self.config.skills.catalogue_url,
+                                      cache_root=self.config.paths.user)
+                entry = shelf.get(name)
+                if entry is None:
+                    return False, "no such skill in the library"
+                self.config.paths.skills.mkdir(parents=True, exist_ok=True)
+                library.install(entry, shelf, self.config.paths.skills)
+            except Exception as error:
+                return False, f"{error}"
+            self._reload_skills()
+            return True, ""
+
+        if action == "remove":
+            # Only what this program installed. A folder somebody wrote by
+            # hand is not ours to delete, and the stamp is how they are told
+            # apart.
+            if not library.remove(self.config.paths.skills, name):
+                return False, ("that one was not installed by Comodor — "
+                               "switch it off instead, or delete the folder "
+                               "yourself")
+            self._reload_skills()
+            return True, ""
+
+        return False, f"{action!r} is not something to do to a skill"
+
+    def _reload_skills(self) -> None:
+        """Re-read the folder and hand the new set to the running agent."""
+        self.skills = load_skills(self.config)
+        try:
+            self.agent.skills = self.skills
+            self.agent.tools.skills = self.skills
+        except Exception:
+            pass
+
     # -- rules ---------------------------------------------------------------- #
 
     def rules(self) -> dict[str, Any]:
@@ -549,6 +791,8 @@ class Session:
                 "providers": [{"id": name, "label": item.display,
                                "model": item.model, "ready": item.ready}
                               for name, item in self.config.providers.items()],
+                # Whether there is one, never what it is.
+                "has_key": bool(entry and entry.api_key),
             },
             "agent": {
                 "mode": self.config.agent.mode,
@@ -575,6 +819,12 @@ class Session:
                 "episodes": reflex.get("episodes", 0),
                 "signals": reflex.get("signals", 0),
                 "success_rate": round(float(reflex.get("success_rate", 0.0)), 3),
+                # Rules learned in other folders. Counted separately and named
+                # as such: the strip used to add them to this folder's total,
+                # so it said eight while the panel beside it, correctly scoped,
+                # listed none.
+                "rules_elsewhere": max(0, int(reflex.get("rules_everywhere", 0))
+                                       - int(reflex.get("rules_active", 0))),
             },
             "safety": {
                 "auto_approve_safe": safety.auto_approve_safe,
@@ -620,6 +870,30 @@ class Session:
             self.meta.model = model
             self._follow_the_window(model)
             self.bus.emit(Kind.STATUS, model=model)
+            return True, ""
+
+        if key == "api_key":
+            # Set for whichever provider is active. Somebody who set Comodor
+            # up with the wrong key, or rotated one, had to find a terminal.
+            new_key = str(value).strip()
+            if not new_key:
+                return False, "a key with nothing in it is not a key"
+            entry = self.config.providers.get(self.config.provider)
+            if entry is None:
+                return False, "no provider is selected"
+            entry.api_key = new_key
+            entry.configured = True
+            try:
+                self.config.save()
+            except OSError as error:
+                return False, f"could not write the settings: {error}"
+            # The gateway holds a client built with the old key.
+            try:
+                self.gateway.close()
+            except Exception:
+                pass
+            self.gateway = Gateway(self.config)
+            self.agent.gateway = self.gateway
             return True, ""
 
         if key == "provider":
@@ -746,6 +1020,20 @@ class Session:
                 self.mcp.close()
             except Exception:
                 pass
+
+
+#: Files that say "somebody works on something here" rather than "this is a
+#: folder". Used only to mark a row in the folder picker, never to refuse one.
+PROJECT_MARKERS = (".git", "pyproject.toml", "package.json", "Cargo.toml",
+                   "go.mod", "pom.xml", "build.gradle", "Makefile",
+                   "composer.json", "Gemfile", ".comodor")
+
+
+def _looks_like_a_project(where: Path) -> bool:
+    try:
+        return any((where / marker).exists() for marker in PROJECT_MARKERS)
+    except OSError:
+        return False
 
 
 def _what_is_already_here() -> tuple[list[Any], list[Any]]:

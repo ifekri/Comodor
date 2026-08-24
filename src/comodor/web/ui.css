@@ -84,7 +84,10 @@
   --rail: 292px;
 
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.34);
-  --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  /* A hairline and a halo, not a slab. Four solid pixels of accent was the
+   * loudest thing in an interface made of one-pixel borders, and it was the
+   * only element speaking at that weight. */
+  --ring: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-wash);
 
   --speed: 140ms;
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.2 6 8.2l4-4' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -203,7 +206,13 @@ body {
 [hidden] { display: none !important; }
 
 :focus { outline: none; }
-:focus-visible { box-shadow: var(--ring); border-radius: var(--r-sm); }
+:focus-visible {
+  box-shadow: var(--ring);
+  border-radius: var(--r-sm);
+  /* The halo is drawn outside the element, so it must not be clipped by a
+   * parent that scrolls — which is every panel in the rail. */
+  outline: none;
+}
 
 button, input, textarea, select {
   font: inherit; color: inherit; background: none; border: none; margin: 0;
@@ -252,6 +261,7 @@ code, pre, kbd, samp, .mono, .path {
 #shell {
   display: grid;
   grid-template-columns: var(--rail) minmax(0, 1fr);
+  position: relative;
   grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas: 'top    top'
                        'rail   main'
@@ -259,6 +269,31 @@ code, pre, kbd, samp, .mono, .path {
   height: 100dvh;
 }
 #shell[data-rail='closed'] { --rail: 0px; }
+
+/* The drag handle.
+ *
+ * One pixel of line, eight pixels of target. A grab area the width of the
+ * border it draws is a design that has never met a trackpad. */
+#rail-grip {
+  position: absolute; top: 0; bottom: 0;
+  inset-inline-start: calc(var(--rail) - 4px);
+  width: 8px; z-index: 30; cursor: col-resize;
+  background: transparent;
+  transition: background var(--speed);
+}
+#rail-grip::after {
+  content: ''; position: absolute; inset-block: 0;
+  inset-inline-start: 3px; width: 2px; border-radius: var(--r-full);
+  background: transparent; transition: background var(--speed);
+}
+#rail-grip:hover::after,
+#rail-grip:focus-visible::after,
+#rail-grip[data-dragging='true']::after { background: var(--accent); }
+#rail-grip:focus-visible { box-shadow: none; }
+#shell[data-rail='closed'] #rail-grip { display: none; }
+/* While dragging, the pointer owns the whole window: without this, moving
+ * over the transcript selects text and the drag turns into a highlight. */
+body[data-dragging='true'] { cursor: col-resize; user-select: none; }
 
 /* --------------------------------------------------------------------------
  * top bar
@@ -367,7 +402,11 @@ code, pre, kbd, samp, .mono, .path {
   border-radius: var(--r-md);
   transition: border-color var(--speed);
 }
-.field:focus-within { border-color: var(--accent-edge); }
+.field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.field input:focus-visible { box-shadow: none; }
 .field svg { width: 15px; height: 15px; color: var(--ink-faint); flex: none; }
 .field input { flex: 1; min-width: 0; font-size: 13.5px; }
 .field input::placeholder { color: var(--ink-dim); }
@@ -402,13 +441,43 @@ code, pre, kbd, samp, .mono, .path {
   content: ''; position: absolute; inset-block: 9px; inset-inline-start: 0;
   width: 2px; border-radius: var(--r-full); background: var(--accent);
 }
+/* One line, always, ending in a fade rather than an ellipsis.
+ *
+ * The row reserves the delete icon's width so a title can never run under it,
+ * and the last stretch of that reserved space is where the text dissolves. A
+ * soft edge reads as "there is more of this"; three dots read as punctuation
+ * somebody typed.
+ *
+ * Done with a mask rather than a gradient overlay, so it works on the row's
+ * normal, hover and selected backgrounds and in both themes without four
+ * colours being kept in step. And it flips with the text — a Persian title
+ * ends on the left, so that is where it fades.
+ */
 .chat-row .title {
   display: block; font-size: 13.5px; font-weight: 500;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden; white-space: nowrap;
+  padding-inline-end: 26px;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 34px),
+                                      transparent calc(100% - 8px));
+  mask-image: linear-gradient(to right, #000 calc(100% - 34px),
+                              transparent calc(100% - 8px));
+}
+.chat-row .title[dir='rtl'] {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 34px),
+                                      transparent calc(100% - 8px));
+  mask-image: linear-gradient(to left, #000 calc(100% - 34px),
+                              transparent calc(100% - 8px));
+}
+/* A title that fits needs no fade, and fading the end of a short one would
+ * dim a word for no reason. Set by the script, which is the only thing that
+ * can measure it. */
+.chat-row .title[data-clipped='false'] {
+  -webkit-mask-image: none; mask-image: none;
 }
 .chat-row .meta {
   display: block; margin-top: 2px; font-size: 11.5px; color: var(--ink-dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-inline-end: 26px;
 }
 /* The highlighted row is a lighter surface, so the same grey on it is a
  * weaker contrast: 3.84:1 on the selected row against 5.0 on the rail. The
@@ -426,6 +495,10 @@ code, pre, kbd, samp, .mono, .path {
   border-radius: var(--r-sm); color: var(--ink-dim); opacity: 0;
 }
 .chat-row:hover .drop, .chat-row .drop:focus-visible { opacity: 1; }
+/* Hidden, never absent: the row reserves its width at all times, so the fade
+ * does not move when the pointer arrives. */
+.chat-row .drop { pointer-events: auto; }
+.chat-row .drop[hidden] { display: grid !important; visibility: hidden; }
 .chat-row .drop:hover { background: var(--bg-active); color: var(--bad); }
 .chat-row .drop svg { width: 14px; height: 14px; }
 
@@ -535,6 +608,96 @@ code, pre, kbd, samp, .mono, .path {
 .switch input:checked + .track::after { transform: translateX(16px); }
 [dir='rtl'] .switch input:checked + .track::after { transform: translateX(-16px); }
 .switch input:focus-visible + .track { box-shadow: var(--ring); }
+
+.control > .label { font-size: 12px; color: var(--ink-dim); }
+.control .aside { font-size: 11.5px; color: var(--ink-dim); line-height: 1.45; }
+/* A path is a reference, not a sentence. Four wrapped lines of it under a
+ * one-line control is four lines nobody reads; the whole of it is on hover. */
+.control .aside.path {
+  font-family: var(--mono); font-size: 11px; direction: ltr;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.control .aside.warn, .aside.warn { color: var(--warn); }
+
+.control input {
+  height: 34px; padding: 0 9px; width: 100%;
+  background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: var(--r-sm); font-size: 13px;
+}
+.control input.mono { font-family: var(--mono); font-size: 12.5px; }
+
+.key-row { display: flex; gap: 6px; }
+.key-row input { flex: 1; min-width: 0; }
+
+button.small {
+  height: 34px; padding-inline: 12px; flex: none;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--bg-raised); font-size: 12.5px; color: var(--ink-soft);
+  transition: border-color var(--speed), color var(--speed);
+}
+button.small:hover { border-color: var(--accent-edge); color: var(--ink); }
+button.small.primary { background: var(--accent); border-color: var(--accent);
+                       color: #fff; }
+button.small.primary:hover { background: var(--accent-soft); }
+button.small.danger:hover { border-color: var(--bad); color: var(--bad); }
+
+/* -- four hundred models is a list you type into, not a dropdown ----------- */
+.model-status {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 11.5px; color: var(--ink-dim); margin-top: 2px;
+}
+.model-status .warn { color: var(--warn); }
+.model-status button {
+  font-size: 11.5px; color: var(--ink-dim); padding: 2px 7px;
+  border-radius: var(--r-sm); border: 1px solid var(--line);
+  margin-inline-start: auto;
+}
+.model-status button:hover { color: var(--ink); border-color: var(--accent-edge); }
+
+.model-list, .folder-list {
+  max-height: 15rem; overflow-y: auto; margin-top: 6px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+}
+.model-row, .folder-row {
+  display: block; width: 100%; text-align: start; padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.model-row:last-child, .folder-row:last-child { border-bottom: none; }
+.model-row:hover, .folder-row:hover { background: var(--bg-hover); }
+.model-row[aria-current='true'], .folder-row[aria-current='true'] {
+  background: var(--accent-wash);
+}
+.model-row b, .folder-row b {
+  display: block; font-family: var(--mono); font-size: 12px; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  direction: ltr;
+}
+.model-row span { display: block; margin-top: 2px; font-size: 11px;
+                  color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.folder-row { display: flex; align-items: baseline; gap: 8px; }
+.folder-row b { flex: 1; min-width: 0; font-family: var(--font); font-size: 13px; }
+.folder-row em { font-style: normal; font-size: 10.5px; color: var(--accent);
+                 text-transform: uppercase; letter-spacing: .05em; }
+
+.current-folder {
+  margin: 0 0 6px; font-size: 12.5px; overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+/* -- skills ---------------------------------------------------------------- */
+.skill {
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 9px 10px; margin-bottom: 7px; background: var(--bg-raised);
+}
+.skill[data-enabled='false'] { opacity: .6; }
+.skill[data-installed='false'] { background: var(--bg); border-style: dashed; }
+.skill-head { display: flex; align-items: baseline; gap: 8px; }
+.skill-head b { font-size: 13px; }
+.skill-head em { font-style: normal; font-size: 10.5px; color: var(--accent);
+                 text-transform: uppercase; letter-spacing: .05em; }
+.skill .aside { display: block; margin: 4px 0 0; }
+.skill-doings { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 
 .pills { display: flex; flex-wrap: wrap; gap: 5px; }
 .pill {
@@ -795,7 +958,13 @@ code, pre, kbd, samp, .mono, .path {
   background: var(--bg-raised); transition: border-color var(--speed);
   box-shadow: var(--shadow);
 }
-#composer:focus-within { border-color: var(--accent-edge); }
+#composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--shadow), 0 0 0 3px var(--accent-wash);
+}
+/* The textarea is the whole of that surface, so its own ring would be a ring
+ * inside a ring. */
+#prompt:focus-visible { box-shadow: none; }
 
 #prompt {
   display: block; width: 100%; resize: none; padding: 13px 15px 4px;
@@ -938,6 +1107,10 @@ code, pre, kbd, samp, .mono, .path {
 @media (max-width: 900px) {
   #shell { grid-template-columns: minmax(0, 1fr);
            grid-template-areas: 'top' 'main' 'foot'; }
+
+  /* The rail is a drawer here with a width of its own, so there is no edge
+   * between two panes to drag — and a stored desktop width must not leak in. */
+  #rail-grip { display: none; }
 
   #rail {
     position: fixed; inset-block: 0; inset-inline-start: 0; z-index: 50;

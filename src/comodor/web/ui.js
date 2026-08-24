@@ -598,6 +598,13 @@ function drawChats(chats) {
       row.appendChild(snippet);
     }
 
+    // Only a title that is actually cut off gets the fade. Measured after
+    // it is in the document, because the answer depends on the font, the
+    // language and how wide the rail has been dragged to.
+    requestAnimationFrame(() => {
+      title.dataset.clipped = String(title.scrollWidth > title.clientWidth + 1);
+    });
+
     row.onclick = () => openChat(chat.id);
 
     if (chat.id !== state.chatId) {
@@ -1136,6 +1143,171 @@ function card(title) {
   return body;
 }
 
+function field(parent, label, control, note, noteClass) {
+  const line = document.createElement('label');
+  line.className = 'control';
+  const name = document.createElement('span');
+  name.className = 'label';
+  name.textContent = label;
+  line.append(name, control);
+  if (note) {
+    const aside = document.createElement('span');
+    aside.className = 'aside' + (noteClass ? ' ' + noteClass : '');
+    aside.textContent = note;
+    if (noteClass === 'path') aside.title = note;
+    line.appendChild(aside);
+  }
+  parent.appendChild(line);
+  return control;
+}
+
+function money(value) {
+  if (value === null || value === undefined) return 'price not stated';
+  if (value === 0) return 'free';
+  return '$' + (value < 1 ? value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+                          : value.toFixed(2)) + '/M';
+}
+
+/* -- choosing from four hundred models ------------------------------------- */
+
+let modelIndex = { provider: '', models: [], source: '', age: 0, error: '' };
+// Reachable from outside for the browser tests, which drive the real page.
+window.modelIndex = modelIndex;
+
+function drawModelPicker(body, data) {
+  const wrap = document.createElement('div');
+  wrap.className = 'control';
+
+  const name = document.createElement('span');
+  name.className = 'label';
+  name.textContent = 'Model';
+
+  const search = document.createElement('input');
+  search.type = 'text';
+  search.className = 'mono';
+  search.setAttribute('aria-label', 'Search models');
+  // The current model is the placeholder, not the value. As a value it was
+  // also a filter, so the picker opened showing one row out of four hundred.
+  search.placeholder = data.model.model || 'search models';
+  search.spellcheck = false;
+
+  const list = document.createElement('div');
+  list.className = 'model-list';
+
+  const status = document.createElement('div');
+  status.className = 'model-status';
+
+  const say = () => {
+    status.textContent = '';
+    const count = document.createElement('span');
+    const total = modelIndex.models.length;
+    count.textContent = total ? `${total} models` : 'no list yet';
+    status.appendChild(count);
+
+    const where = document.createElement('span');
+    if (modelIndex.source === 'live') where.textContent = 'from the provider, just now';
+    else if (modelIndex.source === 'cached') where.textContent = 'checked ' + ago(modelIndex.age);
+    else if (modelIndex.source === 'stale') where.textContent = 'checked ' + ago(modelIndex.age)
+      + ' — could not reach the provider';
+    else where.textContent = modelIndex.error
+      ? 'built-in list only — ' + modelIndex.error : 'built-in list only';
+    where.className = modelIndex.source === 'live' || modelIndex.source === 'cached'
+      ? '' : 'warn';
+    status.appendChild(where);
+
+    const again = document.createElement('button');
+    again.type = 'button';
+    again.textContent = 'Refresh';
+    again.onclick = () => loadModels(data.model.provider, true);
+    status.appendChild(again);
+  };
+
+  const paint = () => {
+    const needle = search.value.trim().toLowerCase();
+    const matching = modelIndex.models
+      .filter((m) => !needle || m.id.toLowerCase().includes(needle)
+                     || (m.name || '').toLowerCase().includes(needle));
+    // The one in use first, wherever the alphabet would have put it.
+    matching.sort((a, b) => (b.id === data.model.model) - (a.id === data.model.model));
+    const shown = matching.slice(0, 60);
+    list.textContent = '';
+    if (!shown.length) {
+      const none = document.createElement('p');
+      none.className = 'empty-note';
+      none.textContent = modelIndex.models.length
+        ? 'Nothing matches that.' : 'No models to choose from yet.';
+      list.appendChild(none);
+      return;
+    }
+    shown.forEach((model) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'model-row';
+      if (model.id === data.model.model) row.setAttribute('aria-current', 'true');
+      const id = document.createElement('b');
+      id.textContent = model.id;
+      const facts = document.createElement('span');
+      const bits = [];
+      if (model.context) bits.push(model.context.toLocaleString() + ' ctx');
+      bits.push(money(model.input_cost) + ' in');
+      bits.push(money(model.output_cost) + ' out');
+      facts.textContent = bits.join('  ·  ');
+      row.append(id, facts);
+      row.onclick = () => {
+        search.value = '';
+        search.placeholder = model.id;
+        data.model.model = model.id;
+        change('model', model.id);
+        paint();
+      };
+      list.appendChild(row);
+    });
+    if (matching.length > shown.length) {
+      const more = document.createElement('p');
+      more.className = 'empty-note';
+      more.textContent = `${matching.length - shown.length} more — type to narrow`;
+      list.appendChild(more);
+    }
+  };
+
+  search.addEventListener('input', paint);
+  wrap.append(name, search, status, list);
+  body.appendChild(wrap);
+
+  wrap._paint = paint;
+  wrap._say = say;
+  say();
+  paint();
+  return wrap;
+}
+
+function ago(seconds) {
+  if (!seconds) return 'just now';
+  if (seconds < 90) return 'a moment ago';
+  if (seconds < 5400) return Math.round(seconds / 60) + ' minutes ago';
+  if (seconds < 172800) return Math.round(seconds / 3600) + ' hours ago';
+  return Math.round(seconds / 86400) + ' days ago';
+}
+
+function loadModels(provider, refresh) {
+  get('/api/models?provider=' + encodeURIComponent(provider)
+      + (refresh ? '&refresh=1' : '')).then((data) => {
+    if (!data) return;
+    modelIndex = {
+      provider, models: data.models || [], source: data.source,
+      age: data.age_seconds || 0, error: data.error || '',
+    };
+    window.modelIndex = modelIndex;
+    const wrap = els.adminBody.querySelector('.control .model-list');
+    if (wrap && wrap.parentElement._paint) {
+      wrap.parentElement._say();
+      wrap.parentElement._paint();
+    }
+  });
+}
+
+/* -- the panel -------------------------------------------------------------- */
+
 function drawAdmin(data) {
   state.admin = data;
   els.adminBody.textContent = '';
@@ -1144,11 +1316,6 @@ function drawAdmin(data) {
   {
     const body = card('Model');
 
-    const providers = document.createElement('div');
-    providers.className = 'control';
-    const providerLabel = document.createElement('label');
-    providerLabel.textContent = 'Provider';
-    providerLabel.htmlFor = 'pick-provider';
     const providerPick = document.createElement('select');
     providerPick.id = 'pick-provider';
     data.model.providers.forEach((entry) => {
@@ -1160,56 +1327,63 @@ function drawAdmin(data) {
       providerPick.appendChild(option);
     });
     providerPick.onchange = () => change('provider', providerPick.value);
-    providers.append(providerLabel, providerPick);
+    field(body, 'Provider', providerPick);
 
-    const models = document.createElement('div');
-    models.className = 'control';
-    const modelLabel = document.createElement('label');
-    modelLabel.textContent = 'Model';
-    modelLabel.htmlFor = 'pick-model';
-    const modelPick = document.createElement('select');
-    modelPick.id = 'pick-model';
-    data.model.models.forEach((name) => {
-      const option = document.createElement('option');
-      option.value = name;
-      option.textContent = name;
-      if (name === data.model.model) option.selected = true;
-      modelPick.appendChild(option);
-    });
-    modelPick.onchange = () => change('model', modelPick.value);
-    models.append(modelLabel, modelPick);
+    drawModelPicker(body, data);
 
-    body.append(providers, models);
+    // The key. Somebody who set this up with the wrong one, or rotated it,
+    // had to find a terminal.
+    const keyRow = document.createElement('div');
+    keyRow.className = 'key-row';
+    const key = document.createElement('input');
+    key.type = 'password';
+    key.id = 'admin-key';
+    key.className = 'mono';
+    key.autocomplete = 'off';
+    key.placeholder = data.model.has_key ? 'a key is set — paste a new one to replace it'
+                                         : 'no key set';
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'small';
+    save.textContent = 'Save';
+    save.onclick = () => {
+      if (!key.value.trim()) { toast('Nothing to save', 'bad', 'key'); return; }
+      post('/api/setting', { key: 'api_key', value: key.value })
+        .then((reply) => {
+          if (!reply.saved) { toast(reply.error || 'That did not take', 'bad', 'key'); return; }
+          key.value = '';
+          toast('Key saved', 'good', 'key');
+          refreshAdmin();
+        });
+    };
+    keyRow.append(key, save);
+    field(body, 'API key', keyRow,
+          data.model.has_key ? data.paths.config : 'This provider has no key yet',
+          data.model.has_key ? 'path' : '');
   }
+
+  /* -- where it works ---------------------------------------------------- */
+  drawFolderCard();
 
   /* -- how far it goes on its own --------------------------------------- */
   {
     const body = card('How it runs');
 
-    const modes = document.createElement('div');
-    modes.className = 'control';
-    const modeLabel = document.createElement('label');
-    modeLabel.textContent = 'Mode';
-    modeLabel.htmlFor = 'pick-mode';
     const modePick = document.createElement('select');
     modePick.id = 'pick-mode';
     ['act', 'plan', 'chat'].forEach((name) => {
       const option = document.createElement('option');
       option.value = name;
-      // Just the name. The sentence explaining it went in the option text
-      // first and was cut off by the width of the control it was in.
       option.textContent = name[0].toUpperCase() + name.slice(1);
       if (name === data.agent.mode) option.selected = true;
       modePick.appendChild(option);
     });
-    const modeNote = document.createElement('p');
-    modeNote.style.cssText = 'margin:2px 0 0;font-size:12px;color:var(--ink-faint)';
-    modeNote.textContent = MODE_NOTE[data.agent.mode] || '';
+    const modeNote = field(body, 'Mode', modePick, MODE_NOTE[data.agent.mode] || '');
     modePick.onchange = () => {
-      modeNote.textContent = MODE_NOTE[modePick.value] || '';
+      modePick.closest('.control').querySelector('.aside').textContent =
+        MODE_NOTE[modePick.value] || '';
       change('mode', modePick.value);
     };
-    modes.append(modeLabel, modePick, modeNote);
 
     const loop = document.createElement('label');
     loop.className = 'switch';
@@ -1222,6 +1396,7 @@ function drawAdmin(data) {
     const track = document.createElement('span');
     track.className = 'track';
     loop.append(loopText, loopBox, track);
+    body.appendChild(loop);
 
     const facts = document.createElement('dl');
     facts.className = 'kv';
@@ -1233,9 +1408,11 @@ function drawAdmin(data) {
       ? Math.round(data.agent.max_seconds / 60) + ' min' : 'none');
     row(facts, 'Spend limit', data.agent.max_cost_usd
       ? '$' + data.agent.max_cost_usd : 'none');
-
-    body.append(modes, loop, facts);
+    body.appendChild(facts);
   }
+
+  /* -- skills ------------------------------------------------------------ */
+  drawSkillsCard();
 
   /* -- what it may touch ------------------------------------------------- */
   {
@@ -1257,13 +1434,14 @@ function drawAdmin(data) {
     facts.style.marginTop = '10px';
     row(facts, 'Undo copies', data.safety.checkpoints ? 'kept' : 'off');
     row(facts, 'Confined to', data.safety.workspace_only
-      ? 'this folder' : 'anywhere');
+      ? 'the working folder' : 'anywhere');
     if (data.safety.grants.length) {
       row(facts, 'Granted', data.safety.grants.join(', '));
     }
 
     const note = document.createElement('p');
-    note.style.cssText = 'margin:10px 0 0;font-size:12px;color:var(--ink-faint)';
+    note.className = 'aside';
+    note.style.marginTop = '10px';
     note.textContent = 'Changed where Comodor was started, not here — a page '
       + 'anyone with the link can open is the wrong place to widen what the '
       + 'agent may do.';
@@ -1276,9 +1454,10 @@ function drawAdmin(data) {
     const body = card('What it has learned');
     const grid = document.createElement('div');
     grid.className = 'stat-grid';
-    const stat = (value, label) => {
+    const stat = (value, label, hint) => {
       const box = document.createElement('div');
       box.className = 'stat';
+      if (hint) box.title = hint;
       const big = document.createElement('b');
       big.textContent = value;
       const small = document.createElement('span');
@@ -1286,13 +1465,24 @@ function drawAdmin(data) {
       box.append(big, small);
       grid.appendChild(box);
     };
-    stat(data.reflex.rules_active, 'rules');
+    stat(data.reflex.rules_active, 'rules here',
+         'Rules in force in this folder. Click the Rules tab to see them.');
     stat(data.reflex.lessons, 'lessons');
     stat(data.reflex.skills, 'skills');
     stat(data.reflex.episodes, 'tasks');
     stat(data.reflex.signals, 'signals');
-    stat(Math.round(data.reflex.success_rate * 100) + '%', 'succeeded');
+    stat(data.reflex.episodes ? Math.round(data.reflex.success_rate * 100) + '%' : '—',
+         'succeeded', data.reflex.episodes ? '' : 'No finished tasks yet');
     body.appendChild(grid);
+
+    if (data.reflex.rules_elsewhere) {
+      const other = document.createElement('p');
+      other.className = 'aside';
+      other.style.marginTop = '10px';
+      other.textContent = data.reflex.rules_elsewhere
+        + ' more rules were learned in other folders. They do not apply here.';
+      body.appendChild(other);
+    }
   }
 
   /* -- tools ------------------------------------------------------------- */
@@ -1310,25 +1500,10 @@ function drawAdmin(data) {
     });
     body.appendChild(pills);
 
-    if (data.skills.length) {
-      const heading = document.createElement('p');
-      heading.style.cssText = 'margin:12px 0 6px;font-size:12px;color:var(--ink-dim)';
-      heading.textContent = 'Your skills';
-      const skills = document.createElement('div');
-      skills.className = 'pills';
-      data.skills.forEach((skill) => {
-        const pill = document.createElement('span');
-        pill.className = 'pill';
-        pill.textContent = skill.name;
-        if (skill.description) pill.title = skill.description;
-        skills.appendChild(pill);
-      });
-      body.append(heading, skills);
-    }
-
     if (data.mcp.enabled && data.mcp.servers.length) {
       const heading = document.createElement('p');
-      heading.style.cssText = 'margin:12px 0 6px;font-size:12px;color:var(--ink-dim)';
+      heading.className = 'aside';
+      heading.style.margin = '12px 0 6px';
       heading.textContent = 'Connected servers';
       const servers = document.createElement('div');
       servers.className = 'pills';
@@ -1350,9 +1525,9 @@ function drawAdmin(data) {
     row(facts, 'Version', data.app.version);
     row(facts, 'Python', data.app.python);
     row(facts, 'System', data.app.platform);
-    row(facts, 'Project', data.paths.project);
     row(facts, 'Settings', data.paths.config);
     row(facts, 'Chats', data.paths.sessions);
+    row(facts, 'Brain', data.paths.brain);
     facts.querySelectorAll('dd').forEach((dd, index) => {
       if (index >= 3) dd.className = 'path';
     });
@@ -1361,11 +1536,211 @@ function drawAdmin(data) {
 
   els.reflexBit.hidden = !data.reflex.rules_active;
   els.reflex.textContent = data.reflex.rules_active;
-  // The number in the status strip is the way most people will find this
-  // panel, so it opens it rather than only reporting.
   els.reflexBit.style.cursor = 'pointer';
-  els.reflexBit.title = 'The rules in force — click to see them';
+  els.reflexBit.title = 'The rules in force in this folder — click to see them';
   els.reflexBit.onclick = () => { setRail(true); selectTab($('tab-rules')); };
+
+  loadModels(data.model.provider, false);
+}
+
+/* -- the folder the agent works in ----------------------------------------- */
+
+function drawFolderCard() {
+  const body = card('Working folder');
+  const holder = document.createElement('div');
+  holder.id = 'folder-body';
+  body.appendChild(holder);
+  get('/api/folder').then((data) => { if (data) drawFolder(holder, data); });
+}
+
+function drawFolder(holder, data) {
+  holder.textContent = '';
+
+  const now = document.createElement('p');
+  now.className = 'path current-folder';
+  now.textContent = data.current;
+  holder.appendChild(now);
+
+  const what = document.createElement('p');
+  what.className = 'aside';
+  what.textContent = data.confined
+    ? 'The agent reads and writes here and nowhere else.'
+    : 'The agent starts here. It is not confined to it — see Permissions.';
+  holder.appendChild(what);
+
+  const line = document.createElement('form');
+  line.className = 'key-row';
+  const typed = document.createElement('input');
+  typed.type = 'text';
+  typed.id = 'pick-folder';
+  typed.className = 'mono';
+  typed.placeholder = 'another folder, by path';
+  typed.setAttribute('aria-label', 'Change the working folder');
+  const go = document.createElement('button');
+  go.type = 'submit';
+  go.className = 'small';
+  go.textContent = 'Move';
+  line.append(typed, go);
+  line.onsubmit = (event) => {
+    event.preventDefault();
+    if (typed.value.trim()) moveTo(typed.value.trim(), data);
+  };
+  holder.appendChild(line);
+
+  if (data.siblings.length) {
+    const near = document.createElement('div');
+    near.className = 'folder-list';
+    data.siblings.slice(0, 40).forEach((child) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'folder-row';
+      if (child.path === data.current) row.setAttribute('aria-current', 'true');
+      const name = document.createElement('b');
+      name.textContent = child.name;
+      row.appendChild(name);
+      if (child.marked) {
+        const tag = document.createElement('em');
+        tag.textContent = 'project';
+        row.appendChild(tag);
+      }
+      row.onclick = () => moveTo(child.path, data);
+      near.appendChild(row);
+    });
+    holder.appendChild(near);
+  }
+}
+
+function moveTo(where, data) {
+  // Asked, because a different folder is a different project: its own rules,
+  // its own checkpoints, and a conversation that starts empty. Finding that
+  // out afterwards is finding out you have lost your place.
+  const warn = data.messages
+    ? `Move to\n\n    ${where}\n\nThat is a different project. This `
+      + `conversation (${data.messages} messages) is saved and a new one starts `
+      + `there, with that folder's own learned rules.`
+    : `Work in\n\n    ${where}\n\nThe agent will read and write there.`;
+  if (!confirm(warn)) return;
+
+  post('/api/folder', { path: where }).then((reply) => {
+    if (!reply.ok) { toast(reply.error || 'Could not move there', 'bad', 'folder'); return; }
+    takeState(reply.state);
+    state.cursor = reply.state.cursor;
+    els.stream.textContent = '';
+    live = null;
+    running.clear();
+    showBlank();
+    refreshChats();
+    refreshRules();
+    refreshAdmin();
+    toast('Working in ' + (reply.folder.name || where), 'good', 'folder');
+  });
+}
+
+/* -- skills ----------------------------------------------------------------- */
+
+function drawSkillsCard() {
+  const body = card('Skills');
+  const holder = document.createElement('div');
+  holder.id = 'skills-manage';
+  body.appendChild(holder);
+  get('/api/skills').then((data) => { if (data) drawSkills(holder, data); });
+}
+
+function drawSkills(holder, data) {
+  holder.textContent = '';
+
+  if (data.error) {
+    const note = document.createElement('p');
+    note.className = 'aside warn';
+    note.textContent = 'The library could not be reached (' + data.error
+      + '), so only what is installed is listed.';
+    holder.appendChild(note);
+  }
+
+  if (!data.skills.length) {
+    const none = document.createElement('p');
+    none.className = 'empty-note';
+    none.style.textAlign = 'start';
+    none.textContent = 'Nothing installed and nothing to offer right now.';
+    holder.appendChild(none);
+    return;
+  }
+
+  data.skills.forEach((skill) => {
+    const box = document.createElement('div');
+    box.className = 'skill';
+    box.dataset.installed = String(skill.installed);
+    box.dataset.enabled = String(skill.enabled);
+
+    const head = document.createElement('div');
+    head.className = 'skill-head';
+    const name = document.createElement('b');
+    name.textContent = skill.name;
+    head.appendChild(name);
+    if (skill.scope === 'project') {
+      const tag = document.createElement('em');
+      tag.textContent = 'this project';
+      head.appendChild(tag);
+    }
+    box.appendChild(head);
+
+    if (skill.description) {
+      const what = document.createElement('p');
+      what.className = 'aside';
+      what.textContent = skill.description;
+      box.appendChild(what);
+    }
+
+    const doings = document.createElement('div');
+    doings.className = 'skill-doings';
+
+    if (skill.installed) {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'small';
+      toggle.textContent = skill.enabled ? 'Switch off' : 'Switch on';
+      toggle.onclick = () => skillAction(skill.enabled ? 'disable' : 'enable',
+                                         skill.name, holder);
+      doings.appendChild(toggle);
+
+      if (skill.managed) {
+        const drop = document.createElement('button');
+        drop.type = 'button';
+        drop.className = 'small danger';
+        drop.textContent = 'Remove';
+        drop.onclick = () => {
+          if (!confirm(`Remove the "${skill.name}" skill from disk?`)) return;
+          skillAction('remove', skill.name, holder);
+        };
+        doings.appendChild(drop);
+      } else {
+        const mine = document.createElement('span');
+        mine.className = 'aside';
+        mine.textContent = 'yours — Comodor will not delete it';
+        doings.appendChild(mine);
+      }
+    } else {
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'small primary';
+      add.textContent = 'Install';
+      add.onclick = () => skillAction('install', skill.name, holder);
+      doings.appendChild(add);
+    }
+
+    box.appendChild(doings);
+    holder.appendChild(box);
+  });
+}
+
+function skillAction(action, name, holder) {
+  post('/api/skills', { action, name }).then((reply) => {
+    if (!reply.ok) { toast(reply.error || 'That did not take', 'bad', 'skill'); return; }
+    toast({ install: 'Installed ' + name, remove: 'Removed ' + name,
+            enable: name + ' is on', disable: name + ' is off' }[action] || 'Done',
+          'good', 'skill');
+    get('/api/skills').then((data) => { if (data) drawSkills(holder, data); });
+  });
 }
 
 function refreshAdmin() {
@@ -1481,6 +1856,97 @@ $('admin-jump').onclick = () => {
   setRail(true);
   selectTab($('tab-admin'));
 };
+
+/* ------------------------------------------------------------- rail width
+ *
+ * 292 pixels is a reasonable default and a bad only-option. Chat titles are as
+ * long as the first thing somebody typed and the Rules panel holds sentences,
+ * so the person reading them should be able to make room — and the person on a
+ * laptop should be able to take it back.
+ */
+
+const RAIL_MIN = 220;
+const RAIL_MAX = 520;
+const WIDTH_KEY = 'comodor-rail-width';
+
+function setRailWidth(px, remember) {
+  const width = Math.round(Math.max(RAIL_MIN, Math.min(RAIL_MAX, px)));
+  els.shell.style.setProperty('--rail', width + 'px');
+  $('rail-grip').setAttribute('aria-valuenow', String(width));
+  if (remember) {
+    try { localStorage.setItem(WIDTH_KEY, String(width)); } catch { /* ignore */ }
+  }
+  // A title that fitted at 292 may not fit at 240. The fade is measured, not
+  // guessed, so it has to be measured again.
+  remeasureTitles();
+  return width;
+}
+
+function remeasureTitles() {
+  requestAnimationFrame(() => {
+    document.querySelectorAll('.chat-row .title').forEach((title) => {
+      title.dataset.clipped = String(title.scrollWidth > title.clientWidth + 1);
+    });
+  });
+}
+
+(function restoreRailWidth() {
+  if (narrow()) return;
+  let stored = null;
+  try { stored = localStorage.getItem(WIDTH_KEY); } catch { /* private window */ }
+  if (stored) setRailWidth(parseInt(stored, 10) || RAIL_MIN, false);
+})();
+
+(function makeRailDraggable() {
+  const grip = $('rail-grip');
+  let dragging = false;
+
+  const move = (event) => {
+    if (!dragging) return;
+    // From the shell's own left edge, not the window's: in a right-to-left
+    // document the rail is on the other side and clientX counts the other way.
+    const box = els.shell.getBoundingClientRect();
+    const rtl = getComputedStyle(document.documentElement).direction === 'rtl';
+    setRailWidth(rtl ? box.right - event.clientX : event.clientX - box.left, false);
+  };
+
+  const stop = () => {
+    if (!dragging) return;
+    dragging = false;
+    grip.dataset.dragging = 'false';
+    document.body.dataset.dragging = 'false';
+    const width = parseInt(grip.getAttribute('aria-valuenow'), 10);
+    setRailWidth(width, true);
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', stop);
+  };
+
+  grip.addEventListener('pointerdown', (event) => {
+    if (narrow()) return;
+    event.preventDefault();
+    dragging = true;
+    grip.dataset.dragging = 'true';
+    document.body.dataset.dragging = 'true';
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+  });
+
+  // A handle only a mouse can reach is a handle half the people cannot use.
+  grip.addEventListener('keydown', (event) => {
+    const step = event.shiftKey ? 48 : 12;
+    const now = parseInt(grip.getAttribute('aria-valuenow'), 10) || RAIL_MIN;
+    if (event.key === 'ArrowLeft') setRailWidth(now - step, true);
+    else if (event.key === 'ArrowRight') setRailWidth(now + step, true);
+    else if (event.key === 'Home') setRailWidth(RAIL_MIN, true);
+    else if (event.key === 'End') setRailWidth(RAIL_MAX, true);
+    else return;
+    event.preventDefault();
+  });
+
+  // Double-click puts it back, which is the escape hatch for having dragged
+  // it somewhere silly.
+  grip.addEventListener('dblclick', () => setRailWidth(292, true));
+})();
 
 /* ---------------------------------------------------------------- composer */
 

@@ -202,4 +202,17 @@ def load_for(config) -> SkillRegistry:
         except OSError:
             pass                      # a read-only home is not worth failing over
     registry.discover(user_dir, config.paths.project_skills)
+
+    # Off, and still both on disk and in the registry. A folder somebody
+    # wrote by hand over an afternoon is not deleted because they wanted it
+    # out of the way today — and a skill that vanishes from the list is one
+    # they cannot switch back on.
+    #
+    # `Skill.enabled` is the mechanism the file format already uses for this,
+    # and `match` already honours it, so the setting joins it rather than
+    # inventing a second way to be off.
+    for name in getattr(config.skills, "disabled", ()) or ():
+        skill = registry.skills.get(name)
+        if skill is not None:
+            skill.enabled = False
     return registry
