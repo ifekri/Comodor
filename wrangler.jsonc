@@ -15,7 +15,7 @@
   //
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "comodor-site",
-  "compatibility_date": "2026-08-01",
+  "compatibility_date": "2026-08-28",
 
   "assets": {
     "directory": "./out",
