@@ -20,6 +20,29 @@
 /_next/static/*
   Cache-Control: public, max-age=31536000, immutable
 
+# Icons, the social card and the one SVG the page draws. None of them are
+# content-hashed, so they were revalidated on every visit — 837 KB of files
+# that change perhaps once a year, asked about every time somebody arrives.
+#
+# `stale-while-revalidate` is what makes a long TTL safe here: the browser
+# shows the copy it has immediately and refreshes it in the background, so a
+# replaced icon appears on the next visit rather than in a week. Without it a
+# week-long TTL would mean a week of the old one.
+/*.png
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/*.svg
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/*.ico
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/site.webmanifest
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/browserconfig.xml
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
 # The page itself is not hashed, so it is revalidated — cheap when unchanged,
 # and a deploy is visible immediately rather than after an hour.
 /
