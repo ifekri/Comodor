@@ -41,11 +41,21 @@ const SCRIPTS = {
 /**
  * Which installer this caller wants.
  *
- * Returns 'ps1', 'sh', or 'browser'.
+ * Returns 'ps1', 'sh', 'browser', or 'nothing' for an address that means
+ * nothing here.
  */
 export function wantedBy(request) {
   const url = new URL(request.url);
   const agent = request.headers.get('user-agent') || '';
+
+  // Only the addresses that mean something. Everything used to be served the
+  // installer with a 200, so `get.comodor.ai/wp-admin.php` — a scanner, or
+  // somebody's typo — came back as twenty-seven kilobytes of shell script and
+  // a success status. A wrong URL should say so.
+  const path = url.pathname.replace(/\/+$/, '') || '/';
+  if (path === '/install.ps1') return 'ps1';
+  if (path === '/install.sh') return 'sh';
+  if (path !== '/') return 'nothing';
 
   // An explicit ask wins over any guess: `get.comodor.ai/?ps1` is what
   // somebody types when the guess got it wrong, and it has to work.
@@ -82,8 +92,17 @@ export default {
     }
 
     const wants = wantedBy(request);
+    if (wants === 'nothing') {
+      return new Response(
+        'Nothing here. The installer is at the root:\n\n'
+        + '  curl -fsSL get.comodor.ai | sh\n'
+        + '  irm get.comodor.ai | iex\n',
+        { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    }
     if (wants === 'browser') {
-      return Response.redirect(SITE + '/', 302);
+      // The query string travels: a shared link carrying a campaign tag should
+      // arrive on the page still carrying it.
+      return Response.redirect(SITE + '/' + new URL(request.url).search, 302);
     }
 
     const script = SCRIPTS[wants];

@@ -64,3 +64,25 @@ test('an explicit ask beats the guess', () => {
   assert.equal(ask(chrome, {}, 'https://get.comodor.ai/?sh'), 'sh');
   assert.equal(ask('curl/8.9.1', {}, 'https://get.comodor.ai/?windows'), 'ps1');
 });
+
+test('an address that means nothing is refused, not handed a shell script', () => {
+  // `get.comodor.ai/wp-admin.php` used to return 27 kB of installer and a 200.
+  for (const path of ['/wp-admin.php', '/anything', '/.env', '/a/b/c']) {
+    assert.equal(ask('curl/8.9.1', {}, `https://get.comodor.ai${path}`), 'nothing', path);
+  }
+});
+
+test('the two script paths serve that script whoever is asking', () => {
+  const chrome = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/141.0.0.0';
+  assert.equal(ask(chrome, {}, 'https://get.comodor.ai/install.sh'), 'sh');
+  assert.equal(ask('curl/8.9.1', {}, 'https://get.comodor.ai/install.ps1'), 'ps1');
+});
+
+test('a trailing slash is still the root', () => {
+  assert.equal(ask('curl/8.9.1', {}, 'https://get.comodor.ai/'), 'sh');
+  assert.equal(ask('curl/8.9.1', {}, 'https://get.comodor.ai//'), 'sh');
+});
+
+test('the root still works with a query string on it', () => {
+  assert.equal(ask('curl/8.9.1', {}, 'https://get.comodor.ai/?utm_source=x'), 'sh');
+});
