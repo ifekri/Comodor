@@ -9,7 +9,8 @@
     "lint": "next lint",
     "build:cloudflare": "node tools/build-export.mjs",
     "deploy": "wrangler deploy",
-    "test:get": "node --test workers/get/dispatch.test.mjs"
+    "test:get": "node --test workers/get/dispatch.test.mjs",
+    "test:version": "node tools/version.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
