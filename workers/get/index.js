@@ -20,6 +20,7 @@
  * first and every Windows install is handed an HTML page to run, which fails
  * with a parse error nobody can act on. PowerShell is therefore checked before
  * anything else, and the browser check is last.
+ *
  * The scripts are not copied in here. They are fetched from the site, which
  * has one useful consequence: editing `lib/scripts/install.sh` and deploying
  * the site updates what this serves. A copy would drift the first time

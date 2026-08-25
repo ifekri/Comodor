@@ -45,6 +45,9 @@ Settings → Build → Connect**:
 | Branch control | `site` | `site` |
 | Build watch paths | `app/*`, `components/*`, `lib/*`, `public/*`, `wrangler.jsonc`, `package.json`, `next.config.mjs` | `workers/get/*` |
 
+Both are connected and both have deployed from a push: `comodor-site` went
+from `git push` to live on the real domain in twenty seconds.
+
 Three things that make the difference between this working and failing:
 
 **The Worker name has to match.** Cloudflare's rule is that the name in the
@@ -65,6 +68,19 @@ run build`. The second form works on Cloudflare's Linux builders and fails on
 Windows, where `cmd` reads the assignment as a command — a difference between
 CI and a developer's machine, which is the worst place to have one.
 `tools/build-export.mjs` sets the variable in Node instead, so both agree.
+
+### Watching a build
+
+The builds API wants the Worker's **tag**, not its name — asking for
+`comodor-site` returns an empty list rather than an error, which reads exactly
+like "nothing has built yet" and is not.
+
+```bash
+npx wrangler deployments list --name comodor-site
+```
+
+Tags, for the API: `comodor-site` is `c07e856d31584cc78e579999b4bc91e2`,
+`comodor-get` is `05eee70b3a7c4fbd899d2b2e5b13d67d`.
 
 ### The GitHub Pages workflow is deliberately still running
 
