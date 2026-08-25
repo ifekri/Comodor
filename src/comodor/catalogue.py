@@ -256,6 +256,23 @@ CATALOGUE: tuple[ProviderSpec, ...] = (
         rank=21,
     ),
     ProviderSpec(
+        id="local",
+        label="Local LLM",
+        # Empty because there is nothing to point at until a model is running,
+        # and the port it lands on is chosen at startup. `LocalProvider` fills
+        # this in once it has a server. A URL written here would be a number
+        # that is wrong the next time.
+        base_url="",
+        keys_url="",
+        blurb="Downloaded to this machine and run here. No key, no account, "
+              "and it keeps working with the network unplugged.",
+        default_model="",
+        env_key="",
+        needs_key=False,
+        rank=19,
+        kind="local",
+    ),
+    ProviderSpec(
         id="custom",
         label="Something else",
         base_url="",

@@ -58,10 +58,18 @@ def test_the_catalogue_offers_the_providers_people_actually_use():
 
 def test_every_provider_entry_is_complete_enough_to_use():
     for spec in catalogue.CATALOGUE:
-        if spec.id == "custom":
-            continue                       # the user supplies the URL
-        assert spec.base_url.startswith("http"), spec.id
         assert spec.label and spec.blurb, spec.id
+
+        # Two providers have no address and no default, for reasons rather than
+        # by omission. `custom` is whatever URL the user types. `local` runs a
+        # model from this disk on a port chosen when the server starts, so a URL
+        # written here would be a number that is wrong the next time — and it
+        # has no default model because nothing is downloaded until somebody
+        # picks one.
+        if spec.id in ("custom", "local"):
+            assert not spec.base_url, f"{spec.id} should carry no URL"
+            continue
+        assert spec.base_url.startswith("http"), spec.id
         assert spec.default_model, spec.id
         if spec.needs_key:
             assert spec.keys_url.startswith("http"), f"{spec.id} has no key page"
@@ -70,6 +78,13 @@ def test_every_provider_entry_is_complete_enough_to_use():
 def test_local_providers_need_no_key():
     for spec in catalogue.local():
         assert not spec.needs_key
+        # Ollama and LM Studio are servers somebody already runs, so they have
+        # a well-known address. `local` is a model Comodor downloads and starts
+        # itself, on a port picked at startup — being local is what these have
+        # in common, not being at a fixed URL.
+        if spec.id == "local":
+            assert not spec.base_url
+            continue
         assert "localhost" in spec.base_url
 
 

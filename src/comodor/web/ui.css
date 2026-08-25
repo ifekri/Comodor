@@ -1488,3 +1488,97 @@ button.small.danger:hover { border-color: var(--bad); color: var(--bad); }
   #shell { display: block; height: auto; }
   body { overflow: visible; background: #fff; color: #000; }
 }
+
+/* --------------------------------------------------------------------------
+ * models on this machine
+ *
+ * A card per model rather than a row: each one carries a description worth
+ * reading, several facts, and a progress bar that appears in place. A table
+ * would have to hide the description or grow a column nobody can read.
+ * ------------------------------------------------------------------------ */
+#local-models { display: flex; flex-direction: column; gap: 10px; }
+
+.lm-note { font-size: 12px; color: var(--ink-dim); margin: 0 0 10px; }
+.lm-missing {
+  margin: 0 0 12px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5;
+  border: 1px solid var(--warn); border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--ink-soft);
+}
+.lm-missing[hidden] { display: none; }
+
+.lm {
+  padding: 12px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--line); background: var(--bg-raised);
+  transition: border-color var(--speed);
+}
+.lm:hover { border-color: var(--line-strong); }
+.lm.active { border-color: var(--accent); background: var(--accent-wash); }
+
+.lm-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+}
+.lm-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.lm-facts {
+  font-size: 11.5px; color: var(--ink-dim); margin-inline-start: auto;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+.lm-why {
+  margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-soft);
+}
+
+.lm-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-block-start: 9px; }
+.lm-tag {
+  font-size: 10.5px; padding: 2px 7px; border-radius: var(--r-full);
+  border: 1px solid var(--line-strong); color: var(--ink-dim);
+  white-space: nowrap;
+}
+.lm-tag.bad { border-color: var(--bad); color: var(--bad); }
+
+/* -- the download ---------------------------------------------------------- */
+
+.lm-bar { margin-block-start: 11px; }
+.lm-bar[hidden] { display: none; }
+.lm-track {
+  height: 6px; border-radius: var(--r-full); overflow: hidden;
+  background: var(--bg-sunk);
+}
+.lm-fill {
+  height: 100%; width: 0; border-radius: inherit; background: var(--accent);
+  /* Only the width, and briefly. A bar that eases over a second lags behind
+   * the numbers printed beside it, and the two disagreeing looks like a bug. */
+  transition: width 200ms linear;
+}
+.lm-numbers {
+  margin-block-start: 6px; font-size: 11.5px; color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.lm-do { display: flex; align-items: center; gap: 8px; margin-block-start: 11px; }
+.lm-do button {
+  padding: 6px 14px; border-radius: var(--r-sm); font-size: 12.5px;
+  border: 1px solid var(--line-strong); background: var(--bg);
+  transition: border-color var(--speed), background var(--speed), opacity var(--speed);
+}
+.lm-do button:hover:not(:disabled) {
+  border-color: var(--accent); background: var(--bg-hover);
+}
+.lm-do button:focus-visible { outline: none; box-shadow: var(--ring); }
+.lm-do button:disabled { opacity: .45; cursor: not-allowed; }
+.lm-do button.primary {
+  background: var(--accent); border-color: var(--accent);
+  color: #fff; font-weight: 500;
+}
+.lm-do button.primary:hover:not(:disabled) {
+  background: var(--accent-soft); border-color: var(--accent-soft);
+}
+.lm-now {
+  font-size: 12px; font-weight: 500; color: var(--accent);
+}
+
+@media (max-width: 620px) {
+  .lm-facts { margin-inline-start: 0; width: 100%; }
+  .lm-do { flex-wrap: wrap; }
+  .lm-do button { flex: 1 1 auto; }
+}
