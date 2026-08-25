@@ -8,7 +8,7 @@
   //
   //   npx wrangler deploy --config workers/get/wrangler.jsonc
   //
-  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "comodor-get",
   "main": "index.js",
   "compatibility_date": "2026-08-01",

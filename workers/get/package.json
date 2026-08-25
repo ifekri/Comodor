@@ -1,3 +1,13 @@
 {
-  "type": "module"
+  "name": "comodor-get",
+  "private": true,
+  "type": "module",
+  "description": "The installer dispatcher behind get.comodor.ai.",
+  "scripts": {
+    "test": "node --test dispatch.test.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.125.0"
+  }
 }

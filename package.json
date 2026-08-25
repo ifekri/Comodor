@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "build:cloudflare": "node tools/build-export.mjs",
+    "deploy": "wrangler deploy",
+    "test:get": "node --test workers/get/dispatch.test.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

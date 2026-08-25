@@ -28,6 +28,51 @@ npx wrangler deploy                                   # the site
 npx wrangler deploy --config workers/get/wrangler.jsonc   # the dispatcher
 ```
 
+### Deploying on push
+
+Both Workers are connected to this repository through **Workers Builds**, so a
+push to `site` builds and deploys them. Nothing local is needed and there is no
+API token in a repository secret — Cloudflare holds the credential.
+
+Connected in the dashboard, once each, at **Workers & Pages → the Worker →
+Settings → Build → Connect**:
+
+| | `comodor-site` | `comodor-get` |
+|---|---|---|
+| Root directory | `/` | `workers/get` |
+| Build command | `npm run build:cloudflare` | *(none)* |
+| Deploy command | `npx wrangler deploy` | `npx wrangler deploy` |
+| Branch control | `site` | `site` |
+| Build watch paths | `app/*`, `components/*`, `lib/*`, `public/*`, `wrangler.jsonc`, `package.json`, `next.config.mjs` | `workers/get/*` |
+
+Three things that make the difference between this working and failing:
+
+**The Worker name has to match.** Cloudflare's rule is that the name in the
+dashboard must equal the `name` in the Wrangler config *in the root directory
+you specified*, or the build fails. That is the whole reason `comodor-get` has
+its own `package.json` and its root directory is `workers/get`: pointed at `/`
+it would find `wrangler.jsonc`, read `comodor-site`, and refuse.
+
+**Branch control defaults to the repository's default branch**, which here is
+`main` — the agent, not the site. It must be changed to `site` or nothing will
+ever build.
+
+**Watch paths keep them apart.** Without them, editing the dispatcher rebuilds
+and redeploys the whole site and the other way round.
+
+The build command is `npm run build:cloudflare`, not `NEXT_STATIC_EXPORT=1 npm
+run build`. The second form works on Cloudflare's Linux builders and fails on
+Windows, where `cmd` reads the assignment as a command — a difference between
+CI and a developer's machine, which is the worst place to have one.
+`tools/build-export.mjs` sets the variable in Node instead, so both agree.
+
+### The GitHub Pages workflow is deliberately still running
+
+It is no longer how the site is served, and it is kept on purpose. The apex
+still carries the four A records that point at Pages — see below — so if these
+Worker routes were ever removed, traffic falls back to it. A fallback that is
+kept current is worth having; a stale one is worse than none.
+
 ### Routes, not Custom Domains — and why that is worth knowing
 
 A Custom Domain is the tidier mechanism: it owns the DNS record and provisions
