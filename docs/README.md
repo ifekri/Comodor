@@ -41,6 +41,7 @@ ends with the agent doing something useful.
 
 | | |
 |---|---|
+| [Models on your machine](local-models.md) | Downloading one, running it offline, adding to the list |
 | [Questions](questions.md) | The form it puts up when a request reads two ways |
 | [How it learns](learning.md) | Corrections, lessons, rules, and the proof |
 | [Safety and permissions](safety.md) | What it can do, what it asks, what it never does |

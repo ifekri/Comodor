@@ -42,3 +42,10 @@ uv.lock
 
 # Local working notes: the reasoning behind the code, kept out of the package.
 PROJECT.md
+
+# Wrangler leaves a cached account identity here after `npx wrangler`.
+# Nothing in it belongs in a repository.
+.wrangler/
+
+# Editor and agent settings that are this machine, not this project.
+.claude/

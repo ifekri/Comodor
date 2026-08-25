@@ -44,6 +44,14 @@ def build_provider(entry: ProviderConfig, scripts: list[Script] | None = None) -
     """Instantiate the adapter for one configured backend."""
     if entry.kind == "fake":
         return FakeProvider(scripts=scripts, model=entry.model or "fake-1")
+    if entry.kind == "local":
+        # A model on this disk. The provider is lazy on purpose: loading four
+        # gigabytes takes tens of seconds and would happen on every `comodor`
+        # invocation, including the ones that never ask the model anything.
+        from ..local.provider import build as build_local
+        from ..paths import resolve_paths
+
+        return build_local(entry, user_dir=resolve_paths().user)
     if entry.kind == "anthropic":
         return AnthropicProvider(
             name=entry.name, base_url=entry.base_url, api_key=entry.api_key,

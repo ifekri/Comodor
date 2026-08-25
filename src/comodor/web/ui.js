@@ -730,6 +730,238 @@ function closeForm(dismissed) {
   if (from && from.focus) from.focus();
 }
 
+/* -------------------------------------------------------------- local models */
+/*
+ * Models that live on this disk.
+ *
+ * The download is the part that shapes this. It is minutes to an hour, so it
+ * cannot happen inside the request that starts it — the browser would hold an
+ * open connection the whole time and any proxy in between would give up long
+ * before it finished. The POST returns at once and the progress arrives on the
+ * event stream the agent already uses, so the bar is drawn from events rather
+ * than by asking over and over.
+ *
+ * Progress therefore updates one card in place. Redrawing the list on every
+ * frame would rebuild the DOM twenty times a second and lose the scroll
+ * position while somebody is reading the description of another model.
+ */
+
+const localState = { models: [], info: null, progress: {}, holder: null,
+                     note: null, runtime: null };
+
+function localCard(model) {
+  const card = document.createElement('div');
+  card.className = 'lm' + (model.active ? ' active' : '');
+  card.dataset.model = model.id;
+
+  const head = document.createElement('div');
+  head.className = 'lm-head';
+
+  const name = document.createElement('span');
+  name.className = 'lm-name';
+  name.textContent = model.name;
+  head.appendChild(name);
+
+  const facts = document.createElement('span');
+  facts.className = 'lm-facts';
+  const bits = [`${model.gigabytes} GB`];
+  if (model.parameters) bits.push(model.parameters);
+  if (model.quantization) bits.push(model.quantization);
+  if (model.context) bits.push(`${(model.context / 1024).toFixed(0)}K context`);
+  facts.textContent = bits.join(' · ');
+  head.appendChild(facts);
+
+  card.appendChild(head);
+
+  if (model.description) {
+    const why = document.createElement('p');
+    why.className = 'lm-why bidi';
+    why.textContent = model.description;
+    orient(why, model.description);
+    card.appendChild(why);
+  }
+
+  const tags = document.createElement('div');
+  tags.className = 'lm-tags';
+  if (model.tools) tags.appendChild(localTag('tools', 'can call tools'));
+  if (model.vision) tags.appendChild(localTag('vision', 'reads images'));
+  (model.good_at || []).forEach(g => tags.appendChild(localTag(g)));
+  if (model.license) tags.appendChild(localTag(model.license, 'licence'));
+  if (model.fits === false) tags.appendChild(localTag('too large', 'for this machine', 'bad'));
+  if (tags.children.length) card.appendChild(tags);
+
+  const bar = document.createElement('div');
+  bar.className = 'lm-bar';
+  bar.hidden = true;
+  bar.innerHTML = '<div class="lm-track"><div class="lm-fill"></div></div>'
+    + '<div class="lm-numbers"></div>';
+  card.appendChild(bar);
+
+  card.appendChild(localButtons(model));
+  return card;
+}
+
+function localTag(text, title = '', kind = '') {
+  const tag = document.createElement('span');
+  tag.className = 'lm-tag' + (kind ? ' ' + kind : '');
+  tag.textContent = text;
+  if (title) tag.title = title;
+  return tag;
+}
+
+function localButtons(model) {
+  const row = document.createElement('div');
+  row.className = 'lm-do';
+
+  const busy = localState.progress[model.id]
+    && !localState.progress[model.id].finished;
+
+  if (busy) {
+    row.appendChild(localButton('Stop', 'ghost', () =>
+      localAct('cancel', model.id)));
+    return row;
+  }
+
+  if (model.downloaded) {
+    if (model.active) {
+      const now = document.createElement('span');
+      now.className = 'lm-now';
+      now.textContent = 'In use';
+      row.appendChild(now);
+    } else {
+      row.appendChild(localButton('Use this', 'primary', () =>
+        localAct('use', model.id)));
+    }
+    row.appendChild(localButton('Delete', 'ghost', () => {
+      if (confirm(`Delete ${model.name}? ${model.gigabytes} GB will be freed.`)) {
+        localAct('remove', model.id);
+      }
+    }));
+    return row;
+  }
+
+  const label = model.partial_bytes
+    ? `Resume (${Math.round(model.partial_bytes / model.size * 100)}%)`
+    : 'Download';
+  const get = localButton(label, 'primary', () => localAct('get', model.id));
+  if (model.room === false) {
+    get.disabled = true;
+    get.title = 'not enough room on this disk';
+  }
+  row.appendChild(get);
+  return row;
+}
+
+function localButton(text, kind, onclick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = kind;
+  button.textContent = text;
+  button.onclick = onclick;
+  return button;
+}
+
+/* Only the one card that is moving, so the rest of the list holds still. */
+function localProgress(event) {
+  const at = localState.progress[event.model] || (localState.progress[event.model] = {});
+  Object.assign(at, event);
+
+  const card = localState.holder && localState.holder.querySelector(`[data-model="${event.model}"]`);
+  if (!card) return;
+
+  const bar = card.querySelector('.lm-bar');
+  const fill = card.querySelector('.lm-fill');
+  const numbers = card.querySelector('.lm-numbers');
+
+  if (event.failed) {
+    bar.hidden = true;
+    notice(`${event.name}: ${event.error}`, true);
+    delete localState.progress[event.model];
+    loadLocal();
+    return;
+  }
+  if (event.finished) {
+    bar.hidden = true;
+    notice(`${event.name} downloaded and verified.`);
+    delete localState.progress[event.model];
+    loadLocal();
+    return;
+  }
+
+  bar.hidden = false;
+  fill.style.width = `${event.percent || 0}%`;
+
+  const parts = [`${(event.percent || 0).toFixed(1)}%`];
+  if (event.done_bytes != null && event.total) {
+    parts.push(`${humanBytes(event.done_bytes)} of ${humanBytes(event.total)}`);
+  }
+  if (event.bytes_per_second) parts.push(`${humanBytes(event.bytes_per_second)}/s`);
+  if (event.seconds_left != null) parts.push(`${humanTime(event.seconds_left)} left`);
+  if (event.resumed) parts.push('resumed');
+  numbers.textContent = parts.join('  ·  ');
+
+  const stop = card.querySelector('.lm-do button');
+  if (stop && stop.textContent !== 'Stop') card.replaceChild(
+    localButtons({ ...localState.models.find(m => m.id === event.model), busy: true }),
+    card.querySelector('.lm-do'));
+}
+
+function humanBytes(n) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
+  return i === 0 ? `${n.toFixed(0)} B` : `${n.toFixed(1)} ${units[i]}`;
+}
+
+function humanTime(seconds) {
+  seconds = Math.round(seconds);
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+  return `${Math.floor(seconds / 3600)}h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}m`;
+}
+
+async function localAct(action, model) {
+  const answer = await post('/api/local', { action, model });
+  if (!answer || answer.ok === false) {
+    notice((answer && answer.error) || 'that did not work', true);
+    return;
+  }
+  if (action === 'get') {
+    localState.progress[model] = { percent: 0 };
+    const card = localState.holder.querySelector(`[data-model="${model}"]`);
+    if (card) card.querySelector('.lm-bar').hidden = false;
+  }
+  if (action !== 'get') loadLocal();
+}
+
+async function loadLocal() {
+  if (!localState.holder) return;
+  const data = await get('/api/local');
+  if (!data) return;
+  localState.models = data.models || [];
+  localState.info = data;
+
+  localState.holder.textContent = '';
+  if (!data.ok) {
+    notice(data.error || 'the model list could not be read', true);
+    return;
+  }
+  localState.models.forEach(m => localState.holder.appendChild(localCard(m)));
+
+  if (localState.note) {
+    const bits = [];
+    if (data.memory_gb) bits.push(`${data.memory_gb} GB of memory`);
+    if (data.free_bytes) bits.push(`${humanBytes(data.free_bytes)} free`);
+    if (data.used_bytes) bits.push(`${humanBytes(data.used_bytes)} used by models`);
+    bits.push(`list from ${data.source}`);
+    localState.note.textContent = bits.join(' · ');
+  }
+
+  if (localState.runtime) {
+    localState.runtime.hidden = !!data.runtime;
+  }
+}
+
 /* ------------------------------------------------------------------ events */
 
 function apply(event) {
@@ -740,7 +972,15 @@ function apply(event) {
     case 'assistant_end': endStream(event.text); break;
     case 'tool_start': toolRow(event.id, event.name || 'tool', event.summary || ''); break;
     case 'tool_end': toolDone(event.id, event.ok, event.elapsed, event.display); break;
-    case 'notice': notice(event.text); break;
+    case 'notice':
+      // A download reports here rather than on a channel of its own: it is a
+      // stream of small updates about something the user started, which is
+      // what this channel already is. `what` says which shape it is — not
+      // `kind`, which the frame stamps with the event's own kind and would
+      // silently overwrite.
+      if (event.what === 'download') localProgress(event);
+      else notice(event.text);
+      break;
     case 'error': endStream(); notice(event.text, true); break;
     case 'cancelled': endStream(); notice('Stopped.'); break;
     case 'request':
@@ -2009,6 +2249,7 @@ function drawAdmin(data) {
   }
 
   /* -- skills ------------------------------------------------------------ */
+  drawLocalCard();
   drawSkillsCard();
 
   /* -- what it may touch ------------------------------------------------- */
@@ -2231,6 +2472,34 @@ function moveTo(where, data) {
     refreshAdmin();
     toast('Working in ' + (reply.folder.name || where), 'good', 'folder');
   });
+}
+
+/* -- models on this machine -------------------------------------------------- */
+
+function drawLocalCard() {
+  const body = card('Local LLM');
+
+  const note = document.createElement('p');
+  note.className = 'lm-note';
+  body.appendChild(note);
+
+  const missing = document.createElement('p');
+  missing.className = 'lm-missing';
+  missing.hidden = true;
+  missing.textContent =
+    'No llama.cpp server was found, so a downloaded model cannot run yet. '
+    + 'Install one — brew install llama.cpp, winget install llama.cpp, or a '
+    + 'build from github.com/ggml-org/llama.cpp. Ollama and LM Studio work too.';
+  body.appendChild(missing);
+
+  const holder = document.createElement('div');
+  holder.id = 'local-models';
+  body.appendChild(holder);
+
+  localState.holder = holder;
+  localState.note = note;
+  localState.runtime = missing;
+  loadLocal();
 }
 
 /* -- skills ----------------------------------------------------------------- */

@@ -108,6 +108,10 @@ class Session:
         self._lock = threading.Lock()
         self._arrived = threading.Condition(self._lock)
         self._pending: dict[str, Request] = {}
+        #: Downloads in flight, by model id. A download outlives the request
+        #: that started it — minutes to an hour — so its state cannot live in
+        #: the request, and the page reads it back from `local_shelf`.
+        self._downloads: dict[str, dict[str, Any]] = {}
         self._turn = threading.Lock()
         self.busy = False
 
@@ -624,6 +628,188 @@ class Session:
         return True, "", self.folder()
 
     # -- skills ---------------------------------------------------------------- #
+
+
+    # -- models that run here ---------------------------------------------- #
+    #
+    # A download is minutes long, so it cannot happen inside the request that
+    # starts it: the browser would sit on an open connection for an hour and
+    # any proxy in between would give up long before that. It runs on its own
+    # thread and reports through the same event stream the agent uses, so the
+    # page draws a bar from events rather than by polling.
+
+    def local_shelf(self) -> dict[str, Any]:
+        """The model list, what is downloaded, and what this machine can take."""
+        from .. import local as local_models
+
+        try:
+            catalogue = local_models.load(Path(self.config.paths.user))
+        except Exception as problem:
+            return {"ok": False, "error": str(problem), "models": []}
+
+        store = local_models.store_for(Path(self.config.paths.user))
+        ram = local_models.memory_gb()
+        free = store.free_bytes()
+        active = (self.config.provider == "local", self.config.active_model())
+
+        models = []
+        for model in catalogue:
+            held = store.have(model)
+            partial = store.partial_bytes(model)
+            downloading = self._downloads.get(model.id)
+            models.append({
+                "id": model.id,
+                "name": model.name,
+                "description": model.description,
+                "size": model.size,
+                "gigabytes": round(model.gigabytes, 2),
+                "context": model.context,
+                "parameters": model.parameters,
+                "quantization": model.quantization,
+                "needs_ram_gb": model.needs_ram_gb,
+                "license": model.license,
+                "good_at": list(model.good_at),
+                "tools": model.tools,
+                "vision": model.vision,
+                "url": model.url,
+                "downloaded": bool(held and held.complete),
+                "partial_bytes": partial,
+                "fits": model.fits(ram),
+                "room": store.room_for(model),
+                "busy": bool(downloading and not downloading.get("finished")),
+                "active": active[0] and active[1] == model.id,
+            })
+
+        return {
+            "ok": True,
+            "models": models,
+            "source": catalogue.source,
+            "updated": catalogue.updated,
+            "memory_gb": round(ram, 1) if ram else None,
+            "free_bytes": free,
+            "used_bytes": store.bytes_used(),
+            "directory": str(store.root),
+            # Whether anything on this machine can actually run a downloaded
+            # file. Worth saying before somebody spends an hour on one.
+            "runtime": str(local_models.find_binary() or ""),
+        }
+
+    def local_get(self, model_id: str) -> tuple[bool, str]:
+        """Start downloading a model. Returns immediately."""
+        import threading
+
+        from .. import local as local_models
+
+        with self._lock:
+            running = self._downloads.get(model_id)
+            if running and not running.get("finished"):
+                return False, "that one is already downloading"
+
+        try:
+            catalogue = local_models.load(Path(self.config.paths.user),
+                                          allow_network=False)
+        except Exception as problem:
+            return False, str(problem)
+        model = catalogue.get(model_id)
+        if model is None:
+            return False, f"no model called {model_id!r}"
+
+        store = local_models.store_for(Path(self.config.paths.user))
+        if store.room_for(model) is False:
+            free = store.free_bytes() or 0
+            return False, (f"not enough disk: {model.gigabytes:.1f} GB needed, "
+                           f"{local_models.human_bytes(free)} free")
+
+        with self._lock:
+            self._downloads[model_id] = {"finished": False, "cancelled": False}
+
+        def work() -> None:
+            def watch(progress) -> None:
+                self.bus.emit(Kind.NOTICE, what="download",
+                              model=model.id, name=model.name,
+                              **progress.as_dict())
+
+            try:
+                local_models.fetch(
+                    model.url, store.path_for(model),
+                    expect_size=model.size, expect_sha256=model.sha256,
+                    watch=watch,
+                    should_stop=lambda: self._downloads.get(
+                        model.id, {}).get("cancelled", False))
+            except Exception as problem:
+                self.bus.emit(Kind.NOTICE, what="download", model=model.id,
+                              name=model.name, failed=True, error=str(problem))
+            else:
+                self.bus.emit(Kind.NOTICE, what="download", model=model.id,
+                              name=model.name, finished=True,
+                              done_bytes=model.size, total=model.size,
+                              percent=100.0)
+            finally:
+                with self._lock:
+                    entry = self._downloads.get(model.id)
+                    if entry is not None:
+                        entry["finished"] = True
+
+        threading.Thread(target=work, name=f"comodor-get-{model.id}",
+                         daemon=True).start()
+        return True, ""
+
+    def local_cancel(self, model_id: str) -> tuple[bool, str]:
+        """Stop a download. What has arrived is kept and can be resumed."""
+        with self._lock:
+            entry = self._downloads.get(model_id)
+            if entry is None or entry.get("finished"):
+                return False, "nothing is downloading"
+            entry["cancelled"] = True
+        return True, ""
+
+    def local_remove(self, model_id: str) -> tuple[bool, str]:
+        from .. import local as local_models
+
+        try:
+            catalogue = local_models.load(Path(self.config.paths.user),
+                                          allow_network=False)
+        except Exception as problem:
+            return False, str(problem)
+        model = catalogue.get(model_id)
+        if model is None:
+            return False, f"no model called {model_id!r}"
+        store = local_models.store_for(Path(self.config.paths.user))
+        return (True, "") if store.remove(model) else (False, "it was not here")
+
+    def local_use(self, model_id: str) -> tuple[bool, str]:
+        """Make a downloaded model the one the agent talks to."""
+        from .. import config as config_mod
+        from .. import local as local_models
+
+        try:
+            catalogue = local_models.load(Path(self.config.paths.user),
+                                          allow_network=False)
+        except Exception as problem:
+            return False, str(problem)
+        model = catalogue.get(model_id)
+        if model is None:
+            return False, f"no model called {model_id!r}"
+
+        store = local_models.store_for(Path(self.config.paths.user))
+        held = store.have(model)
+        if not (held and held.complete):
+            return False, f"{model.name} is not downloaded yet"
+
+        entry = self.config.use("local", model=model.id)
+        entry.label = "Local"
+        entry.configured = True
+        config_mod.save_user_config(self.config)
+        # The gateway holds a client built from the previous provider, and one
+        # built for a different provider cannot answer for this one.
+        try:
+            self.gateway.close()
+        except Exception:
+            pass
+        self.gateway = Gateway(self.config)
+        self.agent.gateway = self.gateway
+        self.bus.emit(Kind.STATUS, provider="local", model=model.id)
+        return True, ""
 
     def skill_shelf(self, refresh: bool = False) -> dict[str, Any]:
         """What is installed, what is available, and what is switched off."""

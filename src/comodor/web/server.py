@@ -324,6 +324,10 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 self._json(200, server.session.skill_shelf())
                 return
 
+            if route == "/api/local":
+                self._json(200, server.session.local_shelf())
+                return
+
             if route == "/api/setup":
                 offer = server.session.offer()
                 offer["may_enter_a_key"] = self._from_this_machine()
@@ -481,6 +485,32 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
             if route == "/api/skills":
                 done, why = server.session.skill(str(body.get("action") or ""),
                                                  str(body.get("name") or ""))
+                self._json(200 if done else 400, {"ok": done, "error": why})
+                return
+
+            if route == "/api/local":
+                # Downloading a model is a several-gigabyte write to this
+                # machine and switching provider changes where every prompt
+                # goes. Neither is something a page loaded from somewhere else
+                # gets to do, and neither is something to do over a shared
+                # link without the person being at the keyboard.
+                if not self._from_this_machine():
+                    self._json(403, {"ok": False, "error":
+                                     "models can only be managed from this machine"})
+                    return
+                action = str(body.get("action") or "")
+                model_id = str(body.get("model") or "")
+                doer = {
+                    "get": server.session.local_get,
+                    "cancel": server.session.local_cancel,
+                    "remove": server.session.local_remove,
+                    "use": server.session.local_use,
+                }.get(action)
+                if doer is None:
+                    self._json(400, {"ok": False,
+                                     "error": f"unknown action {action!r}"})
+                    return
+                done, why = doer(model_id)
                 self._json(200 if done else 400, {"ok": done, "error": why})
                 return
 
