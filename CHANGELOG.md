@@ -2,6 +2,55 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.16.0 — 2026-08-28
+
+### A model that runs on your own machine
+
+```bash
+comodor local list                       # what you can run, and what is here
+comodor local get qwen2.5-coder-7b-q4    # download it, with a progress bar
+comodor local use qwen2.5-coder-7b-q4
+```
+
+Pick one, watch it download, then use it with the network unplugged. No key and
+no account. It appears among the providers as **Local LLM**, in the terminal and
+under **Admin → Local LLM** in the browser, with the same list, the same
+progress and the same buttons.
+
+The list is a JSON file, so adding a model later is an edit rather than a
+release — a name, a description, an https URL, the byte count and the checksum.
+Anything left out is reported as unknown rather than guessed.
+[How to add one](docs/local-models.md).
+
+Downloads **resume**. One to nine gigabytes over a home line cannot mean
+starting again because a laptop slept, so the bytes go to a `.part` file and
+the next attempt continues from where it ended — the button reads
+`Resume (37%)`.
+
+Downloads are **verified**. Every entry carries an exact size and a SHA-256,
+and the file is not accepted until it matches. This is not belt-and-braces: a
+truncated model file is not obviously broken. It loads, and then produces
+nonsense, and somebody spends an evening wondering why a well-regarded model is
+useless. A file that fails is deleted rather than left to be half-trusted.
+
+Inference runs in a **separate process** that keeps the model loaded between
+requests, which is what Ollama, LM Studio and llama.cpp all do and for the same
+reasons: generation is a long CPU-bound loop that would otherwise stall the
+interface, loading four gigabytes must happen once rather than per turn, and an
+out-of-memory kill then ends the model server instead of your session. The
+server starts on your first message, not at startup — loading the weights on
+every `comodor` invocation, including the ones that never ask the model
+anything, would be a blank screen for no reason.
+
+You need something to run a GGUF: `brew install llama.cpp`, `winget install
+llama.cpp`, or a build from llama.cpp itself. Ollama and LM Studio work too.
+`comodor local list` says plainly when nothing is available, so you find out
+before spending an hour on a download rather than after.
+
+Memory and disk are checked before the download starts, with a tenth of the
+disk left spare — one that fills the last byte does not merely fail, it takes
+the rest of the machine with it.
+
 ## 0.15.0 — 2026-08-24
 
 ### It asks before it guesses
