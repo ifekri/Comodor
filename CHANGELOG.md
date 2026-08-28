@@ -2,6 +2,11 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.17.1 — 2026-08-29
+
+Packaging metadata only: the project is published under the account that owns
+it. No change to the program.
+
 ## 0.17.0 — 2026-08-28
 
 ### The first run fits one screen
