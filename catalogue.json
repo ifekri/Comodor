@@ -8,7 +8,7 @@
       "id": "review",
       "name": "review",
       "title": "Code review",
-      "description": "Review a change for correctness before it is committed.",
+      "description": "Review a change for correctness before it is committed",
       "summary": "Reads the whole change first, reports only what would block a merge, and orders findings by what actually breaks.",
       "tags": [
         "review",
@@ -28,7 +28,7 @@
       "id": "output",
       "name": "full-output-enforcement",
       "title": "Full output",
-      "description": "Bans truncation and placeholders; splits cleanly at the limit.",
+      "description": "Overrides default LLM truncation behavior. Enforces complete code generation, bans placeholder patterns, and handles token-limit splits cleanly. Apply to any task requiring exhaustive, unabridged output.",
       "summary": "Overrides default LLM truncation behavior. Enforces complete code generation, bans placeholder patterns, and handles token-limit splits cleanly. Apply to any task requiring exhaustive, unabridged output.",
       "tags": [
         "output",
@@ -48,7 +48,7 @@
       "id": "taste",
       "name": "design-taste-frontend",
       "title": "Design taste",
-      "description": "Anti-slop frontend: reads the brief, ships something untemplated.",
+      "description": "Anti-slop frontend skill for landing pages, portfolios, and redesigns. The agent reads the brief, infers the right design direction, and ships interfaces that do not look templated. Real design systems when applicable, audit-first on redesigns, strict pre-flight check.",
       "summary": "Anti-slop frontend skill for landing pages, portfolios and redesigns. The agent reads the brief, infers the right design direction, and ships interfaces that do not look templated. Real design systems when applicable, audit-first on redesigns, strict pre-flight check. The catalogues it consults — design systems, playbooks, vocabulary, AI tells, appendices — are bundled and read on demand.",
       "tags": [
         "design",
@@ -73,7 +73,7 @@
       "id": "taste-v1",
       "name": "design-taste-frontend-v1",
       "title": "Design taste, v1",
-      "description": "The original taste skill, kept for exact backward compatibility.",
+      "description": "The original v1 taste-skill, preserved for projects depending on its exact behavior. The current default is `design-taste-frontend` (v2 experimental), which is a substantial rewrite. Use this v1 install name only if you need exact backward compatibility.",
       "summary": "The original v1 taste-skill, preserved for projects depending on its exact behavior. The current default is `design-taste-frontend` (v2 experimental), which is a substantial rewrite. Use this v1 install name only if you need exact backward compatibility.",
       "tags": [
         "design",
@@ -93,7 +93,7 @@
       "id": "redesign",
       "name": "redesign-existing-projects",
       "title": "Redesign",
-      "description": "Audits an existing site and lifts it without breaking it.",
+      "description": "Upgrades existing websites and apps to premium quality. Audits current design, identifies generic AI patterns, and applies high-end design standards without breaking functionality. Works with any CSS framework or vanilla CSS.",
       "summary": "Upgrades existing websites and apps to premium quality. Audits current design, identifies generic AI patterns, and applies high-end design standards without breaking functionality. Works with any CSS framework or vanilla CSS.",
       "tags": [
         "design",
@@ -113,7 +113,7 @@
       "id": "soft",
       "name": "high-end-visual-design",
       "title": "High-end visual design",
-      "description": "The fonts, spacing and motion that make a site feel expensive.",
+      "description": "Teaches the AI to design like a high-end agency. Defines the exact fonts, spacing, shadows, card structures, and animations that make a website feel expensive. Blocks all the common defaults that make AI designs look cheap or generic.",
       "summary": "Teaches the AI to design like a high-end agency. Defines the exact fonts, spacing, shadows, card structures, and animations that make a website feel expensive. Blocks all the common defaults that make AI designs look cheap or generic.",
       "tags": [
         "design",
@@ -133,7 +133,7 @@
       "id": "minimalist",
       "name": "minimalist-ui",
       "title": "Minimalist UI",
-      "description": "Warm monochrome, typographic contrast, flat bento grids.",
+      "description": "Clean editorial-style interfaces. Warm monochrome palette, typographic contrast, flat bento grids, muted pastels. No gradients, no heavy shadows.",
       "summary": "Clean editorial-style interfaces. Warm monochrome palette, typographic contrast, flat bento grids, muted pastels. No gradients, no heavy shadows.",
       "tags": [
         "design",
@@ -153,7 +153,7 @@
       "id": "brutalist",
       "name": "industrial-brutalist-ui",
       "title": "Industrial brutalist UI",
-      "description": "Swiss print meets terminal, for dense dashboards.",
+      "description": "Raw mechanical interfaces fusing Swiss typographic print with military terminal aesthetics. Rigid grids, extreme type scale contrast, utilitarian color, analog degradation effects. For data-heavy dashboards, portfolios, or editorial sites that need to feel like declassified blueprints.",
       "summary": "Raw mechanical interfaces fusing Swiss typographic print with military terminal aesthetics. Rigid grids, extreme type scale contrast, utilitarian color, analog degradation effects. For data-heavy dashboards, portfolios, or editorial sites that need to feel like declassified blueprints.",
       "tags": [
         "design",
@@ -173,7 +173,7 @@
       "id": "gpt-taste",
       "name": "gpt-taste",
       "title": "Editorial layout and motion",
-      "description": "Editorial typography with GSAP scroll motion, layouts varied.",
+      "description": "Elite UX/UI & Advanced GSAP Motion Engineer. Enforces Python-driven true randomization for layout variance, strict AIDA page structure, wide editorial typography (bans 6-line wraps), gapless bento grids, strict GSAP ScrollTriggers (pinning, stacking, scrubbing), inline micro-images, and massive section spacing.",
       "summary": "Elite UX/UI & Advanced GSAP Motion Engineer. Enforces Python-driven true randomization for layout variance, strict AIDA page structure, wide editorial typography (bans 6-line wraps), gapless bento grids, strict GSAP ScrollTriggers (pinning, stacking, scrubbing), inline micro-images, and massive section spacing.",
       "tags": [
         "design",
@@ -193,7 +193,7 @@
       "id": "stitch",
       "name": "stitch-design-taste",
       "title": "Stitch design system",
-      "description": "Writes the DESIGN.md that steers Google Stitch off defaults.",
+      "description": "Semantic Design System Skill for Google Stitch. Generates agent-friendly DESIGN.md files that enforce premium, anti-generic UI standards — strict typography, calibrated color, asymmetric layouts, perpetual micro-motion, and hardware-accelerated performance.",
       "summary": "Semantic Design System Skill for Google Stitch. Generates agent-friendly DESIGN.md files that enforce premium, anti-generic UI standards — strict typography, calibrated color, asymmetric layouts, perpetual micro-motion, and hardware-accelerated performance. Ships with a worked DESIGN.md to copy from.",
       "tags": [
         "design",
@@ -214,7 +214,7 @@
       "id": "brandkit",
       "name": "brandkit",
       "title": "Brand kit",
-      "description": "Brand-guideline boards, logo systems and identity decks.",
+      "description": "Premium brand-kit image generation skill for creating high-end brand-guidelines boards, logo systems, identity decks, and visual-world presentations. Trained for minimalist, cinematic, editorial, dark-tech, luxury, cultural, security, gaming, developer-tool, and consumer-app brand systems. Optimized for intentional logo concepting, refined composition, sparse typography, strong symbolic meaning, premium mockups, art-directed imagery, and flexible grid layouts.",
       "summary": "Premium brand-kit image generation skill for creating high-end brand-guidelines boards, logo systems, identity decks, and visual-world presentations. Optimized for intentional logo concepting, refined composition, sparse typography, strong symbolic meaning, premium mockups, and flexible grid layouts.",
       "tags": [
         "branding",
@@ -234,7 +234,7 @@
       "id": "image-to-code",
       "name": "image-to-code",
       "title": "Image to code",
-      "description": "Draw the design first, study it, then build the site to match.",
+      "description": "Elite website image-to-code skill for Codex. For visually important web tasks, it must first generate the design image(s) itself, deeply analyze them, then implement the website to match them as closely as possible. In Codex, it must prefer large, readable, section-specific images instead of tiny compressed boards, generate fresh standalone images for sections or detail views instead of cropping old ones, avoid lazy under-generation, avoid cards-inside-cards-inside-cards UI, and keep the hero clean, spacious, readable, and visible on a small laptop.",
       "summary": "Elite website image-to-code skill. For visually important web tasks it generates the design images itself, analyses them deeply, then implements the site to match as closely as possible. Prefers large, readable, section-specific images over compressed boards, and keeps the hero clean, spacious and visible on a small laptop.",
       "tags": [
         "design",
@@ -254,7 +254,7 @@
       "id": "imagegen-frontend-web",
       "name": "imagegen-frontend-web",
       "title": "Web section references",
-      "description": "One reference image per section — eight sections, eight images.",
+      "description": "Elite frontend image-direction skill for generating premium, conversion-aware website design references. CRITICAL OUTPUT RULE — generate ONE separate horizontal image FOR EVERY section. A landing page with 8 sections produces 8 images. Never compress multiple sections into one image. Enforces composition variety (not always left-text / right-image), background-image freedom, varied CTAs, varied hero scales (giant / mid / mini minimalist), narrative concept spine, second-read moments, and a single consistent palette across all images. Optimized for landing pages, marketing sites, and product comps that developers or coding models can accurately recreate.",
       "summary": "Elite frontend image-direction skill for generating premium, conversion-aware website design references. Generates one separate horizontal image for every section rather than compressing several into one, and enforces composition variety, varied hero scales, a narrative concept spine, and a single consistent palette across all images.",
       "tags": [
         "design",
@@ -274,7 +274,7 @@
       "id": "imagegen-frontend-mobile",
       "name": "imagegen-frontend-mobile",
       "title": "Mobile screen concepts",
-      "description": "App-native mobile screens in a phone mockup. Images only.",
+      "description": "Elite mobile app image-generation skill for creating premium, app-native screen concepts and flows. Designed for iOS, Android, and cross-platform mobile products. Prioritizes clean hierarchy, comfortably readable text, strong multi-screen consistency, controlled color palettes, non-generic creative direction, textured surfaces, image-led composition, tasteful custom iconography, and clean phone mockup framing. By default, screens should be shown inside a subtle premium iPhone or similar phone mockup with a visible frame, while the main focus stays on the app content itself. This skill generates images only. It does not write code.",
       "summary": "Elite mobile app image-generation skill for creating premium, app-native screen concepts and flows for iOS, Android and cross-platform products. Prioritises clean hierarchy, readable text, multi-screen consistency, controlled palettes, textured surfaces and tasteful custom iconography. This skill generates images only; it does not write code.",
       "tags": [
         "design",
@@ -294,7 +294,7 @@
       "id": "better-accessibility",
       "name": "better-accessibility",
       "title": "Better accessibility",
-      "description": "Accessibility engineering for product interfaces. Use when building or reviewing UI components and custom widgets, or when the user reports a keyboard or screen-reader problem. Triggers on accessibility, a11y, WCAG, aria, focus ring, focus trap, keyboard navigation, tabindex, screen reader, sr-only, alt text, hit area, hover on touch, prefers-reduced-motion, autoplay, skip link, semantic HTML, for",
+      "description": "Accessibility engineering for product interfaces. Use when building or reviewing UI components and custom widgets, or when the user reports a keyboard or screen-reader problem. Triggers on accessibility, a11y, WCAG, aria, focus ring, focus trap, keyboard navigation, tabindex, screen reader, sr-only, alt text, hit area, hover on touch, prefers-reduced-motion, autoplay, skip link, semantic HTML, form errors, disabled buttons, \"not keyboard accessible\".",
       "tags": [
         "accessibility",
         "animation",
@@ -328,7 +328,7 @@
       "id": "better-colors",
       "name": "better-colors",
       "title": "Better colors",
-      "description": "Color systems for digital products. Use when creating or extending a palette, theming light and dark appearances, or auditing the colors in a codebase. Triggers on color palette, palette generation, color ramp, brand color, accent color, gray palette, status colors, color tokens, token naming, theming, dark mode colors, contrast ratio, APCA, gamut, display p3, oklch, color conversion, gradients, c",
+      "description": "Color systems for digital products. Use when creating or extending a palette, theming light and dark appearances, or auditing the colors in a codebase. Triggers on color palette, palette generation, color ramp, brand color, accent color, gray palette, status colors, color tokens, token naming, theming, dark mode colors, contrast ratio, APCA, gamut, display p3, oklch, color conversion, gradients, color meaning, increased contrast.",
       "tags": [
         "accessibility",
         "background",
@@ -419,7 +419,7 @@
       "id": "better-typography",
       "name": "better-typography",
       "title": "Better typography",
-      "description": "Web typography. Use when picking or pairing typefaces, setting up a type scale, or styling and truncating text in components. Triggers on typography, font loading, woff2, variable fonts, opentype features, type scale, heading hierarchy, line-height, letter-spacing, measure, text-wrap, truncation, tabular numbers, underlines, text selection, iOS input zoom, font smoothing, smart punctuation, text-b",
+      "description": "Web typography. Use when picking or pairing typefaces, setting up a type scale, or styling and truncating text in components. Triggers on typography, font loading, woff2, variable fonts, opentype features, type scale, heading hierarchy, line-height, letter-spacing, measure, text-wrap, truncation, tabular numbers, underlines, text selection, iOS input zoom, font smoothing, smart punctuation, text-box, drop cap.",
       "tags": [
         "layout",
         "swift",
@@ -655,7 +655,7 @@
       "id": "animate-expo",
       "name": "animate-expo",
       "title": "Animate expo",
-      "description": "Build animations in React Native and Expo, making the decisions in the order that determines whether they feel right — should it animate, which thread it runs on, which properties, spring or timing, how the gesture hands off, how it degrades. Writes the implementation with Reanimated, Gesture Handler, Expo Router and expo-haptics. Use when animating anything in an Expo app, adding gestures, sheets",
+      "description": "Build animations in React Native and Expo, making the decisions in the order that determines whether they feel right — should it animate, which thread it runs on, which properties, spring or timing, how the gesture hands off, how it degrades. Writes the implementation with Reanimated, Gesture Handler, Expo Router and expo-haptics. Use when animating anything in an Expo app, adding gestures, sheets, screen transitions, press feedback or haptics, or fixing motion that stutters on device. For web animation use `animate`.",
       "tags": [
         "animation",
         "mobile",
@@ -683,7 +683,7 @@
       "id": "animate",
       "name": "animate",
       "title": "Animate",
-      "description": "Build an animation from scratch, making the decisions in the order that determines whether it feels right — should it animate at all, what purpose, which tool, which properties, which curve and duration, how it interrupts, how it exits. Writes the implementation. Use when asked to animate something, add motion, make a component feel alive, or build a transition. For critiquing existing motion use ",
+      "description": "Build an animation from scratch, making the decisions in the order that determines whether it feels right — should it animate at all, what purpose, which tool, which properties, which curve and duration, how it interrupts, how it exits. Writes the implementation. Use when asked to animate something, add motion, make a component feel alive, or build a transition. For critiquing existing motion use review-animations; for auditing a whole codebase use improve-animations.",
       "tags": [
         "animation",
         "review",
@@ -710,7 +710,7 @@
       "id": "animation-vocabulary",
       "name": "animation-vocabulary",
       "title": "Animation vocabulary",
-      "description": "Reverse-lookup glossary that turns a vague description of a web animation or motion effect into its exact term (\"the bouncy thing when a popover opens\" → Pop in; \"the iOS rubber-band scroll\" → Rubber-banding). Use when the user asks \"what's it called when…\", or describes a motion effect without knowing its name and wants the right word to prompt an AI or designer with. For naming an effect, not de",
+      "description": "Reverse-lookup glossary that turns a vague description of a web animation or motion effect into its exact term (\"the bouncy thing when a popover opens\" → Pop in; \"the iOS rubber-band scroll\" → Rubber-banding). Use when the user asks \"what's it called when…\", or describes a motion effect without knowing its name and wants the right word to prompt an AI or designer with. For naming an effect, not designing or building one.",
       "tags": [
         "animation",
         "design",
@@ -737,7 +737,7 @@
       "id": "apple-design",
       "name": "apple-design",
       "title": "Apple design",
-      "description": "Apple's approach to interface design and fluid, physical motion, translated for the web. Use when building or reviewing gesture-driven UI, spring animations, drag/swipe/sheet interactions, momentum and interruptible transitions, translucent materials and depth, typography (optical sizing, tracking, leading), reduced-motion, or the design foundations (feedback, spatial consistency, restraint) behin",
+      "description": "Apple's approach to interface design and fluid, physical motion, translated for the web. Use when building or reviewing gesture-driven UI, spring animations, drag/swipe/sheet interactions, momentum and interruptible transitions, translucent materials and depth, typography (optical sizing, tracking, leading), reduced-motion, or the design foundations (feedback, spatial consistency, restraint) behind Apple-style interfaces.",
       "tags": [
         "animation",
         "design",
@@ -764,7 +764,7 @@
       "id": "ask-sonner",
       "name": "ask-sonner",
       "title": "Ask sonner",
-      "description": "Guide to Sonner, the React toast library — install and wire up the Toaster, pick the right toast() call, promise and loading toasts, updating, dismissing and persisting toasts, styling, theming and icons, positioning and multiple toasters. Use when working with Sonner or troubleshooting it — toasts that don't appear, appear twice, lose their styles, ignore Tailwind classes, sit behind a modal, or ",
+      "description": "Guide to Sonner, the React toast library — install and wire up the Toaster, pick the right toast() call, promise and loading toasts, updating, dismissing and persisting toasts, styling, theming and icons, positioning and multiple toasters. Use when working with Sonner or troubleshooting it — toasts that don't appear, appear twice, lose their styles, ignore Tailwind classes, sit behind a modal, or don't follow dark mode.",
       "tags": [
         "icons",
         "library",
@@ -844,7 +844,7 @@
       "id": "improve-animations",
       "name": "improve-animations",
       "title": "Improve animations",
-      "description": "Survey a codebase's animation and motion code as a senior motion advisor, then produce a prioritized audit and self-contained implementation plans for other agents (or cheaper models) to execute. Read-only on source code — it plans improvements, it does not apply them. Use when the user asks to \"improve the animations\", \"audit the motion\", \"make this app feel better\", or wants a roadmap of animati",
+      "description": "Survey a codebase's animation and motion code as a senior motion advisor, then produce a prioritized audit and self-contained implementation plans for other agents (or cheaper models) to execute. Read-only on source code — it plans improvements, it does not apply them. Use when the user asks to \"improve the animations\", \"audit the motion\", \"make this app feel better\", or wants a roadmap of animation fixes rather than a review of a single diff.",
       "tags": [
         "animation",
         "review"
@@ -949,7 +949,7 @@
       "id": "write-swift",
       "name": "write-swift",
       "title": "Write swift",
-      "description": "How to write modern Swift well — modeling with value types, Swift 6 data-race safety and approachable concurrency (@concurrent, main-actor-by-default, actors, task groups), protocols and generics (some vs any), API design, performance and ARC, Swift Testing, macros, and the modern language features agents don't know about yet. Use when writing, reviewing, or migrating Swift, or when a concurrency ",
+      "description": "How to write modern Swift well — modeling with value types, Swift 6 data-race safety and approachable concurrency (@concurrent, main-actor-by-default, actors, task groups), protocols and generics (some vs any), API design, performance and ARC, Swift Testing, macros, and the modern language features agents don't know about yet. Use when writing, reviewing, or migrating Swift, or when a concurrency error, a hang, a data race, a retain cycle, or a performance problem needs fixing.",
       "tags": [
         "design",
         "review",
@@ -976,7 +976,7 @@
       "id": "tastemaker",
       "name": "tastemaker",
       "title": "Tastemaker",
-      "description": "Generate genuinely beautiful, on-brand UI instead of generic \"AI slop\" — use whenever the user asks to build, design, style, or improve a UI, landing page, dashboard, app screen, or component, whenever a PRD/spec needs a design pass before implementation, whenever the user pastes reference images/Pinterest/Dribbble links and wants the app to look like them, or whenever the user complains the AI-ge",
+      "description": "Generate genuinely beautiful, on-brand UI instead of generic \"AI slop\" — use whenever the user asks to build, design, style, or improve a UI, landing page, dashboard, app screen, or component, whenever a PRD/spec needs a design pass before implementation, whenever the user pastes reference images/Pinterest/Dribbble links and wants the app to look like them, or whenever the user complains the AI-generated UI looks generic, boring, cookie-cutter, or \"like every other AI app.\" Make sure to trigger this even if the user doesn't say \"design\" explicitly — phrases like \"make this look good\", \"build the frontend for X\", \"this looks like every other SaaS site\", or \"match this vibe\" all qualify. Also triggers on two verbs, \"study\"/\"extract the look of\" a reference screenshot or URL, and \"audit\"/\"review\"/\"why does this look AI-generated\" for critiquing existing UI.",
       "tags": [
         "design",
         "review",
@@ -1097,7 +1097,7 @@
       "id": "add-shader-cursor-trail",
       "name": "add-shader-cursor-trail",
       "title": "Add shader cursor trail",
-      "description": "Add the Shaders WebGPU mouse effect used for the Tidal Commons hero: a white twinkling halftone cursor trail driven by ChromaFlow, masked through a DotGrid, finished with chromatic ripples and film grain, and protected by static, touch, accessibility, SSR, and performance fallbacks. Use when a user asks for this shader mouse effect, a halftone cursor trail, an interactive WebGPU hero/contact backg",
+      "description": "Add the Shaders WebGPU mouse effect used for the Tidal Commons hero: a white twinkling halftone cursor trail driven by ChromaFlow, masked through a DotGrid, finished with chromatic ripples and film grain, and protected by static, touch, accessibility, SSR, and performance fallbacks. Use when a user asks for this shader mouse effect, a halftone cursor trail, an interactive WebGPU hero/contact background, or a reusable cursor-following shader layer in React, Next.js, Vue, Svelte, Solid, or plain web projects.",
       "tags": [
         "3d",
         "accessibility",
@@ -1439,7 +1439,7 @@
       "id": "build-awwwards-quality-sites",
       "name": "build-awwwards-quality-sites",
       "title": "Build awwwards quality sites",
-      "description": "Art-direct and implement distinctive, motion-rich marketing, editorial, portfolio, and landing websites with original reference-inspired imagery, standout heroes, GSAP choreography, one smooth-scroll engine, optional Three.js shaders, honest icon and logo sourcing, photo avatars, accessibility, and performance safeguards. Use when a user asks for an Awwwards-quality, premium, cinematic, interactiv",
+      "description": "Art-direct and implement distinctive, motion-rich marketing, editorial, portfolio, and landing websites with original reference-inspired imagery, standout heroes, GSAP choreography, one smooth-scroll engine, optional Three.js shaders, honest icon and logo sourcing, photo avatars, accessibility, and performance safeguards. Use when a user asks for an Awwwards-quality, premium, cinematic, interactive, high-concept, or motion-led website, or explicitly requests this visual and motion system.",
       "tags": [
         "3d",
         "accessibility",
@@ -1493,7 +1493,7 @@
       "id": "build-threejs-scroll-worlds",
       "name": "build-threejs-scroll-worlds",
       "title": "Build threejs scroll worlds",
-      "description": "Build rich, scroll-controlled real-time Three.js experiences as one persistent 3D world whose camera, lighting, atmosphere, materials, objects, DOM story, and interactions evolve across authored chapters. Use for 3D scrollytelling, scroll-driven WebGL worlds, camera journeys, interactive portfolios, product stories, exhibitions, explainers, game or film microsites, spatial narratives, and multi-sc",
+      "description": "Build rich, scroll-controlled real-time Three.js experiences as one persistent 3D world whose camera, lighting, atmosphere, materials, objects, DOM story, and interactions evolve across authored chapters. Use for 3D scrollytelling, scroll-driven WebGL worlds, camera journeys, interactive portfolios, product stories, exhibitions, explainers, game or film microsites, spatial narratives, and multi-scene websites where native scroll should travel through one continuous place. Not limited to landing pages.",
       "tags": [
         "3d",
         "game",
@@ -1581,7 +1581,7 @@
       "id": "cinematic-scroll-storytelling",
       "name": "cinematic-scroll-storytelling",
       "title": "Cinematic scroll storytelling",
-      "description": "Create cinematic scroll-driven landing pages with Lenis smooth scrolling, GSAP ScrollTrigger, scroll-linked progression, staggered text reveals, sticky card stacks, parallax backgrounds, scroll-scrubbed transitions, footer reveals, and immersive preloaders. Use when analyzing or building premium editorial scroll experiences, sticky project stacks, kinetic typography, or section-by-section storytel",
+      "description": "Create cinematic scroll-driven landing pages with Lenis smooth scrolling, GSAP ScrollTrigger, scroll-linked progression, staggered text reveals, sticky card stacks, parallax backgrounds, scroll-scrubbed transitions, footer reveals, and immersive preloaders. Use when analyzing or building premium editorial scroll experiences, sticky project stacks, kinetic typography, or section-by-section storytelling.",
       "tags": [
         "animation",
         "background",
@@ -2031,7 +2031,7 @@
       "id": "falling-leaves",
       "name": "falling-leaves",
       "title": "Falling leaves",
-      "description": "Build falling leaves that read as leaves, with each one tumbling on its own axis so it presents a face, thins to an edge, and opens out again, and with its sideways slip driven by that same tumble. Covers the 2-D canvas build and the instanced-3-D variant, where leaves are recycled from, density-versus-count maths, depth layering, colour under a tone-mapped composite, reduced motion, and visibilit",
+      "description": "Build falling leaves that read as leaves, with each one tumbling on its own axis so it presents a face, thins to an edge, and opens out again, and with its sideways slip driven by that same tumble. Covers the 2-D canvas build and the instanced-3-D variant, where leaves are recycled from, density-versus-count maths, depth layering, colour under a tone-mapped composite, reduced motion, and visibility pausing. Use for autumn maple, sakura petals, blossom, ash, snowfall shapes, or any drifting foliage where a generic particle field reads as confetti.",
       "tags": [
         "animation",
         "colour",
@@ -2240,7 +2240,7 @@
       "id": "gooey-blob-system",
       "name": "gooey-blob-system",
       "title": "Gooey blob system",
-      "description": "Create a gooey blob system using SVG filters where multiple shapes merge into a single fluid form. Use overlapping circles combined with a Gaussian blur and color matrix filter to produce a continuous, organic mass. The forms should visually fuse and separate based on proximity. Focus on filter-driven merging (blur + threshold effect), soft organic boundaries with no hard edges, multiple independe",
+      "description": "Create a gooey blob system using SVG filters where multiple shapes merge into a single fluid form. Use overlapping circles combined with a Gaussian blur and color matrix filter to produce a continuous, organic mass. The forms should visually fuse and separate based on proximity. Focus on filter-driven merging (blur + threshold effect), soft organic boundaries with no hard edges, multiple independent shapes behaving as one system, and smooth continuous motion that feels fluid and cohesive.",
       "tags": [
         "animation",
         "colour",
@@ -2424,7 +2424,7 @@
       "id": "liquid-metal-border",
       "name": "liquid-metal-border",
       "title": "Liquid metal border",
-      "description": "Add and tune animated liquid-metal WebGL borders with the React `metal-fx` package. Use when buttons, icon controls, chips, tabs, cards, or selected surfaces need a metallic active, selected, hover, focus, or premium border; when implementing the MetalFx component from metal.jakubantalik.com; or when troubleshooting its presets, themes, strength, glow, reflections, sizing, radius, animation, acces",
+      "description": "Add and tune animated liquid-metal WebGL borders with the React `metal-fx` package. Use when buttons, icon controls, chips, tabs, cards, or selected surfaces need a metallic active, selected, hover, focus, or premium border; when implementing the MetalFx component from metal.jakubantalik.com; or when troubleshooting its presets, themes, strength, glow, reflections, sizing, radius, animation, accessibility, SSR, or performance.",
       "tags": [
         "3d",
         "accessibility",
@@ -2579,7 +2579,7 @@
       "id": "nested-container-frames",
       "name": "nested-container-frames",
       "title": "Nested container frames",
-      "description": "Create a container-in-container layout system using nested frames. Use an outer centered container with visible vertical boundary lines and corner markers. Inside, place inner containers inset from the edges, each with its own background and rounded frame. Technique: outer container defines global bounds, inner containers use padding to create inset spacing, layered frames (border + background) to",
+      "description": "Create a container-in-container layout system using nested frames. Use an outer centered container with visible vertical boundary lines and corner markers. Inside, place inner containers inset from the edges, each with its own background and rounded frame. Technique: outer container defines global bounds, inner containers use padding to create inset spacing, layered frames (border + background) to separate levels, and consistent spacing between outer frame and inner blocks.",
       "tags": [
         "background",
         "detail",
@@ -2684,7 +2684,7 @@
       "id": "pointer-trail-emitter",
       "name": "pointer-trail-emitter",
       "title": "Pointer trail emitter",
-      "description": "Build a cursor trail whose spacing stays constant at any hand speed, by emitting motes per unit of distance travelled rather than on a timer, so a flick draws the same continuous ribbon as a crawl instead of breaking into scattered dots. Covers sub-segment placement, the ring-buffer ordering trap, the idle breath a distance emitter needs, anchoring the trail to the screen in a 3-D scene, scaling s",
+      "description": "Build a cursor trail whose spacing stays constant at any hand speed, by emitting motes per unit of distance travelled rather than on a timer, so a flick draws the same continuous ribbon as a crawl instead of breaking into scattered dots. Covers sub-segment placement, the ring-buffer ordering trap, the idle breath a distance emitter needs, anchoring the trail to the screen in a 3-D scene, scaling scatter against the plane it hangs on, coasting instead of stopping dead, touch and reduced-motion fallbacks, and why moving the emitter to a DOM overlay to raise its z-index costs more than it buys. Use for cursor wisps, pointer sparks, embers, magic trails, comet tails, plankton, dust, or any mote trail that must stay legible however fast the hand moves.",
       "tags": [
         "animation",
         "effects",
@@ -2902,7 +2902,7 @@
       "id": "scroll-world-storytelling",
       "name": "scroll-world-storytelling",
       "title": "Scroll world storytelling",
-      "description": "Turn an article, case study, brand narrative, product journey, or long-form story into a cinematic scroll-driven landing page using one of three renderers: scrubbed video, a real-time Three.js world, or semantic HTML/SVG data and typography. Use when the user asks for a scroll world, fly-through landing page, article-to-website transformation, animated planet, data scrollytelling, video-scrubbed p",
+      "description": "Turn an article, case study, brand narrative, product journey, or long-form story into a cinematic scroll-driven landing page using one of three renderers: scrubbed video, a real-time Three.js world, or semantic HTML/SVG data and typography. Use when the user asks for a scroll world, fly-through landing page, article-to-website transformation, animated planet, data scrollytelling, video-scrubbed page, connected visual journey, or story-led alternative to ordinary stacked sections.",
       "tags": [
         "3d",
         "animation",
@@ -2931,7 +2931,7 @@
       "id": "shaders-cursor-ripples",
       "name": "shaders-cursor-ripples",
       "title": "Shaders cursor ripples",
-      "description": "Add cursor-following fluid WebGPU distortion over an existing image with the Shaders library's ImageTexture and CursorRipples components. Use when a hero, gallery, or media panel needs a water-ripple mouse effect; when replacing a drifting CSS spotlight or flashlight reveal; or when a prompt says to borrow only the shader interaction from a Shaders.com reference while preserving the current brand,",
+      "description": "Add cursor-following fluid WebGPU distortion over an existing image with the Shaders library's ImageTexture and CursorRipples components. Use when a hero, gallery, or media panel needs a water-ripple mouse effect; when replacing a drifting CSS spotlight or flashlight reveal; or when a prompt says to borrow only the shader interaction from a Shaders.com reference while preserving the current brand, image, copy, and layout.",
       "tags": [
         "3d",
         "effects",
@@ -3143,7 +3143,7 @@
       "id": "thinking-orbs",
       "name": "thinking-orbs",
       "title": "Thinking orbs",
-      "description": "Add accessible animated AI loading and agent-status indicators with the React thinking-orbs library. Use when a chat, copilot, voice, search, generation, or tool-running interface needs a semantic working, searching, solving, listening, composing, or shaping state; when replacing a generic spinner with an AI activity orb; or when implementing the library's size, theme, speed, pause, reduced-motion",
+      "description": "Add accessible animated AI loading and agent-status indicators with the React thinking-orbs library. Use when a chat, copilot, voice, search, generation, or tool-running interface needs a semantic working, searching, solving, listening, composing, or shaping state; when replacing a generic spinner with an AI activity orb; or when implementing the library's size, theme, speed, pause, reduced-motion, and canvas behavior.",
       "tags": [
         "accessibility",
         "animation",
@@ -3200,7 +3200,7 @@
       "id": "threejs-landscape",
       "name": "threejs-landscape",
       "title": "Threejs landscape",
-      "description": "Build a live Three.js landscape that stays quiet behind a subject — a noise heightfield on a polar grid so resolution follows the lens, ground coloured by slope and moisture rather than by texture, instanced GPU grass whose wind costs nothing on the CPU, scattered stones, a gradient sky dome, a star field you can actually see, and a time-of-day system that cross-fades instead of cutting. Use for h",
+      "description": "Build a live Three.js landscape that stays quiet behind a subject — a noise heightfield on a polar grid so resolution follows the lens, ground coloured by slope and moisture rather than by texture, instanced GPU grass whose wind costs nothing on the CPU, scattered stones, a gradient sky dome, a star field you can actually see, and a time-of-day system that cross-fades instead of cutting. Use for hero backdrops, product stages, scroll worlds, or any scene where a building, object, or figure has to sit in a place rather than float on a gradient.",
       "tags": [
         "3d",
         "background",
@@ -3228,7 +3228,7 @@
       "id": "threejs-towers",
       "name": "threejs-towers",
       "title": "Threejs towers",
-      "description": "Generate architecture procedurally in Three.js and film it assembling — a small geometry vocabulary that builds pagodas, castles, domes and spires from parameters instead of mesh files, hip roofs with flying eaves driven by a single profile function, and a clipping-plane build animation where everything below a rising line is finished work and scaffolding stands above it. Use for construction stud",
+      "description": "Generate architecture procedurally in Three.js and film it assembling — a small geometry vocabulary that builds pagodas, castles, domes and spires from parameters instead of mesh files, hip roofs with flying eaves driven by a single profile function, and a clipping-plane build animation where everything below a rising line is finished work and scaffolding stands above it. Use for construction studies, architectural title sequences, procedural landmarks, or any hero object that should build itself rather than fade in.",
       "tags": [
         "3d",
         "animation"
@@ -3254,7 +3254,7 @@
       "id": "threejs-weather",
       "name": "threejs-weather",
       "title": "Threejs weather",
-      "description": "Put weather into a Three.js scene that reads as weather — rain anchored inside the frustum, a storm that is the rain leaned on rather than a second system, lightning on its own light with thunder scheduled by distance, snow that blows up into blizzards and keeps settling until the ground goes white, wet ground with puddles and splashes, and looping ambience that has no seam. Use for scene atmosphe",
+      "description": "Put weather into a Three.js scene that reads as weather — rain anchored inside the frustum, a storm that is the rain leaned on rather than a second system, lightning on its own light with thunder scheduled by distance, snow that blows up into blizzards and keeps settling until the ground goes white, wet ground with puddles and splashes, and looping ambience that has no seam. Use for scene atmosphere, seasonal states, hero backdrops, or any world where clear/rain/storm/snow needs to be a control the viewer can turn.",
       "tags": [
         "3d",
         "background"
@@ -3498,7 +3498,7 @@
       "id": "build-game-changelog",
       "name": "build-game-changelog",
       "title": "Build game changelog",
-      "description": "Design, implement, backfill, audit, and release in-game changelogs with contiguous versioning, deployment provenance, menu-state navigation, accessible toggle, close, and Escape behavior, and responsive release-ledger UI. Use when Codex needs to add or revise a changelog or version screen in a game, reconstruct release history from deployments and Git, define version-bump rules, keep displayed ver",
+      "description": "Design, implement, backfill, audit, and release in-game changelogs with contiguous versioning, deployment provenance, menu-state navigation, accessible toggle, close, and Escape behavior, and responsive release-ledger UI. Use when Codex needs to add or revise a changelog or version screen in a game, reconstruct release history from deployments and Git, define version-bump rules, keep displayed versions synchronized with live builds, or test changelog mechanics across desktop and mobile.",
       "tags": [
         "accessibility",
         "design",
@@ -3552,7 +3552,7 @@
       "id": "build-game-map-editor",
       "name": "build-game-map-editor",
       "title": "Build game map editor",
-      "description": "Build, extend, or audit production-linked browser map editors for Three.js and isometric games. Use when Codex needs to create a private director view, derive a versioned editor document from authored placements, add outliner, layer, selection, drag, snap, inspector, or camera controls, expose enemy aggro, leash, or patrol overlays, implement local draft import, export, undo, and reset, secure an ",
+      "description": "Build, extend, or audit production-linked browser map editors for Three.js and isometric games. Use when Codex needs to create a private director view, derive a versioned editor document from authored placements, add outliner, layer, selection, drag, snap, inspector, or camera controls, expose enemy aggro, leash, or patrol overlays, implement local draft import, export, undo, and reset, secure an editor route with IP and password sessions, or validate and release a map editor without mutating live gameplay data.",
       "tags": [
         "3d",
         "game",
@@ -3694,7 +3694,7 @@
       "id": "build-rigged-game-assets",
       "name": "build-rigged-game-assets",
       "title": "Build rigged game assets",
-      "description": "Create, integrate, or audit production-ready rigged 3D characters and monsters with a main model, skeleton, animation library, sockets, collision contracts, separate character equipment, optimized runtime files, catalog media, and an interactive moveset inspector. Use when generating or importing FBX/GLB game actors; defining character-versus-monster asset requirements; separating swords, shields,",
+      "description": "Create, integrate, or audit production-ready rigged 3D characters and monsters with a main model, skeleton, animation library, sockets, collision contracts, separate character equipment, optimized runtime files, catalog media, and an interactive moveset inspector. Use when generating or importing FBX/GLB game actors; defining character-versus-monster asset requirements; separating swords, shields, helmets, armor, or stowed gear; adding idle, walk, run, attack, hit, dodge, block, cast, or death clips; wiring an asset into gameplay; or adding action and equipment controls plus deterministic tests to a game asset catalog.",
       "tags": [
         "3d",
         "animation",
@@ -3751,7 +3751,7 @@
       "id": "build-vesperfall-review-assets",
       "name": "build-vesperfall-review-assets",
       "title": "Build vesperfall review assets",
-      "description": "Build truthful Vesperfall asset-library review pairs from transparent PNG references and live Three.js, FBX, or img2threejs models. Use when adding a character, enemy, prop, or equipment asset to the Vesperfall catalog; creating a card-PNG plus inspector-model treatment; exposing an isolated model or moveset route; or standardizing provenance, grounding, tests, and Codex-browser validation for gam",
+      "description": "Build truthful Vesperfall asset-library review pairs from transparent PNG references and live Three.js, FBX, or img2threejs models. Use when adding a character, enemy, prop, or equipment asset to the Vesperfall catalog; creating a card-PNG plus inspector-model treatment; exposing an isolated model or moveset route; or standardizing provenance, grounding, tests, and Codex-browser validation for game art review.",
       "tags": [
         "3d",
         "game",
