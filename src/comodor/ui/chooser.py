@@ -28,6 +28,7 @@ What is here instead is one framed list at a time.
 
 from __future__ import annotations
 
+import textwrap
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -40,10 +41,34 @@ from .input.keys import KeyEvent
 from .input.reader import TerminalInput
 from .theme import Theme
 
-#: Rows the frame spends on itself: two borders, and the hint line under it.
-CHROME = 4
+#: Rows the frame spends on itself: two borders, the hint line under it, the
+#: two "more above / more below" lines, and a blank line either side.
+CHROME = 7
 #: Never show fewer than this, even on a very short terminal.
 MIN_ROWS = 3
+#: The most the detail pane may take, as a share of the screen. It grows to
+#: fit the note rather than being a fixed size — the descriptions run from one
+#: line to nine hundred characters, and a fixed pane either wastes rows on the
+#: short ones or cuts the long ones — but it never takes so much that the list
+#: it is describing disappears.
+DETAIL_SHARE = 0.5
+#: And never fewer than this, so the pane is worth opening at all.
+DETAIL_MIN = 4
+#: The widest a label may get before it is cut. Long enough for every skill id
+#: in the catalogue, short enough that one long one cannot starve the note.
+LABEL_WIDTH = 24
+
+
+def _pane_width(console: Console) -> int:
+    """Columns a line of the detail pane may use.
+
+    Six off the console rather than four: two for the frame, two for its
+    padding, and two of slack. Rich measures the panel's inside slightly
+    narrower than the arithmetic suggests, and a line one column too long is
+    re-wrapped into two — which makes the pane taller than the height that was
+    reserved for it.
+    """
+    return max(20, console.width - 6)
 
 
 @dataclass(frozen=True)
@@ -95,6 +120,14 @@ class Chooser:
         #: Ticked values, not ticked rows. Filtering changes which options are
         #: on screen and at which index; it must not change what was asked for.
         self.picked: set[str] = set()
+        #: Whether the full note for the highlighted row is open underneath.
+        #:
+        #: The rows show one line each, which is what keeps the list scannable
+        #: and the frame the size of the screen — but some of these notes are a
+        #: paragraph, and a list that truncates with no way to read the rest is
+        #: a list you cannot choose from. Tab opens it, in the same frame,
+        #: against whatever is under the cursor.
+        self.detail = False
 
     # -- what is currently visible ---------------------------------------- #
 
@@ -106,9 +139,33 @@ class Chooser:
         return [option for option in self.options if option.matches(needle)]
 
     def rows(self) -> int:
-        """How many options fit, given the terminal we are in."""
-        available = max(MIN_ROWS, self.console.size.height - CHROME - 6)
-        return min(len(self.matching) or 1, available)
+        """How many options fit, given the terminal we are in.
+
+        One option is one row, which is only true because the note column is
+        told not to wrap. It was not, and a four-hundred-character description
+        became eight lines — so ten options claimed to fit and took sixty rows,
+        the frame ran off the bottom of the screen, and the cursor could be
+        moved several times before this number noticed it had left the window.
+        Both faults were the same fault.
+        """
+        spare = self.console.size.height - CHROME
+        if self.detail:
+            spare -= self.detail_rows()
+        return min(len(self.matching) or 1, max(MIN_ROWS, spare))
+
+    def detail_rows(self) -> int:
+        """How tall the open pane is: what the note needs, within reason."""
+        if not self.detail:
+            return 0
+        items = self.matching
+        note = items[self.cursor].note if items else ""
+        # One for the rule naming the row, plus however many the note wraps to.
+        # The same width `_detail` wraps at, so the height reserved here is the
+        # height actually drawn.
+        wrapped = textwrap.wrap(note, _pane_width(self.console)) or [""]
+        wants = 1 + max(1, len(wrapped))
+        ceiling = max(DETAIL_MIN, int(self.console.size.height * DETAIL_SHARE))
+        return min(wants, ceiling)
 
     def _scroll_into_view(self) -> None:
         window = self.rows()
@@ -129,12 +186,25 @@ class Chooser:
 
         box_width = max(len(theme.glyphs.ticked), len(theme.glyphs.unticked))
 
-        table = Table.grid(padding=(0, 1))
+        # `expand` and a ratio on the note, because the note is the only column
+        # that can give ground. Without them Rich asks every column for the
+        # width its longest cell wants, finds four hundred characters of note,
+        # and squeezes the arrow and the checkbox to nothing to make room — so
+        # the one mark saying where you are disappears exactly when the list is
+        # long enough to need it.
+        table = Table.grid(padding=(0, 1), expand=True)
         table.add_column(width=2, no_wrap=True)
         if self.multi:
             table.add_column(width=box_width, no_wrap=True)
-        table.add_column(no_wrap=True)
-        table.add_column(overflow="ellipsis")
+        table.add_column(no_wrap=True, max_width=LABEL_WIDTH)
+        # `no_wrap` as well as the ellipsis. `overflow` alone only decides what
+        # happens to a line that is too long *after* wrapping has been tried,
+        # so without this a long note silently became a paragraph.
+        # Rich's own ellipsis is "…", which is not ASCII, so under `--ascii`
+        # the note is cropped instead of marked. Cutting is the lesser fault:
+        # the whole note is a keypress away in the pane below.
+        table.add_column(no_wrap=True, ratio=1,
+                         overflow="crop" if theme.ascii else "ellipsis")
 
         if not items:
             blank = ["", Text("nothing matches", style=theme.style("bad")), Text("")]
@@ -167,6 +237,8 @@ class Chooser:
         blocks.append(table)
         if below:
             blocks.append(Text(f"  {below} more below", style=theme.style("dim")))
+        if self.detail and items:
+            blocks.append(self._detail(items[self.cursor]))
 
         subtitle = None
         if self.filter:
@@ -191,6 +263,32 @@ class Chooser:
         )
         return Group(panel, self._hint())
 
+    def _detail(self, option: Option) -> RenderableType:
+        """The whole note for the highlighted row, wrapped, under a rule.
+
+        Inside the same frame rather than a second screen: the point of opening
+        it is to decide about *this* row, and a pane that hides the list makes
+        that comparison impossible.
+        """
+        theme = self.theme
+        note = option.note or "Nothing more to say about this one."
+        lines = textwrap.wrap(note, _pane_width(self.console)) or [""]
+        cut = max(1, self.detail_rows() - 1)
+        if len(lines) > cut:
+            lines = lines[:cut]
+            lines[-1] = lines[-1].rstrip() + theme.glyphs.ellipsis
+        return Group(
+            Text(theme.glyphs.divider * 3 + " " + option.label,
+                 style=theme.style("dim")),
+            # `no_wrap`, because the wrapping above is the one that was
+            # counted. Left to Rich, the lines were re-wrapped a couple of
+            # columns narrower, each one spilling a word onto a line of its
+            # own — so a pane that had reserved eight rows quietly drew ten
+            # and pushed the bottom border off the screen.
+            Text("\n".join(lines), style=theme.style("text"),
+                 no_wrap=True, overflow="crop"),
+        )
+
     def _hint(self) -> Text:
         theme = self.theme
         # Through the glyph table, like everything else in the frame. Written
@@ -204,10 +302,12 @@ class Chooser:
             taking = (f"{self.verb} {len(self.picked)}" if self.picked
                       else f"{self.verb} nothing")
             keys = ((updown, "move"), ("space", "select"), ("enter", taking),
-                    ("type", "filter"), ("esc", "cancel"))
+                    ("tab", "less" if self.detail else "more"),
+                    ("esc", "cancel"))
         else:
             keys = ((updown, "move"), ("enter", "choose"),
-                    ("type", "filter"), ("esc", "cancel"))
+                    ("tab", "less" if self.detail else "more"),
+                    ("esc", "cancel"))
         hint = Text("  ", style=theme.style("dim"))
         for key, what in keys:
             hint.append(key, style=theme.style("accent"))
@@ -267,6 +367,9 @@ class Chooser:
                 self.picked.symmetric_difference_update({value})
             return None
 
+        if event.key == "tab":
+            self.detail = not self.detail
+            return None
         if event.key in ("up", "down", "pgup", "pgdn", "home", "end"):
             self._move(event.key, len(items))
             return None

@@ -20,15 +20,31 @@ none — you are never given something you did not ask for.
 │ ›  ☐ commit-style  Match the commit messages already here │
 │    ☑ python-tests  Write tests the way this project does  │
 └───────────────────────────────────── 2 selected ──────────┘
-  ↑↓ move   space select   enter install 2   type filter   esc cancel
+  ↑↓ move   space select   enter install 2   tab more   esc cancel
 ```
+
+**One line per skill**, so the whole list fits one screen however long the
+library gets, and the window follows the arrow rather than lagging behind it.
+Some of these descriptions run to a paragraph — **tab** opens the full one for
+whatever the arrow is on, in the same frame, and tab again closes it.
 
 Typing filters the list, which is faster than scrolling once there are more
 than a handful. Ticks are kept while you filter, so you can narrow the list,
 tick something, clear the filter and tick something else.
 
 Without a terminal it can take over — a pipe, a script, `curl | sh` — the same
-question is asked as a numbered list, and it takes several: `1,3` or `1 3`.
+question is asked as a numbered list, a page at a time:
+
+| | |
+|---|---|
+| `1,3` or `1 3` | take these |
+| `m` / `b` | next page, previous page |
+| `/word` | show only what matches |
+| `?7` | read the whole description of number 7 |
+| enter | done |
+
+The numbers are absolute: number 92 is the ninety-second skill whichever page
+or search you are looking at, so a number you noted stays the number you type.
 
 ---
 

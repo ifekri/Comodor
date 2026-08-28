@@ -6,6 +6,7 @@ matters here is refusal. The tests are weighted accordingly.
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 import pytest
@@ -342,11 +343,23 @@ def test_angle_brackets_survive(config):
 
 def test_the_welcome_says_whether_it_can_change_anything(service):
     service.config.telegram.allow_writes = False
-    assert "Reading only" in service._welcome()
+    assert "read and plan only" in service._welcome()
 
     service.config.telegram.allow_writes = True
-    assert "Reading only" not in service._welcome()
+    assert "read and plan only" not in service._welcome()
     assert "run commands" in service._welcome()
+
+
+def test_the_welcome_says_what_it_is_pointed_at(service):
+    """Model and folder, without making anybody tap to find out."""
+    said = service._welcome()
+
+    assert "<b>Model</b>" in said
+    assert "<b>Folder</b>" in said
+    # And it names what each button changes, so the keyboard is not a row of
+    # symbols somebody has to press to identify.
+    for wanted in ("Mode", "Skills", "Rules"):
+        assert wanted in said
 
 
 def test_the_slash_commands_are_registered_and_few():
@@ -364,6 +377,41 @@ def test_backoff_climbs_and_stops():
     assert max(steps) <= 60
 
 
+def real_state(*, provider: str, model: str, mode: str, used: int, limit: int,
+               cost: float | None, project: str = "/w") -> dict[str, Any]:
+    """A state dictionary shaped the way `Session.state()` really shapes one.
+
+    The status tests used to invent their own keys — `cwd`, `context_used`,
+    `cost_usd` — and the code read those same invented keys, so both agreed
+    with each other and neither agreed with the session. Folder, Context and
+    Spend were blank on every real status for as long as that lasted, with
+    green tests over it the whole time.
+    """
+    return {
+        "provider": provider,
+        "model": model,
+        "mode": mode,
+        "busy": False,
+        "project": project,
+        "context": {"used": used, "limit": limit},
+        "usage": {"prompt": used, "output": 0, "cached": 0, "cost": cost,
+                  "hit_rate": 0.0},
+    }
+
+
+def test_the_state_helper_matches_what_a_session_really_returns():
+    """The guard on the tests above: if `Session.state()` renames a key, this
+    fails rather than the status quietly going blank again."""
+    from comodor.web.session import Session
+
+    source = inspect.getsource(Session.state)
+    for key in ("provider", "model", "mode", "busy", "project", "context",
+                "usage"):
+        assert f'"{key}"' in source, f"state() no longer returns {key}"
+    assert '"used"' in source and '"limit"' in source
+    assert '"cost"' in source
+
+
 def test_the_status_survives_having_no_spend_yet(service, monkeypatch):
     """Written as one concatenation with a trailing conditional, the `if` bound
     to the whole expression rather than the last line — so a fresh session
@@ -372,9 +420,8 @@ def test_the_status_survives_having_no_spend_yet(service, monkeypatch):
         class session:
             @staticmethod
             def state():
-                return {"provider": "xiaomi", "model": "mimo", "mode": "plan",
-                        "cwd": "/w", "context_used": 0, "context_limit": 128000,
-                        "cost_usd": None}
+                return real_state(provider="xiaomi", model="mimo", mode="plan",
+                                  used=0, limit=128000, cost=None)
 
     text = service._status(Talk())
     assert "<b>Status</b>" in text
@@ -387,10 +434,153 @@ def test_the_status_shows_a_real_spend_when_there_is_one(service):
         class session:
             @staticmethod
             def state():
-                return {"provider": "x", "model": "y", "mode": "act", "cwd": "/w",
-                        "context_used": 100, "context_limit": 1000,
-                        "cost_usd": 0.0412}
+                return real_state(provider="x", model="y", mode="act",
+                                  used=100, limit=1000, cost=0.0412)
 
     text = service._status(Talk())
     assert "$0.0412" in text
     assert "10% of 1,000" in text
+    assert "/w" in text, "the folder is `project`, not `cwd`"
+
+
+# --------------------------------------------------------------------------- #
+# no dead buttons
+#
+# Three buttons — History, Model, Skills — were drawn on the keyboard with no
+# handler behind them. Tapping produced nothing at all: no message, no error,
+# no note. A control that looks like it works and does not is worse than a
+# missing one, because the natural response is to press it again.
+# --------------------------------------------------------------------------- #
+
+
+def taps(keyboard) -> list[str]:
+    return [entry["callback_data"]
+            for row in (keyboard or {}).get("inline_keyboard", [])
+            for entry in row if "callback_data" in entry]
+
+
+@pytest.fixture
+def talking(config, monkeypatch):
+    """A service whose session answers, without a model or a network."""
+    from comodor.telegram.bot import Service
+
+    config.telegram.token = "42:test"
+    config.telegram.enabled = True
+    config.telegram.allowed = [7]
+
+    class Pretend:
+        cursor = 0
+
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def state(self):
+            return {"busy": False, "mode": "plan", "rules": 2,
+                    "provider": "openai", "model": "gpt-4o",
+                    "cwd": "/w", "context_used": 10, "context_limit": 100}
+
+        def chats(self, query="", limit=40):
+            return [{"id": f"s{n}", "title": f"chat {n}", "messages": n,
+                     "current": n == 0} for n in range(9)]
+
+        def open_chat(self, session_id):
+            return True, f"Opened {session_id}", []
+
+        def models_for(self, provider, refresh=False):
+            return {"models": [{"id": f"model-{n}"} for n in range(9)]}
+
+        def setting(self, key, value):
+            return True, f"{key} is now {value}"
+
+        def skill_shelf(self, refresh=False):
+            return {"skills": [{"id": f"skill-{n}", "installed": n == 0}
+                               for n in range(9)], "error": ""}
+
+        def skill(self, action, name):
+            return True, f"{name} {action}ed"
+
+        def rules(self):
+            return {"rules": []}
+
+        def folder(self):
+            return {"cwd": "/w", "siblings": []}
+
+        def set_mode(self, mode):
+            return True
+
+        def interrupt(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("comodor.web.session.Session", Pretend)
+    return Service(config, bot=Recorder())
+
+
+def test_every_button_on_the_first_screen_does_something(talking):
+    """Walked to the end: every screen the first taps open, and so on."""
+    talking._handle(a_message(7, "/start"))
+    start = talking.bot.sent[-1]["keyboard"]
+
+    assert len(taps(start)) >= 9, "the first screen offers the main settings"
+
+    # These are left alone: one ends the conversation under the others' feet,
+    # and the rest belong to a question that is not on screen.
+    skip = {"new", "stop", "ok", "okall", "no", "q", "qw", "qs"}
+    seen: set[str] = set()
+    queue = list(taps(start))
+    dead: list[str] = []
+
+    while queue:
+        data = queue.pop(0)
+        if data in seen or data.split(":")[0] in skip:
+            continue
+        seen.add(data)
+        before = len(talking.bot.sent)
+        talking._handle({"update_id": 2, "callback_query": {
+            "id": "q", "from": {"id": 7},
+            "message": {"chat": {"id": 7}}, "data": data}})
+        replies = talking.bot.sent[before:]
+        if not replies:
+            dead.append(data)
+            continue
+        queue.extend(taps(replies[-1]["keyboard"]))
+
+    assert dead == [], f"buttons with nothing behind them: {dead}"
+    assert len(seen) > 20, "the walk should reach well past the first screen"
+
+
+def test_the_first_screen_names_the_settings_people_look_for(talking):
+    talking._handle(a_message(7, "/start"))
+    labels = " ".join(
+        entry["text"]
+        for row in talking.bot.sent[-1]["keyboard"]["inline_keyboard"]
+        for entry in row).lower()
+
+    for wanted in ("mode", "status", "model", "folder", "skills", "rules",
+                   "settings", "help"):
+        assert wanted in labels, f"{wanted} is not offered on the first screen"
+
+
+def test_a_stale_row_says_so_rather_than_doing_the_wrong_thing(talking):
+    """The list is held on our side; a tap after it moved must not guess."""
+    talking._handle(a_message(7, "/start"))
+    talking._handle({"update_id": 2, "callback_query": {
+        "id": "q", "from": {"id": 7},
+        "message": {"chat": {"id": 7}}, "data": "model:99"}})
+
+    assert "moved on" in talking.bot.sent[-1]["text"]
+
+
+def test_the_phone_cannot_widen_its_own_permissions(talking):
+    """Read-only is changed at the terminal, and the bot says where."""
+    talking._handle(a_message(7, "/start"))
+    talking._handle({"update_id": 2, "callback_query": {
+        "id": "q", "from": {"id": 7},
+        "message": {"chat": {"id": 7}}, "data": "writes"}})
+
+    said = talking.bot.sent[-1]["text"]
+    assert "comodor telegram writes on" in said
+    assert taps(talking.bot.sent[-1]["keyboard"]) == ["settings"], \
+        "no button here may change it"

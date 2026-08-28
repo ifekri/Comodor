@@ -54,6 +54,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ]),
     ("Reach further", [
         ("comodor web", "use it from a browser, here or on a server"),
+        ("comodor telegram start", "drive it from your phone, all buttons"),
         ("comodor skills browse", "procedures it follows when the work calls for them"),
         ("comodor mcp list", "tools from Model Context Protocol servers"),
     ]),
@@ -219,6 +220,29 @@ must be configured before it will start.
 
 In Docker:  docker compose up   and open the address it prints.
 Full guide: docs/web.md"""),
+
+    "telegram": ("From your phone", """\
+  comodor telegram connect TOKEN   a bot from @BotFather
+  comodor telegram pair            a one-time code that adds your account
+  comodor telegram start           run it until stopped
+  comodor telegram status          what is set, and who may talk to it
+
+The first-run setup asks about this as its last question, so a fresh install
+has already offered it.
+
+A bot's username is public, so it answers a fixed list of numeric account ids
+and nobody else - and everyone else gets silence rather than a refusal. The
+list is filled by pairing, at this terminal, and never from Telegram.
+
+It reads and plans only until:
+
+  comodor telegram writes on
+
+Approving a shell command with a thumb, in a queue, is a decision made with
+less attention than the same approval at a keyboard. The consequences are the
+same, so this one is opt-in and cannot be turned on from the phone.
+
+Full guide: docs/telegram.md"""),
 }
 
 

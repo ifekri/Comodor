@@ -11,7 +11,7 @@ is a poor first impression.
 ## On the first run
 
 ```
- 1/6  You already use OpenClaw
+ 1/7  You already use OpenClaw
   OpenClaw  1 API key, the model (claude-sonnet-5), 1 skill
   /home/you/.openclaw
 

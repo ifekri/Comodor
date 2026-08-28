@@ -76,6 +76,12 @@ def supports_unicode() -> bool:
     Built from the glyph table rather than from a literal, so a glyph added
     later widens the probe by existing rather than by somebody remembering.
     """
+    # Ask for UTF-8 before reading the encoding, because a fresh Windows
+    # console reports cp1252 and takes UTF-8 the moment it is asked. Probing
+    # first said no, so the wizard drew its ASCII fallback — while the
+    # interface behind it, which builds its console before probing, drew the
+    # real thing. Same program, two looks, on the same terminal.
+    force_utf8()
     encoding = (getattr(sys.stdout, "encoding", "") or "").lower()
     if "utf" in encoding:
         return True

@@ -434,6 +434,34 @@ def test_the_admin_panel_never_carries_a_key(served):
     assert ready[name] is True                # said, without being shown
 
 
+def test_the_admin_panel_says_whether_a_phone_can_reach_it(served):
+    """A capability nobody is told about is a capability nobody has, and this
+    panel is where somebody looks to find out what this install can do."""
+    served.config.telegram.token = "42:whatever"
+    served.config.telegram.allowed = [4242]
+    served.config.telegram.enabled = True
+
+    _, admin = call(served, "/api/admin", token=served.token)
+
+    assert admin["telegram"]["connected"] is True
+    assert admin["telegram"]["paired"] == 1
+    assert admin["telegram"]["writes"] is False
+
+
+def test_the_admin_panel_never_carries_the_bot_token_or_who_may_talk(served):
+    """This URL gets shared by accident. The token is a credential and the
+    account ids name people, so neither leaves the machine."""
+    served.config.telegram.token = "42:SUPER-SECRET-BOT-TOKEN"
+    served.config.telegram.allowed = [987654321]
+
+    _, admin = call(served, "/api/admin", token=served.token)
+    written = json.dumps(admin)
+
+    assert "SUPER-SECRET-BOT-TOKEN" not in written
+    assert "987654321" not in written
+    assert admin["telegram"]["paired"] == 1, "the count may be said"
+
+
 def test_the_settings_a_page_may_change_are_the_ones_listed(served):
     status, done = call(served, "/api/setting", method="POST",
                         body={"key": "loop", "value": False}, token=served.token)

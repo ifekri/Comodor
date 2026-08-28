@@ -57,6 +57,12 @@ class Answers:
     theme: str = "ember"
     #: Skills chosen from the library, downloaded after the config is saved.
     skills: list[str] = field(default_factory=list)
+    #: A bot token, if one was given. Empty means the question was declined,
+    #: which is the default — nothing about Telegram is switched on quietly.
+    telegram_token: str = ""
+    #: Accounts paired during setup. Kept here rather than written straight to
+    #: the config so that abandoning the wizard leaves nothing behind.
+    telegram_allowed: list[int] = field(default_factory=list)
 
 
 class SetupWizard:
@@ -78,8 +84,18 @@ class SetupWizard:
         # An injected prompt means somebody is driving this without a keyboard,
         # so the interactive list is off whatever the terminal says it can do.
         self._keys = prompt is None and chooser.interactive(self.console)
+        #: Whether the screen can be cleared, which is a weaker thing than
+        #: being able to take over the keyboard. Over a connection where raw
+        #: key reading does not work the wizard falls back to typed numbers —
+        #: and used to stop clearing as well, so a hundred and forty-seven
+        #: skills were printed in full underneath everything already asked.
+        #: One of those two capabilities failing should not cost the other.
+        self._terminal = bool(self.console.is_terminal)
         #: What has been answered so far, shown at the top of each screen.
         self._done: list[tuple[str, str]] = []
+        #: The question being asked, so the typed path can redraw its own
+        #: header after clearing.
+        self._step: tuple[str, int, int] = ("", 0, 0)
         self.imported = migrate.Outcome()
 
     # -- presentation ----------------------------------------------------- #
@@ -93,10 +109,16 @@ class SetupWizard:
         choices already made. What replaces the wall is the same information in
         one line each, which is all it was ever worth.
         """
-        if self._keys:
+        self._step = (title, step, total)
+        self._header()
+
+    def _header(self) -> None:
+        """Clear, then draw the top of the current step."""
+        if self._terminal:
             self.console.clear()
             self._crown()
             self._recap()
+        title, step, total = self._step
         self.console.print()
         self.console.print(
             Text.assemble(
@@ -136,7 +158,7 @@ class SetupWizard:
             return
         for label, value in self._done:
             self.console.print(Text.assemble(
-                ("  ✓ ", self.theme.style("good")),
+                (f"  {self.theme.glyphs.check} ", self.theme.style("good")),
                 (f"{label}  ", self.theme.style("dim")),
                 (value, self.theme.style("value")),
             ))
@@ -149,7 +171,7 @@ class SetupWizard:
         # out: a choice that leaves no trace reads as a choice that did not
         # register.
         self.console.print(Text.assemble(
-            ("  ✓ ", self.theme.style("good")),
+            (f"  {self.theme.glyphs.check} ", self.theme.style("good")),
             (value, self.theme.style("value", bold=True)),
         ))
 
@@ -172,29 +194,8 @@ class SetupWizard:
             # The list could not run, or was escaped out of. Either way the
             # question still needs an answer, so the numbered form takes over.
 
-        table = Table.grid(padding=(0, 2))
-        table.add_column(justify="right", no_wrap=True)
-        table.add_column(no_wrap=True)
-        table.add_column()
-
-        for index, (_, label, note) in enumerate(options, start=1):
-            marker = f"{index}."
-            table.add_row(
-                Text(marker, style=self.theme.style("accent")),
-                Text(label, style=self.theme.style("value", bold=index == default)),
-                Text(note, style=self.theme.style("dim")),
-            )
-        self.console.print(table)
-
-        while True:
-            raw = self._prompt(f"  choice [{default}]: ").strip()
-            if not raw:
-                return options[default - 1][0]
-            if raw.isdigit() and 1 <= int(raw) <= len(options):
-                return options[int(raw) - 1][0]
-            self.console.print(
-                Text(f"  enter a number between 1 and {len(options)}",
-                     style=self.theme.style("bad")))
+        taken = self._numbered(options, multi=False, default=default)
+        return taken[0] if taken else options[default - 1][0]
 
     def _choose_many(self, options: Sequence[tuple[str, str, str]],
                      title: str = "", verb: str = "choose") -> list[str]:
@@ -216,33 +217,195 @@ class SetupWizard:
             # Escaped, or the list would not run. Either way the question is
             # still unanswered, so the numbered form takes over.
 
-        table = Table.grid(padding=(0, 2))
-        table.add_column(justify="right", no_wrap=True)
-        table.add_column(no_wrap=True)
-        table.add_column()
-        for index, (_, label, note) in enumerate(options, start=1):
-            table.add_row(
-                Text(f"{index}.", style=self.theme.style("accent")),
-                Text(label, style=self.theme.style("value")),
-                Text(note, style=self.theme.style("dim")),
-            )
-        self.console.print(table)
+        return self._numbered(options, multi=True, verb=verb)
+
+    def _chrome(self) -> int:
+        """Rows a page spends on everything that is not an option.
+
+        Counted rather than guessed at, because one part of it grows: the
+        recap gains a line per question answered, so a fixed allowance that
+        fits the first question overflows the last. The skills question is the
+        last one with a list, and it was the one that ran off the screen.
+        """
+        size = self.console.size
+        small = size.height < 22 or size.width < 51
+        crown = 1 if small else 7          # the wordmark, or one line instead
+        recap = max(1, len(self._done))
+        # A blank and the title, a blank before the list, the page note, room
+        # for a complaint, and the prompt line itself.
+        return crown + recap + 6
+
+    def _numbered(self, options: Sequence[tuple[str, str, str]], *,
+                  multi: bool, default: int = 1,
+                  verb: str = "choose") -> list[str]:
+        """The same question, typed, for a terminal that will not give up keys.
+
+        A page at a time, because this used to print the lot: the skills
+        question offers a hundred and forty-seven entries with a paragraph of
+        description each, and printing them meant the question itself scrolled
+        off the top before it could be read. Numbers stay absolute — number 92
+        is the ninety-second option whatever page or filter you are looking
+        through — because a number that means something different depending on
+        what you searched for is a number you cannot trust typing.
+        """
+        needle = ""
+        page = 0
+        picked: list[int] = []
+        complaint = ""
+        # The caller has already drawn the header for this step. Where the
+        # screen can be cleared that does not matter, because the redraw below
+        # replaces it — but on a plain pipe nothing is replaced, and the
+        # question appeared twice, one line apart.
+        drawn = not self._terminal
 
         while True:
-            raw = self._prompt("  numbers, separated by commas "
-                               "(enter for none): ").strip()
+            matching = [(index, entry) for index, entry in enumerate(options)
+                        if not needle
+                        or needle in f"{entry[1]} {entry[2]}".lower()]
+            per = max(5, self.console.size.height - self._chrome())
+            pages = max(1, (len(matching) + per - 1) // per)
+            page = max(0, min(page, pages - 1))
+            window = matching[page * per:(page + 1) * per]
+
+            if not drawn:
+                self._header()
+            drawn = False
+            self.console.print()
+            self._page(window, default if not multi else 0, picked,
+                       multi=multi, width=len(str(len(options))) + 1)
+
+            note = []
+            if pages > 1:
+                note.append(f"page {page + 1}/{pages}")
+            if needle:
+                note.append(f"matching {needle!r}")
+            if multi and picked:
+                note.append(f"{len(picked)} chosen")
+            if note:
+                self.console.print(Text("  " + "  ·  ".join(note),
+                                        style=self.theme.style("dim")))
+            if complaint:
+                # Under the list rather than above the next prompt, because the
+                # screen is redrawn each time round and anything printed before
+                # the redraw is gone. Not a second prompt either: a wizard that
+                # asks you to press enter to acknowledge a typo is a wizard
+                # that cannot be scripted.
+                self.console.print(Text(f"  {complaint}",
+                                        style=self.theme.style("bad")))
+                complaint = ""
+
+            raw = self._prompt(self._numbered_prompt(
+                multi, default, pages, verb, picked)).strip()
+            word = raw.lower()
+
+            if word in ("m", "more", "n", "next") and pages > 1:
+                page += 1
+                continue
+            if word in ("b", "back", "p", "prev") and pages > 1:
+                page -= 1
+                continue
+            if word.startswith("/"):
+                needle, page = word[1:].strip(), 0
+                continue
+            if word.startswith("?"):
+                self._explain(options, word[1:].strip())
+                continue
             if not raw:
-                return []
+                if multi:
+                    return [options[index][0] for index in sorted(set(picked))]
+                return [options[default - 1][0]]
+            if word in ("d", "done") and multi:
+                return [options[index][0] for index in sorted(set(picked))]
+
             wanted = [part for part in raw.replace(",", " ").split() if part]
             if all(part.isdigit() and 1 <= int(part) <= len(options)
                    for part in wanted):
-                # Deduplicated, and in the order they were offered — the same
-                # order the list hands back, so the two paths agree.
-                taken = {int(part) - 1 for part in wanted}
-                return [options[index][0] for index in sorted(taken)]
-            self.console.print(
-                Text(f"  numbers between 1 and {len(options)}, "
-                     f"or enter for none", style=self.theme.style("bad")))
+                # Deduplicated within the line: "1,1,2" is somebody naming two
+                # things clumsily, not somebody asking for the first and then
+                # changing their mind about it in the same breath.
+                chosen = list(dict.fromkeys(int(part) - 1 for part in wanted))
+                if not multi:
+                    return [options[chosen[0]][0]]
+                # Typing a number again takes it back off, so a mistyped
+                # number is fixable without starting the question over.
+                for index in chosen:
+                    picked.remove(index) if index in picked \
+                        else picked.append(index)
+                if pages == 1:
+                    # One page, so there is nowhere else to add from and the
+                    # answer is complete. This is what the question has always
+                    # done — typing "1,3" answers it — and paging is not a
+                    # reason to make the short case take an extra keypress.
+                    return [options[index][0] for index in sorted(set(picked))]
+                continue
+
+            complaint = (f"a number between 1 and {len(options)}"
+                         + (", or /word to search" if pages > 1 else ""))
+
+    def _numbered_prompt(self, multi: bool, default: int, pages: int,
+                         verb: str, picked: list[int]) -> str:
+        parts = []
+        if multi:
+            parts.append("numbers to add or remove")
+        else:
+            parts.append(f"number [{default}]")
+        if pages > 1:
+            parts.append("m/b to page")
+        parts.append("/word to search")
+        parts.append("?n to read one")
+        if multi:
+            parts.append(f"enter to {verb} {len(picked) or 'nothing'}")
+        return "  " + ", ".join(parts) + ": "
+
+    def _page(self, window: Sequence[tuple[int, tuple[str, str, str]]],
+              default: int, picked: Sequence[int], *, multi: bool = False,
+              width: int = 4) -> None:
+        """One screenful of options, one line each.
+
+        One line each is the whole point: the descriptions in the skills
+        catalogue run to four hundred characters, and printed in full they
+        turned a list into a wall nobody could pick from. `?n` reads one.
+        """
+        table = Table.grid(padding=(0, 1), expand=True)
+        table.add_column(justify="right", no_wrap=True, width=width)
+        if multi:
+            table.add_column(no_wrap=True, width=1)
+        table.add_column(no_wrap=True, max_width=24)
+        table.add_column(no_wrap=True, ratio=1,
+                         overflow="crop" if self.theme.ascii
+                         else "ellipsis")
+
+        for index, (_, label, note) in window:
+            number = index + 1
+            cells = [Text(f"{number}.", style=self.theme.style("accent"))]
+            if multi:
+                cells.append(Text(
+                    self.theme.glyphs.check if index in picked else " ",
+                    style=self.theme.style("good", bold=True)))
+            cells.append(Text(label, style=self.theme.style(
+                "value", bold=number == default)))
+            cells.append(Text(" ".join(note.split()),
+                              style=self.theme.style("dim")))
+            table.add_row(*cells)
+        self.console.print(table)
+
+    def _explain(self, options: Sequence[tuple[str, str, str]],
+                 which: str) -> None:
+        """The whole note for one option, for the typed path."""
+        if not (which.isdigit() and 1 <= int(which) <= len(options)):
+            self.console.print(Text("  ?  then the number, as in ?3",
+                                    style=self.theme.style("bad")))
+        else:
+            _, label, note = options[int(which) - 1]
+            self._header()
+            self.console.print()
+            self.console.print(Panel(
+                Text(" ".join(note.split()) or "Nothing more to say about "
+                     "this one.", style=self.theme.style("text")),
+                title=Text(f" {label} ", style=self.theme.style("title")),
+                title_align="left", box=self.theme.box,
+                border_style=self.theme.style("border"), padding=(1, 2)))
+        self._prompt("  enter to go back: ")
 
     def _ask(self, message: str, default: str = "") -> str:
         suffix = f" [{default}]" if default else ""
@@ -258,7 +421,7 @@ class SetupWizard:
         # the answer: an imported key is a key not to ask for, and an imported
         # model is the default for the model question.
         elsewhere = self._look_for_another_agent()
-        total = 5 + (1 if elsewhere else 0)
+        total = 6 + (1 if elsewhere else 0)
         step = 1
         if elsewhere:
             self._offer_import(elsewhere, step, total)
@@ -284,6 +447,7 @@ class SetupWizard:
         answers.model = self._ask_model(step + 1, total, spec, answers)
         answers.approvals = self._ask_approvals(step + 2, total)
         answers.skills = self._ask_skills(step + 3, total)
+        self._ask_telegram(step + 4, total, answers)
         return answers
 
     # ---------------------------------------------------------------- import #
@@ -473,6 +637,159 @@ class SetupWizard:
             return []
         self._answered("skills", ", ".join(chosen))
         return chosen
+
+    def _ask_telegram(self, step: int, total: int, answers: Answers) -> None:
+        """Offer the phone, here, because nowhere else would be found.
+
+        The bot shipped and setup did not mention it, so the only people who
+        knew it existed were the ones who read the documentation for a feature
+        they had no reason to look for. A capability nobody is told about is a
+        capability nobody has.
+
+        Declining is the default and costs one keypress. Nothing is written
+        unless a token is given, and a token alone does not open anything: the
+        bot answers a list of accounts, and that list is filled by pairing.
+        """
+        self._rule("Run it from your phone?", step, total)
+        self.console.print(Text(
+            "  A Telegram bot gives you the whole agent as buttons — send it a "
+            "task,\n  watch it work, answer its questions. It reads and plans "
+            "only, until\n  you say otherwise.\n",
+            style=self.theme.style("dim")))
+
+        wanted = self._choose(
+            [("no", "Not now", "`comodor telegram connect` sets it up later"),
+             ("yes", "Yes, connect a bot", "you need a token from @BotFather")],
+            default=1, title="From your phone")
+        if wanted != "yes":
+            self._answered("telegram", "not now")
+            return
+
+        self._rule("Run it from your phone?", step, total)
+        self.console.print(Panel(
+            Text.from_markup(
+                "Open Telegram, message [bold]@BotFather[/bold] and send "
+                "[bold]/newbot[/bold].\nGive it a name, then a username ending "
+                "in `bot`. It answers with a token:\n\n"
+                "   [dim]1234567890:AAF…[/dim]\n\n"
+                "[dim]Paste it below, or press enter to skip this.[/dim]"),
+            title=Text(" Getting a bot ", style=self.theme.style("title")),
+            title_align="left", box=self.theme.box,
+            border_style=self.theme.style("border"), padding=(1, 2)))
+
+        token = self._ask("token")
+        if not token:
+            self._answered("telegram", "not now")
+            return
+
+        username = self._check_token(token)
+        if username is None:
+            self._answered("telegram", "not now")
+            return
+
+        answers.telegram_token = token
+        # Named here, not only in the recap: this is the last question, so on
+        # the typed path there is no next screen for a recap to appear on and
+        # the one confirmation that the token worked would never be seen.
+        self.console.print(Text.assemble(
+            (f"  {self.theme.glyphs.check} Connected to ",
+             self.theme.style("good")),
+            (f"@{username}", self.theme.style("value", bold=True)),
+        ))
+        self._pair_now(token, username, answers)
+        self._answered(
+            "telegram",
+            f"@{username}" + (f", {len(answers.telegram_allowed)} paired"
+                              if answers.telegram_allowed else ", not paired"))
+
+    def _check_token(self, token: str) -> str | None:
+        """Ask Telegram whether the token is real, and who it belongs to.
+
+        Checked here rather than at first use, because a mistyped token that is
+        only discovered days later looks like a broken feature rather than a
+        typo.
+        """
+        from .telegram.api import Bot, TelegramError, Unauthorised
+
+        try:
+            return str(Bot(token).me()["username"])
+        except Unauthorised:
+            self.console.print(Text(
+                "  Telegram refused that token. BotFather can issue another "
+                "with /token.", style=self.theme.style("bad")))
+        except TelegramError as problem:
+            self.console.print(Text(f"  {problem}",
+                                    style=self.theme.style("bad")))
+        except Exception:
+            self.console.print(Text(
+                "  Could not reach Telegram just now.",
+                style=self.theme.style("bad")))
+        self.console.print(Text(
+            "  Skipping — `comodor telegram connect <token>` when you are "
+            "ready.", style=self.theme.style("dim")))
+        return None
+
+    def _pair_now(self, token: str, username: str, answers: Answers) -> None:
+        """Add this account to the list the bot answers, while it is open.
+
+        A bot's username is public, so the bot answers a fixed list of accounts
+        and nobody else. Filling that list is the difference between a bot that
+        works and one that ignores you, so it happens here rather than in a
+        command somebody has to be told about afterwards.
+        """
+        import threading
+
+        from .telegram.bot import Service
+
+        try:
+            service = Service(_pairing_config(self.config, token),
+                              announce=lambda line: None)
+            code = service.offer_pairing()
+        except Exception:
+            self.console.print(Text(
+                "  Could not start pairing. Run `comodor telegram pair` "
+                "later.", style=self.theme.style("dim")))
+            return
+
+        self.console.print()
+        self.console.print(Panel(
+            Text.from_markup(
+                f"Open [bold]t.me/{username}[/bold] and send it this code:\n\n"
+                f"      [bold accent]{code}[/bold accent]\n\n"
+                f"[dim]It works once, and expires in "
+                f"{self.config.telegram.pair_window // 60} minutes. "
+                f"Press Ctrl-C to skip.[/dim]"),
+            title=Text(" Pair your account ", style=self.theme.style("title")),
+            title_align="left", box=self.theme.box,
+            border_style=self.theme.style("border"), padding=(1, 2)))
+        self.console.print(Text("  waiting…", style=self.theme.style("dim")))
+
+        worker = threading.Thread(target=service.run, daemon=True)
+        worker.start()
+        try:
+            while True:
+                if service.config.telegram.allowed:
+                    answers.telegram_allowed = list(
+                        service.config.telegram.allowed)
+                    break
+                if service.pairing is None or not service.pairing.live:
+                    break
+                if worker.join(0.5) is None and not worker.is_alive():
+                    break
+        except KeyboardInterrupt:
+            pass
+        finally:
+            service.stop()
+
+        if answers.telegram_allowed:
+            self.console.print(Text(
+                f"  {self.theme.glyphs.check} Paired. "
+                f"`comodor telegram start` runs it.",
+                style=self.theme.style("good")))
+        else:
+            self.console.print(Text(
+                "  Not paired — the token is saved, so `comodor telegram "
+                "pair` finishes it.", style=self.theme.style("dim")))
 
     def _banner(self) -> None:
 
@@ -699,6 +1016,14 @@ class SetupWizard:
         if model_info is not None:
             config.agent.context_limit = model_info
 
+        if answers.telegram_token:
+            config.telegram.token = answers.telegram_token
+            config.telegram.allowed = list(answers.telegram_allowed)
+            # Switched on only once somebody can actually talk to it. A bot
+            # that is enabled with an empty list is a bot that runs, answers
+            # nobody, and looks broken.
+            config.telegram.enabled = bool(answers.telegram_allowed)
+
         config.save()
         config.first_run = False
         return config
@@ -739,9 +1064,16 @@ class SetupWizard:
         return done
 
     def finish(self, config: Config) -> None:
-        if self._keys:
+        # `_terminal`, not `_keys`: over a connection where raw key reading
+        # does not work the wizard still clears, and this used not to — so the
+        # closing panel arrived underneath the last question instead of on a
+        # screen of its own, which on a short terminal pushed it off the top.
+        if self._terminal:
             self.console.clear()
             self._crown()
+        # No recap here. The panel below already names the provider and the
+        # model, and repeating every answer above it was what pushed the
+        # closing screen past the bottom of a short terminal.
         entry = config.active()
         body = Text.assemble(
             ("Ready.\n\n", self.theme.style("good", bold=True)),
@@ -760,6 +1092,23 @@ class SetupWizard:
                                  border_style=self.theme.style("good"),
                                  padding=(1, 2)))
         self.console.print()
+
+
+def _pairing_config(config: Config, token: str) -> Config:
+    """A copy carrying the token, for the pairing run only.
+
+    A copy rather than the real config, because pairing may be abandoned — by
+    Ctrl-C, by the code expiring, by closing the terminal — and a token written
+    into the live config by a question that was never finished is a setting
+    nobody chose. `apply` writes it, once, if the wizard gets that far.
+    """
+    import copy
+
+    spare = copy.deepcopy(config)
+    spare.telegram.token = token
+    spare.telegram.enabled = True
+    spare.telegram.allowed = []
+    return spare
 
 
 def _with(entry, answers: Answers):

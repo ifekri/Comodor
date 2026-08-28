@@ -440,3 +440,193 @@ def test_the_ticking_list_still_draws_where_unicode_will_not_go():
 
     assert "[x]" in drawn and "[ ]" in drawn
     drawn.encode("ascii")            # every character of it, on a dumb terminal
+
+
+# --------------------------------------------------------------------------- #
+# long notes
+#
+# The skills catalogue has descriptions four hundred characters long, and every
+# fault below was seen with it: the frame ran off the bottom of the screen, the
+# arrow saying where you were disappeared, and the window lagged several
+# keypresses behind the cursor. All three were one thing — the note column
+# wrapped, so an option was not a row.
+# --------------------------------------------------------------------------- #
+
+
+def wordy(count: int = 60, height: int = 24, width: int = 80) -> Chooser:
+    theme = theme_module.load("ember")
+    console = build(theme, width=width, height=height)
+    note = ("Accessibility engineering for product interfaces. Use when "
+            "building or reviewing UI components and custom widgets, or when "
+            "the user reports a keyboard or screen-reader problem. Triggers "
+            "on accessibility, a11y, WCAG, aria, focus ring, focus trap, "
+            "keyboard navigation, tabindex, screen reader, sr-only, alt text.")
+    options = [Option(f"s{i}", f"skill-{i:02d}", note) for i in range(count)]
+    return Chooser(console, theme, options, title="Skills", multi=True,
+                   verb="install")
+
+
+def drawn(chooser: Chooser) -> list[str]:
+    import io
+
+    from rich.console import Console
+
+    buffer = Console(width=chooser.console.width, height=chooser.console.height,
+                     record=True, file=io.StringIO(), no_color=True)
+    buffer.print(chooser.render())
+    return buffer.export_text().splitlines()
+
+
+@pytest.mark.parametrize("height", [20, 24, 30, 45])
+def test_a_paragraph_of_note_still_leaves_one_row_per_option(height):
+    chooser = wordy(height=height)
+    assert len(drawn(chooser)) <= height
+
+
+@pytest.mark.parametrize("height", [20, 24, 30, 45])
+def test_and_still_fits_with_the_detail_open(height):
+    chooser = wordy(height=height)
+    chooser.detail = True
+    assert len(drawn(chooser)) <= height
+
+
+def test_the_arrow_survives_a_note_wider_than_the_screen():
+    """It was squeezed to nothing: Rich gave the width to the longest cell."""
+    chooser = wordy()
+    chooser.cursor = 3
+    body = [line for line in drawn(chooser) if "skill-03" in line]
+    assert body
+    assert chooser.theme.glyphs.arrow in body[0][:6]
+    assert chooser.theme.glyphs.unticked in body[0][:8]
+
+
+def test_the_window_follows_the_cursor_one_press_at_a_time():
+    chooser = wordy()
+    window = chooser.rows()
+    for _ in range(len(chooser.options) - 1):
+        press(chooser, "down")
+        assert chooser.offset <= chooser.cursor < chooser.offset + window
+
+
+def test_tab_opens_the_whole_note_and_tab_closes_it():
+    chooser = wordy()
+    assert "keyboard navigation" not in "".join(drawn(chooser))
+    press(chooser, "tab")
+    assert "keyboard navigation" in "".join(drawn(chooser))
+    press(chooser, "tab")
+    assert "keyboard navigation" not in "".join(drawn(chooser))
+
+
+def test_the_detail_names_the_row_under_the_cursor_and_moves_with_it():
+    chooser = wordy()
+    press(chooser, "tab", "down", "down")
+    text = "\n".join(drawn(chooser))
+    assert f"{chooser.theme.glyphs.divider * 3} skill-02" in text
+
+
+def test_a_note_too_long_for_the_pane_is_cut_rather_than_pushing_the_frame():
+    chooser = wordy(height=20, width=60)
+    chooser.detail = True
+    assert len(drawn(chooser)) <= 20
+    assert chooser.theme.glyphs.ellipsis in "\n".join(drawn(chooser))
+
+
+def test_the_hint_says_which_way_tab_goes():
+    chooser = wordy()
+    assert "tab more" in chooser._hint().plain
+    press(chooser, "tab")
+    assert "tab less" in chooser._hint().plain
+
+
+def test_an_option_with_no_note_says_so_rather_than_showing_a_gap():
+    theme = theme_module.load("ember")
+    console = build(theme, width=80, height=24)
+    chooser = Chooser(console, theme, [Option("a", "alpha")], title="One")
+    chooser.detail = True
+    assert "Nothing more to say" in "\n".join(drawn(chooser))
+
+
+def test_the_wordy_list_still_draws_where_unicode_will_not_go():
+    theme = theme_module.load("ember", ascii_borders=True, no_color=True)
+    console = build(theme, width=76, height=20)
+    note = "a very long note " * 40
+    options = [Option(f"s{i}", f"skill-{i}", note) for i in range(30)]
+    chooser = Chooser(console, theme, options, title="Skills", multi=True,
+                      verb="install")
+    chooser.detail = True
+    text = "\n".join(drawn(chooser))
+    text.encode("ascii")
+    assert len(text.splitlines()) <= 20
+
+
+def test_the_pane_grows_to_the_note_rather_than_being_one_size():
+    """The catalogue's descriptions run from one line to nine hundred
+    characters. A fixed pane wastes rows on the short ones and cuts the long
+    ones, and cutting is the worse of the two — the pane exists to be read."""
+    theme = theme_module.load("ember")
+    console = build(theme, width=100, height=30)
+    brief = Option("a", "alpha", "Short.")
+    essay = Option("b", "beta", "A sentence that goes on. " * 30)
+    chooser = Chooser(console, theme, [brief, essay], title="Two")
+    chooser.detail = True
+
+    small = chooser.detail_rows()
+    chooser.cursor = 1
+    assert chooser.detail_rows() > small
+
+
+def test_a_long_note_is_shown_whole_when_the_screen_can_take_it():
+    theme = theme_module.load("ember")
+    console = build(theme, width=100, height=40)
+    note = ("Generate genuinely beautiful, on-brand UI instead of generic "
+            "output. " * 9)
+    chooser = Chooser(console, theme, [Option("a", "alpha", note)], title="One")
+    chooser.detail = True
+
+    lines = drawn(chooser)
+    # Only the pane. The row above it ellipsises at its column, which is the
+    # point of the row — this is about what the pane does with the rest.
+    rule = f"{theme.glyphs.divider * 3} alpha"
+    start = next(index for index, line in enumerate(lines) if rule in line)
+    pane = " ".join(lines[start:])
+
+    assert note.split()[-1] in pane, "the end of the note is missing"
+    assert theme.glyphs.ellipsis not in pane, "it was cut with room to spare"
+
+
+def test_the_pane_never_takes_the_whole_screen():
+    """A pane that hides the list makes the comparison it was opened for
+    impossible."""
+    theme = theme_module.load("ember")
+    for height in (18, 24, 30, 45):
+        console = build(theme, width=90, height=height)
+        chooser = Chooser(console, theme,
+                          [Option(f"o{n}", f"opt-{n}", "words " * 400)
+                           for n in range(40)], title="Many")
+        chooser.detail = True
+        assert chooser.detail_rows() <= height // 2 or chooser.detail_rows() <= 4
+        assert chooser.rows() >= 3, "the list disappeared"
+        assert len(drawn(chooser)) <= height
+
+
+@pytest.mark.parametrize("width", [76, 80, 90, 100, 120, 140])
+def test_the_pane_draws_exactly_the_rows_it_reserved(width):
+    """It wrapped at one width and was re-wrapped by Rich at a narrower one,
+    so a pane that had reserved eight rows drew ten — and the two extra came
+    off the bottom of the screen."""
+    theme = theme_module.load("ember")
+    console = build(theme, width=width, height=32)
+    note = ("Accessibility engineering for product interfaces, described at "
+            "considerable length. " * 12)
+    chooser = Chooser(console, theme, [Option("a", "alpha", note)], title="One")
+    chooser.detail = True
+
+    lines = drawn(chooser)
+    rule = f"{theme.glyphs.divider * 3} alpha"
+    start = next(index for index, line in enumerate(lines) if rule in line)
+    # To the closing border, which is the line after the pane.
+    pane = len(lines) - start - 2
+
+    assert pane == chooser.detail_rows(), \
+        f"reserved {chooser.detail_rows()} rows and drew {pane}"
+    assert len(lines) <= console.size.height

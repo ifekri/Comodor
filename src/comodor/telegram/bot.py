@@ -114,6 +114,11 @@ class Conversation:
         self.reply: Reply | None = None
         self.waiting: Waiting | None = None
         self.page: dict[str, int] = {}
+        #: What each paged list is currently showing, so a tap can name a row
+        #: by number. Callback data is capped at sixty-four bytes and a model
+        #: id or a session id will not always fit inside one — so the id stays
+        #: here and the button carries an index into this.
+        self.shelf: dict[str, list[tuple[str, str]]] = {}
         self.lock = threading.Lock()
 
     def close(self) -> None:
@@ -318,7 +323,7 @@ class Service:
             self.bot.send(chat, "<b>Settings</b>", keyboard=kb.settings_menu(
                 provider=state.get("provider", "—"),
                 model=state.get("model", "—"),
-                folder=state.get("cwd", "")))
+                folder=state.get("project", "")))
         elif verb == "rules":
             done()
             self.bot.send(chat, self._rules(talk), keyboard=kb.just_back())
@@ -328,6 +333,40 @@ class Service:
         elif verb == "cost":
             done()
             self.bot.send(chat, self._status(talk), keyboard=kb.just_back("settings"))
+        elif verb == "help":
+            done()
+            self.bot.send(chat, self._help(), keyboard=kb.just_back())
+        elif verb == "writes":
+            done()
+            self.bot.send(chat, self._writes(), keyboard=kb.just_back("settings"))
+        elif verb == "chats":
+            done()
+            self._show_chats(talk, int(argument or 0))
+        elif verb == "chat":
+            done("Opening")
+            self._open_chat(talk, argument)
+        elif verb == "models":
+            done()
+            self._show_models(talk, int(argument or 0))
+        elif verb == "model":
+            done("Switching")
+            self._use_model(talk, argument)
+        elif verb == "skills":
+            done()
+            self._show_skills(talk, int(argument or 0))
+        elif verb == "skill":
+            done()
+            self._toggle_skill(talk, argument)
+        elif verb == "page":
+            done()
+            where, _, number = argument.partition(":")
+            page = int(number or 0)
+            if where == "chat":
+                self._show_chats(talk, page)
+            elif where == "model":
+                self._show_models(talk, page)
+            elif where == "skill":
+                self._show_skills(talk, page)
         elif verb in ("ok", "okall", "no"):
             done({"ok": "Approved", "okall": "Approved",
                   "no": "Refused"}[verb])
@@ -591,21 +630,213 @@ class Service:
     def _menu(self, chat: int) -> dict[str, Any]:
         talk = self.chats.get(chat)
         state = talk.session.state() if talk else {}
+        # The count comes from the rules themselves. `state()` carries no
+        # `rules` key, so the button read "Rules" with no number on it however
+        # many had been learned — which is the one thing that button is for.
+        learned = 0
+        if talk is not None:
+            try:
+                learned = int((talk.session.rules() or {}).get("active") or 0)
+            except Exception:
+                learned = 0
         return kb.main_menu(busy=bool(state.get("busy")),
                             mode=state.get("mode", self.config.agent.mode),
-                            rules=int(state.get("rules") or 0))
+                            rules=learned,
+                            model=str(state.get("model") or ""))
+
+    # -- the paged screens -------------------------------------------------- #
+    #
+    # Three buttons here — History, Model, Skills — were on the keyboard with
+    # nothing behind them. Tapping did nothing at all: no message, no error,
+    # no note. A control that appears to work and does not is worse than one
+    # that is missing, because the person taps it again.
+
+    def _shelve(self, talk: Conversation, kind: str,
+                items: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """Remember a list, and hand back index-keyed rows for the buttons."""
+        talk.shelf[kind] = items
+        return [(str(slot), label) for slot, (_, label) in enumerate(items)]
+
+    def _shelved(self, talk: Conversation, kind: str, slot: str) -> str:
+        """The id behind a tapped row, or empty if the list has moved on."""
+        items = talk.shelf.get(kind) or []
+        if slot.isdigit() and int(slot) < len(items):
+            return items[int(slot)][0]
+        return ""
+
+    def _show_chats(self, talk: Conversation, page: int = 0) -> None:
+        found = talk.session.chats(limit=60)
+        if not found:
+            self.bot.send(talk.chat, "<b>History</b>\n\nNothing saved yet.",
+                          keyboard=kb.just_back())
+            return
+        rows = self._shelve(talk, "chat", [
+            (str(card["id"]),
+             ("● " if card.get("current") else "")
+             + escape(str(card.get("title") or "Untitled"))[:44]
+             + f" · {card.get('messages', 0)}")
+            for card in found])
+        self.bot.send(
+            talk.chat,
+            f"<b>History</b>\n\n{len(found)} saved. "
+            f"Opening one brings its whole conversation back.",
+            keyboard=kb.picker("chat", rows, page=page))
+
+    def _open_chat(self, talk: Conversation, slot: str) -> None:
+        session_id = self._shelved(talk, "chat", slot)
+        if not session_id:
+            self.bot.send(talk.chat, "That list has moved on — open History "
+                                     "again.", keyboard=kb.just_back())
+            return
+        ok, note, _ = talk.session.open_chat(session_id)
+        talk.cursor = talk.session.cursor
+        self.bot.send(talk.chat, escape(note or ("Opened." if ok else "Could "
+                                                 "not open that one.")),
+                      keyboard=self._menu(talk.chat))
+
+    def _show_models(self, talk: Conversation, page: int = 0) -> None:
+        state = talk.session.state()
+        provider = str(state.get("provider") or self.config.provider)
+        current = str(state.get("model") or "")
+        found = talk.session.models_for(provider)
+        names = [str(entry.get("id") or entry.get("name") or "")
+                 for entry in found.get("models") or []]
+        names = [name for name in names if name]
+        if not names:
+            self.bot.send(
+                talk.chat,
+                f"<b>Model</b>\n\nCurrently <b>{escape(current or '—')}</b> "
+                f"on {escape(provider)}.\n\nCould not list what else "
+                f"{escape(provider)} offers"
+                + (f" ({escape(str(found.get('error')))})."
+                   if found.get("error") else " right now."),
+                keyboard=kb.just_back())
+            return
+        rows = self._shelve(talk, "model", [
+            (name, ("● " if name == current else "○ ") + name[:56])
+            for name in names])
+        self.bot.send(
+            talk.chat,
+            f"<b>Model</b>\n\nUsing <b>{escape(current or '—')}</b> on "
+            f"{escape(provider)}. {len(names)} available.",
+            keyboard=kb.picker("model", rows, page=page, back="settings"))
+
+    def _use_model(self, talk: Conversation, slot: str) -> None:
+        name = self._shelved(talk, "model", slot)
+        if not name:
+            self.bot.send(talk.chat, "That list has moved on — open Model "
+                                     "again.", keyboard=kb.just_back())
+            return
+        ok, note = talk.session.setting("model", name)
+        self.bot.send(
+            talk.chat,
+            escape(note) if note else
+            (f"Now using <b>{escape(name)}</b>." if ok
+             else "That did not take."),
+            keyboard=self._menu(talk.chat))
+
+    def _show_skills(self, talk: Conversation, page: int = 0) -> None:
+        shelf = talk.session.skill_shelf()
+        cards = shelf.get("skills") or []
+        if not cards:
+            self.bot.send(
+                talk.chat,
+                "<b>Skills</b>\n\nNothing to show"
+                + (f" ({escape(str(shelf.get('error')))})."
+                   if shelf.get("error") else "."),
+                keyboard=kb.just_back())
+            return
+        rows = self._shelve(talk, "skill", [
+            (str(card["id"]),
+             ("● " if card.get("installed") else "○ ") + str(card["id"])[:40])
+            for card in cards])
+        installed = sum(1 for card in cards if card.get("installed"))
+        self.bot.send(
+            talk.chat,
+            f"<b>Skills</b>\n\nA written procedure the agent follows when the "
+            f"work calls for it.\n{installed} installed of {len(cards)}. "
+            f"Tapping one installs it, or removes it if it is already there.",
+            keyboard=kb.picker("skill", rows, page=page, back="settings"))
+
+    def _toggle_skill(self, talk: Conversation, slot: str) -> None:
+        name = self._shelved(talk, "skill", slot)
+        if not name:
+            self.bot.send(talk.chat, "That list has moved on — open Skills "
+                                     "again.", keyboard=kb.just_back())
+            return
+        shelf = talk.session.skill_shelf()
+        here = next((card for card in shelf.get("skills") or []
+                     if card.get("id") == name), None)
+        action = "remove" if here and here.get("installed") else "install"
+        ok, note = talk.session.skill(action, name)
+        self.bot.send(
+            talk.chat,
+            escape(note) if note else
+            (f"<b>{escape(name)}</b> {action}ed." if ok
+             else f"Could not {action} {escape(name)}."),
+            keyboard=kb.just_back("skills"))
+
+    def _writes(self) -> str:
+        """What a Telegram turn is allowed to do, and where to change it.
+
+        Read-only from a phone is the default and it is not changeable from the
+        phone: approving a shell command with a thumb, in a queue, is a
+        decision made with less attention than the same approval at a keyboard,
+        and the consequences are identical. Saying so plainly is better than a
+        button that refuses.
+        """
+        on = self.config.telegram.allow_writes
+        return (
+            "<b>What it may do from here</b>\n\n"
+            + ("It <b>can</b> edit files and run commands, asking you first "
+               "each time.\n\n" if on else
+               "It <b>reads and plans only</b>. It will not edit a file or "
+               "run a command from Telegram.\n\n")
+            + "This one is changed at the terminal, on the machine it runs "
+              "on:\n\n<code>comodor telegram writes "
+            + ("off" if on else "on")
+            + "</code>\n\n<i>Not from here — a bot that could widen its own "
+              "permissions would only need somebody's phone.</i>"
+        )
 
     def _welcome(self) -> str:
+        """The first thing anybody sees, and the only screen they arrive on.
+
+        It says what it is pointed at — model, folder, what it may do — because
+        those are the three things somebody wants to know before they trust it
+        with a task, and a greeting that makes them tap three buttons to find
+        out is a greeting that wasted their first message.
+
+        Each button is named with what it changes, so the keyboard underneath
+        reads as a list of settings rather than a row of symbols.
+        """
         writes = self.config.telegram.allow_writes
+        state: dict[str, Any] = {}
+        for talk in list(self.chats.values()):
+            try:
+                state = talk.session.state()
+            except Exception:
+                state = {}
+            break
+
+        model = escape(str(state.get("model") or self.config.model or "—"))
+        folder = str(state.get("project") or self.config.paths.project or "")
+        folder = escape(folder.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "—")
+
         return (
             "<b>Comodor</b>\n\n"
             "Send a task and it gets on with it — it reads your project, works "
             "out what to change, and tells you what it found.\n\n"
-            + ("It can edit files and run commands.\n"
+            f"<b>Model</b>  {model}\n"
+            f"<b>Folder</b>  {folder}\n"
+            + ("<b>May</b>  edit files and run commands, asking first\n"
                if writes else
-               "<b>Reading only.</b> It will not edit files or run commands "
-               "from here until that is turned on at the terminal.\n")
-            + "\nEverything else is a button below."
+               "<b>May</b>  read and plan only\n")
+            + "\nThe buttons below are the settings:\n"
+              "<b>Mode</b> what it may do · <b>Model</b> which one it uses · "
+              "<b>Folder</b> where it works · <b>Skills</b> procedures to "
+              "follow · <b>Rules</b> what it learned from you\n\n"
+              "<i>Or just send a task.</i>"
         )
 
     def _help(self) -> str:
@@ -627,10 +858,17 @@ class Service:
 
     def _status(self, talk: Conversation) -> str:
         state = talk.session.state()
-        used = int(state.get("context_used") or 0)
-        limit = int(state.get("context_limit") or 0)
+        # Read from where `Session.state()` actually puts them. These used to
+        # ask for `context_used`, `context_limit`, `cost_usd` and `cwd` — four
+        # keys that have never been in that dictionary — so Folder, Context
+        # and Spend reported nothing on every status anybody asked for, with
+        # no error anywhere to say why.
+        context = state.get("context") or {}
+        usage = state.get("usage") or {}
+        used = int(context.get("used") or 0)
+        limit = int(context.get("limit") or 0)
         share = f"{used / limit:.0%}" if limit else "—"
-        cost = state.get("cost_usd")
+        cost = usage.get("cost")
         # Built as a list. Written as one concatenation with a trailing
         # conditional, the `if` bound to the whole expression rather than to
         # the last line — so a session with no spend yet reported its entire
@@ -642,7 +880,7 @@ class Service:
             f"Model     <code>{escape(str(state.get('provider', '—')))}"
             f" / {escape(str(state.get('model', '—')))}</code>",
             f"Mode      <code>{escape(str(state.get('mode', '—')))}</code>",
-            f"Folder    <code>{escape(str(state.get('cwd', '—')))}</code>",
+            f"Folder    <code>{escape(str(state.get('project', '—')))}</code>",
             f"Context   <code>{share} of {limit:,}</code>",
             f"Spend     <code>{spend}</code>",
         ]
@@ -656,11 +894,15 @@ class Service:
                     "correct something it did, and it follows them afterwards.")
         lines = [f"<b>Rules</b> · {len(entries)}\n"]
         for rule in entries[:12]:
-            lines.append("• " + escape(str(rule.get("text", ""))[:160]))
+            # `statement`, which is what a rule card carries. `text` was never
+            # a key on it, so every rule printed as an empty bullet.
+            lines.append("• " + escape(str(rule.get("statement", ""))[:160]))
         return "\n".join(lines)
 
     def _folder(self, talk: Conversation) -> str:
         data = talk.session.folder()
         return ("<b>Folder</b>\n\n"
-                f"<code>{escape(str(data.get('cwd', '')))}</code>\n\n"
-                "It only reads and writes inside this folder.")
+                f"<code>{escape(str(data.get('current', '')))}</code>\n\n"
+                + ("It only reads and writes inside this folder."
+                   if data.get("confined")
+                   else "It is not confined to this folder."))

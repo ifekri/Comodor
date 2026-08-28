@@ -195,12 +195,19 @@ def _rgb(colour: str) -> tuple[int, int, int] | None:
 
 
 def wordmark(theme: Theme, width: int = 80) -> Text:
-    """The logo, or a single line where it will not fit."""
-    if width < MINIMUM:
+    """The logo at the size the terminal can take, or a single line.
+
+    Through `wordmark_for`, so this agrees with everywhere else that draws it.
+    It did not: it took the compact form whatever the width, and it drew block
+    characters under `--ascii` — so the setup wizard showed one logo and the
+    interface behind it showed another.
+    """
+    art_lines = wordmark_for(width, theme.ascii)
+    if art_lines is None:
         return Text("Comodor", style=theme.style("accent", bold=True))
-    shades = _shades(theme, len(WORDMARK))
+    shades = _shades(theme, len(art_lines))
     art = Text()
-    for line, shade in zip(WORDMARK, shades, strict=True):
+    for line, shade in zip(art_lines, shades, strict=True):
         art.append(line + "\n", style=shade)
     return art
 

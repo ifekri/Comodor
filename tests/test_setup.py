@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import stat
 
 import pytest
@@ -97,7 +98,7 @@ def test_a_full_first_run_configures_a_provider(blank, monkeypatch):
     monkeypatch.setattr(SetupWizard, "_discover_models",
                         lambda self, spec, answers: ["gpt-4o", "gpt-4o-mini"])
 
-    setup = wizard(blank, ["3", "2", "1"])   # openai, second model, ask-first
+    setup = wizard(blank, ["3", "2", "1", ""])   # openai, model, ask-first, no bot
     answers = setup.run()
 
     assert answers.provider == "openai"
@@ -109,7 +110,7 @@ def test_a_full_first_run_configures_a_provider(blank, monkeypatch):
 def test_pressing_enter_takes_the_default(blank, monkeypatch):
     monkeypatch.setattr(SetupWizard, "_discover_models",
                         lambda self, spec, answers: ["a-model"])
-    answers = wizard(blank, ["", "", ""]).run()
+    answers = wizard(blank, ["", "", "", ""]).run()
 
     assert answers.provider == catalogue.offered()[0].id
     assert answers.model == "a-model"
@@ -120,7 +121,7 @@ def test_a_bad_choice_is_re_asked_rather_than_defaulted(blank, monkeypatch):
     """Falling through to a default the user did not pick is worse than asking."""
     monkeypatch.setattr(SetupWizard, "_discover_models",
                         lambda self, spec, answers: ["a-model"])
-    answers = wizard(blank, ["999", "banana", "2", "", ""]).run()
+    answers = wizard(blank, ["999", "banana", "2", "", "", ""]).run()
 
     assert answers.provider == catalogue.offered()[1].id
 
@@ -130,7 +131,7 @@ def test_a_local_provider_skips_the_key_question(blank, monkeypatch):
                         lambda self, spec, answers: ["llama3.3"])
 
     index = [spec.id for spec in catalogue.offered()].index("ollama") + 1
-    setup = wizard(blank, [str(index), "1", "1"], key="should-not-be-asked")
+    setup = wizard(blank, [str(index), "1", "1", ""], key="should-not-be-asked")
     answers = setup.run()
 
     assert answers.provider == "ollama"
@@ -140,7 +141,7 @@ def test_a_local_provider_skips_the_key_question(blank, monkeypatch):
 def test_the_answers_are_applied_and_saved(blank, monkeypatch):
     monkeypatch.setattr(SetupWizard, "_discover_models",
                         lambda self, spec, answers: ["gpt-4o"])
-    setup = wizard(blank, ["3", "1", "2"])   # openai, gpt-4o, writes-allowed
+    setup = wizard(blank, ["3", "1", "2", ""])   # openai, gpt-4o, writes-allowed
     saved = setup.apply(setup.run())
 
     assert saved.provider == "openai"
@@ -156,7 +157,7 @@ def test_approval_choices_map_to_the_safety_settings(blank, monkeypatch):
                         lambda self, spec, answers: ["m"])
     for choice, writes, shell in (("1", False, False), ("2", True, False),
                                   ("3", True, True)):
-        setup = wizard(blank, ["3", "1", choice])
+        setup = wizard(blank, ["3", "1", choice, ""])
         saved = setup.apply(setup.run())
         assert (saved.safety.auto_approve_writes,
                 saved.safety.auto_approve_shell) == (writes, shell)
@@ -167,7 +168,7 @@ def test_a_custom_endpoint_can_be_supplied(blank, monkeypatch):
                         lambda self, spec, answers: [])
 
     index = [spec.id for spec in catalogue.offered()].index("custom") + 1
-    setup = wizard(blank, [str(index), "https://llm.internal/v1", "my-model", "1"])
+    setup = wizard(blank, [str(index), "https://llm.internal/v1", "my-model", "1", ""])
     saved = setup.apply(setup.run())
 
     assert saved.providers["custom"].base_url == "https://llm.internal/v1"
@@ -176,7 +177,7 @@ def test_a_custom_endpoint_can_be_supplied(blank, monkeypatch):
 
 def test_model_discovery_falls_back_when_the_provider_cannot_be_reached(blank):
     """A wizard that hangs or crashes on a bad key would be unusable."""
-    setup = wizard(blank, ["3", "1", "1"])
+    setup = wizard(blank, ["3", "1", "1", ""])
     spec = catalogue.get("openai")
     models = setup._discover_models(spec, Answers(provider="openai", api_key="bad"))
 
@@ -192,7 +193,7 @@ def test_model_discovery_falls_back_when_the_provider_cannot_be_reached(blank):
 def test_the_saved_file_is_json_and_round_trips(blank, monkeypatch):
     monkeypatch.setattr(SetupWizard, "_discover_models",
                         lambda self, spec, answers: ["gpt-4o"])
-    setup = wizard(blank, ["3", "1", "1"])
+    setup = wizard(blank, ["3", "1", "1", ""])
     saved = setup.apply(setup.run())
 
     document = json.loads(saved.paths.config_file.read_text(encoding="utf-8"))
@@ -211,7 +212,7 @@ def test_reloading_finds_the_saved_provider(blank, monkeypatch, tmp_path):
     monkeypatch.setattr(SetupWizard, "_discover_models",
                         lambda self, spec, answers: ["gpt-4o"])
 
-    setup = wizard(blank, ["3", "1", "1"])
+    setup = wizard(blank, ["3", "1", "1", ""])
     setup.apply(setup.run())
 
     fresh = load(cwd=tmp_path / "project", use_environment=False)
@@ -243,7 +244,7 @@ def test_a_corrupt_config_does_not_stop_the_program(tmp_path, monkeypatch):
 def test_the_config_file_is_not_world_readable(blank, monkeypatch):
     monkeypatch.setattr(SetupWizard, "_discover_models",
                         lambda self, spec, answers: ["gpt-4o"])
-    setup = wizard(blank, ["3", "1", "1"])
+    setup = wizard(blank, ["3", "1", "1", ""])
     saved = setup.apply(setup.run())
 
     if os.name == "nt":
@@ -255,7 +256,7 @@ def test_the_config_file_is_not_world_readable(blank, monkeypatch):
 def test_no_temporary_file_is_left_behind(blank, monkeypatch):
     monkeypatch.setattr(SetupWizard, "_discover_models",
                         lambda self, spec, answers: ["gpt-4o"])
-    setup = wizard(blank, ["3", "1", "1"])
+    setup = wizard(blank, ["3", "1", "1", ""])
     saved = setup.apply(setup.run())
 
     leftovers = list(saved.paths.user.glob("*.tmp"))
@@ -401,3 +402,210 @@ def test_the_summary_names_every_skill_taken(blank, monkeypatch):
 
     assert taken == ["one", "three"]
     assert ("skills", "one, three") in it._done
+
+
+# --------------------------------------------------------------------------- #
+# the phone
+#
+# The bot shipped and setup never mentioned it, so the only people who could
+# find it were the ones already reading documentation for a feature they had
+# no reason to look for.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_wizard_asks_about_telegram(blank, monkeypatch):
+    monkeypatch.setattr(SetupWizard, "_discover_models",
+                        lambda self, spec, answers: ["a-model"])
+    setup = wizard(blank, ["", "", "", ""])
+    setup.run()
+
+    printed = setup.console.file.getvalue()
+    assert "Run it from your phone?" in printed
+    assert "/6" in printed, "it is one of the six steps, not an afterthought"
+
+
+def test_declining_leaves_telegram_untouched(blank, monkeypatch):
+    monkeypatch.setattr(SetupWizard, "_discover_models",
+                        lambda self, spec, answers: ["a-model"])
+    setup = wizard(blank, ["", "", "", "1"])
+    answers = setup.run()
+    config = setup.apply(answers)
+
+    assert answers.telegram_token == ""
+    assert config.telegram.token == ""
+    assert config.telegram.enabled is False
+
+
+def test_a_token_is_checked_before_it_is_believed(blank, monkeypatch):
+    """A typo found days later looks like a broken feature, not a typo."""
+    from comodor.telegram.api import Unauthorised
+
+    monkeypatch.setattr(SetupWizard, "_discover_models",
+                        lambda self, spec, answers: ["a-model"])
+    monkeypatch.setattr("comodor.telegram.api.Bot.me",
+                        lambda self: (_ for _ in ()).throw(Unauthorised("no")))
+
+    setup = wizard(blank, ["", "", "", "2", "42:wrong"])
+    answers = setup.run()
+
+    assert answers.telegram_token == ""
+    assert "refused that token" in setup.console.file.getvalue()
+
+
+def test_a_good_token_is_kept_and_the_bot_is_named(blank, monkeypatch):
+    monkeypatch.setattr(SetupWizard, "_discover_models",
+                        lambda self, spec, answers: ["a-model"])
+    monkeypatch.setattr("comodor.telegram.api.Bot.me",
+                        lambda self: {"username": "comodor_bot",
+                                      "first_name": "Comodor"})
+    monkeypatch.setattr(SetupWizard, "_pair_now",
+                        lambda self, token, username, answers: None)
+
+    setup = wizard(blank, ["", "", "", "2", "42:right"])
+    answers = setup.run()
+    config = setup.apply(answers)
+
+    assert answers.telegram_token == "42:right"
+    assert config.telegram.token == "42:right"
+    # Nobody paired, so nothing is listening. A bot that runs and answers
+    # nobody looks broken; it is switched on by pairing, not by a token.
+    assert config.telegram.enabled is False
+    assert "comodor_bot" in setup.console.file.getvalue()
+
+
+def test_pairing_switches_it_on(blank, monkeypatch):
+    monkeypatch.setattr(SetupWizard, "_discover_models",
+                        lambda self, spec, answers: ["a-model"])
+    monkeypatch.setattr("comodor.telegram.api.Bot.me",
+                        lambda self: {"username": "comodor_bot",
+                                      "first_name": "Comodor"})
+
+    def paired(self, token, username, answers):
+        answers.telegram_allowed = [4242]
+
+    monkeypatch.setattr(SetupWizard, "_pair_now", paired)
+
+    setup = wizard(blank, ["", "", "", "2", "42:right"])
+    config = setup.apply(setup.run())
+
+    assert config.telegram.allowed == [4242]
+    assert config.telegram.enabled is True
+
+
+def test_an_abandoned_pairing_writes_no_token(blank):
+    """Ctrl-C during pairing must not leave a setting nobody chose."""
+    from comodor.setup import _pairing_config
+
+    spare = _pairing_config(blank, "42:right")
+
+    assert spare.telegram.token == "42:right"
+    assert blank.telegram.token == ""
+    assert blank.telegram.enabled is False
+
+
+# --------------------------------------------------------------------------- #
+# one screen per question
+#
+# Over a connection where raw key reading does not work, the wizard falls back
+# to typed numbers — and it used to stop clearing the screen as well. Each
+# question was printed under the last, and the skills question printed all 147
+# entries with a paragraph of description each. Two capabilities, one of them
+# failing, and the other went with it.
+# --------------------------------------------------------------------------- #
+
+
+class Screen(Console):
+    """A console that is a terminal, and remembers where it was cleared."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.frames: list[list[str]] = [[]]
+
+    @property
+    def is_terminal(self) -> bool:
+        return True
+
+    def clear(self, home: bool = True) -> None:
+        self.frames.append([])
+
+    def print(self, *args, **kw):
+        at = self.file.tell()
+        super().print(*args, **kw)
+        self.file.seek(at)
+        self.frames[-1].extend(self.file.read().splitlines())
+
+
+def a_whole_run(blank, width: int, height: int, replies: list[str]) -> Screen:
+    console = Screen(width=width, height=height, file=io.StringIO(),
+                     no_color=True, legacy_windows=False)
+    answers = iter(replies)
+    setup = SetupWizard(blank, console=console,
+                        prompt=lambda message: next(answers, ""),
+                        secret=lambda message: "unused")
+    setup._discover_models = lambda spec, ans: [f"model-{n}" for n in range(40)]
+    result = setup.run()
+    setup.finish(setup.apply(result))
+    return console
+
+
+LONG = [(f"s{n}", f"skill-{n:03d}",
+         "A description long enough to have been the problem. " * 8)
+        for n in range(147)]
+
+
+@pytest.mark.parametrize("width,height", [(100, 30), (80, 24), (120, 40),
+                                          (90, 20), (76, 18)])
+def test_no_step_of_the_typed_path_runs_past_the_bottom(blank, width, height,
+                                                        monkeypatch):
+    monkeypatch.setattr(SetupWizard, "_ask_skills",
+                        lambda self, step, total: self._choose_many(
+                            LONG, title="Skills", verb="install"))
+
+    console = a_whole_run(blank, width, height,
+                          ["17", "1", "1", "", "1", "1"])
+
+    over = [(number, len(frame))
+            for number, frame in enumerate(console.frames, start=1)
+            if len(frame) > height]
+    assert over == [], f"screens past the bottom of a {width}x{height}: {over}"
+
+
+def test_each_question_gets_a_screen_of_its_own(blank):
+    console = a_whole_run(blank, 100, 30, ["17", "1", "1", "", "1"])
+
+    drawn = [frame for frame in console.frames
+             if any(line.strip() for line in frame)]
+    assert len(drawn) >= 6, "the questions are stacking rather than replacing"
+
+    # And no screen carries two questions.
+    for frame in drawn:
+        titles = [line for line in frame if re.search(r"\s\d/\d\s", line)]
+        assert len(titles) <= 1, f"two questions on one screen: {titles}"
+
+
+def test_the_page_shrinks_as_the_recap_grows(blank):
+    """The recap gains a line per answer, so a fixed allowance that fits the
+    first question overflows the last — which is the skills one."""
+    console = Screen(width=90, height=24, file=io.StringIO(), no_color=True,
+                     legacy_windows=False)
+    setup = SetupWizard(blank, console=console, prompt=lambda m: "",
+                        secret=lambda m: "")
+
+    empty = setup._chrome()
+    setup._done = [("a", "1"), ("b", "2"), ("c", "3"), ("d", "4")]
+    assert setup._chrome() == empty + 3, "the recap is not being counted"
+
+
+def test_the_typed_path_still_clears_when_the_keyboard_does_not_work(blank):
+    """Two capabilities. One failing must not cost the other."""
+    console = Screen(width=90, height=24, file=io.StringIO(), no_color=True,
+                     legacy_windows=False)
+    setup = SetupWizard(blank, console=console, prompt=lambda m: "",
+                        secret=lambda m: "")
+
+    assert setup._keys is False, "an injected prompt means no raw keys"
+    assert setup._terminal is True, "but it is still a terminal"
+
+    before = len(console.frames)
+    setup._rule("A question", 1, 6)
+    assert len(console.frames) == before + 1

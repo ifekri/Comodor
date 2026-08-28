@@ -288,6 +288,9 @@ class Glyphs:
     right: str = "→"
     dot: str = "·"
     dash: str = "—"
+    #: What marks text that was cut. Rich has its own for column overflow;
+    #: this is for the places that do their own trimming.
+    ellipsis: str = "…"
 
 
 ASCII_GLYPHS = Glyphs(
@@ -296,6 +299,7 @@ ASCII_GLYPHS = Glyphs(
     spinner=("|", "/", "-", "\\"), gauge_full="#", gauge_empty=".", cursor="_",
     divider="-", tool="*", memory="+", warn="!",
     rise="^", fall="v", left="<", right=">", dot="-", dash="-",
+    ellipsis="...",
 )
 
 

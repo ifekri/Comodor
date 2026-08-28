@@ -94,12 +94,12 @@ def drive(config, home, *replies: str) -> tuple[SetupWizard, Script, object]:
 
 
 def test_no_other_agent_means_no_extra_question(config, tmp_path, capsys):
-    """Five questions, as before. Offering to import nothing is a question
+    """Six questions, not seven. Offering to import nothing is a question
     that wastes somebody's time on the screen where their patience is thinnest."""
-    drive(config, tmp_path, "1", "1", "1", "1", "1")
+    drive(config, tmp_path, "1", "1", "1", "1", "1", "1")
 
     out = capsys.readouterr().out
-    assert "1/5" in out
+    assert "1/6" in out
 
     # Stripped of colour first. This used to read the raw stream, so it was
     # really asserting that no escape sequence on that line contained the
@@ -107,18 +107,18 @@ def test_no_other_agent_means_no_extra_question(config, tmp_path, capsys):
     # a border. The step number is the thing being checked, not the ink.
     plain = re.sub(r"\x1b\[[0-9;:?]*[a-zA-Z]", "", out)
     before = plain.split("Which model provider?")[0].splitlines()
-    assert not any("6/" in line for line in before[-3:]), \
-        "a sixth step was offered"
+    assert not any("7/" in line for line in before[-3:]), \
+        "a seventh step was offered"
 
 
 def test_an_installation_is_offered_as_the_first_step(config, tmp_path, capsys):
     openclaw(tmp_path)
 
-    drive(config, tmp_path, "1", "1", "1", "1", "1", "1")
+    drive(config, tmp_path, "1", "1", "1", "1", "1", "1", "1")
 
     out = capsys.readouterr().out
     assert "You already use OpenClaw" in out
-    assert "1/6" in out, "the import is the first of six, not an aside"
+    assert "1/7" in out, "the import is the first of seven, not an aside"
 
 
 def test_the_key_arrives(config, tmp_path):

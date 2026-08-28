@@ -3,6 +3,11 @@
 Comodor can be driven from a Telegram bot: send it a task, watch it work,
 answer its questions and stop it — without opening a terminal.
 
+**The first-run setup asks about this.** The last of the six questions offers
+to connect a bot, checks the token with Telegram there and then, and pairs your
+account before the wizard finishes. If you said *Not now*, or you are setting up
+a machine that is already configured:
+
 ```bash
 comodor telegram connect <token>   # a bot from @BotFather
 comodor telegram pair              # add your account
@@ -78,19 +83,32 @@ they are close together and "always" cannot be undone.
 
 ## The buttons
 
+`/start` answers with the model, the folder and what it is allowed to do, and
+the settings underneath. They are on the first screen rather than behind a
+*Settings* button, because what a bot is pointed at is the first thing anybody
+wants to know and the first thing they want to change.
+
 | | |
 |---|---|
 | **New chat** | Forget the conversation so far |
+| **History** | Re-open any earlier conversation, whole |
 | **Stop** | Interrupt what is running — replaces *New chat* while it is |
 | **Mode** | Act, plan or chat, each spelled out |
 | **Status** | Model, folder, context, spend |
+| **Model** | Every model the provider offers; tap to switch |
 | **Folder** | Which project it is confined to |
-| **Rules** | What it has learned from your corrections |
-| **Settings** | Model, folder, skills, cost |
+| **Skills** | Install or remove one from the library |
+| **Rules** | What it has learned from your corrections, and how many |
+| **Settings** | The rest — cost, and what it may do |
+| **Help** | What everything does, without leaving the chat |
 
 When the agent needs a decision it asks with buttons too — the same questions
 it would ask in the terminal, one per screen, with **Write my own** for
 anything it did not think of.
+
+Lists longer than a screen — models, skills, history — are paged six at a time,
+with **Previous** and **Next**. Telegram will render eighty buttons happily and
+nobody will scroll them.
 
 ## Running it
 

@@ -1082,6 +1082,15 @@ class Session:
                 "enabled": bool(self.config.mcp.enabled),
                 "servers": list(getattr(self.config.mcp, "servers", {})),
             },
+            # Whether it is set up, and nothing else. Not the token, which is a
+            # credential, and not the account ids, which name people — this
+            # panel is served over a URL that can be shared by accident.
+            "telegram": {
+                "connected": bool(self.config.telegram.token),
+                "paired": len(self.config.telegram.allowed),
+                "enabled": bool(self.config.telegram.enabled),
+                "writes": bool(self.config.telegram.allow_writes),
+            },
             "reflex": {
                 "lessons": reflex.get("lessons", 0),
                 "rules": reflex.get("rules", 0),

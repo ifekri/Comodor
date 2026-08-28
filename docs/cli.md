@@ -136,7 +136,7 @@ the same lesson an interactive one would.
 comodor setup
 ```
 
-Five questions, or six if another agent is installed and it offers to import.
+Six questions, or seven if another agent is installed and it offers to import.
 Runs automatically on a first run; use this to change your mind later.
 
 Answers go to `~/.comodor/config.json`.
@@ -192,6 +192,27 @@ comodor web --token mytoken       # a fixed token instead of a fresh one
 ```
 
 Full guide: [From a browser](web.md).
+
+---
+
+## `comodor telegram` — from your phone
+
+```bash
+comodor telegram connect <token>  # a bot from @BotFather
+comodor telegram pair             # a one-time code that adds your account
+comodor telegram start            # run it until stopped
+comodor telegram status           # what is configured, and who may talk
+comodor telegram writes on        # let a phone turn edit files
+comodor telegram writes off
+comodor telegram forget 12345     # revoke one account
+comodor telegram forget all
+comodor telegram off              # stop without forgetting anything
+```
+
+The first-run setup offers all of this as its last question; these are for
+changing it afterwards, or for a machine already set up.
+
+Full guide: [From your phone](telegram.md).
 
 ---
 

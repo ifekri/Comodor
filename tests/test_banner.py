@@ -63,10 +63,32 @@ def test_the_letters_line_up():
 
 
 def test_it_is_drawn_whole(theme):
-    printed = plain(banner.wordmark(theme, width=90))
+    printed = plain(banner.wordmark(theme, width=120), width=120)
 
-    for line in banner.WORDMARK:
+    for line in banner.WORDMARK_WIDE:
         assert line.rstrip() in printed
+
+
+def test_a_narrower_terminal_gets_the_compact_one_rather_than_the_wide_one():
+    """`wordmark` used to take the compact form at every width, so the wizard
+    drew a small logo on a wide screen while the interface drew a large one."""
+    theme = console_module.prepare_theme("ember", False, no_color=False)
+    wide = plain(banner.wordmark(theme, width=120), width=120)
+    compact = plain(banner.wordmark(theme, width=60), width=60)
+
+    assert banner.WORDMARK_WIDE[0].rstrip() in wide
+    assert banner.WORDMARK_COMPACT[0].rstrip() in compact
+    assert banner.WORDMARK_WIDE[0].rstrip() not in compact
+
+
+def test_the_logo_is_ascii_when_ascii_was_asked_for():
+    """It drew block characters regardless, on the one terminal that cannot."""
+    plain_theme = console_module.prepare_theme("ember", True, no_color=True)
+
+    for width in (120, 60):
+        printed = plain(banner.wordmark(plain_theme, width=width), width=width)
+        printed.encode("ascii")
+        assert "#" in printed
 
 
 def test_it_shrinks_rather_than_wraps(theme):

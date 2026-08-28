@@ -66,7 +66,8 @@ def link(text: str, url: str) -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 
 
-def main_menu(*, busy: bool, mode: str, rules: int = 0) -> dict[str, Any]:
+def main_menu(*, busy: bool, mode: str, rules: int = 0,
+              model: str = "") -> dict[str, Any]:
     """What is offered when nothing else is happening.
 
     The first row changes with the state rather than being disabled: a button
@@ -79,13 +80,21 @@ def main_menu(*, busy: bool, mode: str, rules: int = 0) -> dict[str, Any]:
         top = [button("✳  New chat", "new"),
                button("↺  History", "chats")]
 
+    # The settings people need are on this screen, not behind Settings. The
+    # first thing somebody does with a new bot is find out what it is pointed
+    # at and change it — which model, which folder, what it is allowed to do —
+    # and a first screen that hides all three behind one button asks them to
+    # guess that it is there.
     return rows(
         top,
         [button(f"◐  Mode · {mode.capitalize()}", "mode"),
          button("◈  Status", "status")],
-        [button("▤  Folder", "folder"),
+        [button(f"◆  Model{f' · {model}' if model else ''}"[:60], "models"),
+         button("▤  Folder", "folder")],
+        [button("✦  Skills", "skills"),
          button(f"⌗  Rules{f' · {rules}' if rules else ''}", "rules")],
-        [button("⚙  Settings", "settings")],
+        [button("⚙  Settings", "settings"),
+         button("?  Help", "help")],
     )
 
 
@@ -109,6 +118,7 @@ def settings_menu(*, provider: str, model: str, folder: str) -> dict[str, Any]:
         [button(f"◈  {provider} / {model}"[:60], "models")],
         [button("▤  Change folder", "folder")],
         [button("⌗  Rules", "rules"), button("✦  Skills", "skills")],
+        [button("⚙  What it may do", "writes")],
         [button("◔  Cost this session", "cost")],
         [button("←  Back", "menu")],
     )

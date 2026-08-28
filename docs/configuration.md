@@ -194,6 +194,34 @@ one run.
 
 Full explanation: [Skills](skills.md).
 
+### `telegram` — from your phone
+
+```json
+{
+  "telegram": {
+    "enabled": false,
+    "token": "",
+    "allowed": [],
+    "allow_writes": false,
+    "pair_window": 300
+  }
+}
+```
+
+| | |
+|---|---|
+| `enabled` | whether `comodor telegram start` runs the bot |
+| `token` | from [@BotFather](https://t.me/botfather). The first-run setup asks for it, or `comodor telegram connect` |
+| `allowed` | the numeric Telegram user ids it answers, and nobody else. Filled by `comodor telegram pair`, never from Telegram itself |
+| `allow_writes` | whether a turn started from a phone may edit files and run commands. Off holds it in plan mode however the terminal is set |
+| `pair_window` | seconds a pairing code stays good |
+
+**A project's `.comodor/config.json` may not set any of this.** A repository
+that could add an account to `allowed` would be a backdoor, and unlike the
+browser or the screen there would be nothing visible while it happened.
+
+Full explanation: [From your phone](telegram.md).
+
 ### `browser` — the real browser
 
 ```json

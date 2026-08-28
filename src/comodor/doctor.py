@@ -103,7 +103,8 @@ def run_checks(config: Config, online: bool = True) -> Report:
     checks = [_check_config, _check_config_permissions, _check_provider,
               _check_saved_provider, _check_model, _check_spend_limit,
               _check_brain,
-              _check_search_index, _check_skills, _check_leftovers, _check_mcp]
+              _check_search_index, _check_skills, _check_leftovers, _check_mcp,
+              _check_telegram]
     if online:
         checks.append(_check_version)
 
@@ -469,6 +470,31 @@ def _check_mcp(config: Config) -> Finding | None:
                    "`comodor mcp disable <name>`")
 
     return Finding("mcp servers", Status.OK, f"{len(enabled)} enabled and reachable")
+
+
+def _check_telegram(config: Config) -> Finding | None:
+    """A bot with a token and nobody paired answers nothing, silently.
+
+    That is the correct behaviour — a bot's username is public, so it must
+    ignore strangers rather than tell them it exists — but from the outside it
+    is indistinguishable from a broken install, and the person who set it up
+    has no way to tell which they have. So it is said here.
+    """
+    settings = getattr(config, "telegram", None)
+    if settings is None or not settings.token:
+        return None
+
+    writes = "may edit files" if settings.allow_writes else "reads and plans only"
+
+    if not settings.allowed:
+        return Finding(
+            "telegram", Status.WARN,
+            "a bot is connected but nobody is paired, so it answers nobody",
+            remedy="`comodor telegram pair` adds your account")
+
+    return Finding("telegram", Status.OK,
+                   f"{len(settings.allowed)} account(s) paired, {writes}"
+                   + ("" if settings.enabled else ", switched off"))
 
 
 # --------------------------------------------------------------------------- #

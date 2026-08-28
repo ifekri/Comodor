@@ -74,17 +74,54 @@ Installing Comodor pulls in `rich` and nothing else.
 
 ## Install
 
+### Recommended installation
+
+#### Linux / MacOS
+
+```bash
+curl -fsSL get.comodor.ai | sh
+```
+
+#### Windows (Powershell)
+
+```bash
+irm get.comodor.ai | iex
+```
+
 The one-liner above finds a Python, builds an isolated environment, puts
 `comodor` on your `PATH`, and fetches a Python if there is none. Verified on a
 bare `debian:bookworm-slim` with nothing installed.
 
 Already have a package manager you like?
 
+### Install With [uv](https://docs.astral.sh/uv/getting-started/installation/ 'UV Installation Docs')
+
 ```bash
-uv tool install comodor      # or pipx install comodor, or pip install comodor
+uv tool install comodor
 ```
 
-Then `comodor`. Python 3.11 or newer. Five questions the first time, never
+> [!NOTE]
+> can use : `uv pip install comodor`
+
+
+### Install With [pip](https://pip.pypa.io/en/stable/installation/ 'pip installation docs')
+
+```bash
+pip install comodor
+```
+
+> [!NOTE]
+> linux on python3 use : `pip3 install comodor`
+
+
+### Install With [pipx](https://pipx.pypa.io/latest/how-to/install-pipx.html 'How to Install pipx')
+
+```bash
+pipx install comodor
+```
+
+
+Then `comodor`. Python 3.11 or newer. Six questions the first time, never
 again.
 
 **No API key?** `comodor --demo` runs the whole interface offline. Or pick a
