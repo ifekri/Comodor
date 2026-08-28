@@ -2,6 +2,92 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.17.0 — 2026-08-28
+
+### The first run fits one screen
+
+Installing on an unfamiliar machine turned up a run of faults in the first five
+minutes, all of them reachable before the first task. This is those.
+
+**One option is one row again.** The note column was told to ellipsise but not
+to stop wrapping, so a four-hundred-character skill description quietly became
+eight lines. The window arithmetic counts options, not lines — so ten of them
+claimed to fit and took sixty rows, the frame ran off the bottom of the screen,
+and the cursor could be moved several times before the window noticed it had
+left. One fault, two symptoms, and the second was the one people reported.
+
+**Tab reads the rest.** A list that truncates with no way to see what was cut
+is a list you cannot choose from, so tab opens the whole description under the
+list — in the same frame, sized to what it needs rather than a fixed height,
+and never taking so much that the list it is describing disappears.
+
+**The arrow stayed visible.** At a hundred and forty-seven entries the note
+column's demand for width squeezed the cursor marker and the checkbox to
+nothing, so the one mark saying where you were vanished exactly when the list
+was long enough to need it. The note yields now; the marks do not.
+
+**Every step clears the one before it, on every kind of terminal.** Clearing
+was tied to raw key reading. Over a connection where that does not work — and
+that is a normal way to meet a new machine — the wizard fell back to typed
+numbers and stopped clearing as well, so each question printed underneath the
+last and the skills question printed all hundred and forty-seven entries in
+full. Those are two capabilities and one failing no longer costs the other.
+
+The typed path is a real path now, not a fallback: it pages, it searches with
+`/word`, it reads one entry in full with `?7`, and its numbers are absolute so
+a number you noted stays the number you type. The page size counts the recap,
+which grows a line per answer — a fixed allowance fitted the first question and
+overflowed the last.
+
+**The wordmark is the same wordmark.** It ignored both the width it was given
+and `--ascii`, so setup drew one logo and the interface behind it drew another.
+And the unicode probe read the encoding before asking for UTF-8, which on
+Windows meant a fresh console was told it could not draw the thing it was about
+to draw.
+
+### It offers you your phone
+
+The Telegram bot shipped and nothing offered it — not the setup wizard, not
+`comodor help`, not `comodor doctor`, not the browser's panel. A capability
+nobody is told about is a capability nobody has.
+
+It is now the last question of the first run. The token is checked against
+Telegram there and then, rather than days later when a typo looks like a broken
+feature, and the pairing finishes before the wizard does. Declining costs one
+keypress, and abandoning it writes nothing.
+
+**Three buttons in that bot had nothing behind them.** History, Model and
+Skills were drawn on the keyboard and tapping them did nothing at all: no
+message, no error, no note — the one control that is worse than a missing one,
+because the natural response is to press it again. All three work, and a test
+now walks every button and every screen those buttons open.
+
+`/start` says what it is pointed at — model, folder, and what it is allowed to
+do — and carries the settings themselves rather than hiding them behind
+*Settings*. Lists longer than a screen page six at a time.
+
+**And the status behind those buttons was blank.** It read four keys that have
+never existed on a session, so Folder, Context and Spend reported nothing on
+every status anybody asked for, and every learned rule printed as an empty
+bullet. The tests were green throughout, because they invented the same keys
+the code was reading.
+
+### Everywhere else it should have been
+
+`comodor help` has a Telegram topic. `comodor doctor` says when a bot is
+connected that nobody is paired with — correct behaviour, indistinguishable
+from broken, so it is said. The browser's Admin panel reports it, without the
+token or the account ids. `docs/configuration.md` documents the settings,
+`docs/cli.md` the commands, and `docs/getting-started.md` and `docs/skills.md`
+the questions as they are now actually asked.
+
+### Skills say what they are
+
+Forty-four catalogue descriptions were cut at four hundred characters, thirty
+of them mid-word — one ended "…semantic HTML, for" and nothing anywhere had the
+rest. The catalogue carries the whole description now and the display decides
+how much to show.
+
 ## 0.16.0 — 2026-08-28
 
 ### A model that runs on your own machine
