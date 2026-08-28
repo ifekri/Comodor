@@ -52,7 +52,11 @@ def make_state(populated: bool = True) -> ScreenState:
             }),
             Entry("error", "provider timed out"),
         ]
-        state.history = HistoryModel(todos=[
+        state.history = HistoryModel(title="add a health endpoint",
+                                     version="0.16.0",
+                                     tokens_used=143_000,
+                                     tokens_limit=1_000_000,
+                                     todos=[
             {"text": "read the app factory", "state": "done"},
             {"text": "write the test", "state": "active"},
             {"text": "run the suite", "state": "pending"},
@@ -111,9 +115,12 @@ def test_regions_never_overlap_or_leave_the_screen(width, height):
         assert rect.bottom <= height, f"{rect} runs past the bottom edge"
         assert rect.width > 0 and rect.height > 0
 
-    # The sidebar and the chat must not share columns.
+    # The sidebar and the chat must not share columns. The sidebar is on the
+    # right of the transcript now — reference material belongs where the eye
+    # goes second — so the order this asserts is the reverse of what it was.
     if geometry.sidebar is not None:
-        assert geometry.sidebar.right <= geometry.chat.x
+        assert geometry.chat.right <= geometry.sidebar.x
+        assert geometry.sidebar.right <= geometry.width
 
 
 def test_a_tiny_terminal_is_reported_not_drawn():
@@ -185,14 +192,17 @@ def test_every_size_renders_when_the_session_is_empty(width, height):
 
 def test_the_reference_size_shows_the_designed_furniture():
     text = "\n".join(render(128, 36))
-    for expected in ("Comodor", "TASKS", "act", "loop on",
-                     "send", "attach", "mode"):
+    # The name lives in the sidebar's footer now rather than in a header row
+    # of its own, the tasks are titled rather than shouted, and the keys are on
+    # the status line instead of in a second row beside it.
+    for expected in ("Comodor", "Tasks", "Mode :", "Act",
+                     "Setting :", "Command :"):
         assert expected in text, f"{expected!r} is missing from the interface"
 
     # Nothing but the rule character: a fenced code block in the transcript has
     # a frame made of the same glyph, and that one has corners on it.
     rules = [line for line in text.splitlines() if set(line.strip()) == {"─"}]
-    assert len(rules) == 2, "one rule under the name, one above the composer"
+    assert len(rules) == 2, "one under the sidebar title, one above the composer"
 
 
 def test_ascii_mode_avoids_box_drawing_characters():
@@ -362,3 +372,78 @@ def test_cycling_the_mode_shows_only_where_it_ended(config):
     modes = [t for t in app.state.toasts.items if t.text.startswith("mode:")]
     assert len(modes) == 1, f"the line carried {len(modes)} modes at once"
     assert app.config.agent.mode in modes[0].text
+
+
+# --------------------------------------------------------------------------- #
+# the welcome state
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("width,height", SIZES)
+def test_welcome_state_renders_within_bounds(width, height):
+    """The welcome box must not overflow the terminal at any size."""
+    lines = render(width, height, state=make_state(populated=False))
+    assert lines, "the welcome state must not be empty"
+    assert len(lines) <= height, (
+        f"welcome state produced {len(lines)} rows in a {height}-row terminal"
+    )
+    for line in lines:
+        assert len(line) <= width, (
+            f"a row is {len(line)} cells wide in {width} columns"
+        )
+
+
+def test_welcome_state_shows_wordmark():
+    text = "\n".join(render(128, 36, state=make_state(populated=False)))
+    # Drawn in solid cells rather than spelled out. The empty screen has no
+    # sidebar — every section of one would read zero — so the product name
+    # appears here only as the logo.
+    assert "█" in text
+    assert "it learns the way you correct it" in text
+
+
+# --------------------------------------------------------------------------- #
+# status bar with token counts
+# --------------------------------------------------------------------------- #
+
+
+def test_footer_shows_how_full_the_window_is():
+    """A raw token count moved to the sidebar, where there is room to label it.
+
+    The status line carries the proportion instead, which is the form of the
+    same fact somebody can act on: a number of tokens means nothing without the
+    limit beside it, and the limit is the part that differs per model.
+    """
+    state = make_state()
+    state.status.input_tokens = 50000
+    state.status.output_tokens = 5000
+    text = "\n".join(render(128, 36, state))
+    assert "14% of 1M" in text
+
+
+def test_footer_shows_cost():
+    """The dollar sign is the label. "spent" beside it was five characters
+    saying what the symbol already said, on the row with the least room."""
+    state = make_state()
+    state.status.cost_usd = 0.042
+    text = "\n".join(render(128, 36, state))
+    assert "$0.042" in text
+
+
+# --------------------------------------------------------------------------- #
+# sidebar context info
+# --------------------------------------------------------------------------- #
+
+
+def test_sidebar_shows_working_dir():
+    state = make_state()
+    state.history.working_dir = "/home/user/project"
+    text = "\n".join(render(128, 36, state))
+    assert "project" in text.lower() or "/home" in text
+
+
+def test_sidebar_shows_mcp_servers():
+    state = make_state()
+    state.history.mcp_servers = [("my-server", "connected")]
+    text = "\n".join(render(128, 36, state))
+    assert "my-server" in text.lower()

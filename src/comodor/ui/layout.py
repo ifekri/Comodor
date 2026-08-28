@@ -183,7 +183,10 @@ def compute(width: int, height: int, sidebar: bool = True,
     editor_height = prompt_height(height)
     # rule + editor + air + hints
     footer_block = 1 + editor_height + 1 + 1
-    body_top = 3                                     # name, rule, air
+    # Nothing above the body any more: the name moved into the sidebar and
+    # the model on to the status line, so the two rows the header used and
+    # the one of air under it all go back to the transcript.
+    body_top = 0
     body_height = height - body_top - footer_block - 1
     if body_height < 3:
         editor_height = max(1, editor_height - (3 - body_height))
@@ -199,10 +202,17 @@ def compute(width: int, height: int, sidebar: bool = True,
     chat_width = inner_width
 
     if side_width:
-        # The tasks sit on the left, where a reader's eye starts, and the
-        # transcript takes the rest.
-        sidebar_rect = Rect(left, body_top, side_width, body_height)
-        chat_x = left + side_width + GAP
+        # The sidebar sits on the right and the transcript takes the rest.
+        #
+        # It used to be on the left, on the reasoning that a reader's eye
+        # starts there. That is true, and it is the argument against: what a
+        # reader's eye should land on first is the conversation, not a column
+        # of counters. The sidebar is reference material — how many tokens,
+        # which servers, which folder — consulted rather than read, and
+        # reference material belongs where the eye goes second.
+        sidebar_rect = Rect(left + inner_width - side_width, body_top,
+                            side_width, body_height)
+        chat_x = left
         chat_width = inner_width - side_width - GAP
 
     # Past a certain measure the line stops being readable; the surplus becomes

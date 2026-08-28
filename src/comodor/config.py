@@ -120,7 +120,7 @@ def provider_from_spec(spec: catalogue.ProviderSpec) -> ProviderConfig:
 
 @dataclass
 class UIConfig:
-    theme: str = "ember"
+    theme: str = "cyan"
     ascii_borders: bool = False          # for terminals without box-drawing glyphs
     mouse: bool = True
     max_fps: int = 20                    # streaming deltas are coalesced to this

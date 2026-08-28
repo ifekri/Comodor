@@ -121,6 +121,8 @@ class App:
                                self.permissions, self.conversation, self.memory,
                                skills=self.skills)
 
+        from .. import __version__ as _version
+
         self.state = ScreenState()
         self.state.slash_commands = [(name, spec[1]) for name, spec in COMMANDS.items()]
         self.state.status = StatusModel(
@@ -129,7 +131,23 @@ class App:
             loop=config.agent.loop, gateway=self.gateway.describe(),
             context_limit=config.agent.context_limit,
             rules=len(self.memory.active_rules()),
+            version=_version,
+            project=str(config.paths.project),
+            skills=sum(1 for skill in self.skills.all() if skill.enabled)
+            if self.skills is not None else 0,
         )
+        # The sidebar carries the session's name and what the window holds; the
+        # empty screen carries the folder and the skill count. Neither was
+        # filled outside the preview command, so the real interface showed a
+        # workspace it had not been told about and a skill count of zero.
+        self.state.history.title = config.paths.project.name or "Comodor"
+        self.state.history.version = _version
+        self.state.history.tokens_limit = config.agent.context_limit
+        self.state.history.working_dir = str(config.paths.project)
+        if self.mcp is not None:
+            self.state.history.mcp_servers = [
+                (name, "connected") for name in config.mcp.servers
+            ]
 
         self.running = False
         self.dirty = True
@@ -153,7 +171,9 @@ class App:
     def run(self) -> int:
         """Draw the interface until the user quits."""
         self.running = True
-        self._greet()
+        # The welcome box in the Live screen replaces the banner for
+        # interactive mode. The banner still prints for headless runs
+        # (comodor run …) via _greet_on_stderr in cli.py.
         self._complain_about_the_config()
         self._warn_if_the_budget_is_a_decoration()
         self._refresh_sessions()
@@ -197,6 +217,15 @@ class App:
         offered depends on whether any loaded skill actually bundles files.
         """
         self.skills = skills_for(self.config)
+        # The empty screen prints this count, and skills are loaded again after
+        # a first run creates the examples — so a number taken only at startup
+        # would say zero on exactly the run where it matters.
+        #
+        # Guarded because the first call comes from the constructor, before
+        # there is any state to write it into.
+        if getattr(self, "state", None) is not None:
+            self.state.status.skills = sum(1 for skill in self.skills.all()
+                                           if skill.enabled)
         self.tools = ToolRegistry(skills=self.skills, history=self.history,
                                   config=self.config,
                                   session_id=self.session.id, mcp=self.mcp)
@@ -271,9 +300,15 @@ class App:
         self.bus.close()
 
     def _frame(self) -> Any:
+        # No sidebar until there is a conversation. On an empty screen every
+        # section of it is either zero or unknown, and a column of zeros beside
+        # a wordmark is furniture rather than information — it also takes a
+        # quarter of the width away from the one thing that screen exists to
+        # show.
+        wanted = self.state.sidebar_visible and self.config.ui.sidebar
         geometry = layout_module.compute(
             self.console.size.width, self.console.size.height,
-            sidebar=self.state.sidebar_visible and self.config.ui.sidebar,
+            sidebar=wanted and bool(self.state.entries),
         )
         self.geometry = geometry
         return self.screen.render(self.state, geometry)
@@ -705,6 +740,9 @@ class App:
             elif kind is Kind.USAGE:
                 status = self.state.status
                 status.context_used = event.get("context_used", status.context_used)
+                # The sidebar reports the same figure with a label beside it.
+                self.state.history.tokens_used = status.context_used
+                self.state.history.tokens_cost = status.cost_usd
                 status.context_limit = event.get("context_limit", status.context_limit)
                 status.cost_usd = event.get("cost_usd", status.cost_usd)
                 status.input_tokens = event.get("input_tokens", 0)
@@ -1698,11 +1736,25 @@ class App:
         return bool(entry and entry.ready) or self.demo
 
     def _refresh_sessions(self) -> None:
-        refs = [
-            SessionRef(id=meta.id, title=meta.title or "untitled", when=meta.when,
-                       messages=meta.messages, current=meta.id == self.session.id)
-            for meta in self.sessions.list_sessions(limit=12)
-        ]
+        """Refresh the session list shown in the sidebar.
+
+        Shows at most 8 recent sessions. Untitled sessions that are not the
+        current one are hidden to reduce clutter.
+        """
+        all_sessions = self.sessions.list_sessions(limit=20)
+        refs: list[SessionRef] = []
+        for meta in all_sessions:
+            if len(refs) >= 8:
+                break
+            title = meta.title or "untitled"
+            is_current = meta.id == self.session.id
+            # Hide untitled sessions that aren't the current one
+            if title == "untitled" and not is_current:
+                continue
+            refs.append(SessionRef(
+                id=meta.id, title=title, when=meta.when,
+                messages=meta.messages, current=is_current,
+            ))
         self.state.history.sessions = refs
 
 

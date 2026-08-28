@@ -213,9 +213,46 @@ INK = Palette(
     assistant_bg="#1b1917"
 )
 
+# The house palette, taken from the design rather than tuned by eye. Every
+# value below was read out of the reference artwork.
+#
+# Two colours do the structural work and they are deliberately different from
+# each other: cyan is the product — the wordmark, the model, the caret — and
+# blue is the furniture, so a section header never competes with the thing it
+# is labelling. Amber and red appear only on state that is genuinely amber or
+# red, which is why neither is in the palette twice.
+CYAN = Palette(
+    name="cyan",
+    background="#151719",
+    # The rule under a section, and the sidebar's spine. Quiet on purpose: it
+    # is punctuation between blocks, not a border around them.
+    border="#2a3138",
+    border_dim="#1e2429",
+    title="#eafff8",
+    label="#b8b8b8",
+    value="#eafff8",
+    text="#c8d2d4",
+    dim="#7d8a8f",
+    accent="#00e1fa",
+    good="#00faab",
+    warn="#fa8500",
+    bad="#fa0000",
+    button_primary_bg="#00e1fa",
+    # Dark on cyan, not white: the accent is bright enough that white text on
+    # it fails contrast in the direction people do not expect.
+    button_primary_fg="#0f1112",
+    button_bg="#0e2327",
+    button_fg="#00e1fa",
+    user="#3badff",
+    assistant="#c8d2d4",
+    tool="#00e1fa",
+    user_bg="#0e2327",
+    assistant_bg="#181b1e",
+)
+
 PALETTES: dict[str, Palette] = {
     palette.name: palette
-    for palette in (EMBER, INK, PAPER, MIDNIGHT, MATRIX, MONO)
+    for palette in (CYAN, EMBER, INK, PAPER, MIDNIGHT, MATRIX, MONO)
 }
 
 
@@ -354,9 +391,9 @@ class Theme:
         }, inherit=True)
 
 
-def load(name: str = "ember", ascii_borders: bool = False, no_color: bool = False,
+def load(name: str = "cyan", ascii_borders: bool = False, no_color: bool = False,
          syntax: str = "") -> Theme:
-    palette = PALETTES.get((name or "ember").lower(), EMBER)
+    palette = PALETTES.get((name or "cyan").lower(), CYAN)
     if no_color:
         palette = MONO
     # An empty string means "whatever this palette wants", which is what every

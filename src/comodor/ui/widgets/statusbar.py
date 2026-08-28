@@ -43,6 +43,13 @@ class StatusModel:
     activity: str = ""
     lessons: int = 0
     rules: int = 0
+    version: str = ""
+    #: The folder the agent is confined to, and how many skills are loaded.
+    #: Neither changes during a session, so neither is on the status line —
+    #: they are on the empty transcript, where somebody checks them before
+    #: typing the first thing.
+    project: str = ""
+    skills: int = 0
 
     @property
     def fill(self) -> float:
@@ -115,57 +122,75 @@ def header_line(model: StatusModel, width: int, theme: Theme) -> Text:
 
 
 def footer_line(model: StatusModel, width: int = 0, theme: Theme = None) -> Text:  # type: ignore[assignment]
-    """The bottom line: where you are, and what this turn has cost.
+    """The bottom line: what mode this is, what is answering, and the keys.
 
-    Written as a sentence of small facts rather than a table of labels. The
-    labels were half the characters and none of the information: `Mode : Act`
-    says nothing `act` does not.
+    Three groups, in the order somebody needs them. The mode, because it
+    decides whether the next thing typed edits files. What is answering, in
+    `provider/model` — the single fact people most often get wrong about a
+    session. Then the keys, which are the least urgent and the first to go.
 
-    It sheds from the right as the terminal narrows, in the order the facts
-    stop being worth the space — the cost first, the window size last, the mode
-    never. There is no border holding a row open any more, so a line one cell
-    too long does not get clipped: it wraps, and takes the whole layout down a
-    row with it.
+    It sheds from the right as the terminal narrows and the mode never goes.
+    There is no border holding this row open, so a line one cell too long does
+    not clip — it wraps, and takes the whole layout down a row with it.
     """
     dim = theme.style("dim", dim=True)
-    separator = f" {theme.glyphs.dot} "
+    glyphs = theme.glyphs
 
-    mode = Text(model.mode.lower(), style=theme.style("value"))
-    loop = Text("loop " + ("on" if model.loop else "off"),
-                style=theme.style(_state_style(model.loop)))
+    mode = Text()
+    mode.append("Mode : ", style=theme.style("label"))
+    mode.append(model.mode.capitalize(), style=theme.style("accent", bold=True))
+    mode.append(" [TAB]", style=dim)
 
+    who = Text()
+    who.append(f"{glyphs.check} ", style=theme.style(
+        "good" if model.connected else "bad"))
+    if model.provider and model.provider != "—":
+        who.append(model.provider, style=theme.style("dim"))
+        who.append("/", style=dim)
+    who.append(_fit_model(model.model, width), style=theme.style("value"))
+
+    # Everything the window is holding, in one figure. A percentage on its own
+    # answers "how full" and not "of what", and the limit is the part that
+    # differs between models.
     fill = model.fill
     tone = "dim" if fill < 0.6 else ("warn" if fill < 0.85 else "bad")
-    context = Text(f"{fill:.0%}", style=theme.style(tone))
-    context.append(" of ", style=dim)
-    context.append(humanise(model.context_limit), style=theme.style("dim"))
+    context = Text()
+    context.append(f"{fill:.0%}", style=theme.style(tone))
+    context.append(f" of {humanise(model.context_limit)}", style=dim)
 
-    short_context = Text(f"{fill:.0%}", style=theme.style(tone))
+    keys = [
+        _key("Setting", "[ctrl + s]", theme),
+        _key("Command", "/", theme),
+        _key("Exit", "esc", theme),
+    ]
 
-    # Least important last: this is the order they get dropped in.
-    parts: list[Text] = [mode, loop, context]
-    if model.gateway and model.gateway.lower() not in ("disable", "off", ""):
-        parts.append(Text(f"gw {model.gateway.lower()}", style=theme.style("good")))
-    if model.rules:
-        parts.append(Text(f"{theme.glyphs.memory}{model.rules}",
-                          style=theme.style("good")))
-    elif model.lessons:
-        parts.append(Text(f"{theme.glyphs.memory}{model.lessons}",
-                          style=theme.style("tool")))
+    money: Text | None = None
     if model.cost_usd:
-        parts.append(Text(f"${model.cost_usd:.3f}", style=theme.style("accent")))
+        money = Text(f"${model.cost_usd:.3f}", style=theme.style("accent"))
 
+    # Least important last: this is the order they are dropped in.
+    parts: list[Text] = [mode, who, context]
+    if model.loop:
+        parts.append(Text("loop", style=theme.style("good")))
+    if model.rules:
+        parts.append(Text(f"{glyphs.memory}{model.rules}", style=theme.style("good")))
+    if money is not None:
+        parts.append(money)
+    parts.extend(keys)
+
+    separator = "   "
     if width <= 0:
         return _join(parts, separator, dim)
-
     while len(parts) > 1 and _joined_len(parts, len(separator)) > width:
         parts.pop()
-    if len(parts) == 3 and _joined_len(parts, len(separator)) > width:
-        parts[2] = short_context
-    while len(parts) > 1 and _joined_len(parts, len(separator)) > width:
-        parts.pop()
-
     return _join(parts, separator, dim)
+
+
+def _key(name: str, stroke: str, theme: Theme) -> Text:
+    row = Text()
+    row.append(f"{name} : ", style=theme.style("label"))
+    row.append(stroke, style=theme.style("dim"))
+    return row
 
 
 def _joined_len(parts: list[Text], separator: int) -> int:

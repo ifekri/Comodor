@@ -44,12 +44,22 @@ def plain(renderable, width: int = 90) -> str:
 def test_the_letters_line_up():
     """Ragged lines are the one way ASCII art fails that nobody notices until
     it is on somebody else's screen."""
-    widths = {len(line) for line in banner.WORDMARK}
+    for art in (banner.WORDMARK_WIDE, banner.WORDMARK_COMPACT):
+        widths = {len(line) for line in art}
+        assert len(widths) == 1, f"lines are not the same width: {sorted(widths)}"
+        assert not any("\t" in line for line in art)
 
-    assert len(widths) == 1, f"the lines are not the same width: {sorted(widths)}"
-    assert banner.WIDTH == 47
-    assert all(line.isascii() for line in banner.WORDMARK)
-    assert not any("\t" in line for line in banner.WORDMARK)
+    assert banner.WIDTH == len(banner.WORDMARK_COMPACT[0])
+    assert banner.WIDE_WIDTH == len(banner.WORDMARK_WIDE[0])
+    assert banner.WIDE_WIDTH > banner.WIDTH
+
+    # Solid cells, not slashes and underscores. Every monospace font renders
+    # those at a slightly different angle and none of them render as a logo —
+    # it read as source code somebody had left on the screen. A filled cell is
+    # the one glyph a terminal cannot get wrong, which is also why this is the
+    # one piece of the interface that is deliberately not ASCII.
+    assert "█" in "".join(banner.WORDMARK_WIDE)
+    assert "/" not in "".join(banner.WORDMARK_WIDE)
 
 
 def test_it_is_drawn_whole(theme):
@@ -70,9 +80,9 @@ def test_it_shrinks_rather_than_wraps(theme):
 
 def test_the_full_mark_needs_room_for_a_margin(theme):
     assert banner.MINIMUM > banner.WIDTH
-    assert "____" in plain(banner.wordmark(theme, banner.MINIMUM), banner.MINIMUM)
-    assert "____" not in plain(banner.wordmark(theme, banner.MINIMUM - 1),
-                               banner.MINIMUM - 1)
+    assert "█" in plain(banner.wordmark(theme, banner.MINIMUM), banner.MINIMUM)
+    assert "█" not in plain(banner.wordmark(theme, banner.MINIMUM - 1),
+                                 banner.MINIMUM - 1)
 
 
 def test_the_fade_follows_the_palette(theme):
@@ -291,10 +301,32 @@ def test_show_prints_it_where_it_is(theme, monkeypatch):
 
     banner.show(terminal, theme, version="0.8.5")
 
-    assert "____" in terminal.file.getvalue()
+    assert "█" in terminal.file.getvalue()
 
 
 def test_it_is_actually_coloured(theme):
     output = painted(banner.render(theme, standing=banner.Standing(lessons=3)))
 
     assert "\x1b[" in output
+
+
+# --------------------------------------------------------------------------- #
+# interactive mode skips the banner
+# --------------------------------------------------------------------------- #
+
+
+def test_the_banner_is_skipped_in_interactive_mode(config):
+    """The welcome box in the Live screen replaces the banner."""
+    from comodor.ui import layout as layout_module
+    from comodor.ui.app import App
+
+    app = App(config, demo=True)
+    app.geometry = layout_module.compute(128, 36)
+
+    # The app should not have called _greet() — the banner is replaced by
+    # the welcome box. We verify this by checking that the welcome box is
+    # rendered when the state is empty (no entries).
+    assert app.state.entries == []
+    # The welcome box should be part of the frame
+    frame = app._frame()
+    assert frame is not None

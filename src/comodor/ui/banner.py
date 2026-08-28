@@ -33,18 +33,62 @@ from rich.text import Text
 
 from .theme import Theme
 
-#: The wordmark. Raw strings: it is made of backslashes.
-WORDMARK = (
-    r"   ______                          __          ",
-    r"  / ____/___  ____ ___  ____  ____/ /___  _____",
-    r" / /   / __ \/ __ `__ \/ __ \/ __  / __ \/ ___/",
-    r"/ /___/ /_/ / / / / / / /_/ / /_/ / /_/ / /    ",
-    r"\____/\____/_/ /_/ /_/\____/\__,_/\____/_/     ",
+#: The wordmark, in two weights.
+#:
+#: Blocks rather than the sloped ASCII this used to be. That one was drawn out
+#: of slashes and underscores, which every monospace font renders at a slightly
+#: different angle and none of them render as a logo — it read as source code
+#: somebody had left in the middle of the screen. Solid cells read the same
+#: everywhere, because a filled cell is the one glyph a terminal cannot get
+#: wrong.
+#:
+#: Two weights because one does not fit both cases. The heavy one is eighty-two
+#: columns, which is the whole width of a default terminal with nothing either
+#: side, so a narrower window gets the light one rather than nothing.
+WORDMARK_WIDE = (
+    "  ████████    ██████    ██      ██    ██████    ████████      ██████    ████████  ",
+    "██          ██      ██  ████  ████  ██      ██  ██      ██  ██      ██  ██      ██",
+    "██          ██      ██  ██  ██  ██  ██      ██  ██      ██  ██      ██  ████████  ",
+    "██          ██      ██  ██      ██  ██      ██  ██      ██  ██      ██  ██    ██  ",
+    "  ████████    ██████    ██      ██    ██████    ████████      ██████    ██      ██",
 )
+
+WORDMARK_COMPACT = (
+    " ████  ███  █   █  ███  ████   ███  ████ ",
+    "█     █   █ ██ ██ █   █ █   █ █   █ █   █",
+    "█     █   █ █ █ █ █   █ █   █ █   █ ████ ",
+    "█     █   █ █   █ █   █ █   █ █   █ █  █ ",
+    " ████  ███  █   █  ███  ████   ███  █   █",
+)
+
+#: What the rest of the interface asks for when it does not care which.
+WORDMARK = WORDMARK_COMPACT
+
+WIDE_WIDTH = max(len(line) for line in WORDMARK_WIDE)
 WIDTH = max(len(line) for line in WORDMARK)
 #: Below this the wordmark is dropped rather than wrapped. Two columns of
 #: margin, because a logo touching both edges reads as a mistake.
 MINIMUM = WIDTH + 4
+
+
+#: The same art with the one non-ASCII character swapped out.
+#:
+#: `--ascii` exists for terminals that cannot render Unicode, and a logo made
+#: of the one glyph such a terminal is certain to get wrong is the last thing
+#: that mode should draw — it puts a field of replacement characters where the
+#: product name goes, on the first screen anybody sees.
+WORDMARK_WIDE_ASCII = tuple(line.replace("█", "#") for line in WORDMARK_WIDE)
+WORDMARK_COMPACT_ASCII = tuple(line.replace("█", "#")
+                               for line in WORDMARK_COMPACT)
+
+
+def wordmark_for(width: int, ascii_only: bool = False) -> tuple[str, ...] | None:
+    """The heaviest wordmark this many columns can hold, or nothing."""
+    if width >= WIDE_WIDTH + 8:
+        return WORDMARK_WIDE_ASCII if ascii_only else WORDMARK_WIDE
+    if width >= MINIMUM:
+        return WORDMARK_COMPACT_ASCII if ascii_only else WORDMARK_COMPACT
+    return None
 
 TAGLINE = "it learns the way you correct it"
 

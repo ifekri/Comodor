@@ -32,7 +32,7 @@ from .widgets.history import HistoryModel, render_history
 from .widgets.overlay import Overlay, render_overlay
 from .widgets.panel import rule, too_small_notice
 from .widgets.prompt import Editor, completions, render_completions, render_editor
-from .widgets.statusbar import StatusModel, activity_line, footer_line, header_line
+from .widgets.statusbar import StatusModel, activity_line, footer_line
 from .widgets.toast import ToastQueue
 
 
@@ -71,9 +71,6 @@ class Screen:
 
         inner = geometry.width - 2 * geometry.margin
         rows: list[RenderableType] = [
-            header_line(state.status, inner, self.theme),
-            rule(inner, self.theme),
-            Text(""),
             self._body(state, geometry),
             Text(""),
             rule(inner, self.theme),
@@ -125,15 +122,20 @@ class Screen:
         if geometry.sidebar is None:
             return transcript
 
-        gap = geometry.chat.x - geometry.sidebar.right
-        grid = self._columns(geometry.sidebar.width, gap, geometry.chat.width)
-        grid.add_row(render_history(state.history, geometry.sidebar, self.theme),
-                     "", transcript)
+        # Transcript first, sidebar second — it sits on the right now, and the
+        # grid lays columns out in the order they are added rather than by the
+        # x each rect carries. Moving the rect without moving this produced a
+        # sidebar that reported one position and drew in another.
+        gap = geometry.sidebar.x - geometry.chat.right
+        grid = self._columns(geometry.chat.width, gap, geometry.sidebar.width)
+        grid.add_row(transcript, "",
+                     render_history(state.history, geometry.sidebar, self.theme))
         return grid
 
     def _chat(self, state: ScreenState, rect: Rect) -> RenderableType:
         body, total = render_transcript(state.entries, rect, self.theme,
-                                        self.console, state.scroll)
+                                        self.console, state.scroll,
+                                        status=state.status)
         state.transcript_rows = total
         return body
 
@@ -180,7 +182,11 @@ class Screen:
         else:
             left = footer_line(state.status, width, self.theme)
 
-        if not geometry.hints:
+        # The status line now ends with the keys it used to be missing —
+        # setting, command, exit — so a second row of them on the right was
+        # the same information twice, and the two of them together left the
+        # left-hand side too narrow to say what model was answering.
+        if not geometry.hints or not state.status.busy:
             return left
 
         keys = hint_line(keyboard_hints(self.theme), self.theme)

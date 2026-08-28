@@ -219,6 +219,31 @@ def bundled_path() -> Path:
     return Path(__file__).parent / "models.json"
 
 
+def yours_path(user_dir: Path) -> Path:
+    """The file somebody edits to add their own models.
+
+    Not the one that ships. That lives inside the installed package, which
+    means it is somewhere awkward, needs a privileged write on some systems,
+    and is replaced wholesale by the next upgrade — three good reasons why
+    edits to it would be lost without warning.
+    """
+    return Path(user_dir) / "models.json"
+
+
+def _merge(base: Catalogue, extra: Catalogue) -> Catalogue:
+    """Yours on top of the shipped list, matched by id.
+
+    An id that already exists replaces it rather than appearing twice, so
+    correcting a checksum or a memory figure in the shipped list is done by
+    writing an entry with the same id — which is the obvious thing to try.
+    """
+    by_id = {model.id: model for model in base}
+    for model in extra:
+        by_id[model.id] = model
+    return Catalogue(models=tuple(by_id.values()), source=extra.source,
+                     updated=extra.updated or base.updated, schema=base.schema)
+
+
 def load(cache_dir: Path | None = None, *, allow_network: bool = True,
          timeout: float = 10.0) -> Catalogue:
     """The best list available, preferring fresh but never requiring it.
@@ -234,7 +259,8 @@ def load(cache_dir: Path | None = None, *, allow_network: bool = True,
         age = time.time() - cached.stat().st_mtime
         if age < FRESH_FOR:
             try:
-                return parse(cached.read_text(encoding="utf-8"), "cached")
+                return _with_yours(
+                    parse(cached.read_text(encoding="utf-8"), "cached"), cache_dir)
             except (BadCatalogue, OSError):
                 pass
 
@@ -251,14 +277,31 @@ def load(cache_dir: Path | None = None, *, allow_network: bool = True,
                     cached.write_text(response.text, encoding="utf-8")
                 except OSError:
                     pass
-            return catalogue
+            return _with_yours(catalogue, cache_dir)
         except Exception:
             pass
 
     if cached and cached.is_file():
         try:
-            return parse(cached.read_text(encoding="utf-8"), "cached")
+            return _with_yours(
+                parse(cached.read_text(encoding="utf-8"), "cached"), cache_dir)
         except (BadCatalogue, OSError):
             pass
 
-    return parse(bundled_path().read_text(encoding="utf-8"), "bundled")
+    return _with_yours(
+        parse(bundled_path().read_text(encoding="utf-8"), "bundled"), cache_dir)
+
+
+def _with_yours(base: Catalogue, cache_dir: Path | None) -> Catalogue:
+    """Fold in the user's own file, if they have written one."""
+    if cache_dir is None:
+        return base
+    mine = yours_path(cache_dir)
+    if not mine.is_file():
+        return base
+    try:
+        extra = parse(mine.read_text(encoding="utf-8"), "yours")
+    except (BadCatalogue, OSError):
+        # A file somebody is midway through editing must not empty the picker.
+        return base
+    return _merge(base, extra)

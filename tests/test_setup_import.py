@@ -13,6 +13,7 @@ number and the whole run is deterministic.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -99,7 +100,15 @@ def test_no_other_agent_means_no_extra_question(config, tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "1/5" in out
-    assert "6" not in out.split("Which model provider?")[0].split("\n")[-3:][0]
+
+    # Stripped of colour first. This used to read the raw stream, so it was
+    # really asserting that no escape sequence on that line contained the
+    # digit — which held until a palette changed and `38;5;236m` appeared in
+    # a border. The step number is the thing being checked, not the ink.
+    plain = re.sub(r"\x1b\[[0-9;:?]*[a-zA-Z]", "", out)
+    before = plain.split("Which model provider?")[0].splitlines()
+    assert not any("6/" in line for line in before[-3:]), \
+        "a sixth step was offered"
 
 
 def test_an_installation_is_offered_as_the_first_step(config, tmp_path, capsys):

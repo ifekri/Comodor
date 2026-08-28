@@ -116,6 +116,8 @@ def build_parser() -> argparse.ArgumentParser:
                              help="render the interface at a given size and exit")
     preview.add_argument("size", nargs="?", default="120x34", help="WIDTHxHEIGHT")
     preview.add_argument("--svg", help="also write an SVG to this path")
+    preview.add_argument("--busy", action="store_true",
+                         help="render as though a turn were under way")
 
     return parser
 
@@ -578,8 +580,24 @@ def _use_font(path: str, family: str) -> None:
     )
 
 
+def _skill_count(config: Config) -> int:
+    """How many skills are loaded, or nothing if they cannot be read.
+
+    Counted rather than assumed: the number is printed on the first screen
+    somebody sees, and a wrong one there is the sort of small lie that makes
+    people stop believing the rest of the panel.
+    """
+    try:
+        from .skills import load_for
+
+        return sum(1 for skill in load_for(config).all() if skill.enabled)
+    except Exception:
+        return 0
+
+
 def run_preview(config: Config, args: argparse.Namespace) -> int:
     """Render one frame at a fixed size — for screenshots and layout checks."""
+    from . import __version__ as _version
     from .ui import console as console_module
     from .ui import layout as layout_module
     from .ui.screen import Screen, ScreenState
@@ -603,8 +621,62 @@ def run_preview(config: Config, args: argparse.Namespace) -> int:
         mode=config.agent.mode, loop=config.agent.loop,
         gateway="Disable" if not config.gateway.enabled else config.gateway.policy,
         context_limit=config.agent.context_limit,
+        version=_version,
+        project=str(config.paths.project),
+        skills=_skill_count(config),
     )
-    geometry = layout_module.compute(size[0], size[1])
+    # The sidebar carries what the empty screen does not: the session's name,
+    # what the window is holding, and what is connected.
+    state.history.title = config.paths.project.name or "Comodor"
+    state.history.working_dir = str(config.paths.project)
+    state.history.version = _version
+    state.history.tokens_limit = config.agent.context_limit
+    if config.mcp.enabled and config.mcp.servers:
+        state.history.mcp_servers = [
+            (name, "connected") for name in config.mcp.servers
+        ]
+    # From the console rather than from the size asked for. Rich hands back a
+    # width one short of the request, and a layout computed from the request
+    # draws a rule one cell wider than the surface can hold — which does not
+    # clip, it wraps, and takes every row below it down by one.
+    if getattr(args, "busy", False):
+        # A frame with a conversation in it, so the sidebar and the transcript
+        # can be looked at. The empty screen is a different layout entirely and
+        # checking one says nothing about the other.
+        from .ui.widgets.chat import Entry
+
+        state.entries = [
+            Entry("user", "Add rate limiting to the web server."),
+            Entry("assistant",
+                  "I read `web/server.py` and `web/session.py` first. The "
+                  "request handler already reads `client_address` for the "
+                  "loopback check, so per-IP limiting needs no new plumbing."),
+            Entry("tool", "read_file web/server.py",
+                  {"ok": True, "elapsed": 0.03}),
+            Entry("tool", "grep client_address", {"ok": True, "elapsed": 0.11}),
+            Entry("assistant",
+                  "Three decisions are still open, so I will ask rather than "
+                  "guess at them."),
+        ]
+        state.status.busy = False
+        state.status.context_used = 14_812
+        state.status.cost_usd = 0.0182
+        state.history.title = "Rate limiting the web server"
+        state.history.tokens_used = 14_812
+        state.history.agents = [("reviewer", "running"), ("tests", "done")]
+        state.history.todos = [
+            {"text": "Read the server", "state": "done"},
+            {"text": "Ask about scope", "state": "active"},
+            {"text": "Write the limiter", "state": "pending"},
+        ]
+        if not state.history.mcp_servers:
+            state.history.mcp_servers = [
+                ("cloudflare", "connected"), ("hostinger", "connected"),
+                ("github", "connecting"), ("n8n", "failed"),
+            ]
+
+    geometry = layout_module.compute(console.width, console.height or size[1],
+                                     sidebar=bool(state.entries))
     console.print(Screen(console, theme).render(state, geometry))
     if args.svg:
         # The one place this program picks a typeface. Everywhere else it is

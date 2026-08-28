@@ -266,7 +266,8 @@ def _diff(text: str, theme: Theme) -> Text:
 
 
 def render_transcript(entries: list[Entry], rect: Rect, theme: Theme,
-                      console: Console, scroll: int = 0) -> tuple[RenderableType, int]:
+                      console: Console, scroll: int = 0,
+                      status: object | None = None) -> tuple[RenderableType, int]:
     """Return the visible slice and the total number of rendered rows.
 
     ``scroll`` counts rows *up from the bottom*, so zero means pinned to the
@@ -277,13 +278,20 @@ def render_transcript(entries: list[Entry], rect: Rect, theme: Theme,
     height = max(1, rect.height)
 
     if not entries:
-        # Centred in the space, which needs the rows counted rather than
-        # guessed: the greeting wraps differently in a 48-column column than
-        # in a 110-column one.
+        # The branded welcome box for a fresh session, or the simplified
+        # greeting when the terminal is too narrow for the panel.
+        from .welcome import WelcomeInfo, render_welcome
+        info = WelcomeInfo(
+            version=getattr(status, "version", "") if status else "",
+            model=getattr(status, "model", "") if status else "",
+            provider=getattr(status, "provider", "") if status else "",
+            project=getattr(status, "project", "") if status else "",
+            skills=getattr(status, "skills", 0) if status else 0,
+        )
+        welcome = render_welcome(info, width, height, theme)
         options = console.options.update(width=width, height=None)
-        greeting = console.render_lines(_welcome(theme), options, pad=False)
-        lead = max(0, (height - len(greeting)) // 2)
-        return Lines(_exactly([[]] * lead + greeting, height)), 0
+        lines = console.render_lines(welcome, options, pad=False)
+        return Lines(_exactly(lines, height)), 0
 
     recent = entries[-MAX_RENDERED_ENTRIES:]
     blocks: list[RenderableType] = []

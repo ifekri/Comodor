@@ -77,9 +77,25 @@ def run(config: Config, args: argparse.Namespace) -> int:
     if action == "list":
         return _list(console, catalogue, store, show_all=getattr(args, "all", False))
     if action == "where":
-        console.print(f"  {store.root}")
+        from .catalogue import bundled_path, yours_path
+
+        mine = yours_path(Path(config.paths.user))
+        console.print()
+        console.print(f"  Models      {store.root}")
         used = store.bytes_used()
-        console.print(f"  {human_bytes(used)} used" if used else "  nothing here yet")
+        console.print(f"              {human_bytes(used)} used" if used
+                      else "              nothing downloaded yet")
+        console.print()
+        console.print(f"  Your list   {mine}")
+        console.print(Text(
+            "              " + ("edit this to add or change models"
+                                 if mine.is_file() else
+                                 "does not exist yet — create it to add your own"),
+            style="dim"))
+        console.print(f"  Shipped     {bundled_path()}")
+        console.print(Text("              replaced on every upgrade; edit yours "
+                           "instead", style="dim"))
+        console.print()
         return 0
     if action == "get":
         return _get(console, config, catalogue, store, args)

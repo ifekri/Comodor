@@ -30,6 +30,7 @@ next-env.d.ts
 npm-debug.log*
 CLAUDE.md
 dist/
+__sample
 
 TODO
 
@@ -49,3 +50,4 @@ PROJECT.md
 
 # Editor and agent settings that are this machine, not this project.
 .claude/
+*-in-git.png

@@ -47,12 +47,26 @@ from .catalogue import Model
 BINARIES = ("llama-server", "llama-server.exe", "server", "server.exe")
 
 #: Where a binary tends to be when it was not put on PATH.
+#:
+#: The WinGet entry is here because `winget install llama.cpp` — which is what
+#: Comodor itself suggests — unpacks into a package directory whose name
+#: carries a hash, and puts a shim in `Links` only for the executables the
+#: manifest declares. `llama-server.exe` was not one of them, so following our
+#: own advice produced a binary this function could not see.
 LIKELY = (
     Path.home() / ".local" / "bin",
     Path.home() / "llama.cpp" / "build" / "bin",
     Path("/usr/local/bin"),
     Path("/opt/homebrew/bin"),
     Path("C:/Program Files/llama.cpp"),
+    Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links",
+)
+
+#: Directories whose children are searched as well, one level down. WinGet puts
+#: each package in its own folder under here and the folder name is not
+#: predictable, so the parent is what can be named.
+LIKELY_PARENTS = (
+    Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages",
 )
 
 #: How long to wait for a model to finish loading before giving up. A 14B model
@@ -92,6 +106,21 @@ def find_binary(extra: Path | None = None) -> Path | None:
             candidate = folder / name
             if candidate.is_file() and os.access(candidate, os.X_OK):
                 return candidate
+
+    for parent in LIKELY_PARENTS:
+        if not parent.is_dir():
+            continue
+        try:
+            children = sorted(parent.iterdir())
+        except OSError:
+            continue
+        for folder in children:
+            if not folder.is_dir():
+                continue
+            for name in BINARIES:
+                candidate = folder / name
+                if candidate.is_file() and os.access(candidate, os.X_OK):
+                    return candidate
     return None
 
 
