@@ -28,6 +28,16 @@ npx wrangler deploy                                   # the site
 npx wrangler deploy --config workers/get/wrangler.jsonc   # the dispatcher
 ```
 
+### Only `site` builds
+
+Each Worker has exactly one build trigger, on the `site` branch. Cloudflare
+adds a second by default — "non-production branch builds", matching `*` and
+excluding the production branch — and on this repository that is actively
+wrong: `main` is the Python agent and carries none of the site's files, so
+every push to it started a build that could only fail. Both were removed. If
+one reappears after somebody reconnects the repository in the dashboard, that
+is where it came from.
+
 ### Deploying on push
 
 Both Workers are connected to this repository through **Workers Builds**, so a
@@ -82,14 +92,38 @@ npx wrangler deployments list --name comodor-site
 Tags, for the API: `comodor-site` is `c07e856d31584cc78e579999b4bc91e2`,
 `comodor-get` is `05eee70b3a7c4fbd899d2b2e5b13d67d`.
 
-### The GitHub Pages workflow is deliberately still running
+### The GitHub Pages workflow still runs, and is no longer a fallback
 
-It is no longer how the site is served, and it is kept on purpose. The apex
-still carries the four A records that point at Pages — see below — so if these
-Worker routes were ever removed, traffic falls back to it. A fallback that is
-kept current is worth having; a stale one is worse than none.
+It was kept on the reasoning that the apex still carried A records aimed at
+Pages, so removing the Worker would fall back to it. Those records are gone —
+the apex is a Workers Custom Domain now — so nothing falls back anywhere. The
+workflow builds a copy that no address points at.
 
-### Routes, not Custom Domains — and why that is worth knowing
+Keeping it costs nothing and it is one command away from being a host again if
+this account is ever unreachable, which is the only argument left for it. It is
+not a safety net and should not be described as one.
+
+### Custom Domains, and the outage that got us here
+
+`comodor.ai` and `www.comodor.ai` are attached to `comodor-site` as **Workers
+Custom Domains**. Each one owns its DNS record and its certificate, so there is
+nothing else to keep in step.
+
+It was routes first, and that took the site down. A route intercepts traffic
+that has already reached Cloudflare — it does not make Cloudflare answer for a
+hostname. The DNS records still pointed at GitHub Pages and were doing the only
+job that mattered: getting the request to the edge at all. Deleting them,
+because they looked like leftovers from the old host, removed the resolution
+and everything below it stopped existing. The site returned `NXDOMAIN` while
+the Worker sat there perfectly healthy with two routes attached to a hostname
+nobody could look up.
+
+**A route is not an address.** A Custom Domain is. If these ever need to be
+rebuilt, attach the domains first and let them create their own records —
+never delete a record in the hope that something else is holding the name.
+
+<details>
+<summary>Routes, and why they were used at first — kept as a record</summary>
 
 A Custom Domain is the tidier mechanism: it owns the DNS record and provisions
 the certificate. It also **refuses to attach to a hostname that already has DNS
@@ -106,11 +140,11 @@ with routes instead. A route intercepts at the edge before the origin is
 dialled, so those A records are never followed and Pages never serves a byte,
 and switching over is atomic: there is no window with no site.
 
-**The trap:** the records still *say* GitHub Pages. Remove these routes and
-traffic silently falls back to Pages rather than breaking, which is a confusing
-way to find out. When somebody with DNS access deletes the four apex A records
-and the `www` CNAME, convert the entries in `wrangler.jsonc` to
-`custom_domain: true` and this footnote goes away.
+**This is the part that was wrong.** It reads as though the records were
+merely untidy. They were load-bearing: they are what made Cloudflare answer for
+the name at all, and the routes only worked because of them.
+
+</details>
 
 ### The assets Worker
 
