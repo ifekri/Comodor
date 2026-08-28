@@ -90,11 +90,28 @@ def _browse(console, theme, catalogue: library.Catalogue, root: Path,
         console.print(f"\n  nothing matches [accent]{search}[/accent]\n")
         return 1
 
+    # The description is what somebody is reading; everything else is
+    # navigation. So the widths come from the terminal rather than from the
+    # data, and the description takes what is left.
+    #
+    # Sized from the data, this collapsed the moment the catalogue grew: the id
+    # column claimed the longest id there was, the tags column would not wrap,
+    # and the description got the remainder — which at a hundred and forty-seven
+    # skills was two characters, printing every word down the screen one letter
+    # at a time.
+    room = max(40, console.width - 4)
+    longest = max(len(entry.id) for entry in entries)
+    names = min(longest, max(14, room // 4))
+    tags = 0 if room < 70 else min(22, room // 5)
+    words = max(20, room - names - tags - 5)
+
     table = Table.grid(padding=(0, 1))
     table.add_column(width=1)
-    table.add_column(width=max(len(entry.id) for entry in entries), no_wrap=True)
-    table.add_column(overflow="fold")
-    table.add_column(justify="right", no_wrap=True)
+    table.add_column(width=names, no_wrap=True, overflow="ellipsis")
+    table.add_column(width=words, no_wrap=True, overflow="ellipsis")
+    if tags:
+        table.add_column(width=tags, justify="right", no_wrap=True,
+                         overflow="ellipsis")
 
     for entry in entries:
         state = library.installed(root, entry.id)
@@ -109,14 +126,21 @@ def _browse(console, theme, catalogue: library.Catalogue, root: Path,
         else:
             mark, style = theme.glyphs.check, "good"
 
-        table.add_row(
+        # One line each. A catalogue is scanned rather than read, and four
+        # hundred characters of description per row for a hundred and
+        # forty-seven of them is a wall nobody reaches the bottom of — the
+        # whole text is one `comodor skills add` away.
+        row = [
             f"[{style}]{mark}[/{style}]",
             f"[value]{entry.id}[/value]",
-            entry.description,
-            f"[dim]{' '.join(entry.tags)}[/dim]",
-        )
+            " ".join(entry.description.split()),
+        ]
+        if tags:
+            row.append(f"[dim]{' '.join(entry.tags)}[/dim]")
+        table.add_row(*row)
 
-    console.print(f"\n[title]Skills[/title]  [dim]{catalogue.updated}[/dim]\n")
+    console.print(f"\n[title]Skills[/title]  [dim]{len(entries)} of "
+                  f"{len(catalogue.skills)} · {catalogue.updated}[/dim]\n")
     console.print(table)
     console.print(f"\n  [dim]{theme.glyphs.check} installed   "
                   f"{theme.glyphs.rise} an update is available[/dim]")
