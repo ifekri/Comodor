@@ -29,7 +29,7 @@ export const site = {
   // The date the page's content last changed, not the date it was last built.
   // A sitemap that claims a change on every deploy teaches crawlers to ignore
   // the field.
-  updated: '2026-08-25',
+  updated: '2026-08-28',
   repo: 'https://github.com/ifekri/Comodor',
   pypi: 'comodor',
   pypiUrl: 'https://pypi.org/project/comodor/',
@@ -37,7 +37,7 @@ export const site = {
   pythonFloor: '3.11',
   // The release the page describes. Structured data quotes it, so it is
   // checkable against PyPI rather than a rounded claim.
-  version: '0.15.0',
+  version: '0.16.0',
 } as const;
 
 export type OsId = 'macos' | 'linux' | 'windows';

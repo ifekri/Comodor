@@ -8,6 +8,7 @@
  * order, images described, the install command present without JavaScript.
  */
 
+import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
 const base = process.argv[2] || 'http://localhost:3300';
@@ -76,8 +77,16 @@ console.log('\nJavaScript disabled');
   await page.goto(base, { waitUntil: 'domcontentloaded' });
 
   const text = await page.textContent('body');
+  // Read from the config rather than written out here. The install address has
+  // changed twice, and both times this line kept asserting the old one — it
+  // was looking for `irm https://` long after the page settled on the shorter
+  // `irm get.comodor.ai`, and reported a missing command that was on screen.
+  const installUrl = (await readFile(
+    new URL('../lib/site.config.ts', import.meta.url), 'utf8'))
+    .match(/installUrl:\s*'([^']+)'/)?.[1] ?? 'get.comodor.ai';
   check(text.includes('curl -fsSL'), 'a macOS/Linux command is in the markup');
-  check(text.includes('irm https://'), 'the Windows command is in the markup');
+  check(text.includes(`irm ${installUrl}`),
+        `the Windows command is in the markup (irm ${installUrl})`);
   check(text.includes('It learns the way'), 'the headline is in the markup');
   check(text.includes('Filesystem'), 'later sections are in the markup');
 

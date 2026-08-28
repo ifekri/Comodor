@@ -151,6 +151,9 @@ const STRUCTURED_DATA = {
       offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
       codeRepository: site.repo,
       image: `${site.url}/og.png`,
+      sameAs: [site.repo, site.pypiUrl],
+      author: { '@id': `${site.url}/#publisher` },
+      maintainer: { '@id': `${site.url}/#publisher` },
     },
     {
       '@type': 'WebSite',
@@ -160,6 +163,18 @@ const STRUCTURED_DATA = {
       description: site.description,
       inLanguage: 'en',
       about: { '@id': `${site.url}/#software` },
+      publisher: { '@id': `${site.url}/#publisher` },
+    },
+    {
+      // Who publishes it, with the two addresses that prove it is the same
+      // project — a search engine reconciles an entity across sites by exactly
+      // these links, and both are pages that exist and are ours.
+      '@type': 'Organization',
+      '@id': `${site.url}/#publisher`,
+      name: site.name,
+      url: `${site.url}/`,
+      logo: `${site.url}/icon-512.png`,
+      sameAs: [site.repo, site.pypiUrl],
     },
   ],
 };
