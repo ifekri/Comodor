@@ -12,25 +12,17 @@ or the next one. Not a setting you turn on. Not a file you maintain.
 [![CI](https://github.com/ifekri/Comodor/actions/workflows/ci.yml/badge.svg)](https://github.com/ifekri/Comodor/actions/workflows/ci.yml)
 [![Licence](https://img.shields.io/pypi/l/comodor?color=555)](LICENSE)
 
-[**comodor.ai**](https://comodor.ai) · [Documentation](docs/README.md) · [Changelog](CHANGELOG.md)
+[**comodor.ai**](https://comodor.ai) · [Installation](#install) · [Documentation](docs/README.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
 ---
 
-```bash
-curl -fsSL get.comodor.ai | sh          # macOS · Linux
-irm get.comodor.ai | iex                # Windows
 ```
-
-```
-  ████████    ██████    ██      ██    ██████    ████████      ██████    ████████
-██          ██      ██  ████  ████  ██      ██  ██      ██  ██      ██  ██      ██
-██          ██      ██  ██  ██  ██  ██      ██  ██      ██  ██      ██  ████████
-██          ██      ██  ██      ██  ██      ██  ██      ██  ██      ██  ██    ██
-  ████████    ██████    ██      ██    ██████    ████████      ██████    ██      ██
-
-                        it learns the way you correct it
+                         ░█▀▀░█▀█░█▄█░█▀█░█▀▄░█▀█░█▀▄  
+                         ░█░░░█░█░█░█░█░█░█░█░█░█░█▀▄  
+                         ░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀░░▀▀▀░▀░▀  
+                       it learns the way you correct it
 ```
 
 ## Why this one
