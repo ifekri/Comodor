@@ -1,102 +1,107 @@
+<div align="center">
+
 # Comodor
 
-**A coding agent that lives in your terminal — and learns the way you correct it.**
+**The coding agent that stops making the same mistake.**
 
-[![PyPI](https://img.shields.io/pypi/v/comodor?label=pypi&color=c4441e)](https://pypi.org/project/comodor/)
-[![Python](https://img.shields.io/pypi/pyversions/comodor)](https://pypi.org/project/comodor/)
+Fix something it wrote, and it never writes it that way again — in this project
+or the next one. Not a setting you turn on. Not a file you maintain.
+
+[![PyPI](https://img.shields.io/pypi/v/comodor?label=pypi&color=00e1fa)](https://pypi.org/project/comodor/)
+[![Python](https://img.shields.io/pypi/pyversions/comodor?color=555)](https://pypi.org/project/comodor/)
 [![CI](https://github.com/ifekri/Comodor/actions/workflows/ci.yml/badge.svg)](https://github.com/ifekri/Comodor/actions/workflows/ci.yml)
 [![Licence](https://img.shields.io/pypi/l/comodor?color=555)](LICENSE)
 
-**[Documentation](docs/README.md)** · [comodor.ai](https://comodor.ai) · [Changelog](CHANGELOG.md)
+[**comodor.ai**](https://comodor.ai) · [Documentation](docs/README.md) · [Changelog](CHANGELOG.md)
+
+</div>
 
 ---
 
-Describe a job — *fix the failing test*, *add a health endpoint*, *work out why
-the deploy broke* — and it does the work: reads your files, writes changes, runs
-your tests, searches the web, and keeps going until the job is done or it needs
-you.
+```bash
+curl -fsSL get.comodor.ai | sh          # macOS · Linux
+irm get.comodor.ai | iex                # Windows
+```
 
-It asks before it changes anything, shows you exactly what it is about to do,
-and can undo it.
+```
+  ████████    ██████    ██      ██    ██████    ████████      ██████    ████████
+██          ██      ██  ████  ████  ██      ██  ██      ██  ██      ██  ██      ██
+██          ██      ██  ██  ██  ██  ██      ██  ██      ██  ██      ██  ████████
+██          ██      ██  ██      ██  ██      ██  ██      ██  ██      ██  ██    ██
+  ████████    ██████    ██      ██    ██████    ████████      ██████    ██      ██
 
-What makes it different from every other tool of this kind is what happens
-afterwards. **When you fix something it wrote, it notices, and it does not make
-that mistake again.** Not because you configured it.
+                        it learns the way you correct it
+```
 
----
+## Why this one
+
+Every agent forgets. You correct the same thing on Monday and again on Friday,
+because the correction went into a conversation that ended.
+
+Comodor watches what you do to its output. Change a name it chose, rewrite a
+function it wrote, tell it *no, use the existing helper* — it works out the rule
+behind the correction, tells you the rule it wrote, and follows it from then on.
+
+```
+◈ learned: naming.functions Name functions in snake_case. 6 of 6 definitions
+◈ learned: line.length Keep lines within about 79 characters. 95% of lines are under 79
+◈ learned: quotes.style Use double quotes for string literals. 176 of 176 literals
+```
+
+Those are real, read out of a working install.
+
+`/progress` shows whether that is actually working — corrections per turn,
+falling or not. A number, not a claim.
+
+## Everything else it does
+
+| | |
+|---|---|
+| **Asks instead of guessing** | When a request reads two ways it settles what it can by reading your code, then puts the rest as one short form — before writing anything. [→](docs/questions.md) |
+| **Never surprises you** | Reading is silent. Writing shows a diff. Commands ask. Every change is checkpointed and `/undo` puts it back. [→](docs/safety.md) |
+| **Drives a real browser** | One that runs JavaScript, keeps cookies and can log in — not a page fetcher. [→](docs/browser.md) |
+| **Uses your screen** | Mouse and keyboard in any application, with a halo showing where it is about to click before it clicks. [→](docs/computer.md) |
+| **Runs on your phone** | A Telegram bot with the whole interface as buttons. Read-only until you say otherwise. [→](docs/telegram.md) |
+| **Runs a model locally** | Pick one, watch it download, use it with the network unplugged. No key, no account. [→](docs/local-models.md) |
+| **Lives in your editor** | Speaks ACP, so VS Code, JetBrains and Zed drive it from their own panels. [→](docs/acp.md) |
+| **Follows your procedures** | Write a skill once; it loads when the work matches. 147 ready to install. [→](docs/skills.md) |
+| **Works with any model** | Nineteen providers, or anything with an OpenAI-compatible URL. [→](docs/models.md) |
+| **Costs less** | 86% of input tokens served from cache, measured — not estimated. [→](docs/cost.md) |
+
+**One dependency.** The HTTP client, the SSE reader, the WebSocket that drives
+Chrome, the PNG encoder for screenshots, the Telegram client — all written here.
+Installing Comodor pulls in `rich` and nothing else.
 
 ## Install
 
-**macOS · Linux**
-
-```bash
-curl -fsSL get.comodor.ai | sh
-```
-
-**Windows**
-
-```powershell
-irm get.comodor.ai | iex
-```
-
-That is the whole thing. It finds a Python, installs an isolated environment,
-puts `comodor` on your `PATH`, and tells you what to do next — and if there is
-no Python at all it fetches one. Verified on a bare `debian:bookworm-slim` with
-nothing installed.
+The one-liner above finds a Python, builds an isolated environment, puts
+`comodor` on your `PATH`, and fetches a Python if there is none. Verified on a
+bare `debian:bookworm-slim` with nothing installed.
 
 Already have a package manager you like?
 
 ```bash
-uv tool install comodor       # or: pipx install comodor, or: pip install comodor
+uv tool install comodor      # or pipx install comodor, or pip install comodor
 ```
 
-Then:
-
-```bash
-comodor
-```
-
-Python 3.11 or newer. It asks five questions the first time and never asks
+Then `comodor`. Python 3.11 or newer. Five questions the first time, never
 again.
 
-No key yet? `comodor --demo` runs the whole interface offline. Or choose
-**Ollama** in the setup and pay nothing, ever.
+**No API key?** `comodor --demo` runs the whole interface offline. Or pick a
+local model in the setup and pay nothing, ever.
 
-Already use OpenClaw or Hermes? The first screen offers to bring your keys and
-skills across. [How that works](docs/migrating.md).
+**Coming from OpenClaw or Hermes?** The first screen offers to bring your keys
+and skills across. [How that works](docs/migrating.md).
 
----
-
-## What it can do
-
-| | |
-|---|---|
-| **Ask before it guesses** | When a request reads two ways, it settles what it can by reading and puts the rest to you as one short form — before it writes anything. [More](docs/questions.md) |
-| **Learn from your corrections** | Edit what it wrote, or say so, and the next answer follows. `/progress` shows whether that is actually working — falling correction rates, not a claim. [More](docs/learning.md) |
-| **Ask before it acts** | Reading is silent, writing shows a diff, commands ask. Every write is checkpointed; `/undo` puts it back. [More](docs/safety.md) |
-| **Use a real browser** | One that runs JavaScript, keeps cookies and can log in — not a page fetcher. [More](docs/browser.md) |
-| **Use your screen** | Mouse and keyboard, in any application, with a halo on screen showing where it is about to click. Windows so far. [More](docs/computer.md) |
-| **Follow your procedures** | Write a skill once; it loads it when the work matches. [More](docs/skills.md) |
-| **Run anywhere** | Terminal, browser, editor, or a container. [Web](docs/web.md) · [Editor](docs/acp.md) · [Docker](docs/docker.md) |
-| **Run a model on your own machine** | Pick one, watch it download, use it with the network unplugged. No key and no account. [More](docs/local-models.md) |
-| **Work with any model** | Seventeen providers, or anything with an OpenAI-compatible URL. Including ones on your own machine. [More](docs/models.md) |
-| **Cost less than it should** | 86% of input tokens served from cache, measured. [More](docs/cost.md) |
-
-**One dependency.** The HTTP client, the SSE reader, the WebSocket for the
-browser, the PNG encoder for screenshots — all part of the package. Installing
-Comodor pulls in `rich` and nothing else.
-
----
-
-## Everyday use
+## Using it
 
 ```bash
 comodor                                    # the interface
 comodor run "fix the failing test" --yes   # one task, no interface
 comodor web                                # from a browser
-comodor acp                                # from your editor (ACP)
+comodor telegram start                     # from your phone
+comodor acp                                # from your editor
 comodor doctor                             # is everything alright?
-comodor help                               # a written help page, not a flag dump
 ```
 
 ```
@@ -106,27 +111,22 @@ comodor help                               # a written help page, not a flag dum
 Esc        stop it                F3         cycle mode
 ```
 
----
-
 ## Documentation
 
-**[docs/README.md](docs/README.md)** — everything, organised by what you are
-trying to do.
+**[docs/README.md](docs/README.md)** — organised by what you are trying to do.
 
 | | |
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, choose a model, first task |
 | [The interface](docs/interface.md) | Panels, keys, and all 29 commands |
-| [From the terminal](docs/cli.md) | Every command and flag |
-| [What the agent can do](docs/tools.md) | The 13 tools, and when it uses each |
-| [Safety and permissions](docs/safety.md) | What it can do, and what it never does |
-| [How it learns](docs/learning.md) | Corrections, lessons, and the evidence |
-| [Using your screen](docs/computer.md) | Mouse and keyboard, watched |
+| [How it learns](docs/learning.md) | Corrections, rules, and the evidence |
+| [What it can do](docs/tools.md) | The 13 tools, and when it uses each |
+| [Safety and permissions](docs/safety.md) | What it asks, and what it never does |
+| [From your phone](docs/telegram.md) | The Telegram bot, and who it answers |
+| [Models on your machine](docs/local-models.md) | Downloading one, running it offline |
 | [Configuration](docs/configuration.md) | Every setting, and what wins |
 | [Cost](docs/cost.md) | Caching, budgets, paying less |
 | [Troubleshooting](docs/troubleshooting.md) | When something is wrong |
-
----
 
 ## Development
 
@@ -138,13 +138,10 @@ uv run pytest -q
 uv run ruff check .
 ```
 
-Both must pass before anything is pushed, on Linux and on Windows.
-[CONTRIBUTING.md](CONTRIBUTING.md).
-
----
+Both pass on Linux and Windows before anything is pushed.
+[CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
-
-Security: [SECURITY.md](SECURITY.md) — please do not open a public issue.
+MIT — [LICENSE](LICENSE).
+Security: [SECURITY.md](SECURITY.md), please not a public issue.

@@ -330,6 +330,49 @@ class MCPServerConfig:
 
 
 @dataclass
+class TelegramConfig:
+    """Reaching the agent from a phone.
+
+    This is a remote control for a machine that edits files and runs commands,
+    which makes the two fields below the most consequential settings in this
+    file. They are deliberately awkward to set by accident:
+
+    `token` is empty until somebody pastes one, and `allowed` is empty until
+    somebody completes a pairing from the terminal. A bot with a token and no
+    allowed accounts answers nobody — which is the right thing for it to do,
+    because a Telegram bot's address is public and anyone who guesses the
+    username can message it.
+    """
+
+    enabled: bool = False
+    #: From BotFather. Kept here rather than in an environment variable so it
+    #: survives a reboot the same way every other credential does.
+    token: str = ""
+    #: Numeric Telegram user ids that may talk to it. Not usernames: a username
+    #: can be given up and taken by somebody else, an id cannot.
+    allowed: list[int] = field(default_factory=list)
+    #: Whether a turn started from Telegram may edit files and run commands.
+    #: Off means the bot is confined to plan and chat however the terminal is
+    #: set, because approving a shell command on a phone is a tap made with
+    #: less attention than the same approval at a keyboard.
+    allow_writes: bool = False
+    #: Seconds a pairing code stays valid.
+    pair_window: int = 300
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "token": self.token,
+            "allowed": list(self.allowed),
+            "allow_writes": self.allow_writes,
+            "pair_window": self.pair_window,
+        }
+
+    def may(self, user_id: int) -> bool:
+        return bool(user_id) and int(user_id) in {int(x) for x in self.allowed}
+
+
+@dataclass
 class MCPConfig:
     """Servers, and the master switch over all of them."""
 
@@ -376,7 +419,7 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: for its whole existence: `headless: false` in a config file did nothing and
 #: said nothing.
 SECTIONS = ("ui", "agent", "gateway", "learning", "skills", "safety",
-            "browser", "computer")
+            "browser", "computer", "telegram")
 
 
 @dataclass
@@ -390,6 +433,7 @@ class Config:
     skills: SkillsConfig = field(default_factory=SkillsConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     computer: ComputerConfig = field(default_factory=ComputerConfig)
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
@@ -677,11 +721,14 @@ PROJECT_SETTABLE: dict[str, frozenset[str] | None] = {
     # uses is useful; a project starting a process is not its decision. The
     # master switch is deliberately absent.
     "mcp": frozenset({"servers"}),
-    # `browser` and `computer` are deliberately absent, and this is the note
-    # for whoever is tempted to add them. A project that could set
+    # `browser`, `computer` and `telegram` are deliberately absent, and this is
+    # the note for whoever is tempted to add them. A project that could set
     # `browser.executable` names a binary for the agent to launch. One that
-    # could set `computer.enabled` asks the machine it was just cloned onto
-    # for its mouse and keyboard. Neither belongs to a repository.
+    # could set `computer.enabled` asks the machine it was just cloned onto for
+    # its mouse and keyboard. One that could set `telegram.allowed` adds its
+    # author to the list of people who may drive that machine from a phone —
+    # and unlike the other two, nothing on screen would ever show it happening.
+    # None of the three belongs to a repository.
 }
 
 
