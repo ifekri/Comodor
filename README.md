@@ -13,6 +13,33 @@ skills/<id>/SKILL.md    the skill itself
 skills/<id>/…           anything it bundles: references/, scripts/, assets/
 ```
 
+## Skills written elsewhere
+
+Most of what is here was written by other people and is republished with their
+permission — everything from [jakubkrehel/skills][jk],
+[emilkowalski/skills][ek], [MengTo/Skills][mt] and
+[codeswithroh/tastemaker][cr], all MIT.
+
+MIT allows this and asks one thing in return: the copyright notice travels with
+the copy. So **every borrowed skill carries a `NOTICE.md`** naming the author,
+the repository, the exact commit it was taken at, and the full licence text —
+and its catalogue entry records the real author rather than Comodor, with a
+`source` block saying where to check it against.
+
+If you add another from somebody else's repository, do the same. Listing
+another person's work under your own name is the one way to do this that is
+both wrong and trivially avoidable.
+
+Their demo folders are not copied. Screenshots and video illustrate a
+repository for a person browsing GitHub; no agent reads them, and git history
+is permanent, so eighty-three megabytes of them would be carried by every clone
+of this project for ever.
+
+[jk]: https://github.com/jakubkrehel/skills
+[ek]: https://github.com/emilkowalski/skills
+[mt]: https://github.com/MengTo/Skills
+[cr]: https://github.com/codeswithroh/tastemaker
+
 ## Adding one
 
 Two steps, and the second is the one that matters.

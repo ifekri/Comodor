@@ -1,7 +1,7 @@
 {
   "$schema": "https://comodor.ai/schema/skills-catalogue-1.json",
   "version": 1,
-  "updated": "2026-08-22",
+  "updated": "2026-08-28",
   "base": "https://raw.githubusercontent.com/ifekri/Comodor/skills/skills/",
   "skills": [
     {
@@ -289,6 +289,3686 @@
         "SKILL.md"
       ],
       "bytes": 41791
+    },
+    {
+      "id": "better-accessibility",
+      "name": "better-accessibility",
+      "title": "Better accessibility",
+      "description": "Accessibility engineering for product interfaces. Use when building or reviewing UI components and custom widgets, or when the user reports a keyboard or screen-reader problem. Triggers on accessibility, a11y, WCAG, aria, focus ring, focus trap, keyboard navigation, tabindex, screen reader, sr-only, alt text, hit area, hover on touch, prefers-reduced-motion, autoplay, skip link, semantic HTML, for",
+      "tags": [
+        "accessibility",
+        "animation",
+        "review",
+        "ui"
+      ],
+      "author": "jakubkrehel",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "better-accessibility/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "focus-and-keyboard.md",
+        "forms.md",
+        "hit-areas.md",
+        "motion-and-zoom.md",
+        "screen-readers.md",
+        "semantics-and-aria.md"
+      ],
+      "bytes": 37128,
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/better-accessibility",
+        "commit": "ca483852de23d48ab4f4ea71da37dad12bd70a95",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "better-colors",
+      "name": "better-colors",
+      "title": "Better colors",
+      "description": "Color systems for digital products. Use when creating or extending a palette, theming light and dark appearances, or auditing the colors in a codebase. Triggers on color palette, palette generation, color ramp, brand color, accent color, gray palette, status colors, color tokens, token naming, theming, dark mode colors, contrast ratio, APCA, gamut, display p3, oklch, color conversion, gradients, c",
+      "tags": [
+        "accessibility",
+        "background",
+        "colour",
+        "detail"
+      ],
+      "author": "jakubkrehel",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "better-colors/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "color-formats.md",
+        "color-usage.md",
+        "contrast.md",
+        "palette-generation.md",
+        "palette-structure.md",
+        "token-naming.md"
+      ],
+      "bytes": 39807,
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/better-colors",
+        "commit": "ca483852de23d48ab4f4ea71da37dad12bd70a95",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "better-interface",
+      "name": "better-interface",
+      "title": "Better interface",
+      "description": "Cross-discipline interface review. Routes a screen, flow, or feature to every `better-*` domain skill and consolidates one ranked verdict. Use when asked for a holistic review rather than a single domain and when `interface-review` hands up a change to route. Triggers on better-interface, holistic interface review, review the whole screen.",
+      "tags": [
+        "review",
+        "ui"
+      ],
+      "author": "jakubkrehel",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "better-interface/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "review-format.md"
+      ],
+      "bytes": 12404,
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/better-interface",
+        "commit": "ca483852de23d48ab4f4ea71da37dad12bd70a95",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "better-layout",
+      "name": "better-layout",
+      "title": "Better layout",
+      "description": "Layout structure for web interfaces. Use when structuring a page or component, deciding what collapses at small sizes, or reviewing frontend code for layout. Triggers on layout, spacing, alignment, grouping, whitespace, visual hierarchy, reading order, progressive disclosure, breakpoints, container queries, safe area, full-bleed, layout margins, RTL layout, logical properties.",
+      "tags": [
+        "design",
+        "layout",
+        "review",
+        "ui"
+      ],
+      "author": "jakubkrehel",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "better-layout/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "grouping-and-alignment.md",
+        "spacing-and-adaptivity.md"
+      ],
+      "bytes": 18060,
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/better-layout",
+        "commit": "ca483852de23d48ab4f4ea71da37dad12bd70a95",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "better-typography",
+      "name": "better-typography",
+      "title": "Better typography",
+      "description": "Web typography. Use when picking or pairing typefaces, setting up a type scale, or styling and truncating text in components. Triggers on typography, font loading, woff2, variable fonts, opentype features, type scale, heading hierarchy, line-height, letter-spacing, measure, text-wrap, truncation, tabular numbers, underlines, text selection, iOS input zoom, font smoothing, smart punctuation, text-b",
+      "tags": [
+        "layout",
+        "swift",
+        "typography",
+        "ui"
+      ],
+      "author": "jakubkrehel",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "better-typography/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "choosing-fonts.md",
+        "css-cheat-sheet.md",
+        "details-and-accessibility.md",
+        "spacing-and-sizing.md",
+        "variable-fonts-and-opentype.md",
+        "wrapping-and-punctuation.md"
+      ],
+      "bytes": 34425,
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/better-typography",
+        "commit": "ca483852de23d48ab4f4ea71da37dad12bd70a95",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "better-ui",
+      "name": "better-ui",
+      "title": "Better ui",
+      "description": "Design engineering principles for making interfaces feel polished. Use when building UI components, implementing animations or hover states, or doing any visual detail work. Triggers on UI polish, \"feels off\", stagger animations, enter animations, theme switch transitions, border radius, optical alignment, image outlines, box shadows, icons, icon stroke weight, motion restraint.",
+      "tags": [
+        "animation",
+        "design",
+        "detail",
+        "icons"
+      ],
+      "author": "jakubkrehel",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "better-ui/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "animations.md",
+        "enter-exit.md",
+        "icon-transitions.md",
+        "icons.md",
+        "performance.md",
+        "surfaces.md"
+      ],
+      "bytes": 35860,
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/better-ui",
+        "commit": "ca483852de23d48ab4f4ea71da37dad12bd70a95",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "better-writing",
+      "name": "better-writing",
+      "title": "Better writing",
+      "description": "UX writing and interface copy. Use when writing or reviewing any user-facing text. Triggers on UX writing, microcopy, button labels, link text, error messages, empty states, placeholder text, settings labels, capitalization, sentence case, voice and tone.",
+      "tags": [
+        "review",
+        "ui",
+        "writing"
+      ],
+      "author": "jakubkrehel",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "better-writing/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 6742,
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/better-writing",
+        "commit": "ca483852de23d48ab4f4ea71da37dad12bd70a95",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "explain-interface",
+      "name": "explain-interface",
+      "title": "Explain interface",
+      "description": "Answers \"how was this built?\" about an interface. Give it a URL and name the thing you're curious about, and it reads the layers that produce the effect. Reads the whole frontend instead when you don't name a thing. From a screenshot it reconstructs rather than reads and says so.",
+      "tags": [
+        "ui"
+      ],
+      "author": "jakubkrehel",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "explain-interface/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "find-the-effect.md",
+        "from-an-image.md",
+        "no-browser.md",
+        "read-the-system.md"
+      ],
+      "bytes": 30501,
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/explain-interface",
+        "commit": "ca483852de23d48ab4f4ea71da37dad12bd70a95",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "break",
+      "name": "break",
+      "title": "Break",
+      "description": "Answers \"does this survive?\" for one component. Renders it on a page in every state real use can put it in, and hands that page over as a visual report of what broke.",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "author": "jakubkrehel",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "break/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "scenarios.md"
+      ],
+      "bytes": 11234,
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/break",
+        "commit": "ca483852de23d48ab4f4ea71da37dad12bd70a95",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "interface-review",
+      "name": "interface-review",
+      "title": "Interface review",
+      "description": "Interface review of a change rather than a screen: uncommitted work, the current branch, or a pull request. Covers interface quality, not correctness, tests, or security.",
+      "tags": [
+        "review",
+        "ui"
+      ],
+      "author": "jakubkrehel",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "interface-review/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "removed-signals.md",
+        "scope-resolution.md"
+      ],
+      "bytes": 21927,
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/interface-review",
+        "commit": "ca483852de23d48ab4f4ea71da37dad12bd70a95",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "variant",
+      "name": "variant",
+      "title": "Variant",
+      "description": "Answers \"which of these?\" rather than \"is this right?\". Builds several genuinely different versions of one piece of UI behind a picker in the real page, so you can flip between them and promote the one that wins.",
+      "tags": [
+        "ui"
+      ],
+      "author": "jakubkrehel",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "variant/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "picker.md"
+      ],
+      "bytes": 9170,
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/variant",
+        "commit": "ca483852de23d48ab4f4ea71da37dad12bd70a95",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "design-first-ui-prompting",
+      "name": "design-first-ui-prompting",
+      "title": "Design first ui prompting",
+      "description": "Use when you need design-first, spec-driven, skimmable prompts for UI generation. Covers prompt structure, constraints, variations, typography/spacing rules, and iteration workflow for consistent UI outputs.",
+      "tags": [
+        "design",
+        "layout",
+        "typography",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "design-first-ui-prompting/",
+      "files": [
+        "ARTICLE.md",
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "demo/PROMPT.md",
+        "demo/index.html"
+      ],
+      "bytes": 24886,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/ui/design-first-ui-prompting",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "animate-expo",
+      "name": "animate-expo",
+      "title": "Animate expo",
+      "description": "Build animations in React Native and Expo, making the decisions in the order that determines whether they feel right — should it animate, which thread it runs on, which properties, spring or timing, how the gesture hands off, how it degrades. Writes the implementation with Reanimated, Gesture Handler, Expo Router and expo-haptics. Use when animating anything in an Expo app, adding gestures, sheets",
+      "tags": [
+        "animation",
+        "mobile",
+        "react",
+        "web"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "animate-expo/",
+      "files": [
+        "NOTICE.md",
+        "RECIPES.md",
+        "SKILL.md"
+      ],
+      "bytes": 34372,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/animate-expo",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "animate",
+      "name": "animate",
+      "title": "Animate",
+      "description": "Build an animation from scratch, making the decisions in the order that determines whether it feels right — should it animate at all, what purpose, which tool, which properties, which curve and duration, how it interrupts, how it exits. Writes the implementation. Use when asked to animate something, add motion, make a component feel alive, or build a transition. For critiquing existing motion use ",
+      "tags": [
+        "animation",
+        "review",
+        "ui"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "animate/",
+      "files": [
+        "NOTICE.md",
+        "RECIPES.md",
+        "SKILL.md"
+      ],
+      "bytes": 19532,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/animate",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "animation-vocabulary",
+      "name": "animation-vocabulary",
+      "title": "Animation vocabulary",
+      "description": "Reverse-lookup glossary that turns a vague description of a web animation or motion effect into its exact term (\"the bouncy thing when a popover opens\" → Pop in; \"the iOS rubber-band scroll\" → Rubber-banding). Use when the user asks \"what's it called when…\", or describes a motion effect without knowing its name and wants the right word to prompt an AI or designer with. For naming an effect, not de",
+      "tags": [
+        "animation",
+        "design",
+        "swift",
+        "web"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "animation-vocabulary/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 13128,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/animation-vocabulary",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "apple-design",
+      "name": "apple-design",
+      "title": "Apple design",
+      "description": "Apple's approach to interface design and fluid, physical motion, translated for the web. Use when building or reviewing gesture-driven UI, spring animations, drag/swipe/sheet interactions, momentum and interruptible transitions, translucent materials and depth, typography (optical sizing, tracking, leading), reduced-motion, or the design foundations (feedback, spatial consistency, restraint) behin",
+      "tags": [
+        "animation",
+        "design",
+        "review",
+        "swift"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "apple-design/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 22715,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/apple-design",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "ask-sonner",
+      "name": "ask-sonner",
+      "title": "Ask sonner",
+      "description": "Guide to Sonner, the React toast library — install and wire up the Toaster, pick the right toast() call, promise and loading toasts, updating, dismissing and persisting toasts, styling, theming and icons, positioning and multiple toasters. Use when working with Sonner or troubleshooting it — toasts that don't appear, appear twice, lose their styles, ignore Tailwind classes, sit behind a modal, or ",
+      "tags": [
+        "icons",
+        "library",
+        "react"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "ask-sonner/",
+      "files": [
+        "API.md",
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 11489,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/ask-sonner",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "emil-design-eng",
+      "name": "emil-design-eng",
+      "title": "Emil design eng",
+      "description": "This skill encodes Emil Kowalski's philosophy on UI polish, component design, animation decisions, and the invisible details that make software feel great.",
+      "tags": [
+        "animation",
+        "design",
+        "detail",
+        "ui"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "emil-design-eng/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 27226,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/emil-design-eng",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "find-animation-opportunities",
+      "name": "find-animation-opportunities",
+      "title": "Find animation opportunities",
+      "description": "Search a codebase or UI for places that don't animate but should, and reject everything that shouldn't. Read-only; it proposes motion with exact values, it does not implement it. Use when the user asks \"what could be animated here?\" or wants to \"make this feel more alive\". For fixing existing animations, use improve-animations or review-animations instead.",
+      "tags": [
+        "animation",
+        "review",
+        "ui"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "find-animation-opportunities/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 9491,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/find-animation-opportunities",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "improve-animations",
+      "name": "improve-animations",
+      "title": "Improve animations",
+      "description": "Survey a codebase's animation and motion code as a senior motion advisor, then produce a prioritized audit and self-contained implementation plans for other agents (or cheaper models) to execute. Read-only on source code — it plans improvements, it does not apply them. Use when the user asks to \"improve the animations\", \"audit the motion\", \"make this app feel better\", or wants a roadmap of animati",
+      "tags": [
+        "animation",
+        "review"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "improve-animations/",
+      "files": [
+        "AUDIT.md",
+        "NOTICE.md",
+        "PLAN-TEMPLATE.md",
+        "SKILL.md"
+      ],
+      "bytes": 18402,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/improve-animations",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "pick-ui-library",
+      "name": "pick-ui-library",
+      "title": "Pick ui library",
+      "description": "Pick the right library for a given frontend task from a curated, opinionated list — numbers, OTP inputs, charts, command menus, virtualization, drag and drop, toasts, state, styling, and more. Only runs when explicitly invoked; it does not trigger on its own.",
+      "tags": [
+        "library"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "pick-ui-library/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4514,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/pick-ui-library",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "prototype",
+      "name": "prototype",
+      "title": "Prototype",
+      "description": "Build multiple genuinely different versions of a UI piece you describe, rendered behind a visual picker so you can flip through them live and promote the one that feels right. Only runs when explicitly invoked; it does not trigger on its own.",
+      "tags": [
+        "design",
+        "prototype",
+        "ui"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "prototype/",
+      "files": [
+        "NOTICE.md",
+        "PICKER.md",
+        "SKILL.md"
+      ],
+      "bytes": 15036,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/prototype",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "review-animations",
+      "name": "review-animations",
+      "title": "Review animations",
+      "description": "Reviews animation and motion code against a high craft bar derived from Emil Kowalski's design engineering philosophy. Default to flagging; approval is earned.",
+      "tags": [
+        "animation",
+        "design",
+        "review"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "review-animations/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "STANDARDS.md"
+      ],
+      "bytes": 17909,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/review-animations",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "write-swift",
+      "name": "write-swift",
+      "title": "Write swift",
+      "description": "How to write modern Swift well — modeling with value types, Swift 6 data-race safety and approachable concurrency (@concurrent, main-actor-by-default, actors, task groups), protocols and generics (some vs any), API design, performance and ARC, Swift Testing, macros, and the modern language features agents don't know about yet. Use when writing, reviewing, or migrating Swift, or when a concurrency ",
+      "tags": [
+        "design",
+        "review",
+        "swift",
+        "ui"
+      ],
+      "author": "emilkowalski",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "write-swift/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 42185,
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/write-swift",
+        "commit": "d23d7f88a2e21c9e4b1418c7abe420f5c1052ba7",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "tastemaker",
+      "name": "tastemaker",
+      "title": "Tastemaker",
+      "description": "Generate genuinely beautiful, on-brand UI instead of generic \"AI slop\" — use whenever the user asks to build, design, style, or improve a UI, landing page, dashboard, app screen, or component, whenever a PRD/spec needs a design pass before implementation, whenever the user pastes reference images/Pinterest/Dribbble links and wants the app to look like them, or whenever the user complains the AI-ge",
+      "tags": [
+        "design",
+        "review",
+        "ui"
+      ],
+      "author": "codeswithroh",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "tastemaker/",
+      "files": [
+        "NOTICE.md",
+        "SECURITY.md",
+        "SKILL.md",
+        "assets/anime-starter.js",
+        "assets/artifact-kit.css",
+        "assets/artifact-kit.js",
+        "assets/gsap-starter.js",
+        "assets/reveal.css",
+        "assets/reveal.js",
+        "ideagram/LICENSE",
+        "ideagram/README.md",
+        "ideagram/SKILL.md",
+        "ideagram/assets/primitives/figure-pointing.svg",
+        "ideagram/assets/primitives/figure-sitting-desk.svg",
+        "ideagram/assets/primitives/figure-standing.svg",
+        "ideagram/assets/primitives/prop-chart-bar.svg",
+        "ideagram/assets/primitives/prop-document.svg",
+        "ideagram/assets/primitives/prop-envelope.svg",
+        "ideagram/assets/primitives/prop-lightbulb.svg",
+        "ideagram/assets/primitives/prop-rocket.svg",
+        "ideagram/assets/primitives/prop-shield.svg",
+        "ideagram/assets/primitives/prop-speech-bubble.svg",
+        "ideagram/references/composition-patterns.md",
+        "ideagram/references/metaphor-library.md",
+        "ideagram/references/prompt-template.md",
+        "ideagram/references/qa-checklist.md",
+        "ideagram/references/style-contract.md",
+        "ideagram/references/style-dna.md",
+        "ideagram/references/undraw-anatomy.md",
+        "ideagram/scripts/build_library_index.py",
+        "ideagram/scripts/export_png.py",
+        "ideagram/scripts/extract_component.py",
+        "ideagram/scripts/recolor_svg.py",
+        "ideagram/scripts/recolor_undraw.py",
+        "ideagram/scripts/validate_assets.py",
+        "references/animation-guidelines.md",
+        "references/anti-slop-checklist.md",
+        "references/asset-curation.md",
+        "references/component-catalog.md",
+        "references/component-patterns.md",
+        "references/component-sourcing.md",
+        "references/diversification.md",
+        "references/hero-guidelines.md",
+        "references/illustration-sources.md",
+        "references/interface-quality-rules.md",
+        "references/library-selection.md",
+        "references/logo-sourcing.md",
+        "references/macrostructures.md",
+        "references/narrative-arc.md",
+        "references/prototype-variants.md",
+        "references/reference-intelligence.md",
+        "references/style-lock-format.md",
+        "references/style-tokens.md",
+        "references/taste-memory.md",
+        "references/tech-stack-guides.md",
+        "references/verbs/audit.md",
+        "references/verbs/comps.md",
+        "references/verbs/study.md",
+        "scripts/_netguard.py",
+        "scripts/anti_slop_scan.py",
+        "scripts/audit_motion.py",
+        "scripts/check_contrast.py",
+        "scripts/check_domains.py",
+        "scripts/export_favicons.py",
+        "scripts/extract_palette.py",
+        "scripts/fetch_icons.py",
+        "scripts/fetch_photos.py",
+        "scripts/generate_palette.py",
+        "scripts/recolor_svg.py",
+        "scripts/test_security.py",
+        "scripts/validate_assets.py"
+      ],
+      "bytes": 474626,
+      "source": {
+        "repo": "https://github.com/codeswithroh/tastemaker",
+        "path": "skills/tastemaker",
+        "commit": "45313ce9f60971134704a17f7b1a64c30909c240",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "add-mouse-driven-orbit",
+      "name": "add-mouse-driven-orbit",
+      "title": "Add mouse driven orbit",
+      "description": "Add restrained mouse-driven orbit and parallax depth to a Three.js hero by damping one pointer target and splitting it across camera translation, look-at, and small object rotations. Use for passive cinematic 3D heroes, pointer-responsive scenes, organic model parallax, and interactive depth where OrbitControls would feel like a product viewer.",
+      "tags": [
+        "3d",
+        "effects"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "add-mouse-driven-orbit/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 6204,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/add-mouse-driven-orbit",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "add-shader-cursor-trail",
+      "name": "add-shader-cursor-trail",
+      "title": "Add shader cursor trail",
+      "description": "Add the Shaders WebGPU mouse effect used for the Tidal Commons hero: a white twinkling halftone cursor trail driven by ChromaFlow, masked through a DotGrid, finished with chromatic ripples and film grain, and protected by static, touch, accessibility, SSR, and performance fallbacks. Use when a user asks for this shader mouse effect, a halftone cursor trail, an interactive WebGPU hero/contact backg",
+      "tags": [
+        "3d",
+        "accessibility",
+        "background",
+        "effects"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "add-shader-cursor-trail/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/implementation.md",
+        "scripts/verify-cursor-trail.mjs"
+      ],
+      "bytes": 11636,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/add-shader-cursor-trail",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "agency-grid-layout-minimal",
+      "name": "agency-grid-layout-minimal",
+      "title": "Agency grid layout minimal",
+      "description": "Create a minimal agency design system with a disciplined editorial grid, oversized typography, quiet uppercase utility labels, restrained image blocks, and subtle structural detail.",
+      "tags": [
+        "design",
+        "detail",
+        "layout",
+        "typography"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "agency-grid-layout-minimal/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4115,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/agency-grid-layout-minimal",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "ambient-section-particles",
+      "name": "ambient-section-particles",
+      "title": "Ambient section particles",
+      "description": "Add a restrained particle atmosphere inside one section with configurable shapes, density, gravity, wind, sway, rotation, recycling or settling, pointer disturbance, visibility pausing, responsive limits, and reduced-motion fallbacks. Use for petals, leaves, snow, sparks, confetti, dots, paper, icons, or brand fragments that support a section's mood without obscuring content.",
+      "tags": [
+        "animation",
+        "effects",
+        "icons"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "ambient-section-particles/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 4832,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/ambient-section-particles",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "animation-on-scroll",
+      "name": "animation-on-scroll",
+      "title": "Animation on scroll",
+      "description": "Create an on-scroll animation trigger using IntersectionObserver with Tailwind-friendly animation classes and keyframes. Use when asked for scroll-reveal, animate-on-scroll, or sequencing element animations when they enter the viewport.",
+      "tags": [
+        "animation",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "animation-on-scroll/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 3549,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/animation-on-scroll",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "animation-systems",
+      "name": "animation-systems",
+      "title": "Animation systems",
+      "description": "Use when designing or implementing product-grade web motion like Stripe, Linear, Apple, and Vercel. Covers motion principles, easing/duration defaults, choreography patterns, scroll/hover interactions, performance, accessibility (reduced motion), and implementation guidance.",
+      "tags": [
+        "accessibility",
+        "animation",
+        "design",
+        "swift"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "animation-systems/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 5237,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/animation-systems",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "atmosphere-background",
+      "name": "atmosphere-background",
+      "title": "Atmosphere background",
+      "description": "Create a dark atmospheric background with drifting vertical light folds, screen-blended glow, and a concentrated luminous corner or lower-edge bloom.",
+      "tags": [
+        "background",
+        "effects"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "atmosphere-background/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 3026,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/atmosphere-background",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "background-grid-webgl",
+      "name": "background-grid-webgl",
+      "title": "Background grid webgl",
+      "description": "Create a perspective WebGL background grid with fading lines, subtle particle haze, slow forward drift, and gentle camera parallax.",
+      "tags": [
+        "3d",
+        "background",
+        "effects",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "background-grid-webgl/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 2622,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/background-grid-webgl",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "beam-glow-states",
+      "name": "beam-glow-states",
+      "title": "Beam glow states",
+      "description": "Create React loading, processing, selected, current, focus, and pressed states with the border-beam package's animated edge glow. Use when a card, button, input, tab, option, task panel, or agent surface needs a restrained traveling or breathing beam; includes installation, imports, prop selection, state wiring, reduced motion, accessibility, and performance and layout guardrails.",
+      "tags": [
+        "accessibility",
+        "animation",
+        "effects",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "beam-glow-states/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 14147,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/beam-glow-states",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "beautiful-shadows",
+      "name": "beautiful-shadows",
+      "title": "Beautiful shadows",
+      "description": "Apply exact Tailwind arbitrary shadow utilities for polished, layered neutral elevation. Use when compact cards, controls, panels, popovers, hero media, feature callouts, or modal-like containers need refined shadows without default Tailwind shadow scales or colored tinting.",
+      "tags": [
+        "colour"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "beautiful-shadows/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 2540,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/beautiful-shadows",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "blue-cloudy-clean-modern",
+      "name": "blue-cloudy-clean-modern",
+      "title": "Blue cloudy clean modern",
+      "description": "Create a clean modern design system with a luminous blue sky atmosphere, soft drifting cloud light, minimal white framing, and serene premium typography.",
+      "tags": [
+        "design",
+        "typography"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "blue-cloudy-clean-modern/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4170,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/blue-cloudy-clean-modern",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "blue-laser-clean-glass-layout",
+      "name": "blue-laser-clean-glass-layout",
+      "title": "Blue laser clean glass layout",
+      "description": "Create a clean dark glass layout system with a thin blue laser atmosphere, frosted premium shells, and polished dashboard structure.",
+      "tags": [
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "blue-laser-clean-glass-layout/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4379,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/blue-laser-clean-glass-layout",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "book-serif-index",
+      "name": "book-serif-index",
+      "title": "Book serif index",
+      "description": "Create an archival book-reader design system with serif-led pages, mono index navigation, aged paper surfaces, margin notes, and a premium catalog frame.",
+      "tags": [
+        "design"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "book-serif-index/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4526,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/book-serif-index",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "bright-green-tech-system-webgl",
+      "name": "bright-green-tech-system-webgl",
+      "title": "Bright green tech system webgl",
+      "description": "Create a bright-green technical design system with structured split layouts, hard-framed dark surfaces, mono utility labels, and a prominent WebGL visualization zone.",
+      "tags": [
+        "3d",
+        "design",
+        "layout",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "bright-green-tech-system-webgl/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4430,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/bright-green-tech-system-webgl",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-awwwards-quality-sites",
+      "name": "build-awwwards-quality-sites",
+      "title": "Build awwwards quality sites",
+      "description": "Art-direct and implement distinctive, motion-rich marketing, editorial, portfolio, and landing websites with original reference-inspired imagery, standout heroes, GSAP choreography, one smooth-scroll engine, optional Three.js shaders, honest icon and logo sourcing, photo avatars, accessibility, and performance safeguards. Use when a user asks for an Awwwards-quality, premium, cinematic, interactiv",
+      "tags": [
+        "3d",
+        "accessibility",
+        "animation",
+        "design"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-awwwards-quality-sites/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 7490,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/build-awwwards-quality-sites",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-interactive-particle-trail",
+      "name": "build-interactive-particle-trail",
+      "title": "Build interactive particle trail",
+      "description": "Build a cursor or touch particle interaction that emits by distance along the traveled segment into a recycled GPU point pool, with optional keyboard-triggered bursts. Use for interactive particle trails, pollen lifted from a surface, dust disturbed by a pointer, hover particle bursts, and discrete motes whose spacing must stay consistent at different gesture speeds.",
+      "tags": [
+        "effects",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-interactive-particle-trail/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 6288,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/build-interactive-particle-trail",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-threejs-scroll-worlds",
+      "name": "build-threejs-scroll-worlds",
+      "title": "Build threejs scroll worlds",
+      "description": "Build rich, scroll-controlled real-time Three.js experiences as one persistent 3D world whose camera, lighting, atmosphere, materials, objects, DOM story, and interactions evolve across authored chapters. Use for 3D scrollytelling, scroll-driven WebGL worlds, camera journeys, interactive portfolios, product stories, exhibitions, explainers, game or film microsites, spatial narratives, and multi-sc",
+      "tags": [
+        "3d",
+        "game",
+        "swift",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-threejs-scroll-worlds/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/kage-anatomy.md",
+        "references/quality-and-qa.md",
+        "references/realtime-architecture.md",
+        "references/scroll-conductor.js",
+        "references/world-bible.md"
+      ],
+      "bytes": 74236,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/build-threejs-scroll-worlds",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-wireframe-scan-reveal",
+      "name": "build-wireframe-scan-reveal",
+      "title": "Build wireframe scan reveal",
+      "description": "Reveal Three.js geometry with an expanding world-space scan whose wire cage leads the solid surface, then burns away. Use for wireframe scanning, radial mesh reveals, survey pulses, holographic assembly, topology intros, and 3D model entrances where a plain opacity wipe does not explain the form.",
+      "tags": [
+        "3d",
+        "prototype",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-wireframe-scan-reveal/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 6542,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/build-wireframe-scan-reveal",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "cinematic-gsap-lenis-motion-system",
+      "name": "cinematic-gsap-lenis-motion-system",
+      "title": "Cinematic gsap lenis motion system",
+      "description": "Create premium cinematic web motion systems with GSAP, ScrollTrigger, and Lenis. Use for luxury editorial websites, creative studio portfolios, Awwwards-style interactions, smooth scroll reveals, staggered text, parallax, pinned sections, magnetic hover states, custom cursors, and mouse-reactive layered movement.",
+      "tags": [
+        "animation",
+        "effects",
+        "react",
+        "swift"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "cinematic-gsap-lenis-motion-system/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md"
+      ],
+      "bytes": 17765,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/cinematic-gsap-lenis-motion-system",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "cinematic-scroll-storytelling",
+      "name": "cinematic-scroll-storytelling",
+      "title": "Cinematic scroll storytelling",
+      "description": "Create cinematic scroll-driven landing pages with Lenis smooth scrolling, GSAP ScrollTrigger, scroll-linked progression, staggered text reveals, sticky card stacks, parallax backgrounds, scroll-scrubbed transitions, footer reveals, and immersive preloaders. Use when analyzing or building premium editorial scroll experiences, sticky project stacks, kinetic typography, or section-by-section storytel",
+      "tags": [
+        "animation",
+        "background",
+        "effects",
+        "typography"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "cinematic-scroll-storytelling/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md"
+      ],
+      "bytes": 12075,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/cinematic-scroll-storytelling",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "clean-minimal-beige-light-mode",
+      "name": "clean-minimal-beige-light-mode",
+      "title": "Clean minimal beige light mode",
+      "description": "Create a clean minimal beige light-mode design system with warm neutral shells, quiet process grids, restrained accent color, and elegant low-contrast structure.",
+      "tags": [
+        "accessibility",
+        "colour",
+        "design",
+        "detail"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "clean-minimal-beige-light-mode/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 3791,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/clean-minimal-beige-light-mode",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "cobejs",
+      "name": "cobejs",
+      "title": "Cobejs",
+      "description": "Use when adding a lightweight interactive globe with cobe (canvas setup, markers, interaction, performance, integration with React/Next.js).",
+      "tags": [
+        "detail",
+        "react",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "cobejs/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md"
+      ],
+      "bytes": 2346,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/cobejs",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "company-logos",
+      "name": "company-logos",
+      "title": "Company logos",
+      "description": "Use Iconify Simple Icons logos (64x64) instead of text logos.",
+      "tags": [
+        "icons"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "company-logos/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 1066,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/company-logos",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "container-lines",
+      "name": "container-lines",
+      "title": "Container lines",
+      "description": "Add vertical container-size guide lines with mini corner squares for precise, structured web layouts. Use when asked for container lines, measured layout guides, vertical boundary lines, editorial grid markers, or small corner-square frame details.",
+      "tags": [
+        "detail",
+        "layout",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "container-lines/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 3611,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/container-lines",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "corner-diagonals",
+      "name": "corner-diagonals",
+      "title": "Corner diagonals",
+      "description": "Apply diagonal-cut corners and chamfered edges to buttons, cards, panels, and container shells. Use when a design needs precise geometric framing, sci-fi UI surfaces, clipped-corner controls, or engineered sharp containers instead of rounded pills or plain rectangles.",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "corner-diagonals/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 5546,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/corner-diagonals",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "corner-lasers",
+      "name": "corner-lasers",
+      "title": "Corner lasers",
+      "description": "Create a corner-anchored laser composition with thin beams, a bright emitter node, bloom, and atmospheric glow or fog.",
+      "tags": [
+        "effects",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "corner-lasers/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 2850,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/corner-lasers",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "css-alpha-masking",
+      "name": "css-alpha-masking",
+      "title": "Css alpha masking",
+      "description": "Apply CSS alpha masking with linear-gradient for horizontal or vertical edge fades (mask-image and -webkit-mask-image). Use when asked for alpha masks, fade edges, or CSS mask gradients.",
+      "tags": [
+        "background",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "css-alpha-masking/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 1780,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/css-alpha-masking",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "css-border-gradient",
+      "name": "css-border-gradient",
+      "title": "Css border gradient",
+      "description": "Apply subtle gradient-border treatments for premium web surfaces. Use when cards, pricing panels, nav bars, modals, buttons, or hero surfaces need a refined edge highlight without a loud glow.",
+      "tags": [
+        "background",
+        "effects",
+        "ui",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "css-border-gradient/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 2931,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/css-border-gradient",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "dark-blue-contrasting-clean",
+      "name": "dark-blue-contrasting-clean",
+      "title": "Dark blue contrasting clean",
+      "description": "Create a dark-blue clean design system with strong contrast, cobalt gradient feature blocks, crisp framed structure, and restrained premium glow.",
+      "tags": [
+        "accessibility",
+        "background",
+        "design",
+        "effects"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "dark-blue-contrasting-clean/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4385,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/dark-blue-contrasting-clean",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "dark-glass-clean-layout",
+      "name": "dark-glass-clean-layout",
+      "title": "Dark glass clean layout",
+      "description": "Create a dark glass layout system with frosted premium shells, clean multi-column workspace structure, floating data cards, and restrained atmospheric depth.",
+      "tags": [
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "dark-glass-clean-layout/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4865,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/dark-glass-clean-layout",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "dither-background",
+      "name": "dither-background",
+      "title": "Dither background",
+      "description": "Create a dark monochrome procedural background with enlarged square pixels and visible Bayer-style ordered dithering. Use when a page needs an atmospheric near-black dither field, broad organic waves or cloud masses, and restrained gray-white highlights behind framed UI, hero content, or data overlays.",
+      "tags": [
+        "background"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "dither-background/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 6921,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/dither-background",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "dither-laser-dark-mode",
+      "name": "dither-laser-dark-mode",
+      "title": "Dither laser dark mode",
+      "description": "Create a dark premium design system that combines near-black surfaces, subtle ordered-dither texture, and a thin accent-colored laser atmosphere.",
+      "tags": [
+        "background",
+        "colour",
+        "design",
+        "detail"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "dither-laser-dark-mode/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4294,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/dither-laser-dark-mode",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "documentary-brutalist-agency",
+      "name": "documentary-brutalist-agency",
+      "title": "Documentary brutalist agency",
+      "description": "Create or redesign creative agency, production studio, architecture, culture, and portfolio websites with billboard typography, hard black-and-white chapters, exposed grids, documentary imagery, irregular collages, restrained parallax, brutalist navigation, and accessible FAQ controls.",
+      "tags": [
+        "accessibility",
+        "design",
+        "effects",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "documentary-brutalist-agency/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 4578,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/documentary-brutalist-agency",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "editorial-portfolio-chapters",
+      "name": "editorial-portfolio-chapters",
+      "title": "Editorial portfolio chapters",
+      "description": "Create or redesign creative-studio, agency, photographer, artist, and portfolio websites where project work leads the story. Use for dark editorial shells, full-bleed campaign media, color-coded case-study chapters, oversized service typography, restrained project reveals, and a decisive contact finale.",
+      "tags": [
+        "colour",
+        "design",
+        "typography",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "editorial-portfolio-chapters/",
+      "files": [
+        "ARTICLE.md",
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 24189,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/editorial-portfolio-chapters",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "editorial-service-booking",
+      "name": "editorial-service-booking",
+      "title": "Editorial service booking",
+      "description": "Create or redesign appointment-based service websites for salons, barbers, spas, wellness studios, clinics, and hospitality brands. Use for warm editorial layouts, serif-led identity, documentary portrait crops, calm treatment selectors, location-aware booking, and operational states that remain elegant and trustworthy.",
+      "tags": [
+        "design",
+        "layout",
+        "swift",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "editorial-service-booking/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 4852,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/editorial-service-booking",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "editorial-tech",
+      "name": "editorial-tech",
+      "title": "Editorial tech",
+      "description": "Blend editorial magazine composition with precision product-tech detailing using asymmetrical grids, cinematic media bands, mono utility labels, and restrained accent color.",
+      "tags": [
+        "colour",
+        "detail",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "editorial-tech/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4261,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/editorial-tech",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "falling-leaves",
+      "name": "falling-leaves",
+      "title": "Falling leaves",
+      "description": "Build falling leaves that read as leaves, with each one tumbling on its own axis so it presents a face, thins to an edge, and opens out again, and with its sideways slip driven by that same tumble. Covers the 2-D canvas build and the instanced-3-D variant, where leaves are recycled from, density-versus-count maths, depth layering, colour under a tone-mapped composite, reduced motion, and visibilit",
+      "tags": [
+        "animation",
+        "colour",
+        "effects"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "falling-leaves/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 8154,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/falling-leaves",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "framed-grid-layout",
+      "name": "framed-grid-layout",
+      "title": "Framed grid layout",
+      "description": "Create minimal framed grid layouts with thin visible boundary lines, L-shaped corner brackets, subtle diagonal line texture, and strict section alignment. Use when asked for clean, neutral, precise, structured, editorial, technical, or guide-border web layouts.",
+      "tags": [
+        "layout",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "framed-grid-layout/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4784,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/framed-grid-layout",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "framed-tech-dark-border-gradient",
+      "name": "framed-tech-dark-border-gradient",
+      "title": "Framed tech dark border gradient",
+      "description": "Create a framed dark technical design system with border-gradient shells, asymmetrical grid panels, mono utility labeling, and restrained monochrome atmosphere.",
+      "tags": [
+        "background",
+        "design",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "framed-tech-dark-border-gradient/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4879,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/framed-tech-dark-border-gradient",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "funky-purple-container-tech",
+      "name": "funky-purple-container-tech",
+      "title": "Funky purple container tech",
+      "description": "Create a dark container-led technical design system with fuchsia-purple accents, layered rounded shells, crisp frame lines, and playful futuristic focal objects.",
+      "tags": [
+        "design",
+        "detail"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "funky-purple-container-tech/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4451,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/funky-purple-container-tech",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "glass-dark-mode-clock",
+      "name": "glass-dark-mode-clock",
+      "title": "Glass dark mode clock",
+      "description": "Create a dark glass design system with frosted shells, soft beam grids, circular clock-like calibration dials, and precise sci-fi instrument framing.",
+      "tags": [
+        "design",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "glass-dark-mode-clock/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4151,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/glass-dark-mode-clock",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "glass-dark-ui",
+      "name": "glass-dark-ui",
+      "title": "Glass dark ui",
+      "description": "Build dark-mode glassmorphism interfaces with readable contrast, frosted surfaces, and gradient borders using a pseudo-element mask. Use when asked for glass cards, frosted dark hero sections, blur panels, or dark UI systems with gradient/glow borders.",
+      "tags": [
+        "accessibility",
+        "background",
+        "effects",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "glass-dark-ui/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 3146,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/glass-dark-ui",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "globe-gl",
+      "name": "globe-gl",
+      "title": "Globe gl",
+      "description": "Use when implementing globe.gl (Globe.GL) for 3D globe data visualization with WebGL/ThreeJS, including setup, data layers (points, arcs, polygons, labels), and integration patterns in plain HTML or React.",
+      "tags": [
+        "3d",
+        "design",
+        "react",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "globe-gl/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 1638,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/globe-gl",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "globe-particles",
+      "name": "globe-particles",
+      "title": "Globe particles",
+      "description": "Create a globe-like 3D particle visualization with a dense luminous spherical core and thinner orbital ring or flattened disc. Use when a design needs a premium planetary, orbital, synthesized data-globe effect rendered with real WebGL/Three.js particles, not generic starfields or full page layout changes.",
+      "tags": [
+        "3d",
+        "design",
+        "effects",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "globe-particles/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 9887,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/globe-particles",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "gooey-blob-system",
+      "name": "gooey-blob-system",
+      "title": "Gooey blob system",
+      "description": "Create a gooey blob system using SVG filters where multiple shapes merge into a single fluid form. Use overlapping circles combined with a Gaussian blur and color matrix filter to produce a continuous, organic mass. The forms should visually fuse and separate based on proximity. Focus on filter-driven merging (blur + threshold effect), soft organic boundaries with no hard edges, multiple independe",
+      "tags": [
+        "animation",
+        "colour",
+        "design",
+        "effects"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "gooey-blob-system/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 1361,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/gooey-blob-system",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "gsap",
+      "name": "gsap",
+      "title": "Gsap",
+      "description": "Use when you need to add or debug professional web animations with GSAP (timelines, ScrollTrigger, stagger, transforms) in HTML/CSS/JS/React. Includes patterns for smooth motion, performance, and common pitfalls.",
+      "tags": [
+        "animation",
+        "react",
+        "ui",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "gsap/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md"
+      ],
+      "bytes": 3282,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/gsap",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "gsap-scrolltrigger-storytelling",
+      "name": "gsap-scrolltrigger-storytelling",
+      "title": "Gsap scrolltrigger storytelling",
+      "description": "Build cinematic sticky product storytelling with GSAP ScrollTrigger, progressive UI reveals, scroll-synced animation, smooth interpolation, and immersive section transitions.",
+      "tags": [
+        "animation",
+        "ui",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "gsap-scrolltrigger-storytelling/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4034,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/gsap-scrolltrigger-storytelling",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "high-contrast-skeuomorphic-clean",
+      "name": "high-contrast-skeuomorphic-clean",
+      "title": "High contrast skeuomorphic clean",
+      "description": "Create a high-contrast clean skeuomorphic design system with molded dark surfaces, crisp light separation, tactile inset depth, and restrained signal accents.",
+      "tags": [
+        "accessibility",
+        "design",
+        "detail"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "high-contrast-skeuomorphic-clean/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4713,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/high-contrast-skeuomorphic-clean",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "image-first-grid-layout",
+      "name": "image-first-grid-layout",
+      "title": "Image first grid layout",
+      "description": "Create an image-led grid design system with full-bleed photography, structural guide lines, anchored content blocks, and restrained technical overlays.",
+      "tags": [
+        "design",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "image-first-grid-layout/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4551,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/image-first-grid-layout",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "landing-page",
+      "name": "landing-page",
+      "title": "Landing page",
+      "description": "Use when designing or rewriting a high-converting landing page (single-offer page) for SaaS/apps/services. Covers structure, layout patterns, conversion strategies, copywriting, SEO/AEO, and common pitfalls.",
+      "tags": [
+        "design",
+        "layout",
+        "writing"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "landing-page/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md"
+      ],
+      "bytes": 5563,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/landing-page",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "light-mode-paper-technical",
+      "name": "light-mode-paper-technical",
+      "title": "Light mode paper technical",
+      "description": "Create a light-mode technical design system with warm paper surfaces, dark outer framing, subtle diagonal texture, precise bracketed geometry, and restrained accent signals.",
+      "tags": [
+        "design",
+        "detail"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "light-mode-paper-technical/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4189,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/light-mode-paper-technical",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "liquid-metal-border",
+      "name": "liquid-metal-border",
+      "title": "Liquid metal border",
+      "description": "Add and tune animated liquid-metal WebGL borders with the React `metal-fx` package. Use when buttons, icon controls, chips, tabs, cards, or selected surfaces need a metallic active, selected, hover, focus, or premium border; when implementing the MetalFx component from metal.jakubantalik.com; or when troubleshooting its presets, themes, strength, glow, reflections, sizing, radius, animation, acces",
+      "tags": [
+        "3d",
+        "accessibility",
+        "animation",
+        "effects"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "liquid-metal-border/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 14231,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/liquid-metal-border",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "marquee-loop",
+      "name": "marquee-loop",
+      "title": "Marquee loop",
+      "description": "Apply seamless infinite marquee loops using duplicated items.",
+      "tags": [
+        "effects"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "marquee-loop/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 818,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/marquee-loop",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "masked-reveal",
+      "name": "masked-reveal",
+      "title": "Masked reveal",
+      "description": "Create masked staggered word reveals on scroll with GSAP ScrollTrigger. Use when headings, hero copy, section titles, or editorial text should reveal word-by-word through an overflow mask as they enter the viewport.",
+      "tags": [
+        "web",
+        "writing"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "masked-reveal/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 3959,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/masked-reveal",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "matterjs",
+      "name": "matterjs",
+      "title": "Matterjs",
+      "description": "Use when implementing 2D physics interactions with Matter.js, including Engine/World setup, Render/Runner configuration, adding bodies and constraints, and scroll/interaction-friendly canvas scenes.",
+      "tags": [
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "matterjs/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 2227,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/matterjs",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "mesh-gradient-dark-blue-clean",
+      "name": "mesh-gradient-dark-blue-clean",
+      "title": "Mesh gradient dark blue clean",
+      "description": "Create a futuristic, premium, clean dark-blue mesh-gradient design system across background rendering, hero shell, navigation, floating nodes, framed sections, CTAs, and motion. Use when the interface needs a near-black navy foundation, procedural blue mesh atmosphere, disciplined minimal structure, and infrastructural or planetary depth.",
+      "tags": [
+        "animation",
+        "background",
+        "design",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "mesh-gradient-dark-blue-clean/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 9875,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/mesh-gradient-dark-blue-clean",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "nested-container-clean-agency",
+      "name": "nested-container-clean-agency",
+      "title": "Nested container clean agency",
+      "description": "Create a clean agency design system built from nested containers, with an outer editorial shell, inset dark feature blocks, rounded premium cards, and restrained accent color.",
+      "tags": [
+        "colour",
+        "design",
+        "detail"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "nested-container-clean-agency/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4010,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/nested-container-clean-agency",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "nested-container-frames",
+      "name": "nested-container-frames",
+      "title": "Nested container frames",
+      "description": "Create a container-in-container layout system using nested frames. Use an outer centered container with visible vertical boundary lines and corner markers. Inside, place inner containers inset from the edges, each with its own background and rounded frame. Technique: outer container defines global bounds, inner containers use padding to create inset spacing, layered frames (border + background) to",
+      "tags": [
+        "background",
+        "detail",
+        "game",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "nested-container-frames/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 1280,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/nested-container-frames",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "number-details",
+      "name": "number-details",
+      "title": "Number details",
+      "description": "Add decorative 01, 02, 03 numeric detail markers.",
+      "tags": [
+        "detail"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "number-details/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 793,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/number-details",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "operational-enterprise-ai",
+      "name": "operational-enterprise-ai",
+      "title": "Operational enterprise ai",
+      "description": "Create or redesign enterprise AI, automation, security, and operations product pages that explain system boundaries, approvals, auditability, exceptions, and rollback. Use for dark cinematic heroes, hairline grids, metric pauses, expandable solution rows, case-study evidence, security proof, and qualified demo or waitlist handoffs.",
+      "tags": [
+        "design",
+        "layout",
+        "review"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "operational-enterprise-ai/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 5062,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/operational-enterprise-ai",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "orange-clean-paper-saas",
+      "name": "orange-clean-paper-saas",
+      "title": "Orange clean paper saas",
+      "description": "Create a clean paper-toned SaaS design system with warm neutrals, orange accent signals, rounded premium forms, and polished product illustration surfaces.",
+      "tags": [
+        "design",
+        "detail",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "orange-clean-paper-saas/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4038,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/orange-clean-paper-saas",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "pointer-trail-emitter",
+      "name": "pointer-trail-emitter",
+      "title": "Pointer trail emitter",
+      "description": "Build a cursor trail whose spacing stays constant at any hand speed, by emitting motes per unit of distance travelled rather than on a timer, so a flick draws the same continuous ribbon as a crawl instead of breaking into scattered dots. Covers sub-segment placement, the ring-buffer ordering trap, the idle breath a distance emitter needs, anchoring the trail to the screen in a 3-D scene, scaling s",
+      "tags": [
+        "animation",
+        "effects",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "pointer-trail-emitter/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 10829,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/pointer-trail-emitter",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "pricing-page",
+      "name": "pricing-page",
+      "title": "Pricing page",
+      "description": "Use when designing or rewriting a high-converting SaaS pricing page (structure, plan design, copywriting, SEO/AEO, FAQs, layout patterns, experiments). Includes checklists, templates, and common pitfalls.",
+      "tags": [
+        "design",
+        "layout",
+        "writing"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "pricing-page/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md"
+      ],
+      "bytes": 6136,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/pricing-page",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "product-proof-saas",
+      "name": "product-proof-saas",
+      "title": "Product proof saas",
+      "description": "Create or redesign SaaS and AI product landing pages where a real workflow, interface, or deterministic demo is the central proof. Use for pale atmospheric shells, product UI in the hero, prompt-to-output stories, audience tabs, compact feature modules, honest pricing comparisons, and FAQ handoffs.",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "product-proof-saas/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 4756,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/product-proof-saas",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "progressive-blur",
+      "name": "progressive-blur",
+      "title": "Progressive blur",
+      "description": "Create a layered CSS progressive blur (top or bottom) using multiple backdrop-filter masks for depth and softness. Use when asked for “progressive blur”, “gradient blur overlay”, or stepped blur masks that fade from an edge of the viewport.",
+      "tags": [
+        "background",
+        "effects",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "progressive-blur/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 6019,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/progressive-blur",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "reveal-hover-effect",
+      "name": "reveal-hover-effect",
+      "title": "Reveal hover effect",
+      "description": "Build cursor-following spotlight reveals that expose a second aligned image through a soft radial mask. Use for hover-to-color, before-and-after, x-ray, material, texture, product-detail, and illustrated hero effects where a desaturated or embossed base image should remain visible while another treatment follows an eased pointer.",
+      "tags": [
+        "colour",
+        "detail",
+        "effects",
+        "mobile"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "reveal-hover-effect/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 11054,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/reveal-hover-effect",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "scroll-progress-timeline",
+      "name": "scroll-progress-timeline",
+      "title": "Scroll progress timeline",
+      "description": "Turn any ordered process into a data-driven vertical or horizontal scroll story with a base line, progress fill, active step states, responsive collapse, semantic fallback, and reduced-motion behavior. Use for onboarding, checkout, roadmaps, recipes, case studies, service processes, histories, or narratives where progress through the sequence should become visible while scrolling.",
+      "tags": [
+        "animation",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "scroll-progress-timeline/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 4732,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/scroll-progress-timeline",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "scroll-scrubbed-visual-sequence",
+      "name": "scroll-scrubbed-visual-sequence",
+      "title": "Scroll scrubbed visual sequence",
+      "description": "Build reversible scroll-controlled visual transformations with a pinned or sticky stage, normalized progress, and video, image-sequence, canvas, SVG, or DOM renderers. Use for hero transformations, product assembly, interface state walkthroughs, object rotation, diagrams, or photo sequences that must move forward and backward with native scrolling.",
+      "tags": [
+        "design",
+        "ui",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "scroll-scrubbed-visual-sequence/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 5431,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/scroll-scrubbed-visual-sequence",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "scroll-scrubbed-word-reveal",
+      "name": "scroll-scrubbed-word-reveal",
+      "title": "Scroll scrubbed word reveal",
+      "description": "Reveal marked-up text word by word as scroll progress advances, while preserving semantic inline links, emphasis, responsive line wrapping, and reduced-motion readability. Use for headlines, quotes, manifestos, product statements, onboarding messages, or editorial passages where scrolling should pace comprehension rather than simulate typing.",
+      "tags": [
+        "animation",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "scroll-scrubbed-word-reveal/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 4856,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/scroll-scrubbed-word-reveal",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "scroll-world-storytelling",
+      "name": "scroll-world-storytelling",
+      "title": "Scroll world storytelling",
+      "description": "Turn an article, case study, brand narrative, product journey, or long-form story into a cinematic scroll-driven landing page using one of three renderers: scrubbed video, a real-time Three.js world, or semantic HTML/SVG data and typography. Use when the user asks for a scroll world, fly-through landing page, article-to-website transformation, animated planet, data scrollytelling, video-scrubbed p",
+      "tags": [
+        "3d",
+        "animation",
+        "design",
+        "typography"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "scroll-world-storytelling/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 12820,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/scroll-world-storytelling",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "shaders-cursor-ripples",
+      "name": "shaders-cursor-ripples",
+      "title": "Shaders cursor ripples",
+      "description": "Add cursor-following fluid WebGPU distortion over an existing image with the Shaders library's ImageTexture and CursorRipples components. Use when a hero, gallery, or media panel needs a water-ripple mouse effect; when replacing a drifting CSS spotlight or flashlight reveal; or when a prompt says to borrow only the shader interaction from a Shaders.com reference while preserving the current brand,",
+      "tags": [
+        "3d",
+        "effects",
+        "layout",
+        "library"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "shaders-cursor-ripples/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 8355,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/shaders-cursor-ripples",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "skeuomorphic-ui",
+      "name": "skeuomorphic-ui",
+      "title": "Skeuomorphic ui",
+      "description": "Create skeuomorphic web UI surfaces with layered gradients, stacked inner and outer shadows, reflective gradient borders, micro texture, and embossed text or icon details. Use when asked for pressed, carved, tactile, realistic, soft-plastic, soft-metal, or premium physical interface styling.",
+      "tags": [
+        "background",
+        "detail",
+        "icons",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "skeuomorphic-ui/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4371,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/skeuomorphic-ui",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "solar-duotone-bold",
+      "name": "solar-duotone-bold",
+      "title": "Solar duotone bold",
+      "description": "Use Iconify Solar Duotone Bold icon style.",
+      "tags": [
+        "icons"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "solar-duotone-bold/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 743,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/solar-duotone-bold",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "split-layout-technical",
+      "name": "split-layout-technical",
+      "title": "Split layout technical",
+      "description": "Create a technical split-screen design system with dual panels, fine frame lines, mono metadata, quiet editorial typography, and premium inset surfaces.",
+      "tags": [
+        "design",
+        "layout",
+        "typography"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "split-layout-technical/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4258,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/split-layout-technical",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "staggered-word-reveal",
+      "name": "staggered-word-reveal",
+      "title": "Staggered word reveal",
+      "description": "Create subtle editorial word-by-word text reveal animations where each word fades and rises into place once it enters the viewport. Use for premium portfolio headlines, hero copy, section intros, and short marketing text that needs a cinematic staggered reveal with IntersectionObserver or in-view detection.",
+      "tags": [
+        "animation",
+        "writing"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "staggered-word-reveal/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4925,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/staggered-word-reveal",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "tailwindcss",
+      "name": "tailwindcss",
+      "title": "Tailwindcss",
+      "description": "Use when designing/implementing UI with Tailwind CSS (layout, typography, responsive, theming, component patterns). Includes quick recipes and conventions for clean, consistent web design.",
+      "tags": [
+        "design",
+        "layout",
+        "typography",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "tailwindcss/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md"
+      ],
+      "bytes": 2888,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/tailwindcss",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "tech-green-dark-mode-modern",
+      "name": "tech-green-dark-mode-modern",
+      "title": "Tech green dark mode modern",
+      "description": "Create a modern dark-mode technical design system with matte-black surfaces, emerald signal accents, mono system labeling, framed dashboard cards, and restrained glow.",
+      "tags": [
+        "design",
+        "detail",
+        "effects"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "tech-green-dark-mode-modern/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4028,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/tech-green-dark-mode-modern",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "technical-wireframe-info-layout",
+      "name": "technical-wireframe-info-layout",
+      "title": "Technical wireframe info layout",
+      "description": "Create a monochrome technical wireframe design system with exploded 3D structure, connector annotations, sparse information labels, and precise dark diagnostic framing.",
+      "tags": [
+        "3d",
+        "design",
+        "layout",
+        "prototype"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "technical-wireframe-info-layout/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 4272,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/technical-wireframe-info-layout",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "thinking-orbs",
+      "name": "thinking-orbs",
+      "title": "Thinking orbs",
+      "description": "Add accessible animated AI loading and agent-status indicators with the React thinking-orbs library. Use when a chat, copilot, voice, search, generation, or tool-running interface needs a semantic working, searching, solving, listening, composing, or shaping state; when replacing a generic spinner with an AI activity orb; or when implementing the library's size, theme, speed, pause, reduced-motion",
+      "tags": [
+        "accessibility",
+        "animation",
+        "library",
+        "react"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "thinking-orbs/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 10768,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/thinking-orbs",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "threejs",
+      "name": "threejs",
+      "title": "Threejs",
+      "description": "Use when building or debugging interactive 3D scenes on the web with Three.js (scene/camera/renderer, lights/materials, GLTF loading, controls, performance). Helpful for designers shipping 3D UI moments.",
+      "tags": [
+        "3d",
+        "design",
+        "ui",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "threejs/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md"
+      ],
+      "bytes": 3525,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/threejs",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "threejs-landscape",
+      "name": "threejs-landscape",
+      "title": "Threejs landscape",
+      "description": "Build a live Three.js landscape that stays quiet behind a subject — a noise heightfield on a polar grid so resolution follows the lens, ground coloured by slope and moisture rather than by texture, instanced GPU grass whose wind costs nothing on the CPU, scattered stones, a gradient sky dome, a star field you can actually see, and a time-of-day system that cross-fades instead of cutting. Use for h",
+      "tags": [
+        "3d",
+        "background",
+        "colour",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "threejs-landscape/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 8746,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/threejs-landscape",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "threejs-towers",
+      "name": "threejs-towers",
+      "title": "Threejs towers",
+      "description": "Generate architecture procedurally in Three.js and film it assembling — a small geometry vocabulary that builds pagodas, castles, domes and spires from parameters instead of mesh files, hip roofs with flying eaves driven by a single profile function, and a clipping-plane build animation where everything below a rising line is finished work and scaffolding stands above it. Use for construction stud",
+      "tags": [
+        "3d",
+        "animation"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "threejs-towers/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 8499,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/threejs-towers",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "threejs-weather",
+      "name": "threejs-weather",
+      "title": "Threejs weather",
+      "description": "Put weather into a Three.js scene that reads as weather — rain anchored inside the frustum, a storm that is the rain leaned on rather than a second system, lightning on its own light with thunder scheduled by distance, snow that blows up into blizzards and keeps settling until the ground goes white, wet ground with puddles and splashes, and looping ambience that has no seam. Use for scene atmosphe",
+      "tags": [
+        "3d",
+        "background"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "threejs-weather/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 8196,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/threejs-weather",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "unicorn-studio",
+      "name": "unicorn-studio",
+      "title": "Unicorn studio",
+      "description": "Use when embedding and customizing Unicorn Studio interactive animations on the web (embed, responsive sizing, performance, layering with UI, fallbacks).",
+      "tags": [
+        "animation",
+        "ui",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "unicorn-studio/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md"
+      ],
+      "bytes": 2879,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/unicorn-studio",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "vantajs",
+      "name": "vantajs",
+      "title": "Vantajs",
+      "description": "Use when adding animated WebGL background effects with Vanta.js (setup, parameters, resizing, performance, integration in React/Next.js).",
+      "tags": [
+        "3d",
+        "animation",
+        "background",
+        "react"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "vantajs/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md"
+      ],
+      "bytes": 2161,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/vantajs",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "webgl-3d-object",
+      "name": "webgl-3d-object",
+      "title": "Webgl 3d object",
+      "description": "Create a real 3D WebGL object with geometric mesh depth, physically based material, directional and ambient lighting, perspective camera, subtle rotation, and floating motion. Use when a page needs a faceted 3D hero object or product-like visual with real lighting instead of CSS transform tricks.",
+      "tags": [
+        "3d",
+        "animation",
+        "design",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "webgl-3d-object/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 6603,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/webgl-3d-object",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "webgl-landing-steering",
+      "name": "webgl-landing-steering",
+      "title": "Webgl landing steering",
+      "description": "Use when creating or refining WebGL-heavy landing pages and you need to steer toward a specific visual outcome (premium, technical, playful, cinematic) while balancing conversion clarity, performance, and implementation complexity.",
+      "tags": [
+        "3d",
+        "design",
+        "ui",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "webgl-landing-steering/",
+      "files": [
+        "NOTICE.md",
+        "REFERENCES.md",
+        "SKILL.md"
+      ],
+      "bytes": 5508,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/webgl-landing-steering",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "webgl-laser",
+      "name": "webgl-laser",
+      "title": "Webgl laser",
+      "description": "Create a fixed full-screen WebGL laser background effect with a thin white-hot vertical core, restrained brand-colored halo, and soft smoky fog around the beam. Use only for laser background effects, not full page layout, copy, generic hero scenes, particles, or unrelated motion systems.",
+      "tags": [
+        "3d",
+        "animation",
+        "background",
+        "colour"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "webgl-laser/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md"
+      ],
+      "bytes": 9398,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/web-design/webgl-laser",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "author-game-levels",
+      "name": "author-game-levels",
+      "title": "Author game levels",
+      "description": "Author or revise readable, flat-world Three.js game levels. Use for movement and camera routes, collision and navigation, encounter zones, landmarks, objectives, pickups, motivated lighting, visibility, deterministic level data, or desktop and mobile playthrough verification.",
+      "tags": [
+        "3d",
+        "game",
+        "mobile"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "author-game-levels/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 4577,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/author-game-levels",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-game-audio-feedback",
+      "name": "build-game-audio-feedback",
+      "title": "Build game audio feedback",
+      "description": "Design or implement responsive audio feedback for a Three.js or web game. Use for action sounds, combat layers, music states, spatial audio, mix priorities, mute controls, accessibility, mobile audio unlock, and audio performance.",
+      "tags": [
+        "3d",
+        "accessibility",
+        "design",
+        "game"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-game-audio-feedback/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 1311,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-game-audio-feedback",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-game-camera-controls",
+      "name": "build-game-camera-controls",
+      "title": "Build game camera controls",
+      "description": "Implement or tune Three.js game cameras. Use for isometric framing, follow behavior, orbit/zoom limits, occlusion, lock-on, camera shake, touch camera controls, and camera regression tests.",
+      "tags": [
+        "3d",
+        "game"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-game-camera-controls/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 1411,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-game-camera-controls",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-game-changelog",
+      "name": "build-game-changelog",
+      "title": "Build game changelog",
+      "description": "Design, implement, backfill, audit, and release in-game changelogs with contiguous versioning, deployment provenance, menu-state navigation, accessible toggle, close, and Escape behavior, and responsive release-ledger UI. Use when Codex needs to add or revise a changelog or version screen in a game, reconstruct release history from deployments and Git, define version-bump rules, keep displayed ver",
+      "tags": [
+        "accessibility",
+        "design",
+        "game",
+        "mobile"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-game-changelog/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/reference-architecture.md"
+      ],
+      "bytes": 17314,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-game-changelog",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-game-inventory",
+      "name": "build-game-inventory",
+      "title": "Build game inventory",
+      "description": "Build or repair game inventory, loot, equipment, tooltips, drag-and-drop, persistence, and progression systems. Use for item schemas, pickup flows, stack rules, equipment slots, atomic swaps, save migration, and no-loss regression testing.",
+      "tags": [
+        "game"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-game-inventory/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 1878,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-game-inventory",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-game-map-editor",
+      "name": "build-game-map-editor",
+      "title": "Build game map editor",
+      "description": "Build, extend, or audit production-linked browser map editors for Three.js and isometric games. Use when Codex needs to create a private director view, derive a versioned editor document from authored placements, add outliner, layer, selection, drag, snap, inspector, or camera controls, expose enemy aggro, leash, or patrol overlays, implement local draft import, export, undo, and reset, secure an ",
+      "tags": [
+        "3d",
+        "game",
+        "mobile",
+        "review"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-game-map-editor/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/vesperfall-implementation.md"
+      ],
+      "bytes": 16128,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-game-map-editor",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-game-monster-system",
+      "name": "build-game-monster-system",
+      "title": "Build game monster system",
+      "description": "Build, integrate, audit, or refactor rigged monsters for Three.js and web action games. Use for monster asset contracts, procedural or imported creature rigs, semantic joints and sockets, hurtboxes and attack volumes, combat animation states, enemy-runtime adapters, LODs, deterministic review fixtures, and validating that every monster follows one shared system.",
+      "tags": [
+        "3d",
+        "animation",
+        "game",
+        "review"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-game-monster-system/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/monster-contract.md"
+      ],
+      "bytes": 12081,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-game-monster-system",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-hybrid-game-assets",
+      "name": "build-hybrid-game-assets",
+      "title": "Build hybrid game assets",
+      "description": "Plan, create, integrate, or audit a hybrid asset pipeline for a Three.js or web game. Use when choosing among imported meshes, procedural 3D geometry, AI-generated reference art, 2D UI media, sprites, VFX, and performance-ready runtime asset delivery.",
+      "tags": [
+        "3d",
+        "game",
+        "review",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-hybrid-game-assets/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 3201,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-hybrid-game-assets",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-isometric-arpg",
+      "name": "build-isometric-arpg",
+      "title": "Build isometric arpg",
+      "description": "Build or extend a playable isometric action RPG in Three.js, React, or similar web technology. Use for game-loop architecture, camera and movement, zones, combat integration, content data, progression, saves, or production-ready vertical slices.",
+      "tags": [
+        "3d",
+        "game",
+        "react",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-isometric-arpg/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 2547,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-isometric-arpg",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-mobile-threejs-games",
+      "name": "build-mobile-threejs-games",
+      "title": "Build mobile threejs games",
+      "description": "Build, tune, or test a Three.js game for mobile web. Use for touch movement, action controls, target selection, touch inventory, safe areas, portrait/landscape layouts, responsive HUD, battery/performance budgets, and real mobile browser QA.",
+      "tags": [
+        "3d",
+        "game",
+        "layout",
+        "mobile"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-mobile-threejs-games/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 1420,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-mobile-threejs-games",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-rigged-game-assets",
+      "name": "build-rigged-game-assets",
+      "title": "Build rigged game assets",
+      "description": "Create, integrate, or audit production-ready rigged 3D characters and monsters with a main model, skeleton, animation library, sockets, collision contracts, separate character equipment, optimized runtime files, catalog media, and an interactive moveset inspector. Use when generating or importing FBX/GLB game actors; defining character-versus-monster asset requirements; separating swords, shields,",
+      "tags": [
+        "3d",
+        "animation",
+        "game",
+        "library"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-rigged-game-assets/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/catalog-and-testing.md",
+        "references/requirements.md",
+        "scripts/validate_asset_manifest.py"
+      ],
+      "bytes": 37402,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-rigged-game-assets",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-threejs-enemy-systems",
+      "name": "build-threejs-enemy-systems",
+      "title": "Build threejs enemy systems",
+      "description": "Build or refactor reusable, data-driven enemy archetype and moveset systems for Three.js action games. Use for enemy content schemas, model and rig conventions, combat move timing and contact contracts, runtime state boundaries, placeholder fallbacks, deterministic fixtures, or production playthrough validation.",
+      "tags": [
+        "3d",
+        "game"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-threejs-enemy-systems/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 4681,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-threejs-enemy-systems",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "build-vesperfall-review-assets",
+      "name": "build-vesperfall-review-assets",
+      "title": "Build vesperfall review assets",
+      "description": "Build truthful Vesperfall asset-library review pairs from transparent PNG references and live Three.js, FBX, or img2threejs models. Use when adding a character, enemy, prop, or equipment asset to the Vesperfall catalog; creating a card-PNG plus inspector-model treatment; exposing an isolated model or moveset route; or standardizing provenance, grounding, tests, and Codex-browser validation for gam",
+      "tags": [
+        "3d",
+        "game",
+        "library",
+        "mobile"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "build-vesperfall-review-assets/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/catalog-contract.md",
+        "scripts/validate_pair.py"
+      ],
+      "bytes": 6987,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/build-vesperfall-review-assets",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "create-game-vfx",
+      "name": "create-game-vfx",
+      "title": "Create game vfx",
+      "description": "Create readable, performance-safe Three.js game visual effects. Use for attacks, impacts, damage feedback, status effects, spell trails, particles, shaders, telegraphs, quality tiers, and reduced-motion alternatives.",
+      "tags": [
+        "3d",
+        "animation",
+        "design",
+        "effects"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "create-game-vfx/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 1275,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/create-game-vfx",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "design-action-combat",
+      "name": "design-action-combat",
+      "title": "Design action combat",
+      "description": "Design, implement, tune, or test readable tactical action combat for web games. Use for attack timing, guard and dodge windows, hit contact, posture, lock-on, weapons, boss phases, combat feedback, and deterministic combat tests.",
+      "tags": [
+        "design",
+        "game",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "design-action-combat/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 2075,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/design-action-combat",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "design-game-encounters",
+      "name": "design-game-encounters",
+      "title": "Design game encounters",
+      "description": "Design, implement, tune, or test Three.js action-game encounters. Use for arena layout, enemy composition, spawn pacing, objectives, boss phases, reward cadence, encounter fixtures, and difficulty validation.",
+      "tags": [
+        "3d",
+        "design",
+        "game",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "design-game-encounters/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 1236,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/design-game-encounters",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "optimize-threejs-games",
+      "name": "optimize-threejs-games",
+      "title": "Optimize threejs games",
+      "description": "Profile, diagnose, and improve Three.js or WebGL game performance without regressing gameplay. Use for frame-time drops, CPU/GPU pressure, draw calls, texture and geometry budgets, animation loops, adaptive quality, mobile performance, and browser performance verification.",
+      "tags": [
+        "3d",
+        "animation",
+        "game",
+        "mobile"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "optimize-threejs-games/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 1892,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/optimize-threejs-games",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "ship-web-games",
+      "name": "ship-web-games",
+      "title": "Ship web games",
+      "description": "Package, deploy, and verify a playable Three.js or web game. Use for release builds, asset delivery, private/public deployment, production smoke tests, browser proof, release notes, rollback readiness, and cleanup of temporary QA resources.",
+      "tags": [
+        "3d",
+        "game",
+        "library",
+        "web"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "ship-web-games/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 1327,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/ship-web-games",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "test-playable-web-games",
+      "name": "test-playable-web-games",
+      "title": "Test playable web games",
+      "description": "Test a playable browser game end to end with deterministic fixtures and real browser evidence. Use for gameplay QA, regression testing, controls, accessibility, responsive/mobile testing, save flows, console checks, performance smoke tests, and release verification.",
+      "tags": [
+        "accessibility",
+        "game",
+        "mobile",
+        "ui"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "test-playable-web-games/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 1921,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/test-playable-web-games",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
+    },
+    {
+      "id": "tune-enemy-ai",
+      "name": "tune-enemy-ai",
+      "title": "Tune enemy ai",
+      "description": "Build, debug, balance, or test combat enemy AI for playable action games. Use for aggro, target selection, navigation, spacing, attack choices, telegraphs, retreats, boss behavior, behavior-state machines, and deterministic AI regression tests.",
+      "tags": [
+        "game",
+        "layout"
+      ],
+      "author": "MengTo",
+      "version": "1.0.0",
+      "updated": "2026-08-28",
+      "path": "tune-enemy-ai/",
+      "files": [
+        "NOTICE.md",
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "bytes": 1895,
+      "source": {
+        "repo": "https://github.com/MengTo/Skills",
+        "path": "agent-skills/game-development/tune-enemy-ai",
+        "commit": "4c716b516b6b0143f3037631306b3730d2832344",
+        "licence": "MIT"
+      }
     }
   ]
 }
