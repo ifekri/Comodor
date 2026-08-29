@@ -1,0 +1,84 @@
+name: Documentation
+description: Report missing, incorrect, outdated, or unclear documentation
+title: "[Docs]: "
+labels:
+  - documentation
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Comodor's documentation.
+
+        Use this form for missing, incorrect, outdated, confusing, or incomplete
+        documentation and examples.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and could not find an existing report for this documentation problem.
+          required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Documentation issue
+      description: What kind of documentation problem did you find?
+      options:
+        - Missing documentation
+        - Incorrect documentation
+        - Outdated documentation
+        - Unclear or confusing documentation
+        - Broken link or reference
+        - Missing or incorrect example
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Location
+      description: >
+        Provide the documentation URL, file path, README section, command,
+        or other location where the problem appears.
+      placeholder: "e.g. README.md > Installation"
+    validations:
+      required: false
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing?
+      description: Clearly explain the documentation problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Suggested improvement
+      description: >
+        Explain what the documentation should say or how it could be clearer.
+    validations:
+      required: false
+
+  - type: upload
+    id: attachments
+    attributes:
+      label: Screenshots or attachments
+      description: Upload anything that helps demonstrate the documentation problem.
+    validations:
+      required: false
+      accept: ".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt"
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add anything else that may help us understand the issue.
+    validations:
+      required: false
