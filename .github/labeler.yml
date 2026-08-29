@@ -1,3 +1,4 @@
+
 Documentation:
   - changed-files:
       - any-glob-to-any-file:
@@ -9,17 +10,22 @@ Testing:
       - any-glob-to-any-file:
           - "tests/**"
 
+Benchmark:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "bench/**"
+
 CI:
   - changed-files:
       - any-glob-to-any-file:
           - ".github/workflows/**"
 
-Area: Core:
+"Area: Core":
   - changed-files:
       - any-glob-to-any-file:
           - "src/**"
 
-Area: Configuration:
+"Area: Configuration":
   - changed-files:
       - any-glob-to-any-file:
           - "**/*.toml"
@@ -53,3 +59,4 @@ Release:
       - any-glob-to-any-file:
           - ".github/workflows/release.yml"
           - "RELEASING.md"
+
