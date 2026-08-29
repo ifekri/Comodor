@@ -2,6 +2,84 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.19.0 — 2026-08-29
+
+### WhatsApp
+
+```bash
+comodor whatsapp connect --number-id … --token … --app-secret …
+comodor whatsapp webhook              # what to paste into Meta
+comodor whatsapp pair                 # add your number
+comodor whatsapp start --background
+```
+
+The same agent, reached from a WhatsApp business number. It runs the same
+session the terminal, the browser and the Telegram bot run, so a task started
+there learns the same lessons and lands in the same history.
+
+**Meta's Cloud API**, which is the official one. The libraries most projects
+reach for drive WhatsApp Web through a headless browser: they need Node, they
+break whenever the web client changes, and they are against the terms the
+account is held to. The failure mode is somebody's number being banned, which
+is not a failure mode a coding tool gets to hand its users.
+
+Two of Meta's decisions shape the whole of it.
+
+**Messages are delivered, not fetched.** There is no long poll, so there is a
+webhook — and a webhook can be reached by anybody who finds it, unlike a poll,
+which only Telegram can answer. So every delivery is checked against an HMAC of
+your app secret before it is parsed: in constant time, and against the raw
+bytes rather than a re-serialised copy, because one different space fails a
+genuine payload. Without a secret nothing verifies at all, and
+`comodor whatsapp status` says so — a check that passes because nothing was
+configured is worse than no check, because it looks like one.
+
+The endpoint answers Meta *before* doing the work. Meta retries anything it
+does not get a 200 for within seconds and an agent turn takes minutes, so a
+webhook that waited would get the same message delivered five times. Message
+ids are remembered, so a redelivery that arrives anyway does not become a
+second turn.
+
+**Buttons are rationed.** Three reply buttons of twenty characters, or one
+button opening a list of ten rows. Those are hard API errors rather than
+things Meta trims, and a rejected message arrives as a bot that answers nothing
+with the reason only in a log. So the menu is a list and it is exactly ten
+rows; paging takes eight because the two arrows count against the ten; and
+every label is clipped where it is built rather than where it is used.
+
+Two things follow from the medium and are said plainly rather than worked
+around. WhatsApp cannot edit a message, so a turn cannot be watched growing —
+it says one line when it starts, speaks occasionally while it works, and sends
+the answer once. And Meta only permits free-form messages within a day of your
+last one, so a task finishing after that cannot be reported until you write
+again.
+
+The allow-list matters more here than on Telegram, not less. A Telegram bot has
+a username a stranger has to find; a WhatsApp business number is a phone number
+and strangers message phone numbers. Everybody not paired gets silence.
+
+### Nothing duplicated to get there
+
+The background process and the systemd, launchd and Task Scheduler units were
+already the same idea for both channels, so they moved into one place
+parameterised by which channel they manage — and the tests that covered them
+now run against both rather than asserting Telegram twice.
+
+What is *not* shared is the part that genuinely differs. Sharing the
+conversation code would have been a lie dressed as an abstraction: one channel
+edits a message to stream a reply and the other cannot edit at all, one draws
+eleven buttons in a grid and the other is allowed three.
+
+### Everywhere it should be
+
+The first-run wizard offers it beside Telegram and hands over to
+`comodor whatsapp connect` rather than pretending a Meta app, a business
+number, an app secret and a public HTTPS address can be produced at a terminal.
+`comodor doctor` says whether it is running and whether webhooks can be
+verified. The browser's Admin panel reports it, without the token, the app
+secret or the numbers. There is `comodor help whatsapp`, a CLI reference, a
+configuration section, and [the page](docs/whatsapp.md).
+
 ## 0.18.0 — 2026-08-29
 
 ### One wordmark
