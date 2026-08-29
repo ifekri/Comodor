@@ -2,6 +2,59 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.19.1 — 2026-08-29
+
+### WhatsApp setup, walked rather than documented
+
+```bash
+comodor whatsapp connect     # guided: links each page, checks each value
+```
+
+Eight things done in a browser and a terminal, in order, where getting one
+wrong fails somewhere else entirely — a phone number pasted where the *number
+id* goes fails at the first send with "Unsupported post request", and an app
+secret that never got saved makes every webhook unverified, which looks exactly
+like a bot nobody is talking to.
+
+`connect` with no arguments now takes them one at a time and checks each as it
+arrives: the token against Meta, the id for being an id rather than a phone
+number, the secret for being a secret. A mistake is a sentence now instead of a
+mystery next week. With arguments it is still the one-line form.
+
+**The tunnel is started for you.** Meta will only deliver to HTTPS and will not
+accept a self-signed certificate, so something has to sit in front of a process
+listening on localhost — the genuinely hard step. `connect` runs `cloudflared`,
+reads the address out of its banner and puts it where the dashboard needs it;
+`comodor whatsapp start --tunnel` brings one up alongside the bot.
+
+**And says which kind it is.** A quick tunnel gets a new hostname on every
+start while Meta goes on delivering to the one it was given: a bot that works
+until the first reboot and then silently receives nothing. That is said where
+it is chosen rather than buried in a page, `start --tunnel` warns when the
+address has moved, and the two commands that make a named tunnel are printed.
+
+**The last step waits instead of assuming.** The endpoint is stood up and
+Meta's verification callback is waited for, so the wizard finishes when Meta
+has actually reached it.
+
+### Honest about what it costs
+
+About twenty minutes the first time against Telegram's one, and mostly in
+Meta's dashboard — said in the wizard, the docs, the CLI reference and
+`comodor help whatsapp`, along with the recommendation that Telegram is less
+work for the same thing unless WhatsApp is specifically what you need.
+
+And what is *not* needed, because everybody assumes otherwise: **no real phone
+number, no payment method, no business verification.** Adding the WhatsApp
+product creates a test number that messages five recipients for free, which is
+four more than one person talking to their own agent requires.
+
+### Fixed
+
+`_wait_for_meta` took its timeout as a parameter default, which binds at import
+— so nothing that changed it afterwards had any effect, and the wait was always
+the full three minutes. It reads the constant at call time now.
+
 ## 0.19.0 — 2026-08-29
 
 ### WhatsApp
