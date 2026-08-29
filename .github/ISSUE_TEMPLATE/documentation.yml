@@ -3,6 +3,7 @@ description: Report missing, incorrect, outdated, or unclear documentation
 title: "[Docs]: "
 labels:
   - Documentation
+  - Triage
 assignees: []
 
 body:
