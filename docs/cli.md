@@ -220,6 +220,29 @@ Full guide: [From your phone](telegram.md).
 
 ---
 
+## `comodor slack` — from a Slack workspace
+
+```bash
+comodor slack manifest            # the app definition to paste into Slack
+comodor slack connect             # the two tokens, checked as you paste them
+comodor slack pair                # a one-time code that adds your account
+comodor slack start               # here, holding this terminal
+comodor slack start -b            # detached
+comodor slack stop
+comodor slack service install     # start it at login
+comodor slack status              # what is set, who may talk, is it running
+comodor slack writes on           # let a Slack turn edit files
+comodor slack forget U01234567
+comodor slack off
+```
+
+About five minutes, and no public address: Socket Mode has the app open a
+websocket outward rather than being posted to.
+
+Full guide: [From Slack](slack.md).
+
+---
+
 ## `comodor whatsapp` — from a WhatsApp number
 
 ```bash

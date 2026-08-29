@@ -9,6 +9,9 @@ it work, answer its questions — without opening a terminal.
 > app, an app secret and a public HTTPS address. **If it does not have to be
 > WhatsApp, use Telegram.**
 >
+> [Slack](slack.md) is the middle road: about five minutes, and no public
+> address either.
+>
 > There is no way around that. WhatsApp has no equivalent of a bot token, and
 > Meta delivers messages to a URL rather than letting anything poll for them.
 > The only genuine one-click version would route every message through

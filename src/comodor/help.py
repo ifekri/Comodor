@@ -55,6 +55,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Reach further", [
         ("comodor web", "use it from a browser, here or on a server"),
         ("comodor telegram start", "drive it from your phone, all buttons"),
+        ("comodor slack start", "the same, in a Slack workspace"),
         ("comodor whatsapp start", "the same, from a WhatsApp number"),
         ("comodor skills browse", "procedures it follows when the work calls for them"),
         ("comodor mcp list", "tools from Model Context Protocol servers"),
@@ -221,6 +222,33 @@ must be configured before it will start.
 
 In Docker:  docker compose up   and open the address it prints.
 Full guide: docs/web.md"""),
+
+    "slack": ("From Slack", """\
+  comodor slack manifest           the app definition to paste into Slack
+  comodor slack connect            the two tokens, checked as you paste them
+  comodor slack pair               a one-time code that adds your account
+  comodor slack start -b           run it detached from this terminal
+  comodor slack status             what is set, who may talk, is it running
+
+About five minutes. Slack takes an app *manifest*, so the app is one paste
+rather than a page of checkboxes - name, scopes, events and Socket Mode all
+switched on already.
+
+Socket Mode is why this needs no public address: the app opens a websocket
+outward rather than being posted to. That is the whole difference between this
+and WhatsApp, which needs a certificate and a tunnel.
+
+Two tokens, and they are not interchangeable:
+
+  xoxb-...   the bot token, from OAuth & Permissions. Does the work.
+  xapp-...   the app-level token, from Basic Information, scope
+             connections:write. Opens the socket, and nothing else.
+
+In a channel it answers when mentioned; in a direct message, always. It answers
+a fixed list of accounts and nobody else - a workspace can have hundreds of
+people in it, and this reads and writes your files.
+
+Full guide: docs/slack.md"""),
 
     "whatsapp": ("From WhatsApp", """\
   comodor whatsapp connect         guided: links each page, checks each value

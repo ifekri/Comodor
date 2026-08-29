@@ -104,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     from .local.commands import register as register_local
     from .mcp.commands import register as register_mcp
     from .skills.commands import register as register_skills
+    from .slack.commands import register as register_slack
     from .telegram.commands import register as register_telegram
     from .web.commands import register as register_web
     from .whatsapp.commands import register as register_whatsapp
@@ -112,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_local(sub)
     register_telegram(sub)
     register_whatsapp(sub)
+    register_slack(sub)
     register_skills(sub)
     register_web(sub)
     register_acp(sub)
@@ -828,6 +830,10 @@ def main(argv: list[str] | None = None) -> int:
         from .whatsapp.commands import run as run_whatsapp
 
         return run_whatsapp(config, args)
+    if args.command == "slack":
+        from .slack.commands import run as run_slack
+
+        return run_slack(config, args)
     if args.command == "skills":
         from .skills.commands import run as run_skills
 

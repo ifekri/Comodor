@@ -65,9 +65,25 @@ def _whatsapp_ready(settings: Any) -> tuple[bool, str]:
     return True, ""
 
 
+def _slack_ready(settings: Any) -> tuple[bool, str]:
+    if not settings.bot_token:
+        return False, ("Not connected. `comodor slack connect` sets up the "
+                       "workspace and the two tokens.")
+    if not settings.app_token:
+        return False, ("No app-level token, so Socket Mode cannot open — "
+                       "`comodor slack connect --app-token xapp-…`")
+    if not settings.allowed:
+        return False, ("Nobody is paired, so it would answer nobody. "
+                       "`comodor slack pair` first.")
+    return True, ""
+
+
 TELEGRAM = Channel(name="telegram", label="Telegram", section="telegram",
                    ready=_telegram_ready)
 WHATSAPP = Channel(name="whatsapp", label="WhatsApp", section="whatsapp",
                    ready=_whatsapp_ready)
 
-CHANNELS = (TELEGRAM, WHATSAPP)
+SLACK = Channel(name="slack", label="Slack", section="slack",
+                ready=_slack_ready)
+
+CHANNELS = (TELEGRAM, WHATSAPP, SLACK)

@@ -114,6 +114,9 @@ class Session:
         self._downloads: dict[str, dict[str, Any]] = {}
         self._turn = threading.Lock()
         self.busy = False
+        #: A pairing in progress, if there is one. Held here so the page can
+        #: poll for the code and for whether it worked.
+        self._pairing: dict[str, Any] = {}
 
         self.bus.subscribe(self._record)
 
@@ -1132,6 +1135,269 @@ class Session:
                 "brain": str(self.config.paths.brain_db),
             },
         }
+
+    # -- reaching it from a phone ------------------------------------------ #
+    #
+    # Telegram, WhatsApp and Slack, set up from the browser rather than only
+    # from a terminal. The terminal commands are still there and still the
+    # reference; this is the same operations through the panel, because
+    # somebody running Comodor on a machine they reach over SSH should not
+    # have to learn a second vocabulary to connect a bot to it.
+    #
+    # Nothing here ever returns a token or an account id. The panel needs to
+    # know whether a channel is connected, not what it was connected with, and
+    # this URL gets shared by accident.
+
+    def channels(self) -> dict[str, Any]:
+        """What each channel is, without any of its secrets."""
+        from ..channels import CHANNELS, daemon, unit
+
+        found = []
+        for channel in CHANNELS:
+            settings = channel.settings(self.config)
+            ready, why = channel.can_run(self.config)
+            here = daemon.state(self.config, channel)
+            found.append({
+                "name": channel.name,
+                "label": channel.label,
+                "connected": bool(getattr(settings, "token", "")
+                                  or getattr(settings, "bot_token", "")),
+                "ready": ready,
+                "blocked": "" if ready else why,
+                "enabled": bool(settings.enabled),
+                "writes": bool(settings.allow_writes),
+                "paired": len(settings.allowed),
+                "running": here.running,
+                "pid": here.pid,
+                "uptime": here.uptime(),
+                "at_login": unit.installed(self.config, channel),
+                "needs": self._channel_needs(channel.name),
+                "pairable": channel.name != "whatsapp",
+            })
+
+        pairing = self._pairing
+        return {
+            "channels": found,
+            "pairing": {
+                "channel": pairing.get("channel", ""),
+                "code": pairing.get("code", ""),
+                "seconds_left": max(
+                    0, int(pairing.get("until", 0) - time.time())),
+                "done": bool(pairing.get("done")),
+            } if pairing else None,
+        }
+
+    @staticmethod
+    def _channel_needs(name: str) -> list[dict[str, str]]:
+        """The fields `connect` wants, so the page can draw the right form.
+
+        Described here rather than written into the page: the three channels
+        need one, two and four values, and one form that guessed would be
+        wrong for two of them.
+        """
+        if name == "telegram":
+            return [{"key": "token", "label": "Bot token",
+                     "hint": "from @BotFather, like 1234567890:AAF..."}]
+        if name == "slack":
+            return [{"key": "bot_token", "label": "Bot token",
+                     "hint": "xoxb-... from OAuth & Permissions"},
+                    {"key": "app_token", "label": "App-level token",
+                     "hint": "xapp-... from Basic Information, "
+                             "scope connections:write"}]
+        if name == "whatsapp":
+            return [{"key": "phone_number_id", "label": "Phone number id",
+                     "hint": "the numeric id beside the number, "
+                             "not the number"},
+                    {"key": "token", "label": "Access token",
+                     "hint": "a System User token does not expire"},
+                    {"key": "app_secret", "label": "App secret",
+                     "hint": "Settings, Basic. Every webhook is signed with it"},
+                    {"key": "public_url", "label": "Webhook address",
+                     "hint": "the public HTTPS address Meta delivers to"}]
+        return []
+
+    def channel(self, action: str, name: str,
+                **fields: Any) -> tuple[bool, str]:
+        """One operation on one channel. Returns (done, what to say)."""
+        from ..channels import CHANNELS, daemon, unit
+
+        channel = next((c for c in CHANNELS if c.name == name), None)
+        if channel is None:
+            return False, f"no channel called {name!r}"
+        settings = channel.settings(self.config)
+
+        if action == "connect":
+            return self._channel_connect(channel, settings, fields)
+        if action == "writes":
+            settings.allow_writes = bool(fields.get("value"))
+            self._save_channels()
+            return True, ("It may edit files and run commands, asking first."
+                          if settings.allow_writes
+                          else "It reads and plans only.")
+        if action == "forget":
+            who = str(fields.get("who") or "")
+            if who == "all":
+                count = len(settings.allowed)
+                settings.allowed = []
+                self._save_channels()
+                return True, f"Removed {count}. It answers nobody now."
+            kept = [x for x in settings.allowed if str(x) != who]
+            if len(kept) == len(settings.allowed):
+                return False, f"{who} was not on the list"
+            settings.allowed = kept
+            self._save_channels()
+            return True, f"Removed {who}."
+        if action == "off":
+            settings.enabled = False
+            self._save_channels()
+            return True, "Switched off. The tokens and pairings are kept."
+        if action == "start":
+            return daemon.start(self.config, channel)
+        if action == "stop":
+            return daemon.stop(self.config, channel)
+        if action == "install":
+            done, why, _ = unit.install(self.config, channel)
+            return done, why
+        if action == "uninstall":
+            return unit.uninstall(self.config, channel)
+        if action == "pair":
+            return self._channel_pair(channel)
+        if action == "unpair":
+            return self._stop_pairing()
+        return False, f"unknown action {action!r}"
+
+    def _channel_connect(self, channel: Any, settings: Any,
+                         fields: dict[str, Any]) -> tuple[bool, str]:
+        """Save credentials, but only after proving them.
+
+        Checked before saving for the same reason the terminal checks them: a
+        wrong token is a sentence now, or a mystery a week from now.
+        """
+        try:
+            if channel.name == "telegram":
+                from ..telegram.api import Bot
+
+                token = str(fields.get("token") or "").strip()
+                if not token:
+                    return False, "no token given"
+                me = Bot(token).me()
+                settings.token = token
+                settings.enabled = True
+                self._save_channels()
+                return True, f"Connected to @{me['username']}."
+
+            if channel.name == "slack":
+                from ..slack.api import Slack
+
+                bot = str(fields.get("bot_token") or "").strip()
+                app = str(fields.get("app_token") or "").strip()
+                if not bot:
+                    return False, "no bot token given"
+                who = Slack(bot, app).me()
+                settings.bot_token = bot
+                if app:
+                    settings.app_token = app
+                settings.team = str(who.get("team") or "")
+                settings.enabled = True
+                self._save_channels()
+                return True, f"Connected to {who.get('team')}."
+
+            if channel.name == "whatsapp":
+                from ..whatsapp.api import Cloud
+                from ..whatsapp.webhook import make_verify_token
+
+                token = str(fields.get("token") or "").strip()
+                number = str(fields.get("phone_number_id") or "").strip()
+                if not (token and number):
+                    return False, "the token and the number id are both needed"
+                me = Cloud(token, number, version=settings.api_version).me()
+                settings.token = token
+                settings.phone_number_id = number
+                if fields.get("app_secret"):
+                    settings.app_secret = str(fields["app_secret"]).strip()
+                if fields.get("public_url"):
+                    settings.public_url = str(fields["public_url"]).strip()
+                if not settings.verify_token:
+                    settings.verify_token = make_verify_token()
+                settings.enabled = True
+                self._save_channels()
+                shown = me.get("display_phone_number") or number
+                return True, f"Connected to {shown}."
+        except Exception as problem:
+            return False, str(problem)
+        return False, f"cannot connect {channel.name}"
+
+    def _channel_pair(self, channel: Any) -> tuple[bool, str]:
+        """Start a pairing and leave it running for the page to poll.
+
+        Pairing needs the bot listening, because the code is sent *to* it. So
+        a real service is started here and stopped the moment somebody is
+        added or the window closes: the panel is not asked to run a daemon,
+        and a pairing that is abandoned does not leave one behind.
+        """
+        if channel.name == "whatsapp":
+            return False, ("WhatsApp pairing needs the webhook running - "
+                           "`comodor whatsapp pair` at the terminal")
+        ready, why = channel.can_run(self.config)
+        if not ready and "paired" not in why:
+            return False, why
+
+        self._stop_pairing()
+        try:
+            if channel.name == "telegram":
+                from ..telegram.bot import Service
+            else:
+                from ..slack.bot import Service
+            service = Service(self.config, announce=lambda line: None)
+            code = service.offer_pairing()
+        except Exception as problem:
+            return False, str(problem)
+
+        settings = channel.settings(self.config)
+        before = {str(x) for x in settings.allowed}
+        self._pairing = {
+            "channel": channel.name, "code": code,
+            "until": time.time() + settings.pair_window,
+            "service": service, "done": False,
+        }
+
+        def watch() -> None:
+            threading.Thread(target=service.run, daemon=True).start()
+            while time.time() < self._pairing.get("until", 0):
+                if {str(x) for x in settings.allowed} != before:
+                    self._pairing["done"] = True
+                    self._save_channels()
+                    break
+                time.sleep(0.4)
+            try:
+                service.stop()
+            except Exception:
+                pass
+
+        threading.Thread(target=watch, daemon=True,
+                         name=f"comodor-pair-{channel.name}").start()
+        return True, code
+
+    def _stop_pairing(self) -> tuple[bool, str]:
+        pairing = self._pairing
+        self._pairing = {}
+        if not pairing:
+            return True, "nothing to stop"
+        service = pairing.get("service")
+        if service is not None:
+            try:
+                service.stop()
+            except Exception:
+                pass
+        return True, "stopped"
+
+    def _save_channels(self) -> None:
+        from .. import config as config_mod
+
+        try:
+            config_mod.save_user_config(self.config)
+        except Exception:
+            pass
 
     def setting(self, key: str, value: Any) -> tuple[bool, str]:
         """Change one thing from the browser.

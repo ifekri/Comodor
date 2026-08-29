@@ -320,6 +320,10 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 self._json(200, server.session.sign_in_state())
                 return
 
+            if route == "/api/channels":
+                self._json(200, server.session.channels())
+                return
+
             if route == "/api/skills":
                 self._json(200, server.session.skill_shelf())
                 return
@@ -480,6 +484,28 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 self._json(200 if done else 400,
                            {"ok": done, "error": why, "folder": where,
                             "state": server.session.state()})
+                return
+
+            if route == "/api/channels":
+                # The same rule as an API key and the working folder: a bot
+                # token is a credential that hands remote control of this
+                # machine to whoever holds it, and pairing adds somebody to
+                # the list of people who may drive it. Neither is a thing a
+                # page loaded from somewhere else gets to do.
+                if not self._from_this_machine():
+                    self._json(403, {"ok": False, "error":
+                                     "Phone channels can only be set up from "
+                                     "the machine Comodor is running on."})
+                    return
+                fields = {key: value for key, value in body.items()
+                          if key not in ("action", "channel")}
+                done, why = server.session.channel(
+                    str(body.get("action") or ""),
+                    str(body.get("channel") or ""), **fields)
+                self._json(200 if done else 400,
+                           {"ok": done, "error": "" if done else why,
+                            "message": why if done else "",
+                            "channels": server.session.channels()})
                 return
 
             if route == "/api/skills":

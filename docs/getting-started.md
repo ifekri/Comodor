@@ -163,9 +163,10 @@ mind later with `comodor setup`, or one setting at a time — see
 ```
  6/6  Run it from your phone?
 ┌─  From your phone  ─────────────────────────────────────────────┐
-│ ›  Not now    you can set either up later                        │
-│    Telegram   a bot from @BotFather — set up here in a minute    │
-│    WhatsApp   a Meta business number — needs an app at Meta      │
+│ ›  Not now    you can set any of them up later                   │
+│    Telegram   one token from @BotFather — about a minute         │
+│    Slack      an app from a manifest, two tokens — five minutes  │
+│    WhatsApp   a Meta app and a public address — twenty minutes   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -173,6 +174,10 @@ mind later with `comodor setup`, or one setting at a time — see
 against Telegram there and then, and shows a code to send the bot so it knows
 which account to answer — a minute, start to finish.
 See [From your phone](telegram.md).
+
+**Slack** takes about five. The app is created from a manifest Comodor prints,
+so it is one paste rather than a page of checkboxes, and Socket Mode means no
+public address at all — see [From Slack](slack.md).
 
 **WhatsApp** does the same thing and takes about twenty minutes: a Meta app, a
 business number, an app secret and a public HTTPS address, none of which can be

@@ -222,6 +222,37 @@ browser or the screen there would be nothing visible while it happened.
 
 Full explanation: [From your phone](telegram.md).
 
+### `slack` — from a Slack workspace
+
+```json
+{
+  "slack": {
+    "enabled": false,
+    "bot_token": "",
+    "app_token": "",
+    "allowed": [],
+    "allow_writes": false,
+    "pair_window": 300,
+    "team": ""
+  }
+}
+```
+
+| | |
+|---|---|
+| `bot_token` | `xoxb-…` from OAuth & Permissions. Does everything the bot does |
+| `app_token` | `xapp-…` from Basic Information, scope `connections:write`. Opens the Socket Mode websocket, and nothing else |
+| `allowed` | The Slack user ids it answers. Not display names: a display name can be changed by the person holding it |
+| `allow_writes` | Whether a Slack turn may edit files and run commands |
+| `pair_window` | Seconds a pairing code stays good |
+| `team` | The workspace it was connected to, remembered so `status` can name it without a round trip |
+
+**A project's `.comodor/config.json` may not set any of this**, for the same
+reason as the others: a repository that could add an account to `allowed` would
+be a backdoor.
+
+Full explanation: [From Slack](slack.md).
+
 ### `whatsapp` — from a WhatsApp number
 
 ```json

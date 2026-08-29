@@ -667,10 +667,13 @@ class SetupWizard:
         # discovering that twenty minutes later, is a question that cost them
         # their evening.
         wanted = self._choose(
-            [("no", "Not now", "you can set either up later"),
+            [("no", "Not now", "you can set any of them up later"),
              ("telegram", "Telegram",
               "recommended — one token from @BotFather, about a minute, "
               "nothing else to set up"),
+             ("slack", "Slack",
+              "about five minutes — create the app from a manifest we give "
+              "you, then two tokens. No public address needed"),
              ("whatsapp", "WhatsApp",
               "about twenty minutes and technical: a Meta app, an app secret "
               "and a public HTTPS address. It does the same thing Telegram "
@@ -678,6 +681,9 @@ class SetupWizard:
             default=1, title="From your phone")
         if wanted == "whatsapp":
             self._point_at_whatsapp(step, total)
+            return
+        if wanted == "slack":
+            self._point_at_slack(step, total)
             return
         if wanted != "telegram":
             self._answered("phone", "not now")
@@ -719,6 +725,31 @@ class SetupWizard:
             "phone",
             f"Telegram @{username}" + (f", {len(answers.telegram_allowed)} paired"
                               if answers.telegram_allowed else ", not paired"))
+
+    def _point_at_slack(self, step: int, total: int) -> None:
+        """Say what Slack needs, and hand over to the command that does it.
+
+        Not asked for here for the same reason as WhatsApp: an app has to be
+        created in a browser. It is far less work than WhatsApp — Slack takes
+        a manifest, so the app is one paste rather than eleven checkboxes, and
+        Socket Mode means no public address at all.
+        """
+        self._rule("Run it from your phone?", step, total)
+        self.console.print(Panel(
+            Text.from_markup(
+                "Slack needs an app in your workspace, which is made in a "
+                "browser — but\nSlack takes a [bold]manifest[/bold], so it is "
+                "one paste rather than a page of\ncheckboxes, and there is no "
+                "public address to arrange.\n\n"
+                "   [bold]comodor slack manifest[/bold]"
+                "[dim]   the app definition to paste[/dim]\n"
+                "   [bold]comodor slack connect[/bold]"
+                "[dim]    the two tokens, checked as you paste them[/dim]\n\n"
+                "[dim]About five minutes.[/dim]"),
+            title=Text(" Slack ", style=self.theme.style("title")),
+            title_align="left", box=self.theme.box,
+            border_style=self.theme.style("border"), padding=(1, 2)))
+        self._answered("phone", "Slack — `comodor slack connect`")
 
     def _point_at_whatsapp(self, step: int, total: int) -> None:
         """Say what WhatsApp needs, and hand over to the command that does it.

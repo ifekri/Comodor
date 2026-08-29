@@ -48,7 +48,7 @@ falling or not. A number, not a claim.
 | **Never surprises you** | Reading is silent. Writing shows a diff. Commands ask. Every change is checkpointed and `/undo` puts it back. [→](docs/safety.md) |
 | **Drives a real browser** | One that runs JavaScript, keeps cookies and can log in — not a page fetcher. [→](docs/browser.md) |
 | **Uses your screen** | Mouse and keyboard in any application, with a halo showing where it is about to click before it clicks. [→](docs/computer.md) |
-| **Runs on your phone** | Telegram or WhatsApp, the whole interface as buttons, running in the background whether or not a terminal is open. Read-only until you say otherwise. [→](docs/telegram.md) · [→](docs/whatsapp.md) |
+| **Runs on your phone** | Telegram, Slack or WhatsApp — the whole interface as buttons, running in the background whether or not a terminal is open. Read-only until you say otherwise. [→](docs/telegram.md) · [→](docs/slack.md) · [→](docs/whatsapp.md) |
 | **Runs a model locally** | Pick one, watch it download, use it with the network unplugged. No key, no account. [→](docs/local-models.md) |
 | **Lives in your editor** | Speaks ACP, so VS Code, JetBrains and Zed drive it from their own panels. [→](docs/acp.md) |
 | **Follows your procedures** | Write a skill once; it loads when the work matches. 147 ready to install. [→](docs/skills.md) |
@@ -147,6 +147,7 @@ Esc        stop it                F3         cycle mode
 | [What it can do](docs/tools.md) | The 13 tools, and when it uses each |
 | [Safety and permissions](docs/safety.md) | What it asks, and what it never does |
 | [From your phone](docs/telegram.md) | The Telegram bot, and who it answers |
+| [From Slack](docs/slack.md) | Socket Mode — five minutes, and no public address |
 | [From WhatsApp](docs/whatsapp.md) | The Cloud API — longer to set up; Telegram does the same thing |
 | [Models on your machine](docs/local-models.md) | Downloading one, running it offline |
 | [Configuration](docs/configuration.md) | Every setting, and what wins |

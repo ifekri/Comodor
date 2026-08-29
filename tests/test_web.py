@@ -1663,3 +1663,110 @@ def test_the_admin_panel_never_carries_the_whatsapp_secrets(served):
     assert "APP-SECRET-VALUE" not in written
     assert "15559998888" not in written
     assert admin["whatsapp"]["paired"] == 1, "the count may be said"
+
+
+# --------------------------------------------------------------------------- #
+# setting up a phone channel from the panel
+#
+# Somebody running Comodor on a machine they reach over SSH should not have to
+# learn a second vocabulary to connect a bot to it. What must not follow from
+# that is a page, loaded from anywhere, being able to hand somebody else the
+# machine.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_panel_reports_every_channel(served):
+    status, found = call(served, "/api/channels", token=served.token)
+
+    assert status == 200
+    names = [c["name"] for c in found["channels"]]
+    assert names == ["telegram", "whatsapp", "slack"]
+    for channel in found["channels"]:
+        assert "connected" in channel and "running" in channel
+        assert channel["needs"], f"{channel['name']} has no form to draw"
+
+
+def test_the_panel_never_carries_a_token_or_an_account(served):
+    """This URL gets shared by accident. The panel needs to know whether a
+    channel is connected, not what it was connected with."""
+    served.config.telegram.token = "111:TELEGRAM-SECRET"
+    served.config.telegram.allowed = [987654321]
+    served.config.slack.bot_token = "xoxb-SLACK-SECRET"
+    served.config.slack.app_token = "xapp-1-SLACK-APP-SECRET"
+    served.config.slack.allowed = ["U12345SECRET"]
+    served.config.whatsapp.token = "EAA-WHATSAPP-SECRET"
+    served.config.whatsapp.app_secret = "WA-APP-SECRET"
+    served.config.whatsapp.allowed = ["15559998888"]
+
+    _, found = call(served, "/api/channels", token=served.token)
+    written = json.dumps(found)
+
+    for secret in ("TELEGRAM-SECRET", "SLACK-SECRET", "SLACK-APP-SECRET",
+                   "WHATSAPP-SECRET", "WA-APP-SECRET",
+                   "987654321", "U12345SECRET", "15559998888"):
+        assert secret not in written, f"{secret} left the machine"
+
+    counts = {c["name"]: c["paired"] for c in found["channels"]}
+    assert counts == {"telegram": 1, "whatsapp": 1, "slack": 1}, \
+        "the count may be said"
+
+
+def test_setting_up_a_channel_is_gated_on_being_at_the_machine():
+    """A bot token hands remote control of this machine to whoever holds it,
+    and pairing adds somebody to the list of people who may drive it. Neither
+    belongs to a page loaded from somewhere else.
+
+    Checked against the source because the handler is nested inside a factory
+    and cannot be reached to patch — and because what matters is that the gate
+    is *there*, which is exactly what a refactor drops.
+    """
+    import inspect
+
+    from comodor.web import server as server_module
+
+    source = inspect.getsource(server_module)
+    where = source.index('if route == "/api/channels"',
+                         source.index("def do_POST"))
+    window = source[where:where + 700]
+
+    assert "_from_this_machine()" in window, (
+        "the channels route is not gated on being at the machine")
+
+
+def test_a_channel_that_cannot_run_says_why(served):
+    served.config.slack.bot_token = "xoxb-something"
+
+    _, found = call(served, "/api/channels", token=served.token)
+    slack = next(c for c in found["channels"] if c["name"] == "slack")
+
+    assert slack["connected"] is True
+    assert slack["ready"] is False
+    assert "app-level token" in slack["blocked"]
+
+
+def test_the_writes_switch_works_from_the_panel(served, monkeypatch):
+    monkeypatch.setattr("comodor.config.save_user_config", lambda cfg: None)
+
+    status, answer = call(served, "/api/channels", method="POST",
+                          body={"action": "writes", "channel": "telegram",
+                                "value": True}, token=served.token)
+
+    assert status == 200 and answer["ok"] is True
+    assert served.config.telegram.allow_writes is True
+
+
+def test_whatsapp_pairing_is_not_offered_where_it_cannot_work(served):
+    """It needs the webhook running, which the panel cannot stand up."""
+    _, found = call(served, "/api/channels", token=served.token)
+    whatsapp = next(c for c in found["channels"] if c["name"] == "whatsapp")
+
+    assert whatsapp["pairable"] is False
+
+
+def test_an_unknown_channel_is_refused(served):
+    status, answer = call(served, "/api/channels", method="POST",
+                          body={"action": "connect", "channel": "carrier-pigeon"},
+                          token=served.token)
+
+    assert status == 400
+    assert "carrier-pigeon" in answer["error"]

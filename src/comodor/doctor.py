@@ -104,7 +104,7 @@ def run_checks(config: Config, online: bool = True) -> Report:
               _check_saved_provider, _check_model, _check_spend_limit,
               _check_brain,
               _check_search_index, _check_skills, _check_leftovers, _check_mcp,
-              _check_telegram, _check_whatsapp]
+              _check_telegram, _check_whatsapp, _check_slack]
     if online:
         checks.append(_check_version)
 
@@ -480,6 +480,10 @@ def _check_whatsapp(config: Config) -> Finding | None:
     return _check_phone(config, "whatsapp")
 
 
+def _check_slack(config: Config) -> Finding | None:
+    return _check_phone(config, "slack")
+
+
 def _check_phone(config: Config, name: str) -> Finding | None:
     """A bot that is set up and answering nobody, or not running at all.
 
@@ -493,7 +497,8 @@ def _check_phone(config: Config, name: str) -> Finding | None:
     if channel is None:
         return None
     settings = channel.settings(config)
-    if not getattr(settings, "token", ""):
+    if not (getattr(settings, "token", "")
+            or getattr(settings, "bot_token", "")):
         return None
 
     ok, why = channel.can_run(config)

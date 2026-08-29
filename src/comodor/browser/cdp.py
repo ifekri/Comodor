@@ -24,16 +24,15 @@ Two things about the protocol that are easy to get wrong:
 
 from __future__ import annotations
 
-import base64
 import json
-import os
-import socket
-import struct
 import threading
 import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable
+
+from ..net.ws import WebSocket as _WebSocket
+from ..net.ws import WebSocketError
 
 DEFAULT_TIMEOUT = 30.0
 #: Long enough for a slow page on a slow machine, short enough that a hung
@@ -50,135 +49,34 @@ class BrowserError(RuntimeError):
 # --------------------------------------------------------------------------- #
 
 
-class WebSocket:
-    """RFC 6455, client side, and only the parts CDP uses.
+class WebSocket(_WebSocket):
+    """The general client, with the browser's vocabulary on its failures.
 
-    No extensions, no compression, no continuation frames on send: CDP sends
-    JSON text and so do we. Fragmented *incoming* frames are reassembled,
-    because a large accessibility tree arrives in pieces.
+    The frame handling moved to `net.ws` when Slack's Socket Mode became a
+    second caller for it. This keeps the errors saying "the browser", because
+    everything above catches `BrowserError` and a person reading a traceback
+    about a websocket is a person who has to work out which websocket.
     """
 
     def __init__(self, url: str, timeout: float = DEFAULT_TIMEOUT) -> None:
-        _, _, rest = url.partition("://")
-        hostport, _, path = rest.partition("/")
-        host, _, port = hostport.partition(":")
         try:
-            self._socket = socket.create_connection((host, int(port or 80)),
-                                                    timeout=timeout)
-        except OSError as error:
-            raise BrowserError(f"could not connect to the browser: {error}") from error
-        self._socket.settimeout(timeout)
-
-        key = base64.b64encode(os.urandom(16)).decode()
-        self._socket.sendall(
-            f"GET /{path} HTTP/1.1\r\n"
-            f"Host: {hostport}\r\n"
-            f"Upgrade: websocket\r\n"
-            f"Connection: Upgrade\r\n"
-            f"Sec-WebSocket-Key: {key}\r\n"
-            f"Sec-WebSocket-Version: 13\r\n\r\n".encode())
-
-        header = b""
-        while b"\r\n\r\n" not in header:
-            chunk = self._socket.recv(1)
-            if not chunk:
-                raise BrowserError("the browser closed the connection during the handshake")
-            header += chunk
-            if len(header) > 8192:
-                raise BrowserError("the browser sent a handshake we cannot read")
-        if b" 101" not in header.split(b"\r\n")[0]:
-            raise BrowserError(f"the browser refused the upgrade: "
-                               f"{header.split(chr(13).encode())[0][:80]!r}")
-        self._buffer = b""
-        self._send_lock = threading.Lock()
-
-    # -- frames ------------------------------------------------------------ #
+            super().__init__(url, timeout=timeout)
+        except WebSocketError as error:
+            raise BrowserError(
+                f"could not connect to the browser: {error}") from error
 
     def send(self, text: str) -> None:
-        payload = text.encode()
-        frame = bytearray([0x81])                 # FIN + text
-        length = len(payload)
-        if length < 126:
-            frame.append(0x80 | length)
-        elif length < 65536:
-            frame.append(0x80 | 126)
-            frame += struct.pack(">H", length)
-        else:
-            frame.append(0x80 | 127)
-            frame += struct.pack(">Q", length)
-        # A client must mask; a server must not. Chrome enforces both.
-        mask = os.urandom(4)
-        frame += mask
-        frame += bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
-        with self._send_lock:
-            try:
-                self._socket.sendall(bytes(frame))
-            except OSError as error:
-                raise BrowserError(f"the browser went away: {error}") from error
+        try:
+            super().send(text)
+        except WebSocketError as error:
+            raise BrowserError(f"the browser went away: {error}") from error
 
     def receive(self) -> str:
-        """One complete message, reassembled if it arrived in fragments."""
-        parts: list[bytes] = []
-        while True:
-            first, second = self._exactly(2)
-            final = bool(first & 0x80)
-            opcode = first & 0x0F
-            length = second & 0x7F
-            if length == 126:
-                length = struct.unpack(">H", self._exactly(2))[0]
-            elif length == 127:
-                length = struct.unpack(">Q", self._exactly(8))[0]
-            mask = self._exactly(4) if second & 0x80 else b""
-            payload = self._exactly(length)
-            if mask:
-                payload = bytes(byte ^ mask[index % 4]
-                                for index, byte in enumerate(payload))
-
-            if opcode == 0x8:                     # close
-                raise BrowserError("the browser closed the connection")
-            if opcode == 0x9:                     # ping -> pong
-                self._pong(payload)
-                continue
-            if opcode == 0xA:                     # pong
-                continue
-
-            parts.append(payload)
-            if final:
-                return b"".join(parts).decode("utf-8", "replace")
-
-    def _pong(self, payload: bytes) -> None:
-        frame = bytearray([0x8A, 0x80 | len(payload)])
-        mask = os.urandom(4)
-        frame += mask
-        frame += bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
-        with self._send_lock:
-            try:
-                self._socket.sendall(bytes(frame))
-            except OSError:
-                pass
-
-    def _exactly(self, count: int) -> bytes:
-        while len(self._buffer) < count:
-            try:
-                chunk = self._socket.recv(65536)
-            except socket.timeout as error:
-                raise BrowserError("the browser stopped answering") from error
-            except OSError as error:
-                raise BrowserError(f"the browser went away: {error}") from error
-            if not chunk:
-                raise BrowserError("the browser closed the connection")
-            self._buffer += chunk
-        taken, self._buffer = self._buffer[:count], self._buffer[count:]
-        return taken
-
-    def settimeout(self, timeout: float) -> None:
-        self._socket.settimeout(timeout)
-
-    def close(self) -> None:
         try:
-            self._socket.close()
-        except OSError:
-            pass
+            return super().receive()
+        except WebSocketError as error:
+            raise BrowserError(
+                f"the browser closed the connection: {error}") from error
 
 
 # --------------------------------------------------------------------------- #

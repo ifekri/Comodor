@@ -461,6 +461,54 @@ def _digits(value: Any) -> str:
 
 
 @dataclass
+class SlackConfig:
+    """Reaching the agent from a Slack workspace.
+
+    Two tokens, because Slack has two kinds. The *bot* token does everything
+    the bot does in the workspace; the *app-level* token does one thing —
+    open the websocket Socket Mode runs on — and that is what keeps this
+    channel as easy to set up as Telegram. Slack's other delivery method posts
+    to a URL and would need a public HTTPS address, a certificate and a tunnel,
+    which is the whole of what makes WhatsApp hard.
+
+    A workspace can have hundreds of people in it, and this is an agent that
+    reads and writes somebody's files. `allowed` holds the Slack user ids it
+    answers; everybody else is ignored.
+    """
+
+    enabled: bool = False
+    #: `xoxb-…`, from OAuth & Permissions after the app is installed.
+    bot_token: str = ""
+    #: `xapp-…`, from Basic Information → App-Level Tokens, scope
+    #: `connections:write`. Only ever used to open the socket.
+    app_token: str = ""
+    #: Slack user ids — `U…` or `W…`. Not display names: a display name can be
+    #: changed by the person holding it, and an id cannot.
+    allowed: list[str] = field(default_factory=list)
+    #: Whether a turn started from Slack may edit files and run commands.
+    allow_writes: bool = False
+    #: Seconds a pairing code stays valid.
+    pair_window: int = 300
+    #: The workspace it was connected to, remembered so `status` can name it
+    #: without a round trip.
+    team: str = ""
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "bot_token": self.bot_token,
+            "app_token": self.app_token,
+            "allowed": list(self.allowed),
+            "allow_writes": self.allow_writes,
+            "pair_window": self.pair_window,
+            "team": self.team,
+        }
+
+    def may(self, user_id: str) -> bool:
+        return bool(user_id) and str(user_id) in {str(x) for x in self.allowed}
+
+
+@dataclass
 class MCPConfig:
     """Servers, and the master switch over all of them."""
 
@@ -507,7 +555,7 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: for its whole existence: `headless: false` in a config file did nothing and
 #: said nothing.
 SECTIONS = ("ui", "agent", "gateway", "learning", "skills", "safety",
-            "browser", "computer", "telegram", "whatsapp")
+            "browser", "computer", "telegram", "whatsapp", "slack")
 
 
 @dataclass
@@ -523,6 +571,7 @@ class Config:
     computer: ComputerConfig = field(default_factory=ComputerConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     whatsapp: WhatsAppConfig = field(default_factory=WhatsAppConfig)
+    slack: SlackConfig = field(default_factory=SlackConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
@@ -816,14 +865,16 @@ PROJECT_SETTABLE: dict[str, frozenset[str] | None] = {
     # uses is useful; a project starting a process is not its decision. The
     # master switch is deliberately absent.
     "mcp": frozenset({"servers"}),
-    # `browser`, `computer`, `telegram` and `whatsapp` are deliberately absent,
+    # `browser`, `computer`, `telegram`, `whatsapp` and `slack` are
+    # deliberately absent,
     # and this is the note for whoever is tempted to add them. A project that
     # could set `browser.executable` names a binary for the agent to launch.
     # One that could set `computer.enabled` asks the machine it was just cloned
     # onto for its mouse and keyboard. One that could set `telegram.allowed` or
-    # `whatsapp.allowed` adds its author to the list of people who may drive
-    # that machine from a phone — and unlike the other two, nothing on screen
-    # would ever show it happening. None of the four belongs to a repository.
+    # `whatsapp.allowed` or `slack.allowed` adds its author to the list of
+    # people who may drive that machine from a phone — and unlike the other
+    # two, nothing on screen would ever show it happening. None of the five
+    # belongs to a repository.
 }
 
 

@@ -2354,42 +2354,8 @@ function drawAdmin(data) {
       body.append(heading, servers);
     }
 
-    /* From a phone. Shown whether or not it is set up: a capability nobody is
-       told about is a capability nobody has, and this panel is where somebody
-       goes to find out what this install can do. */
-    const channels = [
-      ['Telegram', 'telegram', data.telegram],
-      ['WhatsApp', 'whatsapp', data.whatsapp],
-    ].filter((entry) => entry[2]);
-
-    if (channels.length) {
-      const heading = document.createElement('p');
-      heading.className = 'aside';
-      heading.style.margin = '12px 0 6px';
-      heading.textContent = 'From your phone';
-      body.appendChild(heading);
-
-      channels.forEach(([label, name, info]) => {
-        const said = document.createElement('p');
-        said.className = 'aside';
-        let what;
-        if (!info.connected) {
-          what = 'not connected — comodor ' + name + ' connect';
-        } else if (info.verified === false) {
-          what = 'connected, but no app secret, so no webhook can be verified';
-        } else if (!info.paired) {
-          what = 'connected but nobody is paired, so it answers nobody — '
-               + 'comodor ' + name + ' pair';
-        } else {
-          what = info.paired + ' account'
-            + (info.paired === 1 ? '' : 's') + ' paired, '
-            + (info.writes ? 'may edit files' : 'reads and plans only')
-            + (info.enabled ? '' : ', switched off');
-        }
-        said.textContent = label + ' — ' + what;
-        body.appendChild(said);
-      });
-    }
+    /* From a phone, set up rather than only reported. */
+    drawChannels();
   }
 
   /* -- where things are -------------------------------------------------- */
@@ -2416,6 +2382,220 @@ function drawAdmin(data) {
   els.reflexBit.onclick = () => { setRail(true); selectTab($('tab-rules')); };
 
   loadModels(data.model.provider, false);
+}
+
+
+/* Telegram, WhatsApp and Slack, set up from here rather than only from a
+   terminal. Somebody running Comodor on a machine they reach over SSH should
+   not have to learn a second vocabulary to connect a bot to it.
+
+   The server refuses every one of these unless the request came from the
+   machine Comodor is running on: a bot token hands remote control of it to
+   whoever holds the token, and pairing adds somebody to the list of people who
+   may drive it. Neither belongs to a page loaded from somewhere else. */
+async function drawChannels() {
+  const answer = await fetch('/api/channels').then((r) => r.json())
+    .catch(() => null);
+  if (!answer || !answer.channels) return;
+
+  const body = card('From your phone');
+  const note = document.createElement('p');
+  note.className = 'aside';
+  note.textContent = 'The same agent, reached from a chat app. '
+    + 'It reads and plans only until you say otherwise.';
+  body.appendChild(note);
+
+  answer.channels.forEach((channel) => drawChannel(body, channel, answer));
+}
+
+function drawChannel(parent, channel, answer) {
+  const box = document.createElement('div');
+  box.className = 'control';
+  box.style.display = 'block';
+  box.style.marginTop = '14px';
+
+  const head = document.createElement('p');
+  head.style.margin = '0 0 4px';
+  const name = document.createElement('strong');
+  name.textContent = channel.label;
+  const state = document.createElement('span');
+  state.className = 'aside';
+  state.style.marginLeft = '8px';
+  // A leading space as well as the margin: the margin is what a reader sees,
+  // and the space is what anything reading the text out of the page sees.
+  state.textContent = ' ' + channelState(channel);
+  head.append(name, state);
+  box.appendChild(head);
+
+  if (!channel.connected) {
+    drawConnect(box, channel);
+  } else {
+    drawControls(box, channel, answer);
+  }
+  parent.appendChild(box);
+}
+
+function channelState(channel) {
+  if (!channel.connected) return 'not connected';
+  const bits = [];
+  bits.push(channel.paired + (channel.paired === 1 ? ' account' : ' accounts')
+            + ' paired');
+  bits.push(channel.running ? 'running (up ' + channel.uptime + ')'
+                            : 'not running');
+  if (channel.at_login) bits.push('starts at login');
+  bits.push(channel.writes ? 'may edit files' : 'reads only');
+  return bits.join(' · ');
+}
+
+function drawConnect(parent, channel) {
+  const inputs = {};
+  channel.needs.forEach((need) => {
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.placeholder = need.hint || '';
+    inputs[need.key] = input;
+    field(parent, need.label, input, need.hint);
+  });
+
+  const said = document.createElement('p');
+  said.className = 'aside';
+
+  const connect = document.createElement('button');
+  connect.className = 'btn';
+  connect.textContent = 'Connect';
+  connect.onclick = async () => {
+    const payload = { action: 'connect', channel: channel.name };
+    Object.keys(inputs).forEach((key) => {
+      payload[key] = inputs[key].value.trim();
+    });
+    connect.disabled = true;
+    said.textContent = 'checking…';
+    const reply = await post('/api/channels', payload);
+    connect.disabled = false;
+    if (reply && reply.ok) {
+      redrawChannels();
+    } else {
+      said.textContent = (reply && reply.error) || 'that did not work';
+    }
+  };
+
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.append(connect, said);
+  parent.appendChild(row);
+}
+
+function drawControls(parent, channel, answer) {
+  const said = document.createElement('p');
+  said.className = 'aside';
+
+  const act = async (action, extra) => {
+    said.textContent = 'working…';
+    const reply = await post('/api/channels',
+      Object.assign({ action, channel: channel.name }, extra || {}));
+    if (reply && reply.ok) {
+      said.textContent = reply.message || '';
+      redrawChannels();
+    } else {
+      said.textContent = (reply && reply.error) || 'that did not work';
+    }
+  };
+
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  if (channel.pairable) {
+    const pair = document.createElement('button');
+    pair.className = 'btn';
+    pair.textContent = channel.paired ? 'Pair another' : 'Pair an account';
+    pair.onclick = () => act('pair');
+    row.appendChild(pair);
+  }
+
+  const run = document.createElement('button');
+  run.className = 'btn';
+  run.textContent = channel.running ? 'Stop' : 'Start in the background';
+  run.disabled = !channel.ready && !channel.running;
+  run.onclick = () => act(channel.running ? 'stop' : 'start');
+  row.appendChild(run);
+
+  const login = document.createElement('button');
+  login.className = 'btn';
+  login.textContent = channel.at_login ? 'Do not start at login'
+                                       : 'Start at login';
+  login.onclick = () => act(channel.at_login ? 'uninstall' : 'install');
+  row.appendChild(login);
+
+  const writes = document.createElement('button');
+  writes.className = 'btn';
+  writes.textContent = channel.writes ? 'Make it read-only'
+                                      : 'Let it edit files';
+  writes.onclick = () => act('writes', { value: !channel.writes });
+  row.appendChild(writes);
+
+  if (channel.paired) {
+    const forget = document.createElement('button');
+    forget.className = 'btn';
+    forget.textContent = 'Forget everybody';
+    forget.onclick = () => act('forget', { who: 'all' });
+    row.appendChild(forget);
+  }
+
+  parent.append(row, said);
+
+  if (!channel.ready && channel.blocked) {
+    const why = document.createElement('p');
+    why.className = 'aside';
+    why.textContent = channel.blocked;
+    parent.appendChild(why);
+  }
+
+  const pairing = answer.pairing;
+  if (pairing && pairing.channel === channel.name && pairing.code) {
+    parent.appendChild(pairingBox(channel, pairing));
+  }
+}
+
+function pairingBox(channel, pairing) {
+  const box = document.createElement('div');
+  box.className = 'control';
+  box.style.display = 'block';
+  box.style.marginTop = '8px';
+
+  if (pairing.done) {
+    const done = document.createElement('p');
+    done.textContent = 'Paired.';
+    box.appendChild(done);
+    return box;
+  }
+
+  const what = document.createElement('p');
+  what.style.margin = '0 0 4px';
+  what.textContent = channel.name === 'telegram'
+    ? 'Message the bot on Telegram with this code:'
+    : 'Send Comodor a direct message in Slack with this code:';
+
+  const code = document.createElement('strong');
+  code.style.fontSize = '1.4em';
+  code.style.letterSpacing = '0.12em';
+  code.textContent = pairing.code;
+
+  const clock = document.createElement('p');
+  clock.className = 'aside';
+  clock.textContent = pairing.seconds_left + 's left. '
+    + 'The code works once.';
+
+  box.append(what, code, clock);
+  return box;
+}
+
+/* The panel is redrawn whole rather than patched: every one of these actions
+   changes two or three of the things on it, and a half-updated panel is how
+   somebody ends up believing a bot is running when it is not. */
+function redrawChannels() {
+  setTimeout(refreshAdmin, 150);
 }
 
 /* -- the folder the agent works in ----------------------------------------- */
