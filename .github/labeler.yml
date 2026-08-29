@@ -63,3 +63,4 @@ Release:
       - any-glob-to-any-file:
           - ".github/workflows/release.yml"
           - "RELEASING.md"
+
