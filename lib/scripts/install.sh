@@ -69,24 +69,53 @@ term_width() {
     printf '%s' "$_w"
 }
 
-# The same wordmark the program draws, and the same rule about when to drop
-# it: 47 columns, below which ASCII art reflowed by a terminal is not a
-# smaller logo, it is rubble.
+# The wordmark the program draws and the README shows. One face, everywhere:
+# this used to be a slanted one made of slashes and underscores, so an install
+# put one logo on screen and the program that install had just placed put a
+# different one on the next.
+#
+# Twenty-eight columns, and below thirty-two it becomes a line rather than
+# rubble — art reflowed by a terminal is not a smaller logo.
 banner() {
-    printf '\n'
-    if [ "$(term_width)" -lt 51 ]; then
-        printf '%s%sComodor%s %s— it learns the way you correct it%s\n\n' \
-            "$BOLD" "$AMBER" "$RESET" "$DIM" "$RESET"
+    printf '
+'
+    if [ "$(term_width)" -lt 32 ]; then
+        printf '%s%sComodor%s %s— it learns the way you correct it%s
+
+'             "$BOLD" "$AMBER" "$RESET" "$DIM" "$RESET"
         return
     fi
     printf '%s%s' "$AMBER" "$BOLD"
-    printf '%s\n' '   ______                          __          '
-    printf '%s\n' '  / ____/___  ____ ___  ____  ____/ /___  _____'
-    printf '%s\n' ' / /   / __ \/ __ `__ \/ __ \/ __  / __ \/ ___/'
-    printf '%s\n' '/ /___/ /_/ / / / / / / /_/ / /_/ / /_/ / /    '
-    printf '%s\n' '\____/\____/_/ /_/ /_/\____/\__,_/\____/_/     '
+    printf '  %s
+' '░█▀▀░█▀█░█▄█░█▀█░█▀▄░█▀█░█▀▄'
+    printf '  %s
+' '░█░░░█░█░█░█░█░█░█░█░█░█░█▀▄'
+    printf '  %s
+' '░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀░░▀▀▀░▀░▀'
     printf '%s' "$RESET"
-    printf '%s  it learns the way you correct it%s\n\n' "$DIM" "$RESET"
+    printf '%s  it learns the way you correct it%s
+
+' "$DIM" "$RESET"
+}
+
+# One screen per phase: the wordmark at the top, and under it only the step
+# being worked on. Both phases used to print the banner without clearing, so
+# an install ended with two wordmarks on screen a page apart and the question
+# scrolled away from the logo that belonged to it.
+#
+# Where the screen cannot be cleared - a pipe, a log, a CI job - it prints
+# once and lets the phases follow each other, which is the right shape for
+# something being read afterwards rather than watched.
+SCREENS=0
+screen() {
+    if [ -t 1 ] && [ -z "${COMODOR_NO_CLEAR:-}" ]; then
+        printf '[H[2J[3J'
+        banner
+    elif [ "$SCREENS" -eq 0 ]; then
+        banner
+    fi
+    SCREENS=$(( SCREENS + 1 ))
+    heading "$1"
 }
 
 # A rule with a name on it, so the phases of an install read as phases rather
@@ -535,8 +564,7 @@ choose_tool() {
 }
 
 main() {
-    banner
-    heading "Checking this machine"
+    screen "Checking this machine"
 
     detect_platform
     note "$PLATFORM $ARCH"
@@ -684,8 +712,7 @@ offer_setup() {
         return 0
     fi
 
-    banner
-    heading "One thing left"
+    screen "One thing left"
     say "  Comodor needs to know which provider and model to use."
     say "  ${DIM}It is a handful of questions and it is saved, so it is asked once.${RESET}"
     printf '\n'

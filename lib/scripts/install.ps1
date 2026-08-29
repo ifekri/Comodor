@@ -37,27 +37,48 @@ function Get-Width {
     try { return $Host.UI.RawUI.WindowSize.Width } catch { return 80 }
 }
 
-# The same wordmark the program draws, and the same rule about when to
-# drop it: 47 columns, below which ASCII art reflowed by a terminal is not
-# a smaller logo, it is rubble.
+# The wordmark the program draws and the README shows. One face everywhere:
+# this used to be a slanted one made of slashes and underscores, so an install
+# put one logo on screen and the program it had just installed put a different
+# one on the next.
+#
+# Built from code points rather than literal glyphs, because this file is
+# fetched over HTTP and run through `iex` - a mis-guessed encoding on the way
+# turns literal block characters into a row of question marks.
 function Show-Banner {
     Write-Host ''
-    if ((Get-Width) -lt 51) {
+    if ((Get-Width) -lt 32) {
         Write-Host 'Comodor' -ForegroundColor DarkYellow -NoNewline
         Write-Host ' - it learns the way you correct it' -ForegroundColor DarkGray
         Write-Host ''
         return
     }
+    $l = [char]0x2591; $b = [char]0x2588; $u = [char]0x2580; $d = [char]0x2584
     $mark = @(
-        '   ______                          __          ',
-        '  / ____/___  ____ ___  ____  ____/ /___  _____',
-        ' / /   / __ \/ __ `__ \/ __ \/ __  / __ \/ ___/',
-        '/ /___/ /_/ / / / / / / /_/ / /_/ / /_/ / /    ',
-        '\____/\____/_/ /_/ /_/\____/\__,_/\____/_/     '
+        "$l$b$u$u$l$b$u$b$l$b$d$b$l$b$u$b$l$b$u$d$l$b$u$b$l$b$u$d",
+        "$l$b$l$l$l$b$l$b$l$b$l$b$l$b$l$b$l$b$l$b$l$b$l$b$l$b$u$d",
+        "$l$u$u$u$l$u$u$u$l$u$l$u$l$u$u$u$l$u$u$l$l$u$u$u$l$u$l$u"
     )
-    foreach ($line in $mark) { Write-Host $line -ForegroundColor DarkYellow }
+    foreach ($line in $mark) { Write-Host "  $line" -ForegroundColor DarkYellow }
     Write-Host '  it learns the way you correct it' -ForegroundColor DarkGray
     Write-Host ''
+}
+
+# One screen per phase: the wordmark at the top, and under it only the step
+# being worked on. Both phases used to draw the banner without clearing, so an
+# install finished with two wordmarks on screen a page apart, and the last
+# question had scrolled away from the logo belonging to it.
+$script:Screens = 0
+function Show-Screen {
+    param([string]$Title)
+    if (-not [Console]::IsOutputRedirected -and -not $env:COMODOR_NO_CLEAR) {
+        try { Clear-Host } catch { }
+        Show-Banner
+    } elseif ($script:Screens -eq 0) {
+        Show-Banner
+    }
+    $script:Screens++
+    Show-Heading $Title
 }
 
 # A rule with a name on it, so the phases of an install read as phases
@@ -241,8 +262,7 @@ function Install-Uv {
 
 # ------------------------------------------------------------------- run --
 
-Show-Banner
-Show-Heading 'Checking this machine'
+Show-Screen 'Checking this machine'
 
 $edition = if ($PSVersionTable.PSEdition) { $PSVersionTable.PSEdition } else { 'Desktop' }
 $arch = if ([System.Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
@@ -504,8 +524,7 @@ if (-not (Test-CanAsk)) {
     return
 }
 
-Show-Banner
-Show-Heading 'One thing left'
+Show-Screen 'One thing left'
 Write-Host '  Comodor needs to know which provider and model to use.'
 Write-Host '  It is a handful of questions and it is saved, so it is asked once.' -ForegroundColor DarkGray
 Write-Host ''
