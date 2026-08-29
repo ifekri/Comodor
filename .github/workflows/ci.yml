@@ -25,7 +25,10 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
-      - run: ruff check src tests
+      # `bench` too: it is part of the repository and the task
+      # repositories inside it are excluded in pyproject, because
+      # they are fixtures and tidying them changes what is measured.
+      - run: ruff check src tests bench
 
   test:
     name: py${{ matrix.python }} on ${{ matrix.os }}
