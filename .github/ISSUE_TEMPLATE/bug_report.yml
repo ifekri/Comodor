@@ -3,6 +3,7 @@ description: Report a reproducible problem or unexpected behavior in Comodor
 title: "[Bug]: "
 labels:
   - Bug
+  - Triage
 assignees: []
 
 body:
