@@ -1,12 +1,84 @@
 name: Bug report
-description: Something does not work the way it should
-labels: [bug]
+description: Report a reproducible problem or unexpected behavior in Comodor
+title: "[Bug]: "
+labels:
+  - bug
+assignees: []
+
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem with Comodor.
+
+        Before submitting, please search the existing issues to make sure the
+        problem has not already been reported.
+
+        Please provide enough information for us to reproduce and investigate
+        the issue without having to guess about your environment.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and could not find an existing report for this problem.
+          required: true
+
   - type: textarea
     id: what
     attributes:
-      label: What happened
-      description: What you did, what you expected, and what you got instead.
+      label: What happened?
+      description: Describe what you did, what you expected, and what happened instead.
+      placeholder: |
+        I tried to...
+
+        I expected...
+
+        Instead...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest set of steps that reliably reproduces the problem.
+      placeholder: |
+        1. Start Comodor
+        2. Run...
+        3. Enter...
+        4. Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened instead?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Comodor version
+      description: The version, release, or commit you are using.
+      placeholder: "e.g. v0.4.1 or commit a1b2c3d"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      description: Where are you running Comodor?
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
     validations:
       required: true
 
@@ -28,9 +100,9 @@ body:
     attributes:
       label: Terminal
       description: >
-        Which terminal, and roughly what size. Layout bugs are almost always
-        specific to both.
-      placeholder: Windows Terminal, about 90 columns
+        Which terminal are you using, and roughly what size is it?
+        This is especially important for layout or rendering issues.
+      placeholder: "e.g. Windows Terminal, about 90 columns"
     validations:
       required: false
 
@@ -38,6 +110,37 @@ body:
     id: provider
     attributes:
       label: Provider and model
-      placeholder: openrouter / anthropic/claude-sonnet-4.5
+      description: If the issue involves a model provider, specify the provider and model.
+      placeholder: "e.g. openrouter / anthropic/claude-sonnet-4.5"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error output
+      description: >
+        Paste any additional error messages, logs, tracebacks, or terminal output
+        that may help reproduce or diagnose the problem.
+      render: text
+    validations:
+      required: false
+
+  - type: upload
+    id: attachments
+    attributes:
+      label: Screenshots or attachments
+      description: >
+        Upload screenshots, recordings, log files, or other files that may help
+        demonstrate the problem.
+    validations:
+      required: false
+      accept: ".png,.jpg,.jpeg,.gif,.webp,.log,.txt,.json,.zip"
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add anything else that may be useful when investigating the issue.
     validations:
       required: false
