@@ -3,6 +3,7 @@ description: Suggest a new capability or improvement for Comodor
 title: "[Feature]: "
 labels:
   - Enhancement
+  - Triage
 assignees: []
 
 body:
