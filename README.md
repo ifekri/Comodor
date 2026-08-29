@@ -53,7 +53,7 @@ falling or not. A number, not a claim.
 | **Never surprises you** | Reading is silent. Writing shows a diff. Commands ask. Every change is checkpointed and `/undo` puts it back. [→](docs/safety.md) |
 | **Drives a real browser** | One that runs JavaScript, keeps cookies and can log in — not a page fetcher. [→](docs/browser.md) |
 | **Uses your screen** | Mouse and keyboard in any application, with a halo showing where it is about to click before it clicks. [→](docs/computer.md) |
-| **Runs on your phone** | A Telegram bot with the whole interface as buttons. Read-only until you say otherwise. [→](docs/telegram.md) |
+| **Runs on your phone** | A Telegram bot with the whole interface as buttons, running in the background whether or not a terminal is open. Read-only until you say otherwise. [→](docs/telegram.md) |
 | **Runs a model locally** | Pick one, watch it download, use it with the network unplugged. No key, no account. [→](docs/local-models.md) |
 | **Lives in your editor** | Speaks ACP, so VS Code, JetBrains and Zed drive it from their own panels. [→](docs/acp.md) |
 | **Follows your procedures** | Write a skill once; it loads when the work matches. 147 ready to install. [→](docs/skills.md) |

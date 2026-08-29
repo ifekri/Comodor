@@ -44,22 +44,19 @@ def plain(renderable, width: int = 90) -> str:
 def test_the_letters_line_up():
     """Ragged lines are the one way ASCII art fails that nobody notices until
     it is on somebody else's screen."""
-    for art in (banner.WORDMARK_WIDE, banner.WORDMARK_COMPACT):
-        widths = {len(line) for line in art}
-        assert len(widths) == 1, f"lines are not the same width: {sorted(widths)}"
-        assert not any("\t" in line for line in art)
+    widths = {len(line) for line in banner.WORDMARK}
+    assert len(widths) == 1, f"lines are not the same width: {sorted(widths)}"
+    assert not any("\t" in line for line in banner.WORDMARK)
 
-    assert banner.WIDTH == len(banner.WORDMARK_COMPACT[0])
-    assert banner.WIDE_WIDTH == len(banner.WORDMARK_WIDE[0])
-    assert banner.WIDE_WIDTH > banner.WIDTH
+    assert banner.WIDTH == len(banner.WORDMARK[0])
 
     # Solid cells, not slashes and underscores. Every monospace font renders
     # those at a slightly different angle and none of them render as a logo —
     # it read as source code somebody had left on the screen. A filled cell is
     # the one glyph a terminal cannot get wrong, which is also why this is the
     # one piece of the interface that is deliberately not ASCII.
-    assert "█" in "".join(banner.WORDMARK_WIDE)
-    assert "/" not in "".join(banner.WORDMARK_WIDE)
+    assert "█" in "".join(banner.WORDMARK)
+    assert "/" not in "".join(banner.WORDMARK)
 
 
 def test_it_is_drawn_whole(theme):
@@ -69,26 +66,39 @@ def test_it_is_drawn_whole(theme):
         assert line.rstrip() in printed
 
 
-def test_a_narrower_terminal_gets_the_compact_one_rather_than_the_wide_one():
-    """`wordmark` used to take the compact form at every width, so the wizard
-    drew a small logo on a wide screen while the interface drew a large one."""
+def test_one_wordmark_at_every_width_it_fits():
+    """There were two weights, and the shell installer drew a third face of its
+    own — so an install put two different logos on screen before the program
+    had started, and neither was the one in the README."""
     theme = console_module.prepare_theme("ember", False, no_color=False)
-    wide = plain(banner.wordmark(theme, width=120), width=120)
-    compact = plain(banner.wordmark(theme, width=60), width=60)
 
-    assert banner.WORDMARK_WIDE[0].rstrip() in wide
-    assert banner.WORDMARK_COMPACT[0].rstrip() in compact
-    assert banner.WORDMARK_WIDE[0].rstrip() not in compact
+    for width in (120, 90, 60, 40, 32):
+        drawn = plain(banner.wordmark(theme, width=width), width=width)
+        assert banner.WORDMARK[0] in drawn, f"missing at {width} columns"
 
 
-def test_the_logo_is_ascii_when_ascii_was_asked_for():
-    """It drew block characters regardless, on the one terminal that cannot."""
+def test_below_its_width_it_becomes_one_line_rather_than_rubble():
+    theme = console_module.prepare_theme("ember", False, no_color=False)
+    narrow = plain(banner.wordmark(theme, width=28), width=28)
+
+    assert "Comodor" in narrow
+    assert banner.WORDMARK[0] not in narrow
+    assert len(narrow.strip().splitlines()) == 1
+
+
+def test_ascii_mode_gets_the_one_line_form_not_a_transliteration():
+    """The letters are half-blocks, and there is no honest ASCII for those.
+    Substituting `^` and `_` produced a smear that read as neither a word nor a
+    logo, so that mode gets the line instead — legible on any terminal."""
     plain_theme = console_module.prepare_theme("ember", True, no_color=True)
 
-    for width in (120, 60):
+    for width in (120, 60, 32):
         printed = plain(banner.wordmark(plain_theme, width=width), width=width)
         printed.encode("ascii")
-        assert "#" in printed
+        assert "Comodor" in printed
+        assert len(printed.strip().splitlines()) == 1
+
+    assert banner.wordmark_for(120, ascii_only=True) is None
 
 
 def test_it_shrinks_rather_than_wraps(theme):

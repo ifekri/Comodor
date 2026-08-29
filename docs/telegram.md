@@ -112,34 +112,56 @@ nobody will scroll them.
 
 ## Running it
 
-`comodor telegram start` holds the terminal. To keep it up:
-
-**systemd** — `~/.config/systemd/user/comodor-telegram.service`
-
-```ini
-[Unit]
-Description=Comodor on Telegram
-After=network-online.target
-
-[Service]
-ExecStart=%h/.local/bin/comodor telegram start
-WorkingDirectory=%h/projects/the-one-you-want
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=default.target
-```
+Three ways, in order of how long you want it to last.
 
 ```bash
-systemctl --user enable --now comodor-telegram
+comodor telegram start                # here, holding this terminal
+comodor telegram start --background   # detached; survives closing the terminal
+comodor telegram service install      # starts at every login, survives a reboot
 ```
 
-**Windows** — Task Scheduler, *at log on*, running
-`comodor telegram start` with **Start in** set to the project folder.
+**In the foreground** it holds the terminal and shows what it does. That is the
+one to use while setting it up, and the one to come back to when something is
+not working.
 
-The folder matters: the agent only reads and writes inside the directory it was
-started in, and that is the one the bot will work in.
+**In the background** it is the same process, detached from the terminal that
+started it, writing to a log instead of a screen. Closing the terminal, logging
+out, ending the session — none of them take it with them.
+
+```bash
+comodor telegram stop        # end it
+comodor telegram status      # is it running, since when, and as which pid
+```
+
+The log is `telegram.log` beside your config, and it is appended to rather than
+replaced — the reason a bot stopped last night is in the lines a restart would
+otherwise erase.
+
+**At login** is the operating system's job, not ours: nothing a program starts
+for itself survives the machine restarting.
+
+```bash
+comodor telegram service show        # read the unit before trusting it
+comodor telegram service install
+comodor telegram service uninstall
+```
+
+| | |
+|---|---|
+| Linux | a systemd **user** unit in `~/.config/systemd/user` |
+| macOS | a LaunchAgent in `~/Library/LaunchAgents` |
+| Windows | a Task Scheduler task that runs at logon |
+
+A user service on all three, never a system one. A system service runs as root
+or as SYSTEM, and this is an agent that reads and writes your files with your
+credentials — more authority than the person who owns those files buys nothing
+and costs everything if it is ever wrong.
+
+`service show` prints the unit before `service install` writes it. Nobody
+should be asked to trust a daemon definition they have not been shown.
+
+The folder matters in all three: the agent only reads and writes inside the
+directory it was started in, and that is the one the bot will work in.
 
 ## How it is built
 

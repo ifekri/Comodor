@@ -29,7 +29,18 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     connect = actions.add_parser("connect", help="save a bot token")
     connect.add_argument("token", nargs="?", help="from BotFather")
 
-    actions.add_parser("start", help="run the bot until stopped")
+    start = actions.add_parser("start", help="run the bot")
+    start.add_argument(
+        "--background", "-b", action="store_true",
+        help="detach from this terminal, so it keeps answering after you "
+             "close it")
+
+    actions.add_parser("stop", help="stop a bot running in the background")
+
+    unit = actions.add_parser(
+        "service", help="start it at login, so a reboot brings it back")
+    unit.add_argument("what", nargs="?", default="status",
+                      choices=["status", "install", "uninstall", "show"])
     actions.add_parser("status", help="what is configured, and who may talk")
     actions.add_parser("pair", help="add an account, with a one-time code")
 
@@ -67,7 +78,13 @@ def run(config: Config, args: argparse.Namespace) -> int:
     if action == "off":
         return _off(console, config)
     if action == "start":
+        if getattr(args, "background", False):
+            return _background(console, config)
         return _start(console, config)
+    if action == "stop":
+        return _stop(console, config)
+    if action == "service":
+        return _service(console, config, getattr(args, "what", "status"))
 
     console.print("Try `comodor telegram status`.")
     return 1
@@ -126,6 +143,9 @@ def _connect(console, config: Config, args: argparse.Namespace) -> int:
 
 
 def _status(console, config: Config) -> int:
+    from . import service
+    from . import unit as unit_mod
+
     telegram = config.telegram
     console.print()
 
@@ -144,8 +164,14 @@ def _status(console, config: Config) -> int:
     table = Table(box=None, pad_edge=False, show_header=False)
     table.add_column(style="dim")
     table.add_column()
+    here = service.state(config)
     table.add_row("Bot", who)
     table.add_row("Enabled", "yes" if telegram.enabled else "no")
+    table.add_row("At login",
+                  "yes" if unit_mod.installed(config) else "no")
+    table.add_row("Background",
+                  f"[good]running[/good]  pid {here.pid}, up {here.uptime()}"
+                  if here.running else "not running")
     table.add_row("Paired accounts",
                   ", ".join(str(x) for x in telegram.allowed) or "none")
     table.add_row("May edit and run",
@@ -163,6 +189,90 @@ def _status(console, config: Config) -> int:
             style="yellow"))
     console.print()
     return 0
+
+
+def _background(console, config: Config) -> int:
+    """Start it detached, so closing this terminal does not end it."""
+    from . import service
+
+    ok, why = service.start(config)
+    console.print()
+    if not ok:
+        console.print(f"  [red]{why}[/red]\n")
+        return 1
+    console.print(f"  [green]{why}[/green]")
+    console.print(f"  [dim]log:  {service.log_file(config)}[/dim]")
+    console.print("  [dim]stop: [/dim][bold]comodor telegram stop[/bold]")
+    console.print("  [dim]to bring it back after a reboot: "
+                  "[/dim][bold]comodor telegram service install[/bold]\n")
+    return 0
+
+
+def _stop(console, config: Config) -> int:
+    from . import service
+
+    ok, why = service.stop(config)
+    console.print()
+    console.print(f"  {why}\n" if ok else f"  [dim]{why}[/dim]\n")
+    return 0 if ok else 1
+
+
+def _service(console, config: Config, what: str) -> int:
+    """Hand the bot to systemd, launchd or the Task Scheduler."""
+    from . import unit as unit_mod
+
+    plan = unit_mod.plan(config)
+    console.print()
+
+    if not plan.supported:
+        console.print(f"  [red]{plan.why}[/red]")
+        console.print("  [dim]`comodor telegram start --background` still "
+                      "works; it just does not survive a reboot.[/dim]")
+        console.print()
+        return 1
+
+    if what == "show":
+        console.print(Panel(
+            Text(plan.body.rstrip()),
+            title=Text(f" {plan.path} "), title_align="left",
+            border_style="accent", padding=(1, 2)))
+        console.print()
+        return 0
+
+    if what == "status":
+        there = unit_mod.installed(config)
+        console.print(f"  {plan.kind}: "
+                      + ("[green]installed[/green]" if there
+                         else "not installed"))
+        console.print(f"  [dim]{plan.path}[/dim]")
+        console.print()
+        console.print("  [bold]comodor telegram service show[/bold]"
+                      "[dim]     read the unit before trusting it[/dim]")
+        console.print("  [bold]comodor telegram service install[/bold]"
+                      "[dim]  start it at every login[/dim]")
+        console.print()
+        return 0
+
+    if what == "uninstall":
+        ok, why = unit_mod.uninstall(config)
+        console.print(f"  {why}" if ok else f"  [red]{why}[/red]")
+        console.print()
+        return 0 if ok else 1
+
+    # Install. The unit is shown first: nobody should be asked to trust a
+    # daemon definition they have not been shown.
+    console.print(Panel(
+        Text(plan.body.rstrip()),
+        title=Text(f" {plan.path} "), title_align="left",
+        border_style="accent", padding=(1, 2)))
+    ok, why, _ = unit_mod.install(config)
+    console.print()
+    console.print(f"  [green]{why}[/green]" if ok else f"  [red]{why}[/red]")
+    if ok:
+        console.print("  [dim]stop it starting: [/dim]"
+                      "[bold]comodor telegram service uninstall[/bold]")
+    console.print()
+    return 0 if ok else 1
 
 
 def _pair(console, config: Config) -> int:

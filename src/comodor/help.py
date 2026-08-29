@@ -224,11 +224,18 @@ Full guide: docs/web.md"""),
     "telegram": ("From your phone", """\
   comodor telegram connect TOKEN   a bot from @BotFather
   comodor telegram pair            a one-time code that adds your account
-  comodor telegram start           run it until stopped
-  comodor telegram status          what is set, and who may talk to it
+  comodor telegram start           here, holding this terminal
+  comodor telegram start -b        detached - keeps answering after you close it
+  comodor telegram stop            end a background one
+  comodor telegram service install start it at login, so a reboot brings it back
+  comodor telegram status          what is set, who may talk, and is it running
 
-The first-run setup asks about this as its last question, so a fresh install
-has already offered it.
+The first-run setup asks about this, and offers to start it when the questions
+are over, so a fresh install has already been through all of it.
+
+Started with -b it is detached from the terminal: closing the terminal, logging
+out and ending the session all leave it answering. A reboot does not - that is
+the operating system's job, and `service install` is how to ask for it.
 
 A bot's username is public, so it answers a fixed list of numeric account ids
 and nobody else - and everyone else gets silence rather than a refusal. The

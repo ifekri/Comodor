@@ -142,9 +142,10 @@ def test_it_is_actually_coloured(theme):
 def test_ascii_mode_draws_no_block_characters():
     """`--ascii` is for terminals that cannot render Unicode. A logo made of
     the one glyph such a terminal is certain to get wrong is the last thing
-    that mode should draw."""
+    that mode should draw — so that mode gets the tagline and the name on one
+    line instead, which every terminal there is can print."""
     out = drawn(an_info(), 100, 24, theme_module.load("cyan", ascii_borders=True))
     assert "█" not in out
-    assert "#" in out, "the wordmark should still be there, in ASCII"
+    assert "it learns the way you correct it" in out
     for row in out.splitlines():
         assert row.isascii(), f"non-ASCII survived: {row!r}"

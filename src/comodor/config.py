@@ -452,6 +452,12 @@ class Config:
     project_refused: list[str] = field(default_factory=list)
     #: Settings that were the wrong type and were left at their default.
     complaints: list[str] = field(default_factory=list)
+    #: What the closing question of `comodor setup` was answered with —
+    #: `interface`, `telegram`, `both` or `nothing`. Held here rather than
+    #: returned separately so the wizard can answer it and the command line can
+    #: act on the half it owns. Never written to the config file: it is about
+    #: one run, not about how this machine is set up.
+    start_after_setup: str = field(default="nothing", repr=False)
 
     # -- helpers ---------------------------------------------------------- #
 

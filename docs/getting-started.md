@@ -141,8 +141,10 @@ comodor
 
 Arrow keys, or type to filter. **Tab** opens the full description of
 whatever the arrow is on, in the same frame — the lists show one line per
-row so they fit the screen, and some of those descriptions are a paragraph. Piped or scripted, the same questions arrive as a
-numbered list, so it can be automated.
+row so they fit the screen, and some of those descriptions are a paragraph.
+
+Piped or scripted, the same questions arrive as a numbered list, so it can be
+automated.
 
 **No key and no money?** Choose **Ollama** or **LM Studio**. They run on your
 machine, need no key, and cost nothing. Everything in this documentation works
@@ -172,6 +174,19 @@ then, and shows a code to send the bot so it knows which account to answer.
 It reads and plans only until you say otherwise. Declining costs one keypress
 and `comodor telegram connect` does the same thing later — see
 [From your phone](telegram.md).
+
+### And then it offers to start
+
+```
+ What now?
+   1  Start Comodor          — the interface, here in this terminal
+   2  Start the Telegram bot — in the background, answers while this is closed
+   3  Both
+   4  Nothing yet            — `comodor` starts it whenever you want
+```
+
+Setup used to end here, back at the shell prompt with nothing running. The
+Telegram lines appear only when a bot is connected and paired.
 
 ---
 

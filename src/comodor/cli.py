@@ -264,15 +264,25 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
-def run_setup_command(config: Config) -> int:
-    """`comodor setup` — run the wizard again, keeping what is already there."""
+def run_setup_command(config: Config, args: Any = None) -> int:
+    """`comodor setup` — run the wizard again, keeping what is already there.
+
+    It used to end here, back at the shell prompt, with nothing running. That
+    is the command the installer calls, so the last thing an install did was
+    say `Ready.` and hand back a prompt — leaving somebody who had just
+    answered six questions to work out that the next step was to type the
+    program's name. So the wizard asks, and this acts on the answer.
+    """
     from .setup import run_setup
 
     try:
-        run_setup(config)
+        config = run_setup(config, offer=True)
     except (KeyboardInterrupt, EOFError):
         print("\nSetup cancelled; nothing was changed.", file=sys.stderr)
         return 130
+
+    if config.start_after_setup in ("interface", "both"):
+        return start_interface(config, args)
     return 0
 
 
@@ -827,7 +837,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "preview":
         return run_preview(config, args)
     if args.command == "setup":
-        return run_setup_command(config)
+        return run_setup_command(config, args)
     if args.command == "import":
         return run_import(config, args)
     if args.command == "run":
@@ -856,11 +866,22 @@ def main(argv: list[str] | None = None) -> int:
         if config.needs_setup:
             return 1
 
+    return start_interface(config, args)
+
+
+def start_interface(config: Config, args: Any = None) -> int:
+    """Confirm the folder, then hand over to the interface.
+
+    A function of its own because two paths end here: `comodor` with nothing
+    else to do, and `comodor setup` when its closing question was answered with
+    "start it". `getattr` throughout, because the second of those comes from a
+    subcommand parser that has never heard of `--resume`.
+    """
     # Which directory is this about? Asked once per folder, before the agent
     # exists — the project root is worked out by walking upwards, and the
     # answer is occasionally a surprise worth seeing before anything reads it.
     # `--cwd` is the user naming it themselves, so it does not ask again.
-    if not args.cwd:
+    if not getattr(args, "cwd", None):
         from .ui import console as console_module
         from .workspace import confirm
 
@@ -874,11 +895,11 @@ def main(argv: list[str] | None = None) -> int:
 
     from .ui.app import App
 
-    resume = None
-    if args.resume and args.resume != "__pick__":
-        resume = args.resume
+    resume = getattr(args, "resume", None)
+    if resume == "__pick__":
+        resume = None
 
-    app = App(config, demo=args.demo, resume=resume)
+    app = App(config, demo=bool(getattr(args, "demo", False)), resume=resume)
     try:
         return app.run()
     except KeyboardInterrupt:

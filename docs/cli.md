@@ -200,8 +200,12 @@ Full guide: [From a browser](web.md).
 ```bash
 comodor telegram connect <token>  # a bot from @BotFather
 comodor telegram pair             # a one-time code that adds your account
-comodor telegram start            # run it until stopped
-comodor telegram status           # what is configured, and who may talk
+comodor telegram start            # here, holding this terminal
+comodor telegram start -b         # detached; survives closing the terminal
+comodor telegram stop             # end a background one
+comodor telegram service install  # start it at login, so a reboot brings it back
+comodor telegram service show     # read the unit before trusting it
+comodor telegram status           # what is configured, who may talk, is it up
 comodor telegram writes on        # let a phone turn edit files
 comodor telegram writes off
 comodor telegram forget 12345     # revoke one account

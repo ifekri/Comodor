@@ -609,3 +609,108 @@ def test_the_typed_path_still_clears_when_the_keyboard_does_not_work(blank):
     before = len(console.frames)
     setup._rule("A question", 1, 6)
     assert len(console.frames) == before + 1
+
+
+# --------------------------------------------------------------------------- #
+# what happens when the questions are over
+#
+# Setup used to end by returning to the shell. Somebody answered six
+# questions, watched it say `Ready.`, and was put back at a prompt with
+# nothing running — and `comodor setup` is the command the installer calls, so
+# that was the last thing an install did.
+# --------------------------------------------------------------------------- #
+
+
+def closing(blank, replies: list[str], *, paired: bool = False) -> tuple:
+    if paired:
+        blank.telegram.token = "42:x"
+        blank.telegram.allowed = [7]
+    console = Screen(width=90, height=26, file=io.StringIO(), no_color=True,
+                     legacy_windows=False)
+    answers = iter(replies)
+    setup = SetupWizard(blank, console=console,
+                        prompt=lambda message: next(answers, ""),
+                        secret=lambda message: "unused")
+    return setup, setup.offer_start(blank)
+
+
+def test_the_last_screen_offers_to_start_it(blank):
+    setup, chosen = closing(blank, ["1"])
+
+    assert chosen == "interface"
+    drawn = "\n".join(setup.console.frames[-1])
+    assert "What now?" in drawn
+    assert "Start Comodor" in drawn
+
+
+def test_telegram_is_offered_only_when_there_is_a_bot_to_start(blank):
+    """An option that cannot work is worse than an option that is not there."""
+    without, _ = closing(blank, ["1"])
+    assert "Telegram" not in "\n".join(without.console.frames[-1])
+
+    fresh = Config(paths=blank.paths)
+    with_bot, _ = closing(fresh, ["1"], paired=True)
+    assert "Telegram" in "\n".join(with_bot.console.frames[-1])
+
+
+@pytest.mark.parametrize("reply,expected", [("1", "interface"),
+                                            ("2", "telegram"),
+                                            ("3", "both"),
+                                            ("4", "nothing")])
+def test_each_answer_maps_to_what_it_says(blank, reply, expected):
+    _, chosen = closing(blank, [reply], paired=True)
+    assert chosen == expected
+
+
+def test_the_closing_screen_carries_no_step_number(blank):
+    """It is not one of the numbered questions, and labelling it 0/0 read as
+    the bug it was."""
+    setup, _ = closing(blank, ["1"])
+    drawn = "\n".join(setup.console.frames[-1])
+
+    assert "0/0" not in drawn
+    assert "What now?" in drawn
+
+
+def test_the_wizard_does_not_ask_unless_it_was_asked_to(blank, monkeypatch):
+    """The path into the interface is already going there; asking somebody to
+    confirm what they are visibly already doing is a question wasted. The path
+    that ends at a shell prompt is the one that has to ask."""
+    from comodor.setup import run_setup
+
+    monkeypatch.setattr(SetupWizard, "run", lambda self: Answers())
+    monkeypatch.setattr(SetupWizard, "apply", lambda self, answers: blank)
+    monkeypatch.setattr(SetupWizard, "install_skills",
+                        lambda self, config, answers: [])
+    monkeypatch.setattr(SetupWizard, "finish", lambda self, config, closing=True: None)
+
+    asked: list[int] = []
+    monkeypatch.setattr(SetupWizard, "offer_start",
+                        lambda self, config: asked.append(1) or "interface")
+
+    quiet = run_setup(blank)
+    assert asked == [], "it asked when it was not supposed to"
+    assert quiet.start_after_setup == "nothing"
+
+    loud = run_setup(blank, offer=True)
+    assert asked == [1]
+    assert loud.start_after_setup == "interface"
+
+
+def test_choosing_the_bot_actually_starts_it(blank, monkeypatch):
+    from comodor.setup import run_setup
+
+    monkeypatch.setattr(SetupWizard, "run", lambda self: Answers())
+    monkeypatch.setattr(SetupWizard, "apply", lambda self, answers: blank)
+    monkeypatch.setattr(SetupWizard, "install_skills",
+                        lambda self, config, answers: [])
+    monkeypatch.setattr(SetupWizard, "finish", lambda self, config, closing=True: None)
+    monkeypatch.setattr(SetupWizard, "offer_start", lambda self, config: "both")
+
+    started: list[int] = []
+    monkeypatch.setattr(SetupWizard, "start_telegram",
+                        lambda self, config: started.append(1) or True)
+
+    saved = run_setup(blank, offer=True)
+    assert started == [1], "it said it would start the bot and did not"
+    assert saved.start_after_setup == "both"

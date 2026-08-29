@@ -492,9 +492,26 @@ def _check_telegram(config: Config) -> Finding | None:
             "a bot is connected but nobody is paired, so it answers nobody",
             remedy="`comodor telegram pair` adds your account")
 
+    # Whether it is actually up, not just whether it could be. A bot that is
+    # configured and not running is the state somebody is in when they message
+    # it from a train and nothing comes back.
+    from .telegram import service, unit
+
+    here = service.state(config)
+    where = ("running in the background" if here.running
+             else "configured but not running")
+    if here.running:
+        where += f", pid {here.pid}, up {here.uptime()}"
+    if unit.installed(config):
+        where += "; starts at login"
+
     return Finding("telegram", Status.OK,
-                   f"{len(settings.allowed)} account(s) paired, {writes}"
-                   + ("" if settings.enabled else ", switched off"))
+                   f"{len(settings.allowed)} account(s) paired, {writes} — "
+                   f"{where}"
+                   + ("" if settings.enabled else ", switched off"),
+                   remedy=("" if here.running else
+                           "`comodor telegram start --background` runs it "
+                           "without holding a terminal"))
 
 
 # --------------------------------------------------------------------------- #

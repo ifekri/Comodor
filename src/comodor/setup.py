@@ -120,12 +120,14 @@ class SetupWizard:
             self._recap()
         title, step, total = self._step
         self.console.print()
+        # No counter when there is nothing to count. The closing screen is not
+        # one of the numbered questions — labelling it "0/0" reads as a bug,
+        # which is what it was.
+        chip = (f" {step}/{total} ", self.theme.style("accent", bold=True))
+        heading = (title, self.theme.style("title", bold=True))
         self.console.print(
-            Text.assemble(
-                (f" {step}/{total} ", self.theme.style("accent", bold=True)),
-                (title, self.theme.style("title", bold=True)),
-            )
-        )
+            Text.assemble(chip, heading) if total else
+            Text.assemble((" ", ""), heading))
 
     def _crown(self) -> None:
         """The wordmark, at the top of whatever is about to be drawn.
@@ -176,7 +178,7 @@ class SetupWizard:
         ))
 
     def _choose(self, options: Sequence[tuple[str, str, str]], default: int = 1,
-                title: str = "") -> str:
+                title: str = "", header: bool = True) -> str:
         """Return the chosen value, by arrow key or by number.
 
         ``options`` is ``(value, label, note)``. The numbered path re-asks on a
@@ -194,7 +196,8 @@ class SetupWizard:
             # The list could not run, or was escaped out of. Either way the
             # question still needs an answer, so the numbered form takes over.
 
-        taken = self._numbered(options, multi=False, default=default)
+        taken = self._numbered(options, multi=False, default=default,
+                               header=header)
         return taken[0] if taken else options[default - 1][0]
 
     def _choose_many(self, options: Sequence[tuple[str, str, str]],
@@ -236,8 +239,8 @@ class SetupWizard:
         return crown + recap + 6
 
     def _numbered(self, options: Sequence[tuple[str, str, str]], *,
-                  multi: bool, default: int = 1,
-                  verb: str = "choose") -> list[str]:
+                  multi: bool, default: int = 1, verb: str = "choose",
+                  header: bool = True) -> list[str]:
         """The same question, typed, for a terminal that will not give up keys.
 
         A page at a time, because this used to print the lot: the skills
@@ -256,7 +259,7 @@ class SetupWizard:
         # screen can be cleared that does not matter, because the redraw below
         # replaces it — but on a plain pipe nothing is replaced, and the
         # question appeared twice, one line apart.
-        drawn = not self._terminal
+        drawn = not self._terminal or not header
 
         while True:
             matching = [(index, entry) for index, entry in enumerate(options)
@@ -1063,7 +1066,71 @@ class SetupWizard:
             done.append(skill_id)
         return done
 
-    def finish(self, config: Config) -> None:
+    def offer_start(self, config: Config) -> str:
+        """The last screen: what to do with the thing that was just set up.
+
+        Setup used to end by returning to the shell. Somebody had answered six
+        questions, watched it say `Ready.`, and was then put back at a prompt
+        with nothing running and no indication that the next step was to type
+        the program's name again.
+
+        The Telegram line is only offered when there is a bot to start, because
+        an option that cannot work is worse than an option that is not there.
+
+        Returns one of `interface`, `telegram`, `both`, `nothing`.
+        """
+        can_telegram = bool(config.telegram.token and config.telegram.allowed)
+
+        options = [("interface", "Start Comodor",
+                    "the interface, here in this terminal")]
+        if can_telegram:
+            options.append((
+                "telegram", "Start the Telegram bot",
+                "in the background — answers while this terminal is closed"))
+            options.append(("both", "Both",
+                            "the bot in the background, the interface here"))
+        options.append(("nothing", "Nothing yet",
+                        "`comodor` starts it whenever you want"))
+
+        # No clear here: this belongs under the `Ready.` panel `finish` has
+        # just drawn, on the same screen. Cleared, that panel flashed past
+        # unread — and it is the one that says where the answers were saved.
+        self._step = ("What now?", 0, 0)
+        self.console.print(Text(" What now?", style=self.theme.style(
+            "title", bold=True)))
+        return self._choose(options, default=1, title="What now?",
+                            header=False)
+
+    def start_telegram(self, config: Config) -> bool:
+        """Put the bot in the background, and say what happened either way."""
+        from .telegram import service
+
+        ok, why = service.start(config)
+        self.console.print()
+        if ok:
+            self.console.print(Text.assemble(
+                (f"  {self.theme.glyphs.check} ", self.theme.style("good")),
+                (why, self.theme.style("value")),
+            ))
+            self.console.print(Text(
+                f"  log   {service.log_file(config)}",
+                style=self.theme.style("dim")))
+            self.console.print(Text(
+                "  stop  comodor telegram stop",
+                style=self.theme.style("dim")))
+            self.console.print(Text(
+                "  keep it running after a reboot:  "
+                "comodor telegram service install",
+                style=self.theme.style("dim")))
+        else:
+            self.console.print(Text(f"  {why}", style=self.theme.style("bad")))
+            self.console.print(Text(
+                "  `comodor telegram start --background` tries again.",
+                style=self.theme.style("dim")))
+        self.console.print()
+        return ok
+
+    def finish(self, config: Config, closing: bool = True) -> None:
         # `_terminal`, not `_keys`: over a connection where raw key reading
         # does not work the wizard still clears, and this used not to — so the
         # closing panel arrived underneath the last question instead of on a
@@ -1082,10 +1149,19 @@ class SetupWizard:
             ("  model     ", self.theme.style("label")),
             (f"{config.active_model()}\n", self.theme.style("value")),
             ("  saved to  ", self.theme.style("label")),
-            (f"{config.paths.config_file}\n\n", self.theme.style("value")),
-            ("Type a task and press Enter. ", self.theme.style("dim")),
-            ("/help", self.theme.style("accent")),
-            (" lists everything.", self.theme.style("dim")),
+            # The blank line goes with the sentence it separates. Left in when
+            # the sentence was suppressed, it padded the panel with three
+            # empty rows and pushed the question that follows off a short
+            # terminal.
+            (f"{config.paths.config_file}" + ("\n\n" if closing else ""),
+             self.theme.style("value")),
+            # Suppressed when a question follows: the question is the
+            # instruction, and telling somebody to type a task immediately
+            # above a list of things to choose between is two instructions.
+            ("Type a task and press Enter. " if closing else "",
+             self.theme.style("dim")),
+            ("/help" if closing else "", self.theme.style("accent")),
+            (" lists everything." if closing else "", self.theme.style("dim")),
         )
         self.console.print()
         self.console.print(Panel(body, box=self.theme.box,
@@ -1136,11 +1212,29 @@ def _model_info(model: str) -> int | None:
         return None
 
 
-def run_setup(config: Config, console: Console | None = None) -> Config:
-    """Run the wizard and return the saved configuration."""
+def run_setup(config: Config, console: Console | None = None,
+              offer: bool = False) -> Config:
+    """Run the wizard and return the saved configuration.
+
+    `offer` adds the closing question — start the interface, start the bot, or
+    neither — and acts on the answer. It is off for the path that runs the
+    wizard on the way into the interface, because that one is already going
+    there and asking would be asking somebody to confirm what they are visibly
+    already doing.
+
+    What was chosen is left on the config as `start_after_setup`, so the caller
+    can act on the half it owns without this function reaching into it.
+    """
     wizard = SetupWizard(config, console=console)
     answers = wizard.run()
     saved = wizard.apply(answers)
     wizard.install_skills(saved, answers)
-    wizard.finish(saved)
+    wizard.finish(saved, closing=not offer)
+
+    saved.start_after_setup = "nothing"
+    if offer:
+        chosen = wizard.offer_start(saved)
+        saved.start_after_setup = chosen
+        if chosen in ("telegram", "both"):
+            wizard.start_telegram(saved)
     return saved

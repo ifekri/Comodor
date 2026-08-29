@@ -16,9 +16,10 @@ Three rules it follows, because a banner that ignores them is worse than none:
 * **It never touches piped output.** `comodor run … | jq` must see the answer
   and nothing else, so this goes to the error stream when it goes anywhere at
   all, and not at all when the destination is not a terminal.
-* **It shrinks rather than wraps.** The wordmark is 47 columns. Below that it
-  becomes a single styled line, because ASCII art reflowed by a terminal is
-  not a smaller logo, it is rubble.
+* **It shrinks rather than wraps.** The wordmark is 28 columns. Below that,
+  and on a terminal that cannot draw block elements, it becomes a single
+  styled line — art reflowed by a terminal is not a smaller logo, it is
+  rubble, and art transliterated into `#` is not a logo either.
 * **It can be switched off**, and being switched off is remembered.
 """
 
@@ -33,62 +34,48 @@ from rich.text import Text
 
 from .theme import Theme
 
-#: The wordmark, in two weights.
+#: One wordmark, twenty-eight columns wide, three rows tall.
 #:
-#: Blocks rather than the sloped ASCII this used to be. That one was drawn out
-#: of slashes and underscores, which every monospace font renders at a slightly
-#: different angle and none of them render as a logo — it read as source code
-#: somebody had left in the middle of the screen. Solid cells read the same
-#: everywhere, because a filled cell is the one glyph a terminal cannot get
-#: wrong.
+#: There used to be two — an eighty-two column one and a forty-one column one —
+#: and the shell installer drew a third in a slanted ASCII face of its own. So
+#: an install showed you two different logos before the program had even
+#: started, and neither was the one in the README. A product with three
+#: wordmarks has none.
 #:
-#: Two weights because one does not fit both cases. The heavy one is eighty-two
-#: columns, which is the whole width of a default terminal with nothing either
-#: side, so a narrower window gets the light one rather than nothing.
-WORDMARK_WIDE = (
-    "  ████████    ██████    ██      ██    ██████    ████████      ██████    ████████  ",
-    "██          ██      ██  ████  ████  ██      ██  ██      ██  ██      ██  ██      ██",
-    "██          ██      ██  ██  ██  ██  ██      ██  ██      ██  ██      ██  ████████  ",
-    "██          ██      ██  ██      ██  ██      ██  ██      ██  ██      ██  ██    ██  ",
-    "  ████████    ██████    ██      ██    ██████    ████████      ██████    ██      ██",
+#: Twenty-eight columns is narrow enough that every terminal worth drawing on
+#: can hold it, which is what removes the need for a second weight. The glyphs
+#: are from the Block Elements range, which renders identically in every
+#: monospace face — unlike the slashes and underscores of a slanted face, which
+#: each terminal angles differently and none render as a logo.
+WORDMARK = (
+    "░█▀▀░█▀█░█▄█░█▀█░█▀▄░█▀█░█▀▄",
+    "░█░░░█░█░█░█░█░█░█░█░█░█░█▀▄",
+    "░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀░░▀▀▀░▀░▀",
 )
 
-WORDMARK_COMPACT = (
-    " ████  ███  █   █  ███  ████   ███  ████ ",
-    "█     █   █ ██ ██ █   █ █   █ █   █ █   █",
-    "█     █   █ █ █ █ █   █ █   █ █   █ ████ ",
-    "█     █   █ █   █ █   █ █   █ █   █ █  █ ",
-    " ████  ███  █   █  ███  ████   ███  █   █",
-)
+#: Kept as names so nothing that imported them breaks; both are this one now.
+WORDMARK_WIDE = WORDMARK
+WORDMARK_COMPACT = WORDMARK
 
-#: What the rest of the interface asks for when it does not care which.
-WORDMARK = WORDMARK_COMPACT
-
-WIDE_WIDTH = max(len(line) for line in WORDMARK_WIDE)
 WIDTH = max(len(line) for line in WORDMARK)
+WIDE_WIDTH = WIDTH
 #: Below this the wordmark is dropped rather than wrapped. Two columns of
-#: margin, because a logo touching both edges reads as a mistake.
+#: margin either side, because a logo touching both edges reads as a mistake.
 MINIMUM = WIDTH + 4
 
 
-#: The same art with the one non-ASCII character swapped out.
-#:
-#: `--ascii` exists for terminals that cannot render Unicode, and a logo made
-#: of the one glyph such a terminal is certain to get wrong is the last thing
-#: that mode should draw — it puts a field of replacement characters where the
-#: product name goes, on the first screen anybody sees.
-WORDMARK_WIDE_ASCII = tuple(line.replace("█", "#") for line in WORDMARK_WIDE)
-WORDMARK_COMPACT_ASCII = tuple(line.replace("█", "#")
-                               for line in WORDMARK_COMPACT)
-
-
 def wordmark_for(width: int, ascii_only: bool = False) -> tuple[str, ...] | None:
-    """The heaviest wordmark this many columns can hold, or nothing."""
-    if width >= WIDE_WIDTH + 8:
-        return WORDMARK_WIDE_ASCII if ascii_only else WORDMARK_WIDE
-    if width >= MINIMUM:
-        return WORDMARK_COMPACT_ASCII if ascii_only else WORDMARK_COMPACT
-    return None
+    """The wordmark, or nothing if this terminal cannot hold it.
+
+    Nothing under `--ascii` as well as when the terminal is too narrow. The
+    letters are made of half-blocks, and there is no honest transliteration of
+    a half-block into ASCII — substituting `^` and `_` produced a smear that
+    read as neither a word nor a logo. The caller draws the one-line form
+    instead, which is legible everywhere.
+    """
+    if ascii_only or width < MINIMUM:
+        return None
+    return WORDMARK
 
 TAGLINE = "it learns the way you correct it"
 
