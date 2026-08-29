@@ -106,10 +106,12 @@ def build_parser() -> argparse.ArgumentParser:
     from .skills.commands import register as register_skills
     from .telegram.commands import register as register_telegram
     from .web.commands import register as register_web
+    from .whatsapp.commands import register as register_whatsapp
 
     register_mcp(sub)
     register_local(sub)
     register_telegram(sub)
+    register_whatsapp(sub)
     register_skills(sub)
     register_web(sub)
     register_acp(sub)
@@ -822,6 +824,10 @@ def main(argv: list[str] | None = None) -> int:
         from .telegram.commands import run as run_telegram
 
         return run_telegram(config, args)
+    if args.command == "whatsapp":
+        from .whatsapp.commands import run as run_whatsapp
+
+        return run_whatsapp(config, args)
     if args.command == "skills":
         from .skills.commands import run as run_skills
 

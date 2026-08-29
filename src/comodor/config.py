@@ -373,6 +373,94 @@ class TelegramConfig:
 
 
 @dataclass
+class WhatsAppConfig:
+    """The same thing through WhatsApp, which is a different shape.
+
+    Telegram hands you one token and lets you long-poll for messages. WhatsApp
+    is Meta's Cloud API: a token *and* a phone number id to send from, and
+    inbound messages arrive as webhooks — Meta posts them to a URL, which means
+    something of yours has to be reachable from the internet. There is no
+    polling equivalent, so the fields below carry a webhook's worth of settings
+    that Telegram simply does not need.
+
+    Same rule about who it answers, for the same reason and more sharply: a
+    WhatsApp business number is a phone number, and phone numbers get messaged
+    by strangers all day. `allowed` holds the wa_ids that get a reply, and
+    everybody else gets silence.
+    """
+
+    enabled: bool = False
+    #: A permanent access token from a Meta system user. Temporary tokens from
+    #: the app dashboard expire in twenty-four hours, which is long enough to
+    #: finish setting it up and short enough to look like a bug the next day.
+    token: str = ""
+    #: Which of the business account's numbers to send from. Not the number
+    #: itself: Meta addresses it by id.
+    phone_number_id: str = ""
+    #: The app secret, used to check the signature on every webhook. Without it
+    #: anything that can reach the endpoint can impersonate Meta.
+    app_secret: str = ""
+    #: The string echoed back during Meta's one-time endpoint verification.
+    #: Generated rather than chosen, because it is a shared secret and people
+    #: choose badly.
+    verify_token: str = ""
+    #: wa_ids — a phone number in full international form, no `+`, no spaces.
+    allowed: list[str] = field(default_factory=list)
+    #: Whether a turn started from WhatsApp may edit files and run commands.
+    allow_writes: bool = False
+    #: Seconds a pairing code stays valid.
+    pair_window: int = 300
+    #: Where the webhook listens. Bound to localhost: this is meant to sit
+    #: behind a tunnel or a reverse proxy that terminates TLS, because Meta
+    #: will only deliver to HTTPS and will not deliver to a self-signed
+    #: certificate.
+    host: str = "127.0.0.1"
+    port: int = 8770
+    #: The path Meta posts to.
+    path: str = "/whatsapp"
+    #: The public HTTPS address of that path, for the dashboard. Remembered so
+    #: `comodor whatsapp status` can print the thing you have to paste.
+    public_url: str = ""
+    #: Which Graph API version to call. Pinned, because Meta deprecates
+    #: versions on a schedule and a floating version breaks on their calendar
+    #: rather than on yours.
+    api_version: str = "v21.0"
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "token": self.token,
+            "phone_number_id": self.phone_number_id,
+            "app_secret": self.app_secret,
+            "verify_token": self.verify_token,
+            "allowed": list(self.allowed),
+            "allow_writes": self.allow_writes,
+            "pair_window": self.pair_window,
+            "host": self.host,
+            "port": self.port,
+            "path": self.path,
+            "public_url": self.public_url,
+            "api_version": self.api_version,
+        }
+
+    def may(self, wa_id: str) -> bool:
+        """Whether this number gets an answer.
+
+        Compared as digits. The same number reaches us written `+9715…`,
+        `009715…` and `9715…` depending on where it came from, and three
+        spellings of one person is three people to a naive comparison.
+        """
+        wanted = _digits(wa_id)
+        return bool(wanted) and wanted in {_digits(x) for x in self.allowed}
+
+
+def _digits(value: Any) -> str:
+    """A phone number reduced to the digits, with a leading 00 dropped."""
+    kept = "".join(char for char in str(value or "") if char.isdigit())
+    return kept[2:] if kept.startswith("00") else kept
+
+
+@dataclass
 class MCPConfig:
     """Servers, and the master switch over all of them."""
 
@@ -419,7 +507,7 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: for its whole existence: `headless: false` in a config file did nothing and
 #: said nothing.
 SECTIONS = ("ui", "agent", "gateway", "learning", "skills", "safety",
-            "browser", "computer", "telegram")
+            "browser", "computer", "telegram", "whatsapp")
 
 
 @dataclass
@@ -434,6 +522,7 @@ class Config:
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     computer: ComputerConfig = field(default_factory=ComputerConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
+    whatsapp: WhatsAppConfig = field(default_factory=WhatsAppConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
@@ -727,14 +816,14 @@ PROJECT_SETTABLE: dict[str, frozenset[str] | None] = {
     # uses is useful; a project starting a process is not its decision. The
     # master switch is deliberately absent.
     "mcp": frozenset({"servers"}),
-    # `browser`, `computer` and `telegram` are deliberately absent, and this is
-    # the note for whoever is tempted to add them. A project that could set
-    # `browser.executable` names a binary for the agent to launch. One that
-    # could set `computer.enabled` asks the machine it was just cloned onto for
-    # its mouse and keyboard. One that could set `telegram.allowed` adds its
-    # author to the list of people who may drive that machine from a phone —
-    # and unlike the other two, nothing on screen would ever show it happening.
-    # None of the three belongs to a repository.
+    # `browser`, `computer`, `telegram` and `whatsapp` are deliberately absent,
+    # and this is the note for whoever is tempted to add them. A project that
+    # could set `browser.executable` names a binary for the agent to launch.
+    # One that could set `computer.enabled` asks the machine it was just cloned
+    # onto for its mouse and keyboard. One that could set `telegram.allowed` or
+    # `whatsapp.allowed` adds its author to the list of people who may drive
+    # that machine from a phone — and unlike the other two, nothing on screen
+    # would ever show it happening. None of the four belongs to a repository.
 }
 
 

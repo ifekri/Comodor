@@ -2357,26 +2357,38 @@ function drawAdmin(data) {
     /* From a phone. Shown whether or not it is set up: a capability nobody is
        told about is a capability nobody has, and this panel is where somebody
        goes to find out what this install can do. */
-    if (data.telegram) {
-      const tg = data.telegram;
+    const channels = [
+      ['Telegram', 'telegram', data.telegram],
+      ['WhatsApp', 'whatsapp', data.whatsapp],
+    ].filter((entry) => entry[2]);
+
+    if (channels.length) {
       const heading = document.createElement('p');
       heading.className = 'aside';
       heading.style.margin = '12px 0 6px';
       heading.textContent = 'From your phone';
-      const said = document.createElement('p');
-      said.className = 'aside';
-      if (!tg.connected) {
-        said.textContent = 'No bot connected — comodor telegram connect';
-      } else if (!tg.paired) {
-        said.textContent = 'A bot is connected but nobody is paired, '
-                         + 'so it answers nobody — comodor telegram pair';
-      } else {
-        said.textContent = tg.paired + ' account'
-          + (tg.paired === 1 ? '' : 's') + ' paired, '
-          + (tg.writes ? 'may edit files' : 'reads and plans only')
-          + (tg.enabled ? '' : ', switched off');
-      }
-      body.append(heading, said);
+      body.appendChild(heading);
+
+      channels.forEach(([label, name, info]) => {
+        const said = document.createElement('p');
+        said.className = 'aside';
+        let what;
+        if (!info.connected) {
+          what = 'not connected — comodor ' + name + ' connect';
+        } else if (info.verified === false) {
+          what = 'connected, but no app secret, so no webhook can be verified';
+        } else if (!info.paired) {
+          what = 'connected but nobody is paired, so it answers nobody — '
+               + 'comodor ' + name + ' pair';
+        } else {
+          what = info.paired + ' account'
+            + (info.paired === 1 ? '' : 's') + ' paired, '
+            + (info.writes ? 'may edit files' : 'reads and plans only')
+            + (info.enabled ? '' : ', switched off');
+        }
+        said.textContent = label + ' — ' + what;
+        body.appendChild(said);
+      });
     }
   }
 

@@ -220,6 +220,29 @@ Full guide: [From your phone](telegram.md).
 
 ---
 
+## `comodor whatsapp` — from a WhatsApp number
+
+```bash
+comodor whatsapp connect --number-id … --token … --app-secret …
+comodor whatsapp webhook          # what to paste into Meta's dashboard
+comodor whatsapp pair             # a one-time code that adds your number
+comodor whatsapp start            # here, holding this terminal
+comodor whatsapp start -b         # detached
+comodor whatsapp stop
+comodor whatsapp service install  # start it at login
+comodor whatsapp status           # what is set, who may talk, is it running
+comodor whatsapp writes on        # let a phone turn edit files
+comodor whatsapp forget 15551234567
+comodor whatsapp off
+```
+
+Meta delivers messages to a URL rather than letting you poll for them, so this
+one needs a public HTTPS address — a tunnel is the usual answer.
+
+Full guide: [From WhatsApp](whatsapp.md).
+
+---
+
 ## `comodor skills` — procedures it follows
 
 ```bash

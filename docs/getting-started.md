@@ -162,18 +162,25 @@ mind later with `comodor setup`, or one setting at a time — see
 
 ```
  6/6  Run it from your phone?
-┌─  From your phone  ─────────────────────────────────────┐
-│ ›  Not now             `comodor telegram connect` later  │
-│    Yes, connect a bot  you need a token from @BotFather  │
-└──────────────────────────────────────────────────────────┘
+┌─  From your phone  ─────────────────────────────────────────────┐
+│ ›  Not now    you can set either up later                        │
+│    Telegram   a bot from @BotFather — set up here in a minute    │
+│    WhatsApp   a Meta business number — needs an app at Meta      │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-Answering yes takes a bot token from
-[@BotFather](https://t.me/botfather), checks it against Telegram there and
-then, and shows a code to send the bot so it knows which account to answer.
-It reads and plans only until you say otherwise. Declining costs one keypress
-and `comodor telegram connect` does the same thing later — see
-[From your phone](telegram.md).
+**Telegram** takes a token from [@BotFather](https://t.me/botfather), checks it
+against Telegram there and then, and shows a code to send the bot so it knows
+which account to answer — a minute, start to finish.
+See [From your phone](telegram.md).
+
+**WhatsApp** needs a Meta app, a business number, an app secret and a public
+HTTPS address, none of which can be made from a terminal. The wizard says what
+is needed and hands over to `comodor whatsapp connect` — see
+[From WhatsApp](whatsapp.md).
+
+Either way it reads and plans only until you say otherwise, and declining costs
+one keypress.
 
 ### And then it offers to start
 
@@ -185,8 +192,9 @@ and `comodor telegram connect` does the same thing later — see
    4  Nothing yet            — `comodor` starts it whenever you want
 ```
 
-Setup used to end here, back at the shell prompt with nothing running. The
-Telegram lines appear only when a bot is connected and paired.
+Setup used to end here, back at the shell prompt with nothing running. A phone
+line appears for each channel that is connected and paired, named — somebody
+who set up WhatsApp is not offered "the Telegram bot".
 
 ---
 

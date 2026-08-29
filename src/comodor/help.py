@@ -55,6 +55,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Reach further", [
         ("comodor web", "use it from a browser, here or on a server"),
         ("comodor telegram start", "drive it from your phone, all buttons"),
+        ("comodor whatsapp start", "the same, from a WhatsApp number"),
         ("comodor skills browse", "procedures it follows when the work calls for them"),
         ("comodor mcp list", "tools from Model Context Protocol servers"),
     ]),
@@ -220,6 +221,36 @@ must be configured before it will start.
 
 In Docker:  docker compose up   and open the address it prints.
 Full guide: docs/web.md"""),
+
+    "whatsapp": ("From WhatsApp", """\
+  comodor whatsapp connect         the number, the token, the app secret
+  comodor whatsapp webhook         what to paste into Meta's dashboard
+  comodor whatsapp pair            a one-time code that adds your number
+  comodor whatsapp start -b        run it detached from this terminal
+  comodor whatsapp status          what is set, who may talk, is it running
+
+Meta's Cloud API, which is the official one. The libraries that drive WhatsApp
+Web instead need Node, break whenever the web client changes, and are against
+the terms the account is held to - the failure mode there is somebody's phone
+number being banned.
+
+Two things work differently from Telegram, and both are Meta's design:
+
+*Messages are delivered, not fetched.* There is no long poll. Meta posts each
+message to a URL, so something of yours has to be reachable over HTTPS. The
+bot listens on localhost; a tunnel puts a real certificate in front of it:
+
+  cloudflared tunnel --url http://127.0.0.1:8770
+
+*Every webhook is signed* with your app secret, and the signature is checked.
+Without one, anything that reaches that URL can hand the agent instructions
+with somebody else's number on them.
+
+There is also a day-long window: WhatsApp only lets the bot message you within
+twenty-four hours of your last message. A task that finishes after that cannot
+be reported until you write again.
+
+Full guide: docs/whatsapp.md"""),
 
     "telegram": ("From your phone", """\
   comodor telegram connect TOKEN   a bot from @BotFather

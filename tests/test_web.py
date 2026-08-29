@@ -1632,3 +1632,34 @@ def test_the_shelf_lists_what_is_installed(served):
 
     assert len(mine) == 1
     assert mine[0]["installed"] is True and mine[0]["enabled"] is True
+
+
+def test_the_admin_panel_says_whether_whatsapp_can_reach_it(served):
+    served.config.whatsapp.token = "EAA-token"
+    served.config.whatsapp.phone_number_id = "1234567890"
+    served.config.whatsapp.app_secret = "secret"
+    served.config.whatsapp.allowed = ["15550001111"]
+    served.config.whatsapp.enabled = True
+
+    _, admin = call(served, "/api/admin", token=served.token)
+
+    assert admin["whatsapp"]["connected"] is True
+    assert admin["whatsapp"]["paired"] == 1
+    assert admin["whatsapp"]["verified"] is True
+
+
+def test_the_admin_panel_never_carries_the_whatsapp_secrets(served):
+    """This URL gets shared by accident. The token and the app secret are
+    credentials and the numbers name people."""
+    served.config.whatsapp.token = "EAA-SUPER-SECRET-TOKEN"
+    served.config.whatsapp.app_secret = "APP-SECRET-VALUE"
+    served.config.whatsapp.phone_number_id = "1234567890"
+    served.config.whatsapp.allowed = ["15559998888"]
+
+    _, admin = call(served, "/api/admin", token=served.token)
+    written = json.dumps(admin)
+
+    assert "EAA-SUPER-SECRET-TOKEN" not in written
+    assert "APP-SECRET-VALUE" not in written
+    assert "15559998888" not in written
+    assert admin["whatsapp"]["paired"] == 1, "the count may be said"

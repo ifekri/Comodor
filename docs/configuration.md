@@ -222,6 +222,45 @@ browser or the screen there would be nothing visible while it happened.
 
 Full explanation: [From your phone](telegram.md).
 
+### `whatsapp` — from a WhatsApp number
+
+```json
+{
+  "whatsapp": {
+    "enabled": false,
+    "token": "",
+    "phone_number_id": "",
+    "app_secret": "",
+    "verify_token": "",
+    "allowed": [],
+    "allow_writes": false,
+    "host": "127.0.0.1",
+    "port": 8770,
+    "path": "/whatsapp",
+    "public_url": "",
+    "api_version": "v21.0"
+  }
+}
+```
+
+| | |
+|---|---|
+| `token` | A Meta access token. A System User token does not expire; the dashboard's own lasts 24 hours |
+| `phone_number_id` | The numeric id Meta shows beside the number, not the number |
+| `app_secret` | Every webhook is signed with it. Without one, nothing is verified |
+| `verify_token` | Echoed back during Meta's one-time handshake. Generated, not chosen |
+| `allowed` | The numbers it answers, compared as digits. Everyone else gets silence |
+| `allow_writes` | Whether a WhatsApp turn may edit files and run commands |
+| `host`, `port`, `path` | Where the webhook listens. Localhost, behind something that terminates TLS |
+| `public_url` | The address Meta delivers to, remembered so `whatsapp webhook` can print it |
+| `api_version` | Pinned, because Meta deprecates versions on their calendar rather than yours |
+
+**A project's `.comodor/config.json` may not set any of this**, for the same
+reason as `telegram`: a repository that could add a number to `allowed` would
+be a backdoor with nothing on screen to show it happening.
+
+Full explanation: [From WhatsApp](whatsapp.md).
+
 ### `browser` — the real browser
 
 ```json

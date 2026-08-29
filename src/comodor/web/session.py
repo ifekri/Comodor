@@ -1091,6 +1091,16 @@ class Session:
                 "enabled": bool(self.config.telegram.enabled),
                 "writes": bool(self.config.telegram.allow_writes),
             },
+            "whatsapp": {
+                "connected": bool(self.config.whatsapp.token
+                                  and self.config.whatsapp.phone_number_id),
+                "paired": len(self.config.whatsapp.allowed),
+                "enabled": bool(self.config.whatsapp.enabled),
+                "writes": bool(self.config.whatsapp.allow_writes),
+                # Whether webhooks can be verified at all. The one thing about
+                # this channel that is a security answer rather than a status.
+                "verified": bool(self.config.whatsapp.app_secret),
+            },
             "reflex": {
                 "lessons": reflex.get("lessons", 0),
                 "rules": reflex.get("rules", 0),

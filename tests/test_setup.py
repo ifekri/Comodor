@@ -697,20 +697,40 @@ def test_the_wizard_does_not_ask_unless_it_was_asked_to(blank, monkeypatch):
     assert loud.start_after_setup == "interface"
 
 
-def test_choosing_the_bot_actually_starts_it(blank, monkeypatch):
+def test_choosing_a_bot_actually_starts_that_one(blank, monkeypatch):
+    """Named by channel: "both" with only Telegram set up must not try to
+    start a WhatsApp that was never connected."""
     from comodor.setup import run_setup
+
+    blank.telegram.token = "42:x"
+    blank.telegram.allowed = [7]
 
     monkeypatch.setattr(SetupWizard, "run", lambda self: Answers())
     monkeypatch.setattr(SetupWizard, "apply", lambda self, answers: blank)
     monkeypatch.setattr(SetupWizard, "install_skills",
                         lambda self, config, answers: [])
-    monkeypatch.setattr(SetupWizard, "finish", lambda self, config, closing=True: None)
+    monkeypatch.setattr(SetupWizard, "finish",
+                        lambda self, config, closing=True: None)
     monkeypatch.setattr(SetupWizard, "offer_start", lambda self, config: "both")
 
-    started: list[int] = []
-    monkeypatch.setattr(SetupWizard, "start_telegram",
-                        lambda self, config: started.append(1) or True)
+    started: list[str] = []
+    monkeypatch.setattr(SetupWizard, "start_phone",
+                        lambda self, config, channel:
+                        started.append(channel.name) or True)
 
     saved = run_setup(blank, offer=True)
-    assert started == [1], "it said it would start the bot and did not"
+    assert started == ["telegram"], "it started something that is not set up"
     assert saved.start_after_setup == "both"
+
+
+def test_the_closing_question_names_the_channel_that_is_ready(blank):
+    """Somebody who set up WhatsApp should not be offered "the Telegram bot"."""
+    blank.whatsapp.token = "EAA"
+    blank.whatsapp.phone_number_id = "1234567890"
+    blank.whatsapp.allowed = ["15550001111"]
+
+    setup, _ = closing(blank, ["1"])
+    drawn = "\n".join(setup.console.frames[-1])
+
+    assert "WhatsApp" in drawn
+    assert "Telegram" not in drawn

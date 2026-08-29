@@ -1,8 +1,12 @@
-"""Running the bot without a terminal holding it open.
+"""Running a phone channel without a terminal holding it open.
 
 The complaint this answers: the bot only worked while somebody was sitting in
 the terminal with `comodor telegram start` in the foreground, which is the one
 situation in which nobody needs a phone.
+
+Every test runs against both channels. The process bookkeeping is one piece of
+code parameterised by which channel it is managing, so testing it once against
+Telegram would leave WhatsApp asserting nothing.
 
 Nothing here starts a real bot. What is checked is the bookkeeping around the
 process — the part that goes wrong quietly: a stale pid file naming a number
@@ -17,9 +21,14 @@ import sys
 
 import pytest
 
+from comodor.channels import TELEGRAM, WHATSAPP
+from comodor.channels import daemon as service
+from comodor.channels import unit as unit_mod
 from comodor.config import Config, Paths
-from comodor.telegram import service
-from comodor.telegram import unit as unit_mod
+
+#: Both, on every test. One piece of code manages both processes.
+BOTH = pytest.mark.parametrize("channel", [TELEGRAM, WHATSAPP],
+                               ids=lambda c: c.name)
 
 
 @pytest.fixture
@@ -29,6 +38,9 @@ def config(tmp_path):
     (tmp_path / "work").mkdir(parents=True, exist_ok=True)
     made.telegram.token = "42:token"
     made.telegram.allowed = [7]
+    made.whatsapp.token = "EAA-token"
+    made.whatsapp.phone_number_id = "1234567890"
+    made.whatsapp.allowed = ["15550001111"]
     return made
 
 
@@ -37,19 +49,21 @@ def config(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
-def test_it_will_not_start_without_a_bot(config):
-    config.telegram.token = ""
-    ok, why = service.start(config)
+@BOTH
+def test_it_will_not_start_without_a_bot(channel, config):
+    channel.settings(config).token = ""
+    ok, why = service.start(config, channel)
 
     assert ok is False
-    assert "connect" in why
+    assert "connect" in why.lower()
 
 
-def test_it_will_not_start_a_bot_that_would_answer_nobody(config):
+@BOTH
+def test_it_will_not_start_a_bot_that_would_answer_nobody(channel, config):
     """A bot with a token and an empty allow-list runs and ignores everybody,
     which from the outside is indistinguishable from broken."""
-    config.telegram.allowed = []
-    ok, why = service.start(config)
+    channel.settings(config).allowed = []
+    ok, why = service.start(config, channel)
 
     assert ok is False
     assert "paired" in why
@@ -60,54 +74,60 @@ def test_it_will_not_start_a_bot_that_would_answer_nobody(config):
 # --------------------------------------------------------------------------- #
 
 
-def test_nothing_running_is_reported_as_nothing_running(config):
-    here = service.state(config)
+@BOTH
+def test_nothing_running_is_reported_as_nothing_running(channel, config):
+    here = service.state(config, channel)
 
     assert here.running is False
     assert here.pid == 0
 
 
-def test_a_pid_file_for_a_dead_process_is_cleaned_up(config):
+@BOTH
+def test_a_pid_file_for_a_dead_process_is_cleaned_up(channel, config):
     """Left behind by a crash, it otherwise makes `start` refuse forever."""
-    service.pid_file(config).write_text("999999", encoding="utf-8")
+    service.pid_file(config, channel).write_text("999999", encoding="utf-8")
 
-    assert service.state(config).running is False
-    assert not service.pid_file(config).exists(), "the stale file was kept"
+    assert service.state(config, channel).running is False
+    assert not service.pid_file(config, channel).exists(), "the stale file was kept"
 
 
-def test_a_recycled_process_id_is_not_mistaken_for_the_bot(config, monkeypatch):
+@BOTH
+def test_a_recycled_process_id_is_not_mistaken_for_the_bot(channel, config, monkeypatch):
     """Process ids are reused. Treating "something is alive with that number"
     as "the bot is running" is how `stop` kills an unrelated program."""
-    service.pid_file(config).write_text("4321", encoding="utf-8")
+    service.pid_file(config, channel).write_text("4321", encoding="utf-8")
     monkeypatch.setattr(service, "_alive", lambda pid: True)
     monkeypatch.setattr(service, "_command_of",
                         lambda pid: "/usr/bin/postgres -D /var/lib/postgres")
 
-    assert service.state(config).running is False
+    assert service.state(config, channel).running is False
 
 
-def test_a_process_that_is_ours_is_recognised(config, monkeypatch):
-    service.pid_file(config).write_text("4321", encoding="utf-8")
+@BOTH
+def test_a_process_that_is_ours_is_recognised(channel, config, monkeypatch):
+    service.pid_file(config, channel).write_text("4321", encoding="utf-8")
     monkeypatch.setattr(service, "_alive", lambda pid: True)
     monkeypatch.setattr(service, "_command_of",
                         lambda pid: "python -m comodor telegram start")
 
-    here = service.state(config)
+    here = service.state(config, channel)
     assert here.running is True
     assert here.pid == 4321
 
 
-def test_when_the_platform_will_not_say_liveness_is_enough(config, monkeypatch):
+@BOTH
+def test_when_the_platform_will_not_say_liveness_is_enough(channel, config, monkeypatch):
     """Weaker than we would like, and better than refusing to manage it."""
-    service.pid_file(config).write_text("4321", encoding="utf-8")
+    service.pid_file(config, channel).write_text("4321", encoding="utf-8")
     monkeypatch.setattr(service, "_alive", lambda pid: True)
     monkeypatch.setattr(service, "_command_of", lambda pid: "")
 
-    assert service.state(config).running is True
+    assert service.state(config, channel).running is True
 
 
-def test_stopping_something_that_is_not_running_says_so(config):
-    ok, why = service.stop(config)
+@BOTH
+def test_stopping_something_that_is_not_running_says_so(channel, config):
+    ok, why = service.stop(config, channel)
 
     assert ok is False
     assert "not running" in why
@@ -127,15 +147,16 @@ def test_uptime_reads_as_a_duration(seconds, expected):
 # --------------------------------------------------------------------------- #
 
 
-def test_a_child_that_dies_at_once_is_not_reported_as_started(config):
+@BOTH
+def test_a_child_that_dies_at_once_is_not_reported_as_started(channel, config):
     """`start` waits long enough to catch a token Telegram refuses. Reporting
     success for a process that is already gone is worse than the failure."""
-    config.telegram.token = "42:definitely-not-a-token"
-    ok, why = service.start(config)
+    channel.settings(config).token = "definitely-not-a-token"
+    ok, why = service.start(config, channel)
 
     assert ok is False
     assert "stopped immediately" in why
-    assert not service.pid_file(config).exists()
+    assert not service.pid_file(config, channel).exists()
 
 
 # --------------------------------------------------------------------------- #
@@ -143,10 +164,11 @@ def test_a_child_that_dies_at_once_is_not_reported_as_started(config):
 # --------------------------------------------------------------------------- #
 
 
-def test_the_unit_names_this_interpreter_not_a_console_script(config):
+@BOTH
+def test_the_unit_names_this_interpreter_not_a_console_script(channel, config):
     """A service starts with a bare environment, and the directory `pipx` puts
     the `comodor` script in is on a login shell's PATH, not a daemon's."""
-    plan = unit_mod.plan(config)
+    plan = unit_mod.plan(config, channel)
 
     if not plan.supported:
         pytest.skip(plan.why)
@@ -154,17 +176,18 @@ def test_the_unit_names_this_interpreter_not_a_console_script(config):
     assert "-m comodor" in plan.body or "comodor" in plan.body
 
 
-def test_the_unit_is_a_user_service_never_a_system_one(config):
+@BOTH
+def test_the_unit_is_a_user_service_never_a_system_one(channel, config):
     """It runs an agent that edits a person's files with their credentials.
     More authority than the person who owns them buys nothing."""
-    plan = unit_mod.plan(config)
+    plan = unit_mod.plan(config, channel)
 
     if not plan.supported:
         pytest.skip(plan.why)
     if plan.kind == "systemd":
         assert "--user" in " ".join(" ".join(step) for step in plan.enable)
         assert str(plan.path).replace("\\", "/").endswith(
-            "systemd/user/comodor-telegram.service")
+            f"systemd/user/comodor-{channel.name}.service")
     if plan.kind == "launchd":
         assert "LaunchAgents" in str(plan.path)
     if plan.kind == "schtasks":
@@ -172,20 +195,22 @@ def test_the_unit_is_a_user_service_never_a_system_one(config):
             "no other user account"
 
 
-def test_planning_writes_nothing(config):
-    plan = unit_mod.plan(config)
+@BOTH
+def test_planning_writes_nothing(channel, config):
+    plan = unit_mod.plan(config, channel)
 
     if not plan.supported:
         pytest.skip(plan.why)
     assert not plan.path.exists()
-    assert unit_mod.installed(config) is False
+    assert unit_mod.installed(config, channel) is False
 
 
 @pytest.mark.skipif(os.name == "nt", reason="systemd and launchd only")
-def test_the_unit_restarts_it_but_not_in_a_loop(config):
+@BOTH
+def test_the_unit_restarts_it_but_not_in_a_loop(channel, config):
     """A burst of restarts means the network is down or the token is wrong,
     and hammering the Telegram API helps neither."""
-    plan = unit_mod.plan(config)
+    plan = unit_mod.plan(config, channel)
 
     if plan.kind == "systemd":
         assert "Restart=on-failure" in plan.body

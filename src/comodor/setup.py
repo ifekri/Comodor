@@ -26,7 +26,7 @@ import getpass
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 from rich.console import Console
 from rich.panel import Panel
@@ -655,17 +655,23 @@ class SetupWizard:
         """
         self._rule("Run it from your phone?", step, total)
         self.console.print(Text(
-            "  A Telegram bot gives you the whole agent as buttons — send it a "
-            "task,\n  watch it work, answer its questions. It reads and plans "
-            "only, until\n  you say otherwise.\n",
+            "  The whole agent as buttons — send it a task, watch it work, "
+            "answer\n  its questions. It reads and plans only, until you say "
+            "otherwise.\n",
             style=self.theme.style("dim")))
 
         wanted = self._choose(
-            [("no", "Not now", "`comodor telegram connect` sets it up later"),
-             ("yes", "Yes, connect a bot", "you need a token from @BotFather")],
+            [("no", "Not now", "you can set either up later"),
+             ("telegram", "Telegram",
+              "a bot from @BotFather — one token, set up here in a minute"),
+             ("whatsapp", "WhatsApp",
+              "a Meta business number — needs an app at developers.facebook.com")],
             default=1, title="From your phone")
-        if wanted != "yes":
-            self._answered("telegram", "not now")
+        if wanted == "whatsapp":
+            self._point_at_whatsapp(step, total)
+            return
+        if wanted != "telegram":
+            self._answered("phone", "not now")
             return
 
         self._rule("Run it from your phone?", step, total)
@@ -682,12 +688,12 @@ class SetupWizard:
 
         token = self._ask("token")
         if not token:
-            self._answered("telegram", "not now")
+            self._answered("phone", "not now")
             return
 
         username = self._check_token(token)
         if username is None:
-            self._answered("telegram", "not now")
+            self._answered("phone", "not now")
             return
 
         answers.telegram_token = token
@@ -701,9 +707,36 @@ class SetupWizard:
         ))
         self._pair_now(token, username, answers)
         self._answered(
-            "telegram",
-            f"@{username}" + (f", {len(answers.telegram_allowed)} paired"
+            "phone",
+            f"Telegram @{username}" + (f", {len(answers.telegram_allowed)} paired"
                               if answers.telegram_allowed else ", not paired"))
+
+    def _point_at_whatsapp(self, step: int, total: int) -> None:
+        """Say what WhatsApp needs, and hand over to the command that does it.
+
+        Not asked for here, because none of it can be produced at a terminal: a
+        Meta app, a business number, an app secret and a public HTTPS address
+        are four things that live in a browser and a DNS record. A wizard that
+        asked for them would be a wizard that stalled for twenty minutes on the
+        last of six questions.
+        """
+        self._rule("Run it from your phone?", step, total)
+        self.console.print(Panel(
+            Text.from_markup(
+                "WhatsApp goes through Meta's Cloud API, which needs an app "
+                "set up at\n[bold]developers.facebook.com[/bold] — a business "
+                "number, an access token, an\napp secret, and a public HTTPS "
+                "address for Meta to deliver to.\n\n"
+                "None of that can be made from a terminal, so it is its own "
+                "command:\n\n"
+                "   [bold]comodor whatsapp connect[/bold]"
+                "[dim]   walks through all four[/dim]\n"
+                "   [bold]comodor whatsapp webhook[/bold]"
+                "[dim]   what to paste into Meta[/dim]"),
+            title=Text(" WhatsApp ", style=self.theme.style("title")),
+            title_align="left", box=self.theme.box,
+            border_style=self.theme.style("border"), padding=(1, 2)))
+        self._answered("phone", "WhatsApp — `comodor whatsapp connect`")
 
     def _check_token(self, token: str) -> str | None:
         """Ask Telegram whether the token is real, and who it belongs to.
@@ -1074,21 +1107,28 @@ class SetupWizard:
         with nothing running and no indication that the next step was to type
         the program's name again.
 
-        The Telegram line is only offered when there is a bot to start, because
+        A phone line is only offered when there is something to start, because
         an option that cannot work is worse than an option that is not there.
+        The two channels are named rather than lumped together as "the bot":
+        somebody who set up WhatsApp should not be offered "the Telegram bot".
 
-        Returns one of `interface`, `telegram`, `both`, `nothing`.
+        Returns one of `interface`, `telegram`, `whatsapp`, `both`, `nothing`.
         """
-        can_telegram = bool(config.telegram.token and config.telegram.allowed)
+        from .channels import TELEGRAM, WHATSAPP
+
+        ready = [channel for channel in (TELEGRAM, WHATSAPP)
+                 if channel.can_run(config)[0]]
 
         options = [("interface", "Start Comodor",
                     "the interface, here in this terminal")]
-        if can_telegram:
+        for channel in ready:
             options.append((
-                "telegram", "Start the Telegram bot",
+                channel.name, f"Start the {channel.label} bot",
                 "in the background — answers while this terminal is closed"))
+        if ready:
+            named = " and ".join(channel.label for channel in ready)
             options.append(("both", "Both",
-                            "the bot in the background, the interface here"))
+                            f"{named} in the background, the interface here"))
         options.append(("nothing", "Nothing yet",
                         "`comodor` starts it whenever you want"))
 
@@ -1101,34 +1141,48 @@ class SetupWizard:
         return self._choose(options, default=1, title="What now?",
                             header=False)
 
-    def start_telegram(self, config: Config) -> bool:
-        """Put the bot in the background, and say what happened either way."""
-        from .telegram import service
+    def start_phone(self, config: Config, channel: Any) -> bool:
+        """Put one channel's bot in the background, and say what happened.
 
-        ok, why = service.start(config)
+        Named by channel rather than hard-wired to Telegram: there are two of
+        these now, they are started by the same code, and a message that says
+        "Telegram" while starting WhatsApp is a message that will be believed.
+        """
+        from .channels import daemon
+
+        ok, why = daemon.start(config, channel)
         self.console.print()
         if ok:
             self.console.print(Text.assemble(
-                (f"  {self.theme.glyphs.check} ", self.theme.style("good")),
+                (f"  {self.theme.glyphs.check} {channel.label}: ",
+                 self.theme.style("good")),
                 (why, self.theme.style("value")),
             ))
             self.console.print(Text(
-                f"  log   {service.log_file(config)}",
+                f"  log   {daemon.log_file(config, channel)}",
                 style=self.theme.style("dim")))
             self.console.print(Text(
-                "  stop  comodor telegram stop",
+                f"  stop  comodor {channel.name} stop",
                 style=self.theme.style("dim")))
             self.console.print(Text(
-                "  keep it running after a reboot:  "
-                "comodor telegram service install",
+                f"  keep it running after a reboot:  "
+                f"comodor {channel.name} service install",
                 style=self.theme.style("dim")))
         else:
-            self.console.print(Text(f"  {why}", style=self.theme.style("bad")))
+            self.console.print(Text(f"  {channel.label}: {why}",
+                                    style=self.theme.style("bad")))
             self.console.print(Text(
-                "  `comodor telegram start --background` tries again.",
+                f"  `comodor {channel.name} start --background` tries again.",
                 style=self.theme.style("dim")))
         self.console.print()
         return ok
+
+    def start_telegram(self, config: Config) -> bool:
+        """Kept as a name of its own, because the tests and the closing
+        question both reached for it before there was a second channel."""
+        from .channels import TELEGRAM
+
+        return self.start_phone(config, TELEGRAM)
 
     def finish(self, config: Config, closing: bool = True) -> None:
         # `_terminal`, not `_keys`: over a connection where raw key reading
@@ -1233,8 +1287,12 @@ def run_setup(config: Config, console: Console | None = None,
 
     saved.start_after_setup = "nothing"
     if offer:
+        from .channels import CHANNELS
+
         chosen = wizard.offer_start(saved)
         saved.start_after_setup = chosen
-        if chosen in ("telegram", "both"):
-            wizard.start_telegram(saved)
+        for channel in CHANNELS:
+            if chosen == channel.name or (
+                    chosen == "both" and channel.can_run(saved)[0]):
+                wizard.start_phone(saved, channel)
     return saved

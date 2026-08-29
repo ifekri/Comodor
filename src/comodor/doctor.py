@@ -104,7 +104,7 @@ def run_checks(config: Config, online: bool = True) -> Report:
               _check_saved_provider, _check_model, _check_spend_limit,
               _check_brain,
               _check_search_index, _check_skills, _check_leftovers, _check_mcp,
-              _check_telegram]
+              _check_telegram, _check_whatsapp]
     if online:
         checks.append(_check_version)
 
@@ -473,45 +473,59 @@ def _check_mcp(config: Config) -> Finding | None:
 
 
 def _check_telegram(config: Config) -> Finding | None:
-    """A bot with a token and nobody paired answers nothing, silently.
+    return _check_phone(config, "telegram")
 
-    That is the correct behaviour — a bot's username is public, so it must
-    ignore strangers rather than tell them it exists — but from the outside it
-    is indistinguishable from a broken install, and the person who set it up
-    has no way to tell which they have. So it is said here.
+
+def _check_whatsapp(config: Config) -> Finding | None:
+    return _check_phone(config, "whatsapp")
+
+
+def _check_phone(config: Config, name: str) -> Finding | None:
+    """A bot that is set up and answering nobody, or not running at all.
+
+    Both of those are correct behaviour and both are indistinguishable from a
+    broken install to the person holding the phone, so they are said rather
+    than left to be discovered by messaging it from a train.
     """
-    settings = getattr(config, "telegram", None)
-    if settings is None or not settings.token:
+    from .channels import CHANNELS, daemon, unit
+
+    channel = next((c for c in CHANNELS if c.name == name), None)
+    if channel is None:
+        return None
+    settings = channel.settings(config)
+    if not getattr(settings, "token", ""):
         return None
 
-    writes = "may edit files" if settings.allow_writes else "reads and plans only"
+    ok, why = channel.can_run(config)
+    if not ok:
+        return Finding(channel.name, Status.WARN, why.rstrip("."),
+                       remedy=f"`comodor {channel.name} pair` adds your "
+                              f"account")
 
-    if not settings.allowed:
+    if channel.name == "whatsapp" and not settings.app_secret:
         return Finding(
-            "telegram", Status.WARN,
-            "a bot is connected but nobody is paired, so it answers nobody",
-            remedy="`comodor telegram pair` adds your account")
+            channel.name, Status.WARN,
+            "no app secret, so no webhook can be verified — anything that "
+            "reaches the endpoint could pretend to be Meta",
+            remedy="`comodor whatsapp connect --app-secret <secret>`")
 
-    # Whether it is actually up, not just whether it could be. A bot that is
-    # configured and not running is the state somebody is in when they message
-    # it from a train and nothing comes back.
-    from .telegram import service, unit
-
-    here = service.state(config)
+    writes = ("may edit files" if settings.allow_writes
+              else "reads and plans only")
+    here = daemon.state(config, channel)
     where = ("running in the background" if here.running
              else "configured but not running")
     if here.running:
         where += f", pid {here.pid}, up {here.uptime()}"
-    if unit.installed(config):
+    if unit.installed(config, channel):
         where += "; starts at login"
 
-    return Finding("telegram", Status.OK,
+    return Finding(channel.name, Status.OK,
                    f"{len(settings.allowed)} account(s) paired, {writes} — "
                    f"{where}"
                    + ("" if settings.enabled else ", switched off"),
                    remedy=("" if here.running else
-                           "`comodor telegram start --background` runs it "
-                           "without holding a terminal"))
+                           f"`comodor {channel.name} start --background` runs "
+                           f"it without holding a terminal"))
 
 
 # --------------------------------------------------------------------------- #
