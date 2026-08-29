@@ -14,16 +14,11 @@ or the next one. Not a setting you turn on. Not a file you maintain.
 
 [**comodor.ai**](https://comodor.ai) · [Installation](#install) · [Documentation](docs/README.md) · [Changelog](CHANGELOG.md)
 
-</div>
 
 ---
 
-```
-                         ░█▀▀░█▀█░█▄█░█▀█░█▀▄░█▀█░█▀▄  
-                         ░█░░░█░█░█░█░█░█░█░█░█░█░█▀▄  
-                         ░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀░░▀▀▀░▀░▀  
-                       it learns the way you correct it
-```
+[![](.github/ascii-comodor.svg)]()
+</div>
 
 ## Why this one
 
