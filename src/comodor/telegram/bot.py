@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..channels.markdown import to_telegram
 from ..config import Config
 from . import keyboard as kb
 from .api import Bot, TelegramError, Unauthorised, backoff
@@ -445,7 +446,10 @@ class Service:
             return
         reply.last_drawn = now
 
-        body = escape(text.strip()) or "<i>working…</i>"
+        # The model writes Markdown and Telegram reads HTML, so this used to
+        # escape the answer and hand somebody a wall of asterisks, brackets
+        # and backticks. It is converted now, not escaped.
+        body = to_telegram(text.strip()) or "<i>working…</i>"
         if tools:
             recent = tools[-3:]
             body += "\n\n<i>" + escape(" · ".join(recent)) + "</i>"
@@ -511,7 +515,7 @@ class Service:
         head = (f"<b>Question {waiting.at + 1} of {len(waiting.questions)}</b>\n\n"
                 if len(waiting.questions) > 1 else "")
         sent = self.bot.send(
-            talk.chat, head + escape(question.get("prompt", "")),
+            talk.chat, head + to_telegram(question.get("prompt", "")),
             keyboard=kb.question(waiting.request_id, waiting.at, options,
                                  waiting.answers.get(waiting.at, set()),
                                  multi=bool(question.get("multi"))))
@@ -542,7 +546,7 @@ class Service:
                    if not o.get("free")]
         self.bot.edit(
             talk.chat, waiting.message,
-            escape(question.get("prompt", "")),
+            to_telegram(question.get("prompt", "")),
             keyboard=kb.question(waiting.request_id, index, options, chosen,
                                  multi=bool(question.get("multi"))))
 

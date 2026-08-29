@@ -33,6 +33,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..channels.markdown import to_whatsapp
 from ..config import Config
 from . import menu as ui
 from .api import Cloud, OutsideWindow, WhatsAppError, split
@@ -434,7 +435,9 @@ class Service:
             turn.finished = True
         talk.turn = None
 
-        body = (answer or "").strip() or "Done."
+        # WhatsApp has its own markup and no link syntax at all, so the
+        # model's Markdown arrived as punctuation.
+        body = to_whatsapp((answer or "").strip()) or "Done."
         if tools:
             body += "\n\n_" + " · ".join(tools[-3:]) + "_"
         self._send(talk.wa_id, body)

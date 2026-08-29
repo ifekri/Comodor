@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..channels.markdown import to_slack
 from ..config import Config
 from . import blocks as ui
 from .api import EDIT_EVERY, RateLimited, Slack, SlackError, escape, split
@@ -431,7 +432,10 @@ class Service:
             return
         reply.last_drawn = now
 
-        body = escape(text.strip()) or "_working…_"
+        # Slack reads mrkdwn, not Markdown: `*bold*` rather than `**bold**`,
+        # `<url|text>` rather than `[text](url)`. Handed the model's own
+        # markup it printed the punctuation.
+        body = to_slack(text.strip()) or "_working…_"
         if tools:
             body += "\n\n_" + escape(" · ".join(tools[-3:])) + "_"
 
