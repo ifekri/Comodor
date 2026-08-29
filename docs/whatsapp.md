@@ -3,6 +3,17 @@
 The same agent, reached from a WhatsApp business number: send it a task, watch
 it work, answer its questions — without opening a terminal.
 
+> **Read this first.** [Telegram](telegram.md) does the same thing and takes
+> about a minute: message @BotFather, paste one token. WhatsApp takes about
+> twenty, is technical, and most of it is in Meta's dashboard — you need a Meta
+> app, an app secret and a public HTTPS address. **If it does not have to be
+> WhatsApp, use Telegram.**
+>
+> There is no way around that. WhatsApp has no equivalent of a bot token, and
+> Meta delivers messages to a URL rather than letting anything poll for them.
+> The only genuine one-click version would route every message through
+> somebody else's server, which is not a trade this tool makes.
+
 ```bash
 comodor whatsapp connect              # walks you through all of it
 comodor whatsapp pair                 # add your number
@@ -41,9 +52,8 @@ to hand its users.
 
 ## How long this takes
 
-Honestly: about twenty minutes the first time, against one minute for
-Telegram. Most of it is in Meta's dashboard. If you do not specifically need
-WhatsApp, [Telegram](telegram.md) is less work for the same thing.
+About twenty minutes the first time, against one minute for Telegram, and most
+of it is in Meta's dashboard rather than here.
 
 What you do **not** need: a real phone number, a payment method, or business
 verification. Adding the WhatsApp product creates a **test number** that

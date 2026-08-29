@@ -174,9 +174,9 @@ against Telegram there and then, and shows a code to send the bot so it knows
 which account to answer — a minute, start to finish.
 See [From your phone](telegram.md).
 
-**WhatsApp** needs a Meta app, a business number, an app secret and a public
-HTTPS address, none of which can be made from a terminal. The wizard says what
-is needed and hands over to `comodor whatsapp connect` — see
+**WhatsApp** does the same thing and takes about twenty minutes: a Meta app, a
+business number, an app secret and a public HTTPS address, none of which can be
+made from a terminal. Worth it only if it has to be WhatsApp — see
 [From WhatsApp](whatsapp.md).
 
 Either way it reads and plans only until you say otherwise, and declining costs

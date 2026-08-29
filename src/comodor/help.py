@@ -229,9 +229,14 @@ Full guide: docs/web.md"""),
   comodor whatsapp start -b        run it detached from this terminal
   comodor whatsapp status          what is set, who may talk, is it running
 
-About twenty minutes to set up, against one for Telegram, and most of it is
-in Meta's dashboard. No real phone number, no card and no business
-verification: the test number Meta creates messages five people for free.
+Telegram does the same thing in about a minute. This takes about twenty and is
+technical, and most of it is in Meta's dashboard - so unless it has to be
+WhatsApp, `comodor help telegram` is the shorter road.
+
+What is NOT needed, because everybody assumes otherwise: no real phone number,
+no payment method, no business verification. The test number Meta creates
+messages five people for free, which is four more than one person talking to
+their own agent needs.
 
 Meta's Cloud API, which is the official one. The libraries that drive WhatsApp
 Web instead need Node, break whenever the web client changes, and are against

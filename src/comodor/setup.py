@@ -660,12 +660,21 @@ class SetupWizard:
             "otherwise.\n",
             style=self.theme.style("dim")))
 
+        # The two are not equal work and the list says so. WhatsApp needs a
+        # Meta app, an app secret and a public HTTPS address — twenty minutes
+        # of somebody else's dashboard — and it does exactly what the one-token
+        # option does. Somebody choosing it because it was listed second, and
+        # discovering that twenty minutes later, is a question that cost them
+        # their evening.
         wanted = self._choose(
             [("no", "Not now", "you can set either up later"),
              ("telegram", "Telegram",
-              "a bot from @BotFather — one token, set up here in a minute"),
+              "recommended — one token from @BotFather, about a minute, "
+              "nothing else to set up"),
              ("whatsapp", "WhatsApp",
-              "a Meta business number — needs an app at developers.facebook.com")],
+              "about twenty minutes and technical: a Meta app, an app secret "
+              "and a public HTTPS address. It does the same thing Telegram "
+              "does — pick this only if it has to be WhatsApp")],
             default=1, title="From your phone")
         if wanted == "whatsapp":
             self._point_at_whatsapp(step, total)

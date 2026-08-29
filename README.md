@@ -147,7 +147,7 @@ Esc        stop it                F3         cycle mode
 | [What it can do](docs/tools.md) | The 13 tools, and when it uses each |
 | [Safety and permissions](docs/safety.md) | What it asks, and what it never does |
 | [From your phone](docs/telegram.md) | The Telegram bot, and who it answers |
-| [From WhatsApp](docs/whatsapp.md) | The Cloud API, the webhook, and Meta's limits |
+| [From WhatsApp](docs/whatsapp.md) | The Cloud API — longer to set up; Telegram does the same thing |
 | [Models on your machine](docs/local-models.md) | Downloading one, running it offline |
 | [Configuration](docs/configuration.md) | Every setting, and what wins |
 | [Cost](docs/cost.md) | Caching, budgets, paying less |

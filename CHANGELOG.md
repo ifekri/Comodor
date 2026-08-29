@@ -2,6 +2,32 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.19.2 — 2026-08-29
+
+### Say which one to pick
+
+The two ways of reaching Comodor from a phone are not equal work, and the list
+now says so where the choice is made rather than at the bottom of a page:
+
+```
+1. Not now    you can set either up later
+2. Telegram   recommended — one token from @BotFather, about a minute
+3. WhatsApp   about twenty minutes and technical: a Meta app, an app secret
+              and a public HTTPS address. It does the same thing Telegram
+              does — pick this only if it has to be WhatsApp
+```
+
+Somebody picking WhatsApp because it was listed second, and finding out twenty
+minutes later what that meant, is a question that cost them their evening. The
+same sentence is now in `comodor help whatsapp`, at the top of the page, in the
+documentation index and in the README.
+
+There is no shorter road, and the page says why rather than leaving it to be
+discovered: WhatsApp has no equivalent of a bot token, and Meta delivers to a
+URL rather than letting anything poll. A genuine one-click version exists —
+Meta's Embedded Signup — but every message would have to route through
+somebody else's server, which is not a trade this tool makes.
+
 ## 0.19.1 — 2026-08-29
 
 ### WhatsApp setup, walked rather than documented

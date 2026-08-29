@@ -42,7 +42,7 @@ ends with the agent doing something useful.
 | | |
 |---|---|
 | [From your phone](telegram.md) | The Telegram bot: pairing, the buttons, and who it answers |
-| [From WhatsApp](whatsapp.md) | The Cloud API: the webhook, pairing, and Meta's limits |
+| [From WhatsApp](whatsapp.md) | The Cloud API — about twenty minutes and technical. Telegram does the same in one |
 | [Models on your machine](local-models.md) | Downloading one, running it offline, adding to the list |
 | [Questions](questions.md) | The form it puts up when a request reads two ways |
 | [How it learns](learning.md) | Corrections, lessons, rules, and the proof |
