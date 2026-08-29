@@ -109,3 +109,4 @@ keyboard, with a halo on screen showing you where it is about to click.
 | [CONTRIBUTING](../CONTRIBUTING.md) | Working on Comodor itself |
 | [SECURITY](../SECURITY.md) | Reporting something sensitive |
 | [RELEASING](../RELEASING.md) | How a release is cut |
+| [bench](../bench/README.md) | Thirteen coding tasks, judged by programs — what it scores, and how to run it against your own model |

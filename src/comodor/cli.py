@@ -183,6 +183,17 @@ def _release() -> str:
 
 def run_headless(config: Config, args: argparse.Namespace) -> int:
     """One task, no TUI. Used by scripts, hooks and CI."""
+    # Before anything can be printed. A Windows console is cp1252 by default,
+    # and `print` of an answer containing an arrow, an em dash or a word in any
+    # non-Latin script raises UnicodeEncodeError — which kills the run after
+    # the work is done and returns nothing to whatever called it. The
+    # interactive path has always done this when it builds its console; the
+    # headless path never builds one, so it never did.
+    from .ui.console import force_utf8
+
+    force_utf8()
+
+    from . import questions as forms
     from .agent import AgentLoop, Conversation
     from .agent.spawn import spawner
     from .events import EventBus, Kind
@@ -219,6 +230,32 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     agent = AgentLoop(config, gateway, tools, bus,
                       permissions, Conversation(), memory, skills=skills)
 
+    # Two things every headless run needs, whatever it prints.
+    #
+    # *Nobody is there to fill in a form.* `ask` publishes a request and waits
+    # half an hour for an answer that cannot arrive, so one ambiguous task used
+    # to wedge a script for thirty minutes and then carry on anyway. The tool
+    # already handles an unanswered form well — it tells the model to choose
+    # sensible defaults and say which it chose — so the answer is given at once
+    # rather than after the timeout. Permission requests are left alone: they
+    # have their own deadline and refusing by default is the right end of it.
+    #
+    # *What it reached for is part of the result.* A caller checking whether a
+    # task was done properly wants to know that `ask` was called before the
+    # first edit, or that nothing was ever read. The count was already
+    # reported; the names cost nothing and are what makes it checkable.
+    used: list[str] = []
+
+    def observe(event: Any) -> None:
+        if event.kind is Kind.TOOL_START:
+            used.append(str(event.get("name", "")))
+        elif event.kind is Kind.REQUEST:
+            request = event.get("request")
+            if request is not None and request.kind == "questions":
+                request.answer(forms.CANCELLED)
+
+    bus.subscribe(observe)
+
     if not args.json:
         _greet_on_stderr(config, memory, skills)
         for note in config.complaints:
@@ -247,6 +284,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
             "stopped": result.stopped,
             "steps": result.steps,
             "tool_calls": result.tool_calls,
+            "tools": used,
             "error": result.error,
             "usage": {
                 "input_tokens": result.usage.input_tokens,

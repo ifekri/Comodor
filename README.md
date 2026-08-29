@@ -40,6 +40,33 @@ Those are real, read out of a working install.
 `/progress` shows whether that is actually working — corrections per turn,
 falling or not. A number, not a claim.
 
+## Whether it is any good, measured
+
+Most coding agents ask you to take their quality on trust. Comodor has a
+benchmark: thirteen tasks in thirteen real repositories, judged by programs —
+the suite goes green, the file parses, the old name is gone from every file.
+Three attempts each, reported as a rate, because a single run dressed up as
+"it passes" is a made-up number.
+
+Against **MiMo v2.5 Pro**, a cheap model:
+
+| | |
+|---|---|
+| fixing a failing test | 12/12 |
+| building from a spec | 5/6 |
+| finding things in code | 6/6 |
+| refactoring across files | 6/6 |
+| **not** doing the wrong thing | 3/9 |
+
+That last row is the one nobody else measures, and it is the interesting
+result: this model can code and cannot be careful. It built on a one-line
+request with a real ambiguity in it instead of asking — three times out of
+three, identically. Told not to invent the data that would make a suite green,
+it invented it twice.
+
+The whole table, and how to run it against your own model, is in
+[`bench/`](bench/README.md). Every number there came from a real run.
+
 ## Everything else it does
 
 | | |

@@ -44,7 +44,15 @@ comodor = "comodor.cli:main"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["src/comodor/_version.py"]
+# The benchmark's task repositories are fixtures, not source. They are the
+# starting state a model is measured against, and tidying them changes what is
+# being measured — one judge pins a line number, and an import reordered by a
+# linter would silently move it.
+extend-exclude = [
+    "src/comodor/_version.py",
+    "bench/tasks/*/repo",
+    "bench/tasks/*/hidden",
+]
 
 [tool.ruff.lint]
 # Chosen by counting what each family actually found in this tree, not by

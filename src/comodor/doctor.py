@@ -101,7 +101,8 @@ def run_checks(config: Config, online: bool = True) -> Report:
     from somewhere with no route out — turns it off and gets the rest.
     """
     checks = [_check_config, _check_config_permissions, _check_provider,
-              _check_saved_provider, _check_model, _check_spend_limit,
+              _check_saved_provider, _check_model, _check_context_window,
+              _check_spend_limit,
               _check_brain,
               _check_search_index, _check_skills, _check_leftovers, _check_mcp,
               _check_telegram, _check_whatsapp, _check_slack]
@@ -267,6 +268,49 @@ def _check_model(config: Config) -> Finding | None:
             remedy=f"if requests fail, try {spec.default_model}")
 
     return Finding("model", Status.OK, model)
+
+
+def _check_context_window(config: Config) -> Finding | None:
+    """What the model can read, against what the settings claim it can.
+
+    `agent.context_limit` defaults to a million and describes no model in
+    particular. Left in force against a small one, compaction never fires and
+    the first sign of it is the provider refusing a request mid-task — an error
+    that says nothing about the cause. The agent works to the real window now;
+    this says so, because a setting that is being overruled and never mentioned
+    is a setting somebody will keep trying to change.
+    """
+    entry = config.providers.get(config.provider)
+    if entry is None or not config.active_model():
+        return None
+
+    from .providers import profile
+
+    found = profile.of(config)
+    configured = config.agent.context_limit or 0
+    where = {"registry": "known for this model",
+             "provider": f"published by {entry.display}",
+             "configured": "from your settings"}[found.source]
+
+    if found.source != "configured" and configured and configured > found.context:
+        return Finding(
+            "context window", Status.WARN,
+            f"settings say {configured:,} tokens; {found.model} takes "
+            f"{found.context:,} ({where})",
+            remedy=f"the smaller number is used, so nothing breaks. Set "
+                   f"agent.context_limit to {found.context} to stop the "
+                   f"gauge disagreeing with itself")
+
+    if found.cramped:
+        return Finding(
+            "context window", Status.WARN,
+            f"{found.context:,} tokens ({where}) — the tool schemas alone are "
+            f"a large share of that",
+            remedy="expect shorter tasks and earlier compaction. A model with "
+                   "a bigger window will do more per turn")
+
+    return Finding("context window", Status.OK,
+                   f"{found.context:,} tokens ({where})")
 
 
 def _check_spend_limit(config: Config) -> Finding | None:

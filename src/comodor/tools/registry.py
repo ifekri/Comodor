@@ -175,7 +175,50 @@ class ToolRegistry:
             return ToolResult.failure(
                 f"{name} is not available in {ctx.config.agent.mode} mode")
 
+        # Arguments that were not JSON at all. `parse_arguments` puts what it
+        # could not decode under `__raw__` rather than crashing, and that then
+        # reached the tool as an unexpected keyword — so the model was told
+        # "invalid arguments for read_file: unexpected keyword __raw__", which
+        # names neither the problem nor the fix. Weaker models emit this
+        # regularly and, told that, emit it again. Showing the schema turns a
+        # loop into a correction.
+        if "__raw__" in args:
+            return ToolResult.failure(_teach(tool, str(args["__raw__"])))
+
         # Bounded here rather than in each tool, so a tool added tomorrow —
         # or one that arrived over MCP and was never written here at all — is
         # covered by the same rule as the ones that exist today.
         return overflow.contain(tool.invoke(ctx, args), ctx, name)
+
+
+def _teach(tool: Any, raw: str) -> str:
+    """Say what the tool wanted, next to what arrived.
+
+    Deliberately shaped like an example rather than a schema dump. A model that
+    has just failed to produce JSON is not helped by being handed more of it to
+    read; it is helped by seeing the object it should have written.
+    """
+    schema = getattr(tool, "parameters", None) or {}
+    properties = schema.get("properties") or {}
+    required = [name for name in schema.get("required") or [] if name in properties]
+
+    parts = []
+    for name in required or list(properties)[:4]:
+        kind = str((properties.get(name) or {}).get("type", "string"))
+        parts.append(f'"{name}": {_example(kind)}')
+    shape = "{" + ", ".join(parts) + "}"
+
+    optional = [name for name in properties if name not in required]
+    tail = (f" Optional: {', '.join(sorted(optional)[:6])}." if optional else "")
+
+    return (f"the arguments for {tool.name} were not valid JSON, so nothing "
+            f"could be read from them.\n\n"
+            f"Send an object like: {shape}{tail}\n\n"
+            f"What arrived was: {raw[:300]}")
+
+
+def _example(kind: str) -> str:
+    # ASCII, and valid JSON as it stands. An ellipsis inside the example would
+    # make the one thing being shown — a well-formed object — not one.
+    return {"integer": "1", "number": "1", "boolean": "true",
+            "array": "[]", "object": "{}"}.get(kind, '"..."')

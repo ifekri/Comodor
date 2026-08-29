@@ -23,6 +23,41 @@ Everything is confined to the project folder unless you turn
 is smaller, it is reviewable as a diff, and it cannot silently lose the rest of
 the file.
 
+**`edit_file` finds the text you meant.** Exact match first, always. If that
+finds nothing it tries again ignoring line endings, then trailing whitespace,
+then indentation — and says which one worked:
+
+```
+Edited src/api/routes.py (+2/-1). Matched after normalising line endings.
+```
+
+Never silently: an edit that landed somewhere slightly different from what was
+asked for and said nothing is worse than one that refused. And if relaxing the
+match turns one target into several, that step is abandoned rather than
+guessed at — the information that told them apart is what was just dropped.
+
+When nothing matches, the error names the closest few places and diffs the
+nearest, so the next attempt can be right instead of another guess.
+
+**Both check what they wrote.** The file is parsed straight after the write and
+anything wrong with it goes back to the model in the same tool result:
+
+```
+Edited src/api/routes.py (+3/-1).
+
+WARNING  SyntaxError at line 42: unexpected indent. The file was written as
+given — read it and fix it.
+```
+
+So a broken file is found in the turn that broke it rather than by you, an hour
+later. Python, JSON and TOML are parsed in process and cost microseconds;
+JavaScript uses `node --check` when `node` is on your path; anything else is
+left alone, because a warning that is usually wrong is worse than no warning.
+
+It never refuses the write — half a refactor leaves a file inconsistent, and
+the second edit of the pair has to be possible. `safety.verify_edits: false`
+turns it off.
+
 ---
 
 ## Running things

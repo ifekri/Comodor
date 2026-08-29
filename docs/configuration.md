@@ -96,7 +96,7 @@ See [Choosing a model](models.md).
 | `max_steps` | **`0` — no limit, and that is the default.** A refactor across a dozen files ran out of twenty-four steps mid-thought, and a step count has no relationship to harm. Set a number to bring it back |
 | `max_seconds` | an hour. `0` for no limit |
 | `max_cost_usd` | the ceiling that maps onto what going wrong costs — [where the model has a published rate](cost.md#when-the-limit-cannot-fire). `0` for no limit |
-| `context_limit` | the gauge. Follows the model automatically when you switch |
+| `context_limit` | your ceiling on the window. The agent works to whichever is **smaller**, this or what the model actually takes — so a leftover `1000000` against a 32k model no longer stops compaction from firing. `comodor doctor` says which number is in force and where it came from |
 | `compact_at` | summarise the history past this fraction of the limit |
 | `max_tool_chars` | how much of one tool result reaches the model. The rest is written to a file it is told how to read — not truncated |
 | `keep_screenshots` | how many stay in the conversation. [Why](computer.md#screenshots-and-what-they-cost) |
@@ -113,6 +113,7 @@ See [Choosing a model](models.md).
     "auto_approve_writes": false,
     "auto_approve_shell": false,
     "checkpoints": true,
+    "verify_edits": true,
     "workspace_only": true,
     "allow_commands": [],
     "deny_commands": ["rm -rf /", "..."],
@@ -122,6 +123,13 @@ See [Choosing a model](models.md).
   }
 }
 ```
+
+`verify_edits` parses a file after writing it and tells the model what it
+broke, in the same tool result — so a syntax error is found in the turn that
+made it rather than by you, later. Python, JSON and TOML are parsed in
+process; JavaScript uses `node --check` when `node` is on your path; anything
+else is left alone. It never refuses a write, so half a refactor is still
+possible.
 
 Full explanation: [Safety and permissions](safety.md).
 

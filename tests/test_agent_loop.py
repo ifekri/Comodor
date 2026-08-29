@@ -179,6 +179,56 @@ def test_provider_failure_surfaces_as_an_error_event(config, bus):
     assert any(event.kind is Kind.ERROR for event in seen)
 
 
+def test_a_turn_that_fails_halfway_still_reports_the_work_it_did(config, bus):
+    """Found by the benchmark: a task whose files had been changed came back
+    saying `steps: 0, tool_calls: 0`.
+
+    The result used to be built on the way out of the loop, so an exception
+    discarded it and left the empty one the caller started with. Everything
+    downstream believed nothing had happened — the headless JSON, the turn
+    summary, and the lesson the brain records about what a task like this
+    costs — while the project on disk had been edited."""
+    scripts = [
+        Script(text="Reading.", tool_calls=[
+            ToolCall(id="c1", name="list_dir", arguments={"path": "."})]),
+        Script(text="Writing.", tool_calls=[
+            ToolCall(id="c2", name="write_file",
+                     arguments={"path": "made.py", "content": "x = 2\n"})]),
+        Script(error="the provider fell over"),
+    ]
+    agent = make_agent(config, bus, scripts)
+    result = agent.run("do the thing")
+
+    assert result.stopped == "error"
+    assert (config.paths.project / "made.py").exists(), \
+        "the premise of this test is that work was done"
+    assert result.steps == 3, f"reported {result.steps} steps"
+    assert result.tool_calls == 2, f"reported {result.tool_calls} tool calls"
+
+
+def test_a_cancelled_turn_reports_what_it_managed_first(config, bus):
+    scripts = [
+        Script(text="Working.", tool_calls=[
+            ToolCall(id="c1", name="list_dir", arguments={"path": "."})]),
+        Script(text="Done."),
+    ]
+    agent = make_agent(config, bus, scripts)
+
+    seen = []
+
+    def stop_after_the_first_tool(event):
+        seen.append(event.kind)
+        if event.kind is Kind.TOOL_END:
+            agent.interrupt()
+
+    bus.subscribe(stop_after_the_first_tool)
+    result = agent.run("look")
+
+    assert result.stopped == "cancelled"
+    assert result.tool_calls == 1, \
+        "a cancelled turn that ran a tool must say it ran a tool"
+
+
 def test_events_describe_the_whole_turn(config, bus):
     kinds = []
     bus.subscribe(lambda event: kinds.append(event.kind))

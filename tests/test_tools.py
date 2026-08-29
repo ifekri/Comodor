@@ -365,3 +365,50 @@ def test_html_is_reduced_to_readable_text():
 
     assert "Title" in text and "First paragraph." in text and "Second." in text
     assert "alert" not in text and "color:red" not in text
+
+
+# --------------------------------------------------------------------------- #
+# arguments that were not JSON
+#
+# `parse_arguments` files what it cannot decode under `__raw__` rather than
+# crashing. That then reached the tool as an unexpected keyword, so the model
+# was told "invalid arguments for read_file: unexpected keyword __raw__" —
+# which names neither the problem nor the fix. A weaker model told that emits
+# the same thing again.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_malformed_argument_blob_is_named_as_such(tool_context, tools):
+    result = tools.invoke("read_file", tool_context, {"__raw__": "path=a.py"})
+
+    assert not result.ok
+    assert "not valid JSON" in result.content
+    assert "__raw__" not in result.content, \
+        "an internal key is not something the model can act on"
+
+
+def test_it_is_shown_the_object_it_should_have_sent(tool_context, tools):
+    import json
+
+    result = tools.invoke("edit_file", tool_context,
+                          {"__raw__": '{"path": "a.py", '})
+
+    example = result.content.split("Send an object like: ")[1].split("\n")[0]
+    example = example.split(" Optional:")[0].strip()
+    decoded = json.loads(example)
+
+    assert set(decoded) == {"path", "old_string", "new_string"}, \
+        f"the example does not match the tool's own required fields: {decoded}"
+
+
+def test_what_arrived_is_quoted_back(tool_context, tools):
+    """Without it the model cannot tell which of its calls was rejected."""
+    result = tools.invoke("read_file", tool_context, {"__raw__": "path=notes.md"})
+
+    assert "path=notes.md" in result.content
+
+
+def test_an_enormous_blob_does_not_come_back_whole(tool_context, tools):
+    result = tools.invoke("read_file", tool_context, {"__raw__": "x" * 50_000})
+
+    assert len(result.content) < 2_000
