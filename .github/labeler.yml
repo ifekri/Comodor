@@ -1,0 +1,55 @@
+Documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "**/*.md"
+
+Testing:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+
+CI:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+
+Area: Core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/**"
+
+Area: Configuration:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.toml"
+          - "**/*.ini"
+          - "**/*.cfg"
+          - "**/*.yaml"
+          - "**/*.yml"
+          - ".env.example"
+
+Build:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "pyproject.toml"
+          - "setup.py"
+          - "setup.cfg"
+          - "MANIFEST.in"
+
+Dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "pyproject.toml"
+          - "requirements*.txt"
+          - "constraints*.txt"
+          - "uv.lock"
+          - "poetry.lock"
+          - "Pipfile"
+          - "Pipfile.lock"
+
+Release:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/release.yml"
+          - "RELEASING.md"
