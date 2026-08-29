@@ -2,6 +2,77 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.20.0 — 2026-08-29
+
+### Slack
+
+```bash
+comodor slack manifest              # the app definition to paste into Slack
+comodor slack connect               # the two tokens, checked as you paste them
+comodor slack pair
+comodor slack start --background
+```
+
+About five minutes, and **no public address to arrange** — which is the whole
+difference between this and WhatsApp.
+
+**Socket Mode** is why. Slack's other delivery method posts to a URL and needs
+a certificate and a tunnel; Socket Mode has the app ask Slack for a websocket
+and connect *outward*, so nothing has to be reachable from the internet and
+there is no address to keep up to date. And Slack takes an **app manifest**, so
+`comodor slack manifest` prints the app whole — name, scopes, events, Socket
+Mode already on — and creating it is one paste rather than eleven checkboxes
+across four settings pages.
+
+It is the roomiest of the three channels. Messages can be edited, so a reply is
+one message that grows as the answer arrives; buttons are plentiful, so the
+menu fits one screen.
+
+What differs from Telegram and WhatsApp is that a workspace has channels,
+threads and other people in it. So: **direct messages always, a channel only
+when mentioned, and always in the thread it was spoken to in.** A bot that
+replies to everything in a shared channel is a bot somebody removes that
+afternoon; a question asked in a thread and answered in the channel is answered
+in front of everybody.
+
+The two tokens are not interchangeable and mixing them up is the commonest way
+this fails, so each is refused by name in the other's place rather than letting
+Slack answer `invalid_auth` an hour later. A missing scope says to *reinstall*,
+because a scope added without reinstalling never reaches the token you already
+hold and the error alone does not mention it.
+
+**No new dependency.** The websocket written for driving Chrome moved to
+`net/ws` and grew TLS, so one implementation of RFC 6455 serves both callers
+rather than the wheel carrying two. Thirty-two real-browser tests against a
+real Chrome are the guard on that move.
+
+### Set it all up from the browser
+
+**Admin → From your phone** now connects, pairs, starts, stops, installs at
+login and switches writes for all three channels. Somebody running Comodor on a
+machine they reach over SSH should not have to learn a second vocabulary to
+connect a bot to it.
+
+Credentials are proved before they are saved. Pairing runs a real service —
+the code is sent *to* the bot, so something has to be listening — and stops it
+the moment somebody is added or the window closes, so an abandoned pairing does
+not leave a daemon behind. The panel is redrawn whole rather than patched: each
+of these actions changes two or three things on it, and a half-updated panel is
+how somebody comes to believe a bot is running when it is not.
+
+**Nothing on that panel leaves the machine.** Every write is behind the same
+guard the API key and the working folder use, because a bot token hands remote
+control of this machine to whoever holds it. And the payload carries counts
+where the tokens and the account ids would be — that URL gets shared by
+accident.
+
+### Everywhere else
+
+`comodor help slack`, [the page](docs/slack.md), the CLI reference, a
+configuration section, a `doctor` check, and a line in the first-run wizard
+that says what each of the three actually costs: a minute, five minutes,
+twenty.
+
 ## 0.19.2 — 2026-08-29
 
 ### Say which one to pick
