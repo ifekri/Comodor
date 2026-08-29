@@ -75,10 +75,10 @@ def main_menu(*, busy: bool, mode: str, rules: int = 0,
     while a turn is running the only thing offered is stopping it.
     """
     if busy:
-        top = [button("⏹  Stop", "stop")]
+        top = [button("🟥  Stop", "stop")]
     else:
-        top = [button("✳  New chat", "new"),
-               button("↺  History", "chats")]
+        top = [button("💬  New chat", "new"),
+               button("🔄  History", "chats")]
 
     # The settings people need are on this screen, not behind Settings. The
     # first thing somebody does with a new bot is find out what it is pointed
@@ -87,14 +87,14 @@ def main_menu(*, busy: bool, mode: str, rules: int = 0,
     # guess that it is there.
     return rows(
         top,
-        [button(f"◐  Mode · {mode.capitalize()}", "mode"),
-         button("◈  Status", "status")],
-        [button(f"◆  Model{f' · {model}' if model else ''}"[:60], "models"),
-         button("▤  Folder", "folder")],
-        [button("✦  Skills", "skills"),
-         button(f"⌗  Rules{f' · {rules}' if rules else ''}", "rules")],
-        [button("⚙  Settings", "settings"),
-         button("?  Help", "help")],
+        [button(f"Ⓜ️  Mode · {mode.capitalize()}", "mode"),
+         button("⏳  Status", "status")],
+        [button(f"👾  Model{f' · {model}' if model else ''}"[:60], "models"),
+         button("📂  Folder", "folder")],
+        [button("❇️  Skills", "skills"),
+         button(f"🧩  Rules{f' · {rules}' if rules else ''}", "rules")],
+        [button("⚙️  Settings", "settings"),
+         button("❓  Help", "help")],
     )
 
 
