@@ -2,6 +2,54 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.20.1 — 2026-08-29
+
+### The model's Markdown, rendered instead of printed
+
+The model writes Markdown. None of the three chat apps reads Markdown, and all
+three were being handed the answer as-is — so a reply that said
+
+    Use **`Path.resolve()`** — see [the docs](https://docs.python.org/3/).
+
+arrived on somebody's phone as exactly that, asterisks and brackets and
+backticks intact. Nobody reading that concludes the renderer is wrong; they
+conclude the tool is sloppy. And a fenced code block — the part of an answer
+that most needs to be set apart — was the part that looked worst.
+
+Telegram was the clearest case: replies are sent with `parse_mode=HTML` and the
+answer was being HTML-*escaped*, which is precisely the wrong operation.
+
+One renderer, three flavours, because no two of them agree:
+
+| | |
+|---|---|
+| Telegram | HTML — `<b>`, `<code>`, `<pre><code class="language-…">`, `<a href>`, `<blockquote>` |
+| Slack | mrkdwn — `*bold*`, `_italic_`, and `<url\|text>` links |
+| WhatsApp | its own markup, and no link syntax at all, so the label keeps its address beside it |
+
+Headings become bold, because none of the three has headings. A rule becomes a
+drawn line rather than three hyphens, which all three render as three hyphens.
+
+**Order is the whole of the correctness.** Code is lifted out first and sealed
+behind a sentinel, so an asterisk in `rm -rf *.log` is never emphasis and a `<`
+inside a block is escaped as text rather than parsed as a tag. Every other
+replacement is sealed as it is made — which is what fixes the bug that made
+this worth writing carefully: bold emits `*` on Slack and WhatsApp, so running
+the italic pass afterwards matched bold's own output and turned every bold word
+italic.
+
+Two traps that produce almost-right output are handled and tested. An
+underscore only opens emphasis at a word boundary, so `some_var_name` survives
+intact. An unmatched `**` from a half-arrived stream stays text instead of
+swallowing the rest of the message into bold — and a code fence cut off
+mid-stream still renders as code, because a reply is drawn while it arrives and
+half a fence is the ordinary case rather than an edge one.
+
+Checked against Telegram's own parser, which rejects malformed HTML wholesale
+and says nothing about why: generics, shell redirects, nested code inside bold,
+and a truncated fence all parse. Tag balance and escaping are asserted in tests
+so they keep parsing.
+
 ## 0.20.0 — 2026-08-29
 
 ### Slack
