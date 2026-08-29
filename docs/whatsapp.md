@@ -4,11 +4,16 @@ The same agent, reached from a WhatsApp business number: send it a task, watch
 it work, answer its questions — without opening a terminal.
 
 ```bash
-comodor whatsapp connect --number-id … --token … --app-secret …
-comodor whatsapp webhook              # what to paste into Meta
+comodor whatsapp connect              # walks you through all of it
 comodor whatsapp pair                 # add your number
 comodor whatsapp start --background   # run it
 ```
+
+`connect` with no arguments is a guided setup: it links each page, takes one
+value at a time, and checks each as it arrives — the token against Meta, the id
+for being an id, the secret for being a secret. It starts the tunnel for you,
+and it waits for Meta's verification callback to actually arrive rather than
+assuming it did.
 
 It runs the same agent session the terminal, the browser and the Telegram bot
 run. A task started here learns the same lessons and appears in the same
@@ -34,7 +39,22 @@ changes its web client, and they are against the terms the account is held to:
 the failure mode is the number being banned. Not something a coding tool gets
 to hand its users.
 
+## How long this takes
+
+Honestly: about twenty minutes the first time, against one minute for
+Telegram. Most of it is in Meta's dashboard. If you do not specifically need
+WhatsApp, [Telegram](telegram.md) is less work for the same thing.
+
+What you do **not** need: a real phone number, a payment method, or business
+verification. Adding the WhatsApp product creates a **test number** that
+messages up to five recipients for free, which is four more than one person
+talking to their own agent requires.
+
 ## Setting it up
+
+The short version is `comodor whatsapp connect`, which walks the whole thing.
+What follows is what it walks through, for anyone who would rather see it
+first.
 
 ### 1. A Meta app with WhatsApp on it
 
@@ -65,19 +85,34 @@ message now rather than a mystery next week.
 
 The bot listens on `127.0.0.1:8770`. Meta will only deliver to **HTTPS** and
 will not accept a self-signed certificate, so something has to put a real one
-in front of it. A tunnel is the usual answer and needs no open port and no DNS:
+in front of it. A tunnel is the usual answer: no open port, no DNS, no domain.
+
+**`comodor whatsapp connect` does this for you** if `cloudflared` is
+installed — it starts the tunnel, reads the address out of it, and shows you
+what to paste. To run one yourself:
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:8770
-```
-
-That prints a `https://…trycloudflare.com` address. Give it to Comodor so it
-can show you what to paste:
-
-```bash
 comodor whatsapp connect --url https://something.trycloudflare.com/whatsapp
 comodor whatsapp webhook
 ```
+
+**A quick tunnel gets a new address every time it starts.** That is fine while
+setting up and wrong for a bot meant to keep running: Meta goes on delivering
+to the address you gave it, so after a restart nothing arrives and nothing
+says why. `comodor whatsapp start --tunnel` warns when the address has moved.
+
+For an address that stays, make a named tunnel once — it needs a free
+Cloudflare account:
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel create comodor
+cloudflared tunnel route dns comodor comodor-hooks.example.com
+```
+
+Anything else that terminates TLS and forwards to `127.0.0.1:8770` works the
+same way.
 
 ```
   Callback URL   https://something.trycloudflare.com/whatsapp
@@ -173,6 +208,7 @@ Exactly as Telegram:
 
 ```bash
 comodor whatsapp start                # here, holding this terminal
+comodor whatsapp start --tunnel       # and bring a tunnel up with it
 comodor whatsapp start --background   # detached; survives closing it
 comodor whatsapp stop
 comodor whatsapp service install      # starts at login, survives a reboot

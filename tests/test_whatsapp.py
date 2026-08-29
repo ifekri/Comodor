@@ -539,3 +539,143 @@ def test_the_welcome_says_what_it_is_pointed_at(talking):
 
     assert "*Model*" in said
     assert "*Folder*" in said
+
+
+# --------------------------------------------------------------------------- #
+# the guided connect
+#
+# Eight things done in a browser and a terminal, in order, where getting one
+# wrong fails somewhere else entirely — a phone number pasted where the number
+# id goes fails at the first send with "Unsupported post request".
+# --------------------------------------------------------------------------- #
+
+
+def a_wizard(config, answers: list[str], monkeypatch, *, tunnel: bool = False):
+    """Run the guide with Meta and the tunnel stood in for."""
+    import io
+
+    from rich.console import Console
+
+    from comodor.ui import console as console_module
+    from comodor.whatsapp import api as wapi
+    from comodor.whatsapp import guide
+    from comodor.whatsapp import tunnel as tunnel_mod
+
+    class FakeCloud:
+        def __init__(self, token, number_id, version="v21.0", timeout=20.0):
+            if token != "EAA-good-token":
+                raise wapi.Unauthorised("Session expired")
+
+        def me(self):
+            return {"display_phone_number": "+1 555 000 2222"}
+
+    class FakeTunnel:
+        url = "https://kind-words-99.trycloudflare.com"
+
+        def webhook(self, path):
+            return self.url + path
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(guide, "Cloud", FakeCloud)
+    monkeypatch.setattr(guide, "VERIFY_PATIENCE", 0.4)
+    if tunnel:
+        monkeypatch.setattr(tunnel_mod, "find_binary", lambda: "cloudflared")
+        monkeypatch.setattr(tunnel_mod, "start_quick",
+                            lambda port, host="127.0.0.1": (FakeTunnel(), ""))
+    else:
+        monkeypatch.setattr(tunnel_mod, "find_binary", lambda: None)
+
+    console = Console(width=88, force_terminal=False, no_color=True,
+                      file=io.StringIO())
+    theme = console_module.prepare_theme("ember", False, no_color=True)
+    replies = iter(answers)
+    code = guide.walk(console, theme, config,
+                      ask=lambda message: next(replies, ""),
+                      save=lambda cfg: None)
+    return code, console.file.getvalue()
+
+
+def test_the_phone_number_is_refused_where_the_id_belongs(config, monkeypatch):
+    """The single most common mistake, and it otherwise fails much later with
+    an error that does not mention it."""
+    _, said = a_wizard(config, ["", "+1 555 000 2222", ""], monkeypatch)
+
+    assert "looks like the phone number" in said
+
+
+def test_a_token_meta_refuses_is_caught_at_the_time(config, monkeypatch):
+    """Not days later, when the temporary one quietly expires."""
+    _, said = a_wizard(
+        config, ["", "123456789012345", "EAA-wrong", ""], monkeypatch)
+
+    assert "refused it" in said.lower()
+
+
+def test_a_good_token_is_confirmed_against_meta(config, monkeypatch):
+    _, said = a_wizard(
+        config,
+        ["", "123456789012345", "EAA-good-token", ""], monkeypatch)
+
+    assert "Works." in said
+    assert "+1 555 000 2222" in said
+
+
+def test_something_that_is_not_an_app_secret_is_refused(config, monkeypatch):
+    _, said = a_wizard(
+        config,
+        ["", "123456789012345", "EAA-good-token", "nope", ""], monkeypatch)
+
+    assert "does not look like an app secret" in said
+
+
+def test_it_will_not_finish_without_a_secret(config, monkeypatch):
+    """Without one nothing verifies, and that is not a state to leave somebody
+    in quietly."""
+    config.whatsapp.app_secret = ""
+    code, said = a_wizard(
+        config, ["", "123456789012345", "EAA-good-token", ""], monkeypatch)
+
+    assert code == 1
+    assert "nothing can be verified" in said.lower()
+
+
+def test_the_tunnel_is_started_and_its_address_used(config, monkeypatch):
+    good = ["", "123456789012345", "EAA-good-token",
+            "0a1b2c3d4e5f60718293a4b5c6d7e8f9"]
+    _, said = a_wizard(config, good, monkeypatch, tunnel=True)
+
+    assert "tunnel up" in said
+    assert "kind-words-99.trycloudflare.com/whatsapp" in said
+    assert config.whatsapp.public_url.endswith("/whatsapp")
+
+
+def test_a_quick_tunnel_is_said_to_be_temporary(config, monkeypatch):
+    """It gets a new hostname every start, and Meta keeps delivering to the
+    old one — a bot that works until the first reboot."""
+    good = ["", "123456789012345", "EAA-good-token",
+            "0a1b2c3d4e5f60718293a4b5c6d7e8f9"]
+    _, said = a_wizard(config, good, monkeypatch, tunnel=True)
+
+    assert "temporary" in said
+    assert "named tunnel" in said
+
+
+def test_without_cloudflare_it_asks_for_an_address_rather_than_stopping(
+        config, monkeypatch):
+    good = ["", "123456789012345", "EAA-good-token",
+            "0a1b2c3d4e5f60718293a4b5c6d7e8f9", "https://mine.example/whatsapp"]
+    _, said = a_wizard(config, good, monkeypatch)
+
+    assert "not installed" in said
+    assert config.whatsapp.public_url == "https://mine.example/whatsapp"
+
+
+def test_a_verify_token_is_made_if_there_is_not_one(config, monkeypatch):
+    config.whatsapp.verify_token = ""
+    good = ["", "123456789012345", "EAA-good-token",
+            "0a1b2c3d4e5f60718293a4b5c6d7e8f9", "https://mine.example/whatsapp"]
+    a_wizard(config, good, monkeypatch)
+
+    assert len(config.whatsapp.verify_token) >= 24

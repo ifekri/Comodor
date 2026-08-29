@@ -728,11 +728,13 @@ class SetupWizard:
                 "number, an access token, an\napp secret, and a public HTTPS "
                 "address for Meta to deliver to.\n\n"
                 "None of that can be made from a terminal, so it is its own "
-                "command:\n\n"
-                "   [bold]comodor whatsapp connect[/bold]"
-                "[dim]   walks through all four[/dim]\n"
-                "   [bold]comodor whatsapp webhook[/bold]"
-                "[dim]   what to paste into Meta[/dim]"),
+                "command — and\nthat one walks you through it, links each "
+                "page, checks each value as it\narrives, and starts the "
+                "tunnel for you:\n\n"
+                "   [bold]comodor whatsapp connect[/bold]\n\n"
+                "[dim]About twenty minutes the first time. No real number, no "
+                "card and no\nbusiness verification — the test number Meta "
+                "makes you messages five\npeople for free.[/dim]"),
             title=Text(" WhatsApp ", style=self.theme.style("title")),
             title_align="left", box=self.theme.box,
             border_style=self.theme.style("border"), padding=(1, 2)))

@@ -34,11 +34,15 @@ def register(subparsers: argparse._SubParsersAction) -> None:
                          help="from the app's Basic Settings")
     connect.add_argument("--url", dest="public_url",
                          help="the public HTTPS address of the webhook")
+    connect.add_argument("--tunnel", action="store_true",
+                         help="start a Cloudflare tunnel and use its address")
 
     start = actions.add_parser("start", help="run the bot")
     start.add_argument("--background", "-b", action="store_true",
                        help="detach from this terminal, so it keeps answering "
                             "after you close it")
+    start.add_argument("--tunnel", action="store_true",
+                       help="bring up a Cloudflare tunnel alongside it")
 
     actions.add_parser("stop", help="stop a bot running in the background")
 
@@ -86,7 +90,7 @@ def run(config: Config, args: argparse.Namespace) -> int:
     if action == "start":
         if getattr(args, "background", False):
             return _background(console, config)
-        return _start(console, config)
+        return _start(console, config, args)
     if action == "stop":
         return _stop(console, config)
     if action == "service":
@@ -94,6 +98,20 @@ def run(config: Config, args: argparse.Namespace) -> int:
 
     console.print("Try `comodor whatsapp status`.")
     return 1
+
+
+def _ask(console, message: str) -> str:
+    """One line from the person at the terminal, or empty if there is nobody.
+
+    Empty rather than an exception on end-of-file: the wizard treats "nothing
+    entered" as "stop here and keep what we have", which is the right answer
+    for a pipe as well as for somebody pressing enter.
+    """
+    console.print(f"  [bold]{message}[/bold][dim]:[/dim] ", end="")
+    try:
+        return input()
+    except (EOFError, KeyboardInterrupt):
+        return ""
 
 
 def _save(config: Config) -> None:
@@ -112,6 +130,19 @@ def _connect(console, config: Config, args: argparse.Namespace) -> int:
     token = (args.token or "").strip()
     number_id = (args.number_id or "").strip()
     secret = (args.app_secret or "").strip()
+
+    if not (token or number_id or secret):
+        # Nothing given at all: walk it, rather than printing instructions and
+        # leaving somebody to run the command again with three flags they have
+        # to go and find first.
+        from ..ui import console as console_module
+        from .guide import walk
+
+        theme = console_module.prepare_theme(
+            config.ui.theme, config.ui.ascii_borders, no_color=False)
+        return walk(console, theme, config,
+                    ask=lambda message: _ask(console, message),
+                    save=_save)
 
     if not (token and number_id):
         console.print()
@@ -372,7 +403,7 @@ def _off(console, config: Config) -> int:
     return 0
 
 
-def _start(console, config: Config) -> int:
+def _start(console, config: Config, args: argparse.Namespace) -> int:
     from ..channels import WHATSAPP
     from .bot import Service
 
@@ -390,11 +421,35 @@ def _start(console, config: Config) -> int:
     console.print()
     console.print(f"  Working in [bold]{config.paths.project}[/bold]")
 
+    opened = None
+    if getattr(args, "tunnel", False):
+        from . import tunnel as tunnel_mod
+
+        opened, why = tunnel_mod.start_quick(config.whatsapp.port,
+                                             config.whatsapp.host)
+        if opened is None:
+            console.print(f"  [red]{why}[/red]\n")
+            return 1
+        where = opened.webhook(config.whatsapp.path)
+        console.print(f"  Tunnel [bold]{where}[/bold]")
+        if where != config.whatsapp.public_url:
+            # A quick tunnel gets a new hostname every run and Meta keeps
+            # delivering to the old one. Saying nothing here produces a bot
+            # that starts cleanly and never receives anything.
+            console.print("  [warn]This is not the address Meta has.[/warn] "
+                          "Update the Callback URL in")
+            console.print("  [dim]the dashboard, or make a named tunnel for "
+                          "an address that does not move.[/dim]")
+            config.whatsapp.public_url = where
+            _save(config)
+
     service = Service(config, announce=lambda line: console.print(f"  {line}"))
 
     def bye(*_: object) -> None:
         console.print("\n  Stopping.\n")
         service.stop()
+        if opened is not None:
+            opened.stop()
 
     try:
         signal.signal(signal.SIGINT, lambda *_: bye())

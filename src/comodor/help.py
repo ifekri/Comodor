@@ -223,11 +223,15 @@ In Docker:  docker compose up   and open the address it prints.
 Full guide: docs/web.md"""),
 
     "whatsapp": ("From WhatsApp", """\
-  comodor whatsapp connect         the number, the token, the app secret
+  comodor whatsapp connect         guided: links each page, checks each value
   comodor whatsapp webhook         what to paste into Meta's dashboard
   comodor whatsapp pair            a one-time code that adds your number
   comodor whatsapp start -b        run it detached from this terminal
   comodor whatsapp status          what is set, who may talk, is it running
+
+About twenty minutes to set up, against one for Telegram, and most of it is
+in Meta's dashboard. No real phone number, no card and no business
+verification: the test number Meta creates messages five people for free.
 
 Meta's Cloud API, which is the official one. The libraries that drive WhatsApp
 Web instead need Node, break whenever the web client changes, and are against
@@ -238,9 +242,13 @@ Two things work differently from Telegram, and both are Meta's design:
 
 *Messages are delivered, not fetched.* There is no long poll. Meta posts each
 message to a URL, so something of yours has to be reachable over HTTPS. The
-bot listens on localhost; a tunnel puts a real certificate in front of it:
+bot listens on localhost; `connect` starts a Cloudflare tunnel in front of it
+if cloudflared is installed, and `start --tunnel` brings one up alongside.
 
-  cloudflared tunnel --url http://127.0.0.1:8770
+A quick tunnel gets a new address every start, and Meta keeps delivering to
+the old one - so for a bot meant to keep running, make a named tunnel once:
+
+  cloudflared tunnel login && cloudflared tunnel create comodor
 
 *Every webhook is signed* with your app secret, and the signature is checked.
 Without one, anything that reaches that URL can hand the agent instructions

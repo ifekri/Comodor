@@ -223,10 +223,12 @@ Full guide: [From your phone](telegram.md).
 ## `comodor whatsapp` — from a WhatsApp number
 
 ```bash
+comodor whatsapp connect          # guided: links each page, checks each value
 comodor whatsapp connect --number-id … --token … --app-secret …
 comodor whatsapp webhook          # what to paste into Meta's dashboard
 comodor whatsapp pair             # a one-time code that adds your number
 comodor whatsapp start            # here, holding this terminal
+comodor whatsapp start --tunnel   # and bring a Cloudflare tunnel up with it
 comodor whatsapp start -b         # detached
 comodor whatsapp stop
 comodor whatsapp service install  # start it at login
@@ -237,7 +239,9 @@ comodor whatsapp off
 ```
 
 Meta delivers messages to a URL rather than letting you poll for them, so this
-one needs a public HTTPS address — a tunnel is the usual answer.
+one needs a public HTTPS address. `connect` with no arguments walks the whole
+setup and starts the tunnel itself; about twenty minutes the first time, most
+of it in Meta's dashboard. No real number, no card, no business verification.
 
 Full guide: [From WhatsApp](whatsapp.md).
 
