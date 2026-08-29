@@ -30,6 +30,23 @@ from typing import Any
 #: this pushes the message it belongs to off a phone screen.
 MOST_ROWS = 8
 
+#: The pair that says "this one" and "not this one".
+#:
+#: Defined once because it is drawn from five places — the mode list, the model
+#: list, the skills list, the questions the agent asks, and the chat history.
+#: Five copies of a pair of glyphs is five chances for them to drift, and a
+#: menu where "chosen" looks one way on one screen and another way on the next
+#: reads as two different meanings rather than one.
+PICKED = "✅"
+UNPICKED = "🔲"
+
+#: Leaving a screen, and moving within one. Different glyphs on purpose: a
+#: reader should not have to read the words to tell "go back" from "go on".
+BACK = "⬅️"
+PREVIOUS = "◀️"
+NEXT = "▶️"
+FORWARD = "➡️"
+
 MODES = ("act", "plan", "chat")
 
 MODE_WORDS = {
@@ -87,12 +104,12 @@ def main_menu(*, busy: bool, mode: str, rules: int = 0,
     # guess that it is there.
     return rows(
         top,
-        [button(f"Ⓜ️  Mode · {mode.capitalize()}", "mode"),
+        [button(f"Ⓜ️  Mode ❱ {mode.capitalize()}", "mode"),
          button("⏳  Status", "status")],
-        [button(f"👾  Model{f' · {model}' if model else ''}"[:60], "models"),
+        [button(f"🤖  Model{f' ❱ {model}' if model else ''}"[:60], "models"),
          button("📂  Folder", "folder")],
-        [button("❇️  Skills", "skills"),
-         button(f"🧩  Rules{f' · {rules}' if rules else ''}", "rules")],
+        [button("✨  Skills", "skills"),
+         button(f"🧩  Rules{f' ❱ {rules}' if rules else ''}", "rules")],
         [button("⚙️  Settings", "settings"),
          button("❓  Help", "help")],
     )
@@ -107,20 +124,20 @@ def mode_menu(current: str) -> dict[str, Any]:
     """
     lines = []
     for name in MODES:
-        mark = "●" if name == current else "○"
+        mark = PICKED if name == current else UNPICKED
         lines.append([button(f"{mark}  {MODE_WORDS[name]}", f"mode:{name}")])
-    lines.append([button("←  Back", "menu")])
+    lines.append([button(f"{BACK}  Back", "menu")])
     return rows(*lines)
 
 
 def settings_menu(*, provider: str, model: str, folder: str) -> dict[str, Any]:
     return rows(
-        [button(f"◈  {provider} / {model}"[:60], "models")],
-        [button("▤  Change folder", "folder")],
-        [button("⌗  Rules", "rules"), button("✦  Skills", "skills")],
-        [button("⚙  What it may do", "writes")],
-        [button("◔  Cost this session", "cost")],
-        [button("←  Back", "menu")],
+        [button(f"🤖  {provider} / {model}"[:60], "models")],
+        [button("📂  Change folder", "folder")],
+        [button("🧩  Rules", "rules"), button("✨  Skills", "skills")],
+        [button("🎯  What it may do", "writes")],
+        [button("📊  Cost this session", "cost")],
+        [button(f"{BACK}  Back", "menu")],
     )
 
 
@@ -137,10 +154,10 @@ def permission(request_id: str) -> dict[str, Any]:
     together and a mis-tap on "always" is not undoable.
     """
     return rows(
-        [button("✓  Yes, once", f"ok:{request_id}")],
-        [button("✓✓  Yes, and stop asking this session",
+        [button("☑️  Yes, once", f"ok:{request_id}")],
+        [button("✅  Yes, and stop asking this session",
                 f"okall:{request_id}")],
-        [button("✗  No", f"no:{request_id}")],
+        [button("🚫  No", f"no:{request_id}")],
     )
 
 
@@ -155,13 +172,16 @@ def question(request_id: str, index: int, options: list[str],
     chosen = chosen or set()
     lines = []
     for slot, label in enumerate(options):
-        mark = ("☑" if slot in chosen else "☐") if multi else \
-               ("●" if slot in chosen else "○")
+        # The same pair as everywhere else. It used to be a checkbox here and
+        # a dot two screens earlier, which reads as two different meanings
+        # rather than one — whether an option can be picked more than once is
+        # said by the Send button being there, not by the shape of the mark.
+        mark = PICKED if slot in chosen else UNPICKED
         lines.append([button(f"{mark}  {label}"[:60],
                              f"q:{request_id}:{index}:{slot}")])
-    lines.append([button("✎  Write my own", f"qw:{request_id}:{index}")])
+    lines.append([button("✏️  Write my own", f"qw:{request_id}:{index}")])
     if multi or chosen:
-        lines.append([button("→  Send", f"qs:{request_id}")])
+        lines.append([button(f"{FORWARD}  Send", f"qs:{request_id}")])
     return rows(*lines)
 
 
@@ -184,25 +204,27 @@ def picker(action: str, items: list[tuple[str, str]], *, back: str = "menu",
 
     steps = []
     if page > 0:
-        steps.append(button("‹  Previous", f"page:{action}:{page - 1}"))
+        steps.append(button(f"{PREVIOUS}  Previous",
+                            f"page:{action}:{page - 1}"))
     if start + per_page < len(items):
-        steps.append(button("Next  ›", f"page:{action}:{page + 1}"))
+        steps.append(button(f"Next  {NEXT}", f"page:{action}:{page + 1}"))
     if steps:
         lines.append(steps)
 
-    lines.append([button("←  Back", back)])
+    lines.append([button(f"{BACK}  Back", back)])
     return rows(*lines)
 
 
 def confirm(action: str, *, back: str = "menu") -> dict[str, Any]:
     """For anything that cannot be undone."""
     return rows(
-        [button("✓  Yes, do it", action), button("✗  Cancel", back)],
+        [button(f"{PICKED}  Yes, do it", action),
+         button("🚫  Cancel", back)],
     )
 
 
 def just_back(where: str = "menu") -> dict[str, Any]:
-    return rows([button("←  Back", where)])
+    return rows([button(f"{BACK}  Back", where)])
 
 
 # --------------------------------------------------------------------------- #

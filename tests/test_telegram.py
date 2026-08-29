@@ -584,3 +584,74 @@ def test_the_phone_cannot_widen_its_own_permissions(talking):
     assert "comodor telegram writes on" in said
     assert taps(talking.bot.sent[-1]["keyboard"]) == ["settings"], \
         "no button here may change it"
+
+
+# --------------------------------------------------------------------------- #
+# one mark for "chosen", everywhere
+#
+# The marks were changed to emoji on some screens and left as dots and
+# checkboxes on others, so a chosen mode looked nothing like a chosen model two
+# taps later — which reads as two different meanings rather than one. They come
+# from one pair of names now, and these keep them that way.
+# --------------------------------------------------------------------------- #
+
+
+def marks_in(board) -> str:
+    return " ".join(b["text"] for row in board["inline_keyboard"] for b in row)
+
+
+def test_every_screen_marks_a_choice_the_same_way():
+    boards = [
+        kb.mode_menu("plan"),
+        kb.question("r1", 0, ["one", "two"], {0}),
+        kb.question("r1", 0, ["one", "two"], {0}, multi=True),
+    ]
+    for board in boards:
+        drawn = marks_in(board)
+        assert kb.PICKED in drawn, f"nothing marked as chosen: {drawn}"
+        assert kb.UNPICKED in drawn, f"nothing marked as not chosen: {drawn}"
+
+
+@pytest.mark.parametrize("old", ["●", "○", "☐", "✓", "✗", "‹", "›"])
+def test_the_marks_that_were_replaced_are_gone(old):
+    """A screen still drawing the old glyph is a screen that was missed."""
+    boards = [
+        kb.main_menu(busy=False, mode="plan", rules=2, model="m"),
+        kb.main_menu(busy=True, mode="act"),
+        kb.mode_menu("plan"),
+        kb.settings_menu(provider="p", model="m", folder="/w"),
+        kb.permission("r1"),
+        kb.question("r1", 0, ["one", "two"], {0}),
+        kb.question("r1", 0, ["one", "two"], {0}, multi=True),
+        kb.picker("skill", [(str(n), f"s{n}") for n in range(30)], page=1),
+        kb.confirm("wipe"),
+        kb.just_back(),
+    ]
+    for board in boards:
+        assert old not in marks_in(board), f"{old!r} survived in {marks_in(board)}"
+
+
+def test_the_lists_mark_the_current_row_the_same_way_the_menus_do(talking):
+    """The model list, the skills list and the history all say "this one", and
+    they used to say it with a different glyph from the mode list."""
+    talking._handle(a_message(7, "/start"))
+
+    for action in ("models", "skills", "chats"):
+        before = len(talking.bot.sent)
+        talking._handle({"update_id": 2, "callback_query": {
+            "id": "q", "from": {"id": 7},
+            "message": {"chat": {"id": 7}}, "data": action}})
+        drawn = marks_in(talking.bot.sent[-1]["keyboard"])
+        assert "●" not in drawn and "○" not in drawn, f"{action}: {drawn}"
+        assert len(talking.bot.sent) > before
+
+
+def test_going_back_and_paging_do_not_use_the_same_arrow():
+    """One leaves the screen and the others move within it; a reader should not
+    have to read the words to tell them apart."""
+    assert kb.BACK != kb.PREVIOUS
+    assert kb.BACK != kb.NEXT
+
+    paged = marks_in(kb.picker("s", [(str(n), f"s{n}") for n in range(30)],
+                               page=1))
+    assert kb.PREVIOUS in paged and kb.NEXT in paged and kb.BACK in paged

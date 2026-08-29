@@ -676,7 +676,7 @@ class Service:
             return
         rows = self._shelve(talk, "chat", [
             (str(card["id"]),
-             ("● " if card.get("current") else "")
+             (f"{kb.PICKED} " if card.get("current") else "")
              + escape(str(card.get("title") or "Untitled"))[:44]
              + f" · {card.get('messages', 0)}")
             for card in found])
@@ -717,7 +717,8 @@ class Service:
                 keyboard=kb.just_back())
             return
         rows = self._shelve(talk, "model", [
-            (name, ("● " if name == current else "○ ") + name[:56])
+            (name, (f"{kb.PICKED} " if name == current
+                    else f"{kb.UNPICKED} ") + name[:56])
             for name in names])
         self.bot.send(
             talk.chat,
@@ -752,7 +753,8 @@ class Service:
             return
         rows = self._shelve(talk, "skill", [
             (str(card["id"]),
-             ("● " if card.get("installed") else "○ ") + str(card["id"])[:40])
+             (f"{kb.PICKED} " if card.get("installed")
+              else f"{kb.UNPICKED} ") + str(card["id"])[:40])
             for card in cards])
         installed = sum(1 for card in cards if card.get("installed"))
         self.bot.send(
