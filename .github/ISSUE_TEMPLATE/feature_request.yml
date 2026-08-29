@@ -1,15 +1,51 @@
 name: Feature request
-description: Suggest something Comodor should do
-labels: [enhancement]
+description: Suggest a new capability or improvement for Comodor
+title: "[Feature]: "
+labels:
+  - enhancement
+assignees: []
+
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Comodor.
+
+        Good feature requests start with the problem rather than the implementation.
+        Please explain what you are trying to accomplish and why the current behavior
+        makes that difficult.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and discussions and could not find an existing request for this feature.
+          required: true
+
   - type: textarea
     id: problem
     attributes:
       label: The problem
       description: >
-        What are you trying to do that is awkward or impossible today? Describe
-        the situation rather than the solution — it often turns out there is a
-        smaller change that solves it.
+        What are you trying to do that is awkward or impossible today?
+        Describe the situation rather than the solution — it often turns out
+        there is a smaller change that solves it.
+      placeholder: |
+        I am trying to...
+
+        Currently I have to...
+
+        This becomes a problem because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe what you would ideally be able to accomplish.
+      placeholder: "After this change, I should be able to..."
     validations:
       required: true
 
@@ -17,6 +53,33 @@ body:
     id: idea
     attributes:
       label: What you had in mind
+      description: >
+        If you already have an idea for how this could work, describe it here.
+        The proposed implementation is not required to be final.
+    validations:
+      required: false
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: >
+        Give a concrete example of when this feature would be useful.
+      placeholder: |
+        For example:
+
+        When I am working on...
+        I need Comodor to...
+        So that...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: >
+        Describe any existing workarounds or alternative approaches you have tried.
     validations:
       required: false
 
@@ -28,4 +91,42 @@ body:
         Comodor is deliberately small — one runtime dependency, no framework.
         Features that make it larger have to earn it.
       options:
-        - label: This can be done without adding a runtime dependency, or it is worth one and I have said why.
+        - label: This can be done without adding a runtime dependency, or it is worth one and I have explained why.
+          required: true
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation notes
+      description: >
+        Optional technical details, API ideas, architecture considerations,
+        pseudocode, or references that may help implement the feature.
+    validations:
+      required: false
+
+  - type: upload
+    id: attachments
+    attributes:
+      label: Mockups or references
+      description: >
+        Upload screenshots, mockups, diagrams, or other files that help explain
+        the proposed feature.
+    validations:
+      required: false
+      accept: ".png,.jpg,.jpeg,.gif,.webp,.svg,.pdf,.txt,.json,.zip"
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any other information relevant to the request.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to help implement this feature.
+          required: false
