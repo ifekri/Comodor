@@ -2,6 +2,87 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## 0.18.0 — 2026-08-29
+
+### One wordmark
+
+There were three. An eighty-two column block one and a forty-one column one in
+the program, and a slanted face made of slashes and underscores in the shell
+installer — so an install put one logo on screen, the program it had just
+placed put a different one on the next, and neither was the one in the README.
+
+There is one now: the README's, twenty-eight columns and three rows, drawn the
+same in the installer, the setup wizard and the interface. Under `--ascii` it
+becomes the one-line form instead of a transliteration — the letters are
+half-blocks, and `^` and `_` in place of those produced a smear that read as
+neither a word nor a logo.
+
+**The installer draws it once per phase.** It used to print the banner a second
+time before the last question without clearing between, so an install ended
+with two of them on screen a page apart and the question scrolled away from the
+logo belonging to it. Each phase now gets a screen: the mark at the top, and
+under it only the step being worked on. Where the screen cannot be cleared — a
+pipe, a log, a CI job — it prints once and the phases follow each other.
+
+### Setup no longer drops you at a prompt
+
+It ended by returning to the shell. Somebody answered six questions, watched it
+say `Ready.`, and was put back at a prompt with nothing running — and
+`comodor setup` is the command the installer calls, so that was the last thing
+an install did.
+
+```
+ What now?
+   1  Start Comodor          — the interface, here in this terminal
+   2  Start the Telegram bot — in the background, answers while this is closed
+   3  Both
+   4  Nothing yet
+```
+
+On the same screen as `Ready.` rather than one that wipes it. The Telegram
+lines appear only when there is a bot connected and paired, because an option
+that cannot work is worse than an option that is not there.
+
+### The bot runs without a terminal
+
+It only ran in the foreground, holding a terminal open — which is the one
+situation in which nobody needs a phone.
+
+```bash
+comodor telegram start --background   # detached
+comodor telegram stop
+comodor telegram status               # is it up, since when, as which pid
+```
+
+Detached means detached: closing the terminal, logging out and ending the
+session all leave it answering. Output goes to a log beside your config, and
+that log is appended to rather than replaced — the reason a bot stopped last
+night is in the lines a restart would otherwise erase.
+
+**Surviving a reboot is the operating system's job**, so there is a command
+that asks it properly:
+
+```bash
+comodor telegram service show        # read the unit first
+comodor telegram service install
+```
+
+A systemd **user** unit on Linux, a LaunchAgent on macOS, a Task Scheduler task
+on Windows. A user service on all three and never a system one: this is an
+agent that reads and writes your files with your credentials, and more
+authority than the person who owns those files buys nothing and costs
+everything if it is ever wrong. `service show` prints the unit before
+`service install` writes it.
+
+The bookkeeping around a background process is the part that goes wrong
+quietly, so a pid file left behind by a crash is cleaned up rather than making
+`start` refuse forever; a recycled process id is checked against the command
+behind it before `stop` kills anything; and a child that dies in its first
+second is reported as the failure it is instead of as a running bot.
+
+`comodor doctor` now says whether the bot is actually up, not merely whether it
+could be.
+
 ## 0.17.1 — 2026-08-29
 
 Packaging metadata only: the project is published under the account that owns
