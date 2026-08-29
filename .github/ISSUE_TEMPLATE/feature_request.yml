@@ -2,7 +2,7 @@ name: Feature request
 description: Suggest a new capability or improvement for Comodor
 title: "[Feature]: "
 labels:
-  - enhancement
+  - Enhancement
 assignees: []
 
 body:
