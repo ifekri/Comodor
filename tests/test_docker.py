@@ -86,15 +86,28 @@ def test_a_version_can_still_be_pinned_on_purpose():
     assert "--build-arg COMODOR_VERSION=" in text(DOCKERFILE)
 
 
-def test_the_image_is_rebuilt_on_a_release():
-    """The trigger that was missing. Without it a release ships and the
-    published image stays where it was."""
+def test_the_image_is_rebuilt_when_a_version_ships():
+    """Not by listening for `release: [published]`, which looks right and does
+    not work: GitHub raises no workflow events for anything done with
+    GITHUB_TOKEN, so a release created by `release.yml` fires nothing. v0.20.3
+    shipped and no image was ever built.
+
+    `release.yml` calls this workflow instead, after the package is on PyPI.
+    """
     triggers = yaml.safe_load(text(WORKFLOW))
     on = triggers[True] if True in triggers else triggers["on"]
 
-    assert "release" in on, "nothing rebuilds the image when a version ships"
-    assert "pull_request" in on, \
-        "a change to the Dockerfile has to prove the image still starts"
+    assert "workflow_call" in on, "the release workflow cannot call it"
+    assert "release" not in on, "an event that cannot fire for our own releases"
+    assert "pull_request" in on, (
+        "a change to the Dockerfile has to prove the image still starts")
+
+    release = yaml.safe_load(
+        text(ROOT / ".github" / "workflows" / "release.yml"))
+    image = release["jobs"]["image"]
+    assert image["uses"].endswith("image.yml")
+    assert "publish" in image["needs"], (
+        "it would build before PyPI has the version it installs")
 
 
 def test_the_workflow_uses_no_yaml_anchors():

@@ -253,3 +253,24 @@ jobs:
               ```bash
             pipx install comodor==${{ needs.build.outputs.version }}
               ```
+
+  # The container image, built from this release and pushed to both registries.
+  #
+  # Chained here rather than triggered by `release: [published]`, which does not
+  # fire when the release is created by a workflow — GitHub does not raise
+  # events for anything done with GITHUB_TOKEN. v0.20.3 shipped and no image was
+  # ever built. Running it here also puts it after `publish`, so PyPI has the
+  # version the Dockerfile is about to ask for.
+  image:
+    name: Container image
+    needs: [build, publish]
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/image.yml
+    with:
+      version: ${{ needs.build.outputs.version }}
+    permissions:
+      contents: read
+      packages: write
+    # DOCKERHUB_USERNAME and DOCKERHUB_TOKEN. A called workflow gets no secrets
+    # unless they are passed, and the push would silently fall back to GHCR.
+    secrets: inherit
