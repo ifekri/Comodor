@@ -73,7 +73,7 @@ did."*
 pointed the other way.** One passes broken code; the other fails correct work.
 Both produce a number indistinguishable from a real one.
 
-Two rules came out of it, and they apply to every task added from now on:
+Three rules came out of it, and they apply to every task added from now on:
 
 *Read what the agent actually said before believing the verdict.* A failure
 nobody has read is a failure nobody has checked.
@@ -81,6 +81,19 @@ nobody has read is a failure nobody has checked.
 *A `careful` task must turn on something the repository cannot answer.* If the
 code settles it, the right behaviour is to read the code, decide, and say so —
 and a task that punishes that is measuring the task author.
+
+*If a verdict cannot be read exactly, change the question.* `find-why-it-fails`
+went through four heuristics over prose. One passed a confidently wrong answer;
+two failed correct ones, the last of them an answer whose first line was
+**"The failing method is `Cache.get`"** — rejected because "failing method is"
+was not a phrase anybody had listed. The fix was not a fifth word list. The
+task now asks for the verdict on its own line:
+
+    METHOD: <name>
+
+and the judge reads that line. A task whose answer can be read exactly is worth
+more than a judge that is nearly right, because a judge that is nearly right
+produces numbers indistinguishable from real ones.
 
 ## Adding a task
 

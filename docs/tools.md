@@ -39,6 +39,20 @@ guessed at — the information that told them apart is what was just dropped.
 When nothing matches, the error names the closest few places and diffs the
 nearest, so the next attempt can be right instead of another guess.
 
+**`write_file` says when it is replacing something unseen.** It replaces the
+whole file, so doing that to one this session has not read is how the rest of
+it quietly disappears:
+
+```
+Wrote sample.txt (1 lines, +1/-4).
+
+WARNING  4 lines were replaced in a file this session had not read. If you
+meant to change part of it, read it and use edit_file; /undo restores it.
+```
+
+A warning, not a refusal — creating a file, rewriting a generated one, and
+replacing something read earlier are all ordinary.
+
 **Both check what they wrote.** The file is parsed straight after the write and
 anything wrong with it goes back to the model in the same tool result:
 

@@ -169,6 +169,7 @@ class AgentLoop:
         #: eight were a completed task reported as nothing at all.
         spoken = ""
         asked_to_speak = False
+        checked = False
 
         while True:
             self.cancel.raise_if_cancelled()
@@ -206,6 +207,17 @@ class AgentLoop:
                         result.text = ""
                 else:
                     result.text = assistant.content
+
+                # The project's own check, once, before the turn is called
+                # finished. Only when something was changed — a turn that read
+                # files and answered a question has nothing to verify — and
+                # only once, because a model that cannot fix a failing suite on
+                # its first try will not fix it on its fifth.
+                if not checked and self._changed_anything():
+                    checked = True
+                    if self._project_check_failed():
+                        continue
+
                 result.stopped = "done"
                 return result
 
@@ -467,6 +479,45 @@ class AgentLoop:
             output_tokens=usage.output_tokens,
             cost_usd=usage.cost_usd,
         )
+
+    def _changed_anything(self) -> bool:
+        """Whether this turn touched the project at all."""
+        from .claims import WRITES
+
+        return any(name in WRITES for name in self._used)
+
+    def _project_check_failed(self) -> bool:
+        """Run `agent.verify_command`, and hand a failure back to the model.
+
+        Returns whether the turn should carry on. False for every outcome
+        except a check that ran and failed — including a command that could not
+        be run, which is said once and then left alone. A verifier that turns a
+        finished task into a failure is one people switch off.
+        """
+        command = (getattr(self.config.agent, "verify_command", "") or "").strip()
+        if not command:
+            return False
+
+        from . import verify as project
+
+        self._note(f"Running {command}")
+        try:
+            outcome = project.run(command, Path(self.config.paths.project))
+        except Exception as problem:                  # never the reason a turn dies
+            self._note(f"{command} could not be run: {problem}")
+            return False
+
+        if outcome.unusable:
+            self._note(f"{command} could not be run: {outcome.unusable}")
+            return False
+        if outcome.passed:
+            self._note(f"{command} passed.")
+            return False
+
+        self._note(f"{command} fails — giving it one turn to fix that.")
+        self.conversation.add(
+            Message.user(project.as_correction(command, outcome)))
+        return True
 
     def _say_if_unverified(self, result: TurnResult) -> None:
         """Say so when the answer claims a suite passes and nothing ran it.

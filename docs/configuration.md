@@ -100,9 +100,33 @@ See [Choosing a model](models.md).
 | `compact_at` | summarise the history past this fraction of the limit |
 | `max_tool_chars` | how much of one tool result reaches the model. The rest is written to a file it is told how to read — not truncated |
 | `keep_screenshots` | how many stay in the conversation. [Why](computer.md#screenshots-and-what-they-cost) |
+| `verify_command` | your build or test command, run at the end of any turn that changed a file. See below |
 | `system_prompt_extra` | your own standing instructions |
 | `prompt_cache` | let the provider re-serve the unchanging prefix. [Cost](cost.md) |
 | `prompt_cache_ttl` | `5m` or `1h`. The hour costs more to write |
+
+#### `verify_command` — making "done" mean "it still works"
+
+The system prompt asks the model to run the tests after a change. Asking is not
+getting. Set this and it happens:
+
+```json
+{ "agent": { "verify_command": "pytest -q" } }
+```
+
+It runs once, at the end of a turn that changed a file — not after every edit,
+and not at all for a turn that only read things. If it fails, the agent is
+shown the output and given **one** turn to fix it. One, not a loop: a model
+that cannot fix a failing suite on its first try will not fix it on its fifth,
+and you are better told than billed.
+
+A command that cannot be run at all — mistyped, missing, no permission — is
+reported once and the turn ends as it would have. It never turns a finished
+task into an error.
+
+Empty by default, and deliberately: running somebody's whole suite after every
+turn is minutes and money they did not ask to spend, and the right command
+differs in every project.
 
 ### `safety` — what it may do
 

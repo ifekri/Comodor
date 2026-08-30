@@ -134,6 +134,11 @@ def _write(ctx: ToolContext, path: Path, content: str, action: str,
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8", newline="")
 
+    # Written is known. Without this a second `write_file` to the same path
+    # would warn that the contents are unread, when the thing that put them
+    # there was the call before it.
+    ctx.note_read(path)
+
     if not getattr(ctx.config.safety, "verify_edits", True):
         return ""
     return verify.check(path, content)
@@ -195,6 +200,13 @@ class ReadFile(Tool):
         if error:
             return ToolResult.failure(error)
 
+        # Recorded before the result is built, so a later write to this path
+        # can tell "replacing something I have read" from "replacing something
+        # I have not". Only a whole read counts: a twenty-line window of a
+        # thousand-line file is not knowing the file.
+        if start == 1 and len(window) >= total:
+            ctx.note_read(target)
+
         numbered = "\n".join(f"{start + index:6d}\t{line}"
                               for index, line in enumerate(window))
         end = start + len(window) - 1
@@ -241,10 +253,23 @@ class WriteFile(Tool):
             return ToolResult.failure(reason)
 
         before = ""
+        blind = ""
         if target.exists():
             before, error = read_text(target, 2_000_000)
             if error:
                 before = ""
+            if not ctx.was_read(target):
+                # Not refused — creating a file, rewriting a generated one, or
+                # replacing something read in an earlier session are all
+                # ordinary. But `write_file` replaces everything, and doing
+                # that to a file whose contents are unknown is how the rest of
+                # it disappears. The benchmark caught exactly this: a task
+                # failed for overwriting the sample it was measured against, in
+                # a run whose actual work was correct.
+                blind = (f"{len(before.splitlines())} lines were replaced in a "
+                         f"file this session had not read. If you meant to "
+                         f"change part of it, read it and use edit_file; "
+                         f"/undo restores it.")
 
         report = _write(ctx, target, content,
                         action="write" if target.exists() else "create",
@@ -253,7 +278,9 @@ class WriteFile(Tool):
         rel = ctx.relative(target)
         return ToolResult.success(
             content=f"Wrote {rel} ({len(content.splitlines())} lines, "
-                    f"+{added}/-{removed})." + _and_the_damage(report),
+                    f"+{added}/-{removed})."
+                    + _and_the_damage(blind)
+                    + _and_the_damage(report),
             display=unified_diff(before, content, rel),
             path=str(target), added=added, removed=removed, diff=True,
         )
