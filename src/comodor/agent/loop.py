@@ -25,7 +25,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ..config import Config
 from ..events import Cancellation, Cancelled, EventBus, Kind
@@ -671,16 +671,3 @@ class AgentLoop:
             pass
 
 
-def make_summariser(gateway: Gateway, model: str) -> Callable[[list[Message]], str]:
-    """Standalone summariser, used by session export and tests."""
-    from ..providers.base import collapse
-
-    def summarise(messages: list[Message]) -> str:
-        transcript = "\n\n".join(f"[{m.role.value}] {m.content[:2000]}"
-                                 for m in messages if m.content)
-        return collapse(gateway.stream(
-            [Message.system(COMPACT_PROMPT), Message.user(transcript)],
-            model=model, temperature=0.2, max_tokens=1500,
-        )).text
-
-    return summarise

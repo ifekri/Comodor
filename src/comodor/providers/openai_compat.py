@@ -11,7 +11,6 @@ adapter reassembles them and emits each call only once it is complete.
 
 from __future__ import annotations
 
-import json
 from typing import Any, Iterator
 
 from ..net import http
@@ -298,10 +297,3 @@ def _usage_from(raw: dict[str, Any], model: str) -> Usage:
     )
 
 
-def dump_request(messages: list[Message], tools: list[ToolSpec] | None = None) -> str:
-    """Debug helper: the JSON body we would send, minus credentials."""
-    provider = OpenAICompatProvider("debug", "http://localhost", model="debug")
-    return json.dumps({
-        "messages": provider._encode_messages(messages),
-        "tools": [tool.to_openai() for tool in tools or []],
-    }, indent=2, ensure_ascii=False)

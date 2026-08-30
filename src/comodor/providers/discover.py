@@ -235,6 +235,3 @@ def keys_in_the_environment() -> list[Held]:
     return held
 
 
-def anything_ready() -> tuple[list[Running], list[Held]]:
-    """Both kinds, for a caller that wants to open with what is already here."""
-    return running_here(), keys_in_the_environment()

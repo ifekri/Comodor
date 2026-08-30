@@ -21,7 +21,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from itertools import islice
-from typing import Iterable, Iterator
+from typing import Iterable
 
 from .bm25 import tokenize
 
@@ -228,10 +228,6 @@ class HotIndex:
     def get(self, kind: str, doc_id: int) -> Doc | None:
         with self._lock:
             return self._docs.get((kind, doc_id))
-
-    def of_kind(self, kind: str) -> Iterator[Doc]:
-        with self._lock:
-            return iter([doc for doc in self._docs.values() if doc.kind == kind])
 
     def __len__(self) -> int:
         with self._lock:

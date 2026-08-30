@@ -151,14 +151,3 @@ def plain(text: str, theme: Theme, style: str = "text") -> Text:
     return Text(text, style=theme.style(style))
 
 
-def truncate_lines(text: str, limit: int, theme: Theme) -> Text:
-    """Cap a block of output and say how much was hidden."""
-    lines = text.splitlines()
-    if len(lines) <= limit:
-        return Text(text, style=theme.style("dim"))
-    shown = "\n".join(lines[:limit])
-    hidden = len(lines) - limit
-    result = Text(shown, style=theme.style("dim"))
-    result.append(f"\n… {hidden} more line{'s' if hidden != 1 else ''}",
-                  style=theme.style("dim", dim=True))
-    return result

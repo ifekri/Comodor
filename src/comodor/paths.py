@@ -96,10 +96,6 @@ class Paths:
         return self.user / "brain.db"
 
     @property
-    def sessions_db(self) -> Path:
-        return self.user / "sessions.db"
-
-    @property
     def log_file(self) -> Path:
         return self.user / "logs" / "comodor.log"
 

@@ -176,12 +176,3 @@ class Conversation:
 
     # -- introspection ---------------------------------------------------- #
 
-    def summary_line(self) -> str:
-        roles = dict.fromkeys(("user", "assistant", "tool"), 0)
-        for message in self.messages:
-            key = message.role.value
-            if key in roles:
-                roles[key] += 1
-        return (f"{len(self.messages)} messages "
-                f"({roles['user']} user, {roles['assistant']} assistant, "
-                f"{roles['tool']} tool)")

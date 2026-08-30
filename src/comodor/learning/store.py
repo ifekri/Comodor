@@ -735,23 +735,6 @@ class BrainStore:
                 results.append((skill, score))
         return results
 
-    def credit_skill(self, skill_id: int, won: bool, duration: float = 0.0) -> None:
-        column = "wins" if won else "losses"
-        with self._lock, self.connection as connection:
-            connection.execute(
-                f"""UPDATE skills SET {column} = {column} + 1, uses = uses + 1,
-                        last_used = ?,
-                        avg_duration = CASE WHEN uses = 0 THEN ?
-                                            ELSE (avg_duration * uses + ?) / (uses + 1) END
-                    WHERE id = ?""",
-                (time.time(), duration, duration, skill_id),
-            )
-
-    def delete_skill(self, skill_id: int) -> bool:
-        with self._lock, self.connection as connection:
-            cursor = connection.execute("DELETE FROM skills WHERE id=?", (skill_id,))
-        return cursor.rowcount > 0
-
     # -- rules ------------------------------------------------------------ #
 
     def _row_to_rule(self, row: sqlite3.Row) -> Rule:
@@ -822,11 +805,6 @@ class BrainStore:
         return [rule for rule in self.all_rules(scopes, active_only=True)
                 if rule.confident]
 
-    def get_rule(self, rule_id: int) -> Rule | None:
-        row = self.connection.execute("SELECT * FROM rules WHERE id=?",
-                                      (rule_id,)).fetchone()
-        return self._row_to_rule(row) if row else None
-
     def set_rule_flags(self, rule_id: int, *, pinned: bool | None = None,
                        active: bool | None = None) -> bool:
         updates: list[str] = []
@@ -880,12 +858,6 @@ class BrainStore:
             for row in self.connection.execute(sql, params)
         ]
 
-    def signal_counts(self, since: float = 0.0) -> dict[str, int]:
-        rows = self.connection.execute(
-            "SELECT kind, COUNT(*) AS n FROM signals WHERE created_at >= ? GROUP BY kind",
-            (since,))
-        return {row["kind"]: row["n"] for row in rows}
-
     # -- episodes and feedback -------------------------------------------- #
 
     def add_episode(self, episode: Episode) -> Episode:
@@ -928,17 +900,6 @@ class BrainStore:
             )
             for row in reversed(rows)
         ]
-
-    def update_episode(self, episode_id: int, **fields: Any) -> None:
-        """Amend an episode after the fact — corrections arrive a turn later."""
-        allowed = {"corrections", "approvals_asked", "retries", "tokens",
-                   "rules_active", "success"}
-        updates = {k: v for k, v in fields.items() if k in allowed}
-        if not updates or not episode_id:
-            return
-        assignments = ", ".join(f"{name} = ?" for name in updates)
-        self._write(f"UPDATE episodes SET {assignments} WHERE id = ?",
-                    (*updates.values(), episode_id))
 
     def add_feedback(self, target_kind: str, target_id: int, signal: float,
                      note: str = "") -> None:

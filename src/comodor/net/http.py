@@ -1920,10 +1920,6 @@ class Session:
             except Exception:  # pragma: no cover
                 logger.debug("failed to attach cookies", exc_info=True)
 
-    @property
-    def cookie_dict(self) -> dict[str, str]:
-        return _jar_as_dict(self.cookies)
-
     def __repr__(self) -> str:
         return (f"<Session base_url={self.base_url!r} "
                 f"idle_connections={self._pool.idle_count}>")
@@ -2022,11 +2018,6 @@ def patch(url: str, **kwargs: Any) -> Response:
 
 def delete(url: str, **kwargs: Any) -> Response:
     return request("DELETE", url, **kwargs)
-
-
-def close_global_pool() -> None:
-    """Drop every pooled socket (call before forking or at shutdown)."""
-    _GLOBAL_POOL.clear()
 
 
 if __name__ == "__main__":  # pragma: no cover - tiny CLI for smoke testing

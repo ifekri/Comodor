@@ -34,7 +34,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .. import catalogue
 from .._version import __version__
 from ..agent import AgentLoop, Conversation
 from ..agent.spawn import spawner
@@ -82,10 +81,6 @@ def tool_kind(name: str) -> str:
         if lowered.startswith(verb) or f"_{verb}" in lowered:
             return kind
     return "other"
-
-
-class Conversation_(Conversation):
-    """Only here so the type is nameable in one place."""
 
 
 class AcpSession:
@@ -614,5 +609,3 @@ def _rfc3339(when: float) -> str:
         "+00:00", "Z")
 
 
-def known_providers() -> list[str]:
-    return [spec.id for spec in catalogue.offered()]

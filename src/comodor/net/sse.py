@@ -103,11 +103,3 @@ def iter_sse(response: Response, chunk_size: int = 8192) -> Iterator[SSEEvent]:
         yield frame
 
 
-def iter_json(response: Response) -> Iterator[Any]:
-    """Convenience: the decoded JSON payload of every frame that has one."""
-    for frame in iter_sse(response):
-        if frame.is_done:
-            return
-        payload = frame.json()
-        if payload is not None:
-            yield payload

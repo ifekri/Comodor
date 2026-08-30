@@ -17,7 +17,6 @@ prompt.
 
 from __future__ import annotations
 
-import fnmatch
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -103,14 +102,6 @@ class PermissionEngine:
                 return str(pattern)
         return ""
 
-    def preapproved_command(self, command: str) -> bool:
-        """Project allowlist, matched as glob patterns against the command."""
-        text = command.strip()
-        for pattern in self.config.safety.allow_commands:
-            if fnmatch.fnmatch(text, pattern) or text.startswith(str(pattern)):
-                return True
-        return False
-
     def path_allowed(self, path: Path) -> tuple[bool, str]:
         """Keep writes inside the project unless the user opted out."""
         if not self.config.safety.workspace_only:
@@ -188,10 +179,6 @@ class PermissionEngine:
     def grant(self, key: str) -> None:
         with self._lock:
             self._session_grants.add(key)
-
-    def revoke_all(self) -> None:
-        with self._lock:
-            self._session_grants.clear()
 
     @property
     def grants(self) -> list[str]:
