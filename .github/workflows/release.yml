@@ -229,8 +229,27 @@ jobs:
           files: dist/*
           generate_release_notes: true
           body: |
-            ```bash
-            curl -fsSL https://comodor.ai/install.sh | sh     # macOS / Linux
-            irm https://comodor.ai/install.ps1 | iex          # Windows
+            ## Install
+            ### Linux and MacOS
+              ```bash
+              curl -fsSL get.comodor.ai | sh
+              ```
+            ### Windows
+              ```bash
+              irm get.comodor.ai | iex
+              ```
+            ### UV
+
+              ```bash
+              uv tool sync comodor==${{ needs.build.outputs.version }}
+              ```
+
+            ### PIP
+              ```bash
+              pip install comodor==${{ needs.build.outputs.version }}
+              ```
+
+            ### PIPX
+              ```bash
             pipx install comodor==${{ needs.build.outputs.version }}
-            ```
+              ```
