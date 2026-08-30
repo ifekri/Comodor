@@ -149,6 +149,25 @@ def _and_the_damage(report: str) -> str:
     return f"\n\nWARNING  {report}" if report else ""
 
 
+def _and_what_was_asked(ctx: ToolContext) -> str:
+    """The user's own prohibitions, once per turn, on the first write.
+
+    Not a judgement about this particular write — nothing here understands the
+    rule well enough to say whether it was broken, and a wrong refusal is worse
+    than a forgotten instruction. It restates what was asked, at the moment the
+    model is deciding what to do next, and leaves the applying to it.
+
+    Once per turn, because a reminder on every write is one nobody reads.
+    """
+    if ctx.rules_shown or not ctx.rules:
+        return ""
+    from ..agent.constraints import reminder
+
+    ctx.rules_shown = True
+    said = reminder(ctx.rules)
+    return f"\n\n{said}" if said else ""
+
+
 def _splice(text: str, matches, replacement: str) -> str:
     """Put `replacement` at every match, working from the back.
 
@@ -289,7 +308,8 @@ class WriteFile(Tool):
             content=f"Wrote {rel} ({len(content.splitlines())} lines, "
                     f"+{added}/-{removed})."
                     + _and_the_damage(blind)
-                    + _and_the_damage(report),
+                    + _and_the_damage(report)
+                    + _and_what_was_asked(ctx),
             display=unified_diff(before, content, rel),
             path=str(target), added=added, removed=removed, diff=True,
         )
@@ -378,7 +398,8 @@ class EditFile(Tool):
                     f"{occurrences if replace_all else 1} "
                     f"replacement{'s' if replace_all and occurrences > 1 else ''})."
                     + (f" {how[0].upper()}{how[1:]}." if how else "")
-                    + _and_the_damage(report),
+                    + _and_the_damage(report)
+                    + _and_what_was_asked(ctx),
             display=unified_diff(before, after, rel),
             path=str(target), added=added, removed=removed, diff=True,
         )

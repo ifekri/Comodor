@@ -98,6 +98,8 @@ class AgentLoop:
         #: turn to tell "it says the tests pass and ran them" from "it says the
         #: tests pass".
         self._used: list[str] = []
+        #: What the user said not to do this turn, in their own words.
+        self._rules: list[str] = []
         #: Worked out once. The model does not change mid-turn, and reading a
         #: cached catalogue from disk on every step would be a file read per
         #: message for an answer that cannot have moved.
@@ -117,6 +119,15 @@ class AgentLoop:
         # ordering is the whole of the caching win: the head of the request then
         # never changes, and every request after the first is served from the
         # provider's cache at a tenth of the price. See providers/caching.py.
+        # What the user said not to do, pulled out once. Patterns over their
+        # own words — no model call, and nothing that could cost a request.
+        try:
+            from .constraints import prohibitions
+
+            self._rules = prohibitions(user_text)
+        except Exception:
+            self._rules = []
+
         playbook = self._recall(user_text)
         self.conversation.add(
             Message.user(user_text, images=images or [], briefing=playbook))
@@ -386,6 +397,16 @@ class AgentLoop:
         return True
 
     def _tool_context(self) -> ToolContext:
+        # The context is built once and kept — it holds the checkpoint store,
+        # the cancellation flag and what has been read this session. But the
+        # rules belong to *this* turn, so they are refreshed every time rather
+        # than frozen at whatever the first request happened to say.
+        if self.tool_context is not None:
+            if self.tool_context.rules != self._rules:
+                self.tool_context.rules = list(self._rules)
+                self.tool_context.rules_shown = False
+            return self.tool_context
+
         if self.tool_context is None:
             from ..safety import CheckpointStore, Redactor
 
@@ -399,6 +420,7 @@ class AgentLoop:
                 redact=Redactor(secrets),
                 cancel=self.cancel,
                 cwd=Path(self.config.paths.project),
+                rules=list(self._rules),
                 emit_output=lambda text: self.bus.emit(Kind.TOOL_OUTPUT, text=text),
             )
         return self.tool_context

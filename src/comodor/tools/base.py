@@ -51,6 +51,15 @@ class ToolContext:
     cwd: Path
     todos: list[TodoItem] = field(default_factory=list)
     emit_output: Callable[[str], None] | None = None   # incremental tool output
+    #: What the user said not to do, in their own words, for this turn.
+    #:
+    #: Shown again on the result of a write, because that is the last thing the
+    #: model reads before deciding what to do next — and by then the request is
+    #: thousands of tokens up the context behind everything it has read since.
+    rules: list[str] = field(default_factory=list)
+    #: Whether they have been said once already this turn.
+    rules_shown: bool = False
+
     #: Every file this session has actually read, by resolved path.
     #:
     #: Kept so a write can tell the difference between replacing a file whose
