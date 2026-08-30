@@ -7,13 +7,43 @@
 Fix something it wrote, and it never writes it that way again — in this project
 or the next one. Not a setting you turn on. Not a file you maintain.
 
-[![PyPI](https://img.shields.io/pypi/v/comodor?label=pypi&color=00e1fa)](https://pypi.org/project/comodor/)
-[![Python](https://img.shields.io/pypi/pyversions/comodor?color=555)](https://pypi.org/project/comodor/)
+[![PyPI](https://img.shields.io/pypi/v/comodor?label=pypi&color=0A7AFF)](https://pypi.org/project/comodor/)
+[![Python](https://img.shields.io/pypi/pyversions/comodor?color=darkorange)](https://pypi.org/project/comodor/)
 [![CI](https://github.com/ifekri/Comodor/actions/workflows/ci.yml/badge.svg)](https://github.com/ifekri/Comodor/actions/workflows/ci.yml)
-[![Licence](https://img.shields.io/pypi/l/comodor?color=555)](LICENSE)
+[![Licence](https://img.shields.io/pypi/l/comodor?color=white)](LICENSE)
 
-[**comodor.ai**](https://comodor.ai) · [Installation](#install) · [Documentation](docs/README.md) · [Changelog](CHANGELOG.md)
+<p align="center">
+  <a href="/docs/README.md">
+    <img src="https://img.shields.io/badge/Docs-EN-green?logo=github&logoColor=white&style=plastic" alt="English Docs" />
+  </a>
+  <a href="/docs/FA/README.md">
+    <img src="https://img.shields.io/badge/Docs-FA-green?logo=github&logoColor=white&style=plastic" alt="Persian (Farsi) Docs" />
+  </a>
+  <a href="/docs/AR/README.md">
+    <img src="https://img.shields.io/badge/Docs-AR-green?logo=github&logoColor=white&style=plastic" alt="Arabic Docs">
+ </a>
+  <a href="/docs/TR/README.md">
+    <img src="https://img.shields.io/badge/Docs-TR-green?logo=github&logoColor=white&style=plastic" alt="Turkish Docs" />
+  </a>
+  <a href="/docs/DE/README.md">
+    <img src="https://img.shields.io/badge/Docs-DE-green?logo=github&logoColor=white&style=plastic" alt="Deutsch Docs" />
+  </a>
+  <a href="/docs/ES/README.md">
+    <img src="https://img.shields.io/badge/Docs-ES-green?logo=github&logoColor=white&style=plastic" alt="Spanish Docs" />
+  </a>
+  <a href="/docs/RU/README.md">
+    <img src="https://img.shields.io/badge/Docs-RU-green?logo=github&logoColor=white&style=plastic" alt="Russian Docs" />
+  </a>
+  <a href="/docs/FR/README.md">
+    <img src="https://img.shields.io/badge/Docs-FR-green?logo=github&logoColor=white&style=plastic" alt="French Docs" />
+  </a>
+  <a href="/docs/ZH/README.md">
+    <img src="https://img.shields.io/badge/Docs-ZH-green?logo=github&logoColor=white&style=plastic" alt="Zhongwen Docs" />
+  </a>
+</p>
 
+
+[**comodor.ai**](https://comodor.ai) · [Installation](#install) · [Documentation](docs/README.md 'Comodor Documentation English')
 
 ---
 
