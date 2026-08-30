@@ -260,3 +260,47 @@ def test_no_translation_carries_a_command_that_no_longer_works(page):
                          ids=lambda page: page.parent.name)
 def test_every_translation_still_names_the_one_command(page):
     assert "docker compose up" in text(page)
+
+
+# --------------------------------------------------------------------------- #
+# the documentation against the code, not against an older version of it
+# --------------------------------------------------------------------------- #
+
+
+ALL_PAGES = [ROOT / "docs" / "docker.md"] + TRANSLATIONS
+
+#: What the container prints when it starts without a provider.
+#: The documentation quotes it verbatim, so it is one string in
+#: every language and the check is the same everywhere.
+PRINTED = "No provider is configured yet"
+
+
+@pytest.mark.parametrize("page", ALL_PAGES, ids=lambda page: page.parent.name)
+def test_every_page_quotes_the_message_the_code_prints(page):
+    """Nine pages said the container stops when no key is set. It has not
+    stopped for a long time — `web/commands.py` starts anyway and lets the
+    browser page ask, because refusing to start made the interface unreachable
+    for the one person most likely to want it.
+
+    Checked by the line the code actually prints rather than by hunting for
+    wrong phrasings in eight languages: a positive signal, and the same one in
+    every translation. Looking for the wrong words instead found the Persian
+    security paragraph, where the same verb means "stands between".
+    """
+    assert PRINTED in text(page), (
+        f"{page.parent.name}: does not quote what the container really says")
+
+
+def test_the_code_really_does_start_without_a_provider():
+    """The claim the pages now make, checked against the function that decides
+    it — so the documentation is pinned to the behaviour and not to a memory
+    of it."""
+    import inspect
+
+    from comodor.web import commands
+
+    source = inspect.getsource(commands._configured_or_explain)
+
+    assert "return config" in source
+    assert "No provider is configured yet" in source, (
+        "the message the documentation quotes is not the one the code prints")

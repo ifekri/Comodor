@@ -30,11 +30,19 @@ docker run --rm -it -p 127.0.0.1:8765:8765 \
 
 ---
 
-## Une clé n'est pas facultative ici
+## Une clé, sinon la page la demandera
 
-L'interface navigateur n'offre aucun moyen d'en saisir une, si bien que sans clé
-le conteneur indique ce qui manque et s'arrête, au lieu de servir une URL qui
-échoue dès la première tâche.
+Renseignez-en une et tout est prêt dès l'ouverture du lien. Sans clé, il
+démarre quand même et la page la demande — l'interface navigateur peut
+désormais recevoir une clé, et un conteneur qui refusait de démarrer
+était précisément inaccessible à qui en a le plus besoin : quelqu'un
+dont le Comodor tourne sur un serveur, sans terminal devant lui.
+
+Les journaux le disent avant même que vous n'ouvriez quoi que ce soit :
+
+```
+No provider is configured yet — the page will ask when you open it.
+```
 
 Compose transmet celle de ces variables qui est définie dans votre shell, sans
 l'écrire dans l'image ni dans le fichier compose :

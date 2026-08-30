@@ -30,11 +30,19 @@ docker run --rm -it -p 127.0.0.1:8765:8765 \
 
 ---
 
-## Aquí una clave no es opcional
+## Una clave, o la página la pedirá
 
-La interfaz del navegador no tiene forma de introducirla, así que sin una clave
-el contenedor dice qué falta y se detiene en lugar de servir una URL que falla
-en la primera tarea.
+Ponla y estará listo en cuanto abras el enlace. Sin ella también
+arranca, y la página la pide — la interfaz del navegador ya puede
+recibir una clave, y un contenedor que se negaba a arrancar resultaba
+inalcanzable justo para quien más lo necesita: alguien cuyo Comodor
+está en un servidor, sin terminal delante.
+
+Los registros lo dicen antes de que abras nada:
+
+```
+No provider is configured yet — the page will ask when you open it.
+```
 
 Compose pasa a través del que esté establecido en tu shell, sin escribirlo en
 la imagen ni en el archivo compose:

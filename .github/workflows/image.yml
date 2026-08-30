@@ -53,6 +53,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # A ceiling on the whole thing. One of these steps ran a server in the
+    # foreground and captured its output, which hung for three hours before
+    # anybody noticed. Every wait below is bounded as well; this is the
+    # backstop for the one that is not.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -106,31 +111,46 @@ jobs:
         id: image
         run: echo "ref=ghcr.io/${{ github.repository_owner }}/comodor:latest" >> "$GITHUB_OUTPUT"
 
-      # With no key it must stop and say why. The browser interface has no way
-      # to enter one, so a server without a provider is a URL that fails on the
-      # first task - and in a container this message is the only thing the
-      # person who ran `docker compose up` is going to see.
-      - name: With no key, it says what is missing and stops
+      # With no key it starts anyway and says the page will ask.
+      #
+      # This step asserted the opposite until it hung a workflow for three
+      # hours: it was written when the image installed 0.9.0, which refused to
+      # start without a provider. That changed on purpose — the browser
+      # interface can take a key now, and refusing to start made it
+      # unreachable for exactly the person most likely to want it, whose
+      # Comodor is in a container with no terminal in front of them.
+      #
+      # So what is checked is the current contract: it comes up, and it says
+      # out loud that a key is still needed. `timeout` because a step that runs
+      # a server and reads its output must never be able to wait forever.
+      - name: With no key, it starts and says a key is still needed
         run: |
           image="${{ steps.image.outputs.ref }}"
-          set +e
-          output=$(docker run --rm -t --name check-nokey "$image" 2>&1)
-          code=$?
-          set -e
-          echo "$output"
-          if [ "$code" -eq 0 ]; then
-            echo "::error::it started a server with no provider configured"
+          docker run --rm -d -t --name check-nokey             -p 127.0.0.1:8766:8765 "$image"
+
+          ready=""
+          for _ in $(seq 1 30); do
+            sleep 2
+            code=$(curl -s -m 5 -o /dev/null -w '%{http_code}'                    http://127.0.0.1:8766/ || true)
+            if [ "$code" = "401" ]; then ready=yes; break; fi
+            docker ps --filter name=check-nokey --format '{{.Names}}'               | grep -q check-nokey || break
+          done
+
+          logs=$(timeout 30 docker logs check-nokey 2>&1 || true)
+          docker rm -f check-nokey >/dev/null 2>&1 || true
+          echo "$logs"
+
+          if [ -z "$ready" ]; then
+            echo "::error::it never served without a key, which is how the"
+            echo "::error::browser interface is reached on a machine with no terminal"
             exit 1
           fi
-          case "$output" in
-            *"no provider configured"*) ;;
-            *) echo "::error::it stopped without saying why"; exit 1 ;;
+          case "$logs" in
+            *"No provider is configured"*) ;;
+            *) echo "::error::it started without saying a key is still needed"
+               exit 1 ;;
           esac
-          case "$output" in
-            *ANTHROPIC_API_KEY*) ;;
-            *) echo "::error::the message does not say what would fix it"; exit 1 ;;
-          esac
-          echo "It stopped, and the message carries the answer."
+          echo "It serves, and it says what is still missing."
 
       # `-d` is the case that used to hang: compose sets `tty: true`, so a
       # container has a terminal whether or not anybody is reading it, and the
@@ -143,18 +163,18 @@ jobs:
             -p 127.0.0.1:8765:8765 "$image"
           for _ in $(seq 1 30); do
             sleep 2
-            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/ || true)
+            code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/ || true)
             # 401 is the right answer to a request with no token: it is up.
             if [ "$code" = "401" ]; then
               echo "It is serving, and it refused a request without the token."
-              docker logs check | head -30
+              timeout 30 docker logs check | head -30 || true
               break
             fi
             docker ps --filter name=check --format '{{.Names}}' | grep -q check || break
           done
           if [ "${code:-}" != "401" ]; then
             echo "::error::it never answered."
-            docker logs check 2>&1 | head -40 || true
+            timeout 30 docker logs check 2>&1 | head -40 || true
             docker rm -f check 2>/dev/null || true
             exit 1
           fi
@@ -164,7 +184,7 @@ jobs:
       # detached run does not have.
       - name: The logs carry an address that can be opened
         run: |
-          logs=$(docker logs check 2>&1)
+          logs=$(timeout 30 docker logs check 2>&1 || true)
           case "$logs" in
             *"http://127.0.0.1:8765/?token="*) ;;
             *)

@@ -30,11 +30,19 @@ docker run --rm -it -p 127.0.0.1:8765:8765 \
 
 ---
 
-## Ein Schlüssel ist hier nicht optional
+## Ein Schlüssel — sonst fragt die Seite danach
 
-Die Browser-Oberfläche hat keine Möglichkeit, einen einzugeben. Ohne
-Schlüssel sagt der Container also, was fehlt, und stoppt, statt eine URL zu
-servieren, die bei der ersten Aufgabe scheitert.
+Setzen Sie einen, und es ist bereit, sobald Sie den Link öffnen. Ohne
+startet es trotzdem, und die Seite fragt — die Browser-Oberfläche kann
+inzwischen einen Schlüssel entgegennehmen, und ein Container, der nicht
+startete, war genau für die Person unerreichbar, die ihn am ehesten
+braucht: jemand, dessen Comodor auf einem Server ohne Terminal läuft.
+
+Die Logs sagen es, bevor Sie irgendetwas öffnen:
+
+```
+No provider is configured yet — the page will ask when you open it.
+```
 
 Compose reicht durch, welches davon auch immer in deiner Shell gesetzt ist,
 ohne es in das Image oder die Compose-Datei zu schreiben:

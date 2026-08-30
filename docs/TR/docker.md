@@ -29,9 +29,18 @@ docker run --rm -it -p 127.0.0.1:8765:8765 \
 
 ---
 
-## Burada bir anahtar isteğe bağlı değildir
+## Bir anahtar, yoksa sayfa sorar
 
-Tarayıcı arayüzünün anahtar girmek için bir yolu yoktur; bu yüzden anahtar olmadan kapsayıcı neyin eksik olduğunu söyler ve durur — ilk görevde başarısız olan bir URL sunmak yerine.
+Ayarlarsanız bağlantıyı açtığınız anda hazırdır. Anahtarsız da başlar ve
+sayfa sorar — tarayıcı arayüzü artık anahtar alabiliyor ve başlamayı
+reddeden bir kapsayıcı, tam da ona en çok ihtiyaç duyan kişi için
+erişilmezdi: Comodor'u terminalsiz bir sunucuda çalışan kişi.
+
+Günlükler bunu siz bir şey açmadan önce söyler:
+
+```
+No provider is configured yet — the page will ask when you open it.
+```
 
 Compose, kabuğunuzda ayarlı olan hangisi varsa onu iletir; onu imaja ya da compose dosyasına yazmadan:
 
