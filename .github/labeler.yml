@@ -1,3 +1,7 @@
+# A label whose name contains a colon has to be quoted, or YAML reads it
+# as a nested mapping and the whole file fails to parse. Both `Area:`
+# labels did, so this workflow has never once applied a label — it failed
+# on the first pull request that ran it.
 
 Documentation:
   - changed-files:

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ..safety import Risk
+from . import matching, verify
 from .base import Tool, ToolContext, ToolResult
 
 BINARY_SNIFF = 8000
@@ -116,13 +117,42 @@ def change_stats(before: str, after: str) -> tuple[int, int]:
     return added, removed
 
 
-def _write(ctx: ToolContext, path: Path, content: str, action: str, tool: str) -> None:
+def _write(ctx: ToolContext, path: Path, content: str, action: str,
+           tool: str) -> str:
+    """Write the file, then say what is wrong with what was written.
+
+    The check runs after the write and never gates it. Both halves of a
+    two-part edit have to be possible, and the first half of one usually leaves
+    the file inconsistent — a verifier that refused it would make the pair
+    unreachable. The bytes are down and the checkpoint is taken; all this does
+    is make sure the model finds out.
+    """
     # The snapshot records both sides: what was there before, so /undo works,
     # and what the agent is about to leave, so a later hand-edit is detectable.
     if ctx.config.safety.checkpoints:
         ctx.checkpoints.snapshot(path, action=action, tool=tool, after=content)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8", newline="")
+
+    if not getattr(ctx.config.safety, "verify_edits", True):
+        return ""
+    return verify.check(path, content)
+
+
+def _and_the_damage(report: str) -> str:
+    """The verifier's finding, as a line under what the tool already said."""
+    return f"\n\nWARNING  {report}" if report else ""
+
+
+def _splice(text: str, matches, replacement: str) -> str:
+    """Put `replacement` at every match, working from the back.
+
+    Backwards because each replacement shifts everything after it, and the
+    offsets were all measured against the text as it stands now.
+    """
+    for one in reversed(matches):
+        text = text[:one.start] + replacement + text[one.end:]
+    return text
 
 
 # --------------------------------------------------------------------------- #
@@ -216,12 +246,14 @@ class WriteFile(Tool):
             if error:
                 before = ""
 
-        _write(ctx, target, content, action="write" if target.exists() else "create",
-               tool=self.name)
+        report = _write(ctx, target, content,
+                        action="write" if target.exists() else "create",
+                        tool=self.name)
         added, removed = change_stats(before, content)
         rel = ctx.relative(target)
         return ToolResult.success(
-            content=f"Wrote {rel} ({len(content.splitlines())} lines, +{added}/-{removed}).",
+            content=f"Wrote {rel} ({len(content.splitlines())} lines, "
+                    f"+{added}/-{removed})." + _and_the_damage(report),
             display=unified_diff(before, content, rel),
             path=str(target), added=added, removed=removed, diff=True,
         )
@@ -273,29 +305,44 @@ class EditFile(Tool):
         if error:
             return ToolResult.failure(error)
 
-        occurrences = before.count(old_string)
+        matches, _ = matching.find(before, old_string, all_of_them=replace_all)
+        occurrences = len(matches)
         if occurrences == 0:
+            # A bare "not found" sends the model back to read the whole file
+            # and guess again. Naming the closest few places, with the nearest
+            # diffed against what was asked for, usually makes the next call
+            # the right one instead of the second wrong one.
+            hint = matching.near_misses(before, old_string)
             return ToolResult.failure(
-                "old_string was not found. Read the file again — the text may have "
-                "changed, or the whitespace does not match exactly."
+                "old_string was not found. The text may have changed since you "
+                "read it, or the whitespace does not match."
+                + (f"\n\n{hint}" if hint else "")
             )
         if occurrences > 1 and not replace_all:
+            lines = ", ".join(str(before.count("\n", 0, one.start) + 1)
+                              for one in matches[:6])
             return ToolResult.failure(
-                f"old_string matches {occurrences} places. Add surrounding context to "
-                "make it unique, or pass replace_all=true."
+                f"old_string matches {occurrences} places — lines {lines}. Add "
+                "surrounding context to make it unique, or pass replace_all=true."
             )
 
-        after = (before.replace(old_string, new_string) if replace_all
-                 else before.replace(old_string, new_string, 1))
+        after = _splice(before, matches, new_string)
         if after == before:
             return ToolResult.failure("the replacement produced no change")
 
-        _write(ctx, target, after, action="edit", tool=self.name)
+        report = _write(ctx, target, after, action="edit", tool=self.name)
         added, removed = change_stats(before, after)
         rel = ctx.relative(target)
+        # Announced, never silent. An edit that landed somewhere slightly
+        # different from what was asked for and says nothing about it is worse
+        # than one that refused.
+        how = matches[0].how
         return ToolResult.success(
-            content=f"Edited {rel} (+{added}/-{removed}, {occurrences if replace_all else 1} "
-                    f"replacement{'s' if replace_all and occurrences > 1 else ''}).",
+            content=f"Edited {rel} (+{added}/-{removed}, "
+                    f"{occurrences if replace_all else 1} "
+                    f"replacement{'s' if replace_all and occurrences > 1 else ''})."
+                    + (f" {how[0].upper()}{how[1:]}." if how else "")
+                    + _and_the_damage(report),
             display=unified_diff(before, after, rel),
             path=str(target), added=added, removed=removed, diff=True,
         )

@@ -529,6 +529,12 @@ class SafetyConfig:
     auto_approve_writes: bool = False
     auto_approve_shell: bool = False
     checkpoints: bool = True
+    #: Parse a file after writing it and tell the model what it broke, in the
+    #: same tool result. It costs microseconds for Python, JSON and TOML — they
+    #: are parsed in this process — and it never refuses a write, so the worst
+    #: it can do is add a line the model did not need. Off is for somebody
+    #: editing a dialect our parsers do not know.
+    verify_edits: bool = True
     allow_commands: list[str] = field(default_factory=list)
     deny_commands: list[str] = field(default_factory=lambda: list(DEFAULT_DENY))
     workspace_only: bool = True

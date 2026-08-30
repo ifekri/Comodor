@@ -36,6 +36,24 @@ change makes recall slower, that suite fails — that is the intent, not a flake
 If the new cost is genuinely necessary, say so in the pull request and move the
 ceiling in the same commit, so the trade is visible in review.
 
+### If you changed how the agent behaves
+
+The prompts, the tool descriptions, the agent loop, the edit tool: none of
+these have a unit test that can tell you whether you made them better or worse.
+[`bench/`](bench/README.md) can.
+
+```bash
+python -m bench --provider xiaomi --model mimo-v2.5-pro --tries 1
+```
+
+Thirteen coding tasks in real repositories, judged by programs. Run it before
+and after, and put both numbers in the pull request. A change that moves it
+down is not automatically wrong — but it should be a trade somebody chose,
+not one nobody noticed.
+
+**Every bug fixed here should become a task.** That is the only way the suite
+is meant to grow; a task written to make a number look good measures nothing.
+
 ## What gets merged quickly
 
 **A change that comes with the test that would have caught the bug.** Not a test

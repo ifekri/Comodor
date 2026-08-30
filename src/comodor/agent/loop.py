@@ -84,6 +84,14 @@ class AgentLoop:
         self._skills_used: list[Any] = []
         self.tool_context: ToolContext | None = None
         self._recalled: list[Any] = []
+        #: Every tool this turn reached for, in order. Read at the end of the
+        #: turn to tell "it says the tests pass and ran them" from "it says the
+        #: tests pass".
+        self._used: list[str] = []
+        #: Worked out once. The model does not change mid-turn, and reading a
+        #: cached catalogue from disk on every step would be a file read per
+        #: message for an answer that cannot have moved.
+        self._profile: Any = None
 
     # -- public API ------------------------------------------------------- #
 
@@ -91,6 +99,7 @@ class AgentLoop:
         """Handle one user message from start to finish."""
         started = time.monotonic()
         self.cancel.reset()
+        self._used = []
         result = TurnResult()
 
         # Recall runs before the message is stored, not after, so that what it
@@ -106,7 +115,14 @@ class AgentLoop:
         deadline = started + self.config.agent.max_seconds
 
         try:
-            result = self._iterate(deadline)
+            # Filled in as it goes rather than returned at the end. A turn that
+            # fails halfway has still read files and made edits, and a result
+            # built only on the way out reports none of it: `steps: 0,
+            # tool_calls: 0` for a turn that changed the project. Every caller
+            # then believes nothing happened — the headless JSON, the turn
+            # summary, and the lesson the brain records about how much this
+            # took.
+            self._iterate(deadline, result)
         except Cancelled:
             result.stopped = "cancelled"
             self.bus.emit(Kind.CANCELLED)
@@ -121,6 +137,7 @@ class AgentLoop:
 
         result.elapsed = time.monotonic() - started
         result.usage = self.conversation.usage
+        self._say_if_unverified(result)
         self.bus.emit(Kind.TURN_END, stopped=result.stopped, steps=result.steps,
                       elapsed=result.elapsed, error=result.error)
 
@@ -132,8 +149,7 @@ class AgentLoop:
 
     # -- the loop --------------------------------------------------------- #
 
-    def _iterate(self, deadline: float) -> TurnResult:
-        result = TurnResult()
+    def _iterate(self, deadline: float, result: TurnResult) -> TurnResult:
         agent = self.config.agent
 
         while True:
@@ -277,6 +293,7 @@ class AgentLoop:
             self.conversation.add(message)
 
     def _run_one(self, call: ToolCall, context: ToolContext) -> ToolResult:
+        self._used.append(call.name)
         self.bus.emit(Kind.TOOL_START, id=call.id, name=call.name,
                       arguments=call.arguments,
                       summary=self._describe(call))
@@ -334,7 +351,7 @@ class AgentLoop:
             getattr(agent, "keep_screenshots", 2))
         if gone:
             self._emit_usage(system_prompt, specs)
-        limit = agent.context_limit or 128_000
+        limit = self._window()
         if not self.conversation.needs_compaction(limit, agent.compact_at,
                                                   system_prompt, specs):
             return
@@ -358,8 +375,27 @@ class AgentLoop:
         ))
         return completion.text
 
+    def _window(self) -> int:
+        """How much this model can actually read, cached for the turn.
+
+        Not `agent.context_limit`, which defaults to a million and describes no
+        model in particular. Point Comodor at a 32k model with that number in
+        force and compaction never fires — the conversation grows past what the
+        model can take, and the first sign is the provider refusing it.
+        """
+        if self._profile is None:
+            from ..providers import profile
+
+            try:
+                self._profile = profile.of(self.config)
+            except Exception:
+                # Never the reason a turn does not run. The old constant is a
+                # bad answer; no answer at all is a worse one.
+                return self.config.agent.context_limit or 128_000
+        return self._profile.context
+
     def _emit_usage(self, system_prompt: str, specs: list[ToolSpec]) -> None:
-        limit = self.config.agent.context_limit or 128_000
+        limit = self._window()
         used = self.conversation.used_tokens(system_prompt, specs)
         usage = self.conversation.usage
         self.bus.emit(
@@ -371,6 +407,22 @@ class AgentLoop:
             output_tokens=usage.output_tokens,
             cost_usd=usage.cost_usd,
         )
+
+    def _say_if_unverified(self, result: TurnResult) -> None:
+        """Say so when the answer claims a suite passes and nothing ran it.
+
+        The system prompt already forbids this. That is not the same as it not
+        happening, and the user is the one person who cannot tell the two apart
+        — the answer reads identically either way.
+        """
+        try:
+            from .claims import unverified
+
+            notice = unverified(result.text, self._used)
+        except Exception:
+            return
+        if notice:
+            self._note(notice)
 
     def _note(self, text: str) -> None:
         self.bus.emit(Kind.NOTICE, text=text)

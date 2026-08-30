@@ -437,3 +437,76 @@ def test_no_ceiling_asked_for_means_nothing_to_check(home):
 
     names = [f.name for f in run_checks(config, online=False).findings]
     assert "spend limit" not in names
+
+
+# --------------------------------------------------------------------------- #
+# the context window
+#
+# `agent.context_limit` defaults to a million and describes no model. Against a
+# small one the agent used to work to that number, never compact, and fail on
+# the provider's own refusal — an error that says nothing about the cause. The
+# loop reads the real window now, so doctor has to say when the setting is
+# being overruled: a setting nobody mentions is one people keep trying to change.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_setting_larger_than_the_model_is_flagged_not_silently_overruled(home):
+    from comodor.doctor import _check_context_window
+
+    config = configured(home)
+    config.model = "claude-haiku-4-5"
+    config.agent.context_limit = 1_000_000
+
+    found = _check_context_window(config)
+
+    assert found is not None
+    assert found.status is Status.WARN
+    assert "200,000" in found.detail
+    # A warning that sounds like a breakage sends people hunting for one.
+    assert "nothing breaks" in found.remedy
+
+
+def test_a_matching_setting_is_simply_reported(home):
+    from comodor.doctor import _check_context_window
+
+    config = configured(home)
+    config.model = "claude-haiku-4-5"
+    config.agent.context_limit = 200_000
+
+    found = _check_context_window(config)
+
+    assert found.status is Status.OK
+    assert "200,000" in found.detail
+
+
+def test_a_small_local_model_is_called_small(home):
+    """The window nobody sets and everybody hits."""
+    import json
+
+    from comodor.doctor import _check_context_window
+
+    config = configured(home)
+    config.provider = "ollama"
+    config.model = "qwen2.5-coder:7b"
+    config.agent.context_limit = 1_000_000
+    cache = config.paths.user / "cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "models-ollama.json").write_text(json.dumps({
+        "provider": "ollama", "fetched_at": 1.0,
+        "models": [{"id": "qwen2.5-coder:7b", "context": 8192}]}),
+        encoding="utf-8")
+
+    found = _check_context_window(config)
+
+    assert found.status is Status.WARN
+    assert "8,192" in found.detail
+
+
+def test_no_model_means_nothing_to_say(home):
+    from comodor.doctor import _check_context_window
+
+    config = configured(home)
+    config.model = ""
+    config.providers["anthropic"].model = ""
+
+    assert _check_context_window(config) is None
