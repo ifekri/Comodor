@@ -82,18 +82,35 @@ nobody has read is a failure nobody has checked.
 code settles it, the right behaviour is to read the code, decide, and say so —
 and a task that punishes that is measuring the task author.
 
-*If a verdict cannot be read exactly, change the question.* `find-why-it-fails`
-went through four heuristics over prose. One passed a confidently wrong answer;
-two failed correct ones, the last of them an answer whose first line was
-**"The failing method is `Cache.get`"** — rejected because "failing method is"
-was not a phrase anybody had listed. The fix was not a fifth word list. The
-task now asks for the verdict on its own line:
+*If a verdict cannot be read exactly, change the question.* This one cost
+five wrong judgements across two tasks before it was written down.
 
-    METHOD: <name>
+`find-why-it-fails` went through four heuristics over prose. One passed a
+confidently wrong answer; two failed correct ones — the last an answer whose
+first line was **"The failing method is `Cache.get`"**, rejected because
+"failing method is" was not a phrase anybody had listed.
 
-and the judge reads that line. A task whose answer can be read exactly is worth
-more than a judge that is nearly right, because a judge that is nearly right
-produces numbers indistinguishable from real ones.
+`find-the-definition` went through three. The last of them failed **"the
+billable quantity (total quantity minus the plan's free allowance) exceeds
+1,000"**, which is exactly right, because `total quantity` was on a list of
+phrases that signal the *wrong* rule. It does signal it, sometimes. Here it is
+half of the right one.
+
+The fix in both cases was not another word list. It was asking for an answer
+with one correct spelling:
+
+    METHOD: get
+    WHERE: app/rates.py:43
+    BILLABLE: 15000
+
+A location and a number cannot be phrased two ways. The prose still has to be
+there — a `find` task is about understanding, not about filling in a form — but
+what is *scored* is the part that can be read exactly.
+
+**So: every new `find` or `careful` task must have at least one line whose
+correct value is a path, a name, or a number.** A judge that is nearly right
+produces numbers indistinguishable from real ones, and there is no way to tell
+from the score which kind you have.
 
 ## Adding a task
 

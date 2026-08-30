@@ -1,33 +1,29 @@
-"""Find where a rule is actually implemented, across four files.
+"""Find where a rule is implemented, and prove you understood it.
 
 A reading task, run in plan mode so the write tools are absent rather than
 merely refused — a question about code cannot be answered by editing it.
 
-Three things are judged, and the third is the one that took two attempts to get
-right.
+**Both halves of the answer have exactly one correct spelling**, and that is a
+change to the task rather than a cleverer way of reading prose. Three versions
+of this judge tried the latter:
 
-*The file and the function.* `apply_rate` in `app/rates.py`, not `included`
-next to it and not `invoice_lines` upstream.
+*Too lenient.* "allowance" anywhere passed "anything over 1000 raw units,
+regardless of the allowance" — the opposite of what the code does, stated
+confidently, passing because it named the thing it was dismissing.
 
-*A line inside that function.* Accepted anywhere in its body rather than on one
-exact row: "the function at rates.py:33" and "the branch at rates.py:43" are
-both right, and arguing about which is more right would be the judge having an
-opinion.
+*Too strict.* Requiring the words in one sentence failed answers that used a
+pronoun in the next.
 
-*What actually decides the tier.* The allowance comes off first — the reduced
-price applies past a thousand **billable** units, not a thousand raw ones. This
-is the half of the question that separates having read the function from having
-found it.
+*Too strict again.* A dismissal list containing "total quantity" failed this,
+which is correct: "the billable quantity (total quantity minus the plan's free
+allowance) exceeds 1,000". The phrase was on the list because it can signal the
+wrong rule. Here it is half of the right one.
 
-The first version of this check looked for the word "allowance" anywhere in the
-answer, which passed:
-
-    Anything over 1000 raw units of the meter gets the reduced price,
-    regardless of the allowance.
-
-— the wrong rule, stated confidently, passing because it named the thing it was
-dismissing. So the subtraction and the allowance have to appear in the same
-sentence, and that sentence must not be waving it away.
+So the second half is a number now. `25,000` requests on the growth plan, whose
+included allowance is `10,000`, leaves `15,000` billable. An answer that has
+understood the rule can compute it; one that thinks the tier is decided by raw
+quantity will say `25,000`, which is the wrong answer and is visibly the wrong
+answer. No word list can be wrong about it.
 """
 
 import re
@@ -43,56 +39,50 @@ WRITES = False
 #: `def apply_rate` through its last line.
 BODY = range(33, 44)
 
-#: The free part, however it is named.
-ALLOWANCE = ("allowance", "included", "free", "billable")
+WHERE = re.compile(r"^\W*WHERE\W*:\W*`?\**\s*([\w./\\-]+?\.py)\D{0,4}(\d{1,4})",
+                   re.IGNORECASE | re.MULTILINE)
 
-#: Taking it off, however it is put.
-SUBTRACTED = ("minus", "after", "past", "beyond", "subtract", "deduct",
-              "excess", "over and above", "on top of", "billable", "-",
-              "remaining", "left")
+BILLABLE = re.compile(r"^\W*BILLABLE\W*:\W*`?\**\s*([\d,_ ]+)",
+                      re.IGNORECASE | re.MULTILINE)
 
-#: Waving it away, which is the wrong answer wearing the right words.
-DISMISSED = ("regardless", "ignoring", "irrespective", "raw ", "whether or not",
-             "does not matter", "doesn't matter", "no matter", "total quantity")
+#: 25,000 requests against a growth allowance of 10,000.
+ANSWER = 15_000
 
-#: Where the answer talks about the threshold itself.
-THRESHOLD = re.compile(r"\b(?:1[,_ ]?000|thousand|1000)\b", re.IGNORECASE)
-
-#: How far either side of the threshold still counts as talking about it.
-#: A paragraph, not a sentence: an answer that names the allowance and then
-#: continues with a pronoun is an answer, and a rule that cannot follow "it"
-#: is grading prose rather than correctness. That mistake was made twice in
-#: this suite before it was written down.
-REACH = 220
+#: What an answer says when it thinks the tier is decided by raw quantity.
+RAW = 25_000
 
 
 def check(attempt):
-    named = judge.says(attempt, "rates.py", "apply_rate")
-    if not named.passed:
-        return named
+    where = WHERE.search(attempt.text)
+    if not where:
+        return Verdict.no("the answer has no `WHERE:` line, which the task "
+                          "asked for")
 
-    lines = {int(number) for number in re.findall(r"\b(\d{1,4})\b", attempt.text)}
-    if not lines & set(BODY):
+    path, line = where.group(1).replace("\\", "/"), int(where.group(2))
+    if not path.endswith("rates.py"):
+        return Verdict.no(f"it named {path}, and the arithmetic is in "
+                          f"app/rates.py")
+    if line not in BODY:
         return Verdict.no(
-            f"no line number inside apply_rate ({BODY.start}-{BODY.stop - 1}) "
-            f"appears in the answer")
+            f"line {line} is not inside apply_rate "
+            f"({BODY.start}-{BODY.stop - 1})")
 
-    explained = False
-    lowered = attempt.text.lower()
-    for found in THRESHOLD.finditer(lowered):
-        window = lowered[max(0, found.start() - REACH):found.end() + REACH]
-        if any(word in window for word in DISMISSED):
-            continue
-        if (any(word in window for word in ALLOWANCE)
-                and any(word in window for word in SUBTRACTED)):
-            explained = True
-            break
+    billable = BILLABLE.search(attempt.text)
+    if not billable:
+        return Verdict.no("the answer has no `BILLABLE:` line")
 
-    if not explained:
+    digits = re.sub(r"[^\d]", "", billable.group(1))
+    if not digits:
+        return Verdict.no(f"`BILLABLE: {billable.group(1).strip()}` is not a number")
+
+    counted = int(digits)
+    if counted == RAW:
         return Verdict.no(
-            "the answer does not say that the tier is decided after the "
-            "included allowance comes off — the reduced price applies past a "
-            "thousand billable units, not a thousand raw ones")
+            f"it answered {counted:,}, which is the raw quantity. The included "
+            f"allowance comes off first — the tier is decided on billable units")
+    if counted != ANSWER:
+        return Verdict.no(f"it answered {counted:,}; the growth plan includes "
+                          f"10,000, so 25,000 requests leave {ANSWER:,} billable")
 
     return judge.untouched(attempt, judge.original(__file__),
                            "app/rates.py", "app/billing.py", "report.py")
