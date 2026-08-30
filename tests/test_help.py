@@ -142,6 +142,21 @@ def test_the_documentation_index_exists_and_reaches_every_page():
     assert not orphans, f"pages the index does not reach: {orphans}"
 
 
+def link_path(target: str) -> str:
+    """The file a Markdown link points at, out of everything in the brackets.
+
+    `[text](path "title")` is an ordinary link and the title is not part of the
+    path — reading it as one turns a working link into a broken one and reports
+    the wrong thing as the bug. `<path>` is legal too.
+    """
+    target = target.strip()
+    if target.startswith("<") and ">" in target:
+        target = target[1:target.index(">")]
+    else:
+        target = target.split(maxsplit=1)[0] if target.split() else ""
+    return target.partition("#")[0]
+
+
 def test_no_documentation_link_is_broken():
     broken = []
     for page in sorted(DOCS.glob("*.md")):
@@ -149,7 +164,8 @@ def test_no_documentation_link_is_broken():
                                         page.read_text(encoding="utf-8")):
             if target.startswith(("http://", "https://", "mailto:", "#")):
                 continue
-            if not (page.parent / target.partition("#")[0]).exists():
+            path = link_path(target)
+            if path and not (page.parent / path).exists():
                 broken.append(f"{page.name}: [{label}]({target})")
     assert not broken, f"broken links: {broken}"
 
@@ -158,11 +174,28 @@ def test_the_readme_points_at_the_index():
     readme = (DOCS.parent / "README.md").read_text(encoding="utf-8")
 
     assert "docs/README.md" in readme
-    broken = [target for _, target in
-              re.findall(r"\[([^\]]+)\]\(([^)]+)\)", readme)
-              if not target.startswith(("http", "mailto", "#"))
-              and not (DOCS.parent / target.partition("#")[0]).exists()]
+    broken = []
+    for _, target in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", readme):
+        if target.startswith(("http", "mailto", "#")):
+            continue
+        path = link_path(target)
+        if path and not (DOCS.parent / path).exists():
+            broken.append(target)
     assert not broken, f"the README points at nothing: {broken}"
+
+
+@pytest.mark.parametrize("target,expected", [
+    ("docs/README.md", "docs/README.md"),
+    ("docs/README.md 'Comodor Documentation English'", "docs/README.md"),
+    ('docs/tools.md "The tools"', "docs/tools.md"),
+    ("<docs/web.md>", "docs/web.md"),
+    ("docs/safety.md#permissions", "docs/safety.md"),
+])
+def test_a_link_title_is_not_part_of_the_path(target, expected):
+    """A titled link is ordinary Markdown, and reading the title as part of the
+    filename reports a working link as broken — which sends somebody looking
+    for a missing file that is not missing."""
+    assert link_path(target) == expected
 
 
 # --------------------------------------------------------------------------- #

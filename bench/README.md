@@ -59,6 +59,29 @@ a single boolean. Agents are not deterministic and a single run presented as
 Every published result names the model, the provider, the date and the machine.
 Nothing is estimated, projected or rounded up from a partial run.
 
+## A judge can be wrong, and it looks exactly like a result
+
+The first `careful` task here asked for a `delete` operation across two storage
+backends that disagreed about missing keys, and required the agent to ask
+before building. A model scored 0/3 on it — and it had found the ambiguity,
+resolved it from each backend's own existing convention, and said so with file
+and line. Comodor's own prompt tells it to do precisely that: *"do not ask
+about matters with an obvious default — pick the default and say that you
+did."*
+
+**A judge with a made-up standard is the same bug as a test with made-up keys,
+pointed the other way.** One passes broken code; the other fails correct work.
+Both produce a number indistinguishable from a real one.
+
+Two rules came out of it, and they apply to every task added from now on:
+
+*Read what the agent actually said before believing the verdict.* A failure
+nobody has read is a failure nobody has checked.
+
+*A `careful` task must turn on something the repository cannot answer.* If the
+code settles it, the right behaviour is to read the code, decide, and say so —
+and a task that punishes that is measuring the task author.
+
 ## Adding a task
 
 Every bug found in Comodor from now on becomes one. That is the only way the
