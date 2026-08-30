@@ -417,22 +417,35 @@ class AgentLoop:
         if gone:
             self._emit_usage(system_prompt, specs)
 
-        # A file read that a later edit made untrue. Not compaction — no model
-        # call, no summary, no judgement: an exact rule over what the tools
-        # already recorded. The tokens are the smaller half of it. The larger
-        # half is that the model was being shown bytes that are not in the file
-        # any more, beside the diff that changed them, and left to work out
-        # which to believe.
-        stale, freed = self.conversation.forget_superseded_reads()
-        if stale:
-            self._note(f"Dropped {stale} file read{'s' if stale > 1 else ''} "
-                       f"that later edits made out of date "
-                       f"({freed:,} tokens).")
-            self._emit_usage(system_prompt, specs)
         limit = self._window()
         if not self.conversation.needs_compaction(limit, agent.compact_at,
                                                   system_prompt, specs):
             return
+
+        # Under pressure, and not compacted yet. Before asking a model to
+        # summarise the history away, drop the part of it that is known to be
+        # untrue: a file read that a later edit superseded. Exact, free, and
+        # no judgement — where compaction is a model call, a summary, and a
+        # loss of everything it did not think to keep.
+        #
+        # Here rather than on every step, and the reason is the cache. Measured
+        # against two live endpoints, a repeated prefix comes back 99% cached;
+        # rewriting a message in the middle stops everything after it matching,
+        # and the next request pays full price for the tail. Doing that on
+        # every step would have spent more than it saved. Doing it at the point
+        # compaction would happen anyway costs nothing extra, because
+        # compaction busts the same cache and pays a model call on top.
+        stale, freed = self.conversation.forget_superseded_reads()
+        if stale:
+            self._note(f"Dropped {stale} file read{'s' if stale > 1 else ''} "
+                       f"that later edits had already made out of date "
+                       f"({freed:,} tokens).")
+            self._emit_usage(system_prompt, specs)
+            if not self.conversation.needs_compaction(limit, agent.compact_at,
+                                                      system_prompt, specs):
+                # Enough. The history is smaller *and* more accurate, and
+                # nothing was summarised away to get there.
+                return
 
         removed = self.conversation.compact(self._summarise)
         if removed:

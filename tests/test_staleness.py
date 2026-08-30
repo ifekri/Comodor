@@ -1,12 +1,13 @@
 """Dropping file reads that a later edit made untrue.
 
 An agent reads a file at step two, edits it at step five, and the copy from
-step two rides along for the rest of the task — re-sent with every request, and
-on a provider without prefix caching paid for every time.
+step two rides along for the rest of the task, re-sent with every request.
 
-The tokens are the smaller half. The larger half is that the model is being
-shown bytes that are not in the file any more, beside the diff that changed
-them, and left to work out which of the two to believe.
+Prefix caching makes the re-sending cheap — measured at 99% on two live
+endpoints — so the tokens are the smaller half of this. The larger half is that
+the copy is no longer true. The model is being shown bytes that are not in the
+file any more, beside the diff that changed them, and left to work out which of
+the two to believe.
 
 Measured on a file the size of `agent/loop.py`, read twice with one edit
 between: **8,346 tokens freed, half the history**. On the benchmark's
@@ -174,8 +175,9 @@ def test_nothing_but_read_results_is_touched():
 
 
 def test_sweeping_again_changes_nothing():
-    """It runs on every step. A second pass must find nothing left to do, or
-    the provider's cache is invalidated on every single turn."""
+    """A second pass must find nothing left to do. Every sweep that changes
+    something invalidates the provider's cache from that point, so one that
+    repeats its own work would pay that price again for nothing."""
     messages = [a_read("app.py", big()), *an_edit("app.py"),
                 a_read("app.py", big("y"))]
 
@@ -208,3 +210,55 @@ def test_the_conversation_exposes_it():
 
 def test_an_empty_conversation_is_fine():
     assert Conversation().forget_superseded_reads() == (0, 0)
+
+
+# --------------------------------------------------------------------------- #
+# when it runs, which the cache decides
+#
+# Measured against two live endpoints: a repeated prefix comes back 99% cached
+# (MiMo 9,920 of 9,963; B.AI 8,576 of 8,637). Rewriting a message in the middle
+# of the history stops everything after it matching, so the next request pays
+# full price for the tail. On every step that would cost more than it saves.
+# At the moment compaction would happen anyway it costs nothing extra —
+# compaction busts the same cache and pays a model call on top.
+# --------------------------------------------------------------------------- #
+
+
+def test_it_is_tried_before_the_model_is_asked_to_summarise():
+    import inspect
+
+    from comodor.agent.loop import AgentLoop
+
+    source = inspect.getsource(AgentLoop._maybe_compact)
+    sweep = source.index("forget_superseded_reads")
+    compact = source.index("self.conversation.compact")
+
+    assert sweep < compact, "it would summarise away what it could have dropped"
+
+
+def test_it_does_not_run_while_there_is_room():
+    """Every sweep that finds something invalidates the provider's cache. One
+    that was not needed is a bill for nothing."""
+    import inspect
+
+    from comodor.agent.loop import AgentLoop
+
+    source = inspect.getsource(AgentLoop._maybe_compact)
+    guard = source.index("needs_compaction")
+    sweep = source.index("forget_superseded_reads")
+
+    assert guard < sweep, "it sweeps before checking whether it needs to"
+
+
+def test_a_sweep_that_frees_enough_avoids_compaction_entirely():
+    """The point of doing it first: the history ends up smaller *and* more
+    accurate, with nothing summarised away to get there."""
+    import inspect
+
+    from comodor.agent.loop import AgentLoop
+
+    source = inspect.getsource(AgentLoop._maybe_compact)
+    after = source[source.index("forget_superseded_reads"):]
+
+    assert "needs_compaction" in after, "it compacts regardless of what it freed"
+    assert after.index("needs_compaction") < after.index("self.conversation.compact")
