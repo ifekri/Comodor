@@ -1,0 +1,40 @@
+#!/bin/sh
+# What the container does when it starts: serve the browser interface, and put
+# the address where nobody has to hunt for it.
+#
+# The convention this follows: no arguments, or arguments that begin with a
+# dash, mean "run the web interface, with these options". Anything else is a
+# command to run instead — `docker run … comodor doctor`, `… sh`, `… git log`.
+# Getting that wrong is how a container ends up with no way to look inside it.
+set -eu
+
+PORT="${COMODOR_WEB_PORT:-8765}"
+
+if [ "$#" -gt 0 ]; then
+    case "$1" in
+        -*) : ;;                       # options for the web server
+        web) shift ;;                  # explicit, and the default anyway
+        *) exec "$@" ;;                # anything else: run it and nothing else
+    esac
+fi
+
+# A token that survives a restart, if the user asked for one. Otherwise a fresh
+# one each run, which is the safer default — and means the URL changes, so it
+# is printed every time rather than remembered.
+if [ -n "${COMODOR_WEB_TOKEN:-}" ]; then
+    set -- --token "${COMODOR_WEB_TOKEN}" "$@"
+fi
+
+# Started detached, nobody is watching this stream. Say where it went, once,
+# before the address scrolls past — otherwise the one thing the person needs is
+# the one thing they cannot find.
+if [ ! -t 1 ]; then
+    printf '\n  Started in the background. The address is printed below, and\n'
+    printf '  again any time with:  docker compose logs comodor\n'
+fi
+
+# 0.0.0.0 is not a lapse here. A container has its own network namespace, so
+# binding loopback inside one hides the port from the machine running it — the
+# interface would be unreachable by the person who started it. Who may actually
+# reach it is decided by how the port was published, and the banner says so.
+exec comodor web --host 0.0.0.0 --port "$PORT" --no-browser "$@"

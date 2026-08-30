@@ -193,3 +193,83 @@ def test_a_broken_profile_does_not_stop_a_turn(settings, bus, monkeypatch):
                       PermissionEngine(settings, bus), Conversation())
 
     assert agent._window() == 250_000
+
+
+# --------------------------------------------------------------------------- #
+# what the model is actually sent
+#
+# `supports_tools` and `supports_vision` sat in the registry unread since it was
+# written. Knowing what a model can do is only worth anything if it changes
+# what the model receives.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_model_that_cannot_batch_is_not_told_to(settings):
+    """Telling a small local model to call tools in parallel is an instruction
+    it either ignores or botches, and a botched batch costs the whole turn."""
+    from comodor.agent.prompts import build_system_prompt
+
+    settings.provider = "ollama"
+    settings.model = "something-small"
+
+    found = profile.of(settings)
+    assert found.parallel_tools is False
+
+    prompt = build_system_prompt(settings, profile=found)
+    assert "in parallel" not in prompt
+    # And the rest of the advice is untouched.
+    assert "todo_write" in prompt and "edit_file" in prompt
+
+
+def test_a_model_that_can_batch_is_still_told_to(settings):
+    from comodor.agent.prompts import build_system_prompt
+
+    settings.model = "claude-sonnet-5"
+
+    prompt = build_system_prompt(settings, profile=profile.of(settings))
+    assert "in parallel" in prompt
+
+
+def test_no_profile_means_everything_as_before(settings):
+    """Every existing caller passes nothing, and must get what it always got."""
+    from comodor.agent.prompts import build_system_prompt
+
+    assert "in parallel" in build_system_prompt(settings)
+
+
+def test_the_loop_does_not_run_calls_together_for_such_a_model(settings, bus):
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import ToolCall
+    from comodor.providers.gateway import Gateway
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+
+    settings.provider = "ollama"
+    settings.model = "something-small"
+    settings.safety.auto_approve_safe = True
+
+    agent = AgentLoop(settings, Gateway(settings), ToolRegistry(), bus,
+                      PermissionEngine(settings, bus), Conversation())
+    reads = [ToolCall(id="c1", name="list_dir", arguments={"path": "."}),
+             ToolCall(id="c2", name="list_dir", arguments={"path": "."})]
+
+    assert agent._can_parallelise(reads) is False
+
+
+def test_a_known_model_still_runs_reads_together(settings, bus):
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import ToolCall
+    from comodor.providers.gateway import Gateway
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+
+    settings.model = "claude-sonnet-5"
+    settings.safety.auto_approve_safe = True
+
+    agent = AgentLoop(settings, Gateway(settings), ToolRegistry(), bus,
+                      PermissionEngine(settings, bus), Conversation())
+    reads = [ToolCall(id="c1", name="list_dir", arguments={"path": "."}),
+             ToolCall(id="c2", name="list_dir", arguments={"path": "."})]
+
+    assert agent._can_parallelise(reads) is True, \
+        "the fast path must survive for models that have it"

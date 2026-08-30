@@ -18,6 +18,7 @@ import platform
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from ..config import Config
 
@@ -54,6 +55,18 @@ call, after you have read the project and before you change it. Guessing and \
 building is the failure this prevents, and it is not the faster path: a wrong \
 guess is rewritten. If the request genuinely has only one reading, do not ask \
 — get on with it."""
+
+#: The one sentence in the guidance below that is not true of every model.
+#:
+#: Held here as well so it can be removed. Telling a model to batch calls it
+#: cannot batch is an instruction it will either ignore — costing nothing but
+#: the tokens — or attempt, which on a small local model tends to produce one
+#: malformed blob and lose the turn. The registry has always known which models
+#: can; nothing read it until now.
+PARALLEL_ADVICE = (
+    "- Call tools in parallel when the calls are independent — several reads "
+    "or searches at once is normal and much faster.\n"
+)
 
 TOOL_GUIDANCE = """\
 Using tools:
@@ -142,8 +155,16 @@ def project_instructions(config: Config) -> str:
     return ""
 
 
-def build_system_prompt(config: Config, playbook: str = "") -> str:
-    """The complete system prompt for one turn."""
+def build_system_prompt(config: Config, playbook: str = "",
+                        profile: Any = None) -> str:
+    """The complete system prompt for one turn.
+
+    `profile` is what the model in front of us can actually do. Passing it
+    removes advice that does not apply — a model that cannot field several tool
+    calls at once should not be told to make them. Left out, everything is
+    included, which is what every existing caller wants and what the tests of
+    this function assume.
+    """
     mode = (config.agent.mode or "act").lower()
     sections = [
         IDENTITY,
@@ -151,7 +172,10 @@ def build_system_prompt(config: Config, playbook: str = "") -> str:
         _MODES.get(mode, MODE_ACT),
     ]
     if mode != "chat":
-        sections.append(TOOL_GUIDANCE)
+        guidance = TOOL_GUIDANCE
+        if profile is not None and not getattr(profile, "parallel_tools", True):
+            guidance = guidance.replace(PARALLEL_ADVICE, "")
+        sections.append(guidance)
 
     instructions = project_instructions(config)
     if instructions:

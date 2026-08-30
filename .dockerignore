@@ -1,0 +1,9 @@
+# Nothing but what the image needs.
+#
+# This lives on `main` now, beside a repository with a test suite, a benchmark
+# and eight translations of the documentation — none of which belongs in a
+# build context. The image installs Comodor from PyPI, so the only thing that
+# has to travel is the start script.
+*
+!Dockerfile
+!docker/start
