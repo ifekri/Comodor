@@ -30,11 +30,19 @@ docker run --rm -it -p 127.0.0.1:8765:8765 \
 
 ---
 
-## A key is not optional here
+## A key, or the page will ask for one
 
-The browser interface has no way to enter one, so without a key the container
-says what is missing and stops rather than serving a URL that fails on the first
-task.
+Set one and it is ready the moment you open the link. Without one it still
+starts, and the page asks — the browser interface can take a key now, and a
+container that refused to start was unreachable for exactly the person most
+likely to want it: somebody whose Comodor is on a server, with no terminal in
+front of them.
+
+The logs say so before you open anything:
+
+```
+No provider is configured yet — the page will ask when you open it.
+```
 
 Compose passes through whichever of these is set in your shell, without writing
 it into the image or the compose file:
