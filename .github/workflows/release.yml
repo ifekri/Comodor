@@ -216,6 +216,7 @@ jobs:
     needs: [build, publish]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -224,13 +225,103 @@ jobs:
           name: distributions
           path: dist/
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
-          body: |
-            ```bash
-            curl -fsSL https://comodor.ai/install.sh | sh     # macOS / Linux
-            irm https://comodor.ai/install.ps1 | iex          # Windows
-            pipx install comodor==${{ needs.build.outputs.version }}
-            ```
+      # This repository has immutable releases turned on, which is a good thing
+      # and changes the order of operations: once a release is published its
+      # assets are frozen, so they have to go on while it is still a draft.
+      #
+      # Creating the release by hand in the web interface publishes it
+      # immediately. The tag push then starts this workflow, which arrives to
+      # find a release it cannot add anything to, and v0.20.2 failed here —
+      # after the package had already gone to PyPI. A red cross on a job called
+      # "Release" for a release that entirely succeeded is worse than the
+      # missing files: it says the wrong thing about the thing that mattered.
+      - name: What state is the release in
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" --json isDraft > /tmp/release.json 2>/dev/null; then
+            echo "state=absent" >> "$GITHUB_OUTPUT"
+            echo "No release for $TAG yet — this workflow will make one."
+          elif [ "$(jq -r .isDraft /tmp/release.json)" = "true" ]; then
+            echo "state=draft" >> "$GITHUB_OUTPUT"
+            echo "A draft exists for $TAG — attaching to it, then publishing."
+          else
+            echo "state=published" >> "$GITHUB_OUTPUT"
+            echo "$TAG is already published. Its assets are frozen."
+          fi
+
+      # Draft first, assets second, publish third. The only order an immutable
+      # release allows.
+      - name: Create the release with its files
+        if: steps.state.outputs.state == 'absent'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          cat > /tmp/notes.md <<NOTES
+          \`\`\`bash
+          curl -fsSL https://comodor.ai/install.sh | sh     # macOS / Linux
+          irm https://comodor.ai/install.ps1 | iex          # Windows
+          pipx install comodor==$VERSION
+          \`\`\`
+          NOTES
+          gh release create "$TAG" dist/* --draft --title "$TAG" \
+            --notes-file /tmp/notes.md --generate-notes
+          gh release edit "$TAG" --draft=false
+          echo "Created and published $TAG with $(ls dist | wc -l) files."
+
+      - name: Attach to the existing draft and publish it
+        if: steps.state.outputs.state == 'draft'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release upload "$TAG" dist/* --clobber
+          gh release edit "$TAG" --draft=false
+          echo "Attached $(ls dist | wc -l) files and published $TAG."
+
+      # Not a failure. The package is on PyPI, which is where `pip install`
+      # looks; the files on the release page are a convenience, and losing a
+      # convenience must not report as a broken release.
+      - name: Say why the files are not attached
+        if: steps.state.outputs.state == 'published'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          echo "::notice::$TAG was already published, so its assets are frozen."
+          {
+            echo "### Files not attached"
+            echo
+            echo "\`$TAG\` was already a published release before this run"
+            echo "reached this step, and this repository has immutable releases"
+            echo "turned on — a published release cannot take new assets."
+            echo
+            echo "**Nothing is broken.** The package is on PyPI, which is where"
+            echo "\`pip install\` looks."
+            echo
+            echo "To get the sdist and wheel onto the release page as well, let"
+            echo "this workflow create the release: push the tag on its own and"
+            echo "do not create the release by hand."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record what shipped
+        if: always()
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          STATE: ${{ steps.state.outputs.state }}
+        run: |
+          {
+            echo "## Release complete"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| PyPI | \`comodor $VERSION\` published |"
+            if [ "$STATE" = "published" ]; then
+              echo "| Release page | files skipped — already published |"
+            else
+              echo "| Release page | sdist and wheel attached |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

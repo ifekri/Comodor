@@ -91,7 +91,39 @@ That is the whole of it. Pushing the tag runs `release.yml`, which:
    `comodor --version`, so a distribution that cannot start never ships, and
    checks that what it prints is the tag;
 5. publishes to PyPI;
-6. attaches the files to a GitHub release with generated notes.
+6. creates the GitHub release as a **draft**, attaches the sdist and wheel, and
+   publishes it.
+
+## Push the tag; do not create the release by hand
+
+This repository has **immutable releases** turned on. Once a release is
+published its assets are frozen, so the files have to go on while it is still a
+draft — which is the order step 6 uses.
+
+Creating the release in the web interface publishes it immediately. The tag push
+then starts the workflow, which arrives to find a release it cannot add anything
+to. That is what happened to `v0.20.2`:
+
+```
+Cannot upload asset comodor-0.20.2.tar.gz to an immutable release.
+```
+
+**The package had already reached PyPI.** Only the file attachment failed, and
+a red cross on a job called "Release" said the wrong thing about a release that
+worked.
+
+The workflow no longer fails in that case — it says the release was already
+published, that nothing is broken, and that the package is on PyPI. But the
+files will be missing from the release page, so:
+
+```bash
+git tag v0.2.1
+git push origin main --tags       # and nothing else
+```
+
+Let the workflow make the release. If you want to write the notes yourself,
+make the release a **draft** first and leave it as a draft; the workflow will
+attach the files and publish it.
 
 ## Two ways to run it
 
