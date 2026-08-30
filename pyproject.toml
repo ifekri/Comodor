@@ -7,7 +7,7 @@ name = "comodor"
 dynamic = ["version"]
 description = "Comodor — a self-improving terminal coding agent with a Rich TUI"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Mmdrza", email = "devfekri@gmail.com" }]
 keywords = ["agent", "llm", "tui", "rich", "coding-assistant", "terminal", "cli"]
@@ -16,9 +16,12 @@ classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Code Generators",
 ]
 # One dependency. The HTTP client, SSE reader and config loader are
