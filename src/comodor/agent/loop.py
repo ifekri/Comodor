@@ -40,6 +40,7 @@ from ..providers.base import (
 from ..providers.gateway import Gateway
 from ..safety import PermissionEngine, Risk
 from ..tools import ToolContext, ToolRegistry, ToolResult
+from . import staleness
 from .context import Conversation
 from .prompts import COMPACT_PROMPT, build_system_prompt
 
@@ -335,6 +336,10 @@ class AgentLoop:
                 call_id=call.id, name=call.name,
                 content=result.content, is_error=not result.ok,
             )
+            # Which file this was about, so a read that a later edit made
+            # untrue can be found and dropped. The tools already know; nothing
+            # was carrying it across.
+            staleness.note(message, str(result.meta.get("path") or ""))
             # A tool that produced a picture — a screenshot of a page — sends
             # it as one. Where the dialect allows an image beside a tool result
             # it goes there; where it does not, the adapter moves it.
@@ -410,6 +415,19 @@ class AgentLoop:
         gone = self.conversation.forget_old_pictures(
             getattr(agent, "keep_screenshots", 2))
         if gone:
+            self._emit_usage(system_prompt, specs)
+
+        # A file read that a later edit made untrue. Not compaction — no model
+        # call, no summary, no judgement: an exact rule over what the tools
+        # already recorded. The tokens are the smaller half of it. The larger
+        # half is that the model was being shown bytes that are not in the file
+        # any more, beside the diff that changed them, and left to work out
+        # which to believe.
+        stale, freed = self.conversation.forget_superseded_reads()
+        if stale:
+            self._note(f"Dropped {stale} file read{'s' if stale > 1 else ''} "
+                       f"that later edits made out of date "
+                       f"({freed:,} tokens).")
             self._emit_usage(system_prompt, specs)
         limit = self._window()
         if not self.conversation.needs_compaction(limit, agent.compact_at,
