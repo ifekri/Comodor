@@ -304,3 +304,53 @@ def test_the_code_really_does_start_without_a_provider():
     assert "return config" in source
     assert "No provider is configured yet" in source, (
         "the message the documentation quotes is not the one the code prints")
+
+
+# --------------------------------------------------------------------------- #
+# where the image is published
+# --------------------------------------------------------------------------- #
+
+
+def test_it_publishes_to_both_registries():
+    """Docker Hub is where somebody looks first — `docker run comodor` with no
+    prefix means Docker Hub — and GHCR is where a fork can publish without any
+    secret at all."""
+    steps = yaml.safe_load(text(WORKFLOW))["jobs"]["build"]["steps"]
+    names = [step.get("name", "") for step in steps]
+
+    assert any("GitHub's registry" in name for name in names)
+    assert any("Docker Hub" in name for name in names)
+
+
+def test_both_registries_come_from_one_build():
+    """Two builds would publish two images from two runs of the same
+    Dockerfile, and only one of them would have been tested."""
+    steps = yaml.safe_load(text(WORKFLOW))["jobs"]["build"]["steps"]
+    builds = [step for step in steps
+              if "build-push-action" in str(step.get("uses", ""))]
+
+    assert len(builds) == 1, f"{len(builds)} builds; the tested one is ambiguous"
+    assert "steps.tags.outputs.list" in str(builds[0]["with"]["tags"])
+
+
+def test_a_missing_docker_hub_secret_skips_rather_than_fails():
+    """A fork has neither secret, and an image that reaches GHCR is still a
+    published image."""
+    body = text(WORKFLOW)
+
+    assert "steps.hub.outputs.ready == 'yes'" in body
+    assert "No Docker Hub credentials" in body
+
+
+def test_the_secrets_are_read_by_the_names_that_were_set():
+    body = text(WORKFLOW)
+
+    assert "secrets.DOCKERHUB_USERNAME" in body
+    assert "secrets.DOCKERHUB_TOKEN" in body
+
+
+def test_the_documentation_names_both():
+    for page in (ROOT / "README.md", ROOT / "docs" / "docker.md"):
+        body = text(page)
+        assert "ifekri/comodor" in body, f"{page.name}: no Docker Hub image"
+        assert "ghcr.io/ifekri/comodor" in body, f"{page.name}: no GHCR image"

@@ -69,12 +69,40 @@ jobs:
         uses: docker/setup-qemu-action@v3
 
       - if: github.event_name != 'pull_request'
-        name: Sign in to the registry
+        name: Sign in to GitHub's registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Docker Hub is where somebody looks first, and `docker run comodor` with
+      # no registry prefix means Docker Hub. Skipped, rather than failed, when
+      # the secrets are not set: a fork has neither, and an image that reaches
+      # GHCR is still a published image.
+      - id: hub
+        if: github.event_name != 'pull_request'
+        name: Is Docker Hub configured
+        env:
+          USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$USERNAME" ] && [ -n "$TOKEN" ]; then
+            echo "ready=yes" >> "$GITHUB_OUTPUT"
+            echo "repo=$USERNAME/comodor" >> "$GITHUB_OUTPUT"
+            echo "Publishing to Docker Hub as $USERNAME/comodor"
+          else
+            echo "ready=" >> "$GITHUB_OUTPUT"
+            echo "repo=" >> "$GITHUB_OUTPUT"
+            echo "No Docker Hub credentials — GHCR only."
+          fi
+
+      - if: steps.hub.outputs.ready == 'yes'
+        name: Sign in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Which version
         id: pick
@@ -89,6 +117,28 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Building Comodor ${version:-newest release}"
 
+      - name: Which tags
+        id: tags
+        env:
+          VERSION: ${{ steps.pick.outputs.version }}
+          HUB: ${{ steps.hub.outputs.repo }}
+        run: |
+          # `edge` rather than a version when there is no release to name:
+          # a push to main is not a release, and tagging it `latest` alone
+          # would leave nothing pointing at the tested build.
+          label="${VERSION:-edge}"
+          owner="${{ github.repository_owner }}"
+          {
+            echo "list<<EOF"
+            echo "ghcr.io/$owner/comodor:latest"
+            echo "ghcr.io/$owner/comodor:$label"
+            if [ -n "$HUB" ]; then
+              echo "$HUB:latest"
+              echo "$HUB:$label"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -99,9 +149,10 @@ jobs:
           load: ${{ github.event_name == 'pull_request' }}
           build-args: |
             COMODOR_VERSION=${{ steps.pick.outputs.version }}
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/comodor:latest
-            ghcr.io/${{ github.repository_owner }}/comodor:${{ steps.pick.outputs.version || 'edge' }}
+          # One build, pushed to both. Building twice would publish two
+          # images from two runs of the same Dockerfile, and only one of them
+          # would have been tested.
+          tags: ${{ steps.tags.outputs.list }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

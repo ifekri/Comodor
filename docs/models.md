@@ -24,8 +24,8 @@ comodor setup        # pick one, once
 ## Every provider
 
 **Hosted, one key:** OpenRouter · Anthropic · OpenAI · Google Gemini ·
-DeepSeek · xAI · Mistral · Groq · Cerebras · Moonshot (Kimi) · Z.AI (GLM) ·
-Qwen · Together · Fireworks · Xiaomi MiMo
+DeepSeek · xAI (Grok) · Mistral · Groq · Cerebras · Moonshot (Kimi) ·
+Z.AI (GLM) · Qwen (DashScope) · Together AI · Fireworks · Xiaomi MiMo · B.AI
 
 **On your machine, no key:** Ollama · LM Studio
 

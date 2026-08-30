@@ -529,3 +529,102 @@ def test_the_user_agent_says_comodor():
     assert DEFAULT_USER_AGENT.startswith("Comodor/")
     assert "comodor.ai" in DEFAULT_USER_AGENT
     assert "requests/" not in DEFAULT_USER_AGENT
+
+
+# --------------------------------------------------------------------------- #
+# the count in the documentation, against the catalogue
+#
+# "Nineteen providers" was in the README, and adding one made it wrong without
+# anything saying so. A number written in prose is a number that goes stale.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_readme_counts_the_providers_that_exist():
+    import re
+    from pathlib import Path
+
+    from comodor import catalogue
+
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(
+        encoding="utf-8")
+
+    words = {2: "Two", 3: "Three", 4: "Four", 5: "Five", 6: "Six", 7: "Seven",
+             8: "Eight", 9: "Nine", 10: "Ten", 11: "Eleven", 12: "Twelve",
+             13: "Thirteen", 14: "Fourteen", 15: "Fifteen", 16: "Sixteen",
+             17: "Seventeen", 18: "Eighteen", 19: "Nineteen", 20: "Twenty"}
+    hosted = words[len(catalogue.hosted())]
+    local = words[len(catalogue.local())].lower()
+
+    claim = re.search(r"\|\s*\*\*Works with any model\*\*\s*\|([^|]+)\|", readme)
+    assert claim, "the README no longer says what it works with"
+
+    line = claim.group(1)
+    assert f"{hosted} hosted" in line, \
+        f"the README says {line.strip()[:60]!r}; there are {hosted.lower()} hosted"
+    assert f"{local} local" in line, \
+        f"the README does not say there are {local} local runtimes"
+
+
+def test_every_hosted_provider_is_listed_in_the_models_page():
+    from pathlib import Path
+
+    from comodor import catalogue
+
+    page = (Path(__file__).resolve().parents[1] / "docs" / "models.md").read_text(
+        encoding="utf-8")
+
+    missing = [spec.label for spec in catalogue.hosted()
+               if spec.label.split(" (")[0] not in page]
+    assert not missing, f"not documented: {missing}"
+
+
+def test_bai_is_reachable_and_makes_tool_calls():
+    """Live, against the real endpoint, because the only thing that matters
+    about a new provider is whether it can drive tools — a provider that
+    cannot is unusable for coding, and finding that out on the sixth turn of a
+    real task is the failure this prevents.
+
+    Skipped without a key, so the suite stays offline for everyone else.
+    """
+    import json
+    import os
+    import urllib.request
+    from pathlib import Path
+
+    env = Path(__file__).resolve().parents[1] / "src" / ".env"
+    key = os.environ.get("BAI_API_KEY", "")
+    if not key and env.is_file():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            if line.startswith("BAI_API_KEY="):
+                key = line.partition("=")[2].strip()
+    if not key:
+        pytest.skip("no BAI_API_KEY")
+
+    from comodor import catalogue
+
+    spec = catalogue.get("bai")
+    request = urllib.request.Request(
+        f"{spec.base_url}/chat/completions",
+        data=json.dumps({
+            "model": spec.default_model,
+            "messages": [{"role": "user", "content": "Weather in Tehran? Use the tool."}],
+            "tools": [{"type": "function", "function": {
+                "name": "get_weather",
+                "description": "Weather for a city.",
+                "parameters": {"type": "object",
+                               "properties": {"city": {"type": "string"}},
+                               "required": ["city"]}}}],
+            "max_tokens": 300,
+        }).encode(),
+        headers={"Authorization": f"Bearer {key}",
+                 "Content-Type": "application/json"})
+
+    try:
+        with urllib.request.urlopen(request, timeout=90) as reply:
+            body = json.loads(reply.read().decode())
+    except Exception as problem:                       # rate limit, or offline
+        pytest.skip(f"B.AI unreachable: {type(problem).__name__}")
+
+    choice = body["choices"][0]
+    assert choice.get("finish_reason") == "tool_calls"
+    assert choice["message"].get("tool_calls"), "no tool call came back"
