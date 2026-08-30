@@ -170,6 +170,22 @@ def test_no_documentation_link_is_broken():
     assert not broken, f"broken links: {broken}"
 
 
+def reachable(root: Path, path: str) -> str:
+    """Empty if the link resolves, otherwise why it does not.
+
+    An empty directory counts as missing. Git does not track one, so a link to
+    it works on the machine where the folder happens to exist and is broken in
+    every fresh clone — which is the worst kind of broken link, because the
+    person who wrote it cannot reproduce the report.
+    """
+    where = root / path
+    if not where.exists():
+        return "does not exist"
+    if where.is_dir() and not any(where.iterdir()):
+        return "is an empty directory, which git does not track"
+    return ""
+
+
 def test_the_readme_points_at_the_index():
     readme = (DOCS.parent / "README.md").read_text(encoding="utf-8")
 
@@ -179,9 +195,23 @@ def test_the_readme_points_at_the_index():
         if target.startswith(("http", "mailto", "#")):
             continue
         path = link_path(target)
-        if path and not (DOCS.parent / path).exists():
-            broken.append(target)
+        if not path:
+            continue
+        why = reachable(DOCS.parent, path)
+        if why:
+            broken.append(f"{target} — {why}")
     assert not broken, f"the README points at nothing: {broken}"
+
+
+def test_a_link_to_an_empty_directory_is_broken(tmp_path):
+    """It resolves for whoever wrote it and for nobody else."""
+    (tmp_path / "hollow").mkdir()
+    (tmp_path / "solid").mkdir()
+    (tmp_path / "solid" / "thing.md").write_text("x", encoding="utf-8")
+
+    assert reachable(tmp_path, "hollow")
+    assert not reachable(tmp_path, "solid")
+    assert reachable(tmp_path, "absent")
 
 
 @pytest.mark.parametrize("target,expected", [

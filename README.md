@@ -78,9 +78,8 @@ the suite goes green, the file parses, the old name is gone from every file.
 Three attempts each, reported as a rate, because a single run dressed up as
 "it passes" is a made-up number.
 
-Against **MiMo v2.5 Pro**, a cheap model, the current table is in
-[`bench/results/`](bench/results/) — committed, dated, and named for the model
-it is about.
+Results are committed under `bench/results/`, dated and named for the model
+they are about, as JSON and as a table.
 
 The first version of that table was wrong, and the correction is the point.
 One `careful` task scored a model 0/3 for not asking a question — and the model
