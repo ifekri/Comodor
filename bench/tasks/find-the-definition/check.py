@@ -48,13 +48,22 @@ ALLOWANCE = ("allowance", "included", "free", "billable")
 
 #: Taking it off, however it is put.
 SUBTRACTED = ("minus", "after", "past", "beyond", "subtract", "deduct",
-              "excess", "over and above", "on top of", "billable", "-")
+              "excess", "over and above", "on top of", "billable", "-",
+              "remaining", "left")
 
 #: Waving it away, which is the wrong answer wearing the right words.
-DISMISSED = ("regardless", "ignoring", "irrespective", "raw", "whether or not",
-             "does not matter", "doesn't matter", "no matter")
+DISMISSED = ("regardless", "ignoring", "irrespective", "raw ", "whether or not",
+             "does not matter", "doesn't matter", "no matter", "total quantity")
 
-_SENTENCE = re.compile(r"[^.!?\n]+")
+#: Where the answer talks about the threshold itself.
+THRESHOLD = re.compile(r"\b(?:1[,_ ]?000|thousand|1000)\b", re.IGNORECASE)
+
+#: How far either side of the threshold still counts as talking about it.
+#: A paragraph, not a sentence: an answer that names the allowance and then
+#: continues with a pronoun is an answer, and a rule that cannot follow "it"
+#: is grading prose rather than correctness. That mistake was made twice in
+#: this suite before it was written down.
+REACH = 220
 
 
 def check(attempt):
@@ -69,12 +78,13 @@ def check(attempt):
             f"appears in the answer")
 
     explained = False
-    for sentence in _SENTENCE.findall(attempt.text.lower()):
-        if not any(word in sentence for word in ALLOWANCE):
+    lowered = attempt.text.lower()
+    for found in THRESHOLD.finditer(lowered):
+        window = lowered[max(0, found.start() - REACH):found.end() + REACH]
+        if any(word in window for word in DISMISSED):
             continue
-        if any(word in sentence for word in DISMISSED):
-            continue
-        if any(word in sentence for word in SUBTRACTED):
+        if (any(word in window for word in ALLOWANCE)
+                and any(word in window for word in SUBTRACTED)):
             explained = True
             break
 

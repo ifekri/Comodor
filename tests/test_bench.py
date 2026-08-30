@@ -557,40 +557,68 @@ WRONG_DIAGNOSIS = (
     "least recently used one. `get` is fine."
 )
 
+#: The shape that broke the second version of this judge. The model names the
+#: method in a heading and then continues with a pronoun, which every human
+#: reader follows and a same-sentence rule does not.
+PRONOUN_STYLE = (
+    "**Root cause - `Cache.get` is wrong** (`cache.py:13-14`).\n\n"
+    "It only reads from the dict. It never records that the key was accessed. "
+    "In an LRU cache, a read must count as a use.\n\n"
+    "It would have to move the key to the end when it is found."
+)
+
 RIGHT_DIAGNOSES = [
-    "`Cache.get` reads the entry but never records that it was used, so the "
-    "dict keeps its insertion order and the wrong key is evicted.",
-    "The problem is that get() does not update the ordering - it is just a "
-    "dict lookup, so a read has no effect on what gets evicted.",
-    "get never moves the key to the end, so eviction still follows insertion "
+    "`Cache.get` never records that an entry was used, so eviction follows "
+    "insertion order and the wrong key goes.",
+    "The root cause is `get`. It just does a dict lookup and does not update "
+    "the ordering, so a read has no effect on what is evicted.",
+    "get() fails to move the key to the end, so the order is still insertion "
     "order.",
+    PRONOUN_STYLE,
 ]
 
 
 def test_a_confident_wrong_diagnosis_does_not_pass(copy_of):
-    """It blames `put`, where the eviction code is, and says `get` is fine.
-    An earlier version of this judge passed it: both words appeared somewhere."""
+    """It blames `put`, where the eviction code is, and says `get` is fine."""
     from bench.task import load_task
 
     workspace = copy_of("find-why-it-fails")
     task = load_task(TASKS / "find-why-it-fails")
 
-    verdict = task.check(an_answer(WRONG_DIAGNOSIS, workspace))
+    verdict = task.check(an_attempt(workspace, text=WRONG_DIAGNOSIS))
 
     assert not verdict.passed, "a wrong answer passed"
-    assert "`get`" in verdict.reason
+    assert "`put`" in verdict.reason
 
 
 @pytest.mark.parametrize("answer", RIGHT_DIAGNOSES)
 def test_the_right_diagnosis_passes_however_it_is_worded(answer, copy_of):
+    """Including the one an earlier version of this judge rejected.
+
+    It said "Root cause - `Cache.get` is wrong" and then carried on with "It
+    never records...". Requiring the method and the cause in one sentence
+    failed it, which is grading prose rather than correctness."""
     from bench.task import load_task
 
     workspace = copy_of("find-why-it-fails")
     task = load_task(TASKS / "find-why-it-fails")
 
-    verdict = task.check(an_answer(answer, workspace))
+    verdict = task.check(an_attempt(workspace, text=answer))
 
-    assert verdict.passed, f"{verdict.reason} :: {answer}"
+    assert verdict.passed, f"{verdict.reason} :: {answer[:80]}"
+
+
+def test_an_answer_that_blames_nothing_does_not_pass(copy_of):
+    from bench.task import load_task
+
+    workspace = copy_of("find-why-it-fails")
+    task = load_task(TASKS / "find-why-it-fails")
+
+    verdict = task.check(an_attempt(
+        workspace, text="The cache is not really an LRU. It evicts in "
+                        "insertion order."))
+
+    assert not verdict.passed
 
 
 WRONG_RULE = (

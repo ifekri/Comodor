@@ -127,12 +127,40 @@ def _one(task: Task, provider: str, model: str,
 
     if verdict.passed:
         shutil.rmtree(root, ignore_errors=True)
-    elif keep is not None:
+        return attempt, verdict, root
+
+    # What it said, beside what it did. A judge that reads prose can be wrong,
+    # and this session proved it twice — once failing a correct answer, once
+    # passing a wrong one. Neither was visible from the verdict alone, and the
+    # answer that produced it was gone by the time anyone looked. A failure
+    # nobody can read is a failure nobody can check.
+    _keep_the_answer(root, task, attempt, verdict)
+
+    if keep is not None:
         keep.mkdir(parents=True, exist_ok=True)
         moved = keep / f"{task.name}-{int(time.time())}"
         shutil.move(str(root), str(moved))
         return attempt, verdict, moved
     return attempt, verdict, root
+
+
+def _keep_the_answer(root: Path, task: Task, attempt: Attempt,
+                     verdict: Verdict) -> None:
+    """Write the transcript of a failed attempt next to its workspace."""
+    try:
+        (root / "attempt.json").write_text(json.dumps({
+            "task": task.name,
+            "category": task.category,
+            "prompt": task.prompt,
+            "verdict": verdict.reason,
+            "stopped": attempt.stopped,
+            "steps": attempt.steps,
+            "tools": attempt.tools,
+            "error": attempt.error,
+            "answer": attempt.text,
+        }, indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _settings(home: Path, task: Task) -> None:
