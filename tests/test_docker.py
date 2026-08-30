@@ -31,6 +31,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCKERFILE = ROOT / "Dockerfile"
@@ -73,8 +74,6 @@ def test_the_dockerfile_pins_no_version_by_default():
 
 
 def test_compose_pins_no_version_by_default():
-    import yaml
-
     args = yaml.safe_load(text(COMPOSE))["services"]["comodor"]["build"]["args"]
     pinned = str(args.get("COMODOR_VERSION", ""))
 
@@ -90,8 +89,6 @@ def test_a_version_can_still_be_pinned_on_purpose():
 def test_the_image_is_rebuilt_on_a_release():
     """The trigger that was missing. Without it a release ships and the
     published image stays where it was."""
-    import yaml
-
     triggers = yaml.safe_load(text(WORKFLOW))
     on = triggers[True] if True in triggers else triggers["on"]
 
@@ -136,8 +133,6 @@ def test_it_does_not_try_to_open_a_browser_in_a_container():
 def test_the_port_is_published_to_this_machine_only():
     """Drop the `127.0.0.1` and the port is on every interface — and this port
     runs shell commands."""
-    import yaml
-
     ports = yaml.safe_load(text(COMPOSE))["services"]["comodor"]["ports"]
 
     assert ports, "nothing is published, so nothing can be opened"
@@ -189,8 +184,6 @@ def test_every_key_compose_passes_is_one_a_provider_reads():
     not passed, and nothing anywhere says so: the container starts, and the
     first task fails with an authentication error.
     """
-    import yaml
-
     from comodor import catalogue
 
     known = {spec.env_key for spec in catalogue.CATALOGUE if spec.env_key}
@@ -204,8 +197,6 @@ def test_every_key_compose_passes_is_one_a_provider_reads():
 
 
 def test_the_common_providers_are_all_passed_through():
-    import yaml
-
     passed = set(yaml.safe_load(text(COMPOSE))["services"]["comodor"]
                  ["environment"])
 

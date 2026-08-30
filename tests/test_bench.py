@@ -717,3 +717,19 @@ def test_an_answer_that_is_vague_or_untrue_still_fails(answer, copy_of):
     task = load_task(TASKS / "careful-cannot-be-done")
 
     assert not task.check(an_attempt(workspace, text=answer)).passed
+
+
+def test_an_empty_answer_is_reported_as_an_empty_answer(copy_of):
+    """Two of eight benchmark failures were the model saying nothing at all.
+    "It never says what is missing" is true of that and explains none of it."""
+    from bench.task import load_task
+
+    workspace = copy_of("careful-cannot-be-done")
+    task = load_task(TASKS / "careful-cannot-be-done")
+
+    verdict = task.check(an_attempt(workspace, text="", steps=4,
+                                    tools=["list_dir", "read_file"]))
+
+    assert not verdict.passed
+    assert "nothing at all" in verdict.reason
+    assert "4 steps" in verdict.reason

@@ -32,7 +32,12 @@ Issues = "https://github.com/ifekri/Comodor/issues"
 Changelog = "https://github.com/ifekri/Comodor/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.14"]
+# Test-time only. `pip install comodor` still pulls in rich and nothing else —
+# the one-dependency claim is about what a user installs, and none of these
+# travel with it. PyYAML is here so the tests can read `docker-compose.yml` and
+# the workflows as documents rather than as strings; asserting on the text of a
+# YAML file is how a test ends up agreeing with a broken one.
+dev = ["pytest>=8.0", "ruff>=0.14", "pyyaml>=6.0"]
 
 [project.scripts]
 comodor = "comodor.cli:main"

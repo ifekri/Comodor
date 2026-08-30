@@ -44,6 +44,15 @@ from .context import Conversation
 from .prompts import COMPACT_PROMPT, build_system_prompt
 
 MAX_PARALLEL_TOOLS = 6
+
+#: Asked when a turn is about to end having said nothing whatsoever. Phrased so
+#: that "nothing happened" is an acceptable answer: a model pushed to report a
+#: result it does not have is a model invited to invent one.
+SAY_WHAT_HAPPENED = (
+    "You ended without saying anything. Reply now, in plain prose, with what "
+    "you did and what the result was. If you did nothing, or could not finish, "
+    "say that instead — do not describe work you did not do."
+)
 #: Blank line between the skill block and the playbook block.
 SECTION_GAP = "\n\n"
 
@@ -151,6 +160,15 @@ class AgentLoop:
 
     def _iterate(self, deadline: float, result: TurnResult) -> TurnResult:
         agent = self.config.agent
+        #: The last thing it actually said this turn. A model sometimes runs
+        #: its tools, explains what it is doing along the way, and then closes
+        #: with an empty message. In the interface that is invisible — the
+        #: explanation was streamed as it arrived — but `comodor run` prints
+        #: only the final message, so the caller gets a blank answer for a
+        #: turn that did the work. Found by the benchmark: two failures out of
+        #: eight were a completed task reported as nothing at all.
+        spoken = ""
+        asked_to_speak = False
 
         while True:
             self.cancel.raise_if_cancelled()
@@ -165,9 +183,29 @@ class AgentLoop:
             assistant = completion["message"]
             self.conversation.add(assistant)
 
+            if assistant.content.strip():
+                spoken = assistant.content
+
             calls: list[ToolCall] = assistant.tool_calls
             if not calls:
-                result.text = assistant.content
+                if not assistant.content.strip():
+                    if spoken:
+                        # It did explain itself, one message earlier. Report
+                        # that rather than a blank: this repeats what was
+                        # actually said and invents nothing.
+                        result.text = spoken
+                    elif not asked_to_speak:
+                        # It has said nothing at all this turn. Ask once — and
+                        # only once, because a model that answers an empty
+                        # message with another one would otherwise be asked
+                        # forever.
+                        asked_to_speak = True
+                        self.conversation.add(Message.user(SAY_WHAT_HAPPENED))
+                        continue
+                    else:
+                        result.text = ""
+                else:
+                    result.text = assistant.content
                 result.stopped = "done"
                 return result
 
