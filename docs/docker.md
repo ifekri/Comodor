@@ -3,8 +3,8 @@
 The agent, its browser and everything it needs, in one container.
 
 ```bash
-git clone -b docker https://github.com/ifekri/Comodor.git comodor-docker
-cd comodor-docker
+git clone https://github.com/ifekri/Comodor.git
+cd Comodor
 export ANTHROPIC_API_KEY=…        # or OPENAI_API_KEY, OPENROUTER_API_KEY, …
 docker compose up
 ```
@@ -16,7 +16,8 @@ It builds the image the first time, then prints the address:
   Working in     /work
 ```
 
-Open the link. A new token every run, so use the one from *this* run.
+Open the link. A new token every run, so use the one from *this* run — and if
+you started it detached, `docker compose logs comodor` prints it again.
 
 Or without cloning anything:
 
@@ -39,9 +40,10 @@ Compose passes through whichever of these is set in your shell, without writing
 it into the image or the compose file:
 
 ```
-ANTHROPIC_API_KEY   OPENAI_API_KEY   OPENROUTER_API_KEY   DEEPSEEK_API_KEY
-GEMINI_API_KEY      GROQ_API_KEY     XAI_API_KEY          MISTRAL_API_KEY
-XIAOMI_API_KEY
+ANTHROPIC_API_KEY   OPENAI_API_KEY    OPENROUTER_API_KEY   DEEPSEEK_API_KEY
+GOOGLE_API_KEY      GROQ_API_KEY      XAI_API_KEY          MISTRAL_API_KEY
+MOONSHOT_API_KEY    ZAI_API_KEY       DASHSCOPE_API_KEY    TOGETHER_API_KEY
+FIREWORKS_API_KEY   CEREBRAS_API_KEY  XIAOMI_API_KEY
 ```
 
 Prefer a file to your shell history? Put it in a `.env` beside the compose file
@@ -52,11 +54,10 @@ Prefer a file to your shell history? Put it in a `.env` beside the compose file
 ## Where it works
 
 Everything the agent can touch is the `work/` folder beside the compose file.
-Point it somewhere else:
+Point it somewhere else without editing anything:
 
-```yaml
-volumes:
-  - "/path/to/your/project:/work"
+```bash
+COMODOR_WORKDIR=/path/to/your/project docker compose up
 ```
 
 What it learns — the brain, your corrections, session transcripts — lives in a
@@ -97,16 +98,19 @@ machine. It is given nothing it does not need, and runs as a non-root user.
 
 ## Pinning a version
 
-```yaml
-args:
-  COMODOR_VERSION: "0.9.0"
-```
+**Nothing is pinned by default.** A build installs the newest release, so the
+image cannot fall behind the project — which is what happened when these files
+lived on a branch of their own and spent eleven releases describing 0.9.0.
 
-Pinned by default so a rebuild is reproducible. For the newest release instead:
+For a reproducible build, name one:
 
 ```bash
-docker compose build --build-arg COMODOR_VERSION=
+COMODOR_VERSION=0.21.0 docker compose build
+docker build --build-arg COMODOR_VERSION=0.21.0 .
 ```
+
+The published image is rebuilt on every release, so `ghcr.io/ifekri/comodor:latest`
+is the newest one and `ghcr.io/ifekri/comodor:0.21.0` is that release.
 
 ---
 

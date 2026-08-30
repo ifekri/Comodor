@@ -262,3 +262,70 @@ def test_todo_tool_publishes_the_task_list(config, bus):
 
     assert published
     assert published[0].get("items")[1]["state"] == "active"
+
+
+# --------------------------------------------------------------------------- #
+# a turn that ends saying nothing
+#
+# Found by the benchmark: two of eight failures were a completed task reported
+# as an empty string. The model ran its tools, explained itself along the way,
+# and closed with a blank message. In the interface that is invisible, because
+# the explanation was streamed as it arrived — but `comodor run` prints only
+# the final message, so a caller gets nothing for a turn that did the work.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_blank_final_message_falls_back_to_what_was_said(config, bus):
+    """No extra model call: this repeats what it actually said, and invents
+    nothing."""
+    scripts = [
+        Script(text="Reading the file to see what changed.", tool_calls=[
+            ToolCall(id="c1", name="list_dir", arguments={"path": "."})]),
+        Script(text=""),
+    ]
+    result = make_agent(config, bus, scripts).run("look around")
+
+    assert result.ok
+    assert result.text == "Reading the file to see what changed."
+
+
+def test_a_turn_that_said_nothing_at_all_is_asked_once(config, bus):
+    scripts = [
+        Script(text="", tool_calls=[
+            ToolCall(id="c1", name="list_dir", arguments={"path": "."})]),
+        Script(text=""),
+        Script(text="I listed the directory; it has three files."),
+    ]
+    agent = make_agent(config, bus, scripts)
+    result = agent.run("look around")
+
+    assert result.text == "I listed the directory; it has three files."
+
+
+def test_it_is_asked_only_once(config, bus):
+    """A model that answers an empty message with another one must not be
+    asked forever."""
+    scripts = [Script(text=""), Script(text=""), Script(text="")]
+    agent = make_agent(config, bus, scripts)
+
+    result = agent.run("say something")
+
+    assert result.stopped == "done"
+    assert result.text == ""
+    assert result.steps <= 3, f"it kept asking: {result.steps} steps"
+
+
+def test_the_nudge_does_not_invite_an_invented_result(config, bus):
+    """A model pushed to report a result it does not have is a model invited
+    to make one up."""
+    from comodor.agent.loop import SAY_WHAT_HAPPENED
+
+    assert "did nothing" in SAY_WHAT_HAPPENED
+    assert "do not describe work you did not do" in SAY_WHAT_HAPPENED
+
+
+def test_an_ordinary_answer_is_untouched(config, bus):
+    result = make_agent(config, bus, [Script(text="All done.")]).run("hi")
+
+    assert result.text == "All done."
+    assert result.steps == 1

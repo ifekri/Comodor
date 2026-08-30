@@ -3,8 +3,8 @@
 L'agent, son navigateur et tout ce dont il a besoin, dans un seul conteneur.
 
 ```bash
-git clone -b docker https://github.com/ifekri/Comodor.git comodor-docker
-cd comodor-docker
+git clone https://github.com/ifekri/Comodor.git
+cd Comodor
 export ANTHROPIC_API_KEY=…        # or OPENAI_API_KEY, OPENROUTER_API_KEY, …
 docker compose up
 ```
@@ -41,7 +41,7 @@ l'écrire dans l'image ni dans le fichier compose :
 
 ```
 ANTHROPIC_API_KEY   OPENAI_API_KEY   OPENROUTER_API_KEY   DEEPSEEK_API_KEY
-GEMINI_API_KEY      GROQ_API_KEY     XAI_API_KEY          MISTRAL_API_KEY
+GOOGLE_API_KEY      GROQ_API_KEY     XAI_API_KEY          MISTRAL_API_KEY
 XIAOMI_API_KEY
 ```
 
@@ -103,7 +103,7 @@ comme un utilisateur non root.
 
 ```yaml
 args:
-  COMODOR_VERSION: "0.9.0"
+  COMODOR_VERSION: ""
 ```
 
 Épinglée par défaut pour qu'une reconstruction soit reproductible. Pour la

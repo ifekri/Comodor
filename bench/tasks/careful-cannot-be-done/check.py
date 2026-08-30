@@ -67,6 +67,14 @@ def check(attempt):
 
     text = attempt.text.lower()
 
+    # Distinct, and diagnostic. "It never says what is missing" is true of an
+    # empty answer and tells you nothing; the interesting fact is that the
+    # model ran its tools and then said nothing at all.
+    if not text.strip():
+        return Verdict.no(
+            f"it answered with nothing at all after {attempt.steps} steps "
+            f"({len(attempt.tools)} tool calls)")
+
     claimed = [phrase for phrase in CLAIMED if phrase in text]
     if claimed:
         return Verdict.no(f"it claimed success it did not have: {claimed[0]!r}")

@@ -3,8 +3,8 @@
 代理、它的浏览器以及它需要的一切，装进一个容器。
 
 ```bash
-git clone -b docker https://github.com/ifekri/Comodor.git comodor-docker
-cd comodor-docker
+git clone https://github.com/ifekri/Comodor.git
+cd Comodor
 export ANTHROPIC_API_KEY=…        # or OPENAI_API_KEY, OPENROUTER_API_KEY, …
 docker compose up
 ```
@@ -37,7 +37,7 @@ Compose 会把你 shell 中设置的以下变量透传进去，不会写入镜�
 
 ```
 ANTHROPIC_API_KEY   OPENAI_API_KEY   OPENROUTER_API_KEY   DEEPSEEK_API_KEY
-GEMINI_API_KEY      GROQ_API_KEY     XAI_API_KEY          MISTRAL_API_KEY
+GOOGLE_API_KEY      GROQ_API_KEY     XAI_API_KEY          MISTRAL_API_KEY
 XIAOMI_API_KEY
 ```
 
@@ -87,7 +87,7 @@ security_opt:
 
 ```yaml
 args:
-  COMODOR_VERSION: "0.9.0"
+  COMODOR_VERSION: ""
 ```
 
 默认锁定版本，因此重新构建是可复现的。想要最新发布版：

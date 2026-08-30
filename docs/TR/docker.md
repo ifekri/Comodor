@@ -3,8 +3,8 @@
 Ajan, onun tarayıcısı ve ihtiyaç duyduğu her şey, tek bir kapsayıcıda.
 
 ```bash
-git clone -b docker https://github.com/ifekri/Comodor.git comodor-docker
-cd comodor-docker
+git clone https://github.com/ifekri/Comodor.git
+cd Comodor
 export ANTHROPIC_API_KEY=…        # or OPENAI_API_KEY, OPENROUTER_API_KEY, …
 docker compose up
 ```
@@ -37,7 +37,7 @@ Compose, kabuğunuzda ayarlı olan hangisi varsa onu iletir; onu imaja ya da com
 
 ```
 ANTHROPIC_API_KEY   OPENAI_API_KEY   OPENROUTER_API_KEY   DEEPSEEK_API_KEY
-GEMINI_API_KEY      GROQ_API_KEY     XAI_API_KEY          MISTRAL_API_KEY
+GOOGLE_API_KEY      GROQ_API_KEY     XAI_API_KEY          MISTRAL_API_KEY
 XIAOMI_API_KEY
 ```
 
@@ -87,7 +87,7 @@ Kabuk komutları çalıştırır; dolayısıyla kapsayıcı, bunlarla sizin maki
 
 ```yaml
 args:
-  COMODOR_VERSION: "0.9.0"
+  COMODOR_VERSION: ""
 ```
 
 Varsayılan olarak sabitlenmiştir; böylece yeniden derleme yeniden üretilebilirdir. Bunun yerine en yeni sürüm için:

@@ -160,6 +160,35 @@ pip install comodor
 pipx install comodor
 ```
 
+### In Docker — nothing to install
+
+The agent, a real Chromium, git and ripgrep, in one container. It starts the
+**browser interface** and prints the address to open:
+
+```bash
+git clone https://github.com/ifekri/Comodor.git && cd Comodor
+export ANTHROPIC_API_KEY=...        # or OPENAI_API_KEY, OPENROUTER_API_KEY, ...
+docker compose up
+```
+
+```
+  Comodor is at  http://127.0.0.1:8765/?token=...
+  Working in     /work
+```
+
+Open the link. The token is new every run, so use the one from *this* run —
+`docker compose logs comodor` prints it again.
+
+The agent works on `./work`; point it somewhere else with
+`COMODOR_WORKDIR=/path/to/project docker compose up`. Or without cloning
+anything:
+
+```bash
+docker run --rm -it -p 127.0.0.1:8765:8765   -e ANTHROPIC_API_KEY -v "$PWD:/work" ghcr.io/ifekri/comodor:latest
+```
+
+Full details, including how to reach it from another machine safely:
+[Docker](docs/docker.md).
 
 Then `comodor`. Python 3.11 or newer. Six questions the first time, never
 again.

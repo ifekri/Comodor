@@ -3,8 +3,8 @@
 الوكيل ومتصفحه وكل ما يحتاجه، في حاوية واحدة.
 
 ```bash
-git clone -b docker https://github.com/ifekri/Comodor.git comodor-docker
-cd comodor-docker
+git clone https://github.com/ifekri/Comodor.git
+cd Comodor
 export ANTHROPIC_API_KEY=…        # or OPENAI_API_KEY, OPENROUTER_API_KEY, …
 docker compose up
 ```
@@ -37,7 +37,7 @@ docker run --rm -it -p 127.0.0.1:8765:8765 \
 
 ```
 ANTHROPIC_API_KEY   OPENAI_API_KEY   OPENROUTER_API_KEY   DEEPSEEK_API_KEY
-GEMINI_API_KEY      GROQ_API_KEY     XAI_API_KEY          MISTRAL_API_KEY
+GOOGLE_API_KEY      GROQ_API_KEY     XAI_API_KEY          MISTRAL_API_KEY
 XIAOMI_API_KEY
 ```
 
@@ -87,7 +87,7 @@ security_opt:
 
 ```yaml
 args:
-  COMODOR_VERSION: "0.9.0"
+  COMODOR_VERSION: ""
 ```
 
 مثبَّت افتراضيًا حتى تكون إعادة البناء قابلة للتكرار. وللحصول على أحدث إصدار بدلًا من ذلك:

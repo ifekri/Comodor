@@ -1,0 +1,201 @@
+# Build the image and publish it, so `docker run ghcr.io/ifekri/comodor` works
+# without anyone cloning anything.
+#
+# This runs from `main`. It used to run from a branch of its own, which is the
+# reason the published image sat eleven releases behind: a release never
+# touched that branch, so nothing ever rebuilt. Now a tag rebuilds it, and a
+# pull request that changes the Dockerfile has to prove the image still starts.
+#
+# Nothing to configure: GHCR accepts the token Actions already provides, so
+# there is no secret to add. It builds for both architectures on a release,
+# because half the laptops this would run on are ARM and an amd64-only image
+# runs there through emulation at about a third of the speed.
+
+name: Image
+
+on:
+  push:
+    branches: [main]
+    # Written out twice rather than shared with a YAML anchor: GitHub Actions
+    # does not expand anchors, and the failure is a workflow that silently
+    # matches nothing.
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - docker/**
+      - docker-compose.yml
+      - .github/workflows/image.yml
+  # Every release. This is the trigger that was missing.
+  release:
+    types: [published]
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - docker/**
+      - docker-compose.yml
+      - .github/workflows/image.yml
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Comodor version to install (empty means the newest)"
+        required: false
+        default: ""
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Only where it will be published. Emulating arm64 to build an image
+      # nobody will pull costs about four minutes on every pull request.
+      - if: github.event_name != 'pull_request'
+        uses: docker/setup-qemu-action@v3
+
+      - if: github.event_name != 'pull_request'
+        name: Sign in to the registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Which version
+        id: pick
+        run: |
+          # A release builds exactly that release. Everything else builds the
+          # newest, because a number written down by hand is a number that goes
+          # stale — which is what this whole file is a correction of.
+          version="${{ github.event.inputs.version }}"
+          if [ -z "$version" ] && [ "${{ github.event_name }}" = "release" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building Comodor ${version:-newest release}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ github.event_name == 'pull_request'
+                         && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          build-args: |
+            COMODOR_VERSION=${{ steps.pick.outputs.version }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/comodor:latest
+            ghcr.io/${{ github.repository_owner }}/comodor:${{ steps.pick.outputs.version || 'edge' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # On a pull request the build is loaded into the local daemon rather
+      # than pushed, so the same tag names it either way.
+      - name: Name the image under test
+        id: image
+        run: echo "ref=ghcr.io/${{ github.repository_owner }}/comodor:latest" >> "$GITHUB_OUTPUT"
+
+      # With no key it must stop and say why. The browser interface has no way
+      # to enter one, so a server without a provider is a URL that fails on the
+      # first task - and in a container this message is the only thing the
+      # person who ran `docker compose up` is going to see.
+      - name: With no key, it says what is missing and stops
+        run: |
+          image="${{ steps.image.outputs.ref }}"
+          set +e
+          output=$(docker run --rm -t --name check-nokey "$image" 2>&1)
+          code=$?
+          set -e
+          echo "$output"
+          if [ "$code" -eq 0 ]; then
+            echo "::error::it started a server with no provider configured"
+            exit 1
+          fi
+          case "$output" in
+            *"no provider configured"*) ;;
+            *) echo "::error::it stopped without saying why"; exit 1 ;;
+          esac
+          case "$output" in
+            *ANTHROPIC_API_KEY*) ;;
+            *) echo "::error::the message does not say what would fix it"; exit 1 ;;
+          esac
+          echo "It stopped, and the message carries the answer."
+
+      # `-d` is the case that used to hang: compose sets `tty: true`, so a
+      # container has a terminal whether or not anybody is reading it, and the
+      # setup questions would have been asked of nobody.
+      - name: With a key, it serves and wants the token
+        run: |
+          image="${{ steps.image.outputs.ref }}"
+          docker run --rm -d -t --name check \
+            -e ANTHROPIC_API_KEY=sk-not-a-real-key \
+            -p 127.0.0.1:8765:8765 "$image"
+          for _ in $(seq 1 30); do
+            sleep 2
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/ || true)
+            # 401 is the right answer to a request with no token: it is up.
+            if [ "$code" = "401" ]; then
+              echo "It is serving, and it refused a request without the token."
+              docker logs check | head -30
+              break
+            fi
+            docker ps --filter name=check --format '{{.Names}}' | grep -q check || break
+          done
+          if [ "${code:-}" != "401" ]; then
+            echo "::error::it never answered."
+            docker logs check 2>&1 | head -40 || true
+            docker rm -f check 2>/dev/null || true
+            exit 1
+          fi
+
+      # The address is the one thing the person who started the container
+      # needs, and it has to be in the logs — not only on a terminal that a
+      # detached run does not have.
+      - name: The logs carry an address that can be opened
+        run: |
+          logs=$(docker logs check 2>&1)
+          case "$logs" in
+            *"http://127.0.0.1:8765/?token="*) ;;
+            *)
+              echo "::error::the logs do not carry an openable address"
+              echo "$logs" | head -40
+              docker rm -f check 2>/dev/null || true
+              exit 1 ;;
+          esac
+          case "$logs" in
+            *"0.0.0.0:8765"*)
+              echo "::error::it printed the bind address, which nobody can open"
+              docker rm -f check 2>/dev/null || true
+              exit 1 ;;
+          esac
+          echo "The address in the logs is one a browser can open."
+          docker rm -f check
+
+      - name: The healthcheck reports healthy
+        run: |
+          image="${{ steps.image.outputs.ref }}"
+          docker run --rm -d -t --name health \
+            -e ANTHROPIC_API_KEY=sk-not-a-real-key "$image"
+          for _ in $(seq 1 40); do
+            sleep 3
+            state=$(docker inspect --format '{{.State.Health.Status}}' health 2>/dev/null || echo gone)
+            [ "$state" = "healthy" ] && break
+            [ "$state" = "gone" ] && break
+          done
+          docker rm -f health >/dev/null 2>&1 || true
+          if [ "$state" != "healthy" ]; then
+            echo "::error::the container never became healthy (last: $state)"
+            exit 1
+          fi
+          echo "Healthy."

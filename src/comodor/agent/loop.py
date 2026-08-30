@@ -44,6 +44,15 @@ from .context import Conversation
 from .prompts import COMPACT_PROMPT, build_system_prompt
 
 MAX_PARALLEL_TOOLS = 6
+
+#: Asked when a turn is about to end having said nothing whatsoever. Phrased so
+#: that "nothing happened" is an acceptable answer: a model pushed to report a
+#: result it does not have is a model invited to invent one.
+SAY_WHAT_HAPPENED = (
+    "You ended without saying anything. Reply now, in plain prose, with what "
+    "you did and what the result was. If you did nothing, or could not finish, "
+    "say that instead — do not describe work you did not do."
+)
 #: Blank line between the skill block and the playbook block.
 SECTION_GAP = "\n\n"
 
@@ -151,22 +160,52 @@ class AgentLoop:
 
     def _iterate(self, deadline: float, result: TurnResult) -> TurnResult:
         agent = self.config.agent
+        #: The last thing it actually said this turn. A model sometimes runs
+        #: its tools, explains what it is doing along the way, and then closes
+        #: with an empty message. In the interface that is invisible — the
+        #: explanation was streamed as it arrived — but `comodor run` prints
+        #: only the final message, so the caller gets a blank answer for a
+        #: turn that did the work. Found by the benchmark: two failures out of
+        #: eight were a completed task reported as nothing at all.
+        spoken = ""
+        asked_to_speak = False
 
         while True:
             self.cancel.raise_if_cancelled()
             result.steps += 1
 
             specs = self.tools.specs(agent.mode)
-            system_prompt = build_system_prompt(self.config)
+            system_prompt = build_system_prompt(
+                self.config, profile=self._model_profile())
             self._maybe_compact(system_prompt, specs)
 
             completion = self._stream_once(system_prompt, specs)
             assistant = completion["message"]
             self.conversation.add(assistant)
 
+            if assistant.content.strip():
+                spoken = assistant.content
+
             calls: list[ToolCall] = assistant.tool_calls
             if not calls:
-                result.text = assistant.content
+                if not assistant.content.strip():
+                    if spoken:
+                        # It did explain itself, one message earlier. Report
+                        # that rather than a blank: this repeats what was
+                        # actually said and invents nothing.
+                        result.text = spoken
+                    elif not asked_to_speak:
+                        # It has said nothing at all this turn. Ask once — and
+                        # only once, because a model that answers an empty
+                        # message with another one would otherwise be asked
+                        # forever.
+                        asked_to_speak = True
+                        self.conversation.add(Message.user(SAY_WHAT_HAPPENED))
+                        continue
+                    else:
+                        result.text = ""
+                else:
+                    result.text = assistant.content
                 result.stopped = "done"
                 return result
 
@@ -311,8 +350,17 @@ class AgentLoop:
         return tool.summary(call.arguments) if tool else call.name
 
     def _can_parallelise(self, calls: list[ToolCall]) -> bool:
-        """Only when nothing in the batch could stop to ask a question."""
+        """Only when nothing in the batch could stop to ask a question.
+
+        And only when the model is one that can be asked for several at once.
+        A model with no known support for it that emits a batch anyway is
+        usually emitting something malformed; running those concurrently turns
+        one wasted turn into several.
+        """
         if not self.config.safety.auto_approve_safe:
+            return False
+        found = self._model_profile()
+        if found is not None and not found.parallel_tools:
             return False
         for call in calls:
             tool = self.tools.get(call.name)
@@ -375,6 +423,22 @@ class AgentLoop:
         ))
         return completion.text
 
+    def _model_profile(self):
+        """What this model can do, worked out once for the turn.
+
+        Returns `None` if it cannot be worked out, and every caller treats that
+        as "assume the usual" — a profile that cannot be built must never be
+        the reason a turn behaves differently.
+        """
+        if self._profile is None:
+            from ..providers import profile
+
+            try:
+                self._profile = profile.of(self.config)
+            except Exception:
+                return None
+        return self._profile
+
     def _window(self) -> int:
         """How much this model can actually read, cached for the turn.
 
@@ -383,16 +447,12 @@ class AgentLoop:
         force and compaction never fires — the conversation grows past what the
         model can take, and the first sign is the provider refusing it.
         """
-        if self._profile is None:
-            from ..providers import profile
-
-            try:
-                self._profile = profile.of(self.config)
-            except Exception:
-                # Never the reason a turn does not run. The old constant is a
-                # bad answer; no answer at all is a worse one.
-                return self.config.agent.context_limit or 128_000
-        return self._profile.context
+        found = self._model_profile()
+        if found is None:
+            # Never the reason a turn does not run. The old constant is a bad
+            # answer; no answer at all is a worse one.
+            return self.config.agent.context_limit or 128_000
+        return found.context
 
     def _emit_usage(self, system_prompt: str, specs: list[ToolSpec]) -> None:
         limit = self._window()

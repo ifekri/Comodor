@@ -1,0 +1,71 @@
+# Comodor in a container. One command:
+#
+#     docker compose up
+#
+# It builds the image the first time, starts the browser interface, and prints
+# the address to open. Nothing else needs configuring.
+
+services:
+  comodor:
+    build:
+      context: .
+      # Empty means the newest release, which is the point: this used to name a
+      # version by hand and spent eleven releases pointing at 0.9.0. Pin it for
+      # a reproducible build:
+      #   docker compose build --build-arg COMODOR_VERSION=0.21.0
+      args:
+        COMODOR_VERSION: "${COMODOR_VERSION:-}"
+    image: comodor:local
+    init: true                 # so Ctrl-C stops it, and Chromium leaves no zombies
+
+    ports:
+      # 127.0.0.1 on the left is the whole security model. Drop it and the port
+      # is on every interface of this machine — and this port is a shell.
+      - "127.0.0.1:${COMODOR_WEB_PORT:-8765}:8765"
+
+    volumes:
+      # The project the agent works on. Change the left side to point somewhere
+      # else; everything the agent can reach is under it.
+      - "${COMODOR_WORKDIR:-./work}:/work"
+      # Config, the learned brain, and session transcripts. A named volume, so
+      # what it learns survives `docker compose down` — and `down -v` forgets it.
+      - "comodor-home:/home/comodor/.comodor"
+
+    environment:
+      # Whichever of these is set on your machine is passed through. None of
+      # them is written into the image or the compose file.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      XAI_API_KEY: "${XAI_API_KEY:-}"
+      MISTRAL_API_KEY: "${MISTRAL_API_KEY:-}"
+      MOONSHOT_API_KEY: "${MOONSHOT_API_KEY:-}"
+      ZAI_API_KEY: "${ZAI_API_KEY:-}"
+      DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:-}"
+      TOGETHER_API_KEY: "${TOGETHER_API_KEY:-}"
+      FIREWORKS_API_KEY: "${FIREWORKS_API_KEY:-}"
+      CEREBRAS_API_KEY: "${CEREBRAS_API_KEY:-}"
+      XIAOMI_API_KEY: "${XIAOMI_API_KEY:-}"
+      # Which provider and model to use, when you want to say rather than let
+      # it pick whichever key it found.
+      COMODOR_PROVIDER: "${COMODOR_PROVIDER:-}"
+      COMODOR_MODEL: "${COMODOR_MODEL:-}"
+      # Set this to keep the same URL across restarts. Left unset, a new token
+      # is generated each time, which is the safer default.
+      COMODOR_WEB_TOKEN: "${COMODOR_WEB_TOKEN:-}"
+
+    # It runs shell commands, so the container is what stands between those and
+    # the machine. Give it nothing it does not need.
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+    stdin_open: true
+    tty: true
+    restart: "no"              # a coding agent should stop when you stop it
+
+volumes:
+  comodor-home:
