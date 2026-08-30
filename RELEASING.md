@@ -12,7 +12,7 @@ generated, git-ignored, and what `__version__` reads.
 So a release is a tag and nothing else:
 
 ```bash
-git tag v0.2.1 && git push --tags
+git tag v0.2.1 && git push origin v0.2.1
 ```
 
 There is no file to bump, which means there is no file to forget. That was not
@@ -75,8 +75,22 @@ and drop the `id-token: write` permission.
 
 ```bash
 git tag v0.2.1
-git push origin main --tags
+git push origin v0.2.1
 ```
+
+**Push the tag by name, on its own.** `git push origin main --tags` does two
+things in one command, and if either half is refused neither happens — so a
+local `main` that is behind the remote, which is the normal state after merging
+a pull request on the web, stops the tag from ever leaving your machine. The
+workflow then never runs and there is nothing to look at, which is what makes
+it confusing: no failed run, no error, nothing.
+
+`--tags` also pushes every tag you have, including any you were not ready to
+release. Naming the one you mean is shorter and does exactly what it says.
+
+If the push is refused because the tag already exists on the remote, that
+version is spent — PyPI never lets a version number be reused, even after a
+delete. Move to the next patch number.
 
 That is the whole of it. Pushing the tag runs `release.yml`, which:
 
@@ -91,7 +105,17 @@ That is the whole of it. Pushing the tag runs `release.yml`, which:
    `comodor --version`, so a distribution that cannot start never ships, and
    checks that what it prints is the tag;
 5. publishes to PyPI;
-6. attaches the files to a GitHub release with generated notes.
+6. attaches the files to a GitHub release with generated notes;
+7. builds the container image and pushes it to Docker Hub and GHCR.
+
+Step 7 is chained onto the same run rather than triggered by the release being
+published, which looks equivalent and is not: GitHub raises no workflow events
+for anything done with `GITHUB_TOKEN`, so a release created by step 6 fires
+nothing. `v0.20.3` shipped and no image was ever built. Chaining it here also
+puts it after PyPI has the version the Dockerfile is about to install — the
+one time the release event *did* fire, for a release made by hand, the build
+started twenty seconds before the upload finished and asked for a version that
+was not there yet.
 
 ## Two ways to run it
 

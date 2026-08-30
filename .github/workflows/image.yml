@@ -25,9 +25,20 @@ on:
       - docker/**
       - docker-compose.yml
       - .github/workflows/image.yml
-  # Every release. This is the trigger that was missing.
-  release:
-    types: [published]
+  # Called by `release.yml` once the package is actually on PyPI.
+  #
+  # Not `release: [published]`, which looks right and does not work. A release
+  # created by a workflow is created with GITHUB_TOKEN, and GitHub deliberately
+  # does not fire workflow events for those — so v0.20.3 shipped and no image
+  # was ever built. When it *did* fire, for a release made by hand, it raced:
+  # the build started at 12:44:32 and asked PyPI for a version the publish job
+  # had not finished uploading.
+  workflow_call:
+    inputs:
+      version:
+        description: "Comodor version to install"
+        required: false
+        type: string
   pull_request:
     paths:
       - Dockerfile
@@ -41,6 +52,7 @@ on:
         description: "Comodor version to install (empty means the newest)"
         required: false
         default: ""
+        type: string
 
 concurrency:
   group: image-${{ github.ref }}
@@ -106,16 +118,33 @@ jobs:
 
       - name: Which version
         id: pick
+        env:
+          # One expression for both callers: `inputs` covers workflow_call and
+          # workflow_dispatch alike.
+          WANTED: ${{ inputs.version }}
         run: |
-          # A release builds exactly that release. Everything else builds the
-          # newest, because a number written down by hand is a number that goes
-          # stale — which is what this whole file is a correction of.
-          version="${{ github.event.inputs.version }}"
-          if [ -z "$version" ] && [ "${{ github.event_name }}" = "release" ]; then
-            version="${GITHUB_REF_NAME#v}"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Building Comodor ${version:-newest release}"
+          echo "version=$WANTED" >> "$GITHUB_OUTPUT"
+          echo "Building Comodor ${WANTED:-newest release}"
+
+      # PyPI is a CDN, and a version that has just been uploaded is not
+      # instantly installable everywhere. Without this the build asks for a
+      # version that exists and gets told it does not, which reads as a broken
+      # Dockerfile rather than as a race.
+      - name: Wait for PyPI to have it
+        if: steps.pick.outputs.version != ''
+        env:
+          VERSION: ${{ steps.pick.outputs.version }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS -m 10 "https://pypi.org/pypi/comodor/$VERSION/json"                  -o /dev/null; then
+              echo "comodor $VERSION is on PyPI."
+              exit 0
+            fi
+            echo "  not there yet ($attempt/30)"
+            sleep 10
+          done
+          echo "::error::comodor $VERSION never appeared on PyPI"
+          exit 1
 
       - name: Which tags
         id: tags
