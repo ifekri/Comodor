@@ -158,12 +158,39 @@ has() { command -v "$1" >/dev/null 2>&1; }
 TOOL_DIRS="$BIN_DIR $HOME/.cargo/bin $HOME/bin
            /opt/homebrew/bin /usr/local/bin /home/linuxbrew/.linuxbrew/bin"
 
+# On PATH is not the same as runnable on this machine.
+#
+# WSL inherits the Windows PATH, so `command -v pipx` cheerfully answers with
+# /mnt/c/Users/.../scoop/shims/pipx — a Windows shim, which Linux greets with
+# "Exec format error". The installer then chose pipx, failed, and stopped, on a
+# machine that had uv, venv and pip all working.
+#
+# The interpreter search below has always run what it finds before believing
+# in it. This does the same. 126 is "found and cannot be executed", 127 is
+# "not found"; anything else, including a tool that simply has no --version,
+# counts as something this machine can run.
+runnable() {
+    case "$1" in
+        /mnt/[a-zA-Z]/* | /cygdrive/* | *.exe | *.bat | *.cmd)
+            # A Windows path or a Windows executable, seen from a Unix shell.
+            return 1
+            ;;
+    esac
+    "$1" --version >/dev/null 2>&1
+    case $? in
+        126 | 127) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 find_tool() {
-    if command -v "$1" 2>/dev/null; then
+    candidate=$(command -v "$1" 2>/dev/null || true)
+    if [ -n "$candidate" ] && runnable "$candidate"; then
+        printf '%s\n' "$candidate"
         return 0
     fi
     for dir in $TOOL_DIRS; do
-        if [ -x "$dir/$1" ]; then
+        if [ -x "$dir/$1" ] && runnable "$dir/$1"; then
             printf '%s\n' "$dir/$1"
             return 0
         fi
@@ -563,6 +590,45 @@ choose_tool() {
     fi
 }
 
+# One route, tried. Returns whether $PACKAGE is now installed.
+attempt_tool() {
+    case "$1" in
+        uv)
+            [ -n "$UV" ] || UV=$(find_tool uv 2>/dev/null) || return 1
+            install_with_uv
+            ;;
+        pipx)
+            [ -n "$PIPX" ] || PIPX=$(find_tool pipx 2>/dev/null) || return 1
+            install_with_pipx
+            ;;
+        venv)
+            # The interpreter that was merely newest may be the one that cannot
+            # build an environment, so the search happens here rather than
+            # being assumed.
+            if pick_venv_python; then
+                PYTHON="$VENV_PYTHON"
+            fi
+            [ -n "$PYTHON" ] || return 1
+            install_with_venv
+            ;;
+        pip)
+            [ -n "$PYTHON" ] || return 1
+            externally_managed "$PYTHON" && return 1
+            install_with_pip
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+# The chosen route first, then the rest in order of how well they isolate what
+# they install. Nothing is tried twice.
+remaining_tools() {
+    printf '%s\n' "$1"
+    for candidate in uv pipx venv pip; do
+        [ "$candidate" = "$1" ] || printf '%s\n' "$candidate"
+    done
+}
+
 main() {
     screen "Checking this machine"
 
@@ -589,41 +655,35 @@ main() {
             "Then run this installer again."
     fi
 
-    case "$TOOL" in
-        uv)
-            [ -n "$UV" ] || UV=$(find_tool uv 2>/dev/null) ||
-                die "COMODOR_FORCE_TOOL=uv, but uv is not installed."
-            install_with_uv || die "uv could not install $PACKAGE." \
-                "The output above says why."
-            ;;
-        pipx)
-            [ -n "$PIPX" ] || PIPX=$(find_tool pipx 2>/dev/null) ||
-                die "COMODOR_FORCE_TOOL=pipx, but pipx is not installed."
-            install_with_pipx || die "pipx could not install $PACKAGE." \
-                "The output above says why."
-            ;;
-        venv)
-            # Forced, so the search still has to happen: the interpreter that
-            # was merely newest may be the one that cannot do this.
-            if pick_venv_python; then
-                PYTHON="$VENV_PYTHON"
+    if [ -n "${COMODOR_FORCE_TOOL:-}" ]; then
+        attempt_tool "$TOOL" || die "COMODOR_FORCE_TOOL=$TOOL could not install $PACKAGE." \
+            "The output above says why." \
+            "" \
+            "Run the installer without COMODOR_FORCE_TOOL and it will try the" \
+            "others in turn."
+    else
+        # One failing route is not the end of the machine. A tool can be
+        # present, chosen, and still unable to finish — a broken pipx, a
+        # Python without venv, a PEP 668 refusal — and the next route down
+        # usually works. This stopped at the first failure before, and gave up
+        # on a machine that had three other ways to install.
+        installed_by=""
+        for candidate in $(remaining_tools "$TOOL"); do
+            if attempt_tool "$candidate"; then
+                installed_by="$candidate"
+                break
             fi
-            [ -n "$PYTHON" ] ||
-                die "COMODOR_FORCE_TOOL=venv needs Python 3.$PYTHON_MIN_MINOR or newer."
-            install_with_venv || die "Could not build an environment for $PACKAGE." \
-                "On Debian or Ubuntu this is usually one missing package:" \
-                "  sudo apt install python3-venv" \
-                "Then run this installer again."
-            ;;
-        pip)
-            [ -n "$PYTHON" ] ||
-                die "COMODOR_FORCE_TOOL=pip needs Python 3.$PYTHON_MIN_MINOR or newer."
-            install_with_pip || die "pip cannot install into this Python (PEP 668)." \
-                "Run the installer without COMODOR_FORCE_TOOL and it will build an" \
-                "isolated environment instead, which that rule does not cover."
-            ;;
-        *) die "Unknown COMODOR_FORCE_TOOL: $TOOL" "Use one of: uv, pipx, venv, pip" ;;
-    esac
+            note "$candidate did not work. Trying the next one."
+        done
+        [ -n "$installed_by" ] || die \
+            "Every way of installing $PACKAGE on this machine failed." \
+            "The output above says where each one stopped." \
+            "" \
+            "Any one of these fixes it:" \
+            "  * install uv:    curl -LsSf https://astral.sh/uv/install.sh | sh" \
+            "  * on Debian or Ubuntu the venv module is a separate package:" \
+            "      sudo apt install python3-venv"
+    fi
 
     # An install that reports success without producing a working command is
     # the failure people waste the most time on, so it is checked — by running

@@ -52,6 +52,21 @@ if [ $? -eq 0 ]; then report 1 "never passes --break-system-packages"; else repo
 sed 's/#.*//' "$SH" | grep -q 'printf.*\\x[0-9a-f]'
 if [ $? -eq 0 ]; then report 1 "no bash-only \\xNN escapes in printf"; else report 0 "no bash-only \\xNN escapes in printf"; fi
 
+# A tool on PATH is not a tool this machine can run. WSL inherits the Windows
+# PATH, so `command -v pipx` answers with a Windows shim on a mounted drive and
+# Linux says "Exec format error". `find_tool` returned it without checking, the
+# installer chose pipx, and it stopped — on a machine that had uv, venv and pip
+# all working.
+sed 's/#.*//' "$SH" | grep -q 'runnable() {'
+report $? "find_tool verifies that what it found can run"
+
+sed 's/#.*//' "$SH" | grep -q 'remaining_tools'
+report $? "a failing install falls through to the next method"
+
+# The behaviour, not just the presence: builds a Windows shim and asks.
+sh "$(dirname "$0")/check-lookup.sh" >/dev/null 2>&1
+report $? "a Windows shim is refused and a real tool is not"
+
 printf '\ninstall.ps1\n'
 
 # CRLF is correct here; Windows PowerShell wants it.
