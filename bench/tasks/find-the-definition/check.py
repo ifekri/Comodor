@@ -3,11 +3,31 @@
 A reading task, run in plan mode so the write tools are absent rather than
 merely refused — a question about code cannot be answered by editing it.
 
-What is judged is the pair every useful answer to this question contains: the
-file, and a line inside the function that does the work. The line is accepted
-anywhere in `apply_rate` rather than on one exact row, because "the function
-at rates.py:33" and "the branch at rates.py:43" are both right and arguing
-about which is more right would be the judge having an opinion.
+Three things are judged, and the third is the one that took two attempts to get
+right.
+
+*The file and the function.* `apply_rate` in `app/rates.py`, not `included`
+next to it and not `invoice_lines` upstream.
+
+*A line inside that function.* Accepted anywhere in its body rather than on one
+exact row: "the function at rates.py:33" and "the branch at rates.py:43" are
+both right, and arguing about which is more right would be the judge having an
+opinion.
+
+*What actually decides the tier.* The allowance comes off first — the reduced
+price applies past a thousand **billable** units, not a thousand raw ones. This
+is the half of the question that separates having read the function from having
+found it.
+
+The first version of this check looked for the word "allowance" anywhere in the
+answer, which passed:
+
+    Anything over 1000 raw units of the meter gets the reduced price,
+    regardless of the allowance.
+
+— the wrong rule, stated confidently, passing because it named the thing it was
+dismissing. So the subtraction and the allowance have to appear in the same
+sentence, and that sentence must not be waving it away.
 """
 
 import re
@@ -23,6 +43,19 @@ WRITES = False
 #: `def apply_rate` through its last line.
 BODY = range(33, 44)
 
+#: The free part, however it is named.
+ALLOWANCE = ("allowance", "included", "free", "billable")
+
+#: Taking it off, however it is put.
+SUBTRACTED = ("minus", "after", "past", "beyond", "subtract", "deduct",
+              "excess", "over and above", "on top of", "billable", "-")
+
+#: Waving it away, which is the wrong answer wearing the right words.
+DISMISSED = ("regardless", "ignoring", "irrespective", "raw", "whether or not",
+             "does not matter", "doesn't matter", "no matter")
+
+_SENTENCE = re.compile(r"[^.!?\n]+")
+
 
 def check(attempt):
     named = judge.says(attempt, "rates.py", "apply_rate")
@@ -35,12 +68,21 @@ def check(attempt):
             f"no line number inside apply_rate ({BODY.start}-{BODY.stop - 1}) "
             f"appears in the answer")
 
-    # The tier is chosen by billable units past the allowance, not by the raw
-    # quantity — the distinction the question asks about.
-    if not any(word in attempt.text.lower()
-               for word in ("billable", "allowance", "included", "free")):
-        return Verdict.no("the answer never says the tier is decided after the "
-                          "included allowance is taken off")
+    explained = False
+    for sentence in _SENTENCE.findall(attempt.text.lower()):
+        if not any(word in sentence for word in ALLOWANCE):
+            continue
+        if any(word in sentence for word in DISMISSED):
+            continue
+        if any(word in sentence for word in SUBTRACTED):
+            explained = True
+            break
+
+    if not explained:
+        return Verdict.no(
+            "the answer does not say that the tier is decided after the "
+            "included allowance comes off — the reduced price applies past a "
+            "thousand billable units, not a thousand raw ones")
 
     return judge.untouched(attempt, judge.original(__file__),
                            "app/rates.py", "app/billing.py", "report.py")

@@ -78,21 +78,17 @@ the suite goes green, the file parses, the old name is gone from every file.
 Three attempts each, reported as a rate, because a single run dressed up as
 "it passes" is a made-up number.
 
-Against **MiMo v2.5 Pro**, a cheap model:
+Results are committed under `bench/results/`, dated and named for the model
+they are about, as JSON and as a table.
 
-| | |
-|---|---|
-| fixing a failing test | 12/12 |
-| building from a spec | 5/6 |
-| finding things in code | 6/6 |
-| refactoring across files | 6/6 |
-| **not** doing the wrong thing | 3/9 |
-
-That last row is the one nobody else measures, and it is the interesting
-result: this model can code and cannot be careful. It built on a one-line
-request with a real ambiguity in it instead of asking — three times out of
-three, identically. Told not to invent the data that would make a suite green,
-it invented it twice.
+The first version of that table was wrong, and the correction is the point.
+One `careful` task scored a model 0/3 for not asking a question — and the model
+had in fact found the ambiguity, resolved it from the codebase's own
+convention, and said so. The judge was demanding a question Comodor's prompt
+tells the model *not* to ask. A judge with a made-up standard is the same bug
+as a test with made-up keys, pointed the other way: one passes broken code, the
+other fails correct work, and both look exactly like a real number. The task
+was replaced with one whose missing piece genuinely is not in the repository.
 
 The whole table, and how to run it against your own model, is in
 [`bench/`](bench/README.md). Every number there came from a real run.
