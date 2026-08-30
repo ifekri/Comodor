@@ -232,6 +232,21 @@ CATALOGUE: tuple[ProviderSpec, ...] = (
         rank=15,
     ),
     ProviderSpec(
+        id="bai",
+        label="B.AI",
+        base_url="https://api.b.ai/v1",
+        keys_url="https://b.ai",
+        blurb="One key, many houses' models — GLM, DeepSeek, MiniMax, GPT.",
+        # Chosen because it is the one verified against the live endpoint: it
+        # returns a well-formed `tool_calls` and a `finish_reason` of
+        # `tool_calls`, which is what makes a provider usable for coding at all.
+        default_model="glm-5.3-flash",
+        models=("glm-5.3-flash", "deepseek-v4-flash", "glm-5.2",
+                "minimax-m3", "gpt-5.6-sol"),
+        env_key="BAI_API_KEY",
+        rank=16,
+    ),
+    ProviderSpec(
         id="ollama",
         label="Ollama (local)",
         base_url="http://localhost:11434/v1",

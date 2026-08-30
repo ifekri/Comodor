@@ -25,8 +25,18 @@ Or without cloning anything:
 docker run --rm -it -p 127.0.0.1:8765:8765 \
   -e ANTHROPIC_API_KEY \
   -v "$PWD:/work" \
-  ghcr.io/ifekri/comodor:latest
+  ifekri/comodor:latest
 ```
+
+The image is published to both registries on every release, from one build:
+
+| | |
+|---|---|
+| Docker Hub | `ifekri/comodor:latest` · `ifekri/comodor:0.21.0` |
+| GitHub | `ghcr.io/ifekri/comodor:latest` · `ghcr.io/ifekri/comodor:0.21.0` |
+
+One build, pushed to both — building twice would publish two images from two
+runs of the same Dockerfile, and only one of them would have been tested.
 
 ---
 
@@ -51,7 +61,7 @@ it into the image or the compose file:
 ANTHROPIC_API_KEY   OPENAI_API_KEY    OPENROUTER_API_KEY   DEEPSEEK_API_KEY
 GOOGLE_API_KEY      GROQ_API_KEY      XAI_API_KEY          MISTRAL_API_KEY
 MOONSHOT_API_KEY    ZAI_API_KEY       DASHSCOPE_API_KEY    TOGETHER_API_KEY
-FIREWORKS_API_KEY   CEREBRAS_API_KEY  XIAOMI_API_KEY
+FIREWORKS_API_KEY   CEREBRAS_API_KEY  XIAOMI_API_KEY       BAI_API_KEY
 ```
 
 Prefer a file to your shell history? Put it in a `.env` beside the compose file
@@ -117,8 +127,8 @@ COMODOR_VERSION=0.21.0 docker compose build
 docker build --build-arg COMODOR_VERSION=0.21.0 .
 ```
 
-The published image is rebuilt on every release, so `ghcr.io/ifekri/comodor:latest`
-is the newest one and `ghcr.io/ifekri/comodor:0.21.0` is that release.
+The published images are rebuilt on every release, so `:latest` is the newest
+one and `:0.21.0` is that release — on both registries.
 
 ---
 

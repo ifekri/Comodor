@@ -49,6 +49,7 @@ services:
       FIREWORKS_API_KEY: "${FIREWORKS_API_KEY:-}"
       CEREBRAS_API_KEY: "${CEREBRAS_API_KEY:-}"
       XIAOMI_API_KEY: "${XIAOMI_API_KEY:-}"
+      BAI_API_KEY: "${BAI_API_KEY:-}"
       # Which provider and model to use, when you want to say rather than let
       # it pick whichever key it found.
       COMODOR_PROVIDER: "${COMODOR_PROVIDER:-}"
