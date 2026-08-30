@@ -51,6 +51,27 @@ class ToolContext:
     cwd: Path
     todos: list[TodoItem] = field(default_factory=list)
     emit_output: Callable[[str], None] | None = None   # incremental tool output
+    #: Every file this session has actually read, by resolved path.
+    #:
+    #: Kept so a write can tell the difference between replacing a file whose
+    #: contents are known and replacing one sight unseen. The second is how the
+    #: rest of a file gets silently thrown away, and the benchmark caught it:
+    #: one task was failed for overwriting the sample it was being measured
+    #: against, in a run that was otherwise correct.
+    seen: set[str] = field(default_factory=set)
+
+    def note_read(self, path: Path) -> None:
+        self.seen.add(self._key(path))
+
+    def was_read(self, path: Path) -> bool:
+        return self._key(path) in self.seen
+
+    @staticmethod
+    def _key(path: Path) -> str:
+        try:
+            return str(Path(path).resolve())
+        except OSError:
+            return str(path)
 
     def resolve(self, path: str | Path) -> Path:
         """Interpret a model-supplied path relative to the workspace."""

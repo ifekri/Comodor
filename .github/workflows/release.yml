@@ -241,7 +241,7 @@ jobs:
             ### UV
 
               ```bash
-              uv tool sync comodor==${{ needs.build.outputs.version }}
+              uv tool install comodor==${{ needs.build.outputs.version }}
               ```
 
             ### PIP

@@ -163,6 +163,16 @@ class AgentConfig:
     #: price every turn it remains, and a screen from twenty clicks ago is not
     #: the screen now. Two is enough to compare before with after.
     keep_screenshots: int = 2
+    #: Run at the end of any turn that changed a file — your build, your tests,
+    #: your type checker. When it fails, the agent is given the output and one
+    #: turn to fix it, so "done" comes to mean "done, and the project still
+    #: works".
+    #:
+    #: Empty by default, and deliberately so. Running somebody's whole suite
+    #: after every turn is minutes and money they did not ask to spend, and the
+    #: right command is different in every project — a guessed one that is slow
+    #: or destructive is worse than none. Set it once and it pays for itself.
+    verify_command: str = ""
     system_prompt_extra: str = ""
     prompt_cache: bool = True            # let the provider re-serve the prefix
     prompt_cache_ttl: str = "5m"         # "5m" or "1h"; the hour costs more to write

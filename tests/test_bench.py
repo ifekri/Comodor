@@ -551,35 +551,27 @@ def an_answer(text: str, workspace: Path):
     return an_attempt(workspace, text=text)
 
 
-WRONG_DIAGNOSIS = (
-    "The bug is in `put`. It evicts with next(iter(self._entries)), which is "
-    "insertion order, so it drops the oldest inserted entry rather than the "
-    "least recently used one. `get` is fine."
-)
+WRONG_DIAGNOSIS = "METHOD: put\n\nIt evicts in insertion order."
 
-#: The shape that broke the second version of this judge. The model names the
-#: method in a heading and then continues with a pronoun, which every human
-#: reader follows and a same-sentence rule does not.
-PRONOUN_STYLE = (
-    "**Root cause - `Cache.get` is wrong** (`cache.py:13-14`).\n\n"
-    "It only reads from the dict. It never records that the key was accessed. "
-    "In an LRU cache, a read must count as a use.\n\n"
-    "It would have to move the key to the end when it is found."
+#: The shape that broke the third version of this judge: the method named in
+#: bold prose, in a form no word list had. The task asks for a `METHOD:` line
+#: now, and the judge reads that line.
+REAL_ANSWER = (
+    "METHOD: get\n\n"
+    "**The failing method is `Cache.get`** (`cache.py:13-14`). It performs a "
+    "plain dictionary lookup. It does not update the access order of the "
+    "internal `_entries` dict."
 )
 
 RIGHT_DIAGNOSES = [
-    "`Cache.get` never records that an entry was used, so eviction follows "
-    "insertion order and the wrong key goes.",
-    "The root cause is `get`. It just does a dict lookup and does not update "
-    "the ordering, so a read has no effect on what is evicted.",
-    "get() fails to move the key to the end, so the order is still insertion "
-    "order.",
-    PRONOUN_STYLE,
+    REAL_ANSWER,
+    "METHOD: get\n\n`Cache.get` never records that an entry was used, so "
+    "eviction follows insertion order.",
+    "**METHOD:** `Cache.get`\n\nIt does not move the key to the end.",
 ]
 
 
-def test_a_confident_wrong_diagnosis_does_not_pass(copy_of):
-    """It blames `put`, where the eviction code is, and says `get` is fine."""
+def test_naming_the_wrong_method_does_not_pass(copy_of):
     from bench.task import load_task
 
     workspace = copy_of("find-why-it-fails")
@@ -587,17 +579,13 @@ def test_a_confident_wrong_diagnosis_does_not_pass(copy_of):
 
     verdict = task.check(an_attempt(workspace, text=WRONG_DIAGNOSIS))
 
-    assert not verdict.passed, "a wrong answer passed"
+    assert not verdict.passed
     assert "`put`" in verdict.reason
 
 
 @pytest.mark.parametrize("answer", RIGHT_DIAGNOSES)
-def test_the_right_diagnosis_passes_however_it_is_worded(answer, copy_of):
-    """Including the one an earlier version of this judge rejected.
-
-    It said "Root cause - `Cache.get` is wrong" and then carried on with "It
-    never records...". Requiring the method and the cause in one sentence
-    failed it, which is grading prose rather than correctness."""
+def test_the_right_method_passes_however_it_is_dressed(answer, copy_of):
+    """Bold, backticks, a `Cache.` prefix - none of that is what is measured."""
     from bench.task import load_task
 
     workspace = copy_of("find-why-it-fails")
@@ -605,20 +593,34 @@ def test_the_right_diagnosis_passes_however_it_is_worded(answer, copy_of):
 
     verdict = task.check(an_attempt(workspace, text=answer))
 
-    assert verdict.passed, f"{verdict.reason} :: {answer[:80]}"
+    assert verdict.passed, f"{verdict.reason} :: {answer[:60]}"
 
 
-def test_an_answer_that_blames_nothing_does_not_pass(copy_of):
+def test_the_right_method_with_no_reason_does_not_pass(copy_of):
+    from bench.task import load_task
+
+    workspace = copy_of("find-why-it-fails")
+    task = load_task(TASKS / "find-why-it-fails")
+
+    verdict = task.check(an_attempt(workspace, text="METHOD: get\n\nThat one."))
+
+    assert not verdict.passed
+
+
+def test_an_answer_without_the_line_the_task_asked_for_does_not_pass(copy_of):
+    """Three heuristics over prose were wrong before the task was changed to
+    ask for a checkable line. A judge that is nearly right is worth less than
+    a question whose answer can be read exactly."""
     from bench.task import load_task
 
     workspace = copy_of("find-why-it-fails")
     task = load_task(TASKS / "find-why-it-fails")
 
     verdict = task.check(an_attempt(
-        workspace, text="The cache is not really an LRU. It evicts in "
-                        "insertion order."))
+        workspace, text="The problem is that get never updates the order."))
 
     assert not verdict.passed
+    assert "METHOD" in verdict.reason
 
 
 WRONG_RULE = (
