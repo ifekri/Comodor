@@ -162,6 +162,18 @@ class Conversation:
                 message.content = (message.content + "\n" + note).strip()
         return dropped
 
+    def forget_superseded_reads(self) -> tuple[int, int]:
+        """Blank out file reads that a later edit made untrue.
+
+        Returns `(reads dropped, tokens freed)`. See `agent/staleness.py` for
+        why the newest read of a file is always kept, and why a read of a file
+        nothing has written to is left alone even when it is a duplicate.
+        """
+        from .staleness import forget_superseded_reads as sweep
+        from .tokens import estimate_text
+
+        return sweep(self.messages, estimate_text)
+
     # -- introspection ---------------------------------------------------- #
 
     def summary_line(self) -> str:

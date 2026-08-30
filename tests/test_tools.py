@@ -23,7 +23,9 @@ def test_write_then_read_round_trip(tools, tool_context, workspace):
 
     read = tools.invoke("read_file", tool_context, {"path": "app.py"})
     assert "def main():" in read.content
-    assert read.content.startswith("     1\t")     # line numbers help the model cite
+    # Line numbers help the model cite `app.py:42`. Not padded: six spaces on
+    # every line was 6-7% of a real file read, spent on alignment nobody reads.
+    assert read.content.startswith("1\t")
 
 
 def test_edit_requires_a_unique_anchor(tools, tool_context, workspace):
@@ -412,3 +414,67 @@ def test_an_enormous_blob_does_not_come_back_whole(tool_context, tools):
     result = tools.invoke("read_file", tool_context, {"__raw__": "x" * 50_000})
 
     assert len(result.content) < 2_000
+
+
+# --------------------------------------------------------------------------- #
+# what a file read costs
+#
+# A read is the largest thing most turns add, and the prefix behind it comes
+# back 99% cached — so what a read costs is close to what a turn costs. Six
+# characters of padding on every line was 6-7% of a real read: 542 tokens on
+# `agent/loop.py`, 893 on `config.py`, spent on leading spaces.
+# --------------------------------------------------------------------------- #
+
+
+def test_line_numbers_are_not_padded(tool_context):
+    from comodor.tools.fs import ReadFile
+
+    (tool_context.cwd / "small.py").write_text(
+        "\n".join(f"x = {n}" for n in range(1, 4)), encoding="utf-8")
+
+    result = ReadFile().run(tool_context, path="small.py")
+
+    assert result.content.startswith("1\tx = 1"), result.content[:40]
+    assert "     1" not in result.content
+
+
+def test_the_number_and_the_line_are_still_separated_by_a_tab(tool_context):
+    """The tab is what makes the number readable as a number. Only the
+    alignment went."""
+    from comodor.tools.fs import ReadFile
+
+    (tool_context.cwd / "small.py").write_text("first\nsecond\n", encoding="utf-8")
+
+    lines = ReadFile().run(tool_context, path="small.py").content.splitlines()
+
+    assert lines[0] == "1\tfirst"
+    assert lines[1] == "2\tsecond"
+
+
+def test_an_offset_read_still_numbers_from_the_real_line(tool_context):
+    from comodor.tools.fs import ReadFile
+
+    (tool_context.cwd / "big.py").write_text(
+        "\n".join(f"x = {n}" for n in range(1, 30)), encoding="utf-8")
+
+    result = ReadFile().run(tool_context, path="big.py", offset=10, limit=2)
+
+    assert result.content.startswith("10\tx = 10")
+
+
+def test_the_padding_was_worth_removing(tool_context):
+    """Measured rather than asserted: the same file, both ways."""
+    from comodor.agent.tokens import estimate_text
+    from comodor.tools.fs import ReadFile
+
+    body = "\n".join(f"    value_{n} = compute(n={n})" for n in range(1, 400))
+    (tool_context.cwd / "real.py").write_text(body, encoding="utf-8")
+
+    tight = ReadFile().run(tool_context, path="real.py").content
+    padded = "\n".join(f"{n + 1:6d}\t{line}"
+                       for n, line in enumerate(body.splitlines()))
+
+    saved = estimate_text(padded) - estimate_text(tight)
+    assert saved > 0, "the change saves nothing"
+    assert saved / estimate_text(padded) > 0.03, \
+        f"only {saved / estimate_text(padded):.1%} — not worth the churn"

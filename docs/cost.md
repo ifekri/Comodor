@@ -136,6 +136,26 @@ Do not set `screenshot_tokens` too low. A picture the model cannot read is worse
 than no picture: it guesses instead of asking. See
 [Using your screen](computer.md#screenshots-and-what-they-cost).
 
+**A file read that an edit made untrue.** An agent reads a file, edits it, and
+the copy from before the edit rides along for the rest of the task. Comodor
+drops it — but only when the context is under pressure, and only when it is
+worth more than the cache it costs:
+
+```
+one real file, read twice with an edit between
+  history before  16,808 tokens
+  history after    8,462 tokens
+  freed            8,346   (half the history)
+```
+
+This happens instead of compaction rather than as well as it. Compaction asks a
+model to summarise the history away; this drops what is *known* to be stale, by
+an exact rule, for nothing — so if it frees enough, nothing is summarised at
+all, and what remains is more accurate as well as smaller.
+
+It never touches the newest read of a file, a file nothing has written to, or a
+read that came after the edit.
+
 **Large tool output.** Bounded by `agent.max_tool_chars`. What does not fit is
 written to a file the model is told how to read, so it pays only if it looks.
 

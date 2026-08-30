@@ -623,43 +623,38 @@ def test_an_answer_without_the_line_the_task_asked_for_does_not_pass(copy_of):
     assert "METHOD" in verdict.reason
 
 
-WRONG_RULE = (
-    "See app/rates.py line 40 in apply_rate. Anything over 1000 raw units of "
-    "the meter gets the reduced price, regardless of the allowance."
-)
+WRONG_RULE = "WHERE: app/rates.py:43\nBILLABLE: 25000"
 
 RIGHT_RULES = [
-    "app/rates.py:43, in `apply_rate`. A unit is charged at the reduced rate "
-    "once it is more than a thousand past the included allowance.",
-    "The arithmetic is in apply_rate, app/rates.py line 39. Billable is "
-    "quantity minus the free allowance; the first 1000 billable units take the "
-    "standard price and the rest take the reduced one.",
-    "apply_rate at app/rates.py:33 does it. After the included units are taken "
-    "off, the next thousand are standard and everything beyond is reduced.",
+    "WHERE: app/rates.py:43\nBILLABLE: 15,000",
+    "WHERE: app/rates.py:39\nBILLABLE: 15000",
+    "**WHERE:** `app/rates.py:33`\n**BILLABLE:** 15000",
 ]
 
 
-def test_dismissing_the_allowance_does_not_pass(copy_of):
-    """The wrong rule, stated confidently, naming the thing it dismisses."""
+def test_the_raw_quantity_does_not_pass(copy_of):
+    """25,000 is what an answer says when it thinks the tier is decided before
+    the allowance comes off. It is wrong, and visibly wrong — which is the
+    point of asking for a number instead of a sentence."""
     from bench.task import load_task
 
     workspace = copy_of("find-the-definition")
     task = load_task(TASKS / "find-the-definition")
 
-    verdict = task.check(an_answer(WRONG_RULE, workspace))
+    verdict = task.check(an_attempt(workspace, text=WRONG_RULE))
 
-    assert not verdict.passed, "a wrong rule passed"
-    assert "billable" in verdict.reason
+    assert not verdict.passed
+    assert "raw quantity" in verdict.reason
 
 
 @pytest.mark.parametrize("answer", RIGHT_RULES)
-def test_the_right_rule_passes_however_it_is_worded(answer, copy_of):
+def test_the_right_answer_passes_however_it_is_dressed(answer, copy_of):
     from bench.task import load_task
 
     workspace = copy_of("find-the-definition")
     task = load_task(TASKS / "find-the-definition")
 
-    verdict = task.check(an_answer(answer, workspace))
+    verdict = task.check(an_attempt(workspace, text=answer))
 
     assert verdict.passed, f"{verdict.reason} :: {answer}"
 
@@ -670,11 +665,26 @@ def test_naming_the_wrong_function_does_not_pass(copy_of):
     workspace = copy_of("find-the-definition")
     task = load_task(TASKS / "find-the-definition")
 
-    verdict = task.check(an_answer(
-        "app/rates.py:29, `included`. It returns the free allowance, which is "
-        "subtracted before billing.", workspace))
+    verdict = task.check(an_attempt(
+        workspace, text="WHERE: app/rates.py:29\nBILLABLE: 15000"))
 
     assert not verdict.passed
+    assert "apply_rate" in verdict.reason
+
+
+def test_prose_alone_does_not_pass(copy_of):
+    """Three heuristics over prose were wrong before the task was changed to
+    ask for a path and a number. Both have one correct spelling."""
+    from bench.task import load_task
+
+    workspace = copy_of("find-the-definition")
+    task = load_task(TASKS / "find-the-definition")
+
+    verdict = task.check(an_attempt(
+        workspace, text="It is apply_rate in app/rates.py, past the allowance."))
+
+    assert not verdict.passed
+    assert "WHERE" in verdict.reason
 
 
 HONEST_ANSWERS = [

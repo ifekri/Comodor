@@ -2,6 +2,95 @@
 
 Notable changes to Comodor. Versions follow [semantic versioning](https://semver.org).
 
+## Unreleased
+
+### Fewer tokens, the same answers
+
+The hubs advertising "20 to 40% fewer tokens, no quality loss" do it by
+stripping whitespace and comments out of tool output. Measured on this
+repository, whitespace stripping is worth **0.0% to 0.3%** — clean code has no
+whitespace to strip — and stripping comments from source a model is trying to
+understand is not a lossless transformation, whatever it does to the bill.
+
+So the question was asked with a profiler instead. Where the tokens go, on real
+tasks against a live endpoint:
+
+| | fix task | refactor task |
+|---|---|---|
+| tool schemas | 41% | 43% |
+| tool results | 39% | 28% |
+| system prompt | 15% | 15% |
+
+And then the thing that changes what any of it means. Two requests with an
+identical prefix:
+
+    MiMo   request 1: prompt 9,963  cached 0
+           request 2: prompt 9,963  cached 9,920   (99.6%)
+    B.AI   request 1: prompt 8,637  cached 0
+           request 2: prompt 8,637  cached 8,576   (99.3%)
+
+Automatic prefix caching works on these providers and it works almost
+perfectly, so raw token counts say very little about the bill. What is billed,
+request by request on a nine-step task:
+
+    req      sent  billed in    cached   output
+      1       804      3,672         0       65
+      2       822        119     3,648       50
+      3     1,523        849     3,712       43
+      …
+      9     2,944        369     6,336       81
+
+**The first request is 53% of the billed input of the whole task**, and every
+one after it is nearly free. That is the shape everything below is aimed at.
+
+#### A read that an edit made untrue is dropped
+
+An agent reads a file at step two, edits it at step five, and the copy from
+step two rides along for the rest of the task. The tokens are the smaller half.
+The larger half is that it is no longer true: the model is looking at bytes
+that are not in the file any more, beside the diff that changed them, and has
+to work out which of the two to believe.
+
+Measured on a file the size of `agent/loop.py`, read twice with one edit
+between: **8,346 tokens freed, half the history.** Three such files: 17,802.
+
+It is not compaction. Compaction summarises what is too big to keep, with a
+model call and a loss. This drops what is *known* to be stale, by an exact rule
+over what the tools already recorded, for nothing — and it runs at the moment
+compaction would otherwise happen, so if it frees enough, the summary never
+happens at all. The history ends up smaller **and** more accurate.
+
+It leaves alone: the newest read of a file, a file nothing has written to, a
+read that came after the edit, and anything under 400 tokens. That last one is
+the cache — rewriting a message stops everything after it matching what the
+provider stored, which is worth paying for ten thousand tokens and not for
+forty.
+
+#### Six spaces on every line of every file read
+
+    agent/loop.py    686 lines   8,616 → 8,074   saves 542  (6.3%)
+    tools/fs.py      428 lines   6,688 → 6,224   saves 464  (6.9%)
+    config.py      1,232 lines  15,079 → 14,186  saves 893  (5.9%)
+
+Line numbers were padded to six characters whatever the number was. The tab
+that separates the number from the code is untouched; what went was alignment
+for a human eye that is not reading this.
+
+#### What was measured and not done
+
+**Trimming the tool schemas.** 2,187 tokens, the largest fixed item. Every
+description in them is doing work — `"Seconds before it is killed (max 900)."`
+is not padding — and the realistic saving was about 15% at the cost of changing
+how tools get called. Not worth guessing about.
+
+#### And the number that matters
+
+Against the benchmark, three attempts per task, before and after:
+
+**31/39 → 33/39.** No task scored lower. One went from 1/3 to 3/3.
+
+Fewer tokens, and not one answer worse.
+
 ## 0.21.0 — 2026-08-30
 
 ### A number, at last
