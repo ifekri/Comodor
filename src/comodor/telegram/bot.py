@@ -34,7 +34,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..channels.busy import start_or_steer
+from ..channels.busy import interrupt_note, start_or_steer
 from ..channels.markdown import to_telegram
 from ..channels.settings import Settings, keep_current
 from ..config import Config
@@ -534,8 +534,8 @@ class Service:
                     self._draw(talk, streamed, tools, final=True)
                     return
                 elif kind == "cancelled":
-                    self._draw(talk, streamed + "\n\n<i>stopped</i>", tools,
-                               final=True)
+                    self._draw(talk, streamed + "\n\n<i>stopped</i>"
+                               + interrupt_note(event), tools, final=True)
                     return
 
             self._draw(talk, streamed, tools)

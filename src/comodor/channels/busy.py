@@ -34,6 +34,20 @@ SETTLE_SECONDS = 3.0
 POLL_SECONDS = 0.05
 
 
+def interrupt_note(event: dict | None) -> str:
+    """The line a stopped turn carries when it stopped for a new message.
+
+    The loop already emits a `reason` on the cancelled event; this turns it
+    into the one sentence the spec asks for. A plain stop gets nothing —
+    the human pressed it and knows.
+    """
+    reason = str((event or {}).get("reason") or "")
+    if reason == "interrupt":
+        return (" — stopped because a new message arrived; completed file "
+                "work is kept as checkpoints")
+    return ""
+
+
 def normalise(value: object) -> str:
     """The configured busy mode, coerced to one of the two names.
 

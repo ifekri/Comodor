@@ -163,7 +163,10 @@ class AgentLoop:
         except Cancelled:
             result.stopped = "cancelled"
             result.cancel_reason = self._cancel_reason
-            self.bus.emit(Kind.CANCELLED)
+            # The reason rides the event, so an interface can say why the
+            # work stopped — "you pressed stop" and "a newer message took
+            # over" are different sentences.
+            self.bus.emit(Kind.CANCELLED, reason=self._cancel_reason)
         except ProviderError as exc:
             result.stopped = "error"
             result.error = str(exc)
