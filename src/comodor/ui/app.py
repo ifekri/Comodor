@@ -177,6 +177,7 @@ class App:
     def run(self) -> int:
         """Draw the interface until the user quits."""
         self.running = True
+        scheduler = self._start_scheduler()
         # The welcome box in the Live screen replaces the banner for
         # interactive mode. The banner still prints for headless runs
         # (comodor run …) via _greet_on_stderr in cli.py.
@@ -214,7 +215,39 @@ class App:
                     time.sleep(IDLE_SLEEP)
 
         self._shutdown()
+        if scheduler is not None:
+            scheduler.stop()
         return 0
+
+    def _cron_store(self):
+        """The job store for the cronjob tool, or None where cron is off.
+
+        None is what keeps the tool out of the registry, which matters more
+        than saving an import: a tool the model can see but whose scheduler
+        will never fire it is a promise the program does not keep.
+        """
+        if not self.config.cron.enabled:
+            return None
+        from ..cron.jobs import JobStore
+
+        return JobStore(self.config.paths.user / "cron")
+
+    def _start_scheduler(self):
+        """Fire scheduled jobs while the interface is open.
+
+        Comodor runs where the user runs it — no separate daemon to install —
+        so the tick loop lives inside the process that is already awake. Jobs
+        recorded while nobody is here simply wait for the next open session;
+        the misfire grace window covers a laptop that was asleep, not a tool
+        that was never started.
+        """
+        if not self.config.cron.enabled:
+            return None
+        from ..cron.scheduler import Scheduler
+
+        scheduler = Scheduler(self.config, store=self._cron_store())
+        scheduler.start()
+        return scheduler
 
     def _load_skills(self) -> int:
         """Discover skills, creating the folder with examples on a first run.
@@ -234,7 +267,8 @@ class App:
                                            if skill.enabled)
         self.tools = ToolRegistry(skills=self.skills, history=self.history,
                                   config=self.config,
-                                  session_id=self.session.id, mcp=self.mcp)
+                                  session_id=self.session.id, mcp=self.mcp,
+                                  cron_store=self._cron_store())
         return len(self.skills)
 
     def _warn_if_the_budget_is_a_decoration(self) -> None:

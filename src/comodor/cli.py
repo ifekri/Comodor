@@ -102,6 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="do not ask; for scripts")
 
     from .acp.commands import register as register_acp
+    from .cron.commands import register as register_cron
     from .local.commands import register as register_local
     from .mcp.commands import register as register_mcp
     from .skills.commands import register as register_skills
@@ -112,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     register_mcp(sub)
     register_local(sub)
+    register_cron(sub)
     register_telegram(sub)
     register_whatsapp(sub)
     register_slack(sub)
@@ -226,8 +228,14 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     permissions.on_denied = memory.on_denied
     skills = load_skills(config)
     mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
+    cron_store = None
+    if config.cron.enabled:
+        from .cron.jobs import JobStore
+
+        cron_store = JobStore(config.paths.user / "cron")
     tools = ToolRegistry(skills=skills, mcp=mcp, config=config,
-                         spawn=spawner(config, gateway, bus, skills=skills, mcp=mcp))
+                         spawn=spawner(config, gateway, bus, skills=skills, mcp=mcp),
+                         cron_store=cron_store)
     agent = AgentLoop(config, gateway, tools, bus,
                       permissions, Conversation(), memory, skills=skills)
 
@@ -861,6 +869,10 @@ def main(argv: list[str] | None = None) -> int:
         from .local.commands import run as run_local
 
         return run_local(config, args)
+    if args.command == "cron":
+        from .cron.commands import run as run_cron
+
+        return run_cron(config, args)
     if args.command == "telegram":
         from .telegram.commands import run as run_telegram
 

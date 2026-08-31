@@ -17,6 +17,7 @@ from . import overflow
 from .ask import Ask
 from .base import Tool, ToolContext, ToolResult
 from .browser import Browser
+from .cronjob import CronJob
 from .delegate import Delegate
 from .fs import EditFile, ListDir, ReadFile, WriteFile
 from .history import SearchHistory
@@ -62,7 +63,8 @@ class ToolRegistry:
     def __init__(self, tools: Iterable[Tool] | None = None,
                  skills: Any = None, history: Any = None,
                  session_id: str = "", mcp: Any = None,
-                 spawn: Any = None, config: Any = None) -> None:
+                 spawn: Any = None, config: Any = None,
+                 cron_store: Any = None) -> None:
         self._tools: dict[str, Tool] = {}
         if tools is not None:
             for tool in tools:
@@ -86,6 +88,11 @@ class ToolRegistry:
         # instance — must not advertise a tool that cannot run.
         if spawn is not None:
             self.add(Delegate(spawn))
+        # The scheduler's own runs build their registry through cron/runner,
+        # which simply does not pass a cron store — and that absence is the
+        # recursion guard: a scheduled run cannot schedule another.
+        if cron_store is not None:
+            self.add(CronJob(cron_store))
         # The desktop, when this machine can be driven and the user has said
         # so. Both conditions matter: a tool that answers "not on this
         # platform" every time is the wasted call this rule exists to prevent,

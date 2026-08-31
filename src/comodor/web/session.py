@@ -73,7 +73,8 @@ class Session:
             config, self.gateway,
             ToolRegistry(skills=self.skills, mcp=self.mcp, config=config,
                          spawn=spawner(config, self.gateway, self.bus,
-                                       skills=self.skills, mcp=self.mcp)),
+                                       skills=self.skills, mcp=self.mcp),
+                         cron_store=self._cron_store(config)),
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )
@@ -121,6 +122,18 @@ class Session:
         self.bus.subscribe(self._record)
 
     # -- taking events off the bus ----------------------------------------- #
+
+    def _cron_store(self, config: Config):
+        """The job store for the cronjob tool, or None where cron is off.
+
+        Same rule as the terminal: a tool whose scheduler will never fire it
+        is a promise the program does not keep, so it is simply not offered.
+        """
+        if not config.cron.enabled:
+            return None
+        from ..cron.jobs import JobStore
+
+        return JobStore(config.paths.user / "cron")
 
     def _record(self, event: Event) -> None:
         """Called on whatever thread emitted. Cheap, and never raises."""
@@ -623,7 +636,8 @@ class Session:
             self.config, self.gateway,
             ToolRegistry(skills=self.skills, mcp=self.mcp, config=self.config,
                          spawn=spawner(self.config, self.gateway, self.bus,
-                                       skills=self.skills, mcp=self.mcp)),
+                                       skills=self.skills, mcp=self.mcp),
+                         cron_store=self._cron_store(self.config)),
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )

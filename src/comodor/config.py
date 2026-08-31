@@ -534,6 +534,39 @@ class MCPConfig:
 
 
 @dataclass
+class CronConfig:
+    """Scheduled agent runs.
+
+    Everything here is conservative by default: the scheduler is off until it
+    is asked for, and a job that keeps failing stops being trusted after a few
+    tries rather than failing forever in the background.
+    """
+
+    enabled: bool = False
+    #: Blank = whatever model the session that adds the job was using. A
+    #: pinned model that is unavailable fails the run — never a silent
+    #: fallback to a different one, because a task run on a model the user
+    #: did not choose is a task run at an unknown cost.
+    model: str = ""
+    #: Minutes after the fire time a missed job may still run. A laptop waking
+    #: from sleep fires everything it slept through once, late — not never.
+    misfire_grace_minutes: int = 10
+    #: Consecutive failures before a job is auto-paused.
+    failure_streak: int = 3
+    #: How many agent turns the scheduler may run at once.
+    max_concurrency: int = 2
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "model": self.model,
+            "misfire_grace_minutes": self.misfire_grace_minutes,
+            "failure_streak": self.failure_streak,
+            "max_concurrency": self.max_concurrency,
+        }
+
+
+@dataclass
 class SafetyConfig:
     auto_approve_safe: bool = True       # read-only tools never prompt
     auto_approve_writes: bool = False
@@ -571,7 +604,7 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: for its whole existence: `headless: false` in a config file did nothing and
 #: said nothing.
 SECTIONS = ("ui", "agent", "gateway", "learning", "skills", "safety",
-            "browser", "computer", "telegram", "whatsapp", "slack")
+            "browser", "computer", "telegram", "whatsapp", "slack", "cron")
 
 
 @dataclass
@@ -589,6 +622,7 @@ class Config:
     whatsapp: WhatsAppConfig = field(default_factory=WhatsAppConfig)
     slack: SlackConfig = field(default_factory=SlackConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
+    cron: CronConfig = field(default_factory=CronConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     paths: Paths = field(default_factory=resolve_paths)

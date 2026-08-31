@@ -109,7 +109,8 @@ class AcpSession:
             config, self.gateway,
             ToolRegistry(skills=self.skills, mcp=self.mcp, config=config,
                          spawn=spawner(config, self.gateway, self.bus,
-                                       skills=self.skills, mcp=self.mcp)),
+                                       skills=self.skills, mcp=self.mcp),
+                         cron_store=self._cron_store(config)),
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )
@@ -131,8 +132,19 @@ class AcpSession:
 
     # -- talking to the editor ---------------------------------------------- #
 
-    def update(self, body: dict[str, Any]) -> None:
-        self.agent.rpc.notify("session/update",
+    def _cron_store(self, config: Config):
+        """The job store for the cronjob tool, or None where cron is off.
+
+        A tool whose scheduler will never fire it is a promise the program
+        does not keep, so where cron is disabled the tool is simply absent.
+        """
+        if not config.cron.enabled:
+            return None
+        from ..cron.jobs import JobStore
+
+        return JobStore(config.paths.user / "cron")
+
+    def update(self, body: dict[str, Any]) -> None:        self.agent.rpc.notify("session/update",
                               {"sessionId": self.id, "update": body})
 
     def _on_event(self, event: Event) -> None:
