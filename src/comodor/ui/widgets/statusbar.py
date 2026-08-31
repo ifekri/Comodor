@@ -57,22 +57,11 @@ class StatusModel:
             return 0.0
         return min(1.0, self.context_used / self.context_limit)
 
-    @property
-    def status_word(self) -> str:
-        if self.busy:
-            return "Working"
-        return "Connected" if self.connected else "Offline"
-
-
 def _pair(label: str, value: str, theme: Theme, value_style: str = "value") -> Text:
     text = Text()
     text.append(label, style=theme.style("label"))
     text.append(value, style=theme.style(value_style))
     return text
-
-
-def _state_style(good: bool) -> str:
-    return "good" if good else "bad"
 
 
 def gauge(fill: float, width: int, theme: Theme) -> Text:

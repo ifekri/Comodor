@@ -97,10 +97,6 @@ class AsyncWriter:
         """Queue a statement. Returns as soon as it is queued — never blocks."""
         self.queue.put(Write(sql=sql, params=params, callback=callback))
 
-    def submit_many(self, statements: list[tuple[str, tuple[Any, ...]]]) -> None:
-        for sql, params in statements:
-            self.queue.put(Write(sql=sql, params=params))
-
     @property
     def pending(self) -> int:
         return self.queue.qsize()

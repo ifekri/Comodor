@@ -261,20 +261,6 @@ class Runner:
                 self._server.stop()
                 self._server = None
 
-    def stop_if_idle(self, after: float = IDLE_FOR) -> bool:
-        """Give the memory back when nobody has asked anything for a while."""
-        with self._lock:
-            server = self._server
-            if server is None or not server.alive:
-                self._server = None
-                return False
-            if server.idle_for < after:
-                return False
-            server.stop()
-            self._server = None
-            return True
-
-
 def _wait_until_ready(server: Server, timeout: float = LOAD_TIMEOUT) -> None:
     """Block until the server answers, or explain why it never will."""
     deadline = time.monotonic() + timeout

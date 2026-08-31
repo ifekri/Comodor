@@ -201,12 +201,6 @@ class Completion:
     model: str = ""
     provider: str = ""
 
-    def to_message(self) -> Message:
-        return Message(role=Role.ASSISTANT, content=self.text,
-                       tool_calls=list(self.tool_calls),
-                       meta={"reasoning": self.reasoning} if self.reasoning else {})
-
-
 # --------------------------------------------------------------------------- #
 # errors
 # --------------------------------------------------------------------------- #

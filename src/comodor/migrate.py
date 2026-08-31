@@ -33,7 +33,6 @@ Three rules throughout, because this reads other programs' files:
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -486,11 +485,3 @@ def _too_big(path: Path) -> bool:
         return True
 
 
-def env_hint(reading: Found) -> dict[str, str]:
-    """Keys found that are not already in this process's environment.
-
-    Used by the wizard to say *which* keys it can bring, without printing any
-    of them: a key on screen is a key in a scrollback buffer.
-    """
-    return {name: value for name, value in reading.keys.items()
-            if not os.environ.get(name)}

@@ -56,11 +56,6 @@ class Outcome:
     #: Set when the command could not be run at all, as opposed to failing.
     unusable: str = ""
 
-    @property
-    def worth_reporting(self) -> bool:
-        return self.ran and not self.passed
-
-
 def run(command: str, cwd: Path, patience: float = PATIENCE) -> Outcome:
     """Run the project's check and say what happened. Never raises."""
     if not command.strip():

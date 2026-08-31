@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,12 +36,6 @@ PLAYBOOK_HEADER = """\
 Learned playbook — things earlier sessions established. Treat these as strong \
 priors, not orders: if what you observe now contradicts one, trust your \
 observation and say so."""
-
-
-@dataclass
-class RecallResult:
-    lessons: list[Lesson]
-    skills: list[Skill]
 
 
 class LearningEngine:
@@ -250,12 +243,6 @@ class LearningEngine:
             merged.append((lesson, relevance * EXPANSION_WEIGHT))
             seen.add(lesson.id)
         return merged
-
-    def recall_skills(self, query: str, limit: int = 2) -> list[Skill]:
-        if not self.config.learning.enabled:
-            return []
-        return [skill for skill, _ in self.store.search_skills(query, limit=limit)
-                if skill.success_rate >= 0.4]
 
     def render_playbook(self, lessons: list[Lesson], skills: list[Skill] | None = None,
                         max_tokens: int | None = None,

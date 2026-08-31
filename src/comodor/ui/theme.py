@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from rich.box import ASCII, HEAVY, ROUNDED, SQUARE, Box
+from rich.box import ASCII, HEAVY, SQUARE, Box
 from rich.style import Style
 from rich.theme import Theme as RichTheme
 
@@ -323,10 +323,6 @@ class Theme:
     @property
     def heavy_box(self) -> Box:
         return ASCII_BOX if self.ascii else HEAVY
-
-    @property
-    def round_box(self) -> Box:
-        return ASCII_BOX if self.ascii else ROUNDED
 
     def colour(self, token: str) -> str:
         """A palette colour by name, or ``default`` in no-colour mode."""

@@ -59,12 +59,6 @@ def framed(body: RenderableType, rect: Rect, theme: Theme, title: str = "",
     )
 
 
-def plain_box(body: RenderableType, rect: Rect, theme: Theme,
-              focused: bool = False) -> Panel:
-    """An untitled frame — the status block and the buttons use this."""
-    return framed(body, rect, theme, title="", focused=focused)
-
-
 def centred(text: str, rect: Rect, theme: Theme, style: str = "dim") -> RenderableType:
     """A message in the middle of an otherwise empty panel."""
     return Align.center(

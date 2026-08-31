@@ -114,9 +114,6 @@ class TokenCounter:
         raw = estimate_messages(messages) + estimate_tools(tools or [])
         return self.calibration.apply(raw)
 
-    def count_text(self, text: str) -> int:
-        return self.calibration.apply(estimate_text(text))
-
     def observe_usage(self, messages: list[Message], tools: list[ToolSpec] | None,
                       actual_input_tokens: int) -> None:
         raw = estimate_messages(messages) + estimate_tools(tools or [])

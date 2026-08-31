@@ -102,11 +102,6 @@ class Health:
     def available(self) -> bool:
         return time.monotonic() >= self.tripped_until
 
-    @property
-    def error_rate(self) -> float:
-        return self.failures / self.calls if self.calls else 0.0
-
-
 @dataclass
 class Route:
     """Which backend served a request, and how it went."""
@@ -149,10 +144,6 @@ class Gateway:
     def health(self, name: str) -> Health:
         with self._lock:
             return self._health.setdefault(name, Health())
-
-    def health_report(self) -> dict[str, Health]:
-        with self._lock:
-            return dict(self._health)
 
     # -- routing ---------------------------------------------------------- #
 
@@ -275,9 +266,3 @@ class Gateway:
             return "Disable"
         return self.config.gateway.policy.title()
 
-    def refresh_catalogue(self) -> int:
-        """Learn real prices from OpenRouter when we have access to it."""
-        entry = self.config.providers.get("openrouter")
-        if entry is None or not entry.ready:
-            return 0
-        return registry.refresh_from_openrouter(entry.base_url, entry.api_key)

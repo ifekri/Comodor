@@ -101,11 +101,6 @@ class MCPManager:
                 state.error = f"{type(error).__name__}: {error}"
             return state
 
-    def start_all(self) -> dict[str, ServerState]:
-        for name in self.enabled_names():
-            self.start(name)
-        return self.states
-
     def close(self) -> None:
         with self._lock:
             for state in self.states.values():

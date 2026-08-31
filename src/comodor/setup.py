@@ -1219,13 +1219,6 @@ class SetupWizard:
         self.console.print()
         return ok
 
-    def start_telegram(self, config: Config) -> bool:
-        """Kept as a name of its own, because the tests and the closing
-        question both reached for it before there was a second channel."""
-        from .channels import TELEGRAM
-
-        return self.start_phone(config, TELEGRAM)
-
     def finish(self, config: Config, closing: bool = True) -> None:
         # `_terminal`, not `_keys`: over a connection where raw key reading
         # does not work the wizard still clears, and this used not to — so the

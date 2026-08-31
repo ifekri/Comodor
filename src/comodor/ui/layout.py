@@ -100,10 +100,6 @@ class Geometry:
     margin: int = 2
 
     @property
-    def show_sidebar(self) -> bool:
-        return self.sidebar is not None
-
-    @property
     def show_buttons(self) -> bool:
         """Kept for callers that ask whether the pointer has anything to hit."""
         return bool(self.hints)
