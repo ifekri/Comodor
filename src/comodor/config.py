@@ -647,6 +647,15 @@ class SafetyConfig:
     #: Directories the user has confirmed as a workspace. Exact paths, never
     #: prefixes: approving ~/work/api must not quietly approve ~/work.
     trusted_folders: list[str] = field(default_factory=list)
+    #: Whether the model's URL tools may reach this machine's own loopback.
+    #: Comodor runs a web server of its own, and a user whose dev server is
+    #: on localhost can open this per-project; the default stays closed
+    #: because a cloud VM's loopback holds internal services the model has no
+    #: business summarising.
+    ssrf_allow_loopback: bool = False
+    #: URLs the tools may always open, guard aside. Prefix matching: the user
+    #: wrote the rule, the rule says what it trusts.
+    ssrf_allowlist: list[str] = field(default_factory=list)
 
 
 # Patterns that are never worth running from an agent, however it is prompted.

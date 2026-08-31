@@ -101,6 +101,11 @@ class Browse(Tool):
             url = _absolute(str(args.get("url") or ""))
             if not url:
                 return ToolResult.failure("open needs a url")
+            from .web import check_url
+
+            refused = check_url(ctx, url)
+            if refused:
+                return ToolResult.failure(refused)
             page = self._open(ctx)
             page.goto(url)
             return self._describe(page)

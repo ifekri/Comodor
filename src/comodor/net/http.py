@@ -1488,6 +1488,7 @@ class Session:
         max_redirects: int = 20,
         pool: Optional[ConnectionPool] = None,
         hooks: Optional[Mapping[str, list[HookType]]] = None,
+        url_guard: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.base_url = base_url
         self.headers = _merge_headers(headers)
@@ -1504,6 +1505,12 @@ class Session:
         self.max_redirects = max_redirects
         self.hooks: dict[str, list[HookType]] = {
             "response": list((hooks or {}).get("response", []))}
+        #: Called with the full URL before every connection — including every
+        #: redirect hop, because each hop is re-prepared and re-sent through
+        #: the same path. ``None`` means no guard: the session trusts whoever
+        #: built it. Comodor's own traffic (providers, channels) is unguarded;
+        #: sessions built for the model's tools carry the guard.
+        self.url_guard = url_guard
         self._pool = pool if pool is not None else ConnectionPool()
         self._owns_pool = pool is None
         self._cookie_lock = threading.Lock()
@@ -1631,6 +1638,11 @@ class Session:
         current = prepared
 
         while True:
+            if self.url_guard is not None:
+                # Per hop: each redirect re-enters this loop with the new
+                # URL, so a hop to an internal address is refused before its
+                # connection opens.
+                self.url_guard(current.url)
             response = self._send_with_retry(
                 current, jar=jar, timeout=timeout, stream=stream,
                 verify=verify, cert=cert, proxies=proxies, retry=retry,
@@ -1985,7 +1997,7 @@ def request(method: str, url: str, **kwargs: Any) -> Response:
     """
     session_kwargs = {
         key: kwargs.pop(key) for key in
-        ("trust_env", "base_url") if key in kwargs
+        ("trust_env", "base_url", "url_guard") if key in kwargs
     }
     with Session(pool=_GLOBAL_POOL, **session_kwargs) as session:
         return session.request(method, url, **kwargs)

@@ -227,8 +227,13 @@ def _url(argument: str) -> str:
     if not argument.startswith(("http://", "https://")):
         raise Refusal(f"@url:{argument} — only http and https are supported")
     from .net import http
+    from .safety.ssrf import UnsafeURL, assert_url_safe
     from .tools.web import USER_AGENT, html_to_text
 
+    try:
+        assert_url_safe(argument)
+    except UnsafeURL as error:
+        raise Refusal(f"@url:{argument} — {error}") from None
     try:
         response = http.get(argument, headers={"User-Agent": USER_AGENT},
                             timeout=(10.0, 30.0))
