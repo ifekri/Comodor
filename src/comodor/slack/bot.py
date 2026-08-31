@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ..channels.markdown import to_slack
+from ..channels.settings import Settings, keep_current
 from ..config import Config
 from . import blocks as ui
 from .api import EDIT_EVERY, RateLimited, Slack, SlackError, escape, split
@@ -117,6 +118,12 @@ class Service:
     def __init__(self, config: Config, slack: Slack | None = None,
                  announce: Callable[[str], None] | None = None) -> None:
         self.config = config
+        #: The configuration file, watched. A bot is a detached process: every
+        #: setting changed from the terminal or the web panel while it runs was
+        #: invisible to it, and the command that changed the setting said it
+        #: had worked. `allow_writes` is the one people hit — Act went on being
+        #: refused with a message telling them to run what they had just run.
+        self.settings = Settings(config)
         settings = config.slack
         self.slack = slack or Slack(settings.bot_token, settings.app_token)
         self.announce = announce or (lambda line: None)
@@ -189,6 +196,10 @@ class Service:
     # -- what arrives -------------------------------------------------------- #
 
     def _on_envelope(self, envelope: Envelope) -> None:
+        # Before anything is decided: the answer to "what may this turn do"
+        # has to be the answer as of now, not as of whenever the bot started.
+        keep_current(self)
+
         if envelope.kind == "events_api":
             self._on_event(envelope.event)
         elif envelope.kind == "interactive":
