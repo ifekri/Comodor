@@ -4,6 +4,56 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 ## Unreleased
 
+### The user's own rules, put back where they apply — and what it did not do
+
+Every `careful` failure the benchmark finds has one shape. The user says "do
+not invent the coordinates", the model reads it, works for twenty steps, and by
+the time it writes a file that sentence is thousands of tokens up the context
+behind everything it has read since.
+
+So the prohibitions come out of the request by pattern, once per turn, and go
+onto the first two tool results — before anything has been written, while there
+is still a decision to make.
+
+```
+1  x = 1
+...
+
+You were asked: Do not make any up, and do not write a stand-in table.
+```
+
+It restates; it does not judge. Nothing here understands a rule well enough to
+decide whether a write breaks it, and a wrong refusal costs far more than a
+forgotten instruction.
+
+**It did not work.** Measured, twice:
+
+| | before | after |
+|---|---|---|
+| `careful-cannot-be-done` | 0/3 | **0/3** |
+| `careful` overall | 3/9 | 4/9 |
+
+And the +1 is not this. It landed on `careful-unknowable`, which states no
+prohibition at all — the extractor correctly produces nothing for it, so the
+feature could not have caused that pass. On the one task it does target, the
+reminder is demonstrably in front of the model, two results before the write,
+and the model writes the file anyway. That task has now failed 0/3 in four
+separate runs.
+
+The first version was worse and worth recording: it hung the reminder off the
+*result of a write*, and on this task the first write of the turn **is** the
+violation — so it arrived on the result of the thing it meant to prevent. Too
+late by construction. Re-running the benchmark would never have shown that;
+reading the tool trace did, which is what the saved transcripts are for.
+
+It is kept because it costs about thirty tokens on turns that state a rule and
+nothing at all on turns that do not, and because a null at three attempts is
+not proof of no effect. It is **not** claimed as an improvement, and the number
+above is the whole of the evidence either way.
+
+What this does point at: on this model, at this sample size, the gap is not
+that the instruction is out of sight. It was in sight.
+
 ### Fewer tokens, the same answers
 
 The hubs advertising "20 to 40% fewer tokens, no quality loss" do it by
