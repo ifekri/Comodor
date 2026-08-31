@@ -1,8 +1,8 @@
 # Spec: Insights — آمار مصرف و هزینه
 
-> **EN summary:** Comodor tracks cost per session (`/cost`) but has no cross-session view: which projects ate the budget, which model is the workhorse, is the learning brain actually improving (fewer corrections over time — `/progress` answers this but only within one session's episodes). Hermes ships `/insights` and `agent/insights.py` for token/cost/activity analytics plus per-model usage tables. This spec adds `comodor insights` — a pure-SQL aggregation over existing JSONL transcripts and brain.db meta, rendered in TUI and web. Zero new data collection; the data is already on disk. Priority **P1** (cheap, high perceived value), effort **S**.
+> **EN summary:** Comodor tracks cost per session (`/cost`) but has no cross-session view: which projects ate the budget, which model is the workhorse, is the learning brain actually improving (fewer corrections over time — `/progress` answers this but only within one session's episodes). ابزار مرجع ships `/insights` and `agent/insights.py` for token/cost/activity analytics plus per-model usage tables. This spec adds `comodor insights` — a pure-SQL aggregation over existing JSONL transcripts and brain.db meta, rendered in TUI and web. Zero new data collection; the data is already on disk. Priority **P1** (cheap, high perceived value), effort **S**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 مرجع: `agent/insights.py`، دستور `/insights [--days N]`، `agent/usage_pricing.py`، `agent/account_usage.py`.
 

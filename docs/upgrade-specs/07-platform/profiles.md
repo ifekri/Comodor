@@ -1,10 +1,10 @@
 # Spec: پروفایل‌های همزمان
 
-> **EN summary:** Comodor has a single `~/.comodor` home: one brain, one config, one skills folder, one set of channel daemons. Hermes's `hermes -p <name>` gives each profile its own home, config, memory, sessions, and gateway PID — profiles run concurrently (e.g., a "work" profile and a "personal" profile with separate Telegram bots and separate learning). This spec adds profiles by parameterizing `paths.py` with `COMODOR_PROFILE` / `--profile`, defaulting to `default` with zero behavior change for existing users. Priority **P2**, effort **S–M** (the architecture is already single-root; this is mostly threading a root variable).
+> **EN summary:** Comodor has a single `~/.comodor` home: one brain, one config, one skills folder, one set of channel daemons. ابزار مرجع's `ابزار مرجع -p <name>` gives each profile its own home, config, memory, sessions, and gateway PID — profiles run concurrently (e.g., a "work" profile and a "personal" profile with separate Telegram bots and separate learning). This spec adds profiles by parameterizing `paths.py` with `COMODOR_PROFILE` / `--profile`, defaulting to `default` with zero behavior change for existing users. Priority **P2**, effort **S–M** (the architecture is already single-root; this is mostly threading a root variable).
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
-- `hermes -p name` → HERMES_HOME جدا، config، memory، sessions، gateway PID؛ پروفایل‌ها هم‌زمان می‌دوند؛ برای سرویس‌های multi-install هم نام سرویس پسوند می‌گیرد.
+- `ابزار مرجع -p name` → COMODOR_HOME جدا، config، memory، sessions، gateway PID؛ پروفایل‌ها هم‌زمان می‌دوند؛ برای سرویس‌های multi-install هم نام سرویس پسوند می‌گیرد.
 
 ## جای آن در Comodor
 

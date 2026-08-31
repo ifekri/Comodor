@@ -1,8 +1,8 @@
 # Spec: computer use چند-پلتفرمی (macOS + Linux)
 
-> **EN summary:** Comodor's `computer` tool is Windows-only (`desktop/win32.py` via ctypes) — on macOS/Linux the tool simply isn't offered, which a Windows user never notices but a Mac user absolutely does. Hermes ships desktop control via `cua-driver` (background, no focus stealing). This spec adds macOS ( Quartz via ctypes — like the existing win32.py approach, no dependencies) and Linux X11 (Xlib/XTest via ctypes; Wayland explicitly unsupported with an honest message). The overlay/guard/permission architecture ports directly since it is already backend-abstracted (`desktop/screen.py:backend()`). Priority **P2** (large user segment, but heavy testing burden), effort **L**.
+> **EN summary:** Comodor's `computer` tool is Windows-only (`desktop/win32.py` via ctypes) — on macOS/Linux the tool simply isn't offered, which a Windows user never notices but a Mac user absolutely does. ابزار مرجع ships desktop control via `cua-driver` (background, no focus stealing). This spec adds macOS ( Quartz via ctypes — like the existing win32.py approach, no dependencies) and Linux X11 (Xlib/XTest via ctypes; Wayland explicitly unsupported with an honest message). The overlay/guard/permission architecture ports directly since it is already backend-abstracted (`desktop/screen.py:backend()`). Priority **P2** (large user segment, but heavy testing burden), effort **L**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 - toolset `computer_use` با `cua-driver` — کنترل دسکتاپ پس‌زمینه‌ای (بدون دزدیدن focus)؛ گیت runtime؛ در TUI فقط وقتی backend موجود.
 
@@ -32,7 +32,7 @@ guard/overlay: guard همان (permission هر بار چک)؛ overlay برای m
 سقف‌ها: همان screenshot_tokens=1600 و keep_screenshots=2
 ```
 
-- **پرچم تبلیغاتی:** «comodor computer on all three OSes with zero dependencies» — هیچ رقیبی این ادعا با stdlib ندارد؛ hermes به cua-driver (وابستگی) تکیه دارد.
+- **پرچم تبلیغاتی:** «comodor computer on all three OSes with zero dependencies» — هیچ رقیبی این ادعا با stdlib ندارد؛ ابزار مرجع به cua-driver (وابستگی) تکیه دارد.
 - اولویت‌بندی داخل spec: macOS اول (پایگاه کاربر بزرگ‌تر بین توسعه‌دهندگان)؛ X11 دوم؛ Wayland هرگز با پیام شفاف.
 
 ## نقشه‌ی پیاده‌سازی

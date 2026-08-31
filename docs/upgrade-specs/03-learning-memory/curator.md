@@ -1,13 +1,13 @@
 # Spec: Curator — نگهداری دوره‌ای مغز و مهارت‌ها
 
-> **EN summary:** Hermes's curator is an idle-triggered maintenance pass: deterministic auto-transitions (stale at 30d, archived at 90d, pinned and cron-referenced skills exempt), optional LLM consolidation (merge narrow skills into broader umbrella skills), content-addressed backups with rollback, and per-mutation audit. As Comodor accumulates lessons, rules, facts, and skills across projects, the same hygiene problem arrives. This spec adds a `comodor curator` pass over `brain.db` + `skills/` reusing the decay/score machinery that already exists — Comodor's half-life decay makes parts of this *easier* than Hermes. Priority **P1**, effort **M**.
+> **EN summary:** ابزار مرجع's curator is an idle-triggered maintenance pass: deterministic auto-transitions (stale at 30d, archived at 90d, pinned and cron-referenced skills exempt), optional LLM consolidation (merge narrow skills into broader umbrella skills), content-addressed backups with rollback, and per-mutation audit. As Comodor accumulates lessons, rules, facts, and skills across projects, the same hygiene problem arrives. This spec adds a `comodor curator` pass over `brain.db` + `skills/` reusing the decay/score machinery that already exists — Comodor's half-life decay makes parts of this *easier* than ابزار مرجع. Priority **P1**, effort **M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
-مرجع: `agent/curator.py`، CLI `hermes curator`.
+مرجع: `agent/curator.py`، CLI `ابزار مرجع curator`.
 
 - تریگر: بیکاری ≥۲ ساعت؛ فاصله‌ی پیش‌فرض ۱۶۸ ساعت؛ اجرا با مدل کمکی fork‌شده.
-- فاز ۱ قطعی: stale در ۳۰ روز، archived در ۹۰ روز؛ pinned ها و مهارت‌های referشده توسط cron معاف؛ مهارت‌های never-used با grace؛ آرشیو = «ماکسیمم تخریب» به `~/.hermes/skills/.archive/`.
+- فاز ۱ قطعی: stale در ۳۰ روز، archived در ۹۰ روز؛ pinned ها و مهارت‌های referشده توسط cron معاف؛ مهارت‌های never-used با grace؛ آرشیو = «ماکسیمم تخریب» به `~/.ابزار مرجع/skills/.archive/`.
 - فاز ۲ (opt-in، پیش‌فرض خاموش — توکن می‌خورد): consolidation با LLM — چترسازی، ادغام مهارت‌های narrow در broad با references/؛ rewrite ارجاع‌های cron.
 - state در `.curator_state` + گزارش `REPORT.md`؛ `backup|rollback --list|--id|pause/resume|pin/unpin|prune_builtins`.
 - **learning graph** هم از همین داده‌ها ساخته می‌شود (spec جدا: learning-graph.md).

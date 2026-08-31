@@ -1,10 +1,10 @@
-# 📐 مستندات توسعه — شکاف قابلیت‌های Comodor نسبت به Hermes-Agent
+# 📐 مستندات توسعه — شکاف قابلیت‌های Comodor نسبت به ابزار مرجع-Agent
 
-> **EN:** Implementation specifications for features found in NousResearch/hermes-agent but missing from Comodor's core. Each spec is bilingual: an English summary at the top, the detailed body in Persian. Written as blueprints for building a stronger, more competitive Comodor — additive designs that preserve Comodor's own differentiators (evidence-backed learning brain, prefix-cache-stable prompts, single-dependency philosophy).
+> **EN:** Implementation specifications for features found in ابزار مرجع but missing from Comodor's core. Each spec is bilingual: an English summary at the top, the detailed body in Persian. Written as blueprints for building a stronger, more competitive Comodor — additive designs that preserve Comodor's own differentiators (evidence-backed learning brain, prefix-cache-stable prompts, single-dependency philosophy).
 
 این پوشه حاصل بررسی کامل هسته‌ی دو پروژه است:
 
-| | Comodor | hermes-agent |
+| | Comodor | ابزار مرجع |
 |---|---|---|
 | زبان / وابستگی | Python، فقط `rich` | Python + Node |
 | حلقه‌ی ایجنتی | ✅ با بودجه‌ی گام/زمان/هزینه | ✅ با ۳ مود API |
@@ -27,9 +27,9 @@
 
 ## ⚠️ آنچه Comodor برتری دارد — موقع منتقل‌کردن حذفش نکنید
 
-**EN:** These Comodor strengths must survive every feature ported from Hermes. Do not "improve" them away:
+**EN:** These Comodor strengths must survive every feature ported from other agent tools. Do not "improve" them away:
 
-1. **مغز یادگیری با شواهد عددی** (`learning/rules.py`) — قاعده‌ها شمارش و شاهد دارند («۳۱ از ۳۴ رشته با کوتیشن تکی»)، با نیم‌عمر ۴۵ روز decay می‌شوند. حافظه‌ی متنی Hermes جایگزین این نمی‌شود؛ مکملش باشد.
+1. **مغز یادگیری با شواهد عددی** (`learning/rules.py`) — قاعده‌ها شمارش و شاهد دارند («۳۱ از ۳۴ رشته با کوتیشن تکی»)، با نیم‌عمر ۴۵ روز decay می‌شوند. حافظه‌ی متنی ابزار مرجع جایگزین این نمی‌شود؛ مکملش باشد.
 2. **Briefing در پیام کاربر، نه system prompt** — دلیلِ پایداری prefix-cache (کش ۸۶٪). هر قابلیتی که وسط جلسه system prompt را تغییر دهد، ممنوع.
 3. **`mine_only()` در config** — مقادیر قرضی از پروژه/env هرگز روی دیسک ذخیره نمی‌شوند. قابلیت‌های جدید باید از همین مکانیزم عبور کنند.
 4. **Overflow = انتقال نه حذف** (`tools/overflow.py`) — خروجی بزرگ به فایل می‌رود با راهنمای ادامه؛ الگوی همه‌ی ابزارهای جدید.

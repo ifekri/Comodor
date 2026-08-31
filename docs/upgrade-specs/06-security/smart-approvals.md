@@ -1,15 +1,15 @@
 # Spec: Smart Approvals — ارزیابی ریسک با مدل کمکی + approval mining
 
-> **EN summary:** Comodor classifies commands with fixed tiers (SAFE/WRITE/DANGEROUS) and a DEFAULT_DENY list — predictable, but a user running the same benign-but-unusual command fifty times clicks "approve" fifty times, training them to click blindly. Hermes's smart mode uses a cheap auxiliary LLM to risk-assess non-obvious commands (low→auto-approve, dangerous→auto-deny, uncertain→ask the human) with fail-closed timeout, plus "approval mining" that turns past manual approvals into allowlist proposals. This spec adds both, layered *on top of* the existing tiers — the tier system stays the fast path; the LLM only sees what the tiers can't classify. Priority **P1**, effort **M**.
+> **EN summary:** Comodor classifies commands with fixed tiers (SAFE/WRITE/DANGEROUS) and a DEFAULT_DENY list — predictable, but a user running the same benign-but-unusual command fifty times clicks "approve" fifty times, training them to click blindly. ابزار مرجع's smart mode uses a cheap auxiliary LLM to risk-assess non-obvious commands (low→auto-approve, dangerous→auto-deny, uncertain→ask the human) with fail-closed timeout, plus "approval mining" that turns past manual approvals into allowlist proposals. This spec adds both, layered *on top of* the existing tiers — the tier system stays the fast path; the LLM only sees what the tiers can't classify. Priority **P1**, effort **M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 مرجع: `tools/approval.py`.
 
 - `approvals.mode = smart | manual | off`; در smart: LLM کمکی risk-assess می‌کند (low auto-approve، dangerous auto-deny، uncertain → آدم)؛ timeout ۳۰۰ ثانیه = fail-closed؛ مودهای headless (cron و…) پیش‌فرض deny.
 - YOLO همه را رد می‌کند به‌جز UNRECOVERABLE_BLOCKLIST (rm -rf /، fork bomb، mkfs، dd به بلاک‌دستگاه، curl|sh).
 - deny globs کاربر روی variants deobfuscated اجرا می‌شود؛ فهرست تریگرهای مفصل (chmod 777، DROP/DELETE بدون WHERE، نوشتن در /etc و ~/.ssh و .env، docker -H، kill فرایندهای خودش و…).
-- **approval mining:** `hermes approvals suggest --apply` از تاریخچه‌ی state.db پیشنهادهای allowlist استخراج می‌کند (کلاس‌های تخریبی هرگز).
+- **approval mining:** `ابزار مرجع approvals suggest --apply` از تاریخچه‌ی state.db پیشنهادهای allowlist استخراج می‌کند (کلاس‌های تخریبی هرگز).
 - allowlist دائم `command_allowlist`؛ تأیید از خود چت کانال.
 
 ## جای آن در Comodor

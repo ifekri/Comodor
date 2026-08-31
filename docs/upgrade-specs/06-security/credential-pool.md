@@ -1,8 +1,8 @@
 # Spec: Credential Pool — چند کلید با چرخش خودکار
 
-> **EN summary:** Comodor holds one API key per provider; a rate-limited or quota-exhausted key stalls the session. Hermes spreads API calls across multiple keys per provider with auto-rotation on rate limits (and subagents share the parent's pool, rotating instead of pinning). This spec adds a small pool layer in `providers/`: keys resolved as a list, round-robin start, rotate on 429/quota errors with cooldown tracking. Stdlib-only, ~300 lines. Priority **P1** (direct user pain for heavy users and teams), effort **S–M**.
+> **EN summary:** Comodor holds one API key per provider; a rate-limited or quota-exhausted key stalls the session. ابزار مرجع spreads API calls across multiple keys per provider with auto-rotation on rate limits (and subagents share the parent's pool, rotating instead of pinning). This spec adds a small pool layer in `providers/`: keys resolved as a list, round-robin start, rotate on 429/quota errors with cooldown tracking. Stdlib-only, ~300 lines. Priority **P1** (direct user pain for heavy users and teams), effort **S–M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 مرجع: `agent/credential_pool.py`، `agent/anthropic_credentials.py`.
 

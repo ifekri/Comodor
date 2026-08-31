@@ -1,13 +1,13 @@
 # Spec: Plugin System
 
-> **EN summary:** Comodor's extension points today are MCP servers, skills, and custom OpenAI-compatible endpoints — but there is no way to add a *native tool*, a lifecycle hook, or a CLI command without forking. Hermes has a plugin manager: plugins discovered from user dir, project dir, and pip entry points, registering tools/hooks/CLI commands through a context API. This spec adds a deliberately small plugin system: Python modules in `~/.comodor/plugins/<name>/` (v1 skips pip entry points — Comodor is pip-installed itself and dogfooding plugin-as-dir is simpler and safer), a tiny context API, and hook events at the boundaries that already exist in `events.py`. Security is the headline: project plugins are untrusted by default, and every plugin tool passes the normal risk gate. Priority **P2**, effort **M–L**.
+> **EN summary:** Comodor's extension points today are MCP servers, skills, and custom OpenAI-compatible endpoints — but there is no way to add a *native tool*, a lifecycle hook, or a CLI command without forking. ابزار مرجع has a plugin manager: plugins discovered from user dir, project dir, and pip entry points, registering tools/hooks/CLI commands through a context API. This spec adds a deliberately small plugin system: Python modules in `~/.comodor/plugins/<name>/` (v1 skips pip entry points — Comodor is pip-installed itself and dogfooding plugin-as-dir is simpler and safer), a tiny context API, and hook events at the boundaries that already exist in `events.py`. Security is the headline: project plugins are untrusted by default, and every plugin tool passes the normal risk gate. Priority **P2**, effort **M–L**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
-مرجع: `hermes_cli/plugins.py` (PluginManager).
+مرجع: plugin manager ابزار مرجع (PluginManager).
 
-- کشف از سه منبع: `~/.hermes/plugins/`، `.hermes/plugins/` پروژه، pip entry points.
-- Plugin context API: register tool / hook / CLI command؛ hook ها در نقاط lifecycle (interception، metrics، guardrails)؛ `hermes plugins` UI تعاملی.
+- کشف از سه منبع: `~/.ابزار مرجع/plugins/`، `.ابزار مرجع/plugins/` پروژه، pip entry points.
+- Plugin context API: register tool / hook / CLI command؛ hook ها در نقاط lifecycle (interception، metrics، guardrails)؛ `ابزار مرجع plugins` UI تعاملی.
 - `plugin_guard.py` + scanning برای پلاگین‌های پروژه‌ای.
 
 ## جای آن در Comodor

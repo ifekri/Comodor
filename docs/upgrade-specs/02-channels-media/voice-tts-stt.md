@@ -1,8 +1,8 @@
 # Spec: صوت — TTS و STT
 
-> **EN summary:** Comodor has zero audio capability. Hermes ships STT (whisper local, Groq, OpenAI) and TTS (Edge free, ElevenLabs, OpenAI, local NeuTTS) usable from CLI and chat channels, so the agent can talk back and take voice notes. This spec adds `src/comodor/voice/` with a provider-registry design mirroring `providers/`: STT default = local whisper.cpp via the existing llama.cpp-style process runner, TTS default = free Edge-TTS (HTTP, no key), both gated behind config and consumed by inbound-media (spec 02) and a future Discord voice mode. Priority **P1**, effort **M–L**.
+> **EN summary:** Comodor has zero audio capability. ابزار مرجع ships STT (whisper local, Groq, OpenAI) and TTS (Edge free, ElevenLabs, OpenAI, local NeuTTS) usable from CLI and chat channels, so the agent can talk back and take voice notes. This spec adds `src/comodor/voice/` with a provider-registry design mirroring `providers/`: STT default = local whisper.cpp via the existing llama.cpp-style process runner, TTS default = free Edge-TTS (HTTP, no key), both gated behind config and consumed by inbound-media (spec 02) and a future Discord voice mode. Priority **P1**, effort **M–L**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 - **STT:** پرووایدرهای `local` (whisper base/large-v3)، `groq` (whisper-large-v3)، `openai`؛ record key (push-to-talk) با silence detection، `submit_mode` (direct/draft).
 - **TTS:** `edge` (رایگان، صوت‌های neural مایکروسافت)، `neutts` (محلی روی دستگاه)، `elevenlabs`، `openai`، `mistral`؛ `/voice on|off|tts|status`.

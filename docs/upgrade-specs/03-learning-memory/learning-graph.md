@@ -1,15 +1,15 @@
 # Spec: گراف یادگیری (/journey)
 
-> **EN summary:** Hermes's learning graph (`/journey`) renders skills and memory chunks as nodes with edges from `related_skills` frontmatter and lexical-overlap links, feeding a desktop "constellation" visualization. Comodor has richer learning data (rules with evidence, lessons with score decay, associations, episodes) but no way to *see* it as a whole. This spec adds a `comodor journey` timeline + a lightweight TUI visualization built entirely from existing store data — no new analytics, just faithful rendering of what the brain already knows. Priority **P2** (after curated-memory and skill-lifecycle), effort **S–M**.
+> **EN summary:** ابزار مرجع's learning graph (`/journey`) renders skills and memory chunks as nodes with edges from `related_skills` frontmatter and lexical-overlap links, feeding a desktop "constellation" visualization. Comodor has richer learning data (rules with evidence, lessons with score decay, associations, episodes) but no way to *see* it as a whole. This spec adds a `comodor journey` timeline + a lightweight TUI visualization built entirely from existing store data — no new analytics, just faithful rendering of what the brain already knows. Priority **P2** (after curated-memory and skill-lifecycle), effort **S–M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
-مرجع: `agent/learning_graph.py`، `agent/learning_graph_render.py`، CLI `hermes journey`.
+مرجع: `agent/learning_graph.py`، `agent/learning_graph_render.py`، CLI `ابزار مرجع journey`.
 
 - نودها: مهارت‌های ساخته/استفاده‌شده (از usage) + هر chunk از MEMORY/USER (عنوان = خط اول ≤۸۰ کاراکتر، بدنه ≤۱۲۰۰).
 - یال‌ها: `related_skills` در frontmatter (دوسویه، dedup) + پیوند واژگانی memory→skill (۴ مهارت برتر با overlap).
 - خروجی برای پنل دسکتاپ + آمار (`edges_per_node`, `isolated_pct`, `memory_skill_edges`)؛ scrubber «صورت فلکی» قابل پخش در زمان.
-- `hermes journey list|delete <node>|edit <node>` — node های حذف‌شدنی: مهارت آرشیو، chunk حذف.
+- `ابزار مرجع journey list|delete <node>|edit <node>` — node های حذف‌شدنی: مهارت آرشیو، chunk حذف.
 
 ## جای آن در Comodor
 

@@ -1,10 +1,10 @@
 # Spec: کانال Webhook عمومی
 
-> **EN summary:** Hermes has a generic webhook adapter — any external system (CI, monitoring, Git hosting) can POST an event and get agent processing delivered back. Comodor has webhooks *inbound* only for WhatsApp (with its excellent HMAC verification) but no general-purpose webhook channel. This spec generalizes the existing WhatsApp webhook server's security posture into a generic `comodor webhook` channel with per-source tokens, HMAC verification, prompt templating, and optional delivery. Priority **P1**, effort **S–M**.
+> **EN summary:** ابزار مرجع has a generic webhook adapter — any external system (CI, monitoring, Git hosting) can POST an event and get agent processing delivered back. Comodor has webhooks *inbound* only for WhatsApp (with its excellent HMAC verification) but no general-purpose webhook channel. This spec generalizes the existing WhatsApp webhook server's security posture into a generic `comodor webhook` channel with per-source tokens, HMAC verification, prompt templating, and optional delivery. Priority **P1**, effort **S–M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
-- آداپتور `webhook` در gateway + CLI `hermes webhook` برای اشتراک‌های داینامیک (prompt + skills + delivery per subscription).
+- آداپتور `webhook` در gateway + CLI `ابزار مرجع webhook` برای اشتراک‌های داینامیک (prompt + skills + delivery per subscription).
 - هر اشتراک: trigger HTTP → prompt ساخته‌شده از payload → اجرای ایجنتی → تحویل به کانال دلخواه.
 
 ## جای آن در Comodor

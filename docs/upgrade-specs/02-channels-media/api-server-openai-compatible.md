@@ -1,10 +1,10 @@
 # Spec: API Server سازگار با OpenAI
 
-> **EN summary:** Hermes can expose itself as an OpenAI-compatible `/v1/chat/completions` endpoint so any existing frontend (Open WebUI, LobeChat, LibreChat, IDEs) can drive the agent. Comodor's web UI is its own custom protocol — great for its panel, invisible to the ecosystem. This spec adds a stdlib `ThreadingHTTPServer` route (reusing the web server's auth model: loopback bind, per-run token, HttpOnly cookie equivalent via `Authorization: Bearer`) that maps OpenAI requests onto `agent/loop.py` and streams back SSE. Priority **P1**, effort **M**.
+> **EN summary:** ابزار مرجع can expose itself as an OpenAI-compatible `/v1/chat/completions` endpoint so any existing frontend (Open WebUI, LobeChat, LibreChat, IDEs) can drive the agent. Comodor's web UI is its own custom protocol — great for its panel, invisible to the ecosystem. This spec adds a stdlib `ThreadingHTTPServer` route (reusing the web server's auth model: loopback bind, per-run token, HttpOnly cookie equivalent via `Authorization: Bearer`) that maps OpenAI requests onto `agent/loop.py` and streams back SSE. Priority **P1**, effort **M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
-- `hermes serve` یک endpoint سازگار با OpenAI ارائه می‌دهد؛ فرانت‌ندهای استاندارد بدون تغییر وصل می‌شوند.
+- `ابزار مرجع serve` یک endpoint سازگار با OpenAI ارائه می‌دهد؛ فرانت‌ندهای استاندارد بدون تغییر وصل می‌شوند.
 - پشتیبانی از streaming (SSE) و non-streaming؛ مپ کردن tool-call ها به فرمت OpenAI در حد امکان (ایجنتی درونی hidden است).
 
 ## جای آن در Comodor

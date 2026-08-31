@@ -1,8 +1,8 @@
 # Spec: مودهای ورودی هنگام اشغال + ledger تحویل
 
-> **EN summary:** When a message arrives while the agent is mid-turn, Hermes offers three user-selectable behaviors: `interrupt` (redirect the active turn at the next tool boundary, keeping completed work), `queue`, and `steer` — plus a durable delivery ledger that redelivers replies lost to a crash. Comodor's channels queue silently; users on phones cannot redirect a running task except by sending Esc through the TUI. This spec adds the three modes per-channel, a durable delivery ledger for the channel daemons, and a circuit breaker per adapter. Priority **P1**, effort **M**.
+> **EN summary:** When a message arrives while the agent is mid-turn, ابزار مرجع offers three user-selectable behaviors: `interrupt` (redirect the active turn at the next tool boundary, keeping completed work), `queue`, and `steer` — plus a durable delivery ledger that redelivers replies lost to a crash. Comodor's channels queue silently; users on phones cannot redirect a running task except by sending Esc through the TUI. This spec adds the three modes per-channel, a durable delivery ledger for the channel daemons, and a circuit breaker per adapter. Priority **P1**, effort **M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 - `interrupt` (پیش‌فرض): turn فعال در مرز بعدی tool-result به پیام جدید هدایت می‌شود؛ کارِ انجام‌شده به‌صورت checkpoint نگه داشته می‌شود.
 - `queue`: صف FIFO؛ `steer`: پیام جدید به‌عنوان دستور اصلاحی به همان turn تزریق می‌شود.

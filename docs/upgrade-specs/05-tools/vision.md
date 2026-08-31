@@ -1,8 +1,8 @@
 # Spec: ابزار Vision (تحلیل تصویر کاربر)
 
-> **EN summary:** Comodor can only take its own screenshots (desktop tool); a user cannot hand it an image to analyze. Hermes has a `vision` toolset that accepts pasted images/URLs and routes them to vision-capable models, with an auxiliary client for cheap side-calls. This spec builds on the inbound-media pipeline (spec 02) and `providers/profile.py` capability detection: a `vision` tool that accepts a local path/URL and returns a structured description, plus multi-part message support so users can attach images directly. Priority **P1**, effort **M**.
+> **EN summary:** Comodor can only take its own screenshots (desktop tool); a user cannot hand it an image to analyze. ابزار مرجع has a `vision` toolset that accepts pasted images/URLs and routes them to vision-capable models, with an auxiliary client for cheap side-calls. This spec builds on the inbound-media pipeline (spec 02) and `providers/profile.py` capability detection: a `vision` tool that accepts a local path/URL and returns a structured description, plus multi-part message support so users can attach images directly. Priority **P1**, effort **M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 - toolset `vision`: تحلیل عکس از clipboard/URL/فایل با هر مدل vision-capable.
 - `agent/auxiliary_client.py`: کارهای جانبی (vision، summarization) روی مدل ارزان جدا.

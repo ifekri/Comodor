@@ -1,8 +1,8 @@
 # Spec: Backendهای اجرای ایزوله برای shell
 
-> **EN summary:** Comodor runs `run_shell` on the host with a permission gate, checkpoints, and a hardened Docker *image* — but no runtime isolation choice: you either trust the machine or containerize your whole session. Hermes supports seven terminal backends (local, Docker, SSH, Singularity, Modal, Daytona, Vercel Sandbox) selectable per task, so an agent can test "what if this command runs in a clean container" or work on a remote box. This spec adds Docker and SSH backends first (the two that matter to 95% of users), behind the existing DANGEROUS gate, with a per-project config. Modal/Daytona are explicitly out of scope (vendor lock-in contradicts Comodor's self-hosted ethos). Priority **P2**, effort **M–L**.
+> **EN summary:** Comodor runs `run_shell` on the host with a permission gate, checkpoints, and a hardened Docker *image* — but no runtime isolation choice: you either trust the machine or containerize your whole session. ابزار مرجع supports seven terminal backends (local, Docker, SSH, Singularity, Modal, Daytona, Vercel Sandbox) selectable per task, so an agent can test "what if this command runs in a clean container" or work on a remote box. This spec adds Docker and SSH backends first (the two that matter to 95% of users), behind the existing DANGEROUS gate, with a per-project config. Modal/Daytona are explicitly out of scope (vendor lock-in contradicts Comodor's self-hosted ethos). Priority **P2**, effort **M–L**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 مرجع: `tools/environments/` (docker.py، ssh.py، modal.py، …).
 

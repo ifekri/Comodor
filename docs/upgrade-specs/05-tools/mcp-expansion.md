@@ -1,8 +1,8 @@
 # Spec: توسعه‌ی MCP — resources، prompts، sampling، OAuth
 
-> **EN summary:** Comodor's MCP support is tools-only (both stdio and Streamable HTTP, hand-written). Hermes's MCP integration covers resources, prompts, sampling, OAuth for HTTP servers, schema caching, and a stdio watchdog. Most real-world value for Comodor users is in resources (read-only context like logs/datasets) and prompts (slash-invocable templates); sampling and OAuth are rarer. This spec closes the gap incrementally: resources + prompts in v1, OAuth in v2, sampling only on demand. Priority **P2**, effort **M–L**.
+> **EN summary:** Comodor's MCP support is tools-only (both stdio and Streamable HTTP, hand-written). ابزار مرجع's MCP integration covers resources, prompts, sampling, OAuth for HTTP servers, schema caching, and a stdio watchdog. Most real-world value for Comodor users is in resources (read-only context like logs/datasets) and prompts (slash-invocable templates); sampling and OAuth are rarer. This spec closes the gap incrementally: resources + prompts in v1, OAuth in v2, sampling only on demand. Priority **P2**, effort **M–L**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 مرجع: `tools/mcp_tool.py`، `mcp_oauth.py`، `mcp_schema_cache.py`، `mcp_stdio_watchdog.py`.
 
@@ -30,7 +30,7 @@ v2 — OAuth:
 v2 — sampling:
   پیش‌فرض رد؛ کانفیگ per-server mcp.servers.<name>.allow_sampling=false؛
   هر sampling request گیت مجوز بگیرد (مدل جاری با سقف توکن)
- watchdog: timeout برای stdio (الگوی hermes) — سرور بی‌پاسخ → kill + وضعیت در /mcp
+ watchdog: timeout برای stdio (الگوی ابزار مرجع) — سرور بی‌پاسخ → kill + وضعیت در /mcp
  ردact خطاها: الگوهای ghp_/sk-/Bearer در پیام‌های خطای MCP (redact.py)
 ```
 
@@ -39,7 +39,7 @@ v2 — sampling:
 ## نقشه‌ی پیاده‌سازی
 
 1. `mcp/manager.py`: متدهای `resources/list|read` و `prompts/list|get` روی دو ترنسپورت.
-2. ابزارهای SAFE دوگانه + کش فهرست (mtime cache الگوی hermes).
+2. ابزارهای SAFE دوگانه + کش فهرست (mtime cache الگوی ابزار مرجع).
 3. `/mcp` گسترش + `comodor mcp resources|prompts` CLI.
 4. v2: `mcp/oauth.py` reuse `providers/oauth.py` (PKCE loopback — از قبل نوشته شده).
 5. watchdog + redact.

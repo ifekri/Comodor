@@ -1,8 +1,8 @@
 # Spec: رسانه‌ی ورودی در کانال‌ها (صوت‌نامه، عکس، فایل)
 
-> **EN summary:** Today Comodor's three channels are text-only: a user cannot send a voice note, photo, or document from their phone. Hermes handles inbound media everywhere (voice transcription, vision on images, file reading). Closing this gap is the single biggest day-to-day usability win for phone-based use. This spec adds inbound media across Telegram/WhatsApp/Slack: download → type-detect → route (voice→STT via spec voice-tts-stt, image→vision via spec vision, text/file→read_file pipeline) with size caps, MIME pinning, and secrets-safe defaults. Priority **P0**, effort **M**.
+> **EN summary:** Today Comodor's three channels are text-only: a user cannot send a voice note, photo, or document from their phone. ابزار مرجع handles inbound media everywhere (voice transcription, vision on images, file reading). Closing this gap is the single biggest day-to-day usability win for phone-based use. This spec adds inbound media across Telegram/WhatsApp/Slack: download → type-detect → route (voice→STT via spec voice-tts-stt, image→vision via spec vision, text/file→read_file pipeline) with size caps, MIME pinning, and secrets-safe defaults. Priority **P0**, effort **M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 - همه‌ی آداپتورها عکس/فایل/صوت را دریافت و به ابزار درون-ایجنتی تبدیل می‌کنند (`tools/audio_container.py`، `image_source.py`، `read_extract.py`).
 - استریم‌های صوتی به STT، عکس‌ها به vision-capable مدل، PDF/دکی به extract متن.

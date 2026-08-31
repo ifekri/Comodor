@@ -1,10 +1,10 @@
 # Spec: Lineage جلسه + کامپرشن چند-ترایگری
 
-> **EN summary:** Hermes's session store tracks lineage (parent/child across compressions) and runs compression proactively from multiple triggers (preflight threshold, near-limit before an API call, idle-resume, retry templates), physically splitting the SQLite session and rotating the session id. Comodor compresses only reactively, keeps one JSONL per session, and loses the "this session was forked from that one" trail — which breaks `search_history` precision (an FTS hit can point into a compressed-away section) and long-lived channel sessions. This spec adds a lineage header to session JSONL, proactive trigger checks, and post-compression index rebuild pointers. Priority **P1**, effort **M**.
+> **EN summary:** ابزار مرجع's session store tracks lineage (parent/child across compressions) and runs compression proactively from multiple triggers (preflight threshold, near-limit before an API call, idle-resume, retry templates), physically splitting the SQLite session and rotating the session id. Comodor compresses only reactively, keeps one JSONL per session, and loses the "this session was forked from that one" trail — which breaks `search_history` precision (an FTS hit can point into a compressed-away section) and long-lived channel sessions. This spec adds a lineage header to session JSONL, proactive trigger checks, and post-compression index rebuild pointers. Priority **P1**, effort **M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
-مرجع: `hermes_state.py`، `agent/conversation_compression.py`، `agent/context_engine.py`.
+مرجع: state store ابزار مرجع، `agent/conversation_compression.py`، `agent/context_engine.py`.
 
 - **ترایگرها:** preflight (≥ آستانه)، pre-API (نزدیک سقف context/output قبل از call)، idle compaction (رزومه بعد از بیکاری)، retry (قالب‌های خطای too-large/token/count).
 - کامپرشن SQLite session را **فیزیکی می‌شکند** و session_id می‌چرخاند؛ lineage پدر/فرزند حفظ می‌شود؛ جدول‌ها و memory-provider ها اطلاع داده می‌شوند.

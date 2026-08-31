@@ -1,8 +1,8 @@
 # Spec: Delegation ناهمگام (background subagents)
 
-> **EN summary:** Comodor's `delegate` tool is synchronous and single-level: the parent blocks until the child finishes. Hermes supports background delegation — the parent keeps working while children run, and completion events surface as a *new turn* when the agent goes idle (never spliced mid-conversation, to protect alternation and prefix-cache integrity). This spec adds `background=true` to the existing `delegate` tool plus a runtime control plane (list/steer/stop), rejecting-not-queuing on overload, and crash-safe persistence. Priority **P1**, effort **M**.
+> **EN summary:** Comodor's `delegate` tool is synchronous and single-level: the parent blocks until the child finishes. ابزار مرجع supports background delegation — the parent keeps working while children run, and completion events surface as a *new turn* when the agent goes idle (never spliced mid-conversation, to protect alternation and prefix-cache integrity). This spec adds `background=true` to the existing `delegate` tool plus a runtime control plane (list/steer/stop), rejecting-not-queuing on overload, and crash-safe persistence. Priority **P1**, effort **M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 مرجع: `tools/delegate_tool.py`، `tools/async_delegation.py`، `agent/subagent_lifecycle.py`.
 

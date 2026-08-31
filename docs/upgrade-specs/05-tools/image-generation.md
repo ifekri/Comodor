@@ -1,8 +1,8 @@
 # Spec: تولید تصویر
 
-> **EN summary:** Hermes offers text-to-image via multiple providers (FAL, OpenAI images, …) behind an `image_gen` toolset with a registry abstraction. For Comodor this is a P2 nice-to-have — useful for marketing/docs assets and channel content, but far from the core coding loop. The spec keeps it deliberately small: one `image_gen` tool over a registry, stdlib HTTP only, key-from-env, images saved into the session media dir with explicit provenance. Priority **P2**, effort **S–M**.
+> **EN summary:** ابزار مرجع offers text-to-image via multiple providers (FAL, OpenAI images, …) behind an `image_gen` toolset with a registry abstraction. For Comodor this is a P2 nice-to-have — useful for marketing/docs assets and channel content, but far from the core coding loop. The spec keeps it deliberately small: one `image_gen` tool over a registry, stdlib HTTP only, key-from-env, images saved into the session media dir with explicit provenance. Priority **P2**, effort **S–M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 مرجع: `agent/image_gen_provider.py`، `agent/image_gen_registry.py`، `tools/image_generation_tool.py`، `agent/image_routing.py`.
 
@@ -30,7 +30,7 @@
 کانال‌ها: خروجی مستقیم به کانال مبدأ (تلگرام sendPhoto) وقتی از کانال آمده
 ```
 
-- **چرا این spec کوچک است:** برخلاف hermes (که ۱۱ مدل و routing دارد)، یک پرووایدر + یک مدل پیش‌فرض کافی است؛ تفاوت‌گذاری رقابتی Comodor این نیست — این فقط «پارتی کست کامل بودن» است. اگر روزی اولویت شد، فقط آداپتور اضافه می‌شود (registry آماده).
+- **چرا این spec کوچک است:** برخلاف ابزار مرجع (که ۱۱ مدل و routing دارد)، یک پرووایدر + یک مدل پیش‌فرض کافی است؛ تفاوت‌گذاری رقابتی Comodor این نیست — این فقط «پارتی کست کامل بودن» است. اگر روزی اولویت شد، فقط آداپتور اضافه می‌شود (registry آماده).
 - **گیت بودجه:** `max_per_day` شمارنده در brain.db meta؛ رد شدن با پیام روشن.
 
 ## نقشه‌ی پیاده‌سازی

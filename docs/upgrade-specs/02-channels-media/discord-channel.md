@@ -1,14 +1,14 @@
 # Spec: کانال Discord
 
-> **EN summary:** Discord is the most-requested missing channel. Hermes ships a full Discord adapter (messages, threads, reactions, voice channels) plus Discord-specific tools. Comodor already has three hand-written channel bots (Telegram, Slack, WhatsApp) with a shared layer — this spec adds Discord as the fourth, following the exact same architecture: hand-written client over stdlib, allowlist of IDs, pairing code, writes-off-by-default. Uses the official REST API with a bot token (no gateway WebSocket in v1; polling via Slack-Socket-Mode-style is not available, so v1 uses webhooks or a single-shard gateway over the existing `net/ws.py`). Priority **P0** (largest user base gap), effort **L**.
+> **EN summary:** Discord is the most-requested missing channel. ابزار مرجع ships a full Discord adapter (messages, threads, reactions, voice channels) plus Discord-specific tools. Comodor already has three hand-written channel bots (Telegram, Slack, WhatsApp) with a shared layer — this spec adds Discord as the fourth, following the exact same architecture: hand-written client over stdlib, allowlist of IDs, pairing code, writes-off-by-default. Uses the official REST API with a bot token (no gateway WebSocket in v1; polling via Slack-Socket-Mode-style is not available, so v1 uses webhooks or a single-shard gateway over the existing `net/ws.py`). Priority **P0** (largest user base gap), effort **L**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 مرجع: `gateway/` آداپتور discord، `tools/discord_tool.py`.
 
 - پیام/thread/reaction/typing/streaming با message-edit؛ feature matrix هر پلتفرم مستند.
 - ابزارهای `discord` و `discord_admin` در toolset جدا (فقط وقتی کانال فعال).
-- مودهای busy-input، idle-reset per-platform (Discord ۶۰ دقیقه در hermes).
+- مودهای busy-input، idle-reset per-platform (Discord ۶۰ دقیقه در ابزار مرجع).
 
 ## جای آن در Comodor
 

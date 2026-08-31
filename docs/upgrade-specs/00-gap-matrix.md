@@ -1,10 +1,10 @@
-# ماتریس مقایسه‌ی کامل — Comodor × Hermes-Agent
+# ماتریس مقایسه‌ی کامل — Comodor × ابزار مرجع-Agent
 
-> **EN:** Full gap matrix between Comodor and NousResearch/hermes-agent, verified against both codebases. ❌ = absent in Comodor core, ⚠️ = partial, ✅ = present. Each row links to its implementation spec. Rows marked «برتری Comodor» are features where Comodor is ahead — listed so they are never dropped during porting.
+> **EN:** Full gap matrix between Comodor and ابزار مرجع, verified against both codebases. ❌ = absent in Comodor core, ⚠️ = partial, ✅ = present. Each row links to its implementation spec. Rows marked «برتری Comodor» are features where Comodor is ahead — listed so they are never dropped during porting.
 
 ## ۱. اتوماسیون و زمان‌بندی
 
-| قابلیت | hermes | Comodor | Spec |
+| قابلیت | ابزار مرجع | Comodor | Spec |
 |---|---|---|---|
 | Cron ایجنتی (زمان‌بندی NL، تحویل به پلتفرم، incidents) | ✅ `cron/scheduler.py` | ❌ هیچ زمان‌بندی‌ای وجود ندارد | [`cron-scheduler.md`](01-automation/cron-scheduler.md) |
 | Delegation ناهمگام (background + رویداد تکمیل به‌صورت turn) | ✅ `tools/async_delegation.py` | ⚠️ فقط sync تک‌سطحی در `tools/delegate.py` | [`async-delegation.md`](01-automation/async-delegation.md) |
@@ -12,7 +12,7 @@
 
 ## ۲. کانال‌ها و رسانه
 
-| قابلیت | hermes | Comodor | Spec |
+| قابلیت | ابزار مرجع | Comodor | Spec |
 |---|---|---|---|
 | Discord | ✅ آداپتور کامل + voice channel | ❌ | [`discord-channel.md`](02-channels-media/discord-channel.md) |
 | API Server سازگار با OpenAI | ✅ برای Open WebUI و… | ❌ | [`api-server-openai-compatible.md`](02-channels-media/api-server-openai-compatible.md) |
@@ -23,7 +23,7 @@
 
 ## ۳. یادگیری و حافظه
 
-| قابلیت | hermes | Comodor | Spec |
+| قابلیت | ابزار مرجع | Comodor | Spec |
 |---|---|---|---|
 | حافظه‌ی منتخب (MEMORY/USER) + review پس‌زمینه‌ای هر turn | ✅ `agent/background_review.py` | ❌ فقط lessons + rules با ثابت‌سازی | [`curated-memory.md`](03-learning-memory/curated-memory.md) |
 | پرووایدرهای حافظه‌ی بیرونی (Honcho/Mem0/…) | ✅ ۸ پرووایدر | ❌ | [`memory-providers.md`](03-learning-memory/memory-providers.md) |
@@ -35,16 +35,16 @@
 
 ## ۴. مدیریت زمینه
 
-| قابلیت | hermes | Comodor | Spec |
+| قابلیت | ابزار مرجع | Comodor | Spec |
 |---|---|---|---|
 | ارجاع زمینه با @ (فایل/دیفر/git/url در خط فرمان TUI) | ✅ `agent/context_references.py` | ❌ فقط attach فایل | [`context-references.md`](04-context/context-references.md) |
-| Lineage جلسه + کامپرشن چند-ترایگری با شکافتن SQLite session | ✅ `hermes_state.py` | ⚠️ کامپرشن دارد ولی بدون lineage و بدون شکافتن session | [`session-lineage.md`](04-context/session-lineage.md) |
+| Lineage جلسه + کامپرشن چند-ترایگری با شکافتن SQLite session | ✅ state store ابزار مرجع | ⚠️ کامپرشن دارد ولی بدون lineage و بدون شکافتن session | [`session-lineage.md`](04-context/session-lineage.md) |
 
 > **برتری Comodor:** سه‌مرحله‌ای «ارزان‌ترین اول» (اسکرین‌شات → خوانش منقضی → خلاصه) و حفاظت از درخواست اصلی در کامپرشن.
 
 ## ۵. ابزارها
 
-| قابلیت | hermes | Comodor | Spec |
+| قابلیت | ابزار مرجع | Comodor | Spec |
 |---|---|---|---|
 | Vision (تحلیل عکس ورودی کاربر) | ✅ `tools/vision` | ⚠️ فقط اسکرین‌شات خودش در `computer` | [`vision.md`](05-tools/vision.md) |
 | تولید تصویر | ✅ FAL/چند پرووایدر | ❌ | [`image-generation.md`](05-tools/image-generation.md) |
@@ -53,7 +53,7 @@
 
 ## ۶. امنیت
 
-| قابلیت | hermes | Comodor | Spec |
+| قابلیت | ابزار مرجع | Comodor | Spec |
 |---|---|---|---|
 | Smart approvals (ارزیابی ریسک با LLM کمکی + mining اجازه‌ها) | ✅ `tools/approval.py` | ❌ تیرهای ثابت SAFE/WRITE/DANGEROUS | [`smart-approvals.md`](06-security/smart-approvals.md) |
 | Backendهای اجرای ایزوله (Docker/SSH/Modal/…) برای shell | ✅ ۷ backend | ⚠️ فقط host + Docker image | [`execution-backends.md`](06-security/execution-backends.md) |
@@ -64,15 +64,15 @@
 
 ## ۷. پلتفرم
 
-| قابلیت | hermes | Comodor | Spec |
+| قابلیت | ابزار مرجع | Comodor | Spec |
 |---|---|---|---|
-| Plugin system (ابزار/hook/CLI از pip یا پوشه) | ✅ `hermes_cli/plugins.py` | ❌ فقط MCP/skills | [`plugin-system.md`](07-platform/plugin-system.md) |
-| پروفایل‌های همزمان (`hermes -p name`) | ✅ | ❌ یک `~/.comodor` واحد | [`profiles.md`](07-platform/profiles.md) |
+| Plugin system (ابزار/hook/CLI از pip یا پوشه) | ✅ plugin manager ابزار مرجع | ❌ فقط MCP/skills | [`plugin-system.md`](07-platform/plugin-system.md) |
+| پروفایل‌های همزمان (`ابزار مرجع -p name`) | ✅ | ❌ یک `~/.comodor` واحد | [`profiles.md`](07-platform/profiles.md) |
 | آمار مصرف (/usage، /insights) | ✅ `agent/insights.py` | ⚠️ فقط `/cost` درون-جلسه | [`insights.md`](07-platform/insights.md) |
 
-## ۸. چیزهایی که hermes دارد و عمداً توصیه به انتقال نشد
+## ۸. چیزهایی که ابزار مرجع دارد و عمداً توصیه به انتقال نشد
 
-> **EN:** Hermes features deliberately *not* specced, with reasons — Comodor should not copy these.
+> **EN:** ابزار مرجع features deliberately *not* specced, with reasons — Comodor should not copy these.
 
 - **TUI و skin engine** — TUI اختصاصی Comodor (three-thread, hit-test rectangles) بالاتر است؛ بازطراحی معنا ندارد.
 - **سوگند SOUL.md / personality presets** — Comodor از `COMODOR.md` و playbook استفاده می‌کند؛ افزودن لایه‌ی شخصیت، cache پایدار را می‌شکند. (در صورت نیاز آینده: فایل جدا و بیرون از prefix ثابت.)

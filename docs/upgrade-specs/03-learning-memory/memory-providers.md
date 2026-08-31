@@ -1,15 +1,15 @@
 # Spec: پرووایدرهای حافظه‌ی بیرونی (لایه‌ی اختیاری)
 
-> **EN summary:** Hermes runs external memory backends (Honcho, Mem0, Supermemory, RetainDB, …) *alongside* built-in memory — at most one active — via a plugin abstraction. Comodor's brain is entirely local; some users will want cloud personalization or team-shared memory. This spec adds a minimal provider abstraction in `learning/providers/` where the built-in brain remains the primary and exactly one optional external provider mirrors writes and augments recall. Stdlib-first: the reference provider is plain HTTP; no SDK dependencies. Priority **P2** (valuable only after curated-memory ships), effort **M**.
+> **EN summary:** ابزار مرجع runs external memory backends (Honcho, Mem0, Supermemory, RetainDB, …) *alongside* built-in memory — at most one active — via a plugin abstraction. Comodor's brain is entirely local; some users will want cloud personalization or team-shared memory. This spec adds a minimal provider abstraction in `learning/providers/` where the built-in brain remains the primary and exactly one optional external provider mirrors writes and augments recall. Stdlib-first: the reference provider is plain HTTP; no SDK dependencies. Priority **P2** (valuable only after curated-memory ships), effort **M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 مرجع: `agent/memory_provider.py`، `plugins/memory/`.
 
 - ۸ پرووایدر: Honcho (dialectic user modeling)، OpenViking، Mem0، Hindsight، Holographic، RetainDB، ByteRover، Supermemory.
 - حداکثر یک پرووایدر فعال (دومین تلاش رد می‌شود — «جلوی schema bloat»).
 - در کنار حافظه‌ی داخلی می‌دوند، هرگز جایگزینش نمی‌شوند؛ `notify_memory_tool_write` نوشته‌های داخلی را به بیرون mirror می‌کند (روی نوشته‌ی staged fail می‌کند).
-- CLI: `hermes memory setup|status|off`.
+- CLI: `ابزار مرجع memory setup|status|off`.
 
 ## جای آن در Comodor
 

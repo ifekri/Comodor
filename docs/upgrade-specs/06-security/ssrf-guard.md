@@ -1,8 +1,8 @@
 # Spec: SSRF Guard — سپر درخواست‌های خروجی
 
-> **EN summary:** Comodor's `web_fetch` and `browse` (CDP) can currently be steered toward internal addresses — cloud metadata endpoints (169.254.169.254), localhost services (Docker daemon, internal admin panels), or redirect chains that hop back inside. Hermes runs an always-on SSRF guard across every URL-fetching tool: RFC1918/loopback/link-local/CGNAT blocked, cloud-metadata hostnames blocked, fail-closed on DNS failure, per-hop redirect revalidation. This is one of the cheapest high-value specs in this folder: pure stdlib, ~200 lines, protects anyone running Comodor on a cloud VM (which the cron + channels features actively encourage). Priority **P1**, effort **S**.
+> **EN summary:** Comodor's `web_fetch` and `browse` (CDP) can currently be steered toward internal addresses — cloud metadata endpoints (169.254.169.254), localhost services (Docker daemon, internal admin panels), or redirect chains that hop back inside. ابزار مرجع runs an always-on SSRF guard across every URL-fetching tool: RFC1918/loopback/link-local/CGNAT blocked, cloud-metadata hostnames blocked, fail-closed on DNS failure, per-hop redirect revalidation. This is one of the cheapest high-value specs in this folder: pure stdlib, ~200 lines, protects anyone running Comodor on a cloud VM (which the cron + channels features actively encourage). Priority **P1**, effort **S**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 - SSRF guard همیشه-روشن روی همه‌ی ابزارهای URL: بلاک RFC1918، loopback، link-local (شامل 169.254.169.254)، CGNAT، hostname های metadata ابری (metadata.google.internal و…)؛ DNS fail = رد؛ در هر hop ریدایرکت دوباره‌اعتبارسنجی؛ blocklist کاربر روی همه‌ی URL tools.
 

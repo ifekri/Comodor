@@ -1,8 +1,8 @@
 # Spec: ارجاع‌های زمینه با @ (فایل/پوشه/diff/git/url)
 
-> **EN summary:** Hermes's `@` references inline-inject content into a message before it reaches the model: `@file:path[:10-25]` (line ranges), `@folder:` (tree, capped), `@diff`/`@staged`, `@git:N` (last N commits with patches), `@url:` — with tab completion, soft/hard budget limits (25% warn / 50% refuse), and credential-path blocking. Comodor only has file attach (Ctrl-O). This spec adds `@` parsing to the TUI prompt editor — the natural next step, and one of the most-copied UX ideas in modern CLI agents. Priority **P1**, effort **M**.
+> **EN summary:** ابزار مرجع's `@` references inline-inject content into a message before it reaches the model: `@file:path[:10-25]` (line ranges), `@folder:` (tree, capped), `@diff`/`@staged`, `@git:N` (last N commits with patches), `@url:` — with tab completion, soft/hard budget limits (25% warn / 50% refuse), and credential-path blocking. Comodor only has file attach (Ctrl-O). This spec adds `@` parsing to the TUI prompt editor — the natural next step, and one of the most-copied UX ideas in modern CLI agents. Priority **P1**, effort **M**.
 
-## قابلیت در hermes چطور است
+## قابلیت در ابزار مرجع چطور است
 
 مرجع: `agent/context_references.py`.
 
@@ -24,7 +24,7 @@
      کاربر اضافه شود (در transcript هم ثبت شود — شفافیت)
 بودجه: نرم ۲۵٪ context → هشدار inline در editor؛ سخت ۵۰٪ → رد ارسال با شمارش
 tab completion: مسیرها از list_dir محلی؛ کمبوی سبک در editor موجود
-امنیت (همان فهرست hermes + اضافه‌های Comodor):
+امنیت (همان فهرست ابزار مرجع + اضافه‌های Comodor):
   - ~/.comodor/config.json و brain.db هرگز با @ خوانده نشوند (کلیدها/آموزه‌ها)
   - redaction روی محتوای بسط‌یافته قبل از ارسال (الگوی redact.py)
   - باینری → رد با سایز؛ فایل بزرگ → سقف و اشاره به read_file
