@@ -631,6 +631,47 @@ class CronConfig:
 
 
 @dataclass
+class ShellConfig:
+    """Where shell commands run: this machine, a container, or another box.
+
+    The backend is a project setting on purpose — a repository can pin the
+    container its tests need — but everything here is on the host-settable
+    list only in the directions that cannot hurt a fresh clone: a project may
+    name an image, never point the agent at an SSH box or turn hardening off.
+    """
+
+    backend: str = "host"                 # host | docker | ssh
+    #: Docker: the image commands run in. Pulled on first use.
+    docker_image: str = "python:3.13-slim"
+    #: Mount the project into the container. Read-only by default; read-write
+    #: is the choice that makes checkpoints and verify see host files.
+    docker_mount: str = "ro"              # "" | ro | rw
+    #: Hardened invocation (no capabilities, no new privileges, capped
+    #: processes). Auto-approval refuses to run a container without it.
+    docker_harden: bool = True
+    #: SSH: where to connect. The key is read from ~/.ssh and never copied.
+    ssh_host: str = ""
+    ssh_user: str = ""
+    ssh_port: int = 22
+    ssh_key_path: str = ""
+    #: Seconds before a remote command is killed. Long enough for a test
+    #: suite, short enough that a dead network does not hang the turn.
+    timeout: float = 180.0
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "backend": self.backend,
+            "docker_image": self.docker_image,
+            "docker_mount": self.docker_mount,
+            "docker_harden": self.docker_harden,
+            "ssh_host": self.ssh_host,
+            "ssh_user": self.ssh_user,
+            "ssh_port": self.ssh_port,
+            "ssh_key_path": self.ssh_key_path,
+            "timeout": self.timeout,
+        }
+
+@dataclass
 class SafetyConfig:
     auto_approve_safe: bool = True       # read-only tools never prompt
     auto_approve_writes: bool = False
@@ -692,7 +733,7 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: said nothing.
 SECTIONS = ("ui", "agent", "gateway", "learning", "skills", "safety",
             "browser", "computer", "telegram", "whatsapp", "slack", "cron",
-            "media", "delegation")
+            "media", "delegation", "shell")
 
 
 @dataclass
@@ -713,6 +754,7 @@ class Config:
     cron: CronConfig = field(default_factory=CronConfig)
     media: MediaConfig = field(default_factory=MediaConfig)
     delegation: DelegationConfig = field(default_factory=DelegationConfig)
+    shell: ShellConfig = field(default_factory=ShellConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     paths: Paths = field(default_factory=resolve_paths)
@@ -1001,6 +1043,12 @@ PROJECT_SETTABLE: dict[str, frozenset[str] | None] = {
                         "keep_screenshots"}),
     "learning": frozenset({"enabled", "reflect", "top_k", "max_playbook_tokens"}),
     "skills": frozenset({"enabled", "top_k", "max_tokens"}),
+    # A repository may say which image its commands run in — that is what a
+    # Dockerfile is, in another accent. It may not choose the backend itself,
+    # point the agent at a remote box, or turn the container's hardening off:
+    # those are the user's, because they say where the user's machine spends
+    # its trust.
+    "shell": frozenset({"docker_image", "docker_mount"}),
     # Servers only, and they arrive switched off — a project saying what it
     # uses is useful; a project starting a process is not its decision. The
     # master switch is deliberately absent.
