@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..channels.busy import start_or_steer
 from ..channels.markdown import to_telegram
 from ..channels.settings import Settings, keep_current
 from ..config import Config
@@ -492,10 +493,11 @@ class Service:
 
     def _start_turn(self, talk: Conversation, text: str,
                     images: list[str] | None = None) -> None:
-        if not talk.session.send(text, images=images):
-            self.bot.send(talk.chat,
-                          "Something is already running. Stop it first.",
-                          keyboard=self._menu(talk.chat))
+        def refuse(note: str) -> None:
+            self.bot.send(talk.chat, note, keyboard=self._menu(talk.chat))
+
+        if not start_or_steer(talk.session, text, images,
+                              self.config.telegram.busy_mode, refuse):
             return
 
         self.bot.typing(talk.chat)

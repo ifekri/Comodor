@@ -33,6 +33,13 @@ from .store import Fact
 MAX_NEW_FACTS = 3
 
 VALID_KINDS = ("memory", "user")
+#: Turn endings that say something durable rather than something about the
+#: work: a cancel is the human overruling a direction — or a new message
+#: arriving mid-flight and taking over, under the interrupt busy mode — and
+#: both say more about the person than the task. "done" is the everyday case
+#: and stays as it was; "max_steps" and "budget" say the run ran out of room,
+#: which is a lesson about sizing, not about the work itself.
+LEARNABLE_STOPS = ("cancelled",)
 
 
 class ReviewResult:
@@ -107,7 +114,8 @@ class Reviewer:
     # -- the pass ------------------------------------------------------------ #
 
     def review(self, messages: list, outcome: str, episode_id: int = 0,
-               generation: int | None = None) -> ReviewResult:
+               generation: int | None = None,
+               cancel_reason: str = "") -> ReviewResult:
         """One synchronous pass, absorbed before it returns.
 
         ``generation`` is the async caller's ticket: when a newer review has
@@ -116,6 +124,18 @@ class Reviewer:
         """
         result = ReviewResult()
         transcript = build_transcript(messages, goal="", outcome=outcome)
+        if outcome in LEARNABLE_STOPS:
+            # "cancelled" carries a reason now ("stop" — the human pressed it
+            # — or "interrupt" — a newer message took over mid-flight), and
+            # the two are different opinions about the same turn.
+            reason = cancel_reason or "stop"
+            why = ("the person pressed stop, likely overruling the "
+                   "direction." if reason == "stop"
+                   else "a newer message arrived mid-flight and took over.")
+            transcript += (
+                f"\n\nNOTE: this conversation was stopped partway — {why} If "
+                "that pattern is durable — a preference about how the agent "
+                "should work — you may record it as one 'user' fact.")
         model = self.model  # blank means the gateway's active model
         try:
             completion = collapse(
@@ -139,7 +159,8 @@ class Reviewer:
         return result
 
     def review_async(
-        self, messages: list, outcome: str, episode_id: int = 0
+        self, messages: list, outcome: str, episode_id: int = 0,
+        cancel_reason: str = "",
     ) -> threading.Thread | None:
         """Start one pass on a daemon thread, replacing any in-flight one.
 
@@ -154,7 +175,7 @@ class Reviewer:
             mine = self._generation
             thread = threading.Thread(
                 target=self._work,
-                args=(list(messages), outcome, episode_id, mine),
+                args=(list(messages), outcome, episode_id, mine, cancel_reason),
                 daemon=True,
                 name="comodor-review",
             )
@@ -170,9 +191,10 @@ class Reviewer:
             thread.join(timeout=timeout)
 
     def _work(self, messages: list, outcome: str, episode_id: int,
-              generation: int) -> None:
+              generation: int, cancel_reason: str = "") -> None:
         try:
-            self.review(messages, outcome, episode_id, generation=generation)
+            self.review(messages, outcome, episode_id, generation=generation,
+                        cancel_reason=cancel_reason)
         except Exception:
             return
 

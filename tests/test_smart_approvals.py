@@ -6,10 +6,13 @@ from __future__ import annotations
 import pytest
 
 from comodor.safety.permissions import PermissionEngine, Risk
-from comodor.safety.smart import (ASSESS_PROMPT, blocked_absolutely,
-                                  command_branches, make_assessor,
-                                  parse_verdict)
-
+from comodor.safety.smart import (
+    ASSESS_PROMPT,
+    blocked_absolutely,
+    command_branches,
+    make_assessor,
+    parse_verdict,
+)
 
 # -- deobfuscation: every branch is checked ---------------------------------- #
 

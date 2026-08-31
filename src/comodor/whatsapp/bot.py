@@ -33,6 +33,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..channels.busy import start_or_steer
 from ..channels.markdown import to_whatsapp
 from ..channels.settings import Settings, keep_current
 from ..config import Config
@@ -382,9 +383,11 @@ class Service:
 
     def _start_turn(self, talk: Conversation, text: str,
                     images: list[str] | None = None) -> None:
-        if not talk.session.send(text, images=images):
-            self._menu(talk, note="Something is already running. Stop it "
-                                  "first.")
+        def refuse(note: str) -> None:
+            self._menu(talk, note=note)
+
+        if not start_or_steer(talk.session, text, images,
+                              self.config.whatsapp.busy_mode, refuse):
             return
         talk.turn = Turn()
         self._send(talk.wa_id, "_Working on it…_")

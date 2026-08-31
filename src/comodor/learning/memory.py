@@ -336,7 +336,7 @@ class LearningEngine:
     def record_outcome(self, goal: str, messages: list[Any], recalled: list[Lesson],
                        success: bool, stopped: str, steps: int, elapsed: float,
                        approvals: int = 0, tokens: int = 0,
-                       corrections: int = 0) -> None:
+                       corrections: int = 0, cancel_reason: str = "") -> None:
         """Close the loop on one task: credit, store, then reflect in the background."""
         tools_used = sorted({message.name for message in messages
                              if getattr(message.role, "value", "") == "tool" and message.name})
@@ -393,7 +393,7 @@ class LearningEngine:
         self._threads.append(thread)
 
     def _review_async(self, messages: list[Any], outcome: str,
-                      episode_id: int) -> None:
+                      episode_id: int, cancel_reason: str = "") -> None:
         """The curated-memory review, after the turn has fully ended.
 
         Announced through the bus when something stuck, for the same reason
@@ -415,7 +415,8 @@ class LearningEngine:
                 staging=self.config.learning.review_write_approval,
             )
             self._reviewer.on_accepted = self._announce_facts
-        thread = self._reviewer.review_async(messages, outcome, episode_id)
+        thread = self._reviewer.review_async(
+            messages, outcome, episode_id, cancel_reason=cancel_reason)
         if thread is not None:
             self._threads.append(thread)
 

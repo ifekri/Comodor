@@ -69,6 +69,11 @@ class TurnResult:
     stopped: str = "done"        # done | max_steps | budget | cancelled | error
     error: str = ""
     elapsed: float = 0.0
+    #: Why a turn was cancelled, when it was ("stop" — the human pressed stop
+    #: — or "interrupt" — a new message took over under the interrupt busy
+    #: mode). The learn step reads this so the review knows which kind of
+    #: stop it is describing, rather than calling both the same.
+    cancel_reason: str = ""
 
     @property
     def ok(self) -> bool:
@@ -97,6 +102,10 @@ class AgentLoop:
         #: loop never asks.
         self.delegates: Any = None
         self.cancel = Cancellation()
+        #: Why the last interrupt() was called ("stop" or "interrupt"); reset
+        #: with the flag itself at the start of each turn. Read by the learn
+        #: step so the review can tell a human's stop from a takeover.
+        self._cancel_reason = ""
         self._skills_used: list[Any] = []
         self.tool_context: ToolContext | None = None
         self._recalled: list[Any] = []
@@ -117,6 +126,7 @@ class AgentLoop:
         """Handle one user message from start to finish."""
         started = time.monotonic()
         self.cancel.reset()
+        self._cancel_reason = ""
         self._used = []
         result = TurnResult()
 
@@ -152,6 +162,7 @@ class AgentLoop:
             self._iterate(deadline, result)
         except Cancelled:
             result.stopped = "cancelled"
+            result.cancel_reason = self._cancel_reason
             self.bus.emit(Kind.CANCELLED)
         except ProviderError as exc:
             result.stopped = "error"
@@ -171,8 +182,9 @@ class AgentLoop:
         self._learn(user_text, result)
         return result
 
-    def interrupt(self) -> None:
+    def interrupt(self, reason: str = "stop") -> None:
         self.cancel.cancel()
+        self._cancel_reason = reason
 
     def _tool_bridge_live(self) -> bool:
         """Whether run_python here can really take tools=true.
@@ -743,6 +755,7 @@ class AgentLoop:
                 recalled=self._recalled,
                 success=result.ok and result.stopped == "done",
                 stopped=result.stopped,
+                cancel_reason=result.cancel_reason,
                 steps=result.steps,
                 elapsed=result.elapsed,
                 approvals=approvals,

@@ -381,6 +381,11 @@ class TelegramConfig:
     #: set, because approving a shell command on a phone is a tap made with
     #: less attention than the same approval at a keyboard.
     allow_writes: bool = False
+    #: What happens to a new message while a turn is already running. "queue"
+    #: (the default, unchanged behaviour) refuses with a note and lets the
+    #: human resend; "interrupt" stops the running turn — completed file work
+    #: stays undoable through checkpoints — and starts the new one.
+    busy_mode: str = "queue"
     #: Seconds a pairing code stays valid.
     pair_window: int = 300
 
@@ -390,6 +395,7 @@ class TelegramConfig:
             "token": self.token,
             "allowed": list(self.allowed),
             "allow_writes": self.allow_writes,
+            "busy_mode": self.busy_mode,
             "pair_window": self.pair_window,
         }
 
@@ -433,6 +439,9 @@ class WhatsAppConfig:
     allowed: list[str] = field(default_factory=list)
     #: Whether a turn started from WhatsApp may edit files and run commands.
     allow_writes: bool = False
+    #: What happens to a new message while a turn is already running: "queue"
+    #: (the default) or "interrupt" — see the Telegram section above.
+    busy_mode: str = "queue"
     #: Seconds a pairing code stays valid.
     pair_window: int = 300
     #: Where the webhook listens. Bound to localhost: this is meant to sit
@@ -460,6 +469,7 @@ class WhatsAppConfig:
             "verify_token": self.verify_token,
             "allowed": list(self.allowed),
             "allow_writes": self.allow_writes,
+            "busy_mode": self.busy_mode,
             "pair_window": self.pair_window,
             "host": self.host,
             "port": self.port,
@@ -512,6 +522,9 @@ class SlackConfig:
     allowed: list[str] = field(default_factory=list)
     #: Whether a turn started from Slack may edit files and run commands.
     allow_writes: bool = False
+    #: What happens to a new message while a turn is already running: "queue"
+    #: (the default) or "interrupt" — see the Telegram section above.
+    busy_mode: str = "queue"
     #: Seconds a pairing code stays valid.
     pair_window: int = 300
     #: The workspace it was connected to, remembered so `status` can name it
@@ -525,6 +538,7 @@ class SlackConfig:
             "app_token": self.app_token,
             "allowed": list(self.allowed),
             "allow_writes": self.allow_writes,
+            "busy_mode": self.busy_mode,
             "pair_window": self.pair_window,
             "team": self.team,
         }

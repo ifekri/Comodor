@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..channels.busy import start_or_steer
 from ..channels.markdown import to_slack
 from ..channels.settings import Settings, keep_current
 from ..config import Config
@@ -447,8 +448,11 @@ class Service:
 
     def _start_turn(self, talk: Conversation, text: str,
                     images: list[str] | None = None) -> None:
-        if not talk.session.send(text, images=images):
-            self._menu(talk, "Something is already running. Stop it first.")
+        def refuse(note: str) -> None:
+            self._menu(talk, note)
+
+        if not start_or_steer(talk.session, text, images,
+                              self.config.slack.busy_mode, refuse):
             return
         ts = self._send(talk, "_working…_")
         talk.reply = Reply(channel=self._where(talk), ts=ts,

@@ -1662,8 +1662,8 @@ class Session:
         request.answer(choice)
         return True, ""
 
-    def interrupt(self) -> None:
-        self.agent.interrupt()
+    def interrupt(self, reason: str = "stop") -> None:
+        self.agent.interrupt(reason)
 
     def set_mode(self, mode: str) -> bool:
         if mode not in ("act", "plan", "ask", "chat"):

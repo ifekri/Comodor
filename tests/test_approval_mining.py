@@ -7,8 +7,13 @@ import json
 
 import pytest
 
-from comodor.safety.mining import (NEVER_PROPOSE, Proposal, apply_proposals,
-                                   load_approvals, propose, stem_of)
+from comodor.safety.mining import (
+    NEVER_PROPOSE,
+    apply_proposals,
+    load_approvals,
+    propose,
+    stem_of,
+)
 
 
 def write_log(tmp_path, commands, corrupt=False):
