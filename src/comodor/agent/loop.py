@@ -40,7 +40,7 @@ from ..providers.base import (
 from ..providers.gateway import Gateway
 from ..safety import PermissionEngine, Risk
 from ..tools import ToolContext, ToolRegistry, ToolResult
-from . import staleness
+from . import plan, staleness
 from .context import Conversation
 from .prompts import COMPACT_PROMPT, build_system_prompt
 
@@ -450,7 +450,29 @@ class AgentLoop:
         removed = self.conversation.compact(self._summarise)
         if removed:
             self._note(f"Compacted {removed} earlier messages to free context.")
+            # The summary is written by a model asked to keep what matters, and
+            # a checklist is exactly the kind of thing it drops: it reads as
+            # bookkeeping next to the code and the decisions. The list is still
+            # here in memory, so it is repeated rather than trusted to have
+            # survived.
+            self._repeat_the_plan()
             self._emit_usage(system_prompt, specs)
+
+    def _repeat_the_plan(self) -> None:
+        """Say the task list again, now that the messages holding it are gone.
+
+        Never raises and never speaks up when there is nothing to say. A turn
+        must not fail because of a reminder about itself.
+        """
+        context = self.tool_context
+        if context is None:
+            return
+        try:
+            block = plan.render(context.todos)
+        except Exception:
+            return
+        if block:
+            self.conversation.add(Message.user(block))
 
     def _summarise(self, messages: list[Message]) -> str:
         """Ask the model to write the brief that replaces old history."""

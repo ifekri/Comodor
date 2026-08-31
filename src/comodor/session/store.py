@@ -33,6 +33,11 @@ class SessionMeta:
     updated_at: float = field(default_factory=time.time)
     messages: int = 0
     cost_usd: float = 0.0
+    #: The task list as it stood, so `--resume` brings back the plan and not
+    #: just the transcript. Kept here rather than in the JSONL because it is
+    #: state, not an event: only the latest version is of any use, and the
+    #: transcript is append-only by design.
+    todos: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def when(self) -> str:
