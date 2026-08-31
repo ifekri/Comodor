@@ -200,6 +200,23 @@
                 aria-label="Add this rule"><svg><use href="#i-new"/></svg></button>
       </form>
       <div id="rules-body"></div>
+      <h3 class="section-title">Curated memory</h3>
+      <p class="empty-note" style="text-align:start">
+        One-sentence facts the agent has written down about this project and
+        about you — injected at the top of every turn. Proposals from the
+        background review wait here until you approve them.
+      </p>
+      <form class="finder" id="fact-form">
+        <label class="field">
+          <svg aria-hidden="true"><use href="#i-rule"/></svg>
+          <input id="fact-text" type="text" maxlength="120"
+                 placeholder="This project runs on PostgreSQL 15"
+                 autocomplete="off" aria-label="Write a fact">
+        </label>
+        <button class="ghost-btn" type="submit" id="fact-add" title="Add this fact"
+                aria-label="Add this fact"><svg><use href="#i-new"/></svg></button>
+      </form>
+      <div id="facts-body"></div>
     </div>
 
     <div class="panel" id="panel-admin" role="tabpanel" aria-labelledby="tab-admin">

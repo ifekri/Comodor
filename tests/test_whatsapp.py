@@ -292,14 +292,27 @@ def test_a_delivery_receipt_is_not_a_message():
     assert wh.read(payload) == []
 
 
-def test_a_photo_is_named_rather_than_dropped():
-    """Silence from a bot is indistinguishable from a bot that is off."""
+def test_a_photo_is_read_as_media():
+    """A photo with an id is downloadable now, not a refusal."""
     payload = {"entry": [{"changes": [{"value": {
         "messages": [{"from": "1555", "id": "wamid.D", "type": "image",
                       "image": {"id": "x"}}]}, "field": "messages"}]}]}
 
     found = wh.read(payload)
-    assert found[0].action == "unsupported:image"
+    assert found[0].is_media
+    assert found[0].media_id == "x"
+    assert found[0].media_kind == "image"
+
+
+def test_a_location_is_still_named_rather_than_dropped():
+    """Silence from a bot is indistinguishable from a bot that is off."""
+    payload = {"entry": [{"changes": [{"value": {
+        "messages": [{"from": "1555", "id": "wamid.E", "type": "location",
+                      "location": {"latitude": 0.0, "longitude": 0.0}}]},
+        "field": "messages"}]}]}
+
+    found = wh.read(payload)
+    assert found[0].action == "unsupported:location"
 
 
 def test_a_verify_token_is_generated_not_chosen():

@@ -74,7 +74,8 @@ class Session:
             ToolRegistry(skills=self.skills, mcp=self.mcp, config=config,
                          spawn=spawner(config, self.gateway, self.bus,
                                        skills=self.skills, mcp=self.mcp),
-                         cron_store=self._cron_store(config)),
+                         cron_store=self._cron_store(config),
+                         memory=getattr(self.memory, "facts", None)),
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )
@@ -637,7 +638,8 @@ class Session:
             ToolRegistry(skills=self.skills, mcp=self.mcp, config=self.config,
                          spawn=spawner(self.config, self.gateway, self.bus,
                                        skills=self.skills, mcp=self.mcp),
-                         cron_store=self._cron_store(self.config)),
+                         cron_store=self._cron_store(self.config),
+                         memory=getattr(self.memory, "facts", None)),
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )
@@ -1028,6 +1030,65 @@ class Session:
         except Exception as error:
             return False, f"{type(error).__name__}: {error}", ""
         return True, "", str(where)
+
+    # -- curated facts --------------------------------------------------------- #
+
+    def facts(self) -> dict[str, Any]:
+        """The curated shelf for the panel: settled entries and pending proposals."""
+        try:
+            entries = self.memory.fact_entries(include_staged=True)
+        except Exception:
+            entries = []
+        try:
+            usage = self.memory.facts.usage_line()
+            enabled = bool(self.config.learning.enabled
+                           and self.config.learning.review)
+        except Exception:
+            usage, enabled = "", False
+        return {
+            "facts": [{
+                "id": fact.id,
+                "kind": fact.kind,
+                "text": fact.text,
+                "status": fact.status,
+                "pinned": fact.pinned,
+                "staged": fact.status == "staged",
+            } for fact in entries],
+            "usage": usage,
+            "enabled": enabled,
+            "approval": bool(getattr(self.config.learning,
+                                     "review_write_approval", False)),
+        }
+
+    def fact(self, action: str, id: Any = None, text: Any = None,
+             kind: Any = None) -> tuple[bool, str]:
+        """Add, approve, reject, pin or drop one fact."""
+        if action == "add":
+            statement = str(text or "").strip()
+            if not statement:
+                return False, "a fact needs text"
+            try:
+                self.memory.add_fact(statement, kind=str(kind or "memory"))
+                return True, ""
+            except ValueError as error:
+                return False, str(error)
+        try:
+            fact_id = int(id)
+        except (TypeError, ValueError):
+            return False, "which fact?"
+        if action == "approve":
+            return (True, "") if self.memory.decide_fact(fact_id, True) \
+                else (False, "no pending fact by that id")
+        if action == "reject":
+            return (True, "") if self.memory.decide_fact(fact_id, False) \
+                else (False, "no pending fact by that id")
+        if action in ("pin", "unpin"):
+            return (True, "") if self.memory.pin_fact(fact_id, action == "pin") \
+                else (False, "no such fact")
+        if action == "remove":
+            return (True, "") if self.memory.remove_fact(fact_id) \
+                else (False, "no such fact")
+        return False, f"{action!r} is not something to do to a fact"
 
     # -- what the agent is, right now ---------------------------------------- #
 

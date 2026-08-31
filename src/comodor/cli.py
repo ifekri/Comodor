@@ -235,7 +235,8 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
         cron_store = JobStore(config.paths.user / "cron")
     tools = ToolRegistry(skills=skills, mcp=mcp, config=config,
                          spawn=spawner(config, gateway, bus, skills=skills, mcp=mcp),
-                         cron_store=cron_store)
+                         cron_store=cron_store,
+                         memory=getattr(memory, "facts", None))
     agent = AgentLoop(config, gateway, tools, bus,
                       permissions, Conversation(), memory, skills=skills)
 

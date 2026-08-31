@@ -196,6 +196,14 @@ class LearningConfig:
     max_playbook_tokens: int = 800       # hard cap on injected memory
     reflect: bool = True                 # distil lessons after each task
     reflect_model: str = ""              # blank = the active model
+    #: The background review of finished turns, which curates the small
+    #: facts store (see learning/facts.py). Runs after a turn ends, never
+    #: during one; a newer review replaces an in-flight one.
+    review: bool = True
+    review_model: str = ""               # blank = the active model
+    #: On, proposals from the review wait as `staged` until the user
+    #: approves them; off, they are written straight in.
+    review_write_approval: bool = False
     min_confidence: float = 0.15
     half_life_days: float = 45.0
     share_scope: str = "project"         # project | global

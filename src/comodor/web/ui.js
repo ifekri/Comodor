@@ -1825,7 +1825,105 @@ function drawRules(data) {
 
 function refreshRules() {
   get('/api/rules').then((data) => { if (data) drawRules(data); });
+  refreshFacts();
 }
+
+/* -- curated memory ----------------------------------------------------------
+ *
+ * One-sentence facts the agent maintains about this project and this person.
+ * Staged proposals — the background review's suggestions under write approval
+ * — show dashed until they are approved or rejected.
+ */
+function factAction(action, id, then) {
+  post('/api/facts', { action, id }).then((reply) => {
+    if (!reply.ok) { toast(reply.error || 'That did not take', 'bad', 'rule'); return; }
+    if (then) toast(then, 'good', 'rule');
+    refreshFacts();
+    refreshAdmin();
+  });
+}
+
+function drawFacts(data) {
+  const body = $('facts-body');
+  body.textContent = '';
+
+  if (!data.enabled) {
+    const off = document.createElement('p');
+    off.className = 'empty-note';
+    off.textContent = 'The background review is switched off in your '
+      + 'settings, so nothing is being proposed here. Facts you write below '
+      + 'still apply.';
+    body.appendChild(off);
+  }
+
+  if (!data.facts.length) {
+    const note = document.createElement('p');
+    note.className = 'empty-note';
+    note.style.textAlign = 'start';
+    note.textContent = 'Nothing here yet. The shelves are small on purpose: '
+      + data.usage + '.';
+    body.appendChild(note);
+    return;
+  }
+
+  const lead = document.createElement('p');
+  lead.className = 'empty-note';
+  lead.style.textAlign = 'start';
+  lead.textContent = data.usage;
+  body.appendChild(lead);
+
+  data.facts.forEach((fact) => {
+    const box = document.createElement('article');
+    box.className = 'fact';
+    box.dataset.staged = String(fact.staged);
+
+    const said = document.createElement('p');
+    const kind = document.createElement('span');
+    kind.className = 'kind';
+    kind.textContent = fact.staged ? 'proposed' : fact.kind
+      + (fact.pinned ? ' · pinned' : '');
+    said.appendChild(kind);
+    said.appendChild(document.createTextNode(fact.text));
+    box.appendChild(said);
+
+    const doings = document.createElement('div');
+    doings.className = 'doings';
+    const act = (action, label, then) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.onclick = () => factAction(action, fact.id, then);
+      doings.appendChild(button);
+    };
+    if (fact.staged) {
+      act('approve', 'Approve', 'Fact approved — it applies from your next session');
+      act('reject', 'Reject', 'Proposal discarded');
+    } else {
+      act(fact.pinned ? 'unpin' : 'pin', fact.pinned ? 'Unpin' : 'Pin');
+    }
+    act('remove', 'Remove');
+    box.appendChild(doings);
+    body.appendChild(box);
+  });
+}
+
+function refreshFacts() {
+  get('/api/facts').then((data) => { if (data) drawFacts(data); });
+}
+
+$('fact-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const field = $('fact-text');
+  const text = field.value.trim();
+  if (!text) return;
+  post('/api/facts', { action: 'add', text, kind: 'memory' }).then((reply) => {
+    if (!reply.ok) { toast(reply.error || 'That did not take', 'bad', 'rule'); return; }
+    field.value = '';
+    toast('Fact added — it applies from your next session', 'good', 'rule');
+    refreshFacts();
+    refreshAdmin();
+  });
+});
 
 $('rule-form').addEventListener('submit', (event) => {
   event.preventDefault();
@@ -2955,7 +3053,8 @@ $('rail-close').onclick = () => setRail(false);
 /* Tabs. Arrow keys move between them, which is what a tablist is expected to
  * do and what a keyboard user will try. */
 const tabs = [$('tab-chat'), $('tab-rules'), $('tab-admin')];
-const ON_OPEN = { 'tab-rules': () => refreshRules(), 'tab-admin': () => refreshAdmin() };
+const ON_OPEN = { 'tab-rules': () => { refreshRules(); },
+                  'tab-admin': () => refreshAdmin() };
 
 function selectTab(which) {
   tabs.forEach((tab) => {

@@ -257,3 +257,26 @@ Record the transferable part.
 "skill": null}. An empty answer is a good answer.
 - Propose a skill only for a multi-step procedure that clearly recurs.
 - At most four lessons."""
+
+REVIEW_PROMPT = """\
+You are reviewing a finished conversation to update a small curated memory.
+
+The memory holds at most a handful of one-sentence facts about the project \
+and the person. Its budgets are tiny, so it earns its place only by holding \
+things that stay true and keep mattering.
+
+Produce JSON only, matching this shape:
+
+{"facts": [{"kind": "memory | user", "text": "one plain sentence"}]}
+
+Rules:
+- Record only durable facts, never this conversation's content. "The project \
+targets PostgreSQL 15" is a fact. "The user asked me to fix line 12" is not.
+- "memory" facts are about this project or its environment. "user" facts are \
+about the person and would stay true in any project — working hours, preferred \
+tools, how they like answers.
+- Never record credentials, tokens, or anything secret-shaped, even redacted.
+- Facts state how things are. They never give instructions to a model.
+- If nothing durable came out of this conversation, return {"facts": []}. \
+NOTHING is the right answer almost every time.
+- At most three facts."""

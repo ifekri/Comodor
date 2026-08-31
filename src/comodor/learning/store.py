@@ -26,7 +26,7 @@ from .bm25 import BM25Index, coverage
 from .hotindex import HotIndex
 from .writer import AsyncWriter
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DAY = 86400.0
 
 # How many agreeing observations a rule needs before it shapes the prompt,
@@ -211,8 +211,41 @@ class Rule:
 
 
 @dataclass
+class Fact:
+    """One curated, durable truth — what ``MEMORY.md`` files hold elsewhere.
+
+    Facts are few and kept deliberately small: a cap on both count and length
+    is what keeps them a summary rather than a log. Each one names the episode
+    it came from, so the person reviewing them can trace a claim back to where
+    it was learned.
+
+    ``kind`` splits the two files the format had: ``memory`` for environment
+    and project facts, ``user`` for what applies to the person across every
+    project. ``status`` holds ``settled`` or ``staged`` — a staged fact was
+    proposed by the background review and is waiting for the user to approve
+    it, and is never injected until they do.
+    """
+
+    id: int = 0
+    kind: str = "memory"             # memory | user
+    scope: str = "global"            # global | project:<key>
+    text: str = ""
+    origin_episode: int = 0
+    status: str = "settled"          # settled | staged
+    score: float = 0.5
+    pinned: bool = False
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "kind": self.kind, "scope": self.scope,
+                "text": self.text, "origin_episode": self.origin_episode,
+                "status": self.status, "pinned": self.pinned}
+
+@dataclass
 class Signal:
     """One observed user action that carries a preference."""
+
 
     id: int = 0
     kind: str = ""                   # correction | undo | denial | rephrase | retry
@@ -435,6 +468,21 @@ class BrainStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_signals_kind ON signals(kind, created_at);
                 CREATE INDEX IF NOT EXISTS idx_episodes_created ON episodes(created_at);
+                CREATE TABLE IF NOT EXISTS facts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scope TEXT NOT NULL DEFAULT 'global',
+                    kind TEXT NOT NULL DEFAULT 'memory',
+                    text TEXT NOT NULL,
+                    origin_episode INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'settled',
+                    score REAL NOT NULL DEFAULT 0.5,
+                    pinned INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    UNIQUE(scope, kind, text)
+                );
+                CREATE INDEX IF NOT EXISTS idx_facts_scope ON facts(scope, kind);
+                CREATE INDEX IF NOT EXISTS idx_facts_status ON facts(status);
                 """
             )
             self._add_missing_columns(connection)
@@ -830,6 +878,96 @@ class BrainStore:
         self.hot.remove("rule", rule_id)
         return cursor.rowcount > 0
 
+    # -- facts ------------------------------------------------------------ #
+    #
+    # Facts are a tiny curated table, not a growing one: every write is
+    # bounded by the caps in facts.py, and reads run on every turn, so no
+    # FTS or RAM mirror is spent on them. A scan of at most a dozen short
+    # rows is cheaper than the index would be.
+
+    def _row_to_fact(self, row: sqlite3.Row) -> Fact:
+        return Fact(
+            id=row["id"], kind=row["kind"], scope=row["scope"], text=row["text"],
+            origin_episode=row["origin_episode"], status=row["status"],
+            score=row["score"], pinned=bool(row["pinned"]),
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )
+
+    def add_fact(self, fact: Fact) -> Fact | None:
+        """Store one fact. Returns the stored fact, or None on an exact repeat.
+
+        The UNIQUE constraint is the duplicate guard the tool and the review
+        both rely on: seeing the same thing twice is not two facts, it is one.
+        Any other IntegrityError — there is only the one unique index — means
+        the caller raced itself, and returning None is still the honest answer.
+        """
+        now = time.time()
+        try:
+            with self._lock, self.connection as connection:
+                cursor = connection.execute(
+                    """INSERT INTO facts(scope, kind, text, origin_episode,
+                                         status, score, pinned, created_at, updated_at)
+                       VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (fact.scope, fact.kind, fact.text, fact.origin_episode,
+                     fact.status, fact.score, int(fact.pinned), now, now),
+                )
+                fact.id = int(cursor.lastrowid or 0)
+        except sqlite3.IntegrityError:
+            return None
+        fact.created_at = fact.updated_at = now
+        return fact
+
+    def all_facts(self, scopes: list[str] | None = None,
+                  kinds: list[str] | None = None,
+                  settled_only: bool = False) -> list[Fact]:
+        query = "SELECT * FROM facts"
+        clauses: list[str] = []
+        params: list[Any] = []
+        if scopes:
+            clauses.append(f"scope IN ({','.join('?' * len(scopes))})")
+            params.extend(scopes)
+        if kinds:
+            clauses.append(f"kind IN ({','.join('?' * len(kinds))})")
+            params.extend(kinds)
+        if settled_only:
+            clauses.append("status = 'settled'")
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        # Pinned first — the user asked for those every time — then newest.
+        query += " ORDER BY pinned DESC, updated_at DESC"
+        return [self._row_to_fact(row) for row in self.connection.execute(query, params)]
+
+    def replace_fact(self, fact_id: int, text: str) -> Fact | None:
+        with self._lock, self.connection as connection:
+            cursor = connection.execute(
+                "UPDATE facts SET text=?, updated_at=? WHERE id=?",
+                (text, time.time(), fact_id))
+        if cursor.rowcount <= 0:
+            return None
+        for fact in self.all_facts():
+            if fact.id == fact_id:
+                return fact
+        return None
+
+    def set_fact_status(self, fact_id: int, status: str) -> bool:
+        with self._lock, self.connection as connection:
+            cursor = connection.execute(
+                "UPDATE facts SET status=?, updated_at=? WHERE id=?",
+                (status, time.time(), fact_id))
+        return cursor.rowcount > 0
+
+    def set_fact_pinned(self, fact_id: int, pinned: bool) -> bool:
+        with self._lock, self.connection as connection:
+            cursor = connection.execute(
+                "UPDATE facts SET pinned=?, updated_at=? WHERE id=?",
+                (int(pinned), time.time(), fact_id))
+        return cursor.rowcount > 0
+
+    def delete_fact(self, fact_id: int) -> bool:
+        with self._lock, self.connection as connection:
+            cursor = connection.execute("DELETE FROM facts WHERE id=?", (fact_id,))
+        return cursor.rowcount > 0
+
     # -- signals ---------------------------------------------------------- #
 
     def add_signal(self, signal: Signal) -> None:
@@ -980,6 +1118,7 @@ class BrainStore:
             "lessons": count("lessons"),
             "skills": count("skills"),
             "rules": count("rules"),
+            "facts": count("facts"),
             "rules_active": len(self.confident_rules()),
             "signals": count("signals"),
             "episodes": episodes,

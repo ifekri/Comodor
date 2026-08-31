@@ -65,7 +65,8 @@ class ToolRegistry:
                  skills: Any = None, history: Any = None,
                  session_id: str = "", mcp: Any = None,
                  spawn: Any = None, config: Any = None,
-                 cron_store: Any = None, skill_ledger: Any = None) -> None:
+                 cron_store: Any = None, skill_ledger: Any = None,
+                 memory: Any = None) -> None:
         self._tools: dict[str, Tool] = {}
         if tools is not None:
             for tool in tools:
@@ -94,6 +95,14 @@ class ToolRegistry:
         # recursion guard: a scheduled run cannot schedule another.
         if cron_store is not None:
             self.add(CronJob(cron_store))
+        # The curated-memory tool, where there is a facts service to curate.
+        # Registries built without one — inside a delegate, or a scheduled
+        # run — simply do not offer it, the same wiring rule the cronjob
+        # tool follows: a tool absent cannot be called.
+        if memory is not None:
+            from .memory import Memory
+
+            self.add(Memory(memory))
         # The skills tool, where skills are enabled at all. It reaches the
         # managed skills directories only, and every change it makes is
         # recorded in the ledger so the person can put it back.

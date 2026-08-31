@@ -305,6 +305,10 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 self._json(200, server.session.rules())
                 return
 
+            if route == "/api/facts":
+                self._json(200, server.session.facts())
+                return
+
             if route == "/api/models":
                 wanted = (query.get("provider") or [""])[0]
                 self._json(200, server.session.models_for(
@@ -552,6 +556,13 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                     statement=body.get("statement"))
                 self._json(200 if done else 400,
                            {"ok": done, "error": why, "rule": extra})
+                return
+
+            if route == "/api/facts":
+                done, why = server.session.fact(
+                    str(body.get("action") or ""), id=body.get("id"),
+                    text=body.get("text"), kind=body.get("kind"))
+                self._json(200 if done else 400, {"ok": done, "error": why})
                 return
 
             if route == "/api/setting":

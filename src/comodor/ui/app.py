@@ -268,7 +268,8 @@ class App:
         self.tools = ToolRegistry(skills=self.skills, history=self.history,
                                   config=self.config,
                                   session_id=self.session.id, mcp=self.mcp,
-                                  cron_store=self._cron_store())
+                                  cron_store=self._cron_store(),
+                                  memory=getattr(self.memory, "facts", None))
         return len(self.skills)
 
     def _warn_if_the_budget_is_a_decoration(self) -> None:
@@ -857,6 +858,19 @@ class App:
                 self._toast(" · ".join(parts), "good")
         elif action == "taught":
             self._toast("noted — I'll remember that", "good")
+        elif action == "facts":
+            verb = payload.get("verb", "remembered")
+            names = "; ".join(str(item.get("text", "")) for item in items[:3])
+            hint = "/memory facts pending to review" if payload.get("staged") \
+                else "/memory facts to see it"
+            self.state.entries.append(Entry(
+                "memory", f"{verb}: {names}",
+                meta={"hint": hint}))
+        elif action == "reviewing":
+            # Quietly. The review runs after the turn; saying so on the way
+            # out of every turn would be noise for work that usually adds
+            # nothing.
+            pass
 
     def _on_turn_end(self, payload: dict[str, Any]) -> None:
         stopped = payload.get("stopped", "done")
@@ -1098,6 +1112,10 @@ class App:
                     key="gateway")
 
     def cmd_memory(self, args: str) -> None:
+        """The two shelves: curated facts first, then the learned lessons."""
+        if args.strip().lower() in ("facts", "fact"):
+            self._facts_overlay()
+            return
         lessons = self.memory.search(args, limit=40)
         if not lessons:
             self.state.overlay = info_overlay(
@@ -1113,6 +1131,64 @@ class App:
         ]
         self.state.overlay = select_overlay(
             f"Memory ({len(lessons)})", items, self._memory_action)
+
+    def _facts_overlay(self, args: str = "") -> None:
+        """The curated shelf, staged proposals included when there are any."""
+        include_staged = args.strip().lower() == "pending"
+        entries = self.memory.fact_entries(include_staged=include_staged)
+        usage = self.memory.facts.usage_line()
+        if not entries:
+            self.state.overlay = info_overlay(
+                "Curated memory", f"Nothing here yet. Shelves: {usage}\n\n"
+                "Facts are one-sentence truths about this project and about "
+                "you, written down by the agent or by you with /teach, and "
+                "injected at the top of every turn.")
+            return
+        items = []
+        for fact in entries:
+            mark = ""
+            if fact.status == "staged":
+                mark = "  [staged — review]"
+            elif fact.pinned:
+                mark = "  [pinned]"
+            items.append((f"#{fact.id} ({fact.kind}) {fact.text}{mark}",
+                          f"{fact.status}"))
+        self.state.overlay = select_overlay(
+            f"Curated memory — {usage}", items,
+            lambda label: self._fact_action(label, include_staged))
+
+    def _fact_action(self, label: str, staged_view: bool) -> None:
+        try:
+            fact_id = int(label.split()[0].lstrip("#"))
+        except (ValueError, IndexError):
+            return
+        actions = [("pin", "always include this"), ("unpin", "back to normal"),
+                   ("remove", "delete it")]
+        if staged_view:
+            actions = [("approve", "write it into the memory"),
+                       ("reject", "discard the proposal")] + actions
+        self.state.overlay = select_overlay(
+            f"Fact #{fact_id}", actions,
+            lambda action: self._apply_fact_action(fact_id, action))
+
+    def _apply_fact_action(self, fact_id: int, action: str) -> None:
+        if action == "approve":
+            done = self.memory.decide_fact(fact_id, approve=True)
+        elif action == "reject":
+            done = self.memory.decide_fact(fact_id, approve=False)
+        elif action in ("pin", "unpin"):
+            done = self.memory.pin_fact(fact_id, action == "pin")
+        elif action == "remove":
+            done = self.memory.remove_fact(fact_id)
+        else:
+            return
+        if done and action in ("approve", "pin", "unpin"):
+            note = "" if action == "approve" else " pinned" if action == "pin" \
+                else " unpinned"
+            self._toast(f"fact{note or ' approved'}", "good")
+        elif not done:
+            self._toast("that did not take", "warn")
+        self._facts_overlay()
 
     def _memory_action(self, label: str) -> None:
         try:
@@ -1438,6 +1514,7 @@ class App:
             self.memory.store.episodes(limit=300, scope=self.memory.project_scope),
             lessons=stats.get("lessons", 0),
             rules_active=stats.get("rules_active", 0),
+            facts=stats.get("facts_here", 0),
         )
         overlay = info_overlay("Progress", "")
         overlay.meta["renderable"] = render_progress(
@@ -1471,6 +1548,9 @@ class App:
             "", "**Brain**", "",
             f"- lessons: {stats['lessons']}",
             f"- skills: {stats['skills']}",
+            f"- facts: {stats.get('facts', 0)}"
+            + (f" (review cost this session: ${stats['review_cost_usd']:.4f})"
+               if stats.get("review_cost_usd") else ""),
             f"- episodes: {stats['episodes']}"
             f" ({stats['success_rate']:.0%} succeeded)",
         ]
@@ -1817,7 +1897,8 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/mode": ("cmd_mode", "act, plan or chat"),
     "/loop": ("cmd_loop", "autonomous iteration on or off"),
     "/gw": ("cmd_gateway", "model gateway and routing policy"),
-    "/memory": ("cmd_memory", "browse what it has learned"),
+    "/memory": ("cmd_memory", "browse what it has learned "
+                                "(try /memory facts)"),
     "/rules": ("cmd_rules", "house rules learned from your code and edits"),
     "/progress": ("cmd_progress", "proof that it is getting better"),
     "/teach": ("cmd_teach", "record something it should remember"),

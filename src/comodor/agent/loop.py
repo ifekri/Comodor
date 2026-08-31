@@ -665,9 +665,19 @@ class AgentLoop:
             self.bus.emit(Kind.MEMORY, action="recalled",
                           items=[lesson.as_dict() for lesson in lessons],
                           rules=len(rules))
-        if not lessons and not rules:
+        blocks = []
+        playbook = self.memory.render_playbook(lessons, rules=rules)
+        if playbook:
+            blocks.append(playbook)
+        # The curated facts briefing was frozen when this conversation
+        # started, so appending it here costs nothing after the first turn:
+        # the head of the request stays byte-identical and the cache holds.
+        facts = getattr(self.memory, "facts_briefing", "")
+        if facts:
+            blocks.append(facts)
+        if not blocks:
             return ""
-        return self.memory.render_playbook(lessons, rules=rules)
+        return SECTION_GAP.join(blocks)
 
     def _skills_for(self, user_text: str) -> str:
         """Pick the authored skills that fit this request, and announce them.

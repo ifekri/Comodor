@@ -53,6 +53,20 @@ class LearningEngine:
         self._reflect_lock = threading.Lock()
         self._threads: list[threading.Thread] = []
 
+        # Curated memory: a small, separate shelf. The facts service is
+        # cheap to build (one store handle, no threads) and is created even
+        # when learning is off, so /memory can still list what was learned
+        # before it was switched off.
+        from .facts import FactService
+
+        self.facts = FactService(
+            self.store, scopes=["global", self.project_scope],
+            write_scope=self.write_scope,
+        )
+        #: The briefing block, built once. Facts learned after this point
+        #: join the next session, not this one — the prefix-cache rule.
+        self.facts_briefing = ""
+
         # Reflex: the fast lane. Deterministic, model-free, always on.
         self.detector = SignalDetector(
             store=self.store, checkpoints=checkpoints, scope=self.project_scope,
@@ -62,6 +76,34 @@ class LearningEngine:
         self._prefetch_lock = threading.Lock()
         #: The learned vocabulary. Read on first recall, not on start-up.
         self._associations = None
+        self._reviewer: Any = None
+        self.freeze_facts()
+
+    # -- curated facts ----------------------------------------------------- #
+
+    def freeze_facts(self) -> None:
+        """Take the session's facts snapshot.
+
+        Called once at construction. Everything the briefing says for the
+        rest of this session was true when it was taken, which is exactly
+        what keeps the head of every request byte-identical.
+        """
+        try:
+            self.facts_briefing = self.facts.snapshot()
+        except Exception:
+            self.facts_briefing = ""
+
+    def refresh_facts(self) -> str:
+        """Rebuild the snapshot deliberately — a new conversation, a /memory change."""
+        self.facts_briefing = self.facts.snapshot()
+        return self.facts_briefing
+
+    @property
+    def review_spent(self) -> float:
+        """What background review has cost this session, in USD."""
+        reviewer = self._reviewer
+        usage = getattr(reviewer, "usage", None) if reviewer else None
+        return float(getattr(usage, "cost_usd", 0.0) or 0.0)
 
     # -- scoping ---------------------------------------------------------- #
 
@@ -337,6 +379,8 @@ class LearningEngine:
         if self.config.learning.reflect and self.gateway is not None:
             self._reflect_async(goal, list(messages), stopped, episode.id)
 
+        self._review_async(messages, stopped, episode.id)
+
     # -- 4. reflect ------------------------------------------------------- #
 
     def _reflect_async(self, goal: str, messages: list[Any], outcome: str,
@@ -347,6 +391,44 @@ class LearningEngine:
         )
         thread.start()
         self._threads.append(thread)
+
+    def _review_async(self, messages: list[Any], outcome: str,
+                      episode_id: int) -> None:
+        """The curated-memory review, after the turn has fully ended.
+
+        Announced through the bus when something stuck, for the same reason
+        every other learned thing is announced: silent adaptation is the
+        version of this feature nobody trusts.
+        """
+        if not self.config.learning.enabled or not self.config.learning.review:
+            return
+        if self.gateway is None:
+            return
+
+        if self._reviewer is None:
+            from .review import Reviewer
+
+            self._reviewer = Reviewer(
+                self.facts, self.gateway,
+                model=self.config.learning.review_model,
+                write_scope=self.write_scope,
+                staging=self.config.learning.review_write_approval,
+            )
+            self._reviewer.on_accepted = self._announce_facts
+        thread = self._reviewer.review_async(messages, outcome, episode_id)
+        if thread is not None:
+            self._threads.append(thread)
+
+    def _announce_facts(self, facts: list[Any], staged: bool) -> None:
+        """Say what the review wrote, once it has actually written it."""
+        if not facts:
+            return
+        verb = "proposed" if staged else "remembered"
+        self.bus.emit(
+            Kind.MEMORY, action="facts",
+            items=[fact.as_dict() if hasattr(fact, "as_dict") else {"text": str(fact)}
+                   for fact in facts],
+            staged=staged, verb=verb)
 
     def _reflect(self, goal: str, messages: list[Any], outcome: str,
                  episode_id: int) -> None:
@@ -478,6 +560,48 @@ class LearningEngine:
         return [lesson for lesson, _ in
                 self.store.search_lessons(query, self.scopes, limit=limit)]
 
+    # -- curated facts: user-facing controls ------------------------------- #
+
+    def fact_entries(self, include_staged: bool = False) -> list:
+        try:
+            return self.facts.entries(include_staged=include_staged)
+        except Exception:
+            return []
+
+    def add_fact(self, text: str, kind: str = "memory") -> Any:
+        """The user wrote a fact by hand. Settled at once, pinned to nothing."""
+        stored = self.facts.add(text, kind=kind)
+        self.refresh_facts()
+        self.bus.emit(Kind.MEMORY, action="taught", items=[stored.as_dict()])
+        return stored
+
+    def remove_fact(self, fact_id: int) -> bool:
+        for fact in self.facts.entries(include_staged=True):
+            if fact.id == fact_id:
+                self.facts.store.delete_fact(fact_id)
+                self.refresh_facts()
+                self.bus.emit(Kind.MEMORY, action="forgot_fact", id=fact_id)
+                return True
+        return False
+
+    def decide_fact(self, fact_id: int, approve: bool) -> bool:
+        """Approve or reject a staged fact proposed by the review."""
+        from .facts import STATUS_SETTLED
+
+        if approve:
+            done = self.facts.set_staged(fact_id, STATUS_SETTLED)
+        else:
+            done = self.facts.store.delete_fact(fact_id)
+        if done:
+            self.refresh_facts()
+        return done
+
+    def pin_fact(self, fact_id: int, pinned: bool = True) -> bool:
+        done = self.facts.pin(fact_id, pinned)
+        if done:
+            self.refresh_facts()
+        return done
+
     # -- house rules ------------------------------------------------------ #
 
     def all_rules(self) -> list[Rule]:
@@ -532,6 +656,8 @@ class LearningEngine:
         data["rules_everywhere"] = data.get("rules_active", 0)
         data["rules_active"] = len(self.active_rules())
         data["rules_here"] = len(self.store.all_rules(self.scopes))
+        data["facts_here"] = len(self.facts.entries())
+        data["review_cost_usd"] = self.review_spent
         return data
 
     def close(self) -> None:

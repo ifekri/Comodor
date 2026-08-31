@@ -110,7 +110,8 @@ class AcpSession:
             ToolRegistry(skills=self.skills, mcp=self.mcp, config=config,
                          spawn=spawner(config, self.gateway, self.bus,
                                        skills=self.skills, mcp=self.mcp),
-                         cron_store=self._cron_store(config)),
+                         cron_store=self._cron_store(config),
+                         memory=getattr(self.memory, "facts", None)),
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )
