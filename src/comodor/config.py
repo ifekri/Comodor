@@ -635,8 +635,22 @@ class SafetyConfig:
     #: it can do is add a line the model did not need. Off is for somebody
     #: editing a dialect our parsers do not know.
     verify_edits: bool = True
+    #: Commands auto-approved without a prompt, matched per branch after the
+    #: deny list has refused. The first token is what an "always allow" in the
+    #: UI grants, so `git` here approves `git status`, `git log` and every
+    #: other git subcommand — write one line per command stem.
     allow_commands: list[str] = field(default_factory=list)
     deny_commands: list[str] = field(default_factory=lambda: list(DEFAULT_DENY))
+    #: Smart approvals, off by default. When on, a shell command that would
+    #: otherwise prompt is first shown to a cheap model for a risk read:
+    #: allow runs it (labeled as the model's call), deny refuses, ask sends it
+    #: to the human as before. A slow or broken assessment is an "ask", never
+    #: a yes.
+    smart_approvals: bool = False
+    #: The model the assessment runs on. Empty means the session's current
+    #: provider default; name something small and fast — this is a
+    #: classification job, not a reasoning one.
+    smart_model: str = ""
     workspace_only: bool = True
     max_file_read_bytes: int = 512_000
     #: How large a file `read_file` will scan to find the lines asked for. It

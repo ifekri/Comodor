@@ -33,7 +33,7 @@ from ..providers import registry
 from ..providers.fake import demo_scripts
 from ..providers.gateway import Gateway
 from ..questions import CANCELLED, encode_answers
-from ..safety import CheckpointStore, PermissionEngine, Redactor
+from ..safety import CheckpointStore, PermissionEngine, Redactor, make_assessor
 from ..session import SessionIndex, SessionMeta, SessionStore, derive_title, new_session_id
 from ..skills import candidates as skill_candidates
 from ..skills import load_for as skills_for
@@ -84,6 +84,7 @@ class App:
         self.events = EventQueue(self.bus)
         self.gateway = Gateway(config, scripts=demo_scripts() if demo else None)
         self.permissions = PermissionEngine(config, self.bus)
+        self.permissions.assess = make_assessor(config, self.gateway)
 
         # Reflex needs the checkpoint journal: it is what records the exact bytes
         # the agent left in each file, so a later hand-edit can be recognised.

@@ -37,7 +37,7 @@ from ..paths import Paths
 from ..providers.base import Message
 from ..providers.gateway import Gateway
 from ..questions import CANCELLED, decode_answers
-from ..safety import CheckpointStore, PermissionEngine, Redactor
+from ..safety import CheckpointStore, PermissionEngine, Redactor, make_assessor
 from ..session import SessionIndex, SessionMeta, SessionStore, derive_title, new_session_id
 from ..skills import load_for as load_skills
 from ..tools import ToolRegistry
@@ -62,6 +62,7 @@ class Session:
                              if entry.api_key]),
         )
         self.permissions = PermissionEngine(config, self.bus)
+        self.permissions.assess = make_assessor(config, self.gateway)
         self.permissions.on_denied = self.memory.on_denied
         self.skills = load_skills(config)
         self.mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None

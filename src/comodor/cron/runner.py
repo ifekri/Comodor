@@ -20,7 +20,7 @@ from ..events import EventBus, Kind
 from ..mcp import MCPManager
 from ..providers.gateway import Gateway
 from ..questions import CANCELLED
-from ..safety import PermissionEngine
+from ..safety import PermissionEngine, make_assessor
 from ..skills import load_for as load_skills
 from ..tools import ToolRegistry
 
@@ -59,6 +59,10 @@ def run_job(config, job) -> RunOutcome:
 
     gateway = Gateway(config)
     permissions = PermissionEngine(config, bus)
+    # A scheduled run has nobody at the keyboard: a smart verdict of "ask" —
+    # or an assessor that cannot run — refuses through the headless branch
+    # below, exactly as an unanswered prompt would.
+    permissions.assess = make_assessor(config, gateway)
     # No learning engine on purpose: a scheduled run has no person behind it
     # whose corrections could be learned, and lessons proposed by a job would
     # write themselves into sessions the user never saw.

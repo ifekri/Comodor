@@ -100,6 +100,17 @@ class Paths:
         return self.user / "logs" / "comodor.log"
 
     @property
+    def approvals(self) -> Path:
+        """The record of shell commands a person said yes to.
+
+        One JSON line per approval. Nothing reads it while decisions are
+        being made — it exists so approval mining can look at what this user
+        actually approves and propose an allowlist from evidence rather than
+        guesswork.
+        """
+        return self.user / "approvals.jsonl"
+
+    @property
     def checkpoints(self) -> Path:
         return self.project / PROJECT_DIR_NAME / "checkpoints"
 

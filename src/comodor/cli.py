@@ -101,6 +101,15 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument("--yes", action="store_true",
                         help="do not ask; for scripts")
 
+    approvals = sub.add_parser(
+        "approvals",
+        help="propose an allowlist from the commands you keep approving")
+    approvals.add_argument(
+        "--apply", metavar="STEM", nargs="*", default=None,
+        help="add the named stems (or every proposal with no names) to "
+             "safety.allow_commands and save")
+
+
     from .acp.commands import register as register_acp
     from .cron.commands import register as register_cron
     from .local.commands import register as register_local
@@ -204,7 +213,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     from .learning import LearningEngine
     from .mcp import MCPManager
     from .providers.gateway import Gateway
-    from .safety import CheckpointStore, PermissionEngine, Redactor
+    from .safety import CheckpointStore, PermissionEngine, Redactor, make_assessor
     from .skills import load_for as load_skills
     from .tools import ToolRegistry
 
@@ -226,6 +235,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
                          if entry.api_key]),
     )
     permissions = PermissionEngine(config, bus)
+    permissions.assess = make_assessor(config, gateway)
     permissions.on_denied = memory.on_denied
     skills = load_skills(config)
     mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
@@ -351,6 +361,53 @@ def run_setup_command(config: Config, args: Any = None) -> int:
 
     if config.start_after_setup in ("interface", "both"):
         return start_interface(config, args)
+    return 0
+
+
+def run_approvals(config: Config, args: argparse.Namespace) -> int:
+    """Show — or apply — the allowlist the approval log supports."""
+    from rich.console import Console
+
+    from .safety.mining import MIN_APPROVALS, apply_proposals, propose
+
+    console = Console()
+    log = config.paths.approvals
+    wanted = args.apply
+
+    if wanted is None:                                    # plain suggest
+        proposals = propose(log)
+        if not proposals:
+            console.print(
+                f"No proposals yet — nothing in [dim]{log}[/dim] has been "
+                f"approved {MIN_APPROVALS} times or more.")
+            console.print(
+                "[dim]Every command you approve is recorded there; check "
+                "back after a couple of weeks of use.[/dim]")
+            return 0
+        console.print(f"[bold]Proposed allowlist entries[/bold] "
+                      f"(from {log}):")
+        for item in proposals:
+            console.print(f"  [good]{item.stem}[/good]  — {item.reason}")
+            for example in item.examples[:-1]:
+                console.print(f"[dim]    {example}[/dim]")
+        console.print(
+            "\nApply them all with [dim]comodor approvals --apply[/dim], "
+            "or name the ones you want: [dim]comodor approvals --apply "
+            f"{' '.join(item.stem for item in proposals[:2])}[/dim]")
+        return 0
+
+    stems = wanted if wanted else \
+        [item.stem for item in propose(log)]
+    if not stems:
+        console.print("Nothing to apply — there are no proposals.")
+        return 1
+    added = apply_proposals(config, stems)
+    if not added:
+        console.print("Nothing changed — every named stem was already "
+                      "in safety.allow_commands.")
+        return 0
+    console.print(f"[good]added[/good] {', '.join(added)}")
+    console.print(f"[dim]saved to {config.paths.config_file}[/dim]")
     return 0
 
 
@@ -916,6 +973,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_acp(config, args)
     if args.command == "preview":
         return run_preview(config, args)
+    if args.command == "approvals":
+        return run_approvals(config, args)
     if args.command == "setup":
         return run_setup_command(config, args)
     if args.command == "import":

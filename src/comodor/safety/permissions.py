@@ -17,12 +17,14 @@ prompt.
 
 from __future__ import annotations
 
+import json
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from ..config import Config
 from ..events import EventBus, Request
@@ -65,6 +67,11 @@ class PermissionEngine:
     prompt_timeout: float = 600.0
     # Set by the app so a refusal becomes a learned preference, not just a "no".
     on_denied: Callable[[str, str], None] | None = None
+    # Set by the app when safety.smart_approvals is on: a callable taking the
+    # command line and returning a Verdict. Kept as a callback rather than a
+    # gateway reference so the engine stays free of provider plumbing and a
+    # test can script verdicts directly.
+    assess: Callable[[str], Any] | None = None
     asked: int = 0
     denials: list[tuple[str, str]] = field(default_factory=list)
     _session_grants: set[str] = field(default_factory=set)
@@ -94,13 +101,49 @@ class PermissionEngine:
 
         Matching is substring-based and case-insensitive on purpose: these are
         the shapes that are never acceptable regardless of how they are dressed
-        up, and a regex would be easier to slip past.
+        up, and a regex would be easier to slip past. Every branch of a
+        pipeline is checked — `echo hi && rm -rf ~` is two commands, one of
+        which is on the list, and the list is not fooled by which half runs
+        first.
         """
-        haystack = " ".join(command.lower().split())
-        for pattern in self.config.safety.deny_commands:
-            needle = " ".join(str(pattern).lower().split())
-            if needle and needle in haystack:
-                return str(pattern)
+        return self._match_command(command, self.config.safety.deny_commands)
+
+    def _match_command(self, command: str, patterns: Any) -> str:
+        """The first matched pattern across the whole command and each branch."""
+        from .smart import blocked_absolutely, command_branches
+
+        # The absolute blocklist runs over the raw command as well as its
+        # branches, so a pattern split across a pipe cannot become two halves.
+        # It lives in `smart.py` but it is not part of smart mode: it binds
+        # every mode, allowlist and assessor equally.
+        absolute = blocked_absolutely(command)
+        if absolute:
+            return absolute
+        for candidate in command_branches(command):
+            haystack = " ".join(candidate.lower().split())
+            for pattern in patterns:
+                needle = " ".join(str(pattern).lower().split())
+                if needle and needle in haystack:
+                    return str(pattern)
+        return ""
+
+    def allowed_command(self, command: str) -> str:
+        """The matched allowlist entry, or an empty string.
+
+        The user allowlist is layer three: it approves without a prompt and
+        without a model, but only after the deny list has had its say, and
+        only for whole command stems (`git` approves `git status` because that
+        is the shape an "always allow" in the UI records too).
+        """
+        from .smart import command_branches
+
+        first = command.split()[0] if command.split() else ""
+        if first and first in self.config.safety.allow_commands:
+            return first
+        for candidate in command_branches(command):
+            head = candidate.split()[0] if candidate.split() else ""
+            if head and head in self.config.safety.allow_commands:
+                return head
         return ""
 
     def path_allowed(self, path: Path) -> tuple[bool, str]:
@@ -134,6 +177,27 @@ class PermissionEngine:
         if self.auto_approved(risk):
             return Decision(True, "auto-approved by policy")
 
+        # Shell commands carry their own three layers, in order: the deny
+        # list (which the tool re-checks at run time too), the user's
+        # allowlist, then the smart assessor. The command text rides in the
+        # summary or detail; preferring the detail keeps long commands whole.
+        if tool == "run_shell":
+            command = detail.removeprefix("$ ") if detail.startswith("$ ") \
+                else summary.removeprefix("run: ")
+            blocked = self.denied_command(command)
+            if blocked:
+                return Decision(False, f"matches the blocked pattern {blocked!r}")
+            if self.allowed_command(command):
+                return Decision(True, "allowed by your command allowlist")
+            if self.assess is not None:
+                verdict = self.assess(command)
+                if verdict.verdict == "allow":
+                    return Decision(True, verdict.labeled)
+                if verdict.verdict == "deny":
+                    return Decision(False, verdict.labeled)
+                # "ask" — or a timed-out assessment — falls through to the
+                # human, which is where the question was going anyway.
+
         if self.bus is None:
             # Headless with no answering surface: refuse rather than assume yes.
             return Decision(False, "no interactive approval available "
@@ -153,8 +217,12 @@ class PermissionEngine:
         if answer == ALLOW_ALWAYS:
             with self._lock:
                 self._session_grants.add(grant_key)
+            if tool == "run_shell":
+                self._record(command)
             return Decision(True, "approved for this session", remembered=True)
         if answer == ALLOW:
+            if tool == "run_shell":
+                self._record(command)
             return Decision(True, "approved")
 
         # A refusal names one thing this user does not want done. It is the
@@ -174,6 +242,20 @@ class PermissionEngine:
             asked, denials = self.asked, list(self.denials)
             self.asked, self.denials = 0, []
         return asked, denials
+
+    def _record(self, command: str) -> None:
+        """Write one human approval to the mining log. Failure is silent:
+        the approval stands whether or not the record got written."""
+        try:
+            path = self.config.paths.approvals
+            path.parent.mkdir(parents=True, exist_ok=True)
+            record = json.dumps(
+                {"at": time.time(), "command": " ".join(command.split())},
+                ensure_ascii=False)
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(record + "\n")
+        except Exception:
+            pass
 
     # -- grants ----------------------------------------------------------- #
 
