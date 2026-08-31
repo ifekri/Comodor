@@ -34,13 +34,15 @@ from .base import (
 )
 from .fake import FakeProvider, Script
 from .openai_compat import OpenAICompatProvider
+from .pool import KeyPool, pool_keys
 
 # --------------------------------------------------------------------------- #
 # construction
 # --------------------------------------------------------------------------- #
 
 
-def build_provider(entry: ProviderConfig, scripts: list[Script] | None = None) -> Provider:
+def build_provider(entry: ProviderConfig, scripts: list[Script] | None = None,
+                   key_pool: Any = None) -> Provider:
     """Instantiate the adapter for one configured backend."""
     if entry.kind == "fake":
         return FakeProvider(scripts=scripts, model=entry.model or "fake-1")
@@ -56,12 +58,12 @@ def build_provider(entry: ProviderConfig, scripts: list[Script] | None = None) -
         return AnthropicProvider(
             name=entry.name, base_url=entry.base_url, api_key=entry.api_key,
             model=entry.model, headers=entry.headers, timeout=entry.timeout,
-            label=entry.display,
+            label=entry.display, key_pool=key_pool,
         )
     return OpenAICompatProvider(
         name=entry.name, base_url=entry.base_url, api_key=entry.api_key,
         model=entry.model, headers=entry.headers, timeout=entry.timeout,
-        label=entry.display,
+        label=entry.display, key_pool=key_pool,
     )
 
 
@@ -125,7 +127,9 @@ class Gateway:
         self._scripts = scripts
         self._instances: dict[str, Provider] = {}
         self._health: dict[str, Health] = {}
-        self._lock = threading.Lock()
+        self._pools: dict[str, KeyPool] = {}
+        # Reentrant because provider() holds this while consulting pool().
+        self._lock = threading.RLock()
         self.last_route: Route | None = None
 
     # -- instances -------------------------------------------------------- #
@@ -137,9 +141,27 @@ class Gateway:
                 entry = self.config.providers.get(name)
                 if entry is None:
                     raise ProviderError(f"unknown provider: {name}", retryable=False)
-                instance = build_provider(entry, self._scripts)
+                instance = build_provider(
+                    entry, self._scripts, key_pool=self.pool(name))
                 self._instances[name] = instance
             return instance
+
+    def pool(self, name: str) -> KeyPool | None:
+        """The key pool of one provider, or None when it has a single key."""
+        with self._lock:
+            pool = self._pools.get(name)
+            if pool is None:
+                entry = self.config.providers.get(name)
+                keys = pool_keys(entry) if entry is not None else []
+                if len(keys) > 1:
+                    pool = KeyPool(provider=name, keys=keys)
+                    self._pools[name] = pool
+            return pool
+
+    def pool_status(self, name: str) -> list[dict[str, object]]:
+        """Per-key state for the interface — masked keys only."""
+        pool = self.pool(name)
+        return pool.status() if pool else []
 
     def health(self, name: str) -> Health:
         with self._lock:

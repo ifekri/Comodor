@@ -138,6 +138,7 @@ class BackgroundDelegates:
 
     def _work(self, identifier: str, brief: str, write: bool, cwd: Any,
               cancel: Cancellation) -> None:
+        run: DelegateRun | None = None
         try:
             loop = self.spawner(cwd=cwd, mode="act" if write else "plan",
                                 max_steps=12, max_seconds=600.0, cancel=cancel)
@@ -163,6 +164,11 @@ class BackgroundDelegates:
                 else:
                     run.state = "done"
                     run.answer = (result.text or "").strip()
+                # Persisted before releasing the lock: the moment `slots_busy`
+                # says this run is finished, the file must agree. Persisting
+                # outside it once let a reload read "running" for work that
+                # had visibly ended — exactly the lie `lost` must never tell.
+                self._persist()
         except Exception as error:               # the thread must never leak
             with self._lock:
                 run = self._runs.get(identifier)
@@ -170,8 +176,9 @@ class BackgroundDelegates:
                     run.state = "failed"
                     run.error = f"{type(error).__name__}: {error}"
                     run.ended_at = time.time()
-        self._persist()
-        self._emit(identifier, run.state if run else "ended")
+                    self._persist()
+        if run is not None:
+            self._emit(identifier, run.state)
 
     # -- draining ---------------------------------------------------------- #
 
@@ -275,16 +282,21 @@ class BackgroundDelegates:
         if self.persist_path is None:
             return
         try:
-            with self._lock:
-                document = {
-                    "saved_at": time.time(),
-                    "runs": [vars(run) | {} for run in self._runs.values()],
-                }
+            document = self._snapshot()
             self.persist_path.parent.mkdir(parents=True, exist_ok=True)
             self.persist_path.write_text(json.dumps(document, indent=1),
                                          encoding="utf-8")
         except OSError:
             pass
+
+    def _snapshot(self) -> dict[str, Any]:
+        """The document to persist. Lock-free: callers hold the lock when the
+        snapshot must agree with the state they just changed, and take it
+        themselves otherwise."""
+        return {
+            "saved_at": time.time(),
+            "runs": [vars(run) | {} for run in self._runs.values()],
+        }
 
     def _load(self) -> None:
         """Mark anything that was mid-flight when the process died as lost.

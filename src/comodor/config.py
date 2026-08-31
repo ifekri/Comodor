@@ -50,6 +50,11 @@ class ProviderConfig:
     #: prints one, and pytest prints them on every failure; a key in a bug
     #: report is a key in an issue tracker.
     api_key: str = field(default="", repr=False)
+    #: Extra keys for the same provider, forming a pool. `api_key` stays the
+    #: canonical first key so every existing reader is unchanged; the pool is
+    #: `api_key` plus whatever is listed here, rotated on rate limits. Out of
+    #: the repr for the same reason the single key is.
+    api_keys: list[str] = field(default_factory=list, repr=False)
     model: str = ""
     label: str = ""
     headers: dict[str, str] = field(default_factory=dict)
@@ -89,6 +94,8 @@ class ProviderConfig:
         data: dict[str, Any] = {"enabled": self.enabled, "configured": self.configured}
         if self.api_key:
             data["api_key"] = self.api_key
+        if self.api_keys:
+            data["api_keys"] = list(self.api_keys)
         if self.model:
             data["model"] = self.model
         spec = catalogue.get(self.name)
@@ -1160,6 +1167,20 @@ def _apply_environment(providers: dict[str, ProviderConfig]) -> None:
         model = os.environ.get(f"{spec.id.upper()}_MODEL", "").strip()
         if key:
             entry.api_key = key
+            entry.configured = True
+        # Additional keys from the environment: OPENROUTER_API_KEY_2 and up
+        # join the pool. Numbered suffixes stop at the first gap, so a stray
+        # _4 does not invent a key that was never exported.
+        extra: list[str] = list(entry.api_keys)
+        for number in range(2, 100):
+            found = os.environ.get(f"{spec.env_key}_{number}", "").strip() \
+                if spec.env_key else ""
+            if not found:
+                break
+            if found not in extra:
+                extra.append(found)
+        if extra and extra != entry.api_keys:
+            entry.api_keys = extra
             entry.configured = True
         if endpoint:
             entry.base_url = endpoint.rstrip("/")

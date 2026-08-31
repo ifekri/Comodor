@@ -41,7 +41,7 @@ class AnthropicProvider:
     def __init__(self, name: str = "anthropic", base_url: str = "https://api.anthropic.com/v1",
                  api_key: str = "", model: str = "claude-sonnet-4-5",
                  headers: dict[str, str] | None = None, timeout: float = 120.0,
-                 label: str = "Anthropic") -> None:
+                 label: str = "Anthropic", key_pool: Any = None) -> None:
         self.name = name
         self.label = label
         self.base_url = base_url.rstrip("/")
@@ -49,6 +49,8 @@ class AnthropicProvider:
         self.model = model
         self.timeout = timeout
         self.extra_headers = dict(headers or {})
+        self.key_pool = key_pool
+        self._last_key = ""
         self._session = http.Session(
             headers=self._default_headers(),
             timeout=http.Timeout(connect=15.0, read=timeout),
@@ -218,7 +220,7 @@ class AnthropicProvider:
         session its caching and nothing else.
         """
         try:
-            response = self._session.post(f"{self.base_url}/messages", json=body, stream=True)
+            response = self._send(body)
         except http.RequestError as exc:
             raise ProviderError(f"{self.label}: {exc}", provider=self.name) from exc
 
@@ -231,6 +233,45 @@ class AnthropicProvider:
                 raise
             return self._post(body)
         return response
+
+    def _send(self, body: dict[str, Any]) -> http.Response:
+        """One POST, on a key the pool chose — with one retry on the next
+        key when the first is rate-limited. Nothing streamed is ever replayed:
+        at this point no byte of the answer has arrived, so the retry is safe
+        in a way it will not be a moment later."""
+        key = self._draw_key()
+        response = self._session.post(
+            f"{self.base_url}/messages", json=body, stream=True,
+            headers={"x-api-key": key} if key else {},
+        )
+        if response.status_code != 429 or self.key_pool is None \
+                or len(self.key_pool) <= 1:
+            return response
+        self.key_pool.report_rate_limited(
+            key, response.retry_after or 0.0)
+        next_key = self._draw_key()
+        if not next_key or next_key == key:
+            return response
+        retry = self._session.post(
+            f"{self.base_url}/messages", json=body, stream=True,
+            headers={"x-api-key": next_key} if next_key else {},
+        )
+        if retry.ok:
+            self.key_pool.report_ok(next_key)
+        else:
+            self.key_pool.report_rate_limited(
+                next_key, retry.retry_after or 0.0)
+        return retry
+
+    def _draw_key(self) -> str:
+        """The key for this request: pooled when there is a pool, the single
+        key when there is not. The draw is remembered for pool reporting."""
+        if self.key_pool is not None and len(self.key_pool) > 1:
+            key, _ = self.key_pool.next_key()
+            self._last_key = key
+            return key
+        self._last_key = self.api_key
+        return self.api_key
 
     def _parse_stream(self, response: http.Response, model: str) -> Iterator[StreamEvent]:
         blocks: dict[int, dict[str, Any]] = {}     # index -> partial content block
