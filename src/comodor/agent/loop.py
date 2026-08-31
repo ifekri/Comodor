@@ -114,11 +114,6 @@ class AgentLoop:
         self._used = []
         result = TurnResult()
 
-        # Recall runs before the message is stored, not after, so that what it
-        # finds travels *with* the turn instead of in the system prompt. That
-        # ordering is the whole of the caching win: the head of the request then
-        # never changes, and every request after the first is served from the
-        # provider's cache at a tenth of the price. See providers/caching.py.
         # What the user said not to do, pulled out once. Patterns over their
         # own words — no model call, and nothing that could cost a request.
         try:
@@ -128,6 +123,11 @@ class AgentLoop:
         except Exception:
             self._rules = []
 
+        # Recall runs before the message is stored, not after, so that what it
+        # finds travels *with* the turn instead of in the system prompt. That
+        # ordering is the whole of the caching win: the head of the request then
+        # never changes, and every request after the first is served from the
+        # provider's cache at a tenth of the price. See providers/caching.py.
         playbook = self._recall(user_text)
         self.conversation.add(
             Message.user(user_text, images=images or [], briefing=playbook))
@@ -351,6 +351,18 @@ class AgentLoop:
             # untrue can be found and dropped. The tools already know; nothing
             # was carrying it across.
             staleness.note(message, str(result.meta.get("path") or ""))
+
+            # What the user said not to do, while the model is still deciding.
+            #
+            # This used to hang off the result of a write, which measured as
+            # doing nothing at all — and the trace said why: on the task it was
+            # written for, the first write of the turn *is* the violation, so
+            # the reminder arrived on the result of the thing it meant to
+            # prevent. Here it lands on the first couple of results of the
+            # turn, before any write, and stops once one has happened.
+            said = self._what_was_asked(context, call.name)
+            if said:
+                message.content = f"{message.content}\n\n{said}"
             # A tool that produced a picture — a screenshot of a page — sends
             # it as one. Where the dialect allows an image beside a tool result
             # it goes there; where it does not, the adapter moves it.
@@ -396,6 +408,25 @@ class AgentLoop:
                 return False
         return True
 
+    #: How many tool results carry the user's prohibitions before the first
+    #: write. Two: one where the model is orienting, one nearer the decision.
+    #: More than that and it becomes furniture.
+    REPEAT_RULES = 2
+
+    def _what_was_asked(self, context: ToolContext, tool: str) -> str:
+        """The user's prohibitions, while there is still a decision to make."""
+        from .constraints import WRITERS, reminder
+
+        if tool in WRITERS:
+            context.has_written = True
+            return ""
+        if context.has_written or not context.rules:
+            return ""
+        if context.rules_shown >= self.REPEAT_RULES:
+            return ""
+        context.rules_shown += 1
+        return reminder(context.rules)
+
     def _tool_context(self) -> ToolContext:
         # The context is built once and kept — it holds the checkpoint store,
         # the cancellation flag and what has been read this session. But the
@@ -404,7 +435,8 @@ class AgentLoop:
         if self.tool_context is not None:
             if self.tool_context.rules != self._rules:
                 self.tool_context.rules = list(self._rules)
-                self.tool_context.rules_shown = False
+                self.tool_context.rules_shown = 0
+                self.tool_context.has_written = False
             return self.tool_context
 
         if self.tool_context is None:

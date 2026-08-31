@@ -143,70 +143,108 @@ def test_several_rules_are_listed():
 
 # --------------------------------------------------------------------------- #
 # where it appears
+#
+# On the first couple of tool results of a turn, before anything is written.
+# It used to hang off the result of a write, which measured as doing nothing —
+# and the trace explained why: on the task it was built for, the first write of
+# the turn *is* the violation, so the reminder arrived on the result of the
+# thing it meant to prevent.
 # --------------------------------------------------------------------------- #
 
 
-def test_a_write_carries_it(tool_context):
-    from comodor.tools.fs import WriteFile
+def an_agent(config, bus, scripts):
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.gateway import Gateway
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
 
-    tool_context.rules = ["Do not change the tests."]
-
-    result = WriteFile().run(tool_context, path="a.py", content="x = 1\n")
-
-    assert "You were asked: Do not change the tests." in result.content
-
-
-def test_an_edit_carries_it(tool_context):
-    from comodor.tools.fs import EditFile
-
-    (tool_context.cwd / "a.py").write_text("x = 1\n", encoding="utf-8")
-    tool_context.rules = ["Leave b.py alone."]
-
-    result = EditFile().run(tool_context, path="a.py",
-                            old_string="x = 1", new_string="x = 2")
-
-    assert "Leave b.py alone." in result.content
+    config.safety.auto_approve_writes = True
+    config.safety.auto_approve_shell = True
+    return AgentLoop(config, Gateway(config, scripts=scripts), ToolRegistry(),
+                     bus, PermissionEngine(config, bus), Conversation())
 
 
-def test_it_is_said_once_and_not_on_every_write(tool_context):
-    """A reminder on every write is one nobody reads."""
-    from comodor.tools.fs import WriteFile
+def results_of(agent):
+    from comodor.providers.base import Role
 
-    tool_context.rules = ["Do not change the tests."]
-    tool = WriteFile()
-
-    first = tool.run(tool_context, path="a.py", content="x = 1\n")
-    second = tool.run(tool_context, path="b.py", content="y = 2\n")
-
-    assert "You were asked" in first.content
-    assert "You were asked" not in second.content
+    return [m for m in agent.conversation.messages if m.role is Role.TOOL]
 
 
-def test_a_read_does_not_carry_it(tool_context):
-    """It belongs where a decision is about to be made, not on everything."""
-    from comodor.tools.fs import ReadFile
+def test_a_read_before_any_write_carries_it(config, bus):
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
 
-    (tool_context.cwd / "a.py").write_text("x = 1\n", encoding="utf-8")
-    tool_context.rules = ["Do not change the tests."]
+    agent = an_agent(config, bus, [
+        Script(text="Looking.", tool_calls=[
+            ToolCall(id="c1", name="list_dir", arguments={"path": "."})]),
+        Script(text="Done."),
+    ])
+    agent.run("Add a helper. Do not change the tests.")
 
-    assert "You were asked" not in ReadFile().run(
-        tool_context, path="a.py").content
-
-
-def test_a_turn_with_no_rules_costs_nothing(tool_context):
-    from comodor.tools.fs import WriteFile
-
-    result = WriteFile().run(tool_context, path="a.py", content="x = 1\n")
-
-    assert result.content == "Wrote a.py (1 lines, +1/-0)."
+    assert "You were asked: Do not change the tests." in results_of(agent)[0].content
 
 
-def test_the_write_still_says_what_it_did(tool_context):
-    from comodor.tools.fs import WriteFile
+def test_it_arrives_before_the_write_not_on_it(config, bus):
+    """The whole point of moving it."""
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
 
-    tool_context.rules = ["Do not change the tests."]
+    agent = an_agent(config, bus, [
+        Script(text="Looking.", tool_calls=[
+            ToolCall(id="c1", name="list_dir", arguments={"path": "."})]),
+        Script(text="Writing.", tool_calls=[
+            ToolCall(id="c2", name="write_file",
+                     arguments={"path": "a.py", "content": "x = 1\n"})]),
+        Script(text="Done."),
+    ])
+    agent.run("Make a file. Do not change the tests.")
 
-    result = WriteFile().run(tool_context, path="a.py", content="x = 1\n")
+    seen = results_of(agent)
+    assert "You were asked" in seen[0].content, "not shown while deciding"
+    assert "You were asked" not in seen[1].content, "shown on the write itself"
 
-    assert result.content.startswith("Wrote a.py")
-    assert result.meta.get("diff") is True
+
+def test_it_stops_once_something_has_been_written(config, bus):
+    """By then the rule has been kept or broken, and repeating it is noise."""
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+
+    agent = an_agent(config, bus, [
+        Script(text="Writing.", tool_calls=[
+            ToolCall(id="c1", name="write_file",
+                     arguments={"path": "a.py", "content": "x = 1\n"})]),
+        Script(text="Looking.", tool_calls=[
+            ToolCall(id="c2", name="list_dir", arguments={"path": "."})]),
+        Script(text="Done."),
+    ])
+    agent.run("Make a file. Do not change the tests.")
+
+    assert not any("You were asked" in m.content for m in results_of(agent))
+
+
+def test_it_is_not_repeated_forever(config, bus):
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+
+    steps = [Script(text="Looking.", tool_calls=[
+        ToolCall(id=f"c{n}", name="list_dir", arguments={"path": "."})])
+        for n in range(6)]
+    agent = an_agent(config, bus, steps + [Script(text="Done.")])
+    agent.run("Have a look. Do not change the tests.")
+
+    shown = sum("You were asked" in m.content for m in results_of(agent))
+    assert shown == 2, f"shown {shown} times"
+
+
+def test_a_turn_with_no_rules_carries_nothing(config, bus):
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+
+    agent = an_agent(config, bus, [
+        Script(text="Looking.", tool_calls=[
+            ToolCall(id="c1", name="list_dir", arguments={"path": "."})]),
+        Script(text="Done."),
+    ])
+    agent.run("Have a look around.")
+
+    assert not any("You were asked" in m.content for m in results_of(agent))

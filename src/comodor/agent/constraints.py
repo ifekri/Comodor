@@ -33,6 +33,11 @@ from __future__ import annotations
 
 import re
 
+#: Tools that change something. Named here as well as in `staleness` because
+#: this asks a different question of the same set: not "did this invalidate a
+#: read" but "is the moment for a reminder past".
+WRITERS = frozenset({"write_file", "edit_file"})
+
 #: How many to carry. A request with nine prohibitions in it is a request whose
 #: author will not be helped by seeing all nine again on every write, and the
 #: first few are where people put the ones they mean.
