@@ -24,6 +24,7 @@ from .history import SearchHistory
 from .propose_mode import ProposeMode
 from .search import Glob, Grep
 from .shell import RunPython, RunShell
+from .skill_manage import SkillManage
 from .skills import ReadSkillFile
 from .todo import TodoWrite
 from .web import WebFetch, WebSearch
@@ -64,7 +65,7 @@ class ToolRegistry:
                  skills: Any = None, history: Any = None,
                  session_id: str = "", mcp: Any = None,
                  spawn: Any = None, config: Any = None,
-                 cron_store: Any = None) -> None:
+                 cron_store: Any = None, skill_ledger: Any = None) -> None:
         self._tools: dict[str, Tool] = {}
         if tools is not None:
             for tool in tools:
@@ -93,6 +94,15 @@ class ToolRegistry:
         # recursion guard: a scheduled run cannot schedule another.
         if cron_store is not None:
             self.add(CronJob(cron_store))
+        # The skills tool, where skills are enabled at all. It reaches the
+        # managed skills directories only, and every change it makes is
+        # recorded in the ledger so the person can put it back.
+        if skills is not None and config is not None \
+                and getattr(config, "skills", None) and config.skills.enabled:
+            from ..skills.ledger import Ledger
+
+            self.add(SkillManage(ledger=skill_ledger or Ledger(
+                config.paths.skills)))
         # The desktop, when this machine can be driven and the user has said
         # so. Both conditions matter: a tool that answers "not on this
         # platform" every time is the wasted call this rule exists to prevent,

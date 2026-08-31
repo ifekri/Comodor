@@ -108,8 +108,14 @@ class SkillRegistry:
 
     # -- selection -------------------------------------------------------- #
 
-    def match(self, query: str, limit: int = 2) -> list[Skill]:
-        """The skills worth spending context on for this request."""
+    def match(self, query: str, limit: int = 2,
+              record: bool = False) -> list[Skill]:
+        """The skills worth spending context on for this request.
+
+        `record` counts each match into the usage sidecar. Off by default:
+        the registry is rebuilt often and read-only callers exist, so the
+        one call per user turn opts in explicitly.
+        """
         always = [skill for skill in self.skills.values()
                   if skill.enabled and skill.always]
         if not query.strip():
@@ -129,7 +135,25 @@ class SkillRegistry:
             seen.add(skill.name)
             if len(chosen) >= limit:
                 break
+        if record:
+            self._record_uses(chosen)
         return chosen[:limit]
+
+    def _record_uses(self, skills: list[Skill]) -> None:
+        """One use each, written where the skills live. Never fails loudly."""
+        try:
+            from .usage import UsageStore
+
+            directory = next(iter({skill.root or
+                                   (skill.path.parent if skill.path else None)
+                                   for skill in skills if skill.path}), None)
+            if directory is None:
+                return
+            store = UsageStore(directory.parent)
+            for skill in skills:
+                store.record_use(skill.name)
+        except OSError:
+            pass
 
     HEADER = ("Skills — procedures this user has written for situations like "
               "this one. Follow them unless the request says otherwise.")

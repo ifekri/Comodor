@@ -681,7 +681,8 @@ class AgentLoop:
         if self.skills is None or settings is None or not settings.enabled:
             return ""
         try:
-            matched = self.skills.match(user_text, limit=settings.top_k)
+            matched = self.skills.match(user_text, limit=settings.top_k,
+                                        record=True)
         except Exception:
             return ""
         if not matched:
