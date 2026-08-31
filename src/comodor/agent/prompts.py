@@ -108,6 +108,14 @@ plan of changes. Investigate freely, then answer. If the question turns out to \
 be a request for work, offer to switch to Plan or Act mode rather than trying \
 to do the work here."""
 
+BRIDGE_ADVICE = """\
+- For a question whose answer is one sentence but whose evidence is spread \
+across many files, `run_python` with `tools=true` can do the reading in a \
+script: `comodor.tools.grep(...)`, `comodor.tools.read_file(...)` and the \
+other read-only tools are callable there, and only the script's conclusion \
+enters the conversation. Print your own output to stderr in such a script; \
+the tool protocol owns stdout."""
+
 MODE_CHAT = """\
 Mode: CHAT. Tools are switched off. Answer from the conversation and your own \
 knowledge. If answering properly needs to look at files, say so and suggest \
@@ -168,14 +176,16 @@ def project_instructions(config: Config) -> str:
 
 
 def build_system_prompt(config: Config, playbook: str = "",
-                        profile: Any = None) -> str:
+                        profile: Any = None, tool_bridge: bool = False) -> str:
     """The complete system prompt for one turn.
 
     `profile` is what the model in front of us can actually do. Passing it
     removes advice that does not apply — a model that cannot field several tool
     calls at once should not be told to make them. Left out, everything is
     included, which is what every existing caller wants and what the tests of
-    this function assume.
+    this function assume. `tool_bridge` adds the run_python(tools=true)
+    paragraph: it is set by the loop only when its registry actually wired
+    one, so the advice is never a promise the tool cannot keep.
     """
     mode = (config.agent.mode or "act").lower()
     sections = [
@@ -187,6 +197,8 @@ def build_system_prompt(config: Config, playbook: str = "",
         guidance = TOOL_GUIDANCE
         if profile is not None and not getattr(profile, "parallel_tools", True):
             guidance = guidance.replace(PARALLEL_ADVICE, "")
+        if tool_bridge:
+            guidance = guidance + "\n" + BRIDGE_ADVICE
         sections.append(guidance)
 
     instructions = project_instructions(config)

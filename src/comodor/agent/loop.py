@@ -174,6 +174,16 @@ class AgentLoop:
     def interrupt(self) -> None:
         self.cancel.cancel()
 
+    def _tool_bridge_live(self) -> bool:
+        """Whether run_python here can really take tools=true.
+
+        The prompt only promises what the tool can keep: the bridge exists
+        when the registry wired itself into run_python, which it does not
+        inside a delegate or a scheduled run.
+        """
+        tool = self.tools.get("run_python")
+        return bool(getattr(tool, "_registry", None) is not None)
+
     # -- the loop --------------------------------------------------------- #
 
     def _iterate(self, deadline: float, result: TurnResult) -> TurnResult:
@@ -195,7 +205,8 @@ class AgentLoop:
 
             specs = self.tools.specs(agent.mode)
             system_prompt = build_system_prompt(
-                self.config, profile=self._model_profile())
+                self.config, profile=self._model_profile(),
+                tool_bridge=self._tool_bridge_live())
             self._maybe_compact(system_prompt, specs)
 
             completion = self._stream_once(system_prompt, specs)

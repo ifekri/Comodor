@@ -74,6 +74,12 @@ class ToolRegistry:
         else:
             for cls in DEFAULT_TOOLS:
                 self.add(cls())
+            # The Python tool gets the registry itself, so run_python(tools=true)
+            # can dispatch a script's calls back through this session's own
+            # permission engine and overflow rule. It is wired after the whole
+            # set exists, for the same reason a delegate is only offered where
+            # there is something to spawn with.
+            self._tools["run_python"].use_registry(self)
             self.add(_browser_tool())
         # Only offered when a skill actually bundles files. A tool the model can
         # see but can never use successfully is worse than one that is absent:
