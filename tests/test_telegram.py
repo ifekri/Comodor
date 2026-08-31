@@ -184,6 +184,20 @@ def test_the_modes_say_what_they_do():
     assert "edits files" in joined
     assert "reads only" in joined
 
+def test_a_mode_proposal_becomes_one_button_per_option():
+    """The proposal first, and the buttons are the modes the agent offered —
+    not the full list, which would silently invite a different change."""
+    board = kb.mode_choices("r1", ["act", "plan", "ask"])
+    labels = [b["text"] for row in board["inline_keyboard"] for b in row]
+    assert len(labels) == 3
+    assert labels[0].startswith("Act")
+    for row in board["inline_keyboard"]:
+        for b in row:
+            verb, request_id, mode = b["callback_data"].split(":")
+            assert verb == "mm"
+            assert request_id == "r1"
+            assert mode in ("act", "plan", "ask")
+
 
 # --------------------------------------------------------------------------- #
 # who it answers

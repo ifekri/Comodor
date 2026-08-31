@@ -235,11 +235,22 @@ class AcpSession:
     def _ask(self, request: Request) -> None:
         """Put a permission prompt to the editor and answer the worker."""
         self._pending[request.id] = request
-        options = [
-            {"optionId": choice, "name": _option_label(choice),
-             "kind": _option_kind(choice)}
-            for choice in (request.options or ["yes", "no"])
-        ]
+        if request.kind == "mode":
+            # A proposed mode change: the modes are the options, labelled as
+            # themselves. Every choice is "other" to ACP — none of them is an
+            # allow or a reject — and the editor answers with the option id,
+            # which is the mode name.
+            options = [
+                {"optionId": choice, "name": f"Mode: {choice}",
+                 "kind": "other"}
+                for choice in request.options
+            ]
+        else:
+            options = [
+                {"optionId": choice, "name": _option_label(choice),
+                 "kind": _option_kind(choice)}
+                for choice in (request.options or ["yes", "no"])
+            ]
         try:
             answer = self.agent.rpc.call("session/request_permission", {
                 "sessionId": self.id,

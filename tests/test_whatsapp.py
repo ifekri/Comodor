@@ -204,7 +204,7 @@ def test_a_page_of_a_long_list_leaves_room_for_its_arrows():
 
 
 def test_the_three_button_screens_really_are_three():
-    for choices in (ui.mode_menu("plan"), ui.permission("r1")):
+    for choices in (ui.permission("r1"), ui.mode_choices("r1", ["act", "plan", "plan"])):
         assert len(choices) <= MOST_BUTTONS
         assert ui.fits_as_buttons(choices), choices
 

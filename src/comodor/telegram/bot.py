@@ -384,6 +384,11 @@ class Service:
             done({"ok": "Approved", "okall": "Approved",
                   "no": "Refused"}[verb])
             self._answer_permission(talk, argument, verb)
+        elif verb == "mm":
+            # A mode-change suggestion: `mm:<request>:<mode>`.
+            done("Switching")
+            request_id, _, mode = argument.partition(":")
+            self._answer_mode(talk, request_id, mode)
         elif verb == "q":
             done()
             self._pick_option(talk, argument, tapped)
@@ -510,6 +515,15 @@ class Service:
             self._show_question(talk)
             return
 
+        if event.get("about") == "mode":
+            options = [option for option in event.get("options", []) if option]
+            talk.waiting = Waiting(request_id=request_id, kind="mode")
+            self.bot.send(
+                talk.chat,
+                f"<b>{escape(event.get('prompt', 'Change mode?'))}</b>",
+                keyboard=kb.mode_choices(request_id, options))
+            return
+
         talk.waiting = Waiting(request_id=request_id, kind="permission")
         text = f"<b>{escape(event.get('prompt', 'Allow this?'))}</b>"
         if event.get("detail"):
@@ -626,6 +640,15 @@ class Service:
                            verb: str) -> None:
         choice = {"ok": "allow", "okall": "allow_always", "no": "deny"}[verb]
         took, why = talk.session.answer(request_id, choice)
+        if not took and why:
+            self.bot.send(talk.chat, escape(why))
+        talk.waiting = None
+
+    def _answer_mode(self, talk: Conversation, request_id: str,
+                     mode: str) -> None:
+        if not mode:
+            return
+        took, why = talk.session.answer(request_id, mode)
         if not took and why:
             self.bot.send(talk.chat, escape(why))
         talk.waiting = None

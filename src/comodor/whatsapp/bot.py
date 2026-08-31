@@ -314,8 +314,7 @@ class Service:
             if rest.lower() in ui.MODES:
                 self._set_mode(talk, rest.lower())
             else:
-                self._buttons(talk.wa_id, ui.mode_body(self._mode(talk)),
-                              ui.mode_menu(self._mode(talk)))
+                self._show_modes(talk)
         elif name == "status":
             self._send(talk.wa_id, self._status(talk))
         else:
@@ -331,8 +330,7 @@ class Service:
         elif verb == "new":
             self._new_chat(talk)
         elif verb == "mode" and not argument:
-            self._buttons(talk.wa_id, ui.mode_body(self._mode(talk)),
-                          ui.mode_menu(self._mode(talk)))
+            self._show_modes(talk)
         elif verb == "mode":
             self._set_mode(talk, argument)
         elif verb == "status":
@@ -363,6 +361,10 @@ class Service:
             self._chose(talk, verb, argument)
         elif verb in ("ok", "okall", "no"):
             self._answer_permission(talk, argument, verb)
+        elif verb == "mm":
+            # A mode-change suggestion: `mm:<request>:<mode>`.
+            request_id, _, mode = argument.partition(":")
+            self._answer_mode(talk, request_id, mode)
         elif verb == "q":
             self._pick_option(talk, argument)
         elif verb == "qw":
@@ -485,6 +487,13 @@ class Service:
         what = event.get("what") or event.get("request") or {}
         request_id = str(event.get("id") or event.get("request_id") or "")
 
+        if event.get("about") == "mode" or what.get("kind") == "mode":
+            options = [option for option in event.get("options", []) if option]
+            body = what.get("prompt") or event.get("prompt") or "Change mode?"
+            self._buttons(talk.wa_id, f"*Comodor suggests a mode change*\n\n{body}",
+                          ui.mode_choices(request_id, options))
+            return
+
         if what.get("kind") == "permission" or event.get("permission"):
             body = what.get("text") or event.get("text") or "May I?"
             self._buttons(talk.wa_id, f"*Comodor wants to*\n\n{body}",
@@ -577,6 +586,15 @@ class Service:
         except Exception as problem:
             self.say(f"could not deliver the approval: {problem}")
 
+    def _answer_mode(self, talk: Conversation, request_id: str,
+                     mode: str) -> None:
+        if not mode:
+            return
+        try:
+            talk.session.answer(request_id, mode)
+        except Exception as problem:
+            self.say(f"could not deliver the answer: {problem}")
+
     # -- paged lists --------------------------------------------------------- #
 
     def _show(self, talk: Conversation, kind: str, page: int = 0) -> None:
@@ -660,6 +678,12 @@ class Service:
 
     def _mode(self, talk: Conversation) -> str:
         return str(self._state(talk).get("mode") or self.config.agent.mode)
+
+    def _show_modes(self, talk: Conversation) -> None:
+        """The mode screen, as a list — four modes will not fit as buttons."""
+        current = self._mode(talk)
+        self._list(talk.wa_id, ui.mode_body(current), "Mode",
+                   ui.mode_rows(current))
 
     def _rule_count(self, talk: Conversation) -> int:
         try:

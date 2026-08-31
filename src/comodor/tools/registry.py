@@ -20,6 +20,7 @@ from .browser import Browser
 from .delegate import Delegate
 from .fs import EditFile, ListDir, ReadFile, WriteFile
 from .history import SearchHistory
+from .propose_mode import ProposeMode
 from .search import Glob, Grep
 from .shell import RunPython, RunShell
 from .skills import ReadSkillFile
@@ -32,7 +33,7 @@ DEFAULT_TOOLS: tuple[type[Tool], ...] = (
     RunShell, RunPython,
     WebFetch, WebSearch,
     TodoWrite,
-    Ask,
+    Ask, ProposeMode,
 )
 
 
@@ -154,7 +155,7 @@ class ToolRegistry:
         mode = (mode or "act").lower()
         if mode == "chat":
             return []
-        if mode == "plan":
+        if mode in ("plan", "ask"):
             return [tool for tool in self._tools.values() if tool.risk is Risk.SAFE]
         return list(self._tools.values())
 

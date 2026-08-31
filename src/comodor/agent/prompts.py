@@ -94,14 +94,26 @@ MODE_PLAN = """\
 Mode: PLAN. You have read-only tools only — you cannot modify anything, and \
 write tools are not available to you. Investigate the codebase, then produce a \
 concrete plan: which files change, what changes in each, and how to verify the \
-result. Name real files you have actually looked at."""
+result. Name real files you have actually looked at.
+
+When the plan is settled and the user seems to want it carried out rather than \
+just written down, say that the next step is to switch to Act mode. Do not try \
+to work around the missing write tools."""
+
+MODE_ASK = """\
+Mode: ASK. You have read-only tools only, exactly as in Plan mode — you \
+cannot modify anything. The difference is intent: this mode is for answering \
+questions about the codebase and thinking things through, not for producing a \
+plan of changes. Investigate freely, then answer. If the question turns out to \
+be a request for work, offer to switch to Plan or Act mode rather than trying \
+to do the work here."""
 
 MODE_CHAT = """\
 Mode: CHAT. Tools are switched off. Answer from the conversation and your own \
 knowledge. If answering properly needs to look at files, say so and suggest \
 switching to Act mode."""
 
-_MODES = {"act": MODE_ACT, "plan": MODE_PLAN, "chat": MODE_CHAT}
+_MODES = {"act": MODE_ACT, "plan": MODE_PLAN, "ask": MODE_ASK, "chat": MODE_CHAT}
 
 
 def environment_block(config: Config) -> str:

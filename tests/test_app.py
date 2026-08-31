@@ -105,6 +105,8 @@ def test_f3_cycles_the_mode(app):
     app._on_key(key("f3"))
     assert app.config.agent.mode == "plan"
     app._on_key(key("f3"))
+    assert app.config.agent.mode == "ask"
+    app._on_key(key("f3"))
     assert app.config.agent.mode == "chat"
     app._on_key(key("f3"))
     assert app.config.agent.mode == "act"
@@ -237,7 +239,8 @@ def test_memory_command_lists_what_was_learned(app):
 def test_mode_command_rejects_a_bad_value(app):
     app._command("/mode", "turbo")
     assert app.config.agent.mode == "act"
-    assert any("act, plan or chat" in toast.text for toast in app.state.toasts.items)
+    assert any("act, plan, ask or chat" in toast.text
+               for toast in app.state.toasts.items)
 
 
 def test_clear_resets_the_conversation(app):
@@ -398,6 +401,50 @@ def test_keys_do_not_reach_the_editor_while_a_dialog_is_open(app):
     type_text(app, "xqw")           # none of these are dialog hotkeys
     assert app.state.editor.text == ""
     assert app.state.overlay is not None, "the dialog must stay up"
+
+
+# --------------------------------------------------------------------------- #
+# mode-change proposals
+# --------------------------------------------------------------------------- #
+
+def make_mode_request(target: str = "act", current: str = "plan") -> Request:
+    from comodor.tools.propose_mode import _options_for
+
+    return Request(id="m1", prompt=f"Switch to {target} mode? The plan is done.",
+                   options=_options_for(current, target),
+                   kind="mode", meta={"current": current, "target": target})
+
+def test_a_mode_proposal_opens_a_mode_dialog(app):
+    request = make_mode_request()
+    app.bus.ask(request)
+    app._pump_events()
+
+    assert app.state.overlay is not None
+    assert app.state.overlay.kind == "mode"
+    assert "Switch to act mode" in app.state.overlay.body
+
+def test_the_mode_dialog_answers_and_updates_the_status_bar(app):
+    app.config.agent.mode = "plan"
+    request = make_mode_request()
+    app.bus.ask(request)
+    app._pump_events()
+
+    app._on_key(key("char", "a"))       # the proposal is the first choice
+    assert request.wait(0.1) == "act"
+    assert app.state.overlay is None
+    # The switch shows immediately, not only once the tool reads the answer.
+    assert app.state.status.mode == "act"
+    assert app.config.agent.mode == "act"
+
+def test_the_mode_dialog_declines_on_the_last_choice(app):
+    app.config.agent.mode = "plan"
+    request = make_mode_request()
+    app.bus.ask(request)
+    app._pump_events()
+
+    app._on_key(key("char", "c"))       # the current mode is the last choice
+    assert request.wait(0.1) == "plan"
+    assert app.config.agent.mode == "plan"
 
 
 # --------------------------------------------------------------------------- #

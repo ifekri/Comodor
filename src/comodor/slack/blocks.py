@@ -30,17 +30,19 @@ PER_ROW = 3
 #: One page of a long list. Slack will render more; a person will not read it.
 PAGE = 8
 
-MODES = ("act", "plan", "chat")
+MODES = ("act", "plan", "ask", "chat")
 
 MODE_WORDS = {
     "act": "Act",
     "plan": "Plan",
+    "ask": "Ask",
     "chat": "Chat",
 }
 
 MODE_NOTES = {
     "act": "edits files, runs commands",
     "plan": "reads only, changes nothing",
+    "ask": "reads only, answers questions",
     "chat": "no tools at all",
 }
 
@@ -158,6 +160,21 @@ def permission(request_id: str, what: str) -> list[dict[str, Any]]:
                   Choice(f"okall:{request_id}", "Yes, all session"),
                   Choice(f"no:{request_id}", "No")],
                  {f"ok:{request_id}": "primary", f"no:{request_id}": "danger"}),
+    ]
+
+def mode_choices(request_id: str, what: str,
+                 options: list[str]) -> list[dict[str, Any]]:
+    """The modes a proposal offered, as buttons built from the request.
+
+    What the agent offered is what is shown, in the order it offered them,
+    with the proposal first — the same shapes as the request, not a
+    reinvention of the mode list.
+    """
+    return [
+        section(f"*Comodor suggests a mode change*\n{what}"),
+        *actions([Choice(f"mm:{request_id}:{option}",
+                         ("● " if index == 0 else "") + MODE_WORDS.get(option, option))
+                  for index, option in enumerate(options)]),
     ]
 
 

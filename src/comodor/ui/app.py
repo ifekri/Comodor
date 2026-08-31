@@ -44,7 +44,13 @@ from .input import KeyEvent, MouseEvent, PasteEvent, TerminalInput
 from .screen import Screen, ScreenState
 from .widgets.chat import Entry, entries_from
 from .widgets.history import SessionRef
-from .widgets.overlay import info_overlay, permission_overlay, questions_overlay, select_overlay
+from .widgets.overlay import (
+    info_overlay,
+    mode_overlay,
+    permission_overlay,
+    questions_overlay,
+    select_overlay,
+)
 from .widgets.statusbar import StatusModel
 
 #: How long quitting waits for a turn in flight. Quitting mid-task should give
@@ -547,13 +553,13 @@ class App:
             self._close_overlay(cancelled=True)
             return True
 
-        if overlay.kind == "permission":
+        if overlay.kind in ("permission", "mode"):
             for choice in overlay.choices:
                 if event.matches(choice.key):
-                    self._answer_permission(choice.value)
+                    self._answer_request(choice.value)
                     return True
             if event.key == "enter":
-                self._answer_permission(overlay.choices[0].value)
+                self._answer_request(overlay.choices[0].value)
                 return True
             return False
 
@@ -668,10 +674,15 @@ class App:
         self.state.overlay = None
         self._next_request()
 
-    def _answer_permission(self, value: str) -> None:
+    def _answer_request(self, value: str) -> None:
+        """Answer whichever request the overlay is holding, then move on."""
         overlay = self.state.overlay
         if overlay is not None and overlay.request is not None:
             overlay.request.answer(value)
+            # A mode choice takes effect here, not only inside the tool:
+            # the status bar should say so the moment the key is pressed.
+            if overlay.kind == "mode" and value in ("act", "plan", "ask", "chat"):
+                self._set_mode(value)
         self.state.overlay = None
         self._next_request()
 
@@ -680,6 +691,8 @@ class App:
         """The dialog a request deserves, chosen by its kind."""
         if request.kind == "questions":
             return questions_overlay(request)
+        if request.kind == "mode":
+            return mode_overlay(request)
         return permission_overlay(request)
 
     def _next_request(self) -> None:
@@ -1012,15 +1025,15 @@ class App:
     def cmd_mode(self, args: str) -> None:
         if args:
             mode = args.strip().lower()
-            if mode not in ("act", "plan", "chat"):
-                self._toast("mode must be act, plan or chat", "bad")
+            if mode not in ("act", "plan", "ask", "chat"):
+                self._toast("mode must be act, plan, ask or chat", "bad")
                 return
             self._set_mode(mode)
             return
         self._cycle_mode()
 
     def _cycle_mode(self) -> bool:
-        order = ["act", "plan", "chat"]
+        order = ["act", "plan", "ask", "chat"]
         current = self.config.agent.mode.lower()
         index = order.index(current) if current in order else 0
         self._set_mode(order[(index + 1) % len(order)])
@@ -1029,7 +1042,8 @@ class App:
     def _set_mode(self, mode: str) -> None:
         self.config.agent.mode = mode
         self.state.status.mode = mode
-        note = {"act": "full tools", "plan": "read-only", "chat": "no tools"}[mode]
+        note = {"act": "full tools", "plan": "read-only",
+                "ask": "read-only questions", "chat": "no tools"}[mode]
         self._toast(f"mode: {mode} ({note})", "accent", key="mode")
 
     def cmd_loop(self, args: str) -> None:

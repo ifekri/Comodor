@@ -6,8 +6,8 @@ Three risk tiers drive everything:
 ``WRITE``      creates or changes files — shows a diff and asks.
 ``DANGEROUS``  runs commands or reaches the network — always asks.
 
-Mode is the outer gate. **Plan** mode allows only ``SAFE`` tools, so a plan can
-never quietly modify the repository; **Chat** mode allows none at all.
+Mode is the outer gate. **Plan** and **Ask** mode allow only ``SAFE`` tools, so
+neither can quietly modify the repository; **Chat** mode allows none at all.
 
 A grant can be given for one call, for the whole session, or written into the
 project allowlist. Session grants live in memory only — restarting Comodor puts
@@ -37,6 +37,7 @@ class Risk(IntEnum):
 class Mode(str):
     ACT = "act"
     PLAN = "plan"
+    ASK = "ask"
     CHAT = "chat"
 
 
@@ -75,9 +76,9 @@ class PermissionEngine:
         mode = (self.config.agent.mode or Mode.ACT).lower()
         if mode == Mode.CHAT:
             return False, "Chat mode has tools switched off — press F3 to switch to Act."
-        if mode == Mode.PLAN and risk > Risk.SAFE:
-            return False, ("Plan mode is read-only, so this step was skipped. "
-                           "Switch to Act mode to let it run.")
+        if mode in (Mode.PLAN, Mode.ASK) and risk > Risk.SAFE:
+            return False, (f"{mode.capitalize()} mode is read-only, so this "
+                           "step was skipped. Switch to Act mode to let it run.")
         return True, ""
 
     def auto_approved(self, risk: Risk) -> bool:

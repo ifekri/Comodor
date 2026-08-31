@@ -376,6 +376,10 @@ class Service:
             self._chose(talk, verb, argument)
         elif verb in ("ok", "okall", "no"):
             self._answer_permission(talk, argument, verb)
+        elif verb == "mm":
+            # A mode-change suggestion: `mm:<request>:<mode>`.
+            request_id, _, mode = argument.partition(":")
+            self._answer_mode(talk, request_id, mode)
         elif verb == "q":
             self._pick_option(talk, argument)
         elif verb == "qw":
@@ -499,6 +503,13 @@ class Service:
         what = event.get("what") or event.get("request") or {}
         request_id = str(event.get("id") or event.get("request_id") or "")
 
+        if event.get("about") == "mode" or what.get("kind") == "mode":
+            options = [option for option in event.get("options", []) if option]
+            body = what.get("prompt") or event.get("prompt") or "Change mode?"
+            self._send(talk, "Comodor suggests a mode change",
+                       ui.mode_choices(request_id, body, options))
+            return
+
         if what.get("kind") == "permission" or event.get("permission"):
             body = what.get("text") or event.get("text") or "May I?"
             self._send(talk, "Comodor wants to run something",
@@ -588,6 +599,15 @@ class Service:
                                  "no": "no"}[verb])
         except Exception as problem:
             self.say(f"could not deliver the approval: {problem}")
+
+    def _answer_mode(self, talk: Conversation, request_id: str,
+                     mode: str) -> None:
+        if not mode:
+            return
+        try:
+            talk.session.answer(request_id, mode)
+        except Exception as problem:
+            self.say(f"could not deliver the answer: {problem}")
 
     # -- paged lists ----------------------------------------------------------- #
 

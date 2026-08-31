@@ -32,17 +32,19 @@ from .api import MOST_BUTTONS, MOST_ROWS
 NAVIGATION = 2
 PAGE = MOST_ROWS - NAVIGATION
 
-MODES = ("act", "plan", "chat")
+MODES = ("act", "plan", "ask", "chat")
 
 MODE_WORDS = {
     "act": "Act",
     "plan": "Plan",
+    "ask": "Ask",
     "chat": "Chat",
 }
 
 MODE_NOTES = {
     "act": "Edits files, runs commands",
     "plan": "Reads only, changes nothing",
+    "ask": "Reads only, answers questions",
     "chat": "No tools at all",
 }
 
@@ -91,14 +93,22 @@ def main_menu(*, busy: bool, mode: str, rules: int = 0,
 
 
 def mode_menu(current: str) -> list[tuple[str, str]]:
-    """Three modes, three reply buttons. It fits exactly.
+    """One row per mode, for the list message.
 
-    The twenty-character limit is why the explanation is not on the button: a
-    label reading "Plan — reads only, ch" is worse than one reading "Plan" with
-    the sentence in the message above it.
+    Four modes no longer fit WhatsApp's three-reply-button limit, so the mode
+    screen is a list. The twenty-character limit is still why the explanation
+    is not on the row: a label reading "Plan — reads only, ch" is worse than
+    one reading "Plan" with the sentence in the message above it.
     """
     return [(f"mode:{name}",
              ("● " if name == current else "") + MODE_WORDS[name])
+            for name in MODES]
+
+
+def mode_rows(current: str) -> list[Row]:
+    """The mode menu as list rows."""
+    return [Row(f"mode:{name}",
+                ("● " if name == current else "") + MODE_WORDS[name])
             for name in MODES]
 
 
@@ -121,6 +131,15 @@ def permission(request_id: str) -> list[tuple[str, str]]:
         (f"okall:{request_id}", "Yes, all session"),
         (f"no:{request_id}", "No"),
     ]
+
+def mode_choices(request_id: str, options: list[str]) -> list[tuple[str, str]]:
+    """The modes a proposal offered, as buttons built from the request.
+
+    What the agent offered is what is shown, with the proposal first.
+    """
+    return [(f"mm:{request_id}:{option}",
+             ("● " if index == 0 else "") + MODE_WORDS.get(option, option))
+            for index, option in enumerate(options)]
 
 
 def question(request_id: str, index: int, options: list[str],

@@ -48,7 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--provider", help="provider to use (openrouter, anthropic, …)")
     parser.add_argument("--model", help="model id")
-    parser.add_argument("--mode", choices=("act", "plan", "chat"), help="starting mode")
+    parser.add_argument("--mode", choices=("act", "plan", "ask", "chat"),
+                        help="starting mode")
     parser.add_argument("--no-loop", action="store_true",
                         help="answer once instead of iterating autonomously")
     parser.add_argument("--theme", help="colour theme (ember, midnight, matrix, mono)")

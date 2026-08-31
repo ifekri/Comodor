@@ -50,6 +50,7 @@ const els = {
 const MODE_NOTE = {
   act: 'edits files and runs commands',
   plan: 'reads only — nothing is changed',
+  ask: 'reads only — answers questions about the project',
   chat: 'no tools at all',
 };
 
@@ -408,6 +409,49 @@ function askFor(event) {
     button.onclick = () => {
       els.ask.hidden = true;
       post('/api/answer', { id: event.id, choice: option });
+    };
+    choices.appendChild(button);
+  });
+  els.ask.appendChild(choices);
+  const first = els.ask.querySelector('button');
+  if (first) first.focus();
+}
+
+/* ------------------------------------------------------------- mode change */
+
+/*
+ * A proposed mode change. Same dialog as a permission prompt — options are
+ * buttons — but the choice is echoed into the composer's mode selector right
+ * away, so what the page shows and what the session will do stay the same
+ * thing while the agent is still reading the answer.
+ */
+function askMode(event) {
+  els.ask.hidden = false;
+  els.ask.textContent = '';
+
+  const question = document.createElement('p');
+  question.className = 'q bidi';
+  question.id = 'ask-q';
+  question.textContent = event.prompt || 'Change mode?';
+  orient(question, question.textContent);
+  els.ask.appendChild(question);
+
+  const choices = document.createElement('div');
+  choices.className = 'choices';
+  const options = event.options && event.options.length
+    ? event.options : [state.mode];
+  options.forEach((option, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = option[0].toUpperCase() + option.slice(1);
+    if (index === 0) button.className = 'primary';
+    button.onclick = () => {
+      els.ask.hidden = true;
+      post('/api/answer', { id: event.id, choice: option });
+      if (MODE_NOTE[option]) {
+        state.mode = option;
+        drawMode();
+      }
     };
     choices.appendChild(button);
   });
@@ -985,6 +1029,7 @@ function apply(event) {
     case 'cancelled': endStream(); notice('Stopped.'); break;
     case 'request':
       if (event.about === 'questions') askQuestions(event);
+      else if (event.about === 'mode') askMode(event);
       else askFor(event);
       break;
     case 'screen': showScreen(event); break;
@@ -2208,7 +2253,7 @@ function drawAdmin(data) {
 
     const modePick = document.createElement('select');
     modePick.id = 'pick-mode';
-    ['act', 'plan', 'chat'].forEach((name) => {
+    ['act', 'plan', 'ask', 'chat'].forEach((name) => {
       const option = document.createElement('option');
       option.value = name;
       option.textContent = name[0].toUpperCase() + name.slice(1);

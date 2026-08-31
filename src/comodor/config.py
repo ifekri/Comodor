@@ -135,7 +135,7 @@ class UIConfig:
 
 @dataclass
 class AgentConfig:
-    mode: str = "act"                    # act | plan | chat
+    mode: str = "act"                    # act | plan | ask | chat
     loop: bool = True                    # autonomous multi-step iteration
     #: Steps one task may take. `0` is no limit, and is the default: a
     #: refactor across a dozen files runs out of twenty-four steps mid-thought,

@@ -95,6 +95,26 @@ def permission_overlay(request: Request) -> Overlay:
                    detail=request.detail, choices=PERMISSION_CHOICES,
                    request=request)
 
+def mode_overlay(request: Request) -> Overlay:
+    """A proposed mode change, with the modes as plain choices.
+
+    Built from the request's own options rather than a fixed set, so the
+    tool and the dialog cannot drift: whichever modes were offered are the
+    ones shown, in the order they were offered. Keys are sequential letters,
+    since the option ids are mode names, not keys.
+    """
+    labels = {
+        "act": "Act — full tools",
+        "plan": "Plan — read only",
+        "ask": "Ask — read only, answer questions",
+        "chat": "Chat — no tools",
+    }
+    choices = [Choice(chr(ord("a") + index), labels.get(option, option), option,
+                      "good" if index == 0 else "")
+               for index, option in enumerate(request.options)]
+    return Overlay(kind="mode", title="Change mode",
+                   body=request.prompt, choices=choices, request=request)
+
 
 def questions_overlay(request: Request) -> Overlay:
     """The form the `ask` tool put up.

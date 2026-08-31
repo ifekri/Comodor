@@ -1548,7 +1548,7 @@ class Session:
         self.agent.interrupt()
 
     def set_mode(self, mode: str) -> bool:
-        if mode not in ("act", "plan", "chat"):
+        if mode not in ("act", "plan", "ask", "chat"):
             return False
         self.config.agent.mode = mode
         self.bus.emit(Kind.STATUS, mode=mode)
