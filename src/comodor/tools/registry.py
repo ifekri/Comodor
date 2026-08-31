@@ -66,7 +66,7 @@ class ToolRegistry:
                  session_id: str = "", mcp: Any = None,
                  spawn: Any = None, config: Any = None,
                  cron_store: Any = None, skill_ledger: Any = None,
-                 memory: Any = None) -> None:
+                 memory: Any = None, delegates: Any = None) -> None:
         self._tools: dict[str, Tool] = {}
         if tools is not None:
             for tool in tools:
@@ -89,7 +89,7 @@ class ToolRegistry:
         # gateway, and a registry built without one — inside a delegate, for
         # instance — must not advertise a tool that cannot run.
         if spawn is not None:
-            self.add(Delegate(spawn))
+            self.add(Delegate(spawn, background=delegates))
         # The scheduler's own runs build their registry through cron/runner,
         # which simply does not pass a cron store — and that absence is the
         # recursion guard: a scheduled run cannot schedule another.

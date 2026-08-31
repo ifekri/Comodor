@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ..agent import AgentLoop, Conversation
+from ..agent.background import BackgroundDelegates, completion_turn
 from ..agent.spawn import spawner
 from ..config import Config
 from ..events import Event, EventBus, Kind, Request
@@ -69,16 +70,24 @@ class Session:
         self._screen: str = ""
         self._frames: int = 0
         self.conversation = Conversation()
+        # Background delegates: same shape as the terminal — one manager shared
+        # by the tool and the loop, drained between turns.
+        self.delegates = BackgroundDelegates(
+            config, self.bus, spawner(config, self.gateway, self.bus,
+                                      skills=self.skills, mcp=self.mcp),
+            persist_path=config.paths.user / "delegates.json")
         self.agent = AgentLoop(
             config, self.gateway,
             ToolRegistry(skills=self.skills, mcp=self.mcp, config=config,
                          spawn=spawner(config, self.gateway, self.bus,
                                        skills=self.skills, mcp=self.mcp),
                          cron_store=self._cron_store(config),
-                         memory=getattr(self.memory, "facts", None)),
+                         memory=getattr(self.memory, "facts", None),
+                         delegates=self.delegates),
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )
+        self.agent.delegates = self.delegates
 
         # Where conversations live. The same folder the terminal uses, on
         # purpose: a chat begun at the prompt should be openable in the browser
@@ -639,7 +648,8 @@ class Session:
                          spawn=spawner(self.config, self.gateway, self.bus,
                                        skills=self.skills, mcp=self.mcp),
                          cron_store=self._cron_store(self.config),
-                         memory=getattr(self.memory, "facts", None)),
+                         memory=getattr(self.memory, "facts", None),
+                         delegates=self.delegates),
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )
@@ -1590,9 +1600,37 @@ class Session:
                     pass
                 self.bus.emit(Kind.STATUS, busy=False)
                 self._turn.release()
+            # One turn past its end is the turn boundary. A background
+            # delegate that finished while this turn ran is delivered here —
+            # as its own turn, never spliced into the one just saved.
+            self._drain_delegates()
 
         threading.Thread(target=work, name="comodor-web-turn", daemon=True).start()
         return True
+
+    def _drain_delegates(self) -> None:
+        """Turn finished background delegates into turns of their own.
+
+        Chains: each delivered completion runs as a full turn, and the turn
+        after it drains again — so several children finishing together arrive
+        in order rather than all at once. The slot is claimed before anything
+        is marked delivered: if a message the user just sent took the turn
+        first, the completions stay pending for the boundary after that one.
+        """
+        if not self._turn.acquire(blocking=False):
+            return
+        self._turn.release()
+        records = self.delegates.take_pending()
+        if not records:
+            return
+        summary_max = self.config.delegation.completion_summary_max
+        text = "\n\n".join(completion_turn(record, summary_max)
+                           for record in records)
+        if not self.send(text):
+            # A message the user just sent took the turn between the check
+            # and here. The completions go back to pending for the next
+            # boundary rather than being dropped.
+            self.delegates.restore([str(record.get("id")) for record in records])
 
     def answer(self, request_id: str, choice: str) -> tuple[bool, str]:
         """Answer a waiting prompt. Returns whether it took, and why not.

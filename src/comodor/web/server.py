@@ -410,6 +410,20 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 self._json(200, {"interrupted": True})
                 return
 
+            if route == "/api/delegates":
+                self._json(200, {"delegates": server.session.delegates.listing()})
+                return
+
+            if route == "/api/delegates/stop":
+                identifier = str(body.get("id") or "")
+                stopped = (server.session.delegates.stop(identifier)
+                           if identifier
+                           else bool(server.session.delegates.stop_all()))
+                self._json(200 if stopped else 409,
+                           {"stopped": stopped,
+                            "error": "" if stopped else "nothing was running"})
+                return
+
             if route == "/api/mode":
                 changed = server.session.set_mode(str(body.get("mode") or ""))
                 self._json(200 if changed else 400, {"mode": config_mode(server)})

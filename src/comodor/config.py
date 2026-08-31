@@ -542,6 +542,21 @@ class MCPConfig:
 
 
 @dataclass
+class DelegationConfig:
+    """Background delegates: how many at once, and what one may hold."""
+
+    #: Slots for delegates running alongside the parent's own turn. When all
+    #: are busy a new background request is refused, not queued — a pile of
+    #: half-finished children no one is watching is cost with no oversight.
+    max_background: int = 3
+    #: Characters of a finished delegate's answer that reach the parent's
+    #: conversation inline. The rest is moved aside by the usual overflow
+    #: rule, which is transfer rather than deletion.
+    completion_summary_max: int = 24_000
+    #: Seconds between progress checks on each running delegate.
+    stall_check_seconds: float = 30.0
+
+@dataclass
 class MediaConfig:
     """Files sent in from the channels: voice notes, images, documents.
 
@@ -647,7 +662,7 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: said nothing.
 SECTIONS = ("ui", "agent", "gateway", "learning", "skills", "safety",
             "browser", "computer", "telegram", "whatsapp", "slack", "cron",
-            "media")
+            "media", "delegation")
 
 
 @dataclass
@@ -667,6 +682,7 @@ class Config:
     mcp: MCPConfig = field(default_factory=MCPConfig)
     cron: CronConfig = field(default_factory=CronConfig)
     media: MediaConfig = field(default_factory=MediaConfig)
+    delegation: DelegationConfig = field(default_factory=DelegationConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     paths: Paths = field(default_factory=resolve_paths)

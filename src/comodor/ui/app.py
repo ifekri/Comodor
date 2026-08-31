@@ -21,6 +21,7 @@ from typing import Any
 from rich.live import Live
 
 from ..agent import AgentLoop, Conversation
+from ..agent.background import BackgroundDelegates, completion_turn
 from ..agent.spawn import spawner
 from ..config import Config, save_user_config, unenforceable_budget
 from ..events import Cancelled, EventBus, EventQueue, Kind, Request
@@ -121,11 +122,21 @@ class App:
         # one is written by hand, the other is inferred.
         self._load_skills()
 
+        # Background delegates: slots, threads, and finished answers held for
+        # the next turn boundary. The tool gets the same manager, both because
+        # there is one place to ask "how full am I" and so the refusal when
+        # every slot is busy is the manager's, not the tool's.
+        self.delegates = BackgroundDelegates(
+            config, self.bus, spawner(config, self.gateway, self.bus,
+                                      skills=self.skills, mcp=self.mcp),
+            persist_path=config.paths.user / "delegates.json")
         self.tools.add(Delegate(spawner(config, self.gateway, self.bus,
-                                        skills=self.skills, mcp=self.mcp)))
+                                        skills=self.skills, mcp=self.mcp),
+                                background=self.delegates))
         self.agent = AgentLoop(config, self.gateway, self.tools, self.bus,
                                self.permissions, self.conversation, self.memory,
                                skills=self.skills)
+        self.agent.delegates = self.delegates
 
         from .. import __version__ as _version
 
@@ -211,6 +222,12 @@ class App:
                     self._last_frame = now
                     self.dirty = False
                 elif not changed:
+                    # The turn boundary. A background delegate that finished
+                    # while a turn was running is picked up here — never
+                    # mid-turn — because a new message can only join the
+                    # conversation when the conversation is between turns.
+                    if self._drain_delegate_completions():
+                        continue
                     self._maybe_prefetch()
                     time.sleep(IDLE_SLEEP)
 
@@ -319,6 +336,11 @@ class App:
 
     def _shutdown(self) -> None:
         self.agent.interrupt()
+        # Children that are still running cannot finish a job whose parent is
+        # closing, and a daemon thread dies half-way through a write. Asked
+        # to stop, each gets a moment to save its own state.
+        self.delegates.stop_all()
+        self.delegates.wait(SHUTDOWN_JOIN_SECONDS)
         self.tools.close()
         self.history.close()
         if self.mcp is not None:
@@ -379,6 +401,30 @@ class App:
         self._prefetch_draft = draft
         threading.Thread(target=self.memory.prefetch, args=(draft,),
                          daemon=True, name="comodor-prefetch").start()
+
+    def _drain_delegate_completions(self) -> bool:
+        """Finished background delegates become turns of their own.
+
+        Called only when the agent is idle — after a turn ended and before
+        the next one starts. Each completion is shown as a notice the user
+        sees, then delivered as one user turn the agent answers with the
+        full turn machinery: recall, tools, streaming, learning.
+        """
+        if self.state.status.busy:
+            return False
+        records = self.delegates.take_pending()
+        if not records:
+            return False
+        summary_max = self.config.delegation.completion_summary_max
+        turns = [completion_turn(record, summary_max) for record in records]
+        for record, text in zip(records, turns, strict=True):
+            self.state.entries.append(Entry(
+                "notice", f"background task {record.get('id')} — "
+                          f"{record.get('state', 'done')}"))
+            self.state.entries.append(Entry("user", text))
+        self.state.scroll = 0
+        self._start_agent("\n\n".join(turns))
+        return True
 
     def _pump_input(self, terminal: TerminalInput) -> bool:
         changed = False
@@ -1521,6 +1567,37 @@ class App:
             progress, self.theme, width=max(60, self.console.size.width - 10))
         self.state.overlay = overlay
 
+    def cmd_delegates(self, args: str) -> None:
+        """`/delegates list` or `/delegates stop <id>` — the control plane."""
+        words = args.split()
+        if not words or words[0] == "list":
+            runs = self.delegates.listing()
+            if not runs:
+                self._toast("no background delegates", "good")
+                return
+            for run in runs:
+                self.state.entries.append(Entry(
+                    "tool", f"delegate {run['id']}",
+                    meta={"summary": (
+                        f"{run['state']} · {run['steps']} steps · "
+                        f"{run['elapsed']}s · {run['label']}"),
+                        "running": run["state"] == "running",
+                        "ok": run["state"] not in ("failed", "lost")}))
+            self.dirty = True
+            return
+        if words[0] == "stop" and len(words) == 2:
+            if self.delegates.stop(words[1]):
+                self._toast(f"stopping {words[1]}…", "good")
+            else:
+                self._toast(f"{words[1]} is not running", "warn")
+            return
+        if words[0] == "stop" and not words[1:]:
+            stopped = self.delegates.stop_all()
+            self._toast(f"stopping {stopped} delegate(s)…" if stopped
+                        else "nothing running", "warn" if not stopped else "good")
+            return
+        self._toast("usage: /delegates [list | stop <id> | stop]", "warn")
+
     def cmd_cost(self, args: str) -> None:
         usage = self.conversation.usage
         stats = self.memory.stats()
@@ -1920,6 +1997,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/resume": ("cmd_resume", "reopen an earlier session"),
     "/search": ("cmd_search", "find something in an earlier conversation"),
     "/mcp": ("cmd_mcp", "MCP servers and the tools they provide"),
+    "/delegates": ("cmd_delegates", "background delegates: list, or stop one"),
     "/quit": ("cmd_quit", "exit"),
 }
 

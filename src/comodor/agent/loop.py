@@ -90,6 +90,12 @@ class AgentLoop:
         self.conversation = conversation or Conversation()
         self.memory = memory                     # LearningEngine, or None
         self.skills = skills                     # SkillRegistry, or None
+        #: The background-delegate manager, when this session has one. Read at
+        #: the turn boundary — the one place a new message can join the
+        #: conversation without breaking the alternation the provider caches
+        #: against. ``None`` (a delegate's own loop, for instance) means the
+        #: loop never asks.
+        self.delegates: Any = None
         self.cancel = Cancellation()
         self._skills_used: list[Any] = []
         self.tool_context: ToolContext | None = None
