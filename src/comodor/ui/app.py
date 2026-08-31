@@ -24,6 +24,7 @@ from ..agent import AgentLoop, Conversation
 from ..agent.background import BackgroundDelegates, completion_turn
 from ..agent.spawn import spawner
 from ..config import Config, save_user_config, unenforceable_budget
+from ..context_refs import Refusal, expand
 from ..events import Cancelled, EventBus, EventQueue, Kind, Request
 from ..learning import LearningEngine
 from ..mcp import MCPManager
@@ -93,6 +94,10 @@ class App:
             redact=Redactor([entry.api_key for entry in config.providers.values()
                              if entry.api_key]),
         )
+        #: Kept for the @-reference expander: anything a user pastes into a
+        #: prompt goes through the same redaction a tool result does.
+        self._redact = Redactor([entry.api_key for entry in
+                                 config.providers.values() if entry.api_key])
         # A refusal is a preference, so route it into the brain rather than
         # letting it end at "no".
         self.permissions.on_denied = self.memory.on_denied
@@ -952,6 +957,19 @@ class App:
             return self._command(name, rest.strip())
         if text.startswith("!"):
             return self._run_shell_directly(text[1:].strip())
+
+        # @ references expand before anything else happens: the user asked for
+        # material to be in the prompt, and refusing or warning must land
+        # while the editor still holds the draft.
+        try:
+            text, warning = expand(text, self.config.paths.project,
+                                   context_limit=self.config.agent.context_limit,
+                                   redact=self._redact)
+        except Refusal as refusal:
+            self._toast(str(refusal), "bad", ttl=8.0)
+            return True
+        if warning:
+            self._toast(warning, "warn", ttl=8.0)
 
         self.state.entries.append(Entry("user", text))
         self.state.scroll = 0

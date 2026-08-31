@@ -199,6 +199,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     from . import questions as forms
     from .agent import AgentLoop, Conversation
     from .agent.spawn import spawner
+    from .context_refs import Refusal, expand
     from .events import EventBus, Kind
     from .learning import LearningEngine
     from .mcp import MCPManager
@@ -284,7 +285,22 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
 
         bus.subscribe(echo)
 
-    result = agent.run(args.task)
+    # @ references expand before the run, with the same guards the interface
+    # uses — a scheduled prompt asking for @diff should work, and a scheduled
+    # prompt pointed at a credentials file should not.
+    secrets = Redactor([entry.api_key for entry in config.providers.values()
+                        if entry.api_key])
+    try:
+        task, warning = expand(args.task, config.paths.project,
+                               context_limit=config.agent.context_limit,
+                               redact=secrets)
+    except Refusal as refusal:
+        print(f"refused: {refusal}", file=sys.stderr)
+        return 2
+    if warning:
+        print(f"warning: {warning}", file=sys.stderr)
+
+    result = agent.run(task)
     memory.wait_for_reflection(timeout=20.0)
 
     if args.json:
