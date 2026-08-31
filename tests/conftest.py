@@ -22,6 +22,26 @@ from comodor.tools import ToolContext, ToolRegistry  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def a_home_of_our_own(monkeypatch, tmp_path: Path):
+    """No test may reach the real data directory, whatever it does.
+
+    Most fixtures build a `Config` with explicit `Paths`, which is safe. But
+    `load()` resolves its own paths and ignores the ones it was handed, so a
+    test that saves a config it loaded writes to the developer's real
+    `config.json` — and passes, because everything it asserts is true of that
+    file too. One that deletes it also passes.
+
+    `COMODOR_HOME` is the single lever `resolve_paths` honours, so it is set
+    here for every test rather than left to each one to remember. The tests
+    that care about the home directory set their own and still win, because a
+    later `setenv` replaces this one.
+    """
+    home = tmp_path / "comodor-home"
+    home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("COMODOR_HOME", str(home))
+
+
+@pytest.fixture(autouse=True)
 def no_skill_library(monkeypatch):
     """Nothing in this suite downloads the skills catalogue.
 

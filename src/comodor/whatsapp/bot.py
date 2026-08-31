@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ..channels.markdown import to_whatsapp
+from ..channels.settings import Settings, keep_current
 from ..config import Config
 from . import menu as ui
 from .api import Cloud, OutsideWindow, WhatsAppError, split
@@ -109,6 +110,11 @@ class Service:
                  endpoint: Endpoint | None = None,
                  announce: Callable[[str], None] | None = None) -> None:
         self.config = config
+        #: The configuration file, watched. A bot is a detached process: every
+        #: setting changed from the terminal or the web panel while it runs was
+        #: invisible to it, and the command that changed the setting said it
+        #: had worked.
+        self.settings = Settings(config)
         settings = config.whatsapp
         self.cloud = cloud or Cloud(settings.token, settings.phone_number_id,
                                     version=settings.api_version)
@@ -189,6 +195,8 @@ class Service:
         self.chats.clear()
 
     def _handle(self, item: Inbound) -> None:
+        keep_current(self)
+
         if not item.wa_id:
             return
         if not self.config.whatsapp.may(item.wa_id):

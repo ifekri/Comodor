@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..channels.markdown import to_telegram
+from ..channels.settings import Settings, keep_current
 from ..config import Config
 from . import keyboard as kb
 from .api import Bot, TelegramError, Unauthorised, backoff
@@ -135,6 +136,12 @@ class Service:
     def __init__(self, config: Config, bot: Bot | None = None,
                  announce=None) -> None:
         self.config = config
+        #: The configuration file, watched. A bot is a detached process: every
+        #: setting changed from the terminal or the web panel while it runs was
+        #: invisible to it, and the command that changed the setting said it
+        #: had worked. `allow_writes` is the one people hit — Act went on being
+        #: refused with a message telling them to run what they had just run.
+        self.settings = Settings(config)
         self.bot = bot or Bot(config.telegram.token)
         self.chats: dict[int, Conversation] = {}
         self.pairing: Pairing | None = None
@@ -194,6 +201,11 @@ class Service:
     # -- dispatch ---------------------------------------------------------- #
 
     def _handle(self, update: dict[str, Any]) -> None:
+        # Before anything is decided: the answer to "what may this turn
+        # do" has to be the answer as of now, not as of whenever the bot
+        # was started.
+        keep_current(self)
+
         message = update.get("message")
         tapped = update.get("callback_query")
 
