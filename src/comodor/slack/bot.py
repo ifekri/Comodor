@@ -37,6 +37,7 @@ from typing import Any, Callable
 from ..channels.markdown import to_slack
 from ..channels.settings import Settings, keep_current
 from ..config import Config
+from ..media.ingest import MediaError, ingest
 from . import blocks as ui
 from .api import EDIT_EVERY, RateLimited, Slack, SlackError, escape, split
 from .socket import Envelope, SocketMode
@@ -239,6 +240,9 @@ class Service:
             event.get("ts") or "") if channel_kind not in ("im", "") else ""
 
         if not text:
+            if event.get("files"):
+                self._on_media(talk, channel, event)
+                return
             self._menu(talk)
             return
         if talk.waiting is not None and talk.waiting.writing:
@@ -389,10 +393,61 @@ class Service:
         else:
             self._menu(talk)
 
+    # -- media ---------------------------------------------------------------- #
+
+    def _on_media(self, talk: Conversation, channel: str,
+                  event: dict[str, Any]) -> None:
+        """A file shared into the chat: download, type, and route it.
+
+        Slack names files with an id and serves the bytes through
+        `files.info`, whose URL carries the bot's own token — so the fetch is
+        two calls, the same shape as every other channel's.
+        """
+        if not self.config.media.enabled:
+            self._send(talk, "I can only read text here.")
+            return
+        f = (event.get("files") or [])[0] or {}
+        file_id = str(f.get("id") or "")
+        name = str(f.get("name") or "file")
+        if not file_id:
+            self._send(talk, "I could not read that file.")
+            return
+        try:
+            data = self.slack.download(file_id)
+            item = ingest(data, name=name, directory=self._media_dir(),
+                          max_mb=self.config.media.max_download_mb)
+        except MediaError as problem:
+            self._send(talk, str(problem))
+            return
+        except Exception as problem:
+            self._send(talk, f"I could not fetch that file: {problem}")
+            return
+
+        from ..media.route import route
+        from ..providers.profile import of as profile_of
+
+        routed = route(item, profile_of(self.config),
+                       voice_to_text=self._transcriber())
+        self._start_turn(talk, routed.text, images=routed.images)
+
+    def _media_dir(self):
+        from pathlib import Path
+
+        configured = self.config.media.save_dir
+        root = Path(configured) if configured else \
+            Path(self.config.paths.user) / "media"
+        return root / "slack"
+
+    def _transcriber(self):
+        if not self.config.media.voice_to_text:
+            return None
+        return None   # no transcription backend is wired yet; the note says so
+
     # -- turns ---------------------------------------------------------------- #
 
-    def _start_turn(self, talk: Conversation, text: str) -> None:
-        if not talk.session.send(text):
+    def _start_turn(self, talk: Conversation, text: str,
+                    images: list[str] | None = None) -> None:
+        if not talk.session.send(text, images=images):
             self._menu(talk, "Something is already running. Stop it first.")
             return
         ts = self._send(talk, "_working…_")

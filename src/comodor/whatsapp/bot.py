@@ -36,6 +36,7 @@ from typing import Any, Callable
 from ..channels.markdown import to_whatsapp
 from ..channels.settings import Settings, keep_current
 from ..config import Config
+from ..media.ingest import MediaError, ingest
 from . import menu as ui
 from .api import Cloud, OutsideWindow, WhatsAppError, split
 from .webhook import Endpoint, Inbound
@@ -209,6 +210,9 @@ class Service:
         self.cloud.mark_read(item.message_id)
         talk = self._conversation(item.wa_id)
 
+        if item.is_media:
+            self._on_media(talk, item)
+            return
         if item.action.startswith("unsupported:"):
             kind = item.action.split(":", 1)[1]
             self._send(item.wa_id,
@@ -376,8 +380,9 @@ class Service:
 
     # -- turns -------------------------------------------------------------- #
 
-    def _start_turn(self, talk: Conversation, text: str) -> None:
-        if not talk.session.send(text):
+    def _start_turn(self, talk: Conversation, text: str,
+                    images: list[str] | None = None) -> None:
+        if not talk.session.send(text, images=images):
             self._menu(talk, note="Something is already running. Stop it "
                                   "first.")
             return
@@ -385,6 +390,52 @@ class Service:
         self._send(talk.wa_id, "_Working on it…_")
         threading.Thread(target=self._follow, args=(talk,),
                          name=f"comodor-wa-{talk.wa_id}", daemon=True).start()
+
+    # -- media --------------------------------------------------------------- #
+
+    def _on_media(self, talk: Conversation, item: Inbound) -> None:
+        """Download, type, and route one media message."""
+        if not self.config.media.enabled:
+            self._send(item.wa_id,
+                       f"I can only read text here — that was a "
+                       f"{item.media_kind}.")
+            return
+        self.cloud.max_download_bytes = int(
+            self.config.media.max_download_mb * 1_000_000)
+        try:
+            data = self.cloud.download(item.media_id)
+            downloaded = ingest(data, name=item.media_name,
+                                directory=self._media_dir(),
+                                max_mb=self.config.media.max_download_mb)
+        except MediaError as problem:
+            self._send(item.wa_id, str(problem))
+            return
+        except WhatsAppError as problem:
+            self._send(item.wa_id, f"I could not fetch that file: {problem}")
+            return
+        self._start_turn_with_media(talk, downloaded)
+
+    def _media_dir(self):
+        from pathlib import Path
+
+        configured = self.config.media.save_dir
+        root = Path(configured) if configured else \
+            Path(self.config.paths.user) / "media"
+        return root / "whatsapp"
+
+    def _start_turn_with_media(self, talk: Conversation, item) -> None:
+        from ..media.route import route
+        from ..providers.profile import of as profile_of
+
+        profile = profile_of(self.config)
+        routed = route(item, profile, voice_to_text=self._transcriber())
+        self._start_turn(talk, routed.text, images=routed.images)
+
+    def _transcriber(self):
+        """The voice-note transcriber, or None where there is none."""
+        if not self.config.media.voice_to_text:
+            return None
+        return None   # no transcription backend is wired yet; the note says so
 
     def _follow(self, talk: Conversation) -> None:
         """Drain the event stream, and speak rarely.

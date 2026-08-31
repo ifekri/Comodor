@@ -178,6 +178,29 @@ class Slack:
         body["blocks"] = blocks or []
         return self.call("chat.update", body)
 
+    def download(self, file_id: str) -> bytes:
+        """The bytes of a file shared into the chat.
+
+        `files.info` names a private URL that only answers to the bot's own
+        token, so the two calls are made here where that token lives.
+        """
+        description = self.call("files.info", {"file": file_id})
+        info = (description or {}).get("file") or {}
+        url = str(info.get("url_private_download") or info.get("url_private")
+                  or "")
+        if not url:
+            raise SlackError("Slack named no download URL for that file")
+        try:
+            response = http.get(url, headers={
+                "Authorization": f"Bearer {self._bot}"},
+                timeout=(10.0, self.timeout))
+        except Exception as problem:
+            raise SlackError(
+                self._hide(f"could not download the file: {problem}")) from None
+        if response.status_code != 200:
+            raise SlackError(f"the download answered {response.status_code}")
+        return response.content
+
     def open_socket(self) -> str:
         """A fresh websocket address for Socket Mode. App-level token only."""
         found = self.call("apps.connections.open", app_level=True)

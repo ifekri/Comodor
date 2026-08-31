@@ -37,6 +37,7 @@ from typing import Any
 from ..channels.markdown import to_telegram
 from ..channels.settings import Settings, keep_current
 from ..config import Config
+from ..media.ingest import MediaError, ingest
 from . import keyboard as kb
 from .api import Bot, TelegramError, Unauthorised, backoff
 
@@ -229,9 +230,95 @@ class Service:
             return
         if text:
             self._on_text(chat, text)
+            return
+        self._on_media(chat, user, message)
 
     def _allowed(self, user: int) -> bool:
         return self.config.telegram.may(user)
+
+    # -- media ---------------------------------------------------------------- #
+
+    #: Telegram's message keys that carry a downloadable file, most specific
+    #: first. A voice note is audio with a waveform, and Telegram says so
+    #: under its own key rather than under `audio`.
+    MEDIA_KEYS = (("voice", "audio"), ("photo", "image"), ("audio", "audio"),
+                  ("video_note", "video"), ("video", "video"),
+                  ("document", "document"), ("sticker", "image"))
+
+    def _on_media(self, chat: int, user: int, message: dict[str, Any]) -> None:
+        """A message with no text but possibly a file.
+
+        Media is text-plus after routing: a voice note becomes its transcript,
+        a screenshot becomes an image on the message, a document becomes a
+        path the turn can read. A chat where it is not enabled says so once,
+        briefly, rather than letting silence look like being ignored.
+        """
+        if not self.config.media.enabled:
+            return                          # deliberate: channels stay text-only
+        user_allowed = self.config.telegram.may(user)
+        if not user_allowed:
+            return                          # pairing already handled the reply
+
+        kind, file_id, name = None, "", ""
+        for key, media_kind in self.MEDIA_KEYS:
+            if key in message:
+                kind = media_kind
+                payload = message[key]
+                if kind == "image":
+                    # Telegram sends photos as a list of sizes; the last is
+                    # the largest and the only one worth transcription-into-
+                    # text. Its file_id is what getFile wants.
+                    largest = payload[-1] if isinstance(payload, list) else payload
+                    file_id = str((largest or {}).get("file_id") or "")
+                else:
+                    file_id = str((payload or {}).get("file_id") or "")
+                name = str(((message.get("document") or {}).get("file_name"))
+                           or f"{key}")
+                break
+        if not file_id:
+            return
+
+        self.bot.max_download_bytes = int(
+            self.config.media.max_download_mb * 1_000_000)
+        try:
+            data = self.bot.download(file_id)
+            item = ingest(data, name=name,
+                          directory=self._media_dir(), max_mb=self.config.media.max_download_mb)
+        except MediaError as problem:
+            self._send(chat, str(problem))
+            return
+        except Exception as problem:
+            self._send(chat, f"I could not fetch that file: {problem}")
+            return
+
+        self._start_turn_with_media(chat, item)
+
+    def _media_dir(self):
+        from pathlib import Path
+
+        configured = self.config.media.save_dir
+        root = Path(configured) if configured else \
+            Path(self.config.paths.user) / "media"
+        return root / "telegram"
+
+    def _start_turn_with_media(self, chat: int, item) -> None:
+        from ..media.route import route
+        from ..providers.profile import of as profile_of
+
+        talk = self._conversation(chat)
+        profile = profile_of(self.config)
+        routed = route(item, profile,
+                       voice_to_text=self._transcriber())
+        text = routed.text
+        if routed.note:
+            text = f"{text}\n{routed.note}"
+        self._start_turn(talk, text, images=routed.images)
+
+    def _transcriber(self):
+        """The voice-note transcriber, or None where there is none."""
+        if not self.config.media.voice_to_text:
+            return None
+        return None   # no transcription backend is wired yet; the note says so
 
     def _maybe_pair(self, chat: int, user: int, text: str,
                     message: dict[str, Any]) -> None:
@@ -403,8 +490,9 @@ class Service:
 
     # -- turns ------------------------------------------------------------- #
 
-    def _start_turn(self, talk: Conversation, text: str) -> None:
-        if not talk.session.send(text):
+    def _start_turn(self, talk: Conversation, text: str,
+                    images: list[str] | None = None) -> None:
+        if not talk.session.send(text, images=images):
             self.bot.send(talk.chat,
                           "Something is already running. Stop it first.",
                           keyboard=self._menu(talk.chat))

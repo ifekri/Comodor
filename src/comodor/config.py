@@ -534,6 +534,40 @@ class MCPConfig:
 
 
 @dataclass
+class MediaConfig:
+    """Files sent in from the channels: voice notes, images, documents.
+
+    Everything arrives in one managed directory, typed by its own bytes and
+    never executed. A file nobody can read — an image sent to a model without
+    vision, a voice note with no transcription — is kept and its path offered,
+    not quietly discarded.
+    """
+
+    enabled: bool = True
+    #: Ceiling per download. The adapters cap what they fetch; this catches
+    #: whatever slips past them.
+    max_download_mb: float = 25.0
+    #: Transcribe voice notes. Needs a transcription setting; without one a
+    #: voice note is answered with a line saying so rather than silence.
+    voice_to_text: bool = True
+    #: Send images to models that have vision. Without it the image is saved
+    #: and its path handed to the model as a file to read with tools.
+    images_to_vision: bool = True
+    #: Where downloads land, under the user's own directory. Sessions share
+    #: it; names are content-hashed, so the same photo twice costs nothing.
+    save_dir: str = ""                    # blank = <user>/media
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "max_download_mb": self.max_download_mb,
+            "voice_to_text": self.voice_to_text,
+            "images_to_vision": self.images_to_vision,
+            "save_dir": self.save_dir,
+        }
+
+
+@dataclass
 class CronConfig:
     """Scheduled agent runs.
 
@@ -604,7 +638,8 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: for its whole existence: `headless: false` in a config file did nothing and
 #: said nothing.
 SECTIONS = ("ui", "agent", "gateway", "learning", "skills", "safety",
-            "browser", "computer", "telegram", "whatsapp", "slack", "cron")
+            "browser", "computer", "telegram", "whatsapp", "slack", "cron",
+            "media")
 
 
 @dataclass
@@ -623,6 +658,7 @@ class Config:
     slack: SlackConfig = field(default_factory=SlackConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     cron: CronConfig = field(default_factory=CronConfig)
+    media: MediaConfig = field(default_factory=MediaConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     paths: Paths = field(default_factory=resolve_paths)

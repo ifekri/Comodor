@@ -141,6 +141,34 @@ class Bot:
             self.offset = max(self.offset, int(update["update_id"]) + 1)
         return got
 
+    def download(self, file_id: str) -> bytes:
+        """The bytes of a file somebody sent.
+
+        Telegram holds uploads on its own servers; `getFile` names one, and a
+        second, unauthenticated call fetches it. The size Telegram reports is
+        checked first so a huge file is never pulled at all.
+        """
+        description = self.call("getFile", file_id=file_id)
+        size = int((description or {}).get("file_size") or 0)
+        path = str((description or {}).get("file_path") or "")
+        if not path:
+            raise TelegramError("the file was refused: Telegram named no path")
+        limit = getattr(self, "max_download_bytes", 0)
+        if limit and size and size > limit:
+            raise TelegramError(
+                f"the file is {size / 1_000_000:.1f} MB, over the limit here "
+                f"({limit / 1_000_000:.0f} MB) — it was not downloaded")
+        url = f"https://api.telegram.org/file/bot{self._token}/{path}"
+        try:
+            response = http.get(url, timeout=(10.0, self.timeout))
+        except Exception as problem:
+            raise TelegramError(
+                self._hide(f"could not download the file: {problem}")) from None
+        if response.status_code != 200:
+            raise TelegramError(
+                f"the download answered {response.status_code}")
+        return response.content
+
     def send(self, chat: int | str, text: str, *, keyboard: Any = None,
              quiet: bool = False, reply_to: int | None = None,
              preview: bool = False) -> dict[str, Any] | None:

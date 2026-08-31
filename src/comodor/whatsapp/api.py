@@ -252,6 +252,38 @@ class Cloud:
             "interactive": interactive,
         })
 
+    def download(self, media_id: str) -> bytes:
+        """The bytes of a photo, voice note, or document somebody sent.
+
+        Meta names media with an id; one Graph call resolves it to a temporary
+        URL, a second fetches the bytes. Nothing here streams — the whole file
+        arrives or an error does — so the caller's own size cap is what keeps
+        a huge upload from being held in memory.
+        """
+        description = self.call(media_id, method="GET")
+        url = str((description or {}).get("url") or "")
+        mime = str((description or {}).get("mime_type") or "")
+        size = int((description or {}).get("file_size") or 0)
+        if not url:
+            raise WhatsAppError("the media was refused: Meta named no URL")
+        limit = getattr(self, "max_download_bytes", 0)
+        if limit and size and size > limit:
+            raise WhatsAppError(
+                f"the file is {size / 1_000_000:.1f} MB, over the limit here "
+                f"({limit / 1_000_000:.0f} MB) — it was not downloaded")
+        try:
+            response = http.get(url, headers={
+                "Authorization": f"Bearer {self._token}"},
+                timeout=(10.0, self.timeout))
+        except Exception as problem:
+            raise WhatsAppError(
+                self._hide(f"could not download the media: {problem}")) from None
+        if response.status_code != 200:
+            raise WhatsAppError(
+                f"the media download answered {response.status_code}")
+        self.last_mime = mime
+        return response.content
+
     def mark_read(self, message_id: str) -> None:
         """The two blue ticks, so somebody knows it arrived.
 

@@ -1498,9 +1498,13 @@ class Session:
 
     # -- what a browser does ------------------------------------------------ #
 
-    def send(self, text: str) -> bool:
-        """Start a turn. False if one is already running."""
-        if not text.strip():
+    def send(self, text: str, images: list[str] | None = None) -> bool:
+        """Start a turn. False if one is already running.
+
+        ``images`` is base64 picture data for a model with vision, riding the
+        user message the way the web interface's own screenshots do.
+        """
+        if not text.strip() and not images:
             return False
         if not self._turn.acquire(blocking=False):
             return False
@@ -1512,7 +1516,7 @@ class Session:
             self.busy = True
             self.bus.emit(Kind.STATUS, busy=True)
             try:
-                self.agent.run(text)
+                self.agent.run(text, images=images or None)
             except Exception as error:                # never lose the worker
                 self.bus.emit(Kind.ERROR, text=f"{type(error).__name__}: {error}")
             finally:
