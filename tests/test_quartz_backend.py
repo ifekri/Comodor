@@ -30,9 +30,9 @@ pytestmark = pytest.mark.skipif(
 if sys.platform == "darwin" and ctypes.util.find_library("CoreGraphics"):
     from comodor.desktop import quartz  # noqa: E402
 
-_cf = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
-_cf.CFRetain.restype = ctypes.c_void_p
-_cf.CFRetain.argtypes = [ctypes.c_void_p]
+    _cf = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
+    _cf.CFRetain.restype = ctypes.c_void_p
+    _cf.CFRetain.argtypes = [ctypes.c_void_p]
 
 # Pixel buffers CGDataProviderCreateWithData references instead of copies.
 _BUFFERS: list[object] = []
