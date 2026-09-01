@@ -852,6 +852,12 @@ class App:
                 self.state.status.activity = event.text[:80]
             elif kind is Kind.TODO:
                 self.state.history.todos = event.get("items", [])
+                # Carried on the session so that closing the terminal does not
+                # lose it. Written to disk with the rest of the metadata at the
+                # end of the turn, not here — this fires on every edit of the
+                # list, and the plan is worth a file write per turn, not one
+                # per checkbox.
+                self.session.todos = list(self.state.history.todos)
             elif kind is Kind.USAGE:
                 status = self.state.status
                 status.context_used = event.get("context_used", status.context_used)
@@ -2109,8 +2115,30 @@ class App:
         self._saved_count = len(messages)
         if meta:
             self.session = meta
+            self._restore_plan(meta.todos)
         self.state.scroll = 0
         self._toast(f"resumed {len(messages)} messages", "good")
+
+    def _restore_plan(self, todos: list[dict[str, str]]) -> None:
+        """Put a resumed session's task list back where both readers look.
+
+        The sidebar reads `state.history.todos`; the agent reads the list on
+        its tool context, which is what `todo_write` updates and what gets
+        repeated to the model after compaction. Restoring only the first gives
+        a resumed session a plan the person can see and the agent cannot.
+        """
+        from ..tools.base import TodoItem
+
+        self.state.history.todos = list(todos or [])
+        try:
+            context = self.agent._tool_context()
+        except Exception:
+            return
+        context.todos[:] = [
+            TodoItem(text=str(item.get("text", "")),
+                     state=str(item.get("state", "pending")))
+            for item in todos or [] if item.get("text")
+        ]
 
     def cmd_attach(self, args: str) -> None:
         """Pull a file into the prompt as an ``@path`` reference."""
