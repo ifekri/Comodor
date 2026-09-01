@@ -33,6 +33,10 @@ class SessionMeta:
     updated_at: float = field(default_factory=time.time)
     messages: int = 0
     cost_usd: float = 0.0
+    #: How many times this session's history has been compacted. A long-lived
+    #: channel session reads very differently from a fresh one with the same
+    #: message count, and `/resume` should say which it is reopening.
+    compactions: int = 0
 
     @property
     def when(self) -> str:

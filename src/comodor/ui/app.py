@@ -359,6 +359,7 @@ class App:
         if self.conversation.messages:
             self.session.messages = len(self.conversation.messages)
             self.session.cost_usd = self.conversation.usage.cost_usd
+            self.session.compactions = self.conversation.compactions
             self.sessions.save_meta(self.session)
         try:
             self.memory.consolidate()
@@ -935,6 +936,7 @@ class App:
         self._persist_new_messages()
         self.session.messages = len(self.conversation.messages)
         self.session.cost_usd = self.conversation.usage.cost_usd
+        self.session.compactions = self.conversation.compactions
         self.sessions.save_meta(self.session)
         self._refresh_sessions()
 
@@ -1910,7 +1912,9 @@ class App:
             self._toast("no earlier sessions", "warn")
             return
         items = [(meta.id, f"{meta.title or 'untitled'}  ·  {meta.when}  ·  "
-                           f"{meta.messages} messages") for meta in sessions]
+                           f"{meta.messages} messages"
+                           + (f"  ·  compacted {meta.compactions}x"
+                              if meta.compactions else "")) for meta in sessions]
         self.state.overlay = select_overlay("Resume", items, self._resume)
 
     def _resume(self, session_id: str) -> None:

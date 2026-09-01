@@ -283,6 +283,7 @@ class Session:
         self._saved = len(messages)
         self.meta.messages = len(messages)
         self.meta.cost_usd = self.conversation.usage.cost_usd
+        self.meta.compactions = self.conversation.compactions
         self.meta.model = self.config.active_model()
         self.meta.provider = self.config.provider
         self.meta.updated_at = time.time()

@@ -357,6 +357,7 @@ class AcpSession:
         self._saved = len(messages)
         self.meta.messages = len(messages)
         self.meta.cost_usd = self.conversation.usage.cost_usd
+        self.meta.compactions = self.conversation.compactions
         self.meta.updated_at = time.time()
         try:
             self.store.save_meta(self.meta)
