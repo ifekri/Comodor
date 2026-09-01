@@ -563,6 +563,48 @@ class SlackConfig:
 
 
 @dataclass
+class DiscordConfig:
+    """Reaching the agent from a Discord bot.
+
+    One token, like Telegram: a bot token from the developer portal, and the
+    gateway it opens is a websocket Comodor connects out to — so like Slack
+    and unlike WhatsApp, nothing here needs a public address.
+
+    A server can have thousands of people in it, which makes the allow-list
+    below load-bearing in a way even Slack's is not. `allowed` holds Discord
+    snowflake ids — the raw numbers, not usernames, and never the
+    discriminator: a username can be given up and taken by somebody else, an
+    id cannot.
+    """
+
+    enabled: bool = False
+    #: From the developer portal: New Application → Bot → Reset Token.
+    token: str = ""
+    #: Discord user ids (snowflakes) that may talk to it.
+    allowed: list[int] = field(default_factory=list)
+    #: Whether a turn started from Discord may edit files and run commands.
+    allow_writes: bool = False
+    #: What happens to a new message while a turn is already running: "queue"
+    #: (the default) or "interrupt" — see the Telegram section above.
+    busy_mode: str = "queue"
+    #: Seconds a pairing code stays valid.
+    pair_window: int = 300
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "token": self.token,
+            "allowed": list(self.allowed),
+            "allow_writes": self.allow_writes,
+            "busy_mode": self.busy_mode,
+            "pair_window": self.pair_window,
+        }
+
+    def may(self, user_id: int) -> bool:
+        return bool(user_id) and int(user_id) in {int(x) for x in self.allowed}
+
+
+@dataclass
 class MCPConfig:
     """Servers, and the master switch over all of them."""
 
@@ -591,6 +633,42 @@ class DelegationConfig:
     completion_summary_max: int = 24_000
     #: Seconds between progress checks on each running delegate.
     stall_check_seconds: float = 30.0
+
+@dataclass
+class VoiceConfig:
+    """Speech in and out: transcribing voice notes, synthesising speech.
+
+    Everything is off or key-less by default. A cloud transcription provider
+    is only used when the user names one and its key exists — audio leaving
+    the machine is a bigger step than text leaving it, because a recording
+    is a copy of a person, not a summary of what they asked.
+    """
+
+    enabled: bool = False
+    #: Text-to-speech off unless asked for. When on, channel replies may be
+    #: sent as voice messages instead of text where the channel supports it.
+    tts_enabled: bool = False
+    #: Text-to-speech provider: "edge" needs no key and no install.
+    tts_provider: str = "edge"
+    #: Voice for the edge provider. A Persian locale default, since the
+    #: program's other audience speaks Persian; any Edge voice name works.
+    tts_voice: str = "fa-IR-FaridNeural"
+    #: Speech-to-text provider: "groq" or "openai", or "" for none. A local
+    #: whisper binary is not wired in v1 — the setting says so rather than
+    #: pretending.
+    stt_provider: str = ""
+    #: Environment variable holding the transcription provider's key.
+    stt_key_env: str = "GROQ_API_KEY"
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "tts_enabled": self.tts_enabled,
+            "tts_provider": self.tts_provider,
+            "tts_voice": self.tts_voice,
+            "stt_provider": self.stt_provider,
+            "stt_key_env": self.stt_key_env,
+        }
 
 @dataclass
 class MediaConfig:
@@ -761,8 +839,8 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: for its whole existence: `headless: false` in a config file did nothing and
 #: said nothing.
 SECTIONS = ("ui", "agent", "gateway", "learning", "curator", "skills", "safety",
-            "browser", "computer", "telegram", "whatsapp", "slack", "cron",
-            "media", "delegation", "shell")
+            "browser", "computer", "telegram", "whatsapp", "slack", "discord",
+            "cron", "media", "voice", "delegation", "shell")
 
 
 @dataclass
@@ -780,9 +858,11 @@ class Config:
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     whatsapp: WhatsAppConfig = field(default_factory=WhatsAppConfig)
     slack: SlackConfig = field(default_factory=SlackConfig)
+    discord: DiscordConfig = field(default_factory=DiscordConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     cron: CronConfig = field(default_factory=CronConfig)
     media: MediaConfig = field(default_factory=MediaConfig)
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
     delegation: DelegationConfig = field(default_factory=DelegationConfig)
     shell: ShellConfig = field(default_factory=ShellConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)

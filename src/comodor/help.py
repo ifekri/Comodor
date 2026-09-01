@@ -56,6 +56,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("comodor web", "use it from a browser, here or on a server"),
         ("comodor telegram start", "drive it from your phone, all buttons"),
         ("comodor slack start", "the same, in a Slack workspace"),
+        ("comodor discord start", "the same, on a Discord server"),
         ("comodor whatsapp start", "the same, from a WhatsApp number"),
         ("comodor skills browse", "procedures it follows when the work calls for them"),
         ("comodor mcp list", "tools from Model Context Protocol servers"),
@@ -293,6 +294,24 @@ a fixed list of accounts and nobody else - a workspace can have hundreds of
 people in it, and this reads and writes your files.
 
 Full guide: docs/slack.md"""),
+
+    "discord": ("From Discord", """\
+  comodor discord connect          guided: the token, and the one intent to
+                                   switch on before anything works
+  comodor discord pair             a one-time code that adds your account
+  comodor discord start -b         run it detached from this terminal
+  comodor discord status           what is set, who may talk, is it running
+
+About three minutes. One token, from the developer portal; the bot opens a
+websocket outward, so nothing here needs a public address.
+
+The one setting people miss: under Bot → Privileged Gateway Intents, switch on
+Message Content Intent. Without it the bot connects and shows online, and
+every message arrives empty - a bot that looks fine and hears nothing.
+
+In a server it answers when mentioned; in a direct message, always. It answers
+a fixed list of numeric ids and nobody else - a server can have thousands of
+people in it, and this reads and writes your files."""),
 
     "whatsapp": ("From WhatsApp", """\
   comodor whatsapp connect         guided: links each page, checks each value
