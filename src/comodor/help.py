@@ -173,6 +173,22 @@ A skill is a written procedure - a markdown file with a name and a description
 Write your own in  ~/.comodor/skills/<name>/SKILL.md.
 Full guide: docs/skills.md"""),
 
+    "curator": ("Keeping the brain tidy", """\
+Every few days a maintenance pass runs over what has been learned: lessons
+whose confidence has decayed below the floor stop being recalled, duplicate
+facts merge, and skills unused for a month are hidden and, after three,
+moved to the archive. Nothing is deleted; `curator restore` brings a skill
+back from `skills/.archive/`.
+
+  comodor curator run       do a pass now
+  comodor curator report    what the last pass did, and why
+  comodor curator restore NAME    bring an archived skill back
+  comodor curator pin NAME  exempt a skill from the curator
+  comodor curator pause     stop the automatic passes
+
+curator.interval_days sets how often it runs; the pass itself costs no
+tokens and never runs in the middle of a session."""),
+
     "cost": ("Paying less for the same work", """\
   /cost                     tokens, spend, and what the cache saved
   agent.max_cost_usd        stop a task at a price

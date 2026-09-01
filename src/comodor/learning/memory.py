@@ -509,7 +509,27 @@ class LearningEngine:
                 self.store.save_associations(self._associations)
             except Exception:              # noqa: BLE001 - never fatal
                 pass
+        self._curate_if_due()
         return self.store.consolidate(learning.min_confidence, learning.half_life_days)
+
+    def _curate_if_due(self) -> None:
+        """The curator's idle trigger, riding the shutdown path.
+
+        This runs when the interface closes — the one moment the agent is
+        provably not mid-task — and only when the interval has passed. A
+        pass costs no tokens and takes milliseconds, so it rides here rather
+        than earning its own daemon.
+        """
+        try:
+            if not self.config.curator.enabled:
+                return
+            from . import curator
+
+            if not curator.due(self.store, self.config.curator.interval_days):
+                return
+            curator.run(self.store, self.config, skills_root=self.config.paths.skills)
+        except Exception:                  # noqa: BLE001 - never fatal
+            pass
 
     # -- user-facing controls --------------------------------------------- #
 

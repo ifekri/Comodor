@@ -88,6 +88,10 @@ class Lesson:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     last_used: float = 0.0
+    #: The curator's status. `active` lessons are recallable; `stale` ones
+    #: stay in the database — inspectable, restorable — but are never
+    #: injected into a prompt. Set by learning/curator.py, nothing else.
+    status: str = "active"
 
     @property
     def text(self) -> str:
@@ -370,6 +374,7 @@ class BrainStore:
         """
         rows = self.connection.execute(
             """SELECT * FROM lessons
+               WHERE status = 'active'
                ORDER BY pinned DESC, confidence DESC, last_used DESC, updated_at DESC
                LIMIT ?""", (limit,))
         return [self._row_to_lesson(row) for row in rows]
@@ -398,7 +403,8 @@ class BrainStore:
                     source TEXT DEFAULT '',
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
-                    last_used REAL NOT NULL DEFAULT 0
+                    last_used REAL NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'active'
                 );
                 CREATE INDEX IF NOT EXISTS idx_lessons_scope ON lessons(scope);
                 -- Partial: pinned lessons are fetched on every single recall,
@@ -507,6 +513,12 @@ class BrainStore:
                 ("retries", "INTEGER NOT NULL DEFAULT 0"),
                 ("tokens", "INTEGER NOT NULL DEFAULT 0"),
                 ("rules_active", "INTEGER NOT NULL DEFAULT 0"),
+            ],
+            "lessons": [
+                # The curator's status: 'active' is the default and the only
+                # value recall pays attention to; 'stale' stays in the
+                # database, inspectable, but is never injected into a prompt.
+                ("status", "TEXT NOT NULL DEFAULT 'active'"),
             ],
         }
         for table, columns in additions.items():
@@ -624,6 +636,7 @@ class BrainStore:
             losses=row["losses"], pinned=bool(row["pinned"]), source=row["source"],
             created_at=row["created_at"], updated_at=row["updated_at"],
             last_used=row["last_used"],
+            status=row["status"] if "status" in row.keys() else "active",
         )
 
     def all_lessons(self, scopes: list[str] | None = None) -> list[Lesson]:
@@ -641,7 +654,7 @@ class BrainStore:
         This runs on every single recall, so it must not pull the whole table
         through SQLite the way ``all_lessons`` does.
         """
-        sql = "SELECT * FROM lessons WHERE pinned = 1"
+        sql = "SELECT * FROM lessons WHERE pinned = 1 AND status = 'active'"
         params: tuple[Any, ...] = ()
         if scopes:
             sql += f" AND scope IN ({','.join('?' * len(scopes))})"
@@ -656,7 +669,8 @@ class BrainStore:
             return {}
         placeholders = ",".join("?" * len(wanted))
         rows = self.connection.execute(
-            f"SELECT * FROM lessons WHERE id IN ({placeholders})", wanted)
+            f"SELECT * FROM lessons WHERE id IN ({placeholders}) "
+            f"AND status = 'active'", wanted)
         return {row["id"]: self._row_to_lesson(row) for row in rows}
 
     def search_lessons(self, query: str, scopes: list[str] | None = None,
@@ -687,7 +701,7 @@ class BrainStore:
             return []
         sql = ["""SELECT lessons.*, bm25(lessons_fts) AS rank
                   FROM lessons_fts JOIN lessons ON lessons.id = lessons_fts.rowid
-                  WHERE lessons_fts MATCH ?"""]
+                  WHERE lessons_fts MATCH ? AND lessons.status = 'active'"""]
         params: list[Any] = [match]
         if scopes:
             sql.append(f"AND lessons.scope IN ({','.join('?' * len(scopes))})")

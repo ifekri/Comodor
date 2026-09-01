@@ -228,6 +228,21 @@ class LearningConfig:
 
 
 @dataclass
+class CuratorConfig:
+    """The periodic maintenance pass over the brain (see learning/curator).
+
+    Decay is passive and runs per task; the curator is active and runs on
+    its own interval. It never deletes anything: stale items stay in the
+    database hidden from recall, skills move to `.archive/` and can be
+    restored, and every transition is reported with its reason.
+    """
+    enabled: bool = True
+    interval_days: float = 7.0           # minimum days between passes
+    stale_days: float = 30.0             # unused this long -> stale
+    archive_days: float = 90.0           # unused this long -> archived
+
+
+@dataclass
 class BrowserConfig:
     """The real browser: which one, how large, and whether it is visible."""
 
@@ -745,7 +760,7 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: is not named here is silently ignored - which is what happened to `browser`
 #: for its whole existence: `headless: false` in a config file did nothing and
 #: said nothing.
-SECTIONS = ("ui", "agent", "gateway", "learning", "skills", "safety",
+SECTIONS = ("ui", "agent", "gateway", "learning", "curator", "skills", "safety",
             "browser", "computer", "telegram", "whatsapp", "slack", "cron",
             "media", "delegation", "shell")
 
@@ -758,6 +773,7 @@ class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
+    curator: CuratorConfig = field(default_factory=CuratorConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     computer: ComputerConfig = field(default_factory=ComputerConfig)

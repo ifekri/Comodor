@@ -53,9 +53,28 @@ class SkillRegistry:
                 # rest of somebody's collection out of service.
                 self.errors.append((path, str(error)))
                 continue
+            self._apply_stale(skill, path)
             self.add(skill)
             found += 1
         return found
+
+    def _apply_stale(self, skill: Skill, path: Path) -> None:
+        """A skill the curator marked stale loads, but is not offered.
+
+        Stale lives in the usage sidecar, not in the skill file: the file is
+        the user's document and stays untouched. The skill is still here —
+        `comodor skills list` shows it, restoring the state brings it back —
+        but selection skips it, exactly as a stale lesson is skipped.
+        """
+        try:
+            from .usage import UsageStore
+
+            root = skill.root or (path.parent if path.suffix == ".md" else path)
+            record = UsageStore(root.parent).get(skill.name)
+            if record.state == "stale":
+                skill.enabled = False
+        except OSError:
+            pass
 
     @staticmethod
     def _candidates(directory: Path) -> list[Path]:

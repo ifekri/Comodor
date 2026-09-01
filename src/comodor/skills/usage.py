@@ -17,6 +17,7 @@ import json
 import os
 import stat
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,15 +33,18 @@ class Usage:
     use_count: int = 0               # matched into a request's context
     view_count: int = 0              # files read from it
     patch_count: int = 0             # times changed
-    state: str = "active"            # active | archived
+    state: str = "active"            # active | archived | stale
     pinned: bool = False
+    #: Unix time of the last recorded use. The curator reads this to decide
+    #: whether a skill has gone out of service; a count alone cannot.
+    last_used: float = 0.0
     #: Free text for the last thing that happened, so the file reads alone.
     note: str = ""
 
     def to_json(self) -> dict:
         return {key: getattr(self, key) for key in
                 ("created_by", "created", "use_count", "view_count",
-                 "patch_count", "state", "pinned", "note")}
+                 "patch_count", "state", "pinned", "last_used", "note")}
 
     @classmethod
     def from_json(cls, data: dict) -> "Usage":
@@ -53,6 +57,10 @@ class Usage:
             except (TypeError, ValueError):
                 pass
         known.pinned = bool(data.get("pinned", False))
+        try:
+            known.last_used = float(data.get("last_used") or 0)
+        except (TypeError, ValueError):
+            pass
         return known
 
 
@@ -105,8 +113,12 @@ class UsageStore:
             return changed
 
     def record_use(self, name: str) -> None:
-        self.update(name, lambda u: (setattr(u, "use_count", u.use_count + 1),
-                                     u)[1])
+        def bump(usage: Usage) -> Usage:
+            usage.use_count += 1
+            usage.last_used = time.time()
+            return usage
+
+        self.update(name, bump)
 
     def record_patch(self, name: str, note: str = "") -> None:
         def bump(usage: Usage) -> Usage:

@@ -112,6 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     from .acp.commands import register as register_acp
     from .cron.commands import register as register_cron
+    from .learning.commands import register as register_curator
     from .local.commands import register as register_local
     from .mcp.commands import register as register_mcp
     from .skills.commands import register as register_skills
@@ -123,6 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_mcp(sub)
     register_local(sub)
     register_cron(sub)
+    register_curator(sub)
     register_telegram(sub)
     register_whatsapp(sub)
     register_slack(sub)
@@ -947,6 +949,10 @@ def main(argv: list[str] | None = None) -> int:
         from .cron.commands import run as run_cron
 
         return run_cron(config, args)
+    if args.command == "curator":
+        from .learning.commands import run as run_curator
+
+        return run_curator(config, args)
     if args.command == "telegram":
         from .telegram.commands import run as run_telegram
 
