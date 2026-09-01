@@ -108,6 +108,7 @@ def run_checks(config: Config, online: bool = True) -> Report:
               _check_voice,
               _check_api,
               _check_memory_provider,
+              _check_desktop,
               _check_telegram, _check_whatsapp, _check_slack]
     if online:
         checks.append(_check_version)
@@ -601,6 +602,47 @@ def _check_memory_provider(config: Config) -> Finding | None:
                        remedy="check the service is running and "
                               f"{settings.base_url} is right")
     return Finding("memory provider", Status.OK, answer)
+
+def _check_desktop(config: Config) -> Finding | None:
+    """Driving the screen: worth a word only when it is half-able.
+
+    Off entirely is a correct state and says nothing. Half-able - enabled in
+    the config but the machine refuses, or macOS permissions missing - is the
+    setup that will fail at the moment the model first reaches for the tool,
+    so it is said here, with the exact remedy, rather than then.
+    """
+    computer = getattr(config, "computer", None)
+    if computer is None or not computer.enabled:
+        return None
+
+    from .desktop import available, why_not
+
+    if not available():
+        return Finding("computer use", Status.WARN,
+                       f"the tool is enabled but this machine cannot be "
+                       f"driven: {why_not()}",
+                       remedy="run on a machine with a desktop backend, or "
+                              "set `computer.enabled = false` to stop "
+                              "offering the tool")
+
+    import sys
+
+    if sys.platform == "darwin":
+        from .desktop import quartz
+
+        missing = quartz.missing_permissions()
+        if missing:
+            page = " and ".join(missing)
+            return Finding(
+                "computer use", Status.WARN,
+                f"macOS has not granted {page} permission — screenshots "
+                "will come back refused and input will not be sent",
+                remedy="open System Settings, Privacy & Security, then "
+                       f"{page}; add the terminal Comodor runs in and "
+                       "restart it")
+
+    return Finding("computer use", Status.OK, "a backend is present")
+
 
 def _check_telegram(config: Config) -> Finding | None:
     return _check_phone(config, "telegram")
