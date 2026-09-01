@@ -110,6 +110,15 @@ class Paths:
         """
         return self.user / "approvals.jsonl"
 
+    def delivery_ledger(self, platform: str) -> Path:
+        """The outbound-delivery ledger of one channel daemon.
+
+        Per platform, because each daemon recovers its own sends on start
+        and one file per platform keeps the recovery pass single-threaded
+        by construction.
+        """
+        return self.user / "delivery" / f"{platform}.jsonl"
+
     @property
     def checkpoints(self) -> Path:
         return self.project / PROJECT_DIR_NAME / "checkpoints"

@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..channels.breaker import CircuitBreaker
 from ..channels.busy import interrupt_note, start_or_steer
 from ..channels.markdown import to_slack
 from ..channels.settings import Settings, keep_current
@@ -135,8 +136,17 @@ class Service:
         #: The bot's own user id, so its own messages are not answered — a bot
         #: that replies to itself is an infinite loop with a rate limit.
         self.me: str = ""
+        #: The outbound-delivery ledger: every final answer is noted before
+        #: it is sent, so a crash between producing an answer and delivering
+        #: it leaves a record the next start can recover.
+        from ..channels.ledger import DeliveryLedger
+
+        self._ledger = DeliveryLedger(
+            config.paths.delivery_ledger("slack"), "slack")
+        self._breaker = CircuitBreaker("slack")
         self.socket = SocketMode(self.slack, self._on_envelope,
-                                 announce=self.announce)
+                                 announce=self.announce,
+                                 breaker=self._breaker)
 
     def say(self, line: str) -> None:
         try:
@@ -186,7 +196,27 @@ class Service:
         self.say(f"{len(settings.allowed)} paired account(s) · "
                  + ("may edit files" if settings.allow_writes
                     else "read-only"))
+        self._resume_ledger()
         self.socket.run()
+
+    def _resume_ledger(self) -> None:
+        """Redeliver replies a crash left pending, then sweep old records.
+
+        Runs once at start, before the socket opens: recovery is about the
+        previous life of this process, and interleaving it with fresh turns
+        would answer the older question second.
+        """
+        from ..channels.ledger import resume
+
+        try:
+            recovered = resume(self._ledger, lambda chat, body:
+                               self.slack.send(str(chat), body))
+        except Exception:
+            recovered = 0
+        if recovered:
+            self.say(f"redelivered {recovered} reply/replies that a restart "
+                     "had interrupted")
+        self._ledger.sweep()
 
     def stop(self) -> None:
         self.stopping.set()
@@ -306,10 +336,15 @@ class Service:
                 sent = self.slack.send(channel, piece, blocks=blocks,
                                        thread=talk.thread)
                 ts = str(sent.get("ts") or "")
+                self._breaker.ok()
             except RateLimited as problem:
                 time.sleep(problem.retry_after)
             except SlackError as problem:
-                self.say(f"could not send: {problem}")
+                if self._breaker.fail(str(problem)):
+                    self.say(f"{problem} — Slack sends are paused; send "
+                             "/platform here to resume them")
+                else:
+                    self.say(f"could not send: {problem}")
                 return ""
         return ts
 
@@ -339,6 +374,8 @@ class Service:
             self._stop_turn(talk)
         elif name == "status":
             self._send(talk, self._status(talk))
+        elif name == "platform":
+            self._platform_command(talk)
         elif name == "mode":
             if rest.lower() in ui.MODES:
                 self._set_mode(talk, rest.lower())
@@ -522,15 +559,32 @@ class Service:
                 model=str(state.get("model") or ""),
                 writes=self.config.slack.allow_writes, body=body[:2900])
 
-        try:
-            self.slack.edit(reply.channel, reply.ts, body[:2900], blocks)
-        except RateLimited:
+        if not final:
+            try:
+                self.slack.edit(reply.channel, reply.ts, body[:2900], blocks)
+            except RateLimited:
+                return
+            except SlackError as problem:
+                self.say(f"could not update the reply: {problem}")
             return
+        # The final body goes through the ledger: a crash between the answer
+        # being produced and this edit landing is the case the recovery pass
+        # exists for. Interim edits are not recorded — only the whole answer
+        # is worth redelivering.
+        self._ledger.send(
+            reply.channel, body[:2900],
+            lambda chat, text: self._final_edit(talk, reply, text, blocks))
+        reply.finished = True
+        talk.reply = None
+
+    def _final_edit(self, talk: Conversation, reply: Reply, body: str,
+                    blocks: list[dict[str, Any]]) -> None:
+        try:
+            self.slack.edit(reply.channel, reply.ts, body, blocks)
+        except RateLimited:
+            pass
         except SlackError as problem:
             self.say(f"could not update the reply: {problem}")
-        if final:
-            reply.finished = True
-            talk.reply = None
 
     def _stop_turn(self, talk: Conversation) -> None:
         talk.session.interrupt()
@@ -780,6 +834,20 @@ class Service:
             "• *Rules* — what it learned from your corrections\n\n"
             "When it needs to run something, you approve it here first."
         )
+
+    def _platform_command(self, talk: Conversation) -> None:
+        """The Slack adapter's breaker: state, and the resume.
+
+        The command reaches the daemon that owns the connection, so only
+        this platform's breaker is consulted — and only from a paired
+        account, which the dispatcher has already checked.
+        """
+        breaker = self._breaker
+        if breaker.paused:
+            breaker.resume()
+            self._send(talk, "Slack is listening again.")
+            return
+        self._send(talk, breaker.describe())
 
     def _status(self, talk: Conversation) -> str:
         state = self._state(talk)

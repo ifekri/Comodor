@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..channels.breaker import RESUME_POLL, CircuitBreaker
 from ..channels.busy import interrupt_note, start_or_steer
 from ..channels.markdown import to_telegram
 from ..channels.settings import Settings, keep_current
@@ -150,6 +151,14 @@ class Service:
         self.stopping = threading.Event()
         #: Called with a line of text for the terminal that started this.
         self.announce = announce or (lambda line: None)
+        #: The outbound-delivery ledger: every reply is noted before it is
+        #: sent, so a crash between producing an answer and delivering it
+        #: leaves a record the next start can recover.
+        from ..channels.ledger import DeliveryLedger
+
+        self._ledger = DeliveryLedger(
+            config.paths.delivery_ledger("telegram"), "telegram")
+        self._breaker = CircuitBreaker("telegram")
         self._lock = threading.Lock()
 
     # -- lifecycle --------------------------------------------------------- #
@@ -169,28 +178,64 @@ class Service:
         except TelegramError:
             pass
 
+        self._resume_ledger()
         me = self.bot.me()
         self.announce(f"@{me['username']} is listening")
 
+    def _resume_ledger(self) -> None:
+        """Redeliver replies a crash left pending, then sweep old records.
+
+        Runs once at start, before any new traffic: recovery is about the
+        previous life of this process, and interleaving it with fresh turns
+        would answer the older question second.
+        """
+        from ..channels.ledger import resume
+
+        try:
+            recovered = resume(self._ledger, lambda chat, body:
+                               self.bot.send(chat, body))
+        except Exception:
+            recovered = 0
+        if recovered:
+            self.announce(f"redelivered {recovered} reply/replies that a "
+                          "restart had interrupted")
+        self._ledger.sweep()
+
         failures = 0
         while not self.stopping.is_set():
+            if self._breaker.paused:
+                # Paused, the loop does not poll: polling a paused adapter
+                # is only a way to keep tripping it. Resume is a command,
+                # so the loop just sleeps and waits to be told.
+                if self.stopping.wait(RESUME_POLL):
+                    return
+                continue
             try:
                 for update in self.bot.updates():
                     if self.stopping.is_set():
                         break
                     self._handle(update)
                 failures = 0
+                self._breaker.ok()
             except Unauthorised as problem:
                 self.announce(f"the token was refused: {problem}")
                 return
             except TelegramError as problem:
                 failures += 1
+                if self._breaker.fail(str(problem)):
+                    self.announce(f"{problem} — paused; send /platform in "
+                                  "Telegram to resume it")
+                    continue
                 pause = backoff(failures)
                 self.announce(f"{problem} — retrying in {pause:.0f}s")
                 if self.stopping.wait(pause):
                     return
             except Exception as problem:      # pragma: no cover - defensive
                 failures += 1
+                if self._breaker.fail(f"{type(problem).__name__}: {problem}"):
+                    self.announce(f"{problem} — paused; send /platform in "
+                                  "Telegram to resume it")
+                    continue
                 self.announce(f"unexpected: {type(problem).__name__}: {problem}")
                 if self.stopping.wait(backoff(failures)):
                     return
@@ -383,6 +428,8 @@ class Service:
         elif name == "status":
             self.bot.send(talk.chat, self._status(talk),
                           keyboard=kb.just_back())
+        elif name == "platform":
+            self._platform_command(talk)
         else:
             self.bot.send(talk.chat, f"No command <code>/{escape(name)}</code>.",
                           keyboard=self._menu(talk.chat))
@@ -561,11 +608,35 @@ class Service:
             recent = tools[-3:]
             body += "\n\n<i>" + escape(" · ".join(recent)) + "</i>"
 
-        self.bot.edit(reply.chat, reply.message, body,
-                      keyboard=self._menu(talk.chat) if final else None)
-        if final:
-            reply.finished = True
-            talk.reply = None
+        if not final:
+            self.bot.edit(reply.chat, reply.message, body)
+            return
+        # The final body goes through the ledger: a crash between the answer
+        # being produced and this edit landing is the case the recovery pass
+        # exists for. Interim edits are not recorded — only the whole answer
+        # is worth redelivering.
+        try:
+            self._ledger.send(talk.chat, body, lambda chat, text:
+                              self.bot.edit(chat, reply.message, text,
+                                            keyboard=self._menu(talk.chat)))
+        except Exception as problem:
+            self._send_failed(problem)
+            return
+        reply.finished = True
+        talk.reply = None
+
+    def _send_failed(self, problem: Exception) -> None:
+        """A final-send error: count it, and pause the adapter at the cap.
+
+        The breaker lives on the Service, so a run of failing sends counts
+        toward the same trip the poll loop's transport errors do — both are
+        the one question "can this platform hear us?"
+        """
+        if self._breaker.fail(str(problem)):
+            self.announce(f"{problem} — paused; send /platform in "
+                          "Telegram to resume it")
+            return
+        self.announce(f"could not send: {problem}")
 
     def _stop_turn(self, talk: Conversation) -> None:
         talk.session.interrupt()
@@ -986,6 +1057,22 @@ class Service:
             "When it needs a decision it asks with buttons. When it needs to "
             "run something, you approve it here first."
         )
+
+    def _platform_command(self, talk: Conversation) -> None:
+        """The channel's own adapter: live, paused, resumed on request.
+
+        Only this platform's breaker answers — the command is being read by
+        the daemon that owns the network connection that may be paused, so
+        another platform's state is both unknowable here and useless anyway.
+        """
+        breaker = self._breaker
+        if breaker.paused:
+            breaker.resume()
+            self.bot.send(talk.chat, "Telegram is listening again.",
+                          keyboard=self._menu(talk.chat))
+            return
+        self.bot.send(talk.chat, "Telegram is up and sending.",
+                      keyboard=kb.just_back())
 
     def _status(self, talk: Conversation) -> str:
         state = talk.session.state()

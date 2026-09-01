@@ -33,6 +33,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..channels.breaker import CircuitBreaker
 from ..channels.busy import interrupt_note, start_or_steer
 from ..channels.markdown import to_whatsapp
 from ..channels.settings import Settings, keep_current
@@ -129,6 +130,15 @@ class Service:
         self.pairing: Pairing | None = None
         self.stopping = threading.Event()
         self.announce = announce or (lambda line: None)
+        #: The outbound-delivery ledger: every reply is noted before it is
+        #: sent, so a crash between producing an answer and delivering it
+        #: leaves a record the next start can recover. Created lazily where
+        #: tests inject a cloud, since it touches the user directory.
+        from ..channels.ledger import DeliveryLedger
+
+        self._ledger = DeliveryLedger(
+            config.paths.delivery_ledger("whatsapp"), "whatsapp")
+        self._breaker = CircuitBreaker("whatsapp")
 
     def say(self, line: str) -> None:
         try:
@@ -172,6 +182,7 @@ class Service:
     def run(self) -> None:
         """Serve the webhook and turn what arrives into work."""
         self.endpoint.start()
+        self._resume_ledger()
         settings = self.config.whatsapp
         self.say(f"{len(settings.allowed)} paired number(s) · "
                  + ("may edit files" if settings.allow_writes
@@ -188,6 +199,26 @@ class Service:
                 self._handle(item)
             except Exception as problem:          # never let one message stop it
                 self.say(f"failed on a message: {problem}")
+
+    def _resume_ledger(self) -> None:
+        """Redeliver replies a crash left pending, then sweep old records.
+
+        Runs once at start, before any new traffic: recovery is about the
+        previous life of this process, and interleaving it with fresh turns
+        would answer the older question second.
+        """
+        from ..channels.ledger import DeliveryLedger, resume
+
+        ledger = DeliveryLedger(
+            self.config.paths.delivery_ledger("whatsapp"), "whatsapp")
+        try:
+            recovered = resume(ledger, self._send)
+        except Exception:
+            recovered = 0
+        if recovered:
+            self.say(f"redelivered {recovered} reply/replies that a restart "
+                     "had interrupted")
+        ledger.sweep()
 
     def stop(self) -> None:
         self.stopping.set()
@@ -253,14 +284,28 @@ class Service:
             if not piece.strip():
                 continue
             try:
-                self.cloud.send(wa_id, piece)
+                self._ledger.send(wa_id, piece, self.cloud.send)
             except OutsideWindow:
                 self.say(f"{wa_id} has not written for a day; WhatsApp will "
                          f"not take a message until they do")
                 return
             except WhatsAppError as problem:
-                self.say(f"could not send: {problem}")
+                self._send_failed(problem)
                 return
+
+    def _send_failed(self, problem: Exception) -> None:
+        """A send error: count it, and pause the adapter at the cap.
+
+        WhatsApp sends fail for reasons the retry loop cannot fix — an
+        expired token, an account under review. Counting them here means a
+        string of them trips the breaker and the human is told once, in the
+        channel, instead of the daemon muttering to its log forever.
+        """
+        if self._breaker.fail(str(problem)):
+            self.say(f"{problem} — WhatsApp sends are paused; send /platform "
+                     "here to resume them")
+            return
+        self.say(f"could not send: {problem}")
 
     def _menu(self, talk: Conversation, note: str = "") -> None:
         """The main screen, as a list."""
@@ -322,6 +367,8 @@ class Service:
                 self._show_modes(talk)
         elif name == "status":
             self._send(talk.wa_id, self._status(talk))
+        elif name == "platform":
+            self._platform_command(talk)
         else:
             self._menu(talk, note=f"No command called /{name}.")
 
@@ -782,6 +829,20 @@ class Service:
             "message. If a long task finishes after that, write again and "
             "ask._"
         )
+
+    def _platform_command(self, talk: Conversation) -> None:
+        """The WhatsApp adapter's breaker: state, and the resume.
+
+        Sends are what can be paused here — inbound traffic arrives by
+        webhook regardless — so resuming clears the send breaker and says
+        so, and an unpaused adapter just reports health.
+        """
+        breaker = self._breaker
+        if breaker.paused:
+            breaker.resume()
+            self._send(talk.wa_id, "WhatsApp sends are on again.")
+            return
+        self._send(talk.wa_id, breaker.describe())
 
     def _status(self, talk: Conversation) -> str:
         state = self._state(talk)

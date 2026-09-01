@@ -19,6 +19,7 @@ import json
 import threading
 import time
 from datetime import datetime
+from typing import Any
 
 from .jobs import Job, JobStore
 from .parse import next_fire
@@ -26,6 +27,11 @@ from .parse import next_fire
 #: How often to look. Minute resolution matches cron; finer than that would
 #: burn cycles for nothing, coarser would make "every minute" a lie.
 TICK_SECONDS = 60.0
+
+#: How much of a job's last answer is kept on the job record. The whole text
+#: can be enormous; the recovery path needs enough to deliver a reply, and
+#: anything longer than that is summarised rather than stored whole.
+ANSWER_KEEP = 4_000
 
 
 class Scheduler:
@@ -149,16 +155,53 @@ class Scheduler:
             outcome = run_job(self.config, job)
             self.store.update(job.id, lambda j: _record(j, now, outcome.ok,
                                                         outcome.error))
+            if outcome.ok and outcome.answer:
+                # The answer is also kept on the job itself. The delivery
+                # ledger may be gone by the time anything reads this — a
+                # crash between a finished run and its send is the very case
+                # recovery exists for — and the job record is where the
+                # words live regardless of what happened to the envelope.
+                self.store.update(job.id, _keep_answer(outcome))
             if self._deliver is not None and outcome.ok:
                 try:
                     self._deliver(job, outcome, outcome.answer)
                 except Exception:
                     pass
+            else:
+                self._deliver_to_channels(job, outcome)
             self.log.append({"job": job.id, "name": job.name, "at": now.isoformat(),
                              "ok": outcome.ok, "error": outcome.error})
         finally:
             with self._lock:
                 self._running.discard(job.id)
+
+    def _deliver_to_channels(self, job: Job, outcome: Any) -> None:
+        """The default delivery: send the answer where the job says.
+
+        Used when no caller supplied a ``deliver`` of its own. Targets are
+        ``channel:key`` entries on the job; ``origin`` needs nothing here
+        because the answer is already on the job record. Failures are
+        recorded as delivery notes on the job, never as the run failing.
+        """
+        from .deliver import deliver as send_out
+        from .deliver import targets
+
+        pairs = targets(job)
+        if not pairs:
+            return
+        failures = send_out(outcome.answer, pairs, self.config)
+        if failures:
+            note = "; ".join(failures)
+
+            def note_failure(job: Job) -> Job:
+                job.last_error = (job.last_error + " · " if job.last_error
+                                  else "") + "delivery: " + note
+                return job
+
+            try:
+                self.store.update(job.id, note_failure)
+            except Exception:
+                pass
 
     # -- the lock --------------------------------------------------------------- #
 
@@ -213,6 +256,16 @@ def _record(job: Job, when: datetime, ok: bool, error: str,
         job.last_error = (error or "failed") + \
             " — paused after repeated failures"
     return job
+
+
+def _keep_answer(outcome: Any):
+    """A change() that stores one answer on the job, for JobStore.update."""
+    answer = outcome.answer[:ANSWER_KEEP]
+
+    def change(job: Job) -> Job:
+        job.last_answer = answer
+        return job
+    return change
 
 
 def _read(text: str) -> datetime | None:

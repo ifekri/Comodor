@@ -50,6 +50,10 @@ class Job:
     last_result: str = ""            # ok | failed | missed
     last_error: str = ""
     failure_streak: int = 0
+    #: The answer of the last successful fire, as the fire left it. Read by
+    #: the delivery side after a crash — the ledger may hold the envelope but
+    #: the job always holds the words — and shown in the history lines.
+    last_answer: str = ""
     created: str = ""                # ISO, anchors interval schedules
 
     # -- persistence -------------------------------------------------------- #
@@ -63,6 +67,7 @@ class Job:
             "last_fire": self.last_fire, "last_result": self.last_result,
             "last_error": self.last_error,
             "failure_streak": self.failure_streak,
+            "last_answer": self.last_answer,
             "created": self.created,
         }
 
@@ -87,6 +92,7 @@ class Job:
             last_result=str(data.get("last_result") or ""),
             last_error=str(data.get("last_error") or ""),
             failure_streak=int(data.get("failure_streak") or 0),
+            last_answer=str(data.get("last_answer") or ""),
             created=str(data.get("created") or ""),
         )
 

@@ -78,8 +78,17 @@ def run(config: Config, args: argparse.Namespace) -> int:
 def _job(job: Job) -> str:
     state = "enabled" if job.enabled else "paused"
     model = f"  model {job.model}" if job.model else ""
+    # What the last successful fire said, in one short line. A job that has
+    # never fired shows its next fire; a job that has shows what came out,
+    # which is the only way to tell a working job from one that runs and
+    # says nothing.
+    answer = ""
+    if job.last_answer:
+        head = " ".join(job.last_answer.split())
+        answer = (f"\n    [dim]last answer: {head[:160]}"
+                  f"{'…' if len(head) > 160 else ''}[/dim]")
     return (f"  {job.name}  [dim]{state} · {job.schedule.expr}{model}[/dim]\n"
-            f"    [dim]{job.prompt}[/dim]")
+            f"    [dim]{job.prompt}[/dim]{answer}")
 
 
 def _list(config: Config, console, store: JobStore) -> int:

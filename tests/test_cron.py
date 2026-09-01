@@ -6,6 +6,8 @@ hand and the suite runs in milliseconds.
 
 from __future__ import annotations
 
+import dataclasses
+import time
 from datetime import datetime, timedelta
 
 import pytest
@@ -13,7 +15,7 @@ import pytest
 from comodor.config import Config, CronConfig
 from comodor.cron.jobs import Job, JobError, JobStore
 from comodor.cron.parse import Schedule, UnparsableSchedule, next_fire, parse
-from comodor.cron.scheduler import Scheduler
+from comodor.cron.scheduler import Scheduler, _keep_answer, _record
 
 # --------------------------------------------------------------------------- #
 # parsing
@@ -218,3 +220,110 @@ def test_a_misfired_job_still_fires_within_the_grace_window(config, store):
     # The 9am fire was missed by eight minutes; ten are allowed.
     late = datetime(2026, 9, 3, 9, 8)
     assert scheduler.tick(now=late) == ["job1"]
+
+
+def _answer_mark(job):
+    _mark(job)
+    job.last_answer = "the scheduled answer"
+    return job
+
+
+def _fake_run(store, outcome):
+    """What _run_and_record does, minus the agent: record, keep the answer,
+    then let the scheduler's own delivery run for real."""
+    def run(self, job, now):
+        store.update(job.id, lambda j: _record(j, now, outcome.ok,
+                                               outcome.error))
+        store.update(job.id, _keep_answer(outcome))
+        self._deliver_to_channels(job, outcome)
+    return run
+
+
+def _tick_and_settle(scheduler, store):
+    """Fire a tick and wait for the job's thread to finish its bookkeeping.
+
+    `_start` runs the job on its own thread; the tick returns before the
+    records are written, and the assertions need them on disk.
+    """
+    scheduler.tick(now=datetime.now())
+    for _ in range(200):
+        job = store.get("job1")
+        if job is not None and job.last_fire:
+            time.sleep(0.01)
+            break
+        time.sleep(0.01)
+    time.sleep(0.05)
+
+
+class _Outcome:
+    def __init__(self, answer="the scheduled answer", ok=True, error=""):
+        self.ok = ok
+        self.answer = answer
+        self.error = error
+
+
+def test_an_answer_is_kept_on_the_job_record(config, store, monkeypatch):
+    """The scheduler stores the answer on the job itself, so a crash in the
+    delivery path can never lose the words — the job always holds them."""
+    job = make_job(name="hourly")
+    job.schedule = parse("every 1h")
+    job.created = (datetime.now() - timedelta(hours=2)).isoformat()
+    store.add(job)
+
+    monkeypatch.setattr("comodor.cron.scheduler.Scheduler._run_and_record",
+                        _fake_run(store, _Outcome()))
+    scheduler = Scheduler(config, store=store, tick=60)
+    _tick_and_settle(scheduler, store)
+
+    assert store.get("job1").last_answer == "the scheduled answer"
+
+
+def test_a_channel_target_is_delivered_through_the_ledger(
+        config, store, tmp_path, monkeypatch):
+    """A job naming `telegram:123` has its answer sent there, through the
+    delivery ledger, and the send is recorded in the platform's file."""
+    from comodor.channels.ledger import DeliveryLedger
+
+    job = make_job(name="hourly")
+    job.schedule = parse("every 1h")
+    job.created = (datetime.now() - timedelta(hours=2)).isoformat()
+    job.delivery = ["telegram:123"]
+    store.add(job)
+    config = dataclasses.replace(
+        config, paths=dataclasses.replace(config.paths, user=tmp_path / "home"))
+
+    sent: list[tuple[object, str]] = []
+    monkeypatch.setattr("comodor.cron.deliver._sender",
+                        lambda platform, cfg: lambda chat, body:
+                        sent.append((chat, body)))
+    monkeypatch.setattr("comodor.cron.scheduler.Scheduler._run_and_record",
+                        _fake_run(store, _Outcome()))
+    scheduler = Scheduler(config, store=store, tick=60)
+    _tick_and_settle(scheduler, store)
+
+    assert sent == [("123", "the scheduled answer")]
+    ledger = DeliveryLedger(tmp_path / "home" / "delivery" / "telegram.jsonl",
+                            "telegram")
+    assert ledger.unclaimed() == [], "the delivery was marked sent"
+
+
+def test_an_unconfigured_channel_is_reported_not_crashed(
+        config, store, tmp_path, monkeypatch):
+    """A job naming a channel this machine cannot send to is a delivery
+    note on the job, never a failed run and never an exception."""
+    job = make_job(name="hourly")
+    job.schedule = parse("every 1h")
+    job.created = (datetime.now() - timedelta(hours=2)).isoformat()
+    job.delivery = ["discord:999"]
+    store.add(job)
+    config = dataclasses.replace(
+        config, paths=dataclasses.replace(config.paths, user=tmp_path / "home"))
+
+    monkeypatch.setattr("comodor.cron.scheduler.Scheduler._run_and_record",
+                        _fake_run(store, _Outcome()))
+    scheduler = Scheduler(config, store=store, tick=60)
+    _tick_and_settle(scheduler, store)          # must not raise
+
+    job = store.get("job1")
+    assert job.last_result == "ok"
+    assert "discord" in job.last_error
