@@ -1493,9 +1493,109 @@ class App:
         if len(tools) > 30:
             body.append(f"- … and {len(tools) - 30} more")
 
+        resources = self._mcp_resources()
+        if resources:
+            body += ["", f"### {len(resources)} resource(s) to read", ""]
+            for server, uri, label in resources[:20]:
+                body.append(f"- `{uri}` — {label} ({server})")
+            if len(resources) > 20:
+                body.append(f"- … and {len(resources) - 20} more")
+            body.append("")
+            body.append("The agent can read any of these when you ask it to.")
+
         body += ["", "`/mcp reload` reconnects after changing the configuration.",
+                 "`/prompt` runs a server's prompt template as your message.",
                  "`comodor mcp add <name>` adds one from a terminal."]
         self.state.overlay = info_overlay("MCP", "\n".join(body))
+
+    def _mcp_resources(self) -> list[tuple[str, str, str]]:
+        """(server, uri, label) for every resource a started server offers.
+
+        Reads only the states that already exist: starting servers to fill
+        a panel would put their startup cost into a keystroke.
+        """
+        found: list[tuple[str, str, str]] = []
+        for name in self.mcp.enabled_names():
+            state = self.mcp.states.get(name)
+            if state is None or not state.ok:
+                continue
+            for resource in state.resources:
+                found.append((name, resource.uri,
+                              resource.name or resource.description))
+        return found
+
+    def cmd_prompt(self, args: str) -> None:
+        """Run a server's prompt template as this conversation's next message.
+
+        Called with `server/name` and arguments it runs at once; called with
+        nothing it lists what the connected servers offer, so the templates
+        are discoverable without a trip to a terminal.
+        """
+        if self.mcp is None:
+            self._toast("MCP is switched off (mcp.enabled is false)", "warn")
+            return
+
+        words = args.strip().split()
+        if words and "/" in words[0]:
+            self._run_mcp_prompt(words[0], words[1:])
+            return
+
+        choices: list[tuple[str, str]] = []
+        for name in self.mcp.enabled_names():
+            state = self.mcp.start(name)
+            if not state.ok:
+                continue
+            for prompt in state.prompts:
+                note = f" — {prompt.description}" if prompt.description else ""
+                choices.append((f"{name}/{prompt.name}", note.strip()))
+        if not choices:
+            self._toast("no server offers prompt templates", "warn")
+            return
+        self.state.overlay = select_overlay("Run a prompt", choices,
+                                            self._select_mcp_prompt)
+
+    def _select_mcp_prompt(self, full_name: str) -> None:
+        self._run_mcp_prompt(full_name, [])
+
+    def _run_mcp_prompt(self, full_name: str, values: list[str]) -> None:
+        server_name, _, prompt_name = full_name.partition("/")
+        state = self.mcp.start(server_name)
+        if not state.ok:
+            self._toast(f"{server_name} would not start", "bad")
+            return
+        description = next((p for p in state.prompts
+                            if p.name == prompt_name), None)
+        if description is None:
+            self._toast(f"{server_name} has no prompt {prompt_name!r}", "bad")
+            return
+
+        # Prompts may declare arguments. Ones with defaults or none at all
+        # can run straight through; the required ones are asked for in the
+        # editor rather than in a chain of forms — a template is text, and
+        # text is easiest to edit.
+        missing = [entry.get("name", "") for entry in description.arguments
+                   if entry.get("required")]
+        supplied: dict[str, str] = {}
+        for pair in values:
+            key, _, value = pair.partition("=")
+            supplied[key] = value
+        if any(name and name not in supplied for name in missing):
+            wanted = ", ".join(name for name in missing if name not in supplied)
+            self._toast(f"{full_name} needs: {wanted}  — "
+                        f"run as /prompt {full_name} key=value …", "warn")
+            return
+
+        try:
+            text = self.mcp.get_prompt(server_name, prompt_name, supplied)
+        except Exception as error:
+            self._toast(f"{full_name}: {error}", "bad", ttl=8.0)
+            return
+
+        # Injected as the user's own words, visibly, the way an @reference
+        # is: the transcript shows exactly what the template expanded to.
+        self.state.entries.append(Entry("user", text))
+        self.state.scroll = 0
+        self._start_agent(text)
 
     def cmd_good(self, args: str) -> None:
         self.memory.feedback(self.agent._recalled, good=True, note=args)
@@ -2089,6 +2189,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/resume": ("cmd_resume", "reopen an earlier session"),
     "/search": ("cmd_search", "find something in an earlier conversation"),
     "/mcp": ("cmd_mcp", "MCP servers and the tools they provide"),
+    "/prompt": ("cmd_prompt", "run a server's prompt template"),
     "/delegates": ("cmd_delegates", "background delegates: list, or stop one"),
     "/quit": ("cmd_quit", "exit"),
 }

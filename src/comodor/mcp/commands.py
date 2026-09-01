@@ -64,6 +64,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         action = actions.add_parser(name, help=help_text)
         action.add_argument("server")
 
+    actions.add_parser(
+        "resources", help="what the servers let you read, by URI")
+    prompt = actions.add_parser(
+        "prompt", help="run a server's prompt template as your message")
+    prompt.add_argument("name", help="server/prompt, as `resources` shows")
+    prompt.add_argument("args", nargs="*",
+                        help="arguments the template asks for, as key=value")
+
 
 def run(config: Config, args: argparse.Namespace) -> int:
     action = getattr(args, "mcp_action", None) or "list"
@@ -71,6 +79,7 @@ def run(config: Config, args: argparse.Namespace) -> int:
         "list": _list, "catalogue": _catalogue, "add": _add, "custom": _custom,
         "remote": _remote,
         "enable": _enable, "disable": _disable, "remove": _remove, "test": _test,
+        "resources": _resources, "prompt": _prompt,
     }
     handler = handlers.get(action)
     if handler is None:
@@ -322,6 +331,92 @@ def _probe(server: MCPServerConfig, verbose: bool = True) -> bool:
         return False
     finally:
         connection.close()
+
+
+def _resources(config: Config, args: argparse.Namespace) -> int:
+    """What each server lets you read, without launching a conversation.
+
+    Starts each enabled server in turn — a resource list cannot be had any
+    other way — and says what came back, including the servers that offer
+    nothing, so "empty" is distinguishable from "not asked".
+    """
+    if not config.mcp.enabled:
+        print("MCP is switched off entirely (mcp.enabled is false).")
+        return 0
+    servers = {name: server for name, server in config.mcp.servers.items()
+               if server.enabled}
+    if not servers:
+        print("No enabled servers. `comodor mcp list` shows what you have.")
+        return 0
+
+    from .manager import MCPManager
+
+    manager = MCPManager(config.mcp.servers)
+    total = 0
+    try:
+        for name in sorted(servers):
+            state = manager.start(name)
+            if not state.ok:
+                print(f"  {name}: would not start — {state.error}")
+                continue
+            if not state.resources:
+                print(f"  {name}: no resources")
+                continue
+            print(f"  {name}:")
+            for resource in state.resources:
+                label = resource.name or resource.uri
+                note = f" — {resource.description}" if resource.description else ""
+                print(f"    {resource.uri}  ({label}{note})")
+            total += len(state.resources)
+    finally:
+        manager.close()
+    if total:
+        print("\nRead one with the agent: ask it to read a URI, or "
+              "`comodor prompt` for message templates.")
+    return 0
+
+
+def _prompt(config: Config, args: argparse.Namespace) -> int:
+    """Fetch one server's prompt template, filled, and hand it to the person.
+
+    The text is printed rather than silently turned into a run: what a
+    template expands to is exactly the kind of thing to read before it
+    becomes a task. Pipe it into `comodor run` when it reads right.
+    """
+    if not config.mcp.enabled:
+        print("MCP is switched off entirely (mcp.enabled is false).")
+        return 1
+    server_name, _, prompt_name = args.name.partition("/")
+    if not server_name or not prompt_name:
+        print("Name it as server/prompt, for example: "
+              "github/summarize_issue 42", file=sys.stderr)
+        return 1
+    if server_name not in config.mcp.servers:
+        return _unknown(config, server_name)
+
+    arguments: dict[str, str] = {}
+    for pair in args.args or []:
+        key, _, value = pair.partition("=")
+        if not _:
+            arguments[key] = ""          # a bare word is a flag with no value
+        arguments[key] = value
+
+    from .manager import MCPManager
+
+    manager = MCPManager(config.mcp.servers)
+    try:
+        text = manager.get_prompt(server_name, prompt_name, arguments)
+    except Exception as error:
+        print(f"could not fetch {args.name}: {error}", file=sys.stderr)
+        return 1
+    finally:
+        manager.close()
+
+    print(text)
+    print("\n---\nSend this as a task with:", file=sys.stderr)
+    print(f'  comodor run "$(comodor mcp prompt {args.name} …)"',
+          file=sys.stderr)
+    return 0
 
 
 def _parse_env(pairs: list[str]) -> dict[str, str]:

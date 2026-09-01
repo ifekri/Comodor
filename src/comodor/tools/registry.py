@@ -145,6 +145,14 @@ class ToolRegistry:
         if mcp is not None:
             for tool in mcp.tools():
                 self.add(tool)
+            # The resource reader, only when some server actually has
+            # resources. Starting servers to find out would defeat the lazy
+            # rule, so this asks the states that exist and stops at the first
+            # server that answers with any.
+            if mcp.has_resources():
+                from .mcp_resources import MCPReadResource
+
+                self.add(MCPReadResource(mcp))
 
     def _add_computer(self, config: Any) -> None:
         """The computer tool, if this platform has a backend for it."""
