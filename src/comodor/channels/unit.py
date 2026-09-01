@@ -53,13 +53,23 @@ def _command(config: Config, channel: Channel) -> list[str]:
     install puts that script in is on the PATH of a login shell rather than on
     the PATH of a daemon.
     """
-    return [sys.executable, "-m", "comodor", channel.name, "start"]
+    command = [sys.executable, "-m", "comodor"]
+    # A service runs with a bare environment, so the profile the user chose
+    # when installing has to ride on the command line, not in the env.
+    from ..paths import DEFAULT_PROFILE, profile_name
+
+    if profile_name() != DEFAULT_PROFILE:
+        command += ["--profile", profile_name()]
+    return command + [channel.name, "start"]
 
 
 def plan(config: Config, channel: Channel) -> Unit:
     """What would be written, and what would run it. Nothing is written here."""
-    name = f"comodor-{channel.name}"
-    label = f"ai.comodor.{channel.name}"
+    from ..paths import DEFAULT_PROFILE, profile_name
+
+    suffix = "" if profile_name() == DEFAULT_PROFILE else f"@{profile_name()}"
+    name = f"comodor-{channel.name}{suffix}"
+    label = f"ai.comodor.{channel.name}{suffix}"
     command = _command(config, channel)
     workdir = str(Path(config.paths.project))
 

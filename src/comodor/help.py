@@ -77,6 +77,7 @@ OPTIONS: list[tuple[str, str]] = [
     ("--ascii", "for terminals without box-drawing characters"),
     ("--no-mouse", "leave the mouse to the terminal"),
     ("--resume [ID]", "reopen the most recent session, or one by id"),
+    ("--profile NAME", "use a separate brain, sessions and config"),
     ("--demo", "the interface, offline, against a scripted provider"),
     ("--version", "which version this is"),
 ]

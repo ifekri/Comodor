@@ -1719,11 +1719,15 @@ class App:
         self._toast(f"theme: {name}", "good", key="theme")
 
     def cmd_settings(self, args: str) -> None:
+        from ..paths import DEFAULT_PROFILE, profile_name
+
         config = self.config
         body = [
             "**Settings**", "",
             f"- provider: `{config.provider}` · model: `{config.active_model()}`",
-            f"- mode: `{config.agent.mode}` · loop: `{config.agent.loop}`",
+            f"- mode: `{config.agent.mode}` · loop: `{config.agent.loop}`"
+            + (f" · profile: `{profile_name()}`"
+               if profile_name() != DEFAULT_PROFILE else ""),
             f"- gateway: `{self.gateway.describe()}` (policy `{config.gateway.policy}`)",
             f"- auto-approve: writes `{config.safety.auto_approve_writes}`, "
             f"shell `{config.safety.auto_approve_shell}`",

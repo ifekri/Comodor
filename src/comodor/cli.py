@@ -47,6 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"comodor {__version__}")
 
     parser.add_argument("--provider", help="provider to use (openrouter, anthropic, …)")
+    parser.add_argument("--profile", help="run against a named profile — its own "
+                        "brain, sessions and config under profiles/NAME")
     parser.add_argument("--model", help="model id")
     parser.add_argument("--mode", choices=("act", "plan", "ask", "chat"),
                         help="starting mode")
@@ -947,6 +949,16 @@ def run_import(config: Config, args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    # Before anything reads the environment. The profile decides where the
+    # config itself comes from, so it has to be settled ahead of `load`, and
+    # the environment variable is how every module that never sees these args
+    # (the stores, the daemons) reaches the same decision.
+    profile = getattr(args, "profile", None)
+    if profile:
+        import os
+
+        os.environ["COMODOR_PROFILE"] = profile
 
     # Before the configuration is loaded: somebody who cannot get the program
     # to start is exactly the person who needs the help page, and loading a
