@@ -210,6 +210,25 @@ of the price, which is most of a long session.
 A spend limit only works for a model with a published rate. `comodor doctor`
 says plainly when it cannot be enforced.  Full guide: docs/cost.md"""),
 
+    "voice": ("Speaking, and being spoken to", """\
+Voice notes sent to a channel can be transcribed, and answers in Telegram can
+also arrive as a voice message. Both are off until you turn them on, because
+a recording is a copy of a person, not a summary of what they asked.
+
+  Turn voice on          set  voice.enabled: true  in your config
+  Transcribe notes       set  voice.stt_provider: groq   (or openai)
+                         and put the key in the named environment variable
+                         (voice.stt_key_env, GROQ_API_KEY by default)
+  Spoken answers         set  voice.tts_enabled: true
+                         or send /voice on in Telegram
+  What is set            /voice          (Telegram) or comodor doctor
+
+Transcription sends the recording to the provider you named, and needs a key;
+with no key it refuses and says which variable is missing, rather than sending
+anything unnamed. Speech uses the Edge service, which needs no key; the voice
+is voice.tts_voice, a Persian one by default. A voice note that cannot be
+transcribed is kept on disk, and its path is offered, never discarded."""),
+
     "safety": ("What it can do, and what it cannot", """\
 Every tool has a tier. Reading is silent; writing asks; running a command,
 reaching the network or driving the screen asks louder.

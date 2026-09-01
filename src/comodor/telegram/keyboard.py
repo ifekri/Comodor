@@ -261,5 +261,6 @@ COMMANDS: list[tuple[str, str]] = [
     ("mode", "Act, plan, or chat"),
     ("status", "Model, folder, cost, context"),
     ("platform", "Adapter health; resume a paused one"),
+    ("voice", "Spoken answers; voice status"),
     ("help", "What this bot can do"),
 ]

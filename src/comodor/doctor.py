@@ -105,6 +105,7 @@ def run_checks(config: Config, online: bool = True) -> Report:
               _check_spend_limit,
               _check_brain,
               _check_search_index, _check_skills, _check_leftovers, _check_mcp,
+              _check_voice,
               _check_telegram, _check_whatsapp, _check_slack]
     if online:
         checks.append(_check_version)
@@ -514,6 +515,37 @@ def _check_mcp(config: Config) -> Finding | None:
                    "`comodor mcp disable <name>`")
 
     return Finding("mcp servers", Status.OK, f"{len(enabled)} enabled and reachable")
+
+
+def _check_voice(config: Config) -> Finding | None:
+    """Voice only warns when it is half-configured.
+
+    Fully off is a correct state and says nothing; turned on but unable to
+    act — a provider named without its key, a name that matches no provider
+    — is the setup that will disappoint somebody on a train, so it is said
+    here rather than left to be discovered by a voice note nobody answers.
+    """
+    voice = config.voice
+    if not voice.enabled:
+        return None
+    if not voice.stt_provider and not voice.tts_enabled:
+        return Finding("voice", Status.WARN,
+                       "voice is on but does nothing: no transcription "
+                       "provider and no speech",
+                       remedy="set `voice.stt_provider = \"groq\"` (with a "
+                              "key in the environment) or "
+                              "`voice.tts_enabled = true`")
+    if voice.stt_provider:
+        import os
+
+        key = os.environ.get(voice.stt_key_env, "")
+        if not key:
+            return Finding("voice", Status.WARN,
+                           f"transcription is set to {voice.stt_provider} "
+                           f"but `{voice.stt_key_env}` is not in the "
+                           "environment — voice notes will refuse rather "
+                           "than send anything unnamed")
+    return None
 
 
 def _check_telegram(config: Config) -> Finding | None:

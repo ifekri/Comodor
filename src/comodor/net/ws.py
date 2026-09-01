@@ -124,9 +124,15 @@ class WebSocket:
                 raise WebSocketError(f"the connection went away: {error}") \
                     from error
 
-    def receive(self) -> str:
-        """One complete message, reassembled if it arrived in fragments."""
+    def receive(self) -> str | bytes:
+        """One complete message, reassembled if it arrived in fragments.
+
+        Text frames come back as ``str``, binary frames as ``bytes`` — a
+        caller that only ever speaks JSON never sees the difference, and the
+        one that wants audio does.
+        """
         parts: list[bytes] = []
+        binary = False
         while True:
             first, second = self._exactly(2)
             final = bool(first & 0x80)
@@ -149,10 +155,13 @@ class WebSocket:
                 continue
             if opcode == 0xA:                     # pong
                 continue
+            if opcode == 0x2:                     # binary
+                binary = True
 
             parts.append(payload)
             if final:
-                return b"".join(parts).decode("utf-8", "replace")
+                body = b"".join(parts)
+                return body if binary else body.decode("utf-8", "replace")
 
     def _pong(self, payload: bytes) -> None:
         frame = bytearray([0x8A, 0x80 | len(payload)])

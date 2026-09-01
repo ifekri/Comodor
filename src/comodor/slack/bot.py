@@ -464,8 +464,15 @@ class Service:
         from ..media.route import route
         from ..providers.profile import of as profile_of
 
-        routed = route(item, profile_of(self.config),
-                       voice_to_text=self._transcriber())
+        try:
+            routed = route(item, profile_of(self.config),
+                           voice_to_text=self._transcriber())
+        except Exception as problem:
+            # A transcription gate refusing (no key, unknown provider); the
+            # file is on disk either way, and the reason is said.
+            self._send(talk, f"{problem} The file is kept at {item.path}, "
+                             "so nothing is lost.")
+            return
         self._start_turn(talk, routed.text, images=routed.images)
 
     def _media_dir(self):
@@ -477,9 +484,16 @@ class Service:
         return root / "slack"
 
     def _transcriber(self):
+        """The voice-note transcriber, or None where there is none.
+
+        A configured provider whose gate is closed (no key in the
+        environment, an unknown provider name) raises here on purpose: the
+        media handler turns that into a note the user can act on.
+        """
         if not self.config.media.voice_to_text:
             return None
-        return None   # no transcription backend is wired yet; the note says so
+        from ..voice.stt import transcriber
+        return transcriber(self.config)
 
     # -- turns ---------------------------------------------------------------- #
 

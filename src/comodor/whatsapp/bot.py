@@ -463,7 +463,13 @@ class Service:
         except WhatsAppError as problem:
             self._send(item.wa_id, f"I could not fetch that file: {problem}")
             return
-        self._start_turn_with_media(talk, downloaded)
+        try:
+            self._start_turn_with_media(talk, downloaded)
+        except Exception as problem:
+            # A transcription gate refusing (no key, unknown provider); the
+            # file is on disk either way, and the reason is said.
+            self._send(item.wa_id, f"{problem} The file is kept at "
+                                   f"{downloaded.path}, so nothing is lost.")
 
     def _media_dir(self):
         from pathlib import Path
@@ -482,10 +488,16 @@ class Service:
         self._start_turn(talk, routed.text, images=routed.images)
 
     def _transcriber(self):
-        """The voice-note transcriber, or None where there is none."""
+        """The voice-note transcriber, or None where there is none.
+
+        A configured provider whose gate is closed (no key in the
+        environment, an unknown provider name) raises here on purpose: the
+        media handler turns that into a note the user can act on.
+        """
         if not self.config.media.voice_to_text:
             return None
-        return None   # no transcription backend is wired yet; the note says so
+        from ..voice.stt import transcriber
+        return transcriber(self.config)
 
     def _follow(self, talk: Conversation) -> None:
         """Drain the event stream, and speak rarely.

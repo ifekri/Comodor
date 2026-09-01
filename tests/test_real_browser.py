@@ -78,8 +78,11 @@ class Peer:
         return bytes(b ^ mask[i % 4] for i, b in enumerate(body)).decode()
 
     def write(self, text: str, opcode: int = 0x1, final: bool = True) -> None:
+        self.write_bytes(text.encode(), opcode=opcode, final=final)
+
+    def write_bytes(self, payload: bytes, opcode: int = 0x1,
+                    final: bool = True) -> None:
         assert self.conn is not None
-        payload = text.encode()
         frame = bytearray([(0x80 if final else 0) | opcode])
         if len(payload) < 126:
             frame.append(len(payload))
@@ -154,6 +157,20 @@ def test_a_ping_is_answered_and_not_returned_as_a_message(peer):
         peer.write('{"real":1}')
         assert ws.receive() == '{"real":1}'      # the ping did not surface
         assert peer.read_one() == "hello"        # and it was ponged
+    finally:
+        ws.close()
+
+def test_a_binary_frame_arrives_as_bytes_not_decoded_text(peer):
+    """The speech service sends audio as binary frames. A client that decodes
+    every payload as text hands back mojibake exactly when it matters."""
+    ws = WebSocket(f"ws://127.0.0.1:{peer.port}/devtools/page/x")
+    peer.ready.wait(5)
+    try:
+        peer.write_bytes(b"ID3\x04\x00audio", opcode=0x2)
+        peer.write('{"after":1}')
+        frame = ws.receive()
+        assert isinstance(frame, bytes) and frame.startswith(b"ID3")
+        assert ws.receive() == '{"after":1}'     # the stream continues in text
     finally:
         ws.close()
 

@@ -337,7 +337,13 @@ class Service:
             self._send(chat, f"I could not fetch that file: {problem}")
             return
 
-        self._start_turn_with_media(chat, item)
+        try:
+            self._start_turn_with_media(chat, item)
+        except Exception as problem:
+            # A transcription gate refusing (no key, unknown provider) lands
+            # here; the file is on disk either way, and the reason is said.
+            self._send(chat, f"{problem} The file is kept at "
+                             f"{item.path}, so nothing is lost.")
 
     def _media_dir(self):
         from pathlib import Path
@@ -361,10 +367,18 @@ class Service:
         self._start_turn(talk, text, images=routed.images)
 
     def _transcriber(self):
-        """The voice-note transcriber, or None where there is none."""
+        """The voice-note transcriber, or None where there is none.
+
+        A configured provider whose gate is closed (no key in the
+        environment, an unknown provider name) raises here on purpose: the
+        media handler turns that into a note the user can act on, which is
+        more honest than quietly answering "no transcription is set up" for
+        a setup the user believes exists.
+        """
         if not self.config.media.voice_to_text:
             return None
-        return None   # no transcription backend is wired yet; the note says so
+        from ..voice.stt import transcriber
+        return transcriber(self.config)
 
     def _maybe_pair(self, chat: int, user: int, text: str,
                     message: dict[str, Any]) -> None:
@@ -428,6 +442,8 @@ class Service:
         elif name == "status":
             self.bot.send(talk.chat, self._status(talk),
                           keyboard=kb.just_back())
+        elif name == "voice":
+            self._voice_command(talk, rest)
         elif name == "platform":
             self._platform_command(talk)
         else:
@@ -624,6 +640,26 @@ class Service:
             return
         reply.finished = True
         talk.reply = None
+        self._maybe_speak(talk.chat, text.strip())
+
+    def _maybe_speak(self, chat: int, text: str) -> None:
+        """Send the answer again as a voice message, when speech is on.
+
+        Best-effort by design: the text answer has already landed, so a
+        speech failure is a note in the transcript, not a failed turn. And a
+        very short answer — "done", an error line — is faster to read than
+        to hear.
+        """
+        if not (self.config.voice.enabled and self.config.voice.tts_enabled):
+            return
+        if len(text) < 40 or len(text) > 3000:
+            return
+        try:
+            from ..voice.tts import synthesize
+            audio = synthesize(text, self.config)
+            self.bot.send_voice(chat, audio)
+        except Exception as problem:
+            self.announce(f"speech did not work: {problem}")
 
     def _send_failed(self, problem: Exception) -> None:
         """A final-send error: count it, and pause the adapter at the cap.
@@ -649,6 +685,36 @@ class Service:
         talk.waiting = None
         self.bot.send(talk.chat, "New chat. What would you like done?",
                       keyboard=self._menu(talk.chat))
+
+    def _voice_command(self, talk: Conversation, rest: str) -> None:
+        """`/voice` — the honest status line, or `on`/`off` for speech.
+
+        Transcription is not toggled from the phone: it needs a key in the
+        environment of the machine the bot runs on, and a toggle that looks
+        like it did something when it cannot have is worse than none.
+        """
+        arg = rest.strip().lower()
+        if arg in ("tts", "speech", "on"):
+            self.config.voice.tts_enabled = True
+        elif arg in ("off",):
+            self.config.voice.tts_enabled = False
+        elif arg not in ("", "status"):
+            self.bot.send(talk.chat,
+                          "Use <code>/voice on</code> or <code>/voice off</code> "
+                          "for spoken answers, or <code>/voice</code> alone "
+                          "for where things stand.",
+                          keyboard=self._menu(talk.chat))
+            return
+        if arg:
+            from .. import config as config_mod
+            config_mod.save_user_config(self.config)
+        from ..voice import describe
+        body = "<b>Voice</b>\n\n<pre>" + escape(describe(self.config)) \
+               + "</pre>"
+        if arg in ("tts", "speech", "on"):
+            body += ("\n\nSpoken answers are on. The next full-length answer "
+                     "also arrives as a voice message.")
+        self.bot.send(talk.chat, body, keyboard=self._menu(talk.chat))
 
     def _set_mode(self, talk: Conversation, mode: str) -> None:
         if mode == "act" and not self.config.telegram.allow_writes:

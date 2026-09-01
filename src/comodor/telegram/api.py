@@ -236,6 +236,41 @@ class Bot:
         self.call("setMyCommands", commands=[
             {"command": name, "description": what} for name, what in entries])
 
+    def send_voice(self, chat: int | str, audio: bytes, caption: str = "",
+                   reply_to: int | None = None) -> dict[str, Any] | None:
+        """One answer as a voice message.
+
+        `sendVoice` takes a multipart upload rather than the form-encoded
+        body every other call here uses, so it posts directly instead of
+        going through `call`. An mp3 plays on a phone without conversion;
+        Telegram shows the round-trip time as the message's waveform.
+        """
+        url = f"https://api.telegram.org/bot{self._token}/sendVoice"
+        data: dict[str, Any] = {"chat_id": chat}
+        if caption:
+            data["caption"] = caption[:1024]
+            data["parse_mode"] = "HTML"
+        if reply_to is not None:
+            data["reply_to_message_id"] = reply_to
+        try:
+            response = http.post(url, data=data, files={"voice":
+                                                        ("answer.mp3", audio,
+                                                         "audio/mpeg")},
+                                 timeout=(10.0, self.timeout))
+        except Exception as problem:
+            raise TelegramError(
+                self._hide(f"could not reach Telegram: {problem}")) from None
+        try:
+            payload = response.json()
+        except ValueError:
+            raise TelegramError(
+                f"Telegram answered {response.status_code} with something "
+                "that was not JSON") from None
+        if not payload.get("ok"):
+            raise TelegramError(self._hide(
+                f"sendVoice: {payload.get('description', 'no reason given')}"))
+        return payload.get("result")
+
     def drop_webhook(self) -> None:
         """Long polling and a webhook are mutually exclusive.
 
