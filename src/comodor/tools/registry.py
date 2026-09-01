@@ -125,6 +125,12 @@ class ToolRegistry:
         if config is not None and getattr(config, "computer", None) \
                 and config.computer.enabled:
             self._add_computer(config)
+        # The vision tool, only for a model that can answer it. Capability is
+        # read from the same profile the channels use; a model whose support
+        # is unknown is treated as unable, on the principle a tool that
+        # answers "I cannot look at images" every turn is a wasted schema.
+        if config is not None:
+            self._add_vision(config)
 
         # Whatever the enabled MCP servers offer, alongside the built-in tools
         # and subject to exactly the same permission gate.
@@ -148,6 +154,19 @@ class ToolRegistry:
 
     def add(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
+
+    def _add_vision(self, config: Any) -> None:
+        """The vision tool, when the configured model can see images."""
+        try:
+            from ..providers import profile as profile_module
+
+            if not profile_module.of(config).vision:
+                return
+        except Exception:
+            return
+        from .vision import Vision
+
+        self.add(Vision())
 
     def close(self) -> None:
         """Let go of anything a tool is holding open.
