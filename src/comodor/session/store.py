@@ -37,6 +37,11 @@ class SessionMeta:
     #: channel session reads very differently from a fresh one with the same
     #: message count, and `/resume` should say which it is reopening.
     compactions: int = 0
+    #: The task list as it stood, so `--resume` brings back the plan and not
+    #: just the transcript. Kept here rather than in the JSONL because it is
+    #: state, not an event: only the latest version is of any use, and the
+    #: transcript is append-only by design.
+    todos: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def when(self) -> str:
