@@ -691,6 +691,7 @@ class AgentLoop:
             rules = self.memory.active_rules()
         except Exception:
             return ""
+        external = self.memory.external_briefing(user_text)
 
         self._recalled = lessons
         if lessons:
@@ -707,6 +708,11 @@ class AgentLoop:
         facts = getattr(self.memory, "facts_briefing", "")
         if facts:
             blocks.append(facts)
+        # What the external memory service (if any) remembers. Additive,
+        # capped, marked as from outside — it can season the briefing, it
+        # cannot become it.
+        if external:
+            blocks.append(external)
         if not blocks:
             return ""
         return SECTION_GAP.join(blocks)

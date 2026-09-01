@@ -107,6 +107,7 @@ def run_checks(config: Config, online: bool = True) -> Report:
               _check_search_index, _check_skills, _check_leftovers, _check_mcp,
               _check_voice,
               _check_api,
+              _check_memory_provider,
               _check_telegram, _check_whatsapp, _check_slack]
     if online:
         checks.append(_check_version)
@@ -569,6 +570,37 @@ def _check_api(config: Config) -> Finding | None:
                               "proxy with its own auth in front")
     return None
 
+
+def _check_memory_provider(config: Config) -> Finding | None:
+    """An external memory service, checked the way it actually fails.
+
+    Nothing configured says nothing. Configured, the failures are a key
+    that never made it into the environment (the config file is never
+    allowed to hold one), a setup error the turn path silently absorbed,
+    and a service that does not answer — each of which looks, from inside
+    a turn, like "no augmentation today" rather than like a problem.
+    """
+    from .learning.providers import ProviderError, build
+
+    settings = getattr(config.learning, "provider", None)
+    if settings is None or not getattr(settings, "kind", ""):
+        return None
+    try:
+        provider = build(config)
+    except ProviderError as problem:
+        return Finding("memory provider", Status.WARN, str(problem),
+                       remedy=f"put the key in ${settings.key_env} or run "
+                              "`comodor memory-provider setup`")
+    if not provider:
+        return None
+    answer = provider.status()
+    if "unreachable" in answer or "answered " in answer:
+        return Finding("memory provider", Status.WARN,
+                       f"{settings.base_url} {answer} — writes mirror to "
+                       "the local brain only until it answers",
+                       remedy="check the service is running and "
+                              f"{settings.base_url} is right")
+    return Finding("memory provider", Status.OK, answer)
 
 def _check_telegram(config: Config) -> Finding | None:
     return _check_phone(config, "telegram")

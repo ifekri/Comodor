@@ -83,7 +83,7 @@ def test_every_command_it_mentions_exists():
         if action.choices and hasattr(action.choices, "keys"):
             real.update(action.choices.keys())
 
-    named = set(re.findall(r"^\s+comodor (\w+)", page, re.M))
+    named = set(re.findall(r"^\s+comodor ([\w][\w-]*)", page, re.M))
     unknown = named - real
     assert not unknown, f"the page names commands that do not exist: {unknown}"
 

@@ -62,6 +62,10 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("comodor skills browse", "procedures it follows when the work calls for them"),
         ("comodor mcp list", "tools from Model Context Protocol servers"),
     ]),
+    ("Mind and memory", [
+        ("comodor curator run", "a maintenance pass over the brain, now"),
+        ("comodor memory-provider status", "an optional external memory service"),
+    ]),
     ("Keep it working", [
         ("comodor doctor", "check everything; `--fix` repairs what it can"),
         ("comodor update", "move to the newest release; `--check` just looks"),
@@ -361,6 +365,20 @@ By default these turns read and plan only. --allow-writes widens one
 subscription, not the agent, and it is the one flag worth thinking twice
 about: a machine talking to a machine is exactly the caller whose
 instructions nobody has read."""),
+
+    "memory-provider": ("An external memory service (optional)", """\
+  comodor memory-provider setup --base-url http://127.0.0.1:9310
+  comodor memory-provider status     what is set, and whether it answers
+  comodor memory-provider off        forget the external service
+
+The brain here is local and complete; this is one optional service alongside
+it, never instead of it. New facts are mirrored out to the service, and with
+--augment recall may also ask it for lines - which are capped, and marked as
+coming from outside, because they were not earned here.
+
+The key lives in an environment variable (default $MEM0_API_KEY) and is never
+written to the config file. With the service down, nothing changes except a
+warning: the local write already happened."""),
 
     "whatsapp": ("From WhatsApp", """\
   comodor whatsapp connect         guided: links each page, checks each value

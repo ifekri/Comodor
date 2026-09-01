@@ -331,6 +331,39 @@ class LearningEngine:
             blocks.append("\n".join(lines))
         return "\n\n".join(blocks)
 
+    # -- external memory (optional, additive) ------------------------------- #
+
+    def external_briefing(self, query: str) -> str:
+        """What the external provider would add, or "" — never an error.
+
+        Called before the briefing is assembled. Everything here is
+        fail-open on purpose: a service that cannot be reached subtracts
+        nothing from a turn that worked fine before it existed. The lines
+        are marked as coming from outside so a reader of the prompt knows
+        which memories were earned here and which were fetched.
+        """
+        if not getattr(self.config.learning, "provider", None):
+            return ""
+        settings = getattr(self.config.learning.provider, "read_augment", False)
+        if not settings:
+            return ""
+        try:
+            from .providers.base import provider_from_config
+
+            provider = provider_from_config(self.config)
+        except Exception:
+            return ""
+        if provider is None:
+            return ""
+        try:
+            lines = [line for line in provider.augment_recall(query) if line.strip()]
+        except Exception:
+            return ""
+        if not lines:
+            return ""
+        return ("From your external memory service (unverified here):\n"
+                + "\n".join(f"- {line}" for line in lines))
+
     # -- 3. credit -------------------------------------------------------- #
 
     def record_outcome(self, goal: str, messages: list[Any], recalled: list[Lesson],
@@ -595,8 +628,35 @@ class LearningEngine:
         """The user wrote a fact by hand. Settled at once, pinned to nothing."""
         stored = self.facts.add(text, kind=kind)
         self.refresh_facts()
+        self._mirror_write(stored)
         self.bus.emit(Kind.MEMORY, action="taught", items=[stored.as_dict()])
         return stored
+
+    def _mirror_write(self, stored: Any) -> None:
+        """Offer one settled fact to the external provider, if there is one.
+
+        After the local write and its snapshot refresh, on purpose: the
+        local truth is already saved, so the mirror failing changes a log
+        line and nothing else. This is the whole contract — the brain here
+        is primary, the cloud is a copy.
+        """
+        try:
+            from .providers.base import provider_from_config
+
+            provider = provider_from_config(self.config)
+        except Exception:
+            return
+        if provider is None:
+            return
+        try:
+            landed = provider.mirror_write(
+                str(getattr(stored, "text", "") or ""),
+                str(getattr(stored, "kind", "memory") or "memory"))
+        except Exception:
+            return
+        if not landed:
+            self.bus.emit(Kind.NOTICE, text="the external memory service did "
+                          "not confirm the write; the fact is saved locally")
 
     def remove_fact(self, fact_id: int) -> bool:
         for fact in self.facts.entries(include_staged=True):

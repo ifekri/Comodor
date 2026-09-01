@@ -197,6 +197,32 @@ class GatewayConfig:
 
 
 @dataclass
+class MemoryProviderConfig:
+    """One optional external memory service, mirrored beside the brain.
+
+    ``kind`` empty means none. The key is named by environment variable
+    (``key_env``) and never stored here — a config file can be committed by
+    accident, and this one would carry the keys to everything the user has
+    ever told the agent.
+    """
+
+    kind: str = ""                        # "" | http_generic | mem0
+    base_url: str = ""
+    key_env: str = "MEM0_API_KEY"
+    mirror_writes: bool = True
+    read_augment: bool = False
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "base_url": self.base_url,
+            "key_env": self.key_env,
+            "mirror_writes": self.mirror_writes,
+            "read_augment": self.read_augment,
+        }
+
+
+@dataclass
 class LearningConfig:
     enabled: bool = True
     top_k: int = 6                       # lessons recalled per turn
@@ -225,6 +251,12 @@ class LearningConfig:
     rules: bool = True
     announce: bool = True
     prefetch: bool = True
+    #: An optional external memory service (see learning/providers/). Off
+    #: and empty by default — the local brain is complete, and this is a
+    #: mirror, never the source of truth. The key lives in the environment,
+    #: never in this file.
+    provider: MemoryProviderConfig = field(
+        default_factory=lambda: MemoryProviderConfig())
 
 
 @dataclass
