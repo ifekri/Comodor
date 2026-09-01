@@ -815,6 +815,24 @@ class ApiConfig:
             "allow_mode_switch": self.allow_mode_switch,
         }
 
+
+@dataclass
+class WebhookConfig:
+    """The general webhook channel (`comodor webhook`).
+
+    Off until asked for, loopback-bound, and every subscription carries its
+    own secret and its own write permission — a webhook is a machine
+    talking, and the trust it gets is the trust one subscription asked for,
+    never whatever else the machine allows.
+    """
+
+    enabled: bool = False
+    bind: str = "127.0.0.1"
+    port: int = 8790
+
+    def to_json(self) -> dict[str, Any]:
+        return {"enabled": self.enabled, "bind": self.bind, "port": self.port}
+
 @dataclass
 class SafetyConfig:
     auto_approve_safe: bool = True       # read-only tools never prompt
@@ -877,7 +895,7 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: said nothing.
 SECTIONS = ("ui", "agent", "gateway", "learning", "curator", "skills", "safety",
             "browser", "computer", "telegram", "whatsapp", "slack", "discord",
-            "cron", "media", "voice", "delegation", "shell", "api")
+            "cron", "media", "voice", "delegation", "shell", "api", "webhook")
 
 
 @dataclass
@@ -903,6 +921,7 @@ class Config:
     delegation: DelegationConfig = field(default_factory=DelegationConfig)
     shell: ShellConfig = field(default_factory=ShellConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
+    webhook: WebhookConfig = field(default_factory=WebhookConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     paths: Paths = field(default_factory=resolve_paths)

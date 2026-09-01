@@ -342,6 +342,26 @@ One turn may edit files and run commands. The token IS the permission to do
 that, so it is worth what a password is worth: loopback by default, and a
 reverse proxy with its own auth before anything wider."""),
 
+    "webhook": ("Letting other systems hand it work", """\
+  comodor webhook add ci --path /ci --template "A CI run just reported: {payload}"
+  comodor webhook list               what is subscribed, and what it may do
+  comodor webhook start -b           run it detached from this terminal
+  comodor webhook test /ci           send one signed event to prove the wire
+
+CI, monitoring, Git hosts - anything that POSTs JSON when something happens
+can hand the agent the event, and the agent turns it into a task. Each
+subscription has its own path, its own shared secret, and its own prompt
+template ({payload} is the body; {.pull_request.title} picks a field).
+
+The sender signs the raw body with HMAC-SHA256 and sends the digest in
+X-Comodor-Signature-256. A wrong signature gets the same 404 an unknown path
+gets - nothing here tells a prober what exists.
+
+By default these turns read and plan only. --allow-writes widens one
+subscription, not the agent, and it is the one flag worth thinking twice
+about: a machine talking to a machine is exactly the caller whose
+instructions nobody has read."""),
+
     "whatsapp": ("From WhatsApp", """\
   comodor whatsapp connect         guided: links each page, checks each value
   comodor whatsapp webhook         what to paste into Meta's dashboard

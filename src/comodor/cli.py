@@ -129,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     from .slack.commands import register as register_slack
     from .telegram.commands import register as register_telegram
     from .web.commands import register as register_web
+    from .webhook.commands import register as register_webhook
     from .whatsapp.commands import register as register_whatsapp
 
     register_mcp(sub)
@@ -141,6 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_discord(sub)
     register_skills(sub)
     register_web(sub)
+    register_webhook(sub)
     register_acp(sub)
 
     serve = sub.add_parser(
@@ -1027,6 +1029,10 @@ def main(argv: list[str] | None = None) -> int:
         from .web.commands import run as run_web
 
         return run_web(config, args)
+    if args.command == "webhook":
+        from .webhook.commands import run as run_webhook
+
+        return run_webhook(config, args)
     if args.command == "acp":
         from .acp.commands import run as run_acp
 
