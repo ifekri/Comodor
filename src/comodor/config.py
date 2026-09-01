@@ -778,6 +778,43 @@ class ShellConfig:
             "timeout": self.timeout,
         }
 
+
+@dataclass
+class ApiConfig:
+    """The OpenAI-compatible endpoint (`comodor serve`).
+
+    A chat frontend pointed here may run shell commands on this machine —
+    that is what a turn is — so the defaults are the web server's: loopback
+    bind, a token generated per run, no session state unless a client asks
+    for it by name. ``token`` left empty means one is made when the server
+    starts and printed once; a fixed token belongs in the user's own config
+    file, which is 0600, never in a project's.
+    """
+
+    enabled: bool = False
+    bind: str = "127.0.0.1"
+    port: int = 8787
+    token: str = ""
+    #: How many loop steps one request may spend. A chat client's HTTP
+    #: timeout is usually shorter than an agent's patience, so this caps the
+    #: turn at something a client will actually wait for.
+    max_turns: int = 8
+    #: Whether an external request may switch the agent's mode at all. Off,
+    #: the ``comodor`` request field is honoured only inside the modes the
+    #: user already allows — reads and plans, never writes, from a network
+    #: client nobody has met.
+    allow_mode_switch: bool = True
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "bind": self.bind,
+            "port": self.port,
+            "token": self.token,
+            "max_turns": self.max_turns,
+            "allow_mode_switch": self.allow_mode_switch,
+        }
+
 @dataclass
 class SafetyConfig:
     auto_approve_safe: bool = True       # read-only tools never prompt
@@ -840,7 +877,7 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: said nothing.
 SECTIONS = ("ui", "agent", "gateway", "learning", "curator", "skills", "safety",
             "browser", "computer", "telegram", "whatsapp", "slack", "discord",
-            "cron", "media", "voice", "delegation", "shell")
+            "cron", "media", "voice", "delegation", "shell", "api")
 
 
 @dataclass
@@ -865,6 +902,7 @@ class Config:
     voice: VoiceConfig = field(default_factory=VoiceConfig)
     delegation: DelegationConfig = field(default_factory=DelegationConfig)
     shell: ShellConfig = field(default_factory=ShellConfig)
+    api: ApiConfig = field(default_factory=ApiConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     paths: Paths = field(default_factory=resolve_paths)

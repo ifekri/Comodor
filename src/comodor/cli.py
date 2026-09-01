@@ -143,6 +143,15 @@ def build_parser() -> argparse.ArgumentParser:
     register_web(sub)
     register_acp(sub)
 
+    serve = sub.add_parser(
+        "serve", help="speak the OpenAI chat protocol, so other frontends "
+                      "can drive the agent")
+    serve.add_argument("--host", help="address to bind (default: the loopback, "
+                                      "or api.bind in your config)")
+    serve.add_argument("--port", type=int, help="port to listen on (default 8787)")
+    serve.add_argument("--token", help="the access token; one is generated and "
+                                       "printed when this is not given")
+
     preview = sub.add_parser("preview",
                              help="render the interface at a given size and exit")
     preview.add_argument("size", nargs="?", default="120x34", help="WIDTHxHEIGHT")
@@ -1022,6 +1031,10 @@ def main(argv: list[str] | None = None) -> int:
         from .acp.commands import run as run_acp
 
         return run_acp(config, args)
+    if args.command == "serve":
+        from .api.server import run as run_api
+
+        return run_api(config, args)
     if args.command == "preview":
         return run_preview(config, args)
     if args.command == "insights":

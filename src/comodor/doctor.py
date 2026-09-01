@@ -106,6 +106,7 @@ def run_checks(config: Config, online: bool = True) -> Report:
               _check_brain,
               _check_search_index, _check_skills, _check_leftovers, _check_mcp,
               _check_voice,
+              _check_api,
               _check_telegram, _check_whatsapp, _check_slack]
     if online:
         checks.append(_check_version)
@@ -545,6 +546,27 @@ def _check_voice(config: Config) -> Finding | None:
                            f"but `{voice.stt_key_env}` is not in the "
                            "environment — voice notes will refuse rather "
                            "than send anything unnamed")
+    return None
+
+
+def _check_api(config: Config) -> Finding | None:
+    """The OpenAI-compatible endpoint, checked the way it bites.
+
+    Off says nothing. On, what is worth saying is what the web server's
+    check would say and one thing it would not: a token saved in the
+    config file is a credential on disk, which is fine at 0600 in the
+    user's own file and worth naming anywhere else.
+    """
+    api = config.api
+    if not api.enabled:
+        return None
+    if api.bind not in ("127.0.0.1", "localhost", "::1"):
+        return Finding("api server", Status.WARN,
+                       f"the OpenAI endpoint binds {api.bind} — anyone on "
+                       "that network holding the token may run commands on "
+                       "this machine",
+                       remedy="keep `api.bind = \"127.0.0.1\"` and put a "
+                              "proxy with its own auth in front")
     return None
 
 

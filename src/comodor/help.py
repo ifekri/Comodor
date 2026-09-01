@@ -54,6 +54,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ]),
     ("Reach further", [
         ("comodor web", "use it from a browser, here or on a server"),
+        ("comodor serve", "speak the OpenAI protocol, for other frontends"),
         ("comodor telegram start", "drive it from your phone, all buttons"),
         ("comodor slack start", "the same, in a Slack workspace"),
         ("comodor discord start", "the same, on a Discord server"),
@@ -312,6 +313,34 @@ every message arrives empty - a bot that looks fine and hears nothing.
 In a server it answers when mentioned; in a direct message, always. It answers
 a fixed list of numeric ids and nobody else - a server can have thousands of
 people in it, and this reads and writes your files."""),
+
+    "serve": ("Speaking OpenAI", """\
+  comodor serve                    here, on 127.0.0.1, port 8787
+  comodor serve --port 9000
+  comodor serve --token MYTOKEN    a fixed token instead of a printed one
+
+The same agent, answering `POST /v1/chat/completions` - the protocol every
+chat frontend already speaks (Open WebUI, LobeChat, IDE chat panels). Point
+one at the address it prints, paste the token as the API key, done.
+
+  GET  /v1/models                  the one model, named `comodor`
+  POST /v1/chat/completions        streaming and not; standard shapes
+
+One request is one whole agent turn - tools run, files change, and the final
+answer arrives as one message. `X-Comodor-Session: <id>` continues a
+conversation (echo the id the response carries); without it every request
+stands alone.
+
+What is ours, in a `comodor` block on the response, and never in the way:
+
+  comodor: {"session": "...", "steps": 3, "stopped": "done"}
+
+  comodor: {"mode": "plan"}     in the request body - set the mode for
+                                that one request, act / plan / ask / chat
+
+One turn may edit files and run commands. The token IS the permission to do
+that, so it is worth what a password is worth: loopback by default, and a
+reverse proxy with its own auth before anything wider."""),
 
     "whatsapp": ("From WhatsApp", """\
   comodor whatsapp connect         guided: links each page, checks each value
