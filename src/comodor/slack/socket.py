@@ -33,6 +33,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..channels.breaker import RESUME_POLL, CircuitBreaker
 from ..net.ws import WebSocket, WebSocketError
 from .api import Slack, SlackError, backoff
 
@@ -64,11 +65,15 @@ class SocketMode:
 
     def __init__(self, slack: Slack,
                  on_envelope: Callable[[Envelope], None],
-                 announce: Callable[[str], None] | None = None) -> None:
+                 announce: Callable[[str], None] | None = None,
+                 breaker: CircuitBreaker | None = None) -> None:
         self.slack = slack
         self.on_envelope = on_envelope
         self.announce = announce or (lambda line: None)
         self.stopping = threading.Event()
+        #: Shared with the Service, so `/platform` in a chat can resume what
+        #: this loop paused.
+        self.breaker = breaker or CircuitBreaker("slack")
         self._ws: WebSocket | None = None
         self._lock = threading.Lock()
         #: Envelope ids already handled. Slack redelivers anything it did not
@@ -95,6 +100,12 @@ class SocketMode:
         """Connect, read, reconnect. Returns only when stopped."""
         attempt = 0
         while not self.stopping.is_set():
+            if self.breaker.paused:
+                # Paused, the loop stops knocking: resume is a human's
+                # `/platform` command away, not a timer.
+                if self.stopping.wait(RESUME_POLL):
+                    return
+                continue
             try:
                 url = self.slack.open_socket()
             except SlackError as problem:
@@ -104,6 +115,10 @@ class SocketMode:
                     self.say(f"Slack refused the app-level token: {problem}")
                     return
                 attempt += 1
+                if self.breaker.fail(str(problem)):
+                    self.say(f"{problem} — paused; send /platform in "
+                             "Slack to resume it")
+                    continue
                 wait = backoff(attempt)
                 self.say(f"could not open a socket ({problem}) — "
                          f"retrying in {wait:.0f}s")
@@ -120,8 +135,13 @@ class SocketMode:
             try:
                 self._session(url)
                 attempt = 0          # a session that ran is a working setup
+                self.breaker.ok()
             except WebSocketError as problem:
                 attempt += 1
+                if self.breaker.fail(str(problem)):
+                    self.say(f"{problem} — paused; send /platform in "
+                             "Slack to resume it")
+                    continue
                 wait = backoff(attempt)
                 self.say(f"socket closed ({problem}) — reconnecting in "
                          f"{wait:.0f}s")

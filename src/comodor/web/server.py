@@ -305,6 +305,10 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 self._json(200, server.session.rules())
                 return
 
+            if route == "/api/facts":
+                self._json(200, server.session.facts())
+                return
+
             if route == "/api/models":
                 wanted = (query.get("provider") or [""])[0]
                 self._json(200, server.session.models_for(
@@ -404,6 +408,20 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
             if route == "/api/interrupt":
                 server.session.interrupt()
                 self._json(200, {"interrupted": True})
+                return
+
+            if route == "/api/delegates":
+                self._json(200, {"delegates": server.session.delegates.listing()})
+                return
+
+            if route == "/api/delegates/stop":
+                identifier = str(body.get("id") or "")
+                stopped = (server.session.delegates.stop(identifier)
+                           if identifier
+                           else bool(server.session.delegates.stop_all()))
+                self._json(200 if stopped else 409,
+                           {"stopped": stopped,
+                            "error": "" if stopped else "nothing was running"})
                 return
 
             if route == "/api/mode":
@@ -552,6 +570,13 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                     statement=body.get("statement"))
                 self._json(200 if done else 400,
                            {"ok": done, "error": why, "rule": extra})
+                return
+
+            if route == "/api/facts":
+                done, why = server.session.fact(
+                    str(body.get("action") or ""), id=body.get("id"),
+                    text=body.get("text"), kind=body.get("kind"))
+                self._json(200 if done else 400, {"ok": done, "error": why})
                 return
 
             if route == "/api/setting":

@@ -92,10 +92,19 @@ class Inbound:
     action: str = ""
     name: str = ""
     timestamp: int = 0
+    #: A media message, flattened to the two fields a download needs: the id
+    #: Meta names the file by, and what the message called itself.
+    media_id: str = ""
+    media_kind: str = ""          # image | audio | video | document
+    media_name: str = ""
 
     @property
     def tapped(self) -> bool:
         return bool(self.action)
+
+    @property
+    def is_media(self) -> bool:
+        return bool(self.media_id)
 
 
 def read(payload: dict[str, Any]) -> list[Inbound]:
@@ -153,9 +162,14 @@ def _one(message: dict[str, Any], names: dict[str, str]) -> Inbound | None:
                        text=str((message.get("button") or {}).get("text") or ""),
                        **common)
 
-    # Images, audio, documents, locations, reactions. Named rather than
-    # dropped, so the bot can say it cannot read them instead of saying
-    # nothing — silence from a bot is indistinguishable from a bot that is off.
+    # Images, voice notes, documents — media Meta names with an id, downloaded
+    # by the bot and routed by type. Locations and reactions stay "named
+    # rather than dropped": silence from a bot is indistinguishable from a bot
+    # that is off.
+    media = message.get(kind) if isinstance(message.get(kind), dict) else None
+    if media and "id" in media:
+        return Inbound(media_id=str(media["id"]), media_kind=kind,
+                       media_name=str(media.get("filename") or kind), **common)
     return Inbound(text="", action=f"unsupported:{kind}", **common)
 
 

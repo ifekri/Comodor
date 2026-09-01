@@ -36,7 +36,7 @@ class OpenAICompatProvider:
 
     def __init__(self, name: str, base_url: str, api_key: str = "", model: str = "",
                  headers: dict[str, str] | None = None, timeout: float = 120.0,
-                 label: str = "") -> None:
+                 label: str = "", key_pool: Any = None) -> None:
         self.name = name
         self.label = label or name.title()
         self.base_url = base_url.rstrip("/")
@@ -44,6 +44,12 @@ class OpenAICompatProvider:
         self.model = model
         self.timeout = timeout
         self.extra_headers = dict(headers or {})
+        #: A KeyPool when this provider has more than one key. With one key
+        #: (or none) it stays None and the built-in header is used — the pool
+        #: must be invisible to everyone who never asked for it.
+        self.key_pool = key_pool
+        #: The key the current request authenticated with, for pool reporting.
+        self._last_key = ""
         self._session = http.Session(
             headers=self._default_headers(),
             timeout=http.Timeout(connect=15.0, read=timeout),
@@ -51,6 +57,17 @@ class OpenAICompatProvider:
             # generation would bill twice and duplicate side effects.
             retry=http.Retry(total=2, allowed_methods=frozenset({"GET"})),
         )
+
+    def _auth_headers(self) -> dict[str, str]:
+        """The credential headers for one request, drawn from the pool when
+        there is one. The key drawn is remembered so its fate — success or a
+        rate limit — can be reported back."""
+        if self.key_pool is not None and len(self.key_pool) > 1:
+            key, _ = self.key_pool.next_key()
+            self._last_key = key
+            return {"Authorization": f"Bearer {key}"} if key else {}
+        self._last_key = self.api_key
+        return {}
 
     # -- wire helpers ----------------------------------------------------- #
 
@@ -170,17 +187,50 @@ class OpenAICompatProvider:
                 body[key] = kwargs[key]
 
         try:
-            response = self._session.post(
-                f"{self.base_url}/chat/completions",
-                json=body, stream=True,
-                headers={"Accept": "text/event-stream"},
-            )
+            response = self._post(body)
         except http.RequestError as exc:
             raise ProviderError(f"{self.label}: {exc}", provider=self.name) from exc
 
         with response:
             self._raise_for_status(response)
             yield from self._parse_stream(response, target)
+
+    def _post(self, body: dict[str, Any]) -> http.Response:
+        """One POST, on the key the pool chose for it.
+
+        A rate limit before any bytes stream is retried here once on the
+        next key — the same rule the gateway follows, applied one layer
+        down: nothing that has already produced output is ever replayed.
+        """
+        headers = {"Accept": "text/event-stream", **self._auth_headers()}
+        response = self._session.post(
+            f"{self.base_url}/chat/completions",
+            json=body, stream=True, headers=headers,
+        )
+        if response.status_code != 429 or self.key_pool is None \
+                or len(self.key_pool) <= 1:
+            return response
+        self.key_pool.report_rate_limited(
+            self._last_key, response.retry_after or 0.0)
+        key, masked = self.key_pool.next_key()
+        if not key:
+            return response
+        retry = self._session.post(
+            f"{self.base_url}/chat/completions",
+            json=body, stream=True,
+            headers={"Accept": "text/event-stream",
+                     **self._auth_headers_for(key)},
+        )
+        if retry.ok:
+            self.key_pool.report_ok(key)
+        else:
+            self.key_pool.report_rate_limited(
+                key, retry.retry_after or 0.0)
+        return retry
+
+    def _auth_headers_for(self, key: str) -> dict[str, str]:
+        self._last_key = key
+        return {"Authorization": f"Bearer {key}"} if key else {}
 
     def _parse_stream(self, response: http.Response, model: str) -> Iterator[StreamEvent]:
         # index -> partial call, because deltas identify calls positionally

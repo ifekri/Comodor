@@ -34,9 +34,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..channels.breaker import CircuitBreaker
+from ..channels.busy import interrupt_note, start_or_steer
 from ..channels.markdown import to_slack
 from ..channels.settings import Settings, keep_current
 from ..config import Config
+from ..media.ingest import MediaError, ingest
 from . import blocks as ui
 from .api import EDIT_EVERY, RateLimited, Slack, SlackError, escape, split
 from .socket import Envelope, SocketMode
@@ -133,8 +136,17 @@ class Service:
         #: The bot's own user id, so its own messages are not answered — a bot
         #: that replies to itself is an infinite loop with a rate limit.
         self.me: str = ""
+        #: The outbound-delivery ledger: every final answer is noted before
+        #: it is sent, so a crash between producing an answer and delivering
+        #: it leaves a record the next start can recover.
+        from ..channels.ledger import DeliveryLedger
+
+        self._ledger = DeliveryLedger(
+            config.paths.delivery_ledger("slack"), "slack")
+        self._breaker = CircuitBreaker("slack")
         self.socket = SocketMode(self.slack, self._on_envelope,
-                                 announce=self.announce)
+                                 announce=self.announce,
+                                 breaker=self._breaker)
 
     def say(self, line: str) -> None:
         try:
@@ -184,7 +196,27 @@ class Service:
         self.say(f"{len(settings.allowed)} paired account(s) · "
                  + ("may edit files" if settings.allow_writes
                     else "read-only"))
+        self._resume_ledger()
         self.socket.run()
+
+    def _resume_ledger(self) -> None:
+        """Redeliver replies a crash left pending, then sweep old records.
+
+        Runs once at start, before the socket opens: recovery is about the
+        previous life of this process, and interleaving it with fresh turns
+        would answer the older question second.
+        """
+        from ..channels.ledger import resume
+
+        try:
+            recovered = resume(self._ledger, lambda chat, body:
+                               self.slack.send(str(chat), body))
+        except Exception:
+            recovered = 0
+        if recovered:
+            self.say(f"redelivered {recovered} reply/replies that a restart "
+                     "had interrupted")
+        self._ledger.sweep()
 
     def stop(self) -> None:
         self.stopping.set()
@@ -239,6 +271,9 @@ class Service:
             event.get("ts") or "") if channel_kind not in ("im", "") else ""
 
         if not text:
+            if event.get("files"):
+                self._on_media(talk, channel, event)
+                return
             self._menu(talk)
             return
         if talk.waiting is not None and talk.waiting.writing:
@@ -301,10 +336,15 @@ class Service:
                 sent = self.slack.send(channel, piece, blocks=blocks,
                                        thread=talk.thread)
                 ts = str(sent.get("ts") or "")
+                self._breaker.ok()
             except RateLimited as problem:
                 time.sleep(problem.retry_after)
             except SlackError as problem:
-                self.say(f"could not send: {problem}")
+                if self._breaker.fail(str(problem)):
+                    self.say(f"{problem} — Slack sends are paused; send "
+                             "/platform here to resume them")
+                else:
+                    self.say(f"could not send: {problem}")
                 return ""
         return ts
 
@@ -334,6 +374,8 @@ class Service:
             self._stop_turn(talk)
         elif name == "status":
             self._send(talk, self._status(talk))
+        elif name == "platform":
+            self._platform_command(talk)
         elif name == "mode":
             if rest.lower() in ui.MODES:
                 self._set_mode(talk, rest.lower())
@@ -376,6 +418,10 @@ class Service:
             self._chose(talk, verb, argument)
         elif verb in ("ok", "okall", "no"):
             self._answer_permission(talk, argument, verb)
+        elif verb == "mm":
+            # A mode-change suggestion: `mm:<request>:<mode>`.
+            request_id, _, mode = argument.partition(":")
+            self._answer_mode(talk, request_id, mode)
         elif verb == "q":
             self._pick_option(talk, argument)
         elif verb == "qw":
@@ -385,11 +431,79 @@ class Service:
         else:
             self._menu(talk)
 
+    # -- media ---------------------------------------------------------------- #
+
+    def _on_media(self, talk: Conversation, channel: str,
+                  event: dict[str, Any]) -> None:
+        """A file shared into the chat: download, type, and route it.
+
+        Slack names files with an id and serves the bytes through
+        `files.info`, whose URL carries the bot's own token — so the fetch is
+        two calls, the same shape as every other channel's.
+        """
+        if not self.config.media.enabled:
+            self._send(talk, "I can only read text here.")
+            return
+        f = (event.get("files") or [])[0] or {}
+        file_id = str(f.get("id") or "")
+        name = str(f.get("name") or "file")
+        if not file_id:
+            self._send(talk, "I could not read that file.")
+            return
+        try:
+            data = self.slack.download(file_id)
+            item = ingest(data, name=name, directory=self._media_dir(),
+                          max_mb=self.config.media.max_download_mb)
+        except MediaError as problem:
+            self._send(talk, str(problem))
+            return
+        except Exception as problem:
+            self._send(talk, f"I could not fetch that file: {problem}")
+            return
+
+        from ..media.route import route
+        from ..providers.profile import of as profile_of
+
+        try:
+            routed = route(item, profile_of(self.config),
+                           voice_to_text=self._transcriber())
+        except Exception as problem:
+            # A transcription gate refusing (no key, unknown provider); the
+            # file is on disk either way, and the reason is said.
+            self._send(talk, f"{problem} The file is kept at {item.path}, "
+                             "so nothing is lost.")
+            return
+        self._start_turn(talk, routed.text, images=routed.images)
+
+    def _media_dir(self):
+        from pathlib import Path
+
+        configured = self.config.media.save_dir
+        root = Path(configured) if configured else \
+            Path(self.config.paths.user) / "media"
+        return root / "slack"
+
+    def _transcriber(self):
+        """The voice-note transcriber, or None where there is none.
+
+        A configured provider whose gate is closed (no key in the
+        environment, an unknown provider name) raises here on purpose: the
+        media handler turns that into a note the user can act on.
+        """
+        if not self.config.media.voice_to_text:
+            return None
+        from ..voice.stt import transcriber
+        return transcriber(self.config)
+
     # -- turns ---------------------------------------------------------------- #
 
-    def _start_turn(self, talk: Conversation, text: str) -> None:
-        if not talk.session.send(text):
-            self._menu(talk, "Something is already running. Stop it first.")
+    def _start_turn(self, talk: Conversation, text: str,
+                    images: list[str] | None = None) -> None:
+        def refuse(note: str) -> None:
+            self._menu(talk, note)
+
+        if not start_or_steer(talk.session, text, images,
+                              self.config.slack.busy_mode, refuse):
             return
         ts = self._send(talk, "_working…_")
         talk.reply = Reply(channel=self._where(talk), ts=ts,
@@ -424,8 +538,8 @@ class Service:
                     self._draw(talk, streamed, tools, final=True)
                     return
                 elif kind == "cancelled":
-                    self._draw(talk, streamed + "\n\n_stopped_", tools,
-                               final=True)
+                    self._draw(talk, streamed + "\n\n_stopped_"
+                               + interrupt_note(event), tools, final=True)
                     return
 
             self._draw(talk, streamed, tools)
@@ -459,15 +573,32 @@ class Service:
                 model=str(state.get("model") or ""),
                 writes=self.config.slack.allow_writes, body=body[:2900])
 
-        try:
-            self.slack.edit(reply.channel, reply.ts, body[:2900], blocks)
-        except RateLimited:
+        if not final:
+            try:
+                self.slack.edit(reply.channel, reply.ts, body[:2900], blocks)
+            except RateLimited:
+                return
+            except SlackError as problem:
+                self.say(f"could not update the reply: {problem}")
             return
+        # The final body goes through the ledger: a crash between the answer
+        # being produced and this edit landing is the case the recovery pass
+        # exists for. Interim edits are not recorded — only the whole answer
+        # is worth redelivering.
+        self._ledger.send(
+            reply.channel, body[:2900],
+            lambda chat, text: self._final_edit(talk, reply, text, blocks))
+        reply.finished = True
+        talk.reply = None
+
+    def _final_edit(self, talk: Conversation, reply: Reply, body: str,
+                    blocks: list[dict[str, Any]]) -> None:
+        try:
+            self.slack.edit(reply.channel, reply.ts, body, blocks)
+        except RateLimited:
+            pass
         except SlackError as problem:
             self.say(f"could not update the reply: {problem}")
-        if final:
-            reply.finished = True
-            talk.reply = None
 
     def _stop_turn(self, talk: Conversation) -> None:
         talk.session.interrupt()
@@ -498,6 +629,13 @@ class Service:
     def _ask(self, talk: Conversation, event: dict[str, Any]) -> None:
         what = event.get("what") or event.get("request") or {}
         request_id = str(event.get("id") or event.get("request_id") or "")
+
+        if event.get("about") == "mode" or what.get("kind") == "mode":
+            options = [option for option in event.get("options", []) if option]
+            body = what.get("prompt") or event.get("prompt") or "Change mode?"
+            self._send(talk, "Comodor suggests a mode change",
+                       ui.mode_choices(request_id, body, options))
+            return
 
         if what.get("kind") == "permission" or event.get("permission"):
             body = what.get("text") or event.get("text") or "May I?"
@@ -588,6 +726,15 @@ class Service:
                                  "no": "no"}[verb])
         except Exception as problem:
             self.say(f"could not deliver the approval: {problem}")
+
+    def _answer_mode(self, talk: Conversation, request_id: str,
+                     mode: str) -> None:
+        if not mode:
+            return
+        try:
+            talk.session.answer(request_id, mode)
+        except Exception as problem:
+            self.say(f"could not deliver the answer: {problem}")
 
     # -- paged lists ----------------------------------------------------------- #
 
@@ -701,6 +848,20 @@ class Service:
             "• *Rules* — what it learned from your corrections\n\n"
             "When it needs to run something, you approve it here first."
         )
+
+    def _platform_command(self, talk: Conversation) -> None:
+        """The Slack adapter's breaker: state, and the resume.
+
+        The command reaches the daemon that owns the connection, so only
+        this platform's breaker is consulted — and only from a paired
+        account, which the dispatcher has already checked.
+        """
+        breaker = self._breaker
+        if breaker.paused:
+            breaker.resume()
+            self._send(talk, "Slack is listening again.")
+            return
+        self._send(talk, breaker.describe())
 
     def _status(self, talk: Conversation) -> str:
         state = self._state(talk)

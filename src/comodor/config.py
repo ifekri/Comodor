@@ -50,6 +50,11 @@ class ProviderConfig:
     #: prints one, and pytest prints them on every failure; a key in a bug
     #: report is a key in an issue tracker.
     api_key: str = field(default="", repr=False)
+    #: Extra keys for the same provider, forming a pool. `api_key` stays the
+    #: canonical first key so every existing reader is unchanged; the pool is
+    #: `api_key` plus whatever is listed here, rotated on rate limits. Out of
+    #: the repr for the same reason the single key is.
+    api_keys: list[str] = field(default_factory=list, repr=False)
     model: str = ""
     label: str = ""
     headers: dict[str, str] = field(default_factory=dict)
@@ -89,6 +94,8 @@ class ProviderConfig:
         data: dict[str, Any] = {"enabled": self.enabled, "configured": self.configured}
         if self.api_key:
             data["api_key"] = self.api_key
+        if self.api_keys:
+            data["api_keys"] = list(self.api_keys)
         if self.model:
             data["model"] = self.model
         spec = catalogue.get(self.name)
@@ -135,7 +142,7 @@ class UIConfig:
 
 @dataclass
 class AgentConfig:
-    mode: str = "act"                    # act | plan | chat
+    mode: str = "act"                    # act | plan | ask | chat
     loop: bool = True                    # autonomous multi-step iteration
     #: Steps one task may take. `0` is no limit, and is the default: a
     #: refactor across a dozen files runs out of twenty-four steps mid-thought,
@@ -190,12 +197,46 @@ class GatewayConfig:
 
 
 @dataclass
+class MemoryProviderConfig:
+    """One optional external memory service, mirrored beside the brain.
+
+    ``kind`` empty means none. The key is named by environment variable
+    (``key_env``) and never stored here — a config file can be committed by
+    accident, and this one would carry the keys to everything the user has
+    ever told the agent.
+    """
+
+    kind: str = ""                        # "" | http_generic | mem0
+    base_url: str = ""
+    key_env: str = "MEM0_API_KEY"
+    mirror_writes: bool = True
+    read_augment: bool = False
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "base_url": self.base_url,
+            "key_env": self.key_env,
+            "mirror_writes": self.mirror_writes,
+            "read_augment": self.read_augment,
+        }
+
+
+@dataclass
 class LearningConfig:
     enabled: bool = True
     top_k: int = 6                       # lessons recalled per turn
     max_playbook_tokens: int = 800       # hard cap on injected memory
     reflect: bool = True                 # distil lessons after each task
     reflect_model: str = ""              # blank = the active model
+    #: The background review of finished turns, which curates the small
+    #: facts store (see learning/facts.py). Runs after a turn ends, never
+    #: during one; a newer review replaces an in-flight one.
+    review: bool = True
+    review_model: str = ""               # blank = the active model
+    #: On, proposals from the review wait as `staged` until the user
+    #: approves them; off, they are written straight in.
+    review_write_approval: bool = False
     min_confidence: float = 0.15
     half_life_days: float = 45.0
     share_scope: str = "project"         # project | global
@@ -210,6 +251,27 @@ class LearningConfig:
     rules: bool = True
     announce: bool = True
     prefetch: bool = True
+    #: An optional external memory service (see learning/providers/). Off
+    #: and empty by default — the local brain is complete, and this is a
+    #: mirror, never the source of truth. The key lives in the environment,
+    #: never in this file.
+    provider: MemoryProviderConfig = field(
+        default_factory=lambda: MemoryProviderConfig())
+
+
+@dataclass
+class CuratorConfig:
+    """The periodic maintenance pass over the brain (see learning/curator).
+
+    Decay is passive and runs per task; the curator is active and runs on
+    its own interval. It never deletes anything: stale items stay in the
+    database hidden from recall, skills move to `.archive/` and can be
+    restored, and every transition is reported with its reason.
+    """
+    enabled: bool = True
+    interval_days: float = 7.0           # minimum days between passes
+    stale_days: float = 30.0             # unused this long -> stale
+    archive_days: float = 90.0           # unused this long -> archived
 
 
 @dataclass
@@ -366,6 +428,11 @@ class TelegramConfig:
     #: set, because approving a shell command on a phone is a tap made with
     #: less attention than the same approval at a keyboard.
     allow_writes: bool = False
+    #: What happens to a new message while a turn is already running. "queue"
+    #: (the default, unchanged behaviour) refuses with a note and lets the
+    #: human resend; "interrupt" stops the running turn — completed file work
+    #: stays undoable through checkpoints — and starts the new one.
+    busy_mode: str = "queue"
     #: Seconds a pairing code stays valid.
     pair_window: int = 300
 
@@ -375,6 +442,7 @@ class TelegramConfig:
             "token": self.token,
             "allowed": list(self.allowed),
             "allow_writes": self.allow_writes,
+            "busy_mode": self.busy_mode,
             "pair_window": self.pair_window,
         }
 
@@ -418,6 +486,9 @@ class WhatsAppConfig:
     allowed: list[str] = field(default_factory=list)
     #: Whether a turn started from WhatsApp may edit files and run commands.
     allow_writes: bool = False
+    #: What happens to a new message while a turn is already running: "queue"
+    #: (the default) or "interrupt" — see the Telegram section above.
+    busy_mode: str = "queue"
     #: Seconds a pairing code stays valid.
     pair_window: int = 300
     #: Where the webhook listens. Bound to localhost: this is meant to sit
@@ -445,6 +516,7 @@ class WhatsAppConfig:
             "verify_token": self.verify_token,
             "allowed": list(self.allowed),
             "allow_writes": self.allow_writes,
+            "busy_mode": self.busy_mode,
             "pair_window": self.pair_window,
             "host": self.host,
             "port": self.port,
@@ -497,6 +569,9 @@ class SlackConfig:
     allowed: list[str] = field(default_factory=list)
     #: Whether a turn started from Slack may edit files and run commands.
     allow_writes: bool = False
+    #: What happens to a new message while a turn is already running: "queue"
+    #: (the default) or "interrupt" — see the Telegram section above.
+    busy_mode: str = "queue"
     #: Seconds a pairing code stays valid.
     pair_window: int = 300
     #: The workspace it was connected to, remembered so `status` can name it
@@ -510,12 +585,55 @@ class SlackConfig:
             "app_token": self.app_token,
             "allowed": list(self.allowed),
             "allow_writes": self.allow_writes,
+            "busy_mode": self.busy_mode,
             "pair_window": self.pair_window,
             "team": self.team,
         }
 
     def may(self, user_id: str) -> bool:
         return bool(user_id) and str(user_id) in {str(x) for x in self.allowed}
+
+
+@dataclass
+class DiscordConfig:
+    """Reaching the agent from a Discord bot.
+
+    One token, like Telegram: a bot token from the developer portal, and the
+    gateway it opens is a websocket Comodor connects out to — so like Slack
+    and unlike WhatsApp, nothing here needs a public address.
+
+    A server can have thousands of people in it, which makes the allow-list
+    below load-bearing in a way even Slack's is not. `allowed` holds Discord
+    snowflake ids — the raw numbers, not usernames, and never the
+    discriminator: a username can be given up and taken by somebody else, an
+    id cannot.
+    """
+
+    enabled: bool = False
+    #: From the developer portal: New Application → Bot → Reset Token.
+    token: str = ""
+    #: Discord user ids (snowflakes) that may talk to it.
+    allowed: list[int] = field(default_factory=list)
+    #: Whether a turn started from Discord may edit files and run commands.
+    allow_writes: bool = False
+    #: What happens to a new message while a turn is already running: "queue"
+    #: (the default) or "interrupt" — see the Telegram section above.
+    busy_mode: str = "queue"
+    #: Seconds a pairing code stays valid.
+    pair_window: int = 300
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "token": self.token,
+            "allowed": list(self.allowed),
+            "allow_writes": self.allow_writes,
+            "busy_mode": self.busy_mode,
+            "pair_window": self.pair_window,
+        }
+
+    def may(self, user_id: int) -> bool:
+        return bool(user_id) and int(user_id) in {int(x) for x in self.allowed}
 
 
 @dataclass
@@ -534,6 +652,249 @@ class MCPConfig:
 
 
 @dataclass
+class DelegationConfig:
+    """Background delegates: how many at once, and what one may hold."""
+
+    #: Slots for delegates running alongside the parent's own turn. When all
+    #: are busy a new background request is refused, not queued — a pile of
+    #: half-finished children no one is watching is cost with no oversight.
+    max_background: int = 3
+    #: Characters of a finished delegate's answer that reach the parent's
+    #: conversation inline. The rest is moved aside by the usual overflow
+    #: rule, which is transfer rather than deletion.
+    completion_summary_max: int = 24_000
+    #: Seconds between progress checks on each running delegate.
+    stall_check_seconds: float = 30.0
+
+@dataclass
+class VoiceConfig:
+    """Speech in and out: transcribing voice notes, synthesising speech.
+
+    Everything is off or key-less by default. A cloud transcription provider
+    is only used when the user names one and its key exists — audio leaving
+    the machine is a bigger step than text leaving it, because a recording
+    is a copy of a person, not a summary of what they asked.
+    """
+
+    enabled: bool = False
+    #: Text-to-speech off unless asked for. When on, channel replies may be
+    #: sent as voice messages instead of text where the channel supports it.
+    tts_enabled: bool = False
+    #: Text-to-speech provider: "edge" needs no key and no install.
+    tts_provider: str = "edge"
+    #: Voice for the edge provider. A Persian locale default, since the
+    #: program's other audience speaks Persian; any Edge voice name works.
+    tts_voice: str = "fa-IR-FaridNeural"
+    #: Speech-to-text provider: "groq" or "openai", or "" for none. A local
+    #: whisper binary is not wired in v1 — the setting says so rather than
+    #: pretending.
+    stt_provider: str = ""
+    #: Environment variable holding the transcription provider's key.
+    stt_key_env: str = "GROQ_API_KEY"
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "tts_enabled": self.tts_enabled,
+            "tts_provider": self.tts_provider,
+            "tts_voice": self.tts_voice,
+            "stt_provider": self.stt_provider,
+            "stt_key_env": self.stt_key_env,
+        }
+
+@dataclass
+class MediaConfig:
+    """Files sent in from the channels: voice notes, images, documents.
+
+    Everything arrives in one managed directory, typed by its own bytes and
+    never executed. A file nobody can read — an image sent to a model without
+    vision, a voice note with no transcription — is kept and its path offered,
+    not quietly discarded.
+    """
+
+    enabled: bool = True
+    #: Ceiling per download. The adapters cap what they fetch; this catches
+    #: whatever slips past them.
+    max_download_mb: float = 25.0
+    #: Transcribe voice notes. Needs a transcription setting; without one a
+    #: voice note is answered with a line saying so rather than silence.
+    voice_to_text: bool = True
+    #: Send images to models that have vision. Without it the image is saved
+    #: and its path handed to the model as a file to read with tools.
+    images_to_vision: bool = True
+    #: Where downloads land, under the user's own directory. Sessions share
+    #: it; names are content-hashed, so the same photo twice costs nothing.
+    save_dir: str = ""                    # blank = <user>/media
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "max_download_mb": self.max_download_mb,
+            "voice_to_text": self.voice_to_text,
+            "images_to_vision": self.images_to_vision,
+            "save_dir": self.save_dir,
+        }
+
+
+@dataclass
+class CronConfig:
+    """Scheduled agent runs.
+
+    Everything here is conservative by default: the scheduler is off until it
+    is asked for, and a job that keeps failing stops being trusted after a few
+    tries rather than failing forever in the background.
+    """
+
+    enabled: bool = False
+    #: Blank = whatever model the session that adds the job was using. A
+    #: pinned model that is unavailable fails the run — never a silent
+    #: fallback to a different one, because a task run on a model the user
+    #: did not choose is a task run at an unknown cost.
+    model: str = ""
+    #: Minutes after the fire time a missed job may still run. A laptop waking
+    #: from sleep fires everything it slept through once, late — not never.
+    misfire_grace_minutes: int = 10
+    #: Consecutive failures before a job is auto-paused.
+    failure_streak: int = 3
+    #: How many agent turns the scheduler may run at once.
+    max_concurrency: int = 2
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "model": self.model,
+            "misfire_grace_minutes": self.misfire_grace_minutes,
+            "failure_streak": self.failure_streak,
+            "max_concurrency": self.max_concurrency,
+        }
+
+
+@dataclass
+class ShellConfig:
+    """Where shell commands run: this machine, a container, or another box.
+
+    The backend is a project setting on purpose — a repository can pin the
+    container its tests need — but everything here is on the host-settable
+    list only in the directions that cannot hurt a fresh clone: a project may
+    name an image, never point the agent at an SSH box or turn hardening off.
+    """
+
+    backend: str = "host"                 # host | docker | ssh
+    #: Docker: the image commands run in. Pulled on first use.
+    docker_image: str = "python:3.13-slim"
+    #: Mount the project into the container. Read-only by default; read-write
+    #: is the choice that makes checkpoints and verify see host files.
+    docker_mount: str = "ro"              # "" | ro | rw
+    #: Hardened invocation (no capabilities, no new privileges, capped
+    #: processes). Auto-approval refuses to run a container without it.
+    docker_harden: bool = True
+    #: SSH: where to connect. The key is read from ~/.ssh and never copied.
+    ssh_host: str = ""
+    ssh_user: str = ""
+    ssh_port: int = 22
+    ssh_key_path: str = ""
+    #: Seconds before a remote command is killed. Long enough for a test
+    #: suite, short enough that a dead network does not hang the turn.
+    timeout: float = 180.0
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "backend": self.backend,
+            "docker_image": self.docker_image,
+            "docker_mount": self.docker_mount,
+            "docker_harden": self.docker_harden,
+            "ssh_host": self.ssh_host,
+            "ssh_user": self.ssh_user,
+            "ssh_port": self.ssh_port,
+            "ssh_key_path": self.ssh_key_path,
+            "timeout": self.timeout,
+        }
+
+
+@dataclass
+class ApiConfig:
+    """The OpenAI-compatible endpoint (`comodor serve`).
+
+    A chat frontend pointed here may run shell commands on this machine —
+    that is what a turn is — so the defaults are the web server's: loopback
+    bind, a token generated per run, no session state unless a client asks
+    for it by name. ``token`` left empty means one is made when the server
+    starts and printed once; a fixed token belongs in the user's own config
+    file, which is 0600, never in a project's.
+    """
+
+    enabled: bool = False
+    bind: str = "127.0.0.1"
+    port: int = 8787
+    token: str = ""
+    #: How many loop steps one request may spend. A chat client's HTTP
+    #: timeout is usually shorter than an agent's patience, so this caps the
+    #: turn at something a client will actually wait for.
+    max_turns: int = 8
+    #: Whether an external request may switch the agent's mode at all. Off,
+    #: the ``comodor`` request field is honoured only inside the modes the
+    #: user already allows — reads and plans, never writes, from a network
+    #: client nobody has met.
+    allow_mode_switch: bool = True
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "bind": self.bind,
+            "port": self.port,
+            "token": self.token,
+            "max_turns": self.max_turns,
+            "allow_mode_switch": self.allow_mode_switch,
+        }
+
+
+@dataclass
+class WebhookConfig:
+    """The general webhook channel (`comodor webhook`).
+
+    Off until asked for, loopback-bound, and every subscription carries its
+    own secret and its own write permission — a webhook is a machine
+    talking, and the trust it gets is the trust one subscription asked for,
+    never whatever else the machine allows.
+    """
+
+    enabled: bool = False
+    bind: str = "127.0.0.1"
+    port: int = 8790
+
+    def to_json(self) -> dict[str, Any]:
+        return {"enabled": self.enabled, "bind": self.bind, "port": self.port}
+
+@dataclass
+class ImageGenConfig:
+    """Text-to-image (`image_gen`).
+
+    Off by default because every call costs money — a tool the user has to
+    switch on is a tool whose bill they agreed to. The key is named by
+    ``key_env`` and read from the environment only, the same rule the
+    memory provider follows: a config file can be committed by accident.
+    ``max_per_day`` is the fuse; exceeding it refuses in words, not in
+    silence or in a surprise charge.
+    """
+
+    enabled: bool = False
+    provider: str = "openai"
+    model: str = "gpt-image-1"
+    key_env: str = "OPENAI_API_KEY"
+    base_url: str = ""
+    max_per_day: int = 10
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "provider": self.provider,
+            "model": self.model,
+            "key_env": self.key_env,
+            "base_url": self.base_url,
+            "max_per_day": self.max_per_day,
+        }
+
+@dataclass
 class SafetyConfig:
     auto_approve_safe: bool = True       # read-only tools never prompt
     auto_approve_writes: bool = False
@@ -545,8 +906,22 @@ class SafetyConfig:
     #: it can do is add a line the model did not need. Off is for somebody
     #: editing a dialect our parsers do not know.
     verify_edits: bool = True
+    #: Commands auto-approved without a prompt, matched per branch after the
+    #: deny list has refused. The first token is what an "always allow" in the
+    #: UI grants, so `git` here approves `git status`, `git log` and every
+    #: other git subcommand — write one line per command stem.
     allow_commands: list[str] = field(default_factory=list)
     deny_commands: list[str] = field(default_factory=lambda: list(DEFAULT_DENY))
+    #: Smart approvals, off by default. When on, a shell command that would
+    #: otherwise prompt is first shown to a cheap model for a risk read:
+    #: allow runs it (labeled as the model's call), deny refuses, ask sends it
+    #: to the human as before. A slow or broken assessment is an "ask", never
+    #: a yes.
+    smart_approvals: bool = False
+    #: The model the assessment runs on. Empty means the session's current
+    #: provider default; name something small and fast — this is a
+    #: classification job, not a reasoning one.
+    smart_model: str = ""
     workspace_only: bool = True
     max_file_read_bytes: int = 512_000
     #: How large a file `read_file` will scan to find the lines asked for. It
@@ -557,6 +932,15 @@ class SafetyConfig:
     #: Directories the user has confirmed as a workspace. Exact paths, never
     #: prefixes: approving ~/work/api must not quietly approve ~/work.
     trusted_folders: list[str] = field(default_factory=list)
+    #: Whether the model's URL tools may reach this machine's own loopback.
+    #: Comodor runs a web server of its own, and a user whose dev server is
+    #: on localhost can open this per-project; the default stays closed
+    #: because a cloud VM's loopback holds internal services the model has no
+    #: business summarising.
+    ssrf_allow_loopback: bool = False
+    #: URLs the tools may always open, guard aside. Prefix matching: the user
+    #: wrote the rule, the rule says what it trusts.
+    ssrf_allowlist: list[str] = field(default_factory=list)
 
 
 # Patterns that are never worth running from an agent, however it is prompted.
@@ -570,8 +954,10 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: is not named here is silently ignored - which is what happened to `browser`
 #: for its whole existence: `headless: false` in a config file did nothing and
 #: said nothing.
-SECTIONS = ("ui", "agent", "gateway", "learning", "skills", "safety",
-            "browser", "computer", "telegram", "whatsapp", "slack")
+SECTIONS = ("ui", "agent", "gateway", "learning", "curator", "skills", "safety",
+            "browser", "computer", "telegram", "whatsapp", "slack", "discord",
+            "cron", "media", "voice", "delegation", "shell", "api", "webhook",
+            "image_gen")
 
 
 @dataclass
@@ -582,13 +968,23 @@ class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
+    curator: CuratorConfig = field(default_factory=CuratorConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     computer: ComputerConfig = field(default_factory=ComputerConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     whatsapp: WhatsAppConfig = field(default_factory=WhatsAppConfig)
     slack: SlackConfig = field(default_factory=SlackConfig)
+    discord: DiscordConfig = field(default_factory=DiscordConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
+    cron: CronConfig = field(default_factory=CronConfig)
+    media: MediaConfig = field(default_factory=MediaConfig)
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
+    delegation: DelegationConfig = field(default_factory=DelegationConfig)
+    shell: ShellConfig = field(default_factory=ShellConfig)
+    api: ApiConfig = field(default_factory=ApiConfig)
+    webhook: WebhookConfig = field(default_factory=WebhookConfig)
+    image_gen: ImageGenConfig = field(default_factory=ImageGenConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     paths: Paths = field(default_factory=resolve_paths)
@@ -877,6 +1273,12 @@ PROJECT_SETTABLE: dict[str, frozenset[str] | None] = {
                         "keep_screenshots"}),
     "learning": frozenset({"enabled", "reflect", "top_k", "max_playbook_tokens"}),
     "skills": frozenset({"enabled", "top_k", "max_tokens"}),
+    # A repository may say which image its commands run in — that is what a
+    # Dockerfile is, in another accent. It may not choose the backend itself,
+    # point the agent at a remote box, or turn the container's hardening off:
+    # those are the user's, because they say where the user's machine spends
+    # its trust.
+    "shell": frozenset({"docker_image", "docker_mount"}),
     # Servers only, and they arrive switched off — a project saying what it
     # uses is useful; a project starting a process is not its decision. The
     # master switch is deliberately absent.
@@ -1043,6 +1445,20 @@ def _apply_environment(providers: dict[str, ProviderConfig]) -> None:
         model = os.environ.get(f"{spec.id.upper()}_MODEL", "").strip()
         if key:
             entry.api_key = key
+            entry.configured = True
+        # Additional keys from the environment: OPENROUTER_API_KEY_2 and up
+        # join the pool. Numbered suffixes stop at the first gap, so a stray
+        # _4 does not invent a key that was never exported.
+        extra: list[str] = list(entry.api_keys)
+        for number in range(2, 100):
+            found = os.environ.get(f"{spec.env_key}_{number}", "").strip() \
+                if spec.env_key else ""
+            if not found:
+                break
+            if found not in extra:
+                extra.append(found)
+        if extra and extra != entry.api_keys:
+            entry.api_keys = extra
             entry.configured = True
         if endpoint:
             entry.base_url = endpoint.rstrip("/")

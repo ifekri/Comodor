@@ -41,6 +41,16 @@ def run(config: Config, args: argparse.Namespace) -> int:
 
     server = Server(config, host=args.host, port=args.port, token=args.token)
 
+    # The tick loop runs inside the server process: a browser tab closing is
+    # one client leaving, while the server staying up is what "scheduled"
+    # means here.
+    scheduler = None
+    if config.cron.enabled:
+        from ..cron.scheduler import Scheduler
+
+        scheduler = Scheduler(config)
+        scheduler.start()
+
     try:
         server.bind()
     except OSError as error:
@@ -62,6 +72,8 @@ def run(config: Config, args: argparse.Namespace) -> int:
         print("\nStopped.")
     finally:
         server.stop()
+        if scheduler is not None:
+            scheduler.stop()
     return 0
 
 

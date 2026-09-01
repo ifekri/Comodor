@@ -28,7 +28,7 @@ from typing import Any
 
 from ..events import Cancellation, EventBus
 from ..paths import Paths
-from ..safety import PermissionEngine
+from ..safety import PermissionEngine, make_assessor
 from ..tools import ToolRegistry
 
 
@@ -54,8 +54,10 @@ def spawner(config: Any, gateway: Any, bus: EventBus, skills: Any = None,
         settings.agent.max_output_tokens = min(settings.agent.max_output_tokens, 4096)
 
         tools = ToolRegistry(skills=skills, mcp=mcp)
+        permissions = PermissionEngine(settings, bus)
+        permissions.assess = make_assessor(settings, gateway)
         loop = AgentLoop(settings, gateway, tools, bus,
-                         PermissionEngine(settings, bus), Conversation(),
+                         permissions, Conversation(),
                          memory=None, skills=skills)
         if cancel is not None:
             loop.cancel = cancel

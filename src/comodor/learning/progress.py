@@ -109,6 +109,7 @@ class Progress:
     early_success_rate: float = 0.0
     rules_active: int = 0
     lessons: int = 0
+    facts: int = 0
     corrections_total: int = 0
     since: float = 0.0
     days: float = 0.0
@@ -148,11 +149,11 @@ class Progress:
 
 
 def analyse(episodes: list[Episode], lessons: int = 0,
-            rules_active: int = 0) -> Progress:
+            rules_active: int = 0, facts: int = 0) -> Progress:
     """Turn stored episodes into the series behind the dashboard."""
     usable = [episode for episode in episodes if episode.stopped != "cancelled"]
     progress = Progress(episodes=len(usable), lessons=lessons,
-                        rules_active=rules_active)
+                        rules_active=rules_active, facts=facts)
     if not usable:
         return progress
 

@@ -354,7 +354,7 @@ class Pretend:
     def set_mode(self, mode):
         return True
 
-    def send(self, text):
+    def send(self, text, images=None):
         return False          # nothing is started; the tests are about routing
 
     def wait_for(self, cursor, timeout=8.0):

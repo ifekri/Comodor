@@ -39,6 +39,13 @@ def register(sub: argparse._SubParsersAction) -> None:
     actions.add_parser("update", help="refetch anything whose version has moved")
     actions.add_parser("list", help="what is installed on this machine")
 
+    rollback = actions.add_parser("rollback",
+                                  help="put a skill back the way it was")
+    rollback.add_argument("--id", help="the version block to restore (see "
+                                       "--list)")
+    rollback.add_argument("--list", dest="show", action="store_true",
+                          help="show the recorded history instead")
+
 
 def run(config: Config, args: argparse.Namespace) -> int:
     from ..ui import console as console_module
@@ -51,6 +58,9 @@ def run(config: Config, args: argparse.Namespace) -> int:
 
     if action == "list":
         return _list(console, theme, root)
+    if action == "rollback":
+        return _rollback(console, theme, config, getattr(args, "id", ""),
+                         show=getattr(args, "show", False))
 
     try:
         catalogue = library.fetch(
@@ -269,3 +279,61 @@ def _ago(seconds: float) -> str:
     if seconds < 86400:
         return f"{int(seconds // 3600)} hours ago"
     return f"{int(seconds // 86400)} days ago"
+
+
+def _rollback(console, theme, config: Config, block_id: str,
+              show: bool) -> int:
+    """Restore a skill from the ledger's backups, or show the history.
+
+    Deliberately manual. The ledger records everything the agent did, but
+    putting a file back is the owner's call — nothing here decides it.
+    """
+    from ..skills.ledger import Ledger
+    from ..skills.loader import MANIFEST
+
+    ledger = Ledger(config.paths.skills)
+
+    if show or not block_id:
+        entries = ledger.entries()
+        if not entries:
+            console.print("\n  No changes recorded yet.\n")
+            return 0
+        console.print("\n[title]Skill history[/title]\n")
+        for entry in entries[-20:]:
+            console.print(
+                f"  {entry.when}  [dim]{entry.actor} {entry.action}[/dim]  "
+                f"{entry.skill}")
+            for version in (entry.before, entry.after):
+                if version:
+                    console.print(f"    [dim]block {version[:12]}[/dim]")
+        console.print("\n  [dim]restore with: comodor skills rollback "
+                      "--id <block>[/dim]\n")
+        return 0
+
+    # Which skill does this block belong to? The newest entry naming it.
+    owner = None
+    for entry in reversed(ledger.entries()):
+        if block_id in (entry.before, entry.after):
+            owner = entry.skill
+            break
+    if owner is None:
+        console.print(f"\n  [bad]no recorded change names block "
+                      f"{block_id[:12]}[/bad]\n")
+        return 1
+
+    text = ledger.restore_block(block_id)
+    if text is None:
+        console.print(f"\n  [bad]the backup block {block_id[:12]} is gone — "
+                      "it may have been pruned[/bad]\n")
+        return 1
+
+    manifest = config.paths.skills / owner / MANIFEST
+    if not manifest.exists():
+        console.print(f"\n  [bad]no skill {owner!r} to restore into[/bad]\n")
+        return 1
+    manifest.write_text(text, encoding="utf-8")
+    ledger.record(actor="user", action="restore", skill=owner,
+                  after=ledger.keep(text))
+    console.print(f"\n  [good]restored[/good] {owner} from block "
+                  f"{block_id[:12]}\n")
+    return 0

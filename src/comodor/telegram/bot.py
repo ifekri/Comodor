@@ -34,9 +34,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..channels.breaker import RESUME_POLL, CircuitBreaker
+from ..channels.busy import interrupt_note, start_or_steer
 from ..channels.markdown import to_telegram
 from ..channels.settings import Settings, keep_current
 from ..config import Config
+from ..media.ingest import MediaError, ingest
 from . import keyboard as kb
 from .api import Bot, TelegramError, Unauthorised, backoff
 
@@ -148,6 +151,14 @@ class Service:
         self.stopping = threading.Event()
         #: Called with a line of text for the terminal that started this.
         self.announce = announce or (lambda line: None)
+        #: The outbound-delivery ledger: every reply is noted before it is
+        #: sent, so a crash between producing an answer and delivering it
+        #: leaves a record the next start can recover.
+        from ..channels.ledger import DeliveryLedger
+
+        self._ledger = DeliveryLedger(
+            config.paths.delivery_ledger("telegram"), "telegram")
+        self._breaker = CircuitBreaker("telegram")
         self._lock = threading.Lock()
 
     # -- lifecycle --------------------------------------------------------- #
@@ -167,28 +178,64 @@ class Service:
         except TelegramError:
             pass
 
+        self._resume_ledger()
         me = self.bot.me()
         self.announce(f"@{me['username']} is listening")
 
+    def _resume_ledger(self) -> None:
+        """Redeliver replies a crash left pending, then sweep old records.
+
+        Runs once at start, before any new traffic: recovery is about the
+        previous life of this process, and interleaving it with fresh turns
+        would answer the older question second.
+        """
+        from ..channels.ledger import resume
+
+        try:
+            recovered = resume(self._ledger, lambda chat, body:
+                               self.bot.send(chat, body))
+        except Exception:
+            recovered = 0
+        if recovered:
+            self.announce(f"redelivered {recovered} reply/replies that a "
+                          "restart had interrupted")
+        self._ledger.sweep()
+
         failures = 0
         while not self.stopping.is_set():
+            if self._breaker.paused:
+                # Paused, the loop does not poll: polling a paused adapter
+                # is only a way to keep tripping it. Resume is a command,
+                # so the loop just sleeps and waits to be told.
+                if self.stopping.wait(RESUME_POLL):
+                    return
+                continue
             try:
                 for update in self.bot.updates():
                     if self.stopping.is_set():
                         break
                     self._handle(update)
                 failures = 0
+                self._breaker.ok()
             except Unauthorised as problem:
                 self.announce(f"the token was refused: {problem}")
                 return
             except TelegramError as problem:
                 failures += 1
+                if self._breaker.fail(str(problem)):
+                    self.announce(f"{problem} — paused; send /platform in "
+                                  "Telegram to resume it")
+                    continue
                 pause = backoff(failures)
                 self.announce(f"{problem} — retrying in {pause:.0f}s")
                 if self.stopping.wait(pause):
                     return
             except Exception as problem:      # pragma: no cover - defensive
                 failures += 1
+                if self._breaker.fail(f"{type(problem).__name__}: {problem}"):
+                    self.announce(f"{problem} — paused; send /platform in "
+                                  "Telegram to resume it")
+                    continue
                 self.announce(f"unexpected: {type(problem).__name__}: {problem}")
                 if self.stopping.wait(backoff(failures)):
                     return
@@ -229,9 +276,109 @@ class Service:
             return
         if text:
             self._on_text(chat, text)
+            return
+        self._on_media(chat, user, message)
 
     def _allowed(self, user: int) -> bool:
         return self.config.telegram.may(user)
+
+    # -- media ---------------------------------------------------------------- #
+
+    #: Telegram's message keys that carry a downloadable file, most specific
+    #: first. A voice note is audio with a waveform, and Telegram says so
+    #: under its own key rather than under `audio`.
+    MEDIA_KEYS = (("voice", "audio"), ("photo", "image"), ("audio", "audio"),
+                  ("video_note", "video"), ("video", "video"),
+                  ("document", "document"), ("sticker", "image"))
+
+    def _on_media(self, chat: int, user: int, message: dict[str, Any]) -> None:
+        """A message with no text but possibly a file.
+
+        Media is text-plus after routing: a voice note becomes its transcript,
+        a screenshot becomes an image on the message, a document becomes a
+        path the turn can read. A chat where it is not enabled says so once,
+        briefly, rather than letting silence look like being ignored.
+        """
+        if not self.config.media.enabled:
+            return                          # deliberate: channels stay text-only
+        user_allowed = self.config.telegram.may(user)
+        if not user_allowed:
+            return                          # pairing already handled the reply
+
+        kind, file_id, name = None, "", ""
+        for key, media_kind in self.MEDIA_KEYS:
+            if key in message:
+                kind = media_kind
+                payload = message[key]
+                if kind == "image":
+                    # Telegram sends photos as a list of sizes; the last is
+                    # the largest and the only one worth transcription-into-
+                    # text. Its file_id is what getFile wants.
+                    largest = payload[-1] if isinstance(payload, list) else payload
+                    file_id = str((largest or {}).get("file_id") or "")
+                else:
+                    file_id = str((payload or {}).get("file_id") or "")
+                name = str(((message.get("document") or {}).get("file_name"))
+                           or f"{key}")
+                break
+        if not file_id:
+            return
+
+        self.bot.max_download_bytes = int(
+            self.config.media.max_download_mb * 1_000_000)
+        try:
+            data = self.bot.download(file_id)
+            item = ingest(data, name=name,
+                          directory=self._media_dir(), max_mb=self.config.media.max_download_mb)
+        except MediaError as problem:
+            self._send(chat, str(problem))
+            return
+        except Exception as problem:
+            self._send(chat, f"I could not fetch that file: {problem}")
+            return
+
+        try:
+            self._start_turn_with_media(chat, item)
+        except Exception as problem:
+            # A transcription gate refusing (no key, unknown provider) lands
+            # here; the file is on disk either way, and the reason is said.
+            self._send(chat, f"{problem} The file is kept at "
+                             f"{item.path}, so nothing is lost.")
+
+    def _media_dir(self):
+        from pathlib import Path
+
+        configured = self.config.media.save_dir
+        root = Path(configured) if configured else \
+            Path(self.config.paths.user) / "media"
+        return root / "telegram"
+
+    def _start_turn_with_media(self, chat: int, item) -> None:
+        from ..media.route import route
+        from ..providers.profile import of as profile_of
+
+        talk = self._conversation(chat)
+        profile = profile_of(self.config)
+        routed = route(item, profile,
+                       voice_to_text=self._transcriber())
+        text = routed.text
+        if routed.note:
+            text = f"{text}\n{routed.note}"
+        self._start_turn(talk, text, images=routed.images)
+
+    def _transcriber(self):
+        """The voice-note transcriber, or None where there is none.
+
+        A configured provider whose gate is closed (no key in the
+        environment, an unknown provider name) raises here on purpose: the
+        media handler turns that into a note the user can act on, which is
+        more honest than quietly answering "no transcription is set up" for
+        a setup the user believes exists.
+        """
+        if not self.config.media.voice_to_text:
+            return None
+        from ..voice.stt import transcriber
+        return transcriber(self.config)
 
     def _maybe_pair(self, chat: int, user: int, text: str,
                     message: dict[str, Any]) -> None:
@@ -295,6 +442,10 @@ class Service:
         elif name == "status":
             self.bot.send(talk.chat, self._status(talk),
                           keyboard=kb.just_back())
+        elif name == "voice":
+            self._voice_command(talk, rest)
+        elif name == "platform":
+            self._platform_command(talk)
         else:
             self.bot.send(talk.chat, f"No command <code>/{escape(name)}</code>.",
                           keyboard=self._menu(talk.chat))
@@ -384,6 +535,11 @@ class Service:
             done({"ok": "Approved", "okall": "Approved",
                   "no": "Refused"}[verb])
             self._answer_permission(talk, argument, verb)
+        elif verb == "mm":
+            # A mode-change suggestion: `mm:<request>:<mode>`.
+            done("Switching")
+            request_id, _, mode = argument.partition(":")
+            self._answer_mode(talk, request_id, mode)
         elif verb == "q":
             done()
             self._pick_option(talk, argument, tapped)
@@ -398,11 +554,13 @@ class Service:
 
     # -- turns ------------------------------------------------------------- #
 
-    def _start_turn(self, talk: Conversation, text: str) -> None:
-        if not talk.session.send(text):
-            self.bot.send(talk.chat,
-                          "Something is already running. Stop it first.",
-                          keyboard=self._menu(talk.chat))
+    def _start_turn(self, talk: Conversation, text: str,
+                    images: list[str] | None = None) -> None:
+        def refuse(note: str) -> None:
+            self.bot.send(talk.chat, note, keyboard=self._menu(talk.chat))
+
+        if not start_or_steer(talk.session, text, images,
+                              self.config.telegram.busy_mode, refuse):
             return
 
         self.bot.typing(talk.chat)
@@ -439,8 +597,8 @@ class Service:
                     self._draw(talk, streamed, tools, final=True)
                     return
                 elif kind == "cancelled":
-                    self._draw(talk, streamed + "\n\n<i>stopped</i>", tools,
-                               final=True)
+                    self._draw(talk, streamed + "\n\n<i>stopped</i>"
+                               + interrupt_note(event), tools, final=True)
                     return
 
             self._draw(talk, streamed, tools)
@@ -466,11 +624,55 @@ class Service:
             recent = tools[-3:]
             body += "\n\n<i>" + escape(" · ".join(recent)) + "</i>"
 
-        self.bot.edit(reply.chat, reply.message, body,
-                      keyboard=self._menu(talk.chat) if final else None)
-        if final:
-            reply.finished = True
-            talk.reply = None
+        if not final:
+            self.bot.edit(reply.chat, reply.message, body)
+            return
+        # The final body goes through the ledger: a crash between the answer
+        # being produced and this edit landing is the case the recovery pass
+        # exists for. Interim edits are not recorded — only the whole answer
+        # is worth redelivering.
+        try:
+            self._ledger.send(talk.chat, body, lambda chat, text:
+                              self.bot.edit(chat, reply.message, text,
+                                            keyboard=self._menu(talk.chat)))
+        except Exception as problem:
+            self._send_failed(problem)
+            return
+        reply.finished = True
+        talk.reply = None
+        self._maybe_speak(talk.chat, text.strip())
+
+    def _maybe_speak(self, chat: int, text: str) -> None:
+        """Send the answer again as a voice message, when speech is on.
+
+        Best-effort by design: the text answer has already landed, so a
+        speech failure is a note in the transcript, not a failed turn. And a
+        very short answer — "done", an error line — is faster to read than
+        to hear.
+        """
+        if not (self.config.voice.enabled and self.config.voice.tts_enabled):
+            return
+        if len(text) < 40 or len(text) > 3000:
+            return
+        try:
+            from ..voice.tts import synthesize
+            audio = synthesize(text, self.config)
+            self.bot.send_voice(chat, audio)
+        except Exception as problem:
+            self.announce(f"speech did not work: {problem}")
+
+    def _send_failed(self, problem: Exception) -> None:
+        """A final-send error: count it, and pause the adapter at the cap.
+
+        The breaker lives on the Service, so a run of failing sends counts
+        toward the same trip the poll loop's transport errors do — both are
+        the one question "can this platform hear us?"
+        """
+        if self._breaker.fail(str(problem)):
+            self.announce(f"{problem} — paused; send /platform in "
+                          "Telegram to resume it")
+            return
+        self.announce(f"could not send: {problem}")
 
     def _stop_turn(self, talk: Conversation) -> None:
         talk.session.interrupt()
@@ -483,6 +685,36 @@ class Service:
         talk.waiting = None
         self.bot.send(talk.chat, "New chat. What would you like done?",
                       keyboard=self._menu(talk.chat))
+
+    def _voice_command(self, talk: Conversation, rest: str) -> None:
+        """`/voice` — the honest status line, or `on`/`off` for speech.
+
+        Transcription is not toggled from the phone: it needs a key in the
+        environment of the machine the bot runs on, and a toggle that looks
+        like it did something when it cannot have is worse than none.
+        """
+        arg = rest.strip().lower()
+        if arg in ("tts", "speech", "on"):
+            self.config.voice.tts_enabled = True
+        elif arg in ("off",):
+            self.config.voice.tts_enabled = False
+        elif arg not in ("", "status"):
+            self.bot.send(talk.chat,
+                          "Use <code>/voice on</code> or <code>/voice off</code> "
+                          "for spoken answers, or <code>/voice</code> alone "
+                          "for where things stand.",
+                          keyboard=self._menu(talk.chat))
+            return
+        if arg:
+            from .. import config as config_mod
+            config_mod.save_user_config(self.config)
+        from ..voice import describe
+        body = "<b>Voice</b>\n\n<pre>" + escape(describe(self.config)) \
+               + "</pre>"
+        if arg in ("tts", "speech", "on"):
+            body += ("\n\nSpoken answers are on. The next full-length answer "
+                     "also arrives as a voice message.")
+        self.bot.send(talk.chat, body, keyboard=self._menu(talk.chat))
 
     def _set_mode(self, talk: Conversation, mode: str) -> None:
         if mode == "act" and not self.config.telegram.allow_writes:
@@ -508,6 +740,15 @@ class Service:
             talk.waiting = Waiting(request_id=request_id, kind="questions",
                                    questions=questions)
             self._show_question(talk)
+            return
+
+        if event.get("about") == "mode":
+            options = [option for option in event.get("options", []) if option]
+            talk.waiting = Waiting(request_id=request_id, kind="mode")
+            self.bot.send(
+                talk.chat,
+                f"<b>{escape(event.get('prompt', 'Change mode?'))}</b>",
+                keyboard=kb.mode_choices(request_id, options))
             return
 
         talk.waiting = Waiting(request_id=request_id, kind="permission")
@@ -626,6 +867,15 @@ class Service:
                            verb: str) -> None:
         choice = {"ok": "allow", "okall": "allow_always", "no": "deny"}[verb]
         took, why = talk.session.answer(request_id, choice)
+        if not took and why:
+            self.bot.send(talk.chat, escape(why))
+        talk.waiting = None
+
+    def _answer_mode(self, talk: Conversation, request_id: str,
+                     mode: str) -> None:
+        if not mode:
+            return
+        took, why = talk.session.answer(request_id, mode)
         if not took and why:
             self.bot.send(talk.chat, escape(why))
         talk.waiting = None
@@ -873,6 +1123,22 @@ class Service:
             "When it needs a decision it asks with buttons. When it needs to "
             "run something, you approve it here first."
         )
+
+    def _platform_command(self, talk: Conversation) -> None:
+        """The channel's own adapter: live, paused, resumed on request.
+
+        Only this platform's breaker answers — the command is being read by
+        the daemon that owns the network connection that may be paused, so
+        another platform's state is both unknowable here and useless anyway.
+        """
+        breaker = self._breaker
+        if breaker.paused:
+            breaker.resume()
+            self.bot.send(talk.chat, "Telegram is listening again.",
+                          keyboard=self._menu(talk.chat))
+            return
+        self.bot.send(talk.chat, "Telegram is up and sending.",
+                      keyboard=kb.just_back())
 
     def _status(self, talk: Conversation) -> str:
         state = talk.session.state()

@@ -20,7 +20,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .http import HTTPConnection
-from .protocol import MCPError, StdioConnection, ToolDescription
+from .protocol import (
+    MCPError,
+    PromptDescription,
+    ResourceDescription,
+    StdioConnection,
+    ToolDescription,
+)
 
 
 def _connection_for(server: Any) -> Any:
@@ -49,6 +55,8 @@ class ServerState:
     name: str
     connection: Any = None      # stdio or http; same interface
     tools: list[ToolDescription] = field(default_factory=list)
+    resources: list[ResourceDescription] = field(default_factory=list)
+    prompts: list[PromptDescription] = field(default_factory=list)
     error: str = ""
     started: bool = False
 
@@ -92,6 +100,11 @@ class MCPManager:
                 connection.start()
                 state.connection = connection
                 state.tools = _list_tools(connection)
+                # Resources and prompts are asked for, not assumed: a server
+                # that never declared the capability answers with a protocol
+                # error, and that is not a failure of the connection.
+                state.resources = _list_resources(connection)
+                state.prompts = _list_prompts(connection)
                 state.started = True
             except MCPError as error:
                 connection.close()
@@ -140,6 +153,64 @@ class MCPManager:
                     + f"\n\n[truncated: {len(text) - MAX_RESULT} more characters]")
         return text
 
+    def has_resources(self) -> bool:
+        """Whether any started server has declared resources.
+
+        Deliberately does not start servers to find out: the tool wrapped
+        around this only becomes useful once a server is up, and probing
+        every one on construction would put half a minute back into a
+        first turn. A server started later is picked up on reload.
+        """
+        for name in self.enabled_names():
+            state = self.states.get(name)
+            if state is not None and state.ok and state.resources:
+                return True
+        return False
+
+    def read_resource(self, server: str, uri: str) -> str:
+        """Read one resource. Text comes back as text; anything else is named."""
+        state = self.start(server)
+        if not state.ok or state.connection is None:
+            raise MCPError(state.error or f"{server} is not running")
+
+        result = state.connection.request(
+            "resources/read", {"uri": uri})
+        parts: list[str] = []
+        for block in result.get("contents") or []:
+            if not isinstance(block, dict):
+                continue
+            if "text" in block:
+                parts.append(str(block["text"]))
+            elif "blob" in block:
+                parts.append(f"[binary resource: {block.get('mimeType', 'unknown type')}"
+                             f" — {len(str(block['blob']))} base64 characters]")
+        text = "\n".join(part for part in parts if part).strip()
+        if len(text) > MAX_RESULT:
+            text = (text[:MAX_RESULT]
+                    + f"\n\n[truncated: {len(text) - MAX_RESULT} more characters]")
+        return text
+
+    def get_prompt(self, server: str, name: str,
+                   arguments: dict[str, str] | None = None) -> str:
+        """Fetch one prompt template, filled, as a plain user message."""
+        state = self.start(server)
+        if not state.ok or state.connection is None:
+            raise MCPError(state.error or f"{server} is not running")
+
+        result = state.connection.request(
+            "prompts/get", {"name": name, "arguments": arguments or {}})
+        lines: list[str] = []
+        for message in result.get("messages") or []:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content") or {}
+            text = content.get("text") if isinstance(content, dict) else ""
+            if text:
+                lines.append(str(text))
+        if not lines:
+            raise MCPError(f"the prompt {name!r} came back empty")
+        return "\n\n".join(lines)
+
     def report(self) -> list[tuple[str, str, str]]:
         """(name, status, detail) for `/mcp` and for doctor."""
         rows: list[tuple[str, str, str]] = []
@@ -151,7 +222,12 @@ class MCPManager:
             if state is None:
                 rows.append((name, "idle", "starts when first used"))
             elif state.ok:
-                rows.append((name, "ready", f"{len(state.tools)} tool(s)"))
+                detail = f"{len(state.tools)} tool(s)"
+                if state.resources:
+                    detail += f", {len(state.resources)} resource(s)"
+                if state.prompts:
+                    detail += f", {len(state.prompts)} prompt(s)"
+                rows.append((name, "ready", detail))
             else:
                 rows.append((name, "failed", state.error))
         return rows
@@ -178,6 +254,63 @@ def _list_tools(connection: StdioConnection) -> list[ToolDescription]:
             break
 
     return found
+
+
+def _list_resources(connection: StdioConnection) -> list[ResourceDescription]:
+    """Ask a server what it lets you read. Servers without resources stay quiet.
+
+    A server that never declared the capability is expected to refuse these
+    with a method-not-found error; that is "none", not a failure, so it is
+    swallowed here rather than landing on the state as a broken connection.
+    """
+    try:
+        result = connection.request("resources/list", {})
+    except MCPError as error:
+        if _method_not_supported(error):
+            return []
+        raise
+    found: list[ResourceDescription] = []
+    for entry in result.get("resources") or []:
+        if not isinstance(entry, dict) or not entry.get("uri"):
+            continue
+        found.append(ResourceDescription(
+            uri=str(entry["uri"]),
+            name=str(entry.get("name") or ""),
+            description=str(entry.get("description") or ""),
+            mime_type=str(entry.get("mimeType") or ""),
+        ))
+    return found
+
+
+def _list_prompts(connection: StdioConnection) -> list[PromptDescription]:
+    """Same question for prompts. Absent capability means none, as above."""
+    try:
+        result = connection.request("prompts/list", {})
+    except MCPError as error:
+        if _method_not_supported(error):
+            return []
+        raise
+    found: list[PromptDescription] = []
+    for entry in result.get("prompts") or []:
+        if not isinstance(entry, dict) or not entry.get("name"):
+            continue
+        arguments = entry.get("arguments")
+        found.append(PromptDescription(
+            name=str(entry["name"]),
+            description=str(entry.get("description") or ""),
+            arguments=arguments if isinstance(arguments, list) else [],
+        ))
+    return found
+
+
+def _method_not_supported(error: MCPError) -> bool:
+    """Whether a refusal means "I do not do that", rather than "I broke".
+
+    The codes differ across servers in the wild; the words are the part that
+    is reliable, so they are what is matched.
+    """
+    text = str(error).lower()
+    return "-32601" in text or "method not found" in text
 
 
 def _flatten(content: Any) -> str:

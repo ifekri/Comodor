@@ -25,6 +25,14 @@ edits it, and what comes back is a patch — inspected, then applied, or kept
 aside with its path if it will not apply cleanly. The parent's working tree is
 never what the delegate is experimenting in.
 
+**Background** is the other opt-in. With ``background=true`` the call returns
+at once — "running as #d2, you will be told when it finishes" — and the parent
+keeps its turn. The finished answer arrives later as a message of its own, at
+a turn boundary, never spliced into the middle of an existing one. Background
+delegates are read-only on purpose: the parent is no longer watching the
+moment the work happens, and the answer to an unwatched writer is applied
+patches nobody reviewed.
+
 Delegates do not delegate. One level is a tool; a tree of them is a way to
 spend an afternoon's budget in ninety seconds, and nothing in the design would
 stop it.
@@ -65,7 +73,8 @@ class Delegate(Tool):
         "rather than filling this conversation. Give it a self-contained brief: "
         "it cannot see this conversation, only what you write here. Set "
         "write=true to let it change files, which it will do in an isolated "
-        "checkout."
+        "checkout. Set background=true to keep working here while it runs — "
+        "its answer arrives later as its own message."
     )
     risk = Risk.SAFE
     parameters = {
@@ -82,14 +91,31 @@ class Delegate(Tool):
                                "changes are made in a separate checkout and "
                                "returned as a patch.",
             },
+            "background": {
+                "type": "boolean",
+                "description": "Launch it and return immediately (default "
+                               "false). Its answer arrives later as a new "
+                               "message at a turn boundary. Read-only.",
+            },
+            "label": {
+                "type": "string",
+                "description": "A short name for a background delegate, shown "
+                               "in listings.",
+            },
         },
         "required": ["task"],
     }
 
-    def __init__(self, spawn: Callable[..., Any]) -> None:
+    def __init__(self, spawn: Callable[..., Any],
+                 background: Any = None) -> None:
         #: Builds a fresh loop. Injected because the tool layer must not know
         #: how a gateway, a brain or a skill registry is assembled.
         self._spawn = spawn
+        #: The background executor, when this session can receive completions.
+        #: ``None`` means this session has nowhere to deliver a finished
+        #: answer to, and background launches are refused outright rather than
+        #: started and dropped.
+        self._background = background
 
     def summary(self, args: dict[str, Any]) -> str:
         task = str(args.get("task", "")).strip().splitlines()
@@ -99,10 +125,13 @@ class Delegate(Tool):
     # -- running ---------------------------------------------------------- #
 
     def run(self, ctx: ToolContext, task: str = "", write: bool = False,
-            **_: Any) -> ToolResult:
+            background: bool = False, label: str = "", **_: Any) -> ToolResult:
         brief = (task or "").strip()
         if not brief:
             return ToolResult.failure("a delegate needs a brief")
+
+        if background:
+            return self._run_background(ctx, brief, label)
 
         started = time.monotonic()
         worktree: _Worktree | None = None
@@ -118,6 +147,38 @@ class Delegate(Tool):
         finally:
             if worktree is not None and worktree.keep is False:
                 worktree.remove()
+
+    def _run_background(self, ctx: ToolContext, brief: str,
+                        label: str) -> ToolResult:
+        """Launch on the executor and return. Never wait.
+
+        Three refusals, each saying why and what to do instead:
+
+        * no executor — this session has nowhere to deliver a finished answer
+          (a headless `run` without an interface), so waiting is the only
+          delivery there is;
+        * write=true — nobody reviews an unwatched writer's patches;
+        * every slot busy — a queued delegate is work the parent would forget
+          it owes, so it is refused with the running ids to wait on.
+        """
+        if self._background is None:
+            return ToolResult.failure(
+                "background delegates need an interface to receive their "
+                "finished answers, and this session has none. Run it "
+                "without background, or start the interactive app.")
+        if not self._background.listening:
+            return ToolResult.failure(
+                "background delegates need a listener to receive their "
+                "finished answers, and nobody is receiving right now. Run it "
+                "without background.")
+        started, identifier, why = self._background.start(brief, label=label)
+        if not started:
+            return ToolResult.failure(why)
+        return ToolResult.success(
+            content=(f"Running as {identifier}. Its answer will arrive as a "
+                     "new message when it finishes — do not wait for it; "
+                     "carry on with the rest of the work."),
+            delegate_id=identifier, background=True)
 
     def _run_once(self, ctx: ToolContext, brief: str, root: Path,
                   write: bool) -> ToolResult:

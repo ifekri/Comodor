@@ -47,8 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"comodor {__version__}")
 
     parser.add_argument("--provider", help="provider to use (openrouter, anthropic, …)")
+    parser.add_argument("--profile", help="run against a named profile — its own "
+                        "brain, sessions and config under profiles/NAME")
     parser.add_argument("--model", help="model id")
-    parser.add_argument("--mode", choices=("act", "plan", "chat"), help="starting mode")
+    parser.add_argument("--mode", choices=("act", "plan", "ask", "chat"),
+                        help="starting mode")
     parser.add_argument("--no-loop", action="store_true",
                         help="answer once instead of iterating autonomously")
     parser.add_argument("--theme", help="colour theme (ember, midnight, matrix, mono)")
@@ -100,23 +103,62 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument("--yes", action="store_true",
                         help="do not ask; for scripts")
 
+    insights = sub.add_parser(
+        "insights", help="spend, activity and progress over recent days")
+    insights.add_argument("--days", type=int, default=30,
+                          help="how far back to look (default 30)")
+    insights.add_argument("--json", action="store_true",
+                          help="emit the numbers as JSON, for scripts")
+
+    approvals = sub.add_parser(
+        "approvals",
+        help="propose an allowlist from the commands you keep approving")
+    approvals.add_argument(
+        "--apply", metavar="STEM", nargs="*", default=None,
+        help="add the named stems (or every proposal with no names) to "
+             "safety.allow_commands and save")
+
+
     from .acp.commands import register as register_acp
+    from .cron.commands import register as register_cron
+    from .discord.commands import register as register_discord
+    from .learning.commands import register as register_curator
+    from .learning.journey_commands import register as register_journey
+    from .learning.providers.commands import register as register_memory_provider
     from .local.commands import register as register_local
     from .mcp.commands import register as register_mcp
+    from .plugins.commands import register as register_plugins
     from .skills.commands import register as register_skills
     from .slack.commands import register as register_slack
     from .telegram.commands import register as register_telegram
     from .web.commands import register as register_web
+    from .webhook.commands import register as register_webhook
     from .whatsapp.commands import register as register_whatsapp
 
     register_mcp(sub)
     register_local(sub)
+    register_cron(sub)
+    register_curator(sub)
     register_telegram(sub)
     register_whatsapp(sub)
     register_slack(sub)
+    register_discord(sub)
     register_skills(sub)
     register_web(sub)
+    register_webhook(sub)
     register_acp(sub)
+    register_memory_provider(sub)
+    register_journey(sub)
+    register_plugins(sub)
+
+    serve = sub.add_parser(
+        "serve", help="speak the OpenAI chat protocol, so other frontends "
+                      "can drive the agent")
+    serve.add_argument("--host", help="address to bind (default: the loopback, "
+                                      "or api.bind in your config)")
+    serve.add_argument("--port", type=int, help="port to listen on (default 8787)")
+    serve.add_argument("--token", help="the access token; one is generated and "
+                                       "printed when this is not given")
 
     preview = sub.add_parser("preview",
                              help="render the interface at a given size and exit")
@@ -181,6 +223,39 @@ def _release() -> str:
     return __version__
 
 
+def _load_plugins(config: Config, bus: Any) -> Any:
+    """Discover and load the plugins, and wire their hooks to the bus.
+
+    Kept in one place so every entry point — terminal, web, phone — gets
+    the same plugins with the same rules. A hook callback that raises is
+    its author's bug, but it must not break the event it was listening to,
+    so each call is wrapped here rather than trusted.
+    """
+    try:
+        from .plugins import load_for
+
+        manager = load_for(config)
+    except Exception:
+        return None
+
+    manager.load_all()
+
+    def dispatch(event: Any) -> None:
+        for _, callback in manager.hook_callbacks(event.kind.value):
+            try:
+                callback(event)
+            except Exception:
+                pass                       # a broken hook is not a broken turn
+
+    # One subscription total, whatever the plugins registered; dispatch
+    # filters by kind, and a bus event without listeners of its own is a
+    # dictionary miss away.
+    if any(state.ok and state.context and state.context.hooks
+           for state in manager.states.values()):
+        bus.subscribe(dispatch)
+    return manager
+
+
 def run_headless(config: Config, args: argparse.Namespace) -> int:
     """One task, no TUI. Used by scripts, hooks and CI."""
     # Before anything can be printed. A Windows console is cp1252 by default,
@@ -196,11 +271,12 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     from . import questions as forms
     from .agent import AgentLoop, Conversation
     from .agent.spawn import spawner
+    from .context_refs import Refusal, expand
     from .events import EventBus, Kind
     from .learning import LearningEngine
     from .mcp import MCPManager
     from .providers.gateway import Gateway
-    from .safety import CheckpointStore, PermissionEngine, Redactor
+    from .safety import CheckpointStore, PermissionEngine, Redactor, make_assessor
     from .skills import load_for as load_skills
     from .tools import ToolRegistry
 
@@ -222,11 +298,21 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
                          if entry.api_key]),
     )
     permissions = PermissionEngine(config, bus)
+    permissions.assess = make_assessor(config, gateway)
     permissions.on_denied = memory.on_denied
     skills = load_skills(config)
     mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
+    plugins = _load_plugins(config, bus)
+    cron_store = None
+    if config.cron.enabled:
+        from .cron.jobs import JobStore
+
+        cron_store = JobStore(config.paths.user / "cron")
     tools = ToolRegistry(skills=skills, mcp=mcp, config=config,
-                         spawn=spawner(config, gateway, bus, skills=skills, mcp=mcp))
+                         spawn=spawner(config, gateway, bus, skills=skills, mcp=mcp),
+                         cron_store=cron_store,
+                         memory=getattr(memory, "facts", None),
+                         plugins=plugins)
     agent = AgentLoop(config, gateway, tools, bus,
                       permissions, Conversation(), memory, skills=skills)
 
@@ -274,7 +360,22 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
 
         bus.subscribe(echo)
 
-    result = agent.run(args.task)
+    # @ references expand before the run, with the same guards the interface
+    # uses — a scheduled prompt asking for @diff should work, and a scheduled
+    # prompt pointed at a credentials file should not.
+    secrets = Redactor([entry.api_key for entry in config.providers.values()
+                        if entry.api_key])
+    try:
+        task, warning = expand(args.task, config.paths.project,
+                               context_limit=config.agent.context_limit,
+                               redact=secrets)
+    except Refusal as refusal:
+        print(f"refused: {refusal}", file=sys.stderr)
+        return 2
+    if warning:
+        print(f"warning: {warning}", file=sys.stderr)
+
+    result = agent.run(task)
     memory.wait_for_reflection(timeout=20.0)
 
     if args.json:
@@ -325,6 +426,53 @@ def run_setup_command(config: Config, args: Any = None) -> int:
 
     if config.start_after_setup in ("interface", "both"):
         return start_interface(config, args)
+    return 0
+
+
+def run_approvals(config: Config, args: argparse.Namespace) -> int:
+    """Show — or apply — the allowlist the approval log supports."""
+    from rich.console import Console
+
+    from .safety.mining import MIN_APPROVALS, apply_proposals, propose
+
+    console = Console()
+    log = config.paths.approvals
+    wanted = args.apply
+
+    if wanted is None:                                    # plain suggest
+        proposals = propose(log)
+        if not proposals:
+            console.print(
+                f"No proposals yet — nothing in [dim]{log}[/dim] has been "
+                f"approved {MIN_APPROVALS} times or more.")
+            console.print(
+                "[dim]Every command you approve is recorded there; check "
+                "back after a couple of weeks of use.[/dim]")
+            return 0
+        console.print(f"[bold]Proposed allowlist entries[/bold] "
+                      f"(from {log}):")
+        for item in proposals:
+            console.print(f"  [good]{item.stem}[/good]  — {item.reason}")
+            for example in item.examples[:-1]:
+                console.print(f"[dim]    {example}[/dim]")
+        console.print(
+            "\nApply them all with [dim]comodor approvals --apply[/dim], "
+            "or name the ones you want: [dim]comodor approvals --apply "
+            f"{' '.join(item.stem for item in proposals[:2])}[/dim]")
+        return 0
+
+    stems = wanted if wanted else \
+        [item.stem for item in propose(log)]
+    if not stems:
+        console.print("Nothing to apply — there are no proposals.")
+        return 1
+    added = apply_proposals(config, stems)
+    if not added:
+        console.print("Nothing changed — every named stem was already "
+                      "in safety.allow_commands.")
+        return 0
+    console.print(f"[good]added[/good] {', '.join(added)}")
+    console.print(f"[dim]saved to {config.paths.config_file}[/dim]")
     return 0
 
 
@@ -649,6 +797,26 @@ def _skill_count(config: Config) -> int:
         return 0
 
 
+def run_insights(config: Config, args: argparse.Namespace) -> int:
+    """The cross-session view: spend, activity, and whether the brain helps."""
+    import json as jsonlib
+
+    from .insights import collect, render, to_json
+
+    days = max(1, int(getattr(args, "days", 30) or 30))
+    result = collect(config, days=days)
+    if getattr(args, "json", False):
+        print(jsonlib.dumps(to_json(result), ensure_ascii=False, indent=2))
+    else:
+        from rich.console import Console
+
+        from .ui.console import force_utf8
+
+        force_utf8()
+        Console().print(render(result))
+    return 0
+
+
 def run_preview(config: Config, args: argparse.Namespace) -> int:
     """Render one frame at a fixed size — for screenshots and layout checks."""
     from . import __version__ as _version
@@ -836,6 +1004,16 @@ def run_import(config: Config, args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
+    # Before anything reads the environment. The profile decides where the
+    # config itself comes from, so it has to be settled ahead of `load`, and
+    # the environment variable is how every module that never sees these args
+    # (the stores, the daemons) reaches the same decision.
+    profile = getattr(args, "profile", None)
+    if profile:
+        import os
+
+        os.environ["COMODOR_PROFILE"] = profile
+
     # Before the configuration is loaded: somebody who cannot get the program
     # to start is exactly the person who needs the help page, and loading a
     # broken config first would deny it to them.
@@ -860,6 +1038,14 @@ def main(argv: list[str] | None = None) -> int:
         from .local.commands import run as run_local
 
         return run_local(config, args)
+    if args.command == "cron":
+        from .cron.commands import run as run_cron
+
+        return run_cron(config, args)
+    if args.command == "curator":
+        from .learning.commands import run as run_curator
+
+        return run_curator(config, args)
     if args.command == "telegram":
         from .telegram.commands import run as run_telegram
 
@@ -872,6 +1058,10 @@ def main(argv: list[str] | None = None) -> int:
         from .slack.commands import run as run_slack
 
         return run_slack(config, args)
+    if args.command == "discord":
+        from .discord.commands import run as run_discord
+
+        return run_discord(config, args)
     if args.command == "skills":
         from .skills.commands import run as run_skills
 
@@ -880,12 +1070,36 @@ def main(argv: list[str] | None = None) -> int:
         from .web.commands import run as run_web
 
         return run_web(config, args)
+    if args.command == "webhook":
+        from .webhook.commands import run as run_webhook
+
+        return run_webhook(config, args)
     if args.command == "acp":
         from .acp.commands import run as run_acp
 
         return run_acp(config, args)
+    if args.command == "memory-provider":
+        from .learning.providers.commands import run as run_memory_provider
+
+        return run_memory_provider(config, args)
+    if args.command == "journey":
+        from .learning.journey_commands import run as run_journey
+
+        return run_journey(config, args)
+    if args.command == "plugins":
+        from .plugins.commands import run as run_plugins
+
+        return run_plugins(config, args)
+    if args.command == "serve":
+        from .api.server import run as run_api
+
+        return run_api(config, args)
     if args.command == "preview":
         return run_preview(config, args)
+    if args.command == "insights":
+        return run_insights(config, args)
+    if args.command == "approvals":
+        return run_approvals(config, args)
     if args.command == "setup":
         return run_setup_command(config, args)
     if args.command == "import":

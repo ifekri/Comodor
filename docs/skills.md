@@ -163,7 +163,28 @@ comodor skills remove review
 comodor skills list                       # with versions
 ```
 
+## When the agent writes one
+
+The agent can save a procedure that just worked as a skill of yours
+(`skill_manage`): it proposes it in conversation first, and nothing is
+written until you agree. In the interface, `/skills draft` shows what it
+has learned and wants to keep, and `/skills adopt NAME` saves a draft.
+
+Every change the agent makes is recorded in a ledger, so anything can be
+put back exactly as it was:
+
+```bash
+comodor skills rollback --list            # the history
+comodor skills rollback --id <block>      # put one version back
+```
+
+New text is also scanned for prompt-injection patterns at write time —
+a hit is reported in the conversation as a note for you; nothing is
+blocked automatically.
+
 ---
+
+## See also
 
 ## See also
 

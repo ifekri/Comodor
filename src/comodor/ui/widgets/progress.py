@@ -112,6 +112,9 @@ def _summary(progress: Progress, theme: Theme) -> RenderableType:
     line.append(f"{progress.rules_active} rules", style=theme.style("value"))
     line.append(f" {theme.glyphs.dot} ", style=theme.style("dim"))
     line.append(f"{progress.lessons} lessons", style=theme.style("value"))
+    if getattr(progress, "facts", 0):
+        line.append(f" {theme.glyphs.dot} ", style=theme.style("dim"))
+        line.append(f"{progress.facts} facts", style=theme.style("value"))
     line.append(f" {theme.glyphs.dot} ", style=theme.style("dim"))
     line.append(f"{progress.corrections_total} corrections learned from",
                 style=theme.style("value"))

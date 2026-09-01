@@ -184,6 +184,20 @@ def test_the_modes_say_what_they_do():
     assert "edits files" in joined
     assert "reads only" in joined
 
+def test_a_mode_proposal_becomes_one_button_per_option():
+    """The proposal first, and the buttons are the modes the agent offered —
+    not the full list, which would silently invite a different change."""
+    board = kb.mode_choices("r1", ["act", "plan", "ask"])
+    labels = [b["text"] for row in board["inline_keyboard"] for b in row]
+    assert len(labels) == 3
+    assert labels[0].startswith("Act")
+    for row in board["inline_keyboard"]:
+        for b in row:
+            verb, request_id, mode = b["callback_data"].split(":")
+            assert verb == "mm"
+            assert request_id == "r1"
+            assert mode in ("act", "plan", "ask")
+
 
 # --------------------------------------------------------------------------- #
 # who it answers
@@ -655,3 +669,58 @@ def test_going_back_and_paging_do_not_use_the_same_arrow():
     paged = marks_in(kb.picker("s", [(str(n), f"s{n}") for n in range(30)],
                                page=1))
     assert kb.PREVIOUS in paged and kb.NEXT in paged and kb.BACK in paged
+
+
+# --------------------------------------------------------------------------- #
+# voice: the command, and what a closed gate says
+# --------------------------------------------------------------------------- #
+
+def test_the_voice_command_says_where_things_stand(talking):
+    talking._handle(a_message(7, "/voice"))
+    body = talking.bot.sent[-1]["text"]
+    assert "Voice" in body
+    assert "off" in body.lower(), "the default state is off, and it says so"
+
+
+def test_the_voice_command_turns_speech_on_and_says_so(talking, config):
+    talking._handle(a_message(7, "/voice on"))
+    assert config.voice.tts_enabled, "the toggle reached the config"
+    body = talking.bot.sent[-1]["text"]
+    assert "on" in body.lower()
+
+
+def test_the_voice_command_turns_speech_off(talking, config):
+    config.voice.tts_enabled = True
+    talking._handle(a_message(7, "/voice off"))
+    assert not config.voice.tts_enabled
+
+
+def test_an_unknown_voice_argument_is_corrected(talking):
+    talking._handle(a_message(7, "/voice louder"))
+    assert "on" in talking.bot.sent[-1]["text"]
+
+
+def test_speech_that_cannot_run_is_said_not_lost(talking, config, monkeypatch):
+    """Speech on, service unreachable: the text answer has already landed, so
+    the failure is a line in the transcript — never a failed turn."""
+    from comodor.voice.stt import VoiceError
+
+    config.voice.enabled = True
+    config.voice.tts_enabled = True
+    monkeypatch.setattr("comodor.voice.tts.synthesize",
+                        lambda text, cfg: (_ for _ in ()).throw(
+                            VoiceError("the speech service did not connect")))
+    talking.announce = lambda line: talking.bot.sent.append(
+        {"chat": 7, "text": line})
+    talking._maybe_speak(7, "a" * 100)
+    assert any("speech did not work" in m["text"] for m in talking.bot.sent)
+
+
+def test_short_answers_are_not_spoken(talking, config):
+    config.voice.enabled = True
+    config.voice.tts_enabled = True
+    called = []
+    monkey_hits = called
+    assert monkey_hits == []      # nothing patched: the length gate is pure
+    talking._maybe_speak(7, "done")
+    assert called == []

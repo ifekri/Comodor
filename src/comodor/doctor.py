@@ -105,6 +105,10 @@ def run_checks(config: Config, online: bool = True) -> Report:
               _check_spend_limit,
               _check_brain,
               _check_search_index, _check_skills, _check_leftovers, _check_mcp,
+              _check_voice,
+              _check_api,
+              _check_memory_provider,
+              _check_desktop,
               _check_telegram, _check_whatsapp, _check_slack]
     if online:
         checks.append(_check_version)
@@ -514,6 +518,130 @@ def _check_mcp(config: Config) -> Finding | None:
                    "`comodor mcp disable <name>`")
 
     return Finding("mcp servers", Status.OK, f"{len(enabled)} enabled and reachable")
+
+
+def _check_voice(config: Config) -> Finding | None:
+    """Voice only warns when it is half-configured.
+
+    Fully off is a correct state and says nothing; turned on but unable to
+    act — a provider named without its key, a name that matches no provider
+    — is the setup that will disappoint somebody on a train, so it is said
+    here rather than left to be discovered by a voice note nobody answers.
+    """
+    voice = config.voice
+    if not voice.enabled:
+        return None
+    if not voice.stt_provider and not voice.tts_enabled:
+        return Finding("voice", Status.WARN,
+                       "voice is on but does nothing: no transcription "
+                       "provider and no speech",
+                       remedy="set `voice.stt_provider = \"groq\"` (with a "
+                              "key in the environment) or "
+                              "`voice.tts_enabled = true`")
+    if voice.stt_provider:
+        import os
+
+        key = os.environ.get(voice.stt_key_env, "")
+        if not key:
+            return Finding("voice", Status.WARN,
+                           f"transcription is set to {voice.stt_provider} "
+                           f"but `{voice.stt_key_env}` is not in the "
+                           "environment — voice notes will refuse rather "
+                           "than send anything unnamed")
+    return None
+
+
+def _check_api(config: Config) -> Finding | None:
+    """The OpenAI-compatible endpoint, checked the way it bites.
+
+    Off says nothing. On, what is worth saying is what the web server's
+    check would say and one thing it would not: a token saved in the
+    config file is a credential on disk, which is fine at 0600 in the
+    user's own file and worth naming anywhere else.
+    """
+    api = config.api
+    if not api.enabled:
+        return None
+    if api.bind not in ("127.0.0.1", "localhost", "::1"):
+        return Finding("api server", Status.WARN,
+                       f"the OpenAI endpoint binds {api.bind} — anyone on "
+                       "that network holding the token may run commands on "
+                       "this machine",
+                       remedy="keep `api.bind = \"127.0.0.1\"` and put a "
+                              "proxy with its own auth in front")
+    return None
+
+
+def _check_memory_provider(config: Config) -> Finding | None:
+    """An external memory service, checked the way it actually fails.
+
+    Nothing configured says nothing. Configured, the failures are a key
+    that never made it into the environment (the config file is never
+    allowed to hold one), a setup error the turn path silently absorbed,
+    and a service that does not answer — each of which looks, from inside
+    a turn, like "no augmentation today" rather than like a problem.
+    """
+    from .learning.providers import ProviderError, build
+
+    settings = getattr(config.learning, "provider", None)
+    if settings is None or not getattr(settings, "kind", ""):
+        return None
+    try:
+        provider = build(config)
+    except ProviderError as problem:
+        return Finding("memory provider", Status.WARN, str(problem),
+                       remedy=f"put the key in ${settings.key_env} or run "
+                              "`comodor memory-provider setup`")
+    if not provider:
+        return None
+    answer = provider.status()
+    if "unreachable" in answer or "answered " in answer:
+        return Finding("memory provider", Status.WARN,
+                       f"{settings.base_url} {answer} — writes mirror to "
+                       "the local brain only until it answers",
+                       remedy="check the service is running and "
+                              f"{settings.base_url} is right")
+    return Finding("memory provider", Status.OK, answer)
+
+def _check_desktop(config: Config) -> Finding | None:
+    """Driving the screen: worth a word only when it is half-able.
+
+    Off entirely is a correct state and says nothing. Half-able - enabled in
+    the config but the machine refuses, or macOS permissions missing - is the
+    setup that will fail at the moment the model first reaches for the tool,
+    so it is said here, with the exact remedy, rather than then.
+    """
+    computer = getattr(config, "computer", None)
+    if computer is None or not computer.enabled:
+        return None
+
+    from .desktop import available, why_not
+
+    if not available():
+        return Finding("computer use", Status.WARN,
+                       f"the tool is enabled but this machine cannot be "
+                       f"driven: {why_not()}",
+                       remedy="run on a machine with a desktop backend, or "
+                              "set `computer.enabled = false` to stop "
+                              "offering the tool")
+
+    import sys
+
+    if sys.platform == "darwin":
+        from .desktop import quartz
+
+        missing = quartz.missing_permissions()
+        if missing:
+            page = " and ".join(missing)
+            return Finding(
+                "computer use", Status.WARN,
+                f"macOS has not granted {page} permission — screenshots "
+                "will come back refused and input will not be sent",
+                remedy="open System Settings, Privacy & Security, then "
+                       f"{page}; add the terminal Comodor runs in and "
+                       "restart it")
+
+    return Finding("computer use", Status.OK, "a backend is present")
 
 
 def _check_telegram(config: Config) -> Finding | None:

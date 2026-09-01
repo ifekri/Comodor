@@ -54,11 +54,17 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ]),
     ("Reach further", [
         ("comodor web", "use it from a browser, here or on a server"),
+        ("comodor serve", "speak the OpenAI protocol, for other frontends"),
         ("comodor telegram start", "drive it from your phone, all buttons"),
         ("comodor slack start", "the same, in a Slack workspace"),
+        ("comodor discord start", "the same, on a Discord server"),
         ("comodor whatsapp start", "the same, from a WhatsApp number"),
         ("comodor skills browse", "procedures it follows when the work calls for them"),
         ("comodor mcp list", "tools from Model Context Protocol servers"),
+    ]),
+    ("Mind and memory", [
+        ("comodor curator run", "a maintenance pass over the brain, now"),
+        ("comodor memory-provider status", "an optional external memory service"),
     ]),
     ("Keep it working", [
         ("comodor doctor", "check everything; `--fix` repairs what it can"),
@@ -77,6 +83,7 @@ OPTIONS: list[tuple[str, str]] = [
     ("--ascii", "for terminals without box-drawing characters"),
     ("--no-mouse", "leave the mouse to the terminal"),
     ("--resume [ID]", "reopen the most recent session, or one by id"),
+    ("--profile NAME", "use a separate brain, sessions and config"),
     ("--demo", "the interface, offline, against a scripted provider"),
     ("--version", "which version this is"),
 ]
@@ -168,13 +175,37 @@ A skill is a written procedure - a markdown file with a name and a description
   comodor skills browse     what is available
   comodor skills add NAME   install one
   comodor skills list       what you have
+  comodor skills rollback --list
+                            every change the agent made, and how to undo it
   /skills                   the same, in the interface
+  /skills draft             procedures Comodor worked out and wants to save
+  /skills adopt NAME        save one of those drafts as your own skill
 
-Write your own in  ~/.comodor/skills/<name>/SKILL.md.
+Write your own in  ~/.comodor/skills/<name>/SKILL.md. The agent can write
+and patch them too (skill_manage); every change is recorded, and the
+injection scan flags anything suspicious at write time.
 Full guide: docs/skills.md"""),
+
+    "curator": ("Keeping the brain tidy", """\
+Every few days a maintenance pass runs over what has been learned: lessons
+whose confidence has decayed below the floor stop being recalled, duplicate
+facts merge, and skills unused for a month are hidden and, after three,
+moved to the archive. Nothing is deleted; `curator restore` brings a skill
+back from `skills/.archive/`.
+
+  comodor curator run       do a pass now
+  comodor curator report    what the last pass did, and why
+  comodor curator restore NAME    bring an archived skill back
+  comodor curator pin NAME  exempt a skill from the curator
+  comodor curator pause     stop the automatic passes
+
+curator.interval_days sets how often it runs; the pass itself costs no
+tokens and never runs in the middle of a session."""),
 
     "cost": ("Paying less for the same work", """\
   /cost                     tokens, spend, and what the cache saved
+  /insights [days]          spend and progress across every session
+  comodor insights --json   the same numbers, for scripts
   agent.max_cost_usd        stop a task at a price
   agent.max_steps           stop it at a number of steps
 
@@ -184,6 +215,25 @@ of the price, which is most of a long session.
 
 A spend limit only works for a model with a published rate. `comodor doctor`
 says plainly when it cannot be enforced.  Full guide: docs/cost.md"""),
+
+    "voice": ("Speaking, and being spoken to", """\
+Voice notes sent to a channel can be transcribed, and answers in Telegram can
+also arrive as a voice message. Both are off until you turn them on, because
+a recording is a copy of a person, not a summary of what they asked.
+
+  Turn voice on          set  voice.enabled: true  in your config
+  Transcribe notes       set  voice.stt_provider: groq   (or openai)
+                         and put the key in the named environment variable
+                         (voice.stt_key_env, GROQ_API_KEY by default)
+  Spoken answers         set  voice.tts_enabled: true
+                         or send /voice on in Telegram
+  What is set            /voice          (Telegram) or comodor doctor
+
+Transcription sends the recording to the provider you named, and needs a key;
+with no key it refuses and says which variable is missing, rather than sending
+anything unnamed. Speech uses the Edge service, which needs no key; the voice
+is voice.tts_voice, a Persian one by default. A voice note that cannot be
+transcribed is kept on disk, and its path is offered, never discarded."""),
 
     "safety": ("What it can do, and what it cannot", """\
 Every tool has a tier. Reading is silent; writing asks; running a command,
@@ -249,6 +299,123 @@ a fixed list of accounts and nobody else - a workspace can have hundreds of
 people in it, and this reads and writes your files.
 
 Full guide: docs/slack.md"""),
+
+    "discord": ("From Discord", """\
+  comodor discord connect          guided: the token, and the one intent to
+                                   switch on before anything works
+  comodor discord pair             a one-time code that adds your account
+  comodor discord start -b         run it detached from this terminal
+  comodor discord status           what is set, who may talk, is it running
+
+About three minutes. One token, from the developer portal; the bot opens a
+websocket outward, so nothing here needs a public address.
+
+The one setting people miss: under Bot → Privileged Gateway Intents, switch on
+Message Content Intent. Without it the bot connects and shows online, and
+every message arrives empty - a bot that looks fine and hears nothing.
+
+In a server it answers when mentioned; in a direct message, always. It answers
+a fixed list of numeric ids and nobody else - a server can have thousands of
+people in it, and this reads and writes your files."""),
+
+    "serve": ("Speaking OpenAI", """\
+  comodor serve                    here, on 127.0.0.1, port 8787
+  comodor serve --port 9000
+  comodor serve --token MYTOKEN    a fixed token instead of a printed one
+
+The same agent, answering `POST /v1/chat/completions` - the protocol every
+chat frontend already speaks (Open WebUI, LobeChat, IDE chat panels). Point
+one at the address it prints, paste the token as the API key, done.
+
+  GET  /v1/models                  the one model, named `comodor`
+  POST /v1/chat/completions        streaming and not; standard shapes
+
+One request is one whole agent turn - tools run, files change, and the final
+answer arrives as one message. `X-Comodor-Session: <id>` continues a
+conversation (echo the id the response carries); without it every request
+stands alone.
+
+What is ours, in a `comodor` block on the response, and never in the way:
+
+  comodor: {"session": "...", "steps": 3, "stopped": "done"}
+
+  comodor: {"mode": "plan"}     in the request body - set the mode for
+                                that one request, act / plan / ask / chat
+
+One turn may edit files and run commands. The token IS the permission to do
+that, so it is worth what a password is worth: loopback by default, and a
+reverse proxy with its own auth before anything wider."""),
+
+    "webhook": ("Letting other systems hand it work", """\
+  comodor webhook add ci --path /ci --template "A CI run just reported: {payload}"
+  comodor webhook list               what is subscribed, and what it may do
+  comodor webhook start -b           run it detached from this terminal
+  comodor webhook test /ci           send one signed event to prove the wire
+
+CI, monitoring, Git hosts - anything that POSTs JSON when something happens
+can hand the agent the event, and the agent turns it into a task. Each
+subscription has its own path, its own shared secret, and its own prompt
+template ({payload} is the body; {.pull_request.title} picks a field).
+
+The sender signs the raw body with HMAC-SHA256 and sends the digest in
+X-Comodor-Signature-256. A wrong signature gets the same 404 an unknown path
+gets - nothing here tells a prober what exists.
+
+By default these turns read and plan only. --allow-writes widens one
+subscription, not the agent, and it is the one flag worth thinking twice
+about: a machine talking to a machine is exactly the caller whose
+instructions nobody has read."""),
+
+    "journey": ("What it has learned, in order", """\
+  comodor journey                  the whole timeline, oldest first
+  comodor journey remove rule:3    retire one node (a rule is disabled,
+                                   not deleted — its evidence stays true)
+
+Lessons, rules, learned skills and facts, each with what backs it — the
+confidence, the observation counts, the episode it came from. Nothing here
+enters a prompt: it is rendering of the brain's own records, for the person
+wondering what the agent has actually picked up after a few weeks."""),
+
+    "memory-provider": ("An external memory service (optional)", """\
+  comodor memory-provider setup --base-url http://127.0.0.1:9310
+  comodor memory-provider status     what is set, and whether it answers
+  comodor memory-provider off        forget the external service
+
+The brain here is local and complete; this is one optional service alongside
+it, never instead of it. New facts are mirrored out to the service, and with
+--augment recall may also ask it for lines - which are capped, and marked as
+coming from outside, because they were not earned here.
+
+The key lives in an environment variable (default $MEM0_API_KEY) and is never
+written to the config file. With the service down, nothing changes except a
+warning: the local write already happened."""),
+
+    "image-gen": ("Making pictures", """\
+The agent can generate an image from a prompt - an illustration for a page, a
+mock for a design, an asset for a game. It is off by default, because every
+image costs real money and an agent that can spend silently is not yours.
+
+  Turn it on        set  image_gen.enabled: true  in your config
+  Provider          image_gen.provider: openai
+                    (any endpoint speaking the images API works too — point
+                    image_gen.base_url at a local image server and no key
+                    is needed)
+  Model             image_gen.model: gpt-image-1
+  The key           in the environment: image_gen.key_env, OPENAI_API_KEY
+                    by default — never in the config file
+  Daily limit       image_gen.max_per_day: 10 — when it is reached the tool
+                    refuses in words until tomorrow, and /cost shows the
+                    count
+
+The tool is only offered to the model while it is switched on, and every call
+asks permission, like a shell command. The prompt is sent to the provider
+whole — nothing is redacted out of it — so an approving look at what it is
+about to send is worth having.
+
+Images land in  ~/.comodor/media/generated/  unless the model names another
+folder, and the transcript keeps the prompt and a fingerprint of what came
+back, not the bytes."""),
+
 
     "whatsapp": ("From WhatsApp", """\
   comodor whatsapp connect         guided: links each page, checks each value

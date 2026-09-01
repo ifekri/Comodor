@@ -25,6 +25,28 @@ from .base import Tool, ToolContext, ToolResult
 USER_AGENT = ("Mozilla/5.0 (compatible; ComodorAgent/0.1; +https://github.com/ifekri/comodor)")
 MAX_PAGE_CHARS = 40_000
 
+
+def check_url(ctx: ToolContext, url: str) -> str | None:
+    """The SSRF guard, as the tools share it. Returns an error message or "".
+
+    Every URL the *model* steers goes through this before a connection is
+    opened — web_fetch, web_search's own endpoint excepted (fixed host), and
+    the browser's open. Comodor's own traffic never passes here: the guard
+    is for the component that can be talked into misuse.
+    """
+    from ..safety.ssrf import UnsafeURL, assert_url_safe
+
+    safety = ctx.config.safety
+    try:
+        assert_url_safe(
+            url, allow_loopback=safety.ssrf_allow_loopback,
+            allowlist=safety.ssrf_allowlist)
+    except UnsafeURL as error:
+        return (f"refused: {error}. Internal addresses are not opened by "
+                "the tools — if you need this host, ask the user to allow it "
+                "in safety.ssrf_allowlist.")
+    return ""
+
 _SCRIPT_STYLE = re.compile(r"<(script|style|noscript|svg)[^>]*>.*?</\1>",
                            re.IGNORECASE | re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
@@ -71,6 +93,9 @@ class WebFetch(Tool):
             **_: Any) -> ToolResult:
         if not url.lower().startswith(("http://", "https://")):
             url = "https://" + url
+        refused = check_url(ctx, url)
+        if refused:
+            return ToolResult.failure(refused)
         try:
             response = http.get(url, headers={"User-Agent": USER_AGENT},
                                 timeout=(10.0, 30.0))

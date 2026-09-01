@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ..agent import AgentLoop, Conversation
+from ..agent.background import BackgroundDelegates, completion_turn
 from ..agent.spawn import spawner
 from ..config import Config
 from ..events import Event, EventBus, Kind, Request
@@ -36,7 +37,7 @@ from ..paths import Paths
 from ..providers.base import Message
 from ..providers.gateway import Gateway
 from ..questions import CANCELLED, decode_answers
-from ..safety import CheckpointStore, PermissionEngine, Redactor
+from ..safety import CheckpointStore, PermissionEngine, Redactor, make_assessor
 from ..session import SessionIndex, SessionMeta, SessionStore, derive_title, new_session_id
 from ..skills import load_for as load_skills
 from ..tools import ToolRegistry
@@ -61,6 +62,7 @@ class Session:
                              if entry.api_key]),
         )
         self.permissions = PermissionEngine(config, self.bus)
+        self.permissions.assess = make_assessor(config, self.gateway)
         self.permissions.on_denied = self.memory.on_denied
         self.skills = load_skills(config)
         self.mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
@@ -69,14 +71,24 @@ class Session:
         self._screen: str = ""
         self._frames: int = 0
         self.conversation = Conversation()
+        # Background delegates: same shape as the terminal — one manager shared
+        # by the tool and the loop, drained between turns.
+        self.delegates = BackgroundDelegates(
+            config, self.bus, spawner(config, self.gateway, self.bus,
+                                      skills=self.skills, mcp=self.mcp),
+            persist_path=config.paths.user / "delegates.json")
         self.agent = AgentLoop(
             config, self.gateway,
             ToolRegistry(skills=self.skills, mcp=self.mcp, config=config,
                          spawn=spawner(config, self.gateway, self.bus,
-                                       skills=self.skills, mcp=self.mcp)),
+                                       skills=self.skills, mcp=self.mcp),
+                         cron_store=self._cron_store(config),
+                         memory=getattr(self.memory, "facts", None),
+                         delegates=self.delegates),
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )
+        self.agent.delegates = self.delegates
 
         # Where conversations live. The same folder the terminal uses, on
         # purpose: a chat begun at the prompt should be openable in the browser
@@ -121,6 +133,18 @@ class Session:
         self.bus.subscribe(self._record)
 
     # -- taking events off the bus ----------------------------------------- #
+
+    def _cron_store(self, config: Config):
+        """The job store for the cronjob tool, or None where cron is off.
+
+        Same rule as the terminal: a tool whose scheduler will never fire it
+        is a promise the program does not keep, so it is simply not offered.
+        """
+        if not config.cron.enabled:
+            return None
+        from ..cron.jobs import JobStore
+
+        return JobStore(config.paths.user / "cron")
 
     def _record(self, event: Event) -> None:
         """Called on whatever thread emitted. Cheap, and never raises."""
@@ -259,6 +283,7 @@ class Session:
         self._saved = len(messages)
         self.meta.messages = len(messages)
         self.meta.cost_usd = self.conversation.usage.cost_usd
+        self.meta.compactions = self.conversation.compactions
         self.meta.model = self.config.active_model()
         self.meta.provider = self.config.provider
         self.meta.updated_at = time.time()
@@ -623,7 +648,10 @@ class Session:
             self.config, self.gateway,
             ToolRegistry(skills=self.skills, mcp=self.mcp, config=self.config,
                          spawn=spawner(self.config, self.gateway, self.bus,
-                                       skills=self.skills, mcp=self.mcp)),
+                                       skills=self.skills, mcp=self.mcp),
+                         cron_store=self._cron_store(self.config),
+                         memory=getattr(self.memory, "facts", None),
+                         delegates=self.delegates),
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )
@@ -1014,6 +1042,65 @@ class Session:
         except Exception as error:
             return False, f"{type(error).__name__}: {error}", ""
         return True, "", str(where)
+
+    # -- curated facts --------------------------------------------------------- #
+
+    def facts(self) -> dict[str, Any]:
+        """The curated shelf for the panel: settled entries and pending proposals."""
+        try:
+            entries = self.memory.fact_entries(include_staged=True)
+        except Exception:
+            entries = []
+        try:
+            usage = self.memory.facts.usage_line()
+            enabled = bool(self.config.learning.enabled
+                           and self.config.learning.review)
+        except Exception:
+            usage, enabled = "", False
+        return {
+            "facts": [{
+                "id": fact.id,
+                "kind": fact.kind,
+                "text": fact.text,
+                "status": fact.status,
+                "pinned": fact.pinned,
+                "staged": fact.status == "staged",
+            } for fact in entries],
+            "usage": usage,
+            "enabled": enabled,
+            "approval": bool(getattr(self.config.learning,
+                                     "review_write_approval", False)),
+        }
+
+    def fact(self, action: str, id: Any = None, text: Any = None,
+             kind: Any = None) -> tuple[bool, str]:
+        """Add, approve, reject, pin or drop one fact."""
+        if action == "add":
+            statement = str(text or "").strip()
+            if not statement:
+                return False, "a fact needs text"
+            try:
+                self.memory.add_fact(statement, kind=str(kind or "memory"))
+                return True, ""
+            except ValueError as error:
+                return False, str(error)
+        try:
+            fact_id = int(id)
+        except (TypeError, ValueError):
+            return False, "which fact?"
+        if action == "approve":
+            return (True, "") if self.memory.decide_fact(fact_id, True) \
+                else (False, "no pending fact by that id")
+        if action == "reject":
+            return (True, "") if self.memory.decide_fact(fact_id, False) \
+                else (False, "no pending fact by that id")
+        if action in ("pin", "unpin"):
+            return (True, "") if self.memory.pin_fact(fact_id, action == "pin") \
+                else (False, "no such fact")
+        if action == "remove":
+            return (True, "") if self.memory.remove_fact(fact_id) \
+                else (False, "no such fact")
+        return False, f"{action!r} is not something to do to a fact"
 
     # -- what the agent is, right now ---------------------------------------- #
 
@@ -1484,9 +1571,13 @@ class Session:
 
     # -- what a browser does ------------------------------------------------ #
 
-    def send(self, text: str) -> bool:
-        """Start a turn. False if one is already running."""
-        if not text.strip():
+    def send(self, text: str, images: list[str] | None = None) -> bool:
+        """Start a turn. False if one is already running.
+
+        ``images`` is base64 picture data for a model with vision, riding the
+        user message the way the web interface's own screenshots do.
+        """
+        if not text.strip() and not images:
             return False
         if not self._turn.acquire(blocking=False):
             return False
@@ -1498,7 +1589,7 @@ class Session:
             self.busy = True
             self.bus.emit(Kind.STATUS, busy=True)
             try:
-                self.agent.run(text)
+                self.agent.run(text, images=images or None)
             except Exception as error:                # never lose the worker
                 self.bus.emit(Kind.ERROR, text=f"{type(error).__name__}: {error}")
             finally:
@@ -1511,9 +1602,37 @@ class Session:
                     pass
                 self.bus.emit(Kind.STATUS, busy=False)
                 self._turn.release()
+            # One turn past its end is the turn boundary. A background
+            # delegate that finished while this turn ran is delivered here —
+            # as its own turn, never spliced into the one just saved.
+            self._drain_delegates()
 
         threading.Thread(target=work, name="comodor-web-turn", daemon=True).start()
         return True
+
+    def _drain_delegates(self) -> None:
+        """Turn finished background delegates into turns of their own.
+
+        Chains: each delivered completion runs as a full turn, and the turn
+        after it drains again — so several children finishing together arrive
+        in order rather than all at once. The slot is claimed before anything
+        is marked delivered: if a message the user just sent took the turn
+        first, the completions stay pending for the boundary after that one.
+        """
+        if not self._turn.acquire(blocking=False):
+            return
+        self._turn.release()
+        records = self.delegates.take_pending()
+        if not records:
+            return
+        summary_max = self.config.delegation.completion_summary_max
+        text = "\n\n".join(completion_turn(record, summary_max)
+                           for record in records)
+        if not self.send(text):
+            # A message the user just sent took the turn between the check
+            # and here. The completions go back to pending for the next
+            # boundary rather than being dropped.
+            self.delegates.restore([str(record.get("id")) for record in records])
 
     def answer(self, request_id: str, choice: str) -> tuple[bool, str]:
         """Answer a waiting prompt. Returns whether it took, and why not.
@@ -1544,11 +1663,11 @@ class Session:
         request.answer(choice)
         return True, ""
 
-    def interrupt(self) -> None:
-        self.agent.interrupt()
+    def interrupt(self, reason: str = "stop") -> None:
+        self.agent.interrupt(reason)
 
     def set_mode(self, mode: str) -> bool:
-        if mode not in ("act", "plan", "chat"):
+        if mode not in ("act", "plan", "ask", "chat"):
             return False
         self.config.agent.mode = mode
         self.bus.emit(Kind.STATUS, mode=mode)

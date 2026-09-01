@@ -12,6 +12,7 @@ exercised rather than assumed:
     --die-on-call   exit as soon as a tool is called
     --no-tools      offer nothing
     --paginate      return its tools across two pages
+    --rich          also offer resources and prompts
 """
 
 import json
@@ -86,14 +87,85 @@ def main():
         if method == "initialize":
             if flag("--slow"):
                 time.sleep(float(value("--slow", "0")))
+            capabilities = {"tools": {}}
+            if flag("--rich"):
+                capabilities = {"tools": {}, "resources": {}, "prompts": {}}
             reply(identifier, {
                 "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}},
+                "capabilities": capabilities,
                 "serverInfo": {"name": "fake-server", "version": "1.0.0"},
             })
 
         elif method == "notifications/initialized":
             continue                       # a notification has no reply
+
+        elif method == "resources/list":
+            if not flag("--rich"):
+                send({"jsonrpc": "2.0", "id": identifier,
+                      "error": {"code": -32601, "message": "Method not found"}})
+            else:
+                reply(identifier, {"resources": [
+                    {"uri": "file:///logs/app.log", "name": "application log",
+                     "description": "the last few hundred lines",
+                     "mimeType": "text/plain"},
+                    {"uri": "sqlite:///data.db/main/users",
+                     "name": "users table", "mimeType": "text/plain"},
+                ]})
+
+        elif method == "resources/read":
+            uri = (message.get("params") or {}).get("uri", "")
+            known = ("log" in uri or "users" in uri)
+            if not known:
+                send({"jsonrpc": "2.0", "id": identifier,
+                      "error": {"code": -32002,
+                                "message": f"no resource {uri!r}"}})
+            elif "log" in uri:
+                reply(identifier, {"contents": [
+                    {"uri": uri, "mimeType": "text/plain",
+                     "text": "INFO started\nINFO ready\nERROR 1 + 1 = 3"},
+                ]})
+            else:
+                reply(identifier, {"contents": [
+                    {"uri": uri, "mimeType": "text/plain",
+                     "text": "alice\nbob"},
+                ]})
+
+        elif method == "prompts/list":
+            if not flag("--rich"):
+                send({"jsonrpc": "2.0", "id": identifier,
+                      "error": {"code": -32601, "message": "Method not found"}})
+            else:
+                reply(identifier, {"prompts": [
+                    {"name": "review_pr",
+                     "description": "Ask for a review of a pull request",
+                     "arguments": [{"name": "number", "required": True},
+                                   {"name": "focus"}]},
+                    {"name": "morning",
+                     "description": "A greeting with nothing to fill in",
+                     "arguments": []},
+                ]})
+
+        elif method == "prompts/get":
+            params = message.get("params") or {}
+            name = params.get("name", "")
+            filled = params.get("arguments") or {}
+            if name == "review_pr":
+                number = filled.get("number", "?")
+                focus = filled.get("focus", "correctness")
+                reply(identifier, {"messages": [
+                    {"role": "user", "content": {
+                        "type": "text",
+                        "text": f"Review pull request #{number}, "
+                                f"paying attention to {focus}."}},
+                ]})
+            elif name == "morning":
+                reply(identifier, {"messages": [
+                    {"role": "user", "content": {
+                        "type": "text", "text": "What is on my plate today?"}},
+                ]})
+            else:
+                send({"jsonrpc": "2.0", "id": identifier,
+                      "error": {"code": -32602, "message": f"no prompt {name!r}"}})
 
         elif method == "tools/list":
             if flag("--no-tools"):

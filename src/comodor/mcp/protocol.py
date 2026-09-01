@@ -50,6 +50,25 @@ class ToolDescription:
     schema: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class ResourceDescription:
+    """One resource a server offers: a thing that can be read by URI."""
+
+    uri: str
+    name: str = ""
+    description: str = ""
+    mime_type: str = ""
+
+
+@dataclass
+class PromptDescription:
+    """One prompt template a server offers."""
+
+    name: str
+    description: str = ""
+    arguments: list[dict[str, Any]] = field(default_factory=list)
+
+
 class StdioConnection:
     """A running MCP server, spoken to over its stdin and stdout."""
 

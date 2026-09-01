@@ -43,7 +43,7 @@ from ..learning import LearningEngine
 from ..mcp import MCPManager
 from ..paths import Paths
 from ..providers.gateway import Gateway
-from ..safety import CheckpointStore, PermissionEngine, Redactor
+from ..safety import CheckpointStore, PermissionEngine, Redactor, make_assessor
 from ..session import SessionMeta, SessionStore, derive_title, new_session_id
 from ..skills import load_for as load_skills
 from ..tools import ToolRegistry
@@ -101,6 +101,7 @@ class AcpSession:
                              if entry.api_key]),
         )
         self.permissions = PermissionEngine(config, self.bus)
+        self.permissions.assess = make_assessor(config, self.gateway)
         self.permissions.on_denied = self.memory.on_denied
         self.skills = load_skills(config)
         self.mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
@@ -109,7 +110,9 @@ class AcpSession:
             config, self.gateway,
             ToolRegistry(skills=self.skills, mcp=self.mcp, config=config,
                          spawn=spawner(config, self.gateway, self.bus,
-                                       skills=self.skills, mcp=self.mcp)),
+                                       skills=self.skills, mcp=self.mcp),
+                         cron_store=self._cron_store(config),
+                         memory=getattr(self.memory, "facts", None)),
             self.bus, self.permissions, self.conversation, self.memory,
             skills=self.skills,
         )
@@ -131,8 +134,19 @@ class AcpSession:
 
     # -- talking to the editor ---------------------------------------------- #
 
-    def update(self, body: dict[str, Any]) -> None:
-        self.agent.rpc.notify("session/update",
+    def _cron_store(self, config: Config):
+        """The job store for the cronjob tool, or None where cron is off.
+
+        A tool whose scheduler will never fire it is a promise the program
+        does not keep, so where cron is disabled the tool is simply absent.
+        """
+        if not config.cron.enabled:
+            return None
+        from ..cron.jobs import JobStore
+
+        return JobStore(config.paths.user / "cron")
+
+    def update(self, body: dict[str, Any]) -> None:        self.agent.rpc.notify("session/update",
                               {"sessionId": self.id, "update": body})
 
     def _on_event(self, event: Event) -> None:
@@ -235,11 +249,22 @@ class AcpSession:
     def _ask(self, request: Request) -> None:
         """Put a permission prompt to the editor and answer the worker."""
         self._pending[request.id] = request
-        options = [
-            {"optionId": choice, "name": _option_label(choice),
-             "kind": _option_kind(choice)}
-            for choice in (request.options or ["yes", "no"])
-        ]
+        if request.kind == "mode":
+            # A proposed mode change: the modes are the options, labelled as
+            # themselves. Every choice is "other" to ACP — none of them is an
+            # allow or a reject — and the editor answers with the option id,
+            # which is the mode name.
+            options = [
+                {"optionId": choice, "name": f"Mode: {choice}",
+                 "kind": "other"}
+                for choice in request.options
+            ]
+        else:
+            options = [
+                {"optionId": choice, "name": _option_label(choice),
+                 "kind": _option_kind(choice)}
+                for choice in (request.options or ["yes", "no"])
+            ]
         try:
             answer = self.agent.rpc.call("session/request_permission", {
                 "sessionId": self.id,
@@ -332,6 +357,7 @@ class AcpSession:
         self._saved = len(messages)
         self.meta.messages = len(messages)
         self.meta.cost_usd = self.conversation.usage.cost_usd
+        self.meta.compactions = self.conversation.compactions
         self.meta.updated_at = time.time()
         try:
             self.store.save_meta(self.meta)

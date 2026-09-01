@@ -69,6 +69,11 @@ class TurnResult:
     stopped: str = "done"        # done | max_steps | budget | cancelled | error
     error: str = ""
     elapsed: float = 0.0
+    #: Why a turn was cancelled, when it was ("stop" — the human pressed stop
+    #: — or "interrupt" — a new message took over under the interrupt busy
+    #: mode). The learn step reads this so the review knows which kind of
+    #: stop it is describing, rather than calling both the same.
+    cancel_reason: str = ""
 
     @property
     def ok(self) -> bool:
@@ -90,7 +95,17 @@ class AgentLoop:
         self.conversation = conversation or Conversation()
         self.memory = memory                     # LearningEngine, or None
         self.skills = skills                     # SkillRegistry, or None
+        #: The background-delegate manager, when this session has one. Read at
+        #: the turn boundary — the one place a new message can join the
+        #: conversation without breaking the alternation the provider caches
+        #: against. ``None`` (a delegate's own loop, for instance) means the
+        #: loop never asks.
+        self.delegates: Any = None
         self.cancel = Cancellation()
+        #: Why the last interrupt() was called ("stop" or "interrupt"); reset
+        #: with the flag itself at the start of each turn. Read by the learn
+        #: step so the review can tell a human's stop from a takeover.
+        self._cancel_reason = ""
         self._skills_used: list[Any] = []
         self.tool_context: ToolContext | None = None
         self._recalled: list[Any] = []
@@ -111,6 +126,7 @@ class AgentLoop:
         """Handle one user message from start to finish."""
         started = time.monotonic()
         self.cancel.reset()
+        self._cancel_reason = ""
         self._used = []
         result = TurnResult()
 
@@ -146,7 +162,11 @@ class AgentLoop:
             self._iterate(deadline, result)
         except Cancelled:
             result.stopped = "cancelled"
-            self.bus.emit(Kind.CANCELLED)
+            result.cancel_reason = self._cancel_reason
+            # The reason rides the event, so an interface can say why the
+            # work stopped — "you pressed stop" and "a newer message took
+            # over" are different sentences.
+            self.bus.emit(Kind.CANCELLED, reason=self._cancel_reason)
         except ProviderError as exc:
             result.stopped = "error"
             result.error = str(exc)
@@ -165,8 +185,19 @@ class AgentLoop:
         self._learn(user_text, result)
         return result
 
-    def interrupt(self) -> None:
+    def interrupt(self, reason: str = "stop") -> None:
         self.cancel.cancel()
+        self._cancel_reason = reason
+
+    def _tool_bridge_live(self) -> bool:
+        """Whether run_python here can really take tools=true.
+
+        The prompt only promises what the tool can keep: the bridge exists
+        when the registry wired itself into run_python, which it does not
+        inside a delegate or a scheduled run.
+        """
+        tool = self.tools.get("run_python")
+        return bool(getattr(tool, "_registry", None) is not None)
 
     # -- the loop --------------------------------------------------------- #
 
@@ -189,7 +220,8 @@ class AgentLoop:
 
             specs = self.tools.specs(agent.mode)
             system_prompt = build_system_prompt(
-                self.config, profile=self._model_profile())
+                self.config, profile=self._model_profile(),
+                tool_bridge=self._tool_bridge_live())
             self._maybe_compact(system_prompt, specs)
 
             completion = self._stream_once(system_prompt, specs)
@@ -453,6 +485,7 @@ class AgentLoop:
                 cancel=self.cancel,
                 cwd=Path(self.config.paths.project),
                 rules=list(self._rules),
+                brain_store=self.memory.store if self.memory is not None else None,
                 emit_output=lambda text: self.bus.emit(Kind.TOOL_OUTPUT, text=text),
             )
         return self.tool_context
@@ -681,15 +714,31 @@ class AgentLoop:
             rules = self.memory.active_rules()
         except Exception:
             return ""
+        external = self.memory.external_briefing(user_text)
 
         self._recalled = lessons
         if lessons:
             self.bus.emit(Kind.MEMORY, action="recalled",
                           items=[lesson.as_dict() for lesson in lessons],
                           rules=len(rules))
-        if not lessons and not rules:
+        blocks = []
+        playbook = self.memory.render_playbook(lessons, rules=rules)
+        if playbook:
+            blocks.append(playbook)
+        # The curated facts briefing was frozen when this conversation
+        # started, so appending it here costs nothing after the first turn:
+        # the head of the request stays byte-identical and the cache holds.
+        facts = getattr(self.memory, "facts_briefing", "")
+        if facts:
+            blocks.append(facts)
+        # What the external memory service (if any) remembers. Additive,
+        # capped, marked as from outside — it can season the briefing, it
+        # cannot become it.
+        if external:
+            blocks.append(external)
+        if not blocks:
             return ""
-        return self.memory.render_playbook(lessons, rules=rules)
+        return SECTION_GAP.join(blocks)
 
     def _skills_for(self, user_text: str) -> str:
         """Pick the authored skills that fit this request, and announce them.
@@ -703,7 +752,8 @@ class AgentLoop:
         if self.skills is None or settings is None or not settings.enabled:
             return ""
         try:
-            matched = self.skills.match(user_text, limit=settings.top_k)
+            matched = self.skills.match(user_text, limit=settings.top_k,
+                                        record=True)
         except Exception:
             return ""
         if not matched:
@@ -737,10 +787,12 @@ class AgentLoop:
                 recalled=self._recalled,
                 success=result.ok and result.stopped == "done",
                 stopped=result.stopped,
+                cancel_reason=result.cancel_reason,
                 steps=result.steps,
                 elapsed=result.elapsed,
                 approvals=approvals,
                 tokens=self.conversation.usage.total,
+                cost_usd=self.conversation.usage.cost_usd,
             )
         except Exception:
             # Learning is a background nicety; it must never break a turn.

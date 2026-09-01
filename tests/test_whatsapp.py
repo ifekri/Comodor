@@ -204,7 +204,7 @@ def test_a_page_of_a_long_list_leaves_room_for_its_arrows():
 
 
 def test_the_three_button_screens_really_are_three():
-    for choices in (ui.mode_menu("plan"), ui.permission("r1")):
+    for choices in (ui.permission("r1"), ui.mode_choices("r1", ["act", "plan", "plan"])):
         assert len(choices) <= MOST_BUTTONS
         assert ui.fits_as_buttons(choices), choices
 
@@ -292,14 +292,27 @@ def test_a_delivery_receipt_is_not_a_message():
     assert wh.read(payload) == []
 
 
-def test_a_photo_is_named_rather_than_dropped():
-    """Silence from a bot is indistinguishable from a bot that is off."""
+def test_a_photo_is_read_as_media():
+    """A photo with an id is downloadable now, not a refusal."""
     payload = {"entry": [{"changes": [{"value": {
         "messages": [{"from": "1555", "id": "wamid.D", "type": "image",
                       "image": {"id": "x"}}]}, "field": "messages"}]}]}
 
     found = wh.read(payload)
-    assert found[0].action == "unsupported:image"
+    assert found[0].is_media
+    assert found[0].media_id == "x"
+    assert found[0].media_kind == "image"
+
+
+def test_a_location_is_still_named_rather_than_dropped():
+    """Silence from a bot is indistinguishable from a bot that is off."""
+    payload = {"entry": [{"changes": [{"value": {
+        "messages": [{"from": "1555", "id": "wamid.E", "type": "location",
+                      "location": {"latitude": 0.0, "longitude": 0.0}}]},
+        "field": "messages"}]}]}
+
+    found = wh.read(payload)
+    assert found[0].action == "unsupported:location"
 
 
 def test_a_verify_token_is_generated_not_chosen():

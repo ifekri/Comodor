@@ -40,10 +40,17 @@ def render(text: str, flavour) -> str:
 @EVERY
 def test_no_markdown_only_punctuation_survives(flavour):
     """Backticks are not the test: Slack and WhatsApp both use them. What must
-    not survive is the markup that only Markdown has."""
+    not survive is the markup that only Markdown has.
+
+    Discord is the exception that proves the rule: it *is* Markdown, so the
+    right output carries the same asterisks and brackets — what must not
+    survive there is nothing, because there is nothing to convert."""
     out = render("Use **bold** and *italic* and [a link](https://x.dev/).",
                  flavour)
 
+    if flavour.name == "discord":
+        assert out == "Use **bold** and *italic* and [a link](https://x.dev/)."
+        return
     assert "**" not in out
     assert "](" not in out
     assert "bold" in out and "italic" in out and "a link" in out

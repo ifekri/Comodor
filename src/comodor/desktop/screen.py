@@ -127,17 +127,25 @@ class NotSupported(RuntimeError):
 def backend():
     """The module that knows how to touch this machine.
 
-    Windows only for now, and it says so plainly. A macOS backend is a file
-    beside `win32.py` with the same handful of functions, which is why nothing
-    above here imports ctypes.
+    One file per platform beside this one, each with the same handful of
+    functions, which is why nothing above here imports ctypes. A platform with
+    no file gets told so plainly rather than half-worked.
     """
     if sys.platform == "win32":
         from . import win32
 
         return win32
+    if sys.platform == "darwin":
+        from . import quartz
+
+        return quartz
+    if sys.platform.startswith("linux"):
+        from . import x11
+
+        return x11
     raise NotSupported(
-        f"Comodor can only drive the screen on Windows so far, and this is "
-        f"{sys.platform}. The browser tool works everywhere.")
+        f"Comodor can drive the screen on Windows, macOS and Linux/X11, "
+        f"not on {sys.platform}. The browser tool works everywhere.")
 
 
 def capture(budget: int = DEFAULT_TOKENS, region: tuple[int, int, int, int] | None = None,

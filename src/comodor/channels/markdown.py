@@ -162,7 +162,26 @@ WHATSAPP = Flavour(
     nest_code=False,
 )
 
-FLAVOURS = {f.name: f for f in (TELEGRAM, SLACK, WHATSAPP)}
+DISCORD = Flavour(
+    name="discord",
+    bold=("**", "**"),
+    italic=("*", "*"),
+    strike=("~~", "~~"),
+    code=("`", "`"),
+    block=lambda language, body: (
+        f"```{language}\n{body}\n```" if language else f"```\n{body}\n```"),
+    # Markdown links, with the label kept for the few places a bare URL
+    # renders better than nothing.
+    link=lambda text, href: (href if text.strip() == href.strip()
+                             else f"[{text}]({href})"),
+    quote=lambda text: f"> {text}",
+    # Discord renders `&lt;` as `<`, so the Slack escape is the right one:
+    # escape only what would start an element, and let the emphasis through,
+    # because this module is what puts it there.
+    escape=_slack_escape,
+)
+
+FLAVOURS = {f.name: f for f in (TELEGRAM, SLACK, WHATSAPP, DISCORD)}
 
 
 def render(text: str, flavour: Flavour) -> str:
@@ -320,3 +339,6 @@ def to_slack(text: str) -> str:
 
 def to_whatsapp(text: str) -> str:
     return render(text, WHATSAPP)
+
+def to_discord(text: str) -> str:
+    return render(text, DISCORD)

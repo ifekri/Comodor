@@ -17,11 +17,14 @@ from . import overflow
 from .ask import Ask
 from .base import Tool, ToolContext, ToolResult
 from .browser import Browser
+from .cronjob import CronJob
 from .delegate import Delegate
 from .fs import EditFile, ListDir, ReadFile, WriteFile
 from .history import SearchHistory
+from .propose_mode import ProposeMode
 from .search import Glob, Grep
 from .shell import RunPython, RunShell
+from .skill_manage import SkillManage
 from .skills import ReadSkillFile
 from .todo import TodoWrite
 from .web import WebFetch, WebSearch
@@ -32,7 +35,7 @@ DEFAULT_TOOLS: tuple[type[Tool], ...] = (
     RunShell, RunPython,
     WebFetch, WebSearch,
     TodoWrite,
-    Ask,
+    Ask, ProposeMode,
 )
 
 
@@ -61,7 +64,10 @@ class ToolRegistry:
     def __init__(self, tools: Iterable[Tool] | None = None,
                  skills: Any = None, history: Any = None,
                  session_id: str = "", mcp: Any = None,
-                 spawn: Any = None, config: Any = None) -> None:
+                 spawn: Any = None, config: Any = None,
+                 cron_store: Any = None, skill_ledger: Any = None,
+                 memory: Any = None, delegates: Any = None,
+                 plugins: Any = None) -> None:
         self._tools: dict[str, Tool] = {}
         if tools is not None:
             for tool in tools:
@@ -69,6 +75,12 @@ class ToolRegistry:
         else:
             for cls in DEFAULT_TOOLS:
                 self.add(cls())
+            # The Python tool gets the registry itself, so run_python(tools=true)
+            # can dispatch a script's calls back through this session's own
+            # permission engine and overflow rule. It is wired after the whole
+            # set exists, for the same reason a delegate is only offered where
+            # there is something to spawn with.
+            self._tools["run_python"].use_registry(self)
             self.add(_browser_tool())
         # Only offered when a skill actually bundles files. A tool the model can
         # see but can never use successfully is worse than one that is absent:
@@ -84,7 +96,29 @@ class ToolRegistry:
         # gateway, and a registry built without one — inside a delegate, for
         # instance — must not advertise a tool that cannot run.
         if spawn is not None:
-            self.add(Delegate(spawn))
+            self.add(Delegate(spawn, background=delegates))
+        # The scheduler's own runs build their registry through cron/runner,
+        # which simply does not pass a cron store — and that absence is the
+        # recursion guard: a scheduled run cannot schedule another.
+        if cron_store is not None:
+            self.add(CronJob(cron_store))
+        # The curated-memory tool, where there is a facts service to curate.
+        # Registries built without one — inside a delegate, or a scheduled
+        # run — simply do not offer it, the same wiring rule the cronjob
+        # tool follows: a tool absent cannot be called.
+        if memory is not None:
+            from .memory import Memory
+
+            self.add(Memory(memory))
+        # The skills tool, where skills are enabled at all. It reaches the
+        # managed skills directories only, and every change it makes is
+        # recorded in the ledger so the person can put it back.
+        if skills is not None and config is not None \
+                and getattr(config, "skills", None) and config.skills.enabled:
+            from ..skills.ledger import Ledger
+
+            self.add(SkillManage(ledger=skill_ledger or Ledger(
+                config.paths.skills)))
         # The desktop, when this machine can be driven and the user has said
         # so. Both conditions matter: a tool that answers "not on this
         # platform" every time is the wasted call this rule exists to prevent,
@@ -92,12 +126,41 @@ class ToolRegistry:
         if config is not None and getattr(config, "computer", None) \
                 and config.computer.enabled:
             self._add_computer(config)
+        # The vision tool, only for a model that can answer it. Capability is
+        # read from the same profile the channels use; a model whose support
+        # is unknown is treated as unable, on the principle a tool that
+        # answers "I cannot look at images" every turn is a wasted schema.
+        if config is not None:
+            self._add_vision(config)
+        # Image generation, only when explicitly switched on — it is off by
+        # default because every call costs money, and a tool the model can
+        # see it might use is itself an invitation to spend.
+        if config is not None and getattr(config, "image_gen", None) \
+                and config.image_gen.enabled:
+            from .image_gen import ImageGen
+
+            self.add(ImageGen())
 
         # Whatever the enabled MCP servers offer, alongside the built-in tools
         # and subject to exactly the same permission gate.
         if mcp is not None:
             for tool in mcp.tools():
                 self.add(tool)
+            # The resource reader, only when some server actually has
+            # resources. Starting servers to find out would defeat the lazy
+            # rule, so this asks the states that exist and stops at the first
+            # server that answers with any.
+            if mcp.has_resources():
+                from .mcp_resources import MCPReadResource
+
+                self.add(MCPReadResource(mcp))
+        # A plugin's tools sit in the same registry and pass the same gate.
+        # Only trusted, successfully loaded plugins contribute anything.
+        if plugins is not None:
+            from .plugin import PluginTool
+
+            for owner, spec in plugins.registered_tools():
+                self.add(PluginTool(owner, spec))
 
     def _add_computer(self, config: Any) -> None:
         """The computer tool, if this platform has a backend for it."""
@@ -115,6 +178,19 @@ class ToolRegistry:
 
     def add(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
+
+    def _add_vision(self, config: Any) -> None:
+        """The vision tool, when the configured model can see images."""
+        try:
+            from ..providers import profile as profile_module
+
+            if not profile_module.of(config).vision:
+                return
+        except Exception:
+            return
+        from .vision import Vision
+
+        self.add(Vision())
 
     def close(self) -> None:
         """Let go of anything a tool is holding open.
@@ -154,7 +230,7 @@ class ToolRegistry:
         mode = (mode or "act").lower()
         if mode == "chat":
             return []
-        if mode == "plan":
+        if mode in ("plan", "ask"):
             return [tool for tool in self._tools.values() if tool.risk is Risk.SAFE]
         return list(self._tools.values())
 

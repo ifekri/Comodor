@@ -94,6 +94,38 @@ def test_a_key_you_keep_in_your_environment_stays_there(home, monkeypatch):
     assert "sk-only-in-my-environment" not in body
 
 
+def test_numbered_environment_keys_join_the_pool(home, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env-1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY_2", "sk-env-2")
+    monkeypatch.setenv("ANTHROPIC_API_KEY_3", "sk-env-3")
+    mine(home)
+
+    config = load(cwd=home / "project")
+    pool = config.providers["anthropic"]
+    assert pool.api_key == "sk-env-1"
+    assert pool.api_keys == ["sk-env-2", "sk-env-3"]
+
+
+def test_a_gap_in_numbered_keys_stops_the_scan(home, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env-1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY_3", "sk-env-3")
+    mine(home)
+
+    config = load(cwd=home / "project")
+    assert config.providers["anthropic"].api_keys == []
+
+
+def test_environment_pool_keys_are_never_written_to_disk(home, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env-1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY_2", "sk-env-2")
+    mine(home)
+
+    config = load(cwd=home / "project")
+    config.save()
+    body = (home / ".comodor" / "config.json").read_text(encoding="utf-8")
+    assert "sk-env-2" not in body
+
+
 def test_a_flag_typed_once_is_not_permanent(home):
     mine(home, agent={"mode": "act"})
 

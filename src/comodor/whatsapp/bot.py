@@ -33,9 +33,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..channels.breaker import CircuitBreaker
+from ..channels.busy import interrupt_note, start_or_steer
 from ..channels.markdown import to_whatsapp
 from ..channels.settings import Settings, keep_current
 from ..config import Config
+from ..media.ingest import MediaError, ingest
 from . import menu as ui
 from .api import Cloud, OutsideWindow, WhatsAppError, split
 from .webhook import Endpoint, Inbound
@@ -127,6 +130,15 @@ class Service:
         self.pairing: Pairing | None = None
         self.stopping = threading.Event()
         self.announce = announce or (lambda line: None)
+        #: The outbound-delivery ledger: every reply is noted before it is
+        #: sent, so a crash between producing an answer and delivering it
+        #: leaves a record the next start can recover. Created lazily where
+        #: tests inject a cloud, since it touches the user directory.
+        from ..channels.ledger import DeliveryLedger
+
+        self._ledger = DeliveryLedger(
+            config.paths.delivery_ledger("whatsapp"), "whatsapp")
+        self._breaker = CircuitBreaker("whatsapp")
 
     def say(self, line: str) -> None:
         try:
@@ -170,6 +182,7 @@ class Service:
     def run(self) -> None:
         """Serve the webhook and turn what arrives into work."""
         self.endpoint.start()
+        self._resume_ledger()
         settings = self.config.whatsapp
         self.say(f"{len(settings.allowed)} paired number(s) · "
                  + ("may edit files" if settings.allow_writes
@@ -186,6 +199,26 @@ class Service:
                 self._handle(item)
             except Exception as problem:          # never let one message stop it
                 self.say(f"failed on a message: {problem}")
+
+    def _resume_ledger(self) -> None:
+        """Redeliver replies a crash left pending, then sweep old records.
+
+        Runs once at start, before any new traffic: recovery is about the
+        previous life of this process, and interleaving it with fresh turns
+        would answer the older question second.
+        """
+        from ..channels.ledger import DeliveryLedger, resume
+
+        ledger = DeliveryLedger(
+            self.config.paths.delivery_ledger("whatsapp"), "whatsapp")
+        try:
+            recovered = resume(ledger, self._send)
+        except Exception:
+            recovered = 0
+        if recovered:
+            self.say(f"redelivered {recovered} reply/replies that a restart "
+                     "had interrupted")
+        ledger.sweep()
 
     def stop(self) -> None:
         self.stopping.set()
@@ -209,6 +242,9 @@ class Service:
         self.cloud.mark_read(item.message_id)
         talk = self._conversation(item.wa_id)
 
+        if item.is_media:
+            self._on_media(talk, item)
+            return
         if item.action.startswith("unsupported:"):
             kind = item.action.split(":", 1)[1]
             self._send(item.wa_id,
@@ -248,14 +284,28 @@ class Service:
             if not piece.strip():
                 continue
             try:
-                self.cloud.send(wa_id, piece)
+                self._ledger.send(wa_id, piece, self.cloud.send)
             except OutsideWindow:
                 self.say(f"{wa_id} has not written for a day; WhatsApp will "
                          f"not take a message until they do")
                 return
             except WhatsAppError as problem:
-                self.say(f"could not send: {problem}")
+                self._send_failed(problem)
                 return
+
+    def _send_failed(self, problem: Exception) -> None:
+        """A send error: count it, and pause the adapter at the cap.
+
+        WhatsApp sends fail for reasons the retry loop cannot fix — an
+        expired token, an account under review. Counting them here means a
+        string of them trips the breaker and the human is told once, in the
+        channel, instead of the daemon muttering to its log forever.
+        """
+        if self._breaker.fail(str(problem)):
+            self.say(f"{problem} — WhatsApp sends are paused; send /platform "
+                     "here to resume them")
+            return
+        self.say(f"could not send: {problem}")
 
     def _menu(self, talk: Conversation, note: str = "") -> None:
         """The main screen, as a list."""
@@ -314,10 +364,11 @@ class Service:
             if rest.lower() in ui.MODES:
                 self._set_mode(talk, rest.lower())
             else:
-                self._buttons(talk.wa_id, ui.mode_body(self._mode(talk)),
-                              ui.mode_menu(self._mode(talk)))
+                self._show_modes(talk)
         elif name == "status":
             self._send(talk.wa_id, self._status(talk))
+        elif name == "platform":
+            self._platform_command(talk)
         else:
             self._menu(talk, note=f"No command called /{name}.")
 
@@ -331,8 +382,7 @@ class Service:
         elif verb == "new":
             self._new_chat(talk)
         elif verb == "mode" and not argument:
-            self._buttons(talk.wa_id, ui.mode_body(self._mode(talk)),
-                          ui.mode_menu(self._mode(talk)))
+            self._show_modes(talk)
         elif verb == "mode":
             self._set_mode(talk, argument)
         elif verb == "status":
@@ -363,6 +413,10 @@ class Service:
             self._chose(talk, verb, argument)
         elif verb in ("ok", "okall", "no"):
             self._answer_permission(talk, argument, verb)
+        elif verb == "mm":
+            # A mode-change suggestion: `mm:<request>:<mode>`.
+            request_id, _, mode = argument.partition(":")
+            self._answer_mode(talk, request_id, mode)
         elif verb == "q":
             self._pick_option(talk, argument)
         elif verb == "qw":
@@ -374,15 +428,76 @@ class Service:
 
     # -- turns -------------------------------------------------------------- #
 
-    def _start_turn(self, talk: Conversation, text: str) -> None:
-        if not talk.session.send(text):
-            self._menu(talk, note="Something is already running. Stop it "
-                                  "first.")
+    def _start_turn(self, talk: Conversation, text: str,
+                    images: list[str] | None = None) -> None:
+        def refuse(note: str) -> None:
+            self._menu(talk, note=note)
+
+        if not start_or_steer(talk.session, text, images,
+                              self.config.whatsapp.busy_mode, refuse):
             return
         talk.turn = Turn()
         self._send(talk.wa_id, "_Working on it…_")
         threading.Thread(target=self._follow, args=(talk,),
                          name=f"comodor-wa-{talk.wa_id}", daemon=True).start()
+
+    # -- media --------------------------------------------------------------- #
+
+    def _on_media(self, talk: Conversation, item: Inbound) -> None:
+        """Download, type, and route one media message."""
+        if not self.config.media.enabled:
+            self._send(item.wa_id,
+                       f"I can only read text here — that was a "
+                       f"{item.media_kind}.")
+            return
+        self.cloud.max_download_bytes = int(
+            self.config.media.max_download_mb * 1_000_000)
+        try:
+            data = self.cloud.download(item.media_id)
+            downloaded = ingest(data, name=item.media_name,
+                                directory=self._media_dir(),
+                                max_mb=self.config.media.max_download_mb)
+        except MediaError as problem:
+            self._send(item.wa_id, str(problem))
+            return
+        except WhatsAppError as problem:
+            self._send(item.wa_id, f"I could not fetch that file: {problem}")
+            return
+        try:
+            self._start_turn_with_media(talk, downloaded)
+        except Exception as problem:
+            # A transcription gate refusing (no key, unknown provider); the
+            # file is on disk either way, and the reason is said.
+            self._send(item.wa_id, f"{problem} The file is kept at "
+                                   f"{downloaded.path}, so nothing is lost.")
+
+    def _media_dir(self):
+        from pathlib import Path
+
+        configured = self.config.media.save_dir
+        root = Path(configured) if configured else \
+            Path(self.config.paths.user) / "media"
+        return root / "whatsapp"
+
+    def _start_turn_with_media(self, talk: Conversation, item) -> None:
+        from ..media.route import route
+        from ..providers.profile import of as profile_of
+
+        profile = profile_of(self.config)
+        routed = route(item, profile, voice_to_text=self._transcriber())
+        self._start_turn(talk, routed.text, images=routed.images)
+
+    def _transcriber(self):
+        """The voice-note transcriber, or None where there is none.
+
+        A configured provider whose gate is closed (no key in the
+        environment, an unknown provider name) raises here on purpose: the
+        media handler turns that into a note the user can act on.
+        """
+        if not self.config.media.voice_to_text:
+            return None
+        from ..voice.stt import transcriber
+        return transcriber(self.config)
 
     def _follow(self, talk: Conversation) -> None:
         """Drain the event stream, and speak rarely.
@@ -416,7 +531,8 @@ class Service:
                     self._finish(talk, answer, tools)
                     return
                 elif kind == "cancelled":
-                    self._finish(talk, answer + "\n\n_stopped_", tools)
+                    self._finish(talk, answer + "\n\n_stopped_"
+                                 + interrupt_note(event), tools)
                     return
 
             self._still_working(talk, tools)
@@ -484,6 +600,13 @@ class Service:
     def _ask(self, talk: Conversation, event: dict[str, Any]) -> None:
         what = event.get("what") or event.get("request") or {}
         request_id = str(event.get("id") or event.get("request_id") or "")
+
+        if event.get("about") == "mode" or what.get("kind") == "mode":
+            options = [option for option in event.get("options", []) if option]
+            body = what.get("prompt") or event.get("prompt") or "Change mode?"
+            self._buttons(talk.wa_id, f"*Comodor suggests a mode change*\n\n{body}",
+                          ui.mode_choices(request_id, options))
+            return
 
         if what.get("kind") == "permission" or event.get("permission"):
             body = what.get("text") or event.get("text") or "May I?"
@@ -577,6 +700,15 @@ class Service:
         except Exception as problem:
             self.say(f"could not deliver the approval: {problem}")
 
+    def _answer_mode(self, talk: Conversation, request_id: str,
+                     mode: str) -> None:
+        if not mode:
+            return
+        try:
+            talk.session.answer(request_id, mode)
+        except Exception as problem:
+            self.say(f"could not deliver the answer: {problem}")
+
     # -- paged lists --------------------------------------------------------- #
 
     def _show(self, talk: Conversation, kind: str, page: int = 0) -> None:
@@ -661,6 +793,12 @@ class Service:
     def _mode(self, talk: Conversation) -> str:
         return str(self._state(talk).get("mode") or self.config.agent.mode)
 
+    def _show_modes(self, talk: Conversation) -> None:
+        """The mode screen, as a list — four modes will not fit as buttons."""
+        current = self._mode(talk)
+        self._list(talk.wa_id, ui.mode_body(current), "Mode",
+                   ui.mode_rows(current))
+
     def _rule_count(self, talk: Conversation) -> int:
         try:
             return int((talk.session.rules() or {}).get("active") or 0)
@@ -703,6 +841,20 @@ class Service:
             "message. If a long task finishes after that, write again and "
             "ask._"
         )
+
+    def _platform_command(self, talk: Conversation) -> None:
+        """The WhatsApp adapter's breaker: state, and the resume.
+
+        Sends are what can be paused here — inbound traffic arrives by
+        webhook regardless — so resuming clears the send breaker and says
+        so, and an unpaused adapter just reports health.
+        """
+        breaker = self._breaker
+        if breaker.paused:
+            breaker.resume()
+            self._send(talk.wa_id, "WhatsApp sends are on again.")
+            return
+        self._send(talk.wa_id, breaker.describe())
 
     def _status(self, talk: Conversation) -> str:
         state = self._state(talk)

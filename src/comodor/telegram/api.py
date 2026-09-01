@@ -141,6 +141,34 @@ class Bot:
             self.offset = max(self.offset, int(update["update_id"]) + 1)
         return got
 
+    def download(self, file_id: str) -> bytes:
+        """The bytes of a file somebody sent.
+
+        Telegram holds uploads on its own servers; `getFile` names one, and a
+        second, unauthenticated call fetches it. The size Telegram reports is
+        checked first so a huge file is never pulled at all.
+        """
+        description = self.call("getFile", file_id=file_id)
+        size = int((description or {}).get("file_size") or 0)
+        path = str((description or {}).get("file_path") or "")
+        if not path:
+            raise TelegramError("the file was refused: Telegram named no path")
+        limit = getattr(self, "max_download_bytes", 0)
+        if limit and size and size > limit:
+            raise TelegramError(
+                f"the file is {size / 1_000_000:.1f} MB, over the limit here "
+                f"({limit / 1_000_000:.0f} MB) — it was not downloaded")
+        url = f"https://api.telegram.org/file/bot{self._token}/{path}"
+        try:
+            response = http.get(url, timeout=(10.0, self.timeout))
+        except Exception as problem:
+            raise TelegramError(
+                self._hide(f"could not download the file: {problem}")) from None
+        if response.status_code != 200:
+            raise TelegramError(
+                f"the download answered {response.status_code}")
+        return response.content
+
     def send(self, chat: int | str, text: str, *, keyboard: Any = None,
              quiet: bool = False, reply_to: int | None = None,
              preview: bool = False) -> dict[str, Any] | None:
@@ -207,6 +235,41 @@ class Bot:
         """Register the slash commands, so Telegram offers them as you type."""
         self.call("setMyCommands", commands=[
             {"command": name, "description": what} for name, what in entries])
+
+    def send_voice(self, chat: int | str, audio: bytes, caption: str = "",
+                   reply_to: int | None = None) -> dict[str, Any] | None:
+        """One answer as a voice message.
+
+        `sendVoice` takes a multipart upload rather than the form-encoded
+        body every other call here uses, so it posts directly instead of
+        going through `call`. An mp3 plays on a phone without conversion;
+        Telegram shows the round-trip time as the message's waveform.
+        """
+        url = f"https://api.telegram.org/bot{self._token}/sendVoice"
+        data: dict[str, Any] = {"chat_id": chat}
+        if caption:
+            data["caption"] = caption[:1024]
+            data["parse_mode"] = "HTML"
+        if reply_to is not None:
+            data["reply_to_message_id"] = reply_to
+        try:
+            response = http.post(url, data=data, files={"voice":
+                                                        ("answer.mp3", audio,
+                                                         "audio/mpeg")},
+                                 timeout=(10.0, self.timeout))
+        except Exception as problem:
+            raise TelegramError(
+                self._hide(f"could not reach Telegram: {problem}")) from None
+        try:
+            payload = response.json()
+        except ValueError:
+            raise TelegramError(
+                f"Telegram answered {response.status_code} with something "
+                "that was not JSON") from None
+        if not payload.get("ok"):
+            raise TelegramError(self._hide(
+                f"sendVoice: {payload.get('description', 'no reason given')}"))
+        return payload.get("result")
 
     def drop_webhook(self) -> None:
         """Long polling and a webhook are mutually exclusive.

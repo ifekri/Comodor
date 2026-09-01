@@ -53,6 +53,7 @@ class Kind(str, Enum):
     NOTICE = "notice"                            # transient toast
     ERROR = "error"
     REQUEST = "request"                          # needs an answer from the user
+    DELEGATE = "delegate"                        # background delegate state changed
 
 
 @dataclass(slots=True)

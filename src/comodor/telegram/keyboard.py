@@ -47,11 +47,12 @@ PREVIOUS = "◀️"
 NEXT = "▶️"
 FORWARD = "➡️"
 
-MODES = ("act", "plan", "chat")
+MODES = ("act", "plan", "ask", "chat")
 
 MODE_WORDS = {
     "act": "Act — edits files, runs commands",
     "plan": "Plan — reads only, changes nothing",
+    "ask": "Ask — reads only, answers questions",
     "chat": "Chat — no tools at all",
 }
 
@@ -161,6 +162,25 @@ def permission(request_id: str) -> dict[str, Any]:
     )
 
 
+def mode_choices(request_id: str, options: list[str]) -> dict[str, Any]:
+    """The modes a proposal offered, as one column of buttons.
+
+    Built from the request's options rather than the full mode list: what the
+    agent offered is what is shown, in the order it offered them, with the
+    proposal first.
+    """
+    words = {
+        "act": "Act — full tools",
+        "plan": "Plan — read only",
+        "ask": "Ask — read only, answers",
+        "chat": "Chat — no tools",
+    }
+    lines = [[button(f"{words.get(option, option)}"[:60],
+                     f"mm:{request_id}:{option}")]
+             for option in options if len(f"mm:{request_id}:{option}") <= 64]
+    return rows(*lines)
+
+
 def question(request_id: str, index: int, options: list[str],
              chosen: set[int] | None = None,
              multi: bool = False) -> dict[str, Any]:
@@ -240,5 +260,7 @@ COMMANDS: list[tuple[str, str]] = [
     ("stop", "Interrupt what is running"),
     ("mode", "Act, plan, or chat"),
     ("status", "Model, folder, cost, context"),
+    ("platform", "Adapter health; resume a paused one"),
+    ("voice", "Spoken answers; voice status"),
     ("help", "What this bot can do"),
 ]

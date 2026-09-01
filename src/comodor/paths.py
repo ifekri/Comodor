@@ -21,26 +21,48 @@ from pathlib import Path
 
 APP_DIR_NAME = "comodor"
 PROJECT_DIR_NAME = ".comodor"
+DEFAULT_PROFILE = "default"
+
+
+def profile_name() -> str:
+    """Which profile this run belongs to, from the flag or the environment.
+
+    The default needs no name: it is the data directory the program has always
+    used, and somebody who has never heard of profiles must not find one day
+    that their brain has moved.
+    """
+    name = os.environ.get("COMODOR_PROFILE", "").strip()
+    return name or DEFAULT_PROFILE
 
 
 def user_root() -> Path:
-    """Per-user data directory, honouring the platform's conventions."""
+    """Per-user data directory, honouring the platform's conventions.
+
+    A named profile (``--profile work`` or ``COMODOR_PROFILE=work``) gets its
+    own subtree under ``profiles/`` — its own brain, sessions, skills and
+    config — so two profiles can run at once without sharing a single learned
+    lesson. The default profile is the root itself, not a member of
+    ``profiles/``, so an installation predating profiles needs no migration.
+    """
     override = os.environ.get("COMODOR_HOME")
     if override:
-        return Path(override).expanduser()
-
-    if sys.platform == "win32":
-        base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
-        if base:
-            return Path(base) / "Comodor"
+        base = Path(override).expanduser()
+    elif sys.platform == "win32":
+        base_env = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
+        base = Path(base_env) / "Comodor" if base_env \
+            else Path.home() / f".{APP_DIR_NAME}"
     elif sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Comodor"
+        base = Path.home() / "Library" / "Application Support" / "Comodor"
     else:
         xdg = os.environ.get("XDG_DATA_HOME")
-        if xdg:
-            return Path(xdg) / APP_DIR_NAME
+        base = (Path(xdg) / APP_DIR_NAME if xdg
+                else Path.home() / f".{APP_DIR_NAME}")
 
-    return Path.home() / f".{APP_DIR_NAME}"
+    name = profile_name()
+    if name != DEFAULT_PROFILE:
+        return base / "profiles" / name
+    return base
+
 
 
 def project_root(cwd: Path | str | None = None) -> Path:
@@ -98,6 +120,26 @@ class Paths:
     @property
     def log_file(self) -> Path:
         return self.user / "logs" / "comodor.log"
+
+    @property
+    def approvals(self) -> Path:
+        """The record of shell commands a person said yes to.
+
+        One JSON line per approval. Nothing reads it while decisions are
+        being made — it exists so approval mining can look at what this user
+        actually approves and propose an allowlist from evidence rather than
+        guesswork.
+        """
+        return self.user / "approvals.jsonl"
+
+    def delivery_ledger(self, platform: str) -> Path:
+        """The outbound-delivery ledger of one channel daemon.
+
+        Per platform, because each daemon recovers its own sends on start
+        and one file per platform keeps the recovery pass single-threaded
+        by construction.
+        """
+        return self.user / "delivery" / f"{platform}.jsonl"
 
     @property
     def checkpoints(self) -> Path:

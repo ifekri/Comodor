@@ -229,3 +229,36 @@ def test_the_tool_is_absent_until_there_is_history(store, tmp_path):
     filled = SessionIndex(store)
     filled.refresh()
     assert "search_history" in ToolRegistry(history=filled)
+
+# --------------------------------------------------------------------------- #
+# the compaction trail
+# --------------------------------------------------------------------------- #
+
+def test_a_session_that_was_compacted_says_so(store):
+    from comodor.session.store import SessionMeta
+
+    store.append("20260501-120000", Message.user("begin"))
+    store.append("20260501-120000", Message.assistant("done"))
+    meta = SessionMeta(id="20260501-120000", messages=2,
+                       cost_usd=0.5, compactions=3)
+    store.save_meta(meta)
+
+    loaded = store.load_meta("20260501-120000")
+    assert loaded.compactions == 3
+
+def test_an_older_meta_without_the_field_reads_as_never_compacted(store):
+    """Metas written before the field existed load with the default."""
+    import json
+
+    from comodor.session.store import SessionMeta
+
+    store.append("20260502-130000", Message.user("begin"))
+    store.save_meta(SessionMeta(id="20260502-130000", messages=1))
+    path = store.meta_path("20260502-130000")
+    document = json.loads(path.read_text())
+    document.pop("compactions", None)
+    path.write_text(json.dumps(document))
+
+    loaded = store.load_meta("20260502-130000")
+    assert loaded is not None
+    assert loaded.compactions == 0

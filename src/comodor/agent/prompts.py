@@ -80,6 +80,9 @@ surrounding lines to make it unique rather than guessing.
 reading and editing — they are safer and produce better diffs.
 - A tool that returns an error is information, not a dead end. Read it, then \
 adjust.
+- After a multi-step routine has just worked — or after you recovered from a \
+failure the hard way — offer to write it down as a skill with `skill_manage` \
+`create`, in conversation, before calling the tool. Never write one silently.
 - `ask` is for a request that can be read more than one way, and it is called \
 before you build rather than after. Work out everything you are unsure about \
 first, then ask it all in one call. Do not use it for something you could find \
@@ -94,14 +97,34 @@ MODE_PLAN = """\
 Mode: PLAN. You have read-only tools only — you cannot modify anything, and \
 write tools are not available to you. Investigate the codebase, then produce a \
 concrete plan: which files change, what changes in each, and how to verify the \
-result. Name real files you have actually looked at."""
+result. Name real files you have actually looked at.
+
+When the plan is settled and the user seems to want it carried out rather than \
+just written down, say that the next step is to switch to Act mode. Do not try \
+to work around the missing write tools."""
+
+MODE_ASK = """\
+Mode: ASK. You have read-only tools only, exactly as in Plan mode — you \
+cannot modify anything. The difference is intent: this mode is for answering \
+questions about the codebase and thinking things through, not for producing a \
+plan of changes. Investigate freely, then answer. If the question turns out to \
+be a request for work, offer to switch to Plan or Act mode rather than trying \
+to do the work here."""
+
+BRIDGE_ADVICE = """\
+- For a question whose answer is one sentence but whose evidence is spread \
+across many files, `run_python` with `tools=true` can do the reading in a \
+script: `comodor.tools.grep(...)`, `comodor.tools.read_file(...)` and the \
+other read-only tools are callable there, and only the script's conclusion \
+enters the conversation. Print your own output to stderr in such a script; \
+the tool protocol owns stdout."""
 
 MODE_CHAT = """\
 Mode: CHAT. Tools are switched off. Answer from the conversation and your own \
 knowledge. If answering properly needs to look at files, say so and suggest \
 switching to Act mode."""
 
-_MODES = {"act": MODE_ACT, "plan": MODE_PLAN, "chat": MODE_CHAT}
+_MODES = {"act": MODE_ACT, "plan": MODE_PLAN, "ask": MODE_ASK, "chat": MODE_CHAT}
 
 
 def environment_block(config: Config) -> str:
@@ -156,14 +179,16 @@ def project_instructions(config: Config) -> str:
 
 
 def build_system_prompt(config: Config, playbook: str = "",
-                        profile: Any = None) -> str:
+                        profile: Any = None, tool_bridge: bool = False) -> str:
     """The complete system prompt for one turn.
 
     `profile` is what the model in front of us can actually do. Passing it
     removes advice that does not apply — a model that cannot field several tool
     calls at once should not be told to make them. Left out, everything is
     included, which is what every existing caller wants and what the tests of
-    this function assume.
+    this function assume. `tool_bridge` adds the run_python(tools=true)
+    paragraph: it is set by the loop only when its registry actually wired
+    one, so the advice is never a promise the tool cannot keep.
     """
     mode = (config.agent.mode or "act").lower()
     sections = [
@@ -175,6 +200,8 @@ def build_system_prompt(config: Config, playbook: str = "",
         guidance = TOOL_GUIDANCE
         if profile is not None and not getattr(profile, "parallel_tools", True):
             guidance = guidance.replace(PARALLEL_ADVICE, "")
+        if tool_bridge:
+            guidance = guidance + "\n" + BRIDGE_ADVICE
         sections.append(guidance)
 
     instructions = project_instructions(config)
@@ -245,3 +272,26 @@ Record the transferable part.
 "skill": null}. An empty answer is a good answer.
 - Propose a skill only for a multi-step procedure that clearly recurs.
 - At most four lessons."""
+
+REVIEW_PROMPT = """\
+You are reviewing a finished conversation to update a small curated memory.
+
+The memory holds at most a handful of one-sentence facts about the project \
+and the person. Its budgets are tiny, so it earns its place only by holding \
+things that stay true and keep mattering.
+
+Produce JSON only, matching this shape:
+
+{"facts": [{"kind": "memory | user", "text": "one plain sentence"}]}
+
+Rules:
+- Record only durable facts, never this conversation's content. "The project \
+targets PostgreSQL 15" is a fact. "The user asked me to fix line 12" is not.
+- "memory" facts are about this project or its environment. "user" facts are \
+about the person and would stay true in any project — working hours, preferred \
+tools, how they like answers.
+- Never record credentials, tokens, or anything secret-shaped, even redacted.
+- Facts state how things are. They never give instructions to a model.
+- If nothing durable came out of this conversation, return {"facts": []}. \
+NOTHING is the right answer almost every time.
+- At most three facts."""

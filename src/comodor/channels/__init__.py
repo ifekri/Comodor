@@ -77,6 +77,15 @@ def _slack_ready(settings: Any) -> tuple[bool, str]:
                        "`comodor slack pair` first.")
     return True, ""
 
+def _discord_ready(settings: Any) -> tuple[bool, str]:
+    if not settings.token:
+        return False, ("No bot is connected. `comodor discord connect "
+                       "<token>` first.")
+    if not settings.allowed:
+        return False, ("Nobody is paired, so the bot would answer nobody. "
+                       "`comodor discord pair` first.")
+    return True, ""
+
 
 TELEGRAM = Channel(name="telegram", label="Telegram", section="telegram",
                    ready=_telegram_ready)
@@ -86,4 +95,7 @@ WHATSAPP = Channel(name="whatsapp", label="WhatsApp", section="whatsapp",
 SLACK = Channel(name="slack", label="Slack", section="slack",
                 ready=_slack_ready)
 
-CHANNELS = (TELEGRAM, WHATSAPP, SLACK)
+DISCORD = Channel(name="discord", label="Discord", section="discord",
+                  ready=_discord_ready)
+
+CHANNELS = (TELEGRAM, WHATSAPP, SLACK, DISCORD)

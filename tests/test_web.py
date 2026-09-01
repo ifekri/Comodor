@@ -1262,6 +1262,42 @@ def test_nothing_looked_at_yet_is_not_an_error_shaped_like_a_picture(config):
     finally:
         session.close()
 
+# --------------------------------------------------------------------------- #
+# modes
+#
+# `ask` rides the same request channel as everything else, so most of what
+# needs testing here is the mode list itself: accepted everywhere a mode can
+# be set, refused everywhere it cannot.
+# --------------------------------------------------------------------------- #
+
+def test_set_mode_accepts_every_mode(config):
+    from comodor.web.session import Session
+
+    session = Session(config)
+    try:
+        for mode in ("act", "plan", "ask", "chat"):
+            assert session.set_mode(mode), mode
+            assert session.state()["mode"] == mode
+        assert not session.set_mode("turbo")
+    finally:
+        session.close()
+
+def test_a_mode_request_rides_the_event_log_with_its_options(config):
+    from comodor.events import Request
+    from comodor.web.session import Session
+
+    session = Session(config)
+    try:
+        session.bus.ask(Request(id="m1", prompt="Switch to act mode?",
+                                options=["act", "plan", "ask"],
+                                kind="mode", meta={"current": "plan",
+                                                   "target": "act"}))
+        frames = [f for f in session.since(0) if f["kind"] == "request"]
+        assert frames and frames[0]["about"] == "mode"
+        assert frames[0]["options"] == ["act", "plan", "ask"]
+    finally:
+        session.close()
+
 
 # --------------------------------------------------------------------------- #
 # rules

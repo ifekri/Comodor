@@ -21,8 +21,10 @@ from typing import Any
 from rich.live import Live
 
 from ..agent import AgentLoop, Conversation
+from ..agent.background import BackgroundDelegates, completion_turn
 from ..agent.spawn import spawner
 from ..config import Config, save_user_config, unenforceable_budget
+from ..context_refs import Refusal, expand
 from ..events import Cancelled, EventBus, EventQueue, Kind, Request
 from ..learning import LearningEngine
 from ..mcp import MCPManager
@@ -31,7 +33,7 @@ from ..providers import registry
 from ..providers.fake import demo_scripts
 from ..providers.gateway import Gateway
 from ..questions import CANCELLED, encode_answers
-from ..safety import CheckpointStore, PermissionEngine, Redactor
+from ..safety import CheckpointStore, PermissionEngine, Redactor, make_assessor
 from ..session import SessionIndex, SessionMeta, SessionStore, derive_title, new_session_id
 from ..skills import candidates as skill_candidates
 from ..skills import load_for as skills_for
@@ -44,7 +46,13 @@ from .input import KeyEvent, MouseEvent, PasteEvent, TerminalInput
 from .screen import Screen, ScreenState
 from .widgets.chat import Entry, entries_from
 from .widgets.history import SessionRef
-from .widgets.overlay import info_overlay, permission_overlay, questions_overlay, select_overlay
+from .widgets.overlay import (
+    info_overlay,
+    mode_overlay,
+    permission_overlay,
+    questions_overlay,
+    select_overlay,
+)
 from .widgets.statusbar import StatusModel
 
 #: How long quitting waits for a turn in flight. Quitting mid-task should give
@@ -76,6 +84,7 @@ class App:
         self.events = EventQueue(self.bus)
         self.gateway = Gateway(config, scripts=demo_scripts() if demo else None)
         self.permissions = PermissionEngine(config, self.bus)
+        self.permissions.assess = make_assessor(config, self.gateway)
 
         # Reflex needs the checkpoint journal: it is what records the exact bytes
         # the agent left in each file, so a later hand-edit can be recognised.
@@ -86,6 +95,10 @@ class App:
             redact=Redactor([entry.api_key for entry in config.providers.values()
                              if entry.api_key]),
         )
+        #: Kept for the @-reference expander: anything a user pastes into a
+        #: prompt goes through the same redaction a tool result does.
+        self._redact = Redactor([entry.api_key for entry in
+                                 config.providers.values() if entry.api_key])
         # A refusal is a preference, so route it into the brain rather than
         # letting it end at "no".
         self.permissions.on_denied = self.memory.on_denied
@@ -115,11 +128,21 @@ class App:
         # one is written by hand, the other is inferred.
         self._load_skills()
 
+        # Background delegates: slots, threads, and finished answers held for
+        # the next turn boundary. The tool gets the same manager, both because
+        # there is one place to ask "how full am I" and so the refusal when
+        # every slot is busy is the manager's, not the tool's.
+        self.delegates = BackgroundDelegates(
+            config, self.bus, spawner(config, self.gateway, self.bus,
+                                      skills=self.skills, mcp=self.mcp),
+            persist_path=config.paths.user / "delegates.json")
         self.tools.add(Delegate(spawner(config, self.gateway, self.bus,
-                                        skills=self.skills, mcp=self.mcp)))
+                                        skills=self.skills, mcp=self.mcp),
+                                background=self.delegates))
         self.agent = AgentLoop(config, self.gateway, self.tools, self.bus,
                                self.permissions, self.conversation, self.memory,
                                skills=self.skills)
+        self.agent.delegates = self.delegates
 
         from .. import __version__ as _version
 
@@ -171,6 +194,7 @@ class App:
     def run(self) -> int:
         """Draw the interface until the user quits."""
         self.running = True
+        scheduler = self._start_scheduler()
         # The welcome box in the Live screen replaces the banner for
         # interactive mode. The banner still prints for headless runs
         # (comodor run …) via _greet_on_stderr in cli.py.
@@ -204,11 +228,49 @@ class App:
                     self._last_frame = now
                     self.dirty = False
                 elif not changed:
+                    # The turn boundary. A background delegate that finished
+                    # while a turn was running is picked up here — never
+                    # mid-turn — because a new message can only join the
+                    # conversation when the conversation is between turns.
+                    if self._drain_delegate_completions():
+                        continue
                     self._maybe_prefetch()
                     time.sleep(IDLE_SLEEP)
 
         self._shutdown()
+        if scheduler is not None:
+            scheduler.stop()
         return 0
+
+    def _cron_store(self):
+        """The job store for the cronjob tool, or None where cron is off.
+
+        None is what keeps the tool out of the registry, which matters more
+        than saving an import: a tool the model can see but whose scheduler
+        will never fire it is a promise the program does not keep.
+        """
+        if not self.config.cron.enabled:
+            return None
+        from ..cron.jobs import JobStore
+
+        return JobStore(self.config.paths.user / "cron")
+
+    def _start_scheduler(self):
+        """Fire scheduled jobs while the interface is open.
+
+        Comodor runs where the user runs it — no separate daemon to install —
+        so the tick loop lives inside the process that is already awake. Jobs
+        recorded while nobody is here simply wait for the next open session;
+        the misfire grace window covers a laptop that was asleep, not a tool
+        that was never started.
+        """
+        if not self.config.cron.enabled:
+            return None
+        from ..cron.scheduler import Scheduler
+
+        scheduler = Scheduler(self.config, store=self._cron_store())
+        scheduler.start()
+        return scheduler
 
     def _load_skills(self) -> int:
         """Discover skills, creating the folder with examples on a first run.
@@ -228,8 +290,24 @@ class App:
                                            if skill.enabled)
         self.tools = ToolRegistry(skills=self.skills, history=self.history,
                                   config=self.config,
-                                  session_id=self.session.id, mcp=self.mcp)
+                                  session_id=self.session.id, mcp=self.mcp,
+                                  cron_store=self._cron_store(),
+                                  memory=getattr(self.memory, "facts", None),
+                                  plugins=self._plugins())
         return len(self.skills)
+
+    def _plugins(self) -> Any:
+        """The plugin manager, built once. Kept for `/plugins` and reload."""
+        if getattr(self, "_plugin_manager", None) is None:
+            from ..plugins import load_for
+
+            try:
+                self._plugin_manager = load_for(self.config)
+                self._plugin_manager.load_all()
+                self._plugin_bus_wired = False
+            except Exception:
+                self._plugin_manager = None
+        return self._plugin_manager
 
     def _warn_if_the_budget_is_a_decoration(self) -> None:
         """A spend ceiling that cannot fire, said before it fails to.
@@ -278,6 +356,11 @@ class App:
 
     def _shutdown(self) -> None:
         self.agent.interrupt()
+        # Children that are still running cannot finish a job whose parent is
+        # closing, and a daemon thread dies half-way through a write. Asked
+        # to stop, each gets a moment to save its own state.
+        self.delegates.stop_all()
+        self.delegates.wait(SHUTDOWN_JOIN_SECONDS)
         self.tools.close()
         self.history.close()
         if self.mcp is not None:
@@ -290,6 +373,7 @@ class App:
         if self.conversation.messages:
             self.session.messages = len(self.conversation.messages)
             self.session.cost_usd = self.conversation.usage.cost_usd
+            self.session.compactions = self.conversation.compactions
             self.sessions.save_meta(self.session)
         try:
             self.memory.consolidate()
@@ -338,6 +422,30 @@ class App:
         self._prefetch_draft = draft
         threading.Thread(target=self.memory.prefetch, args=(draft,),
                          daemon=True, name="comodor-prefetch").start()
+
+    def _drain_delegate_completions(self) -> bool:
+        """Finished background delegates become turns of their own.
+
+        Called only when the agent is idle — after a turn ended and before
+        the next one starts. Each completion is shown as a notice the user
+        sees, then delivered as one user turn the agent answers with the
+        full turn machinery: recall, tools, streaming, learning.
+        """
+        if self.state.status.busy:
+            return False
+        records = self.delegates.take_pending()
+        if not records:
+            return False
+        summary_max = self.config.delegation.completion_summary_max
+        turns = [completion_turn(record, summary_max) for record in records]
+        for record, text in zip(records, turns, strict=True):
+            self.state.entries.append(Entry(
+                "notice", f"background task {record.get('id')} — "
+                          f"{record.get('state', 'done')}"))
+            self.state.entries.append(Entry("user", text))
+        self.state.scroll = 0
+        self._start_agent("\n\n".join(turns))
+        return True
 
     def _pump_input(self, terminal: TerminalInput) -> bool:
         changed = False
@@ -547,13 +655,13 @@ class App:
             self._close_overlay(cancelled=True)
             return True
 
-        if overlay.kind == "permission":
+        if overlay.kind in ("permission", "mode"):
             for choice in overlay.choices:
                 if event.matches(choice.key):
-                    self._answer_permission(choice.value)
+                    self._answer_request(choice.value)
                     return True
             if event.key == "enter":
-                self._answer_permission(overlay.choices[0].value)
+                self._answer_request(overlay.choices[0].value)
                 return True
             return False
 
@@ -668,10 +776,15 @@ class App:
         self.state.overlay = None
         self._next_request()
 
-    def _answer_permission(self, value: str) -> None:
+    def _answer_request(self, value: str) -> None:
+        """Answer whichever request the overlay is holding, then move on."""
         overlay = self.state.overlay
         if overlay is not None and overlay.request is not None:
             overlay.request.answer(value)
+            # A mode choice takes effect here, not only inside the tool:
+            # the status bar should say so the moment the key is pressed.
+            if overlay.kind == "mode" and value in ("act", "plan", "ask", "chat"):
+                self._set_mode(value)
         self.state.overlay = None
         self._next_request()
 
@@ -680,6 +793,8 @@ class App:
         """The dialog a request deserves, chosen by its kind."""
         if request.kind == "questions":
             return questions_overlay(request)
+        if request.kind == "mode":
+            return mode_overlay(request)
         return permission_overlay(request)
 
     def _next_request(self) -> None:
@@ -816,6 +931,19 @@ class App:
                 self._toast(" · ".join(parts), "good")
         elif action == "taught":
             self._toast("noted — I'll remember that", "good")
+        elif action == "facts":
+            verb = payload.get("verb", "remembered")
+            names = "; ".join(str(item.get("text", "")) for item in items[:3])
+            hint = "/memory facts pending to review" if payload.get("staged") \
+                else "/memory facts to see it"
+            self.state.entries.append(Entry(
+                "memory", f"{verb}: {names}",
+                meta={"hint": hint}))
+        elif action == "reviewing":
+            # Quietly. The review runs after the turn; saying so on the way
+            # out of every turn would be noise for work that usually adds
+            # nothing.
+            pass
 
     def _on_turn_end(self, payload: dict[str, Any]) -> None:
         stopped = payload.get("stopped", "done")
@@ -828,6 +956,7 @@ class App:
         self._persist_new_messages()
         self.session.messages = len(self.conversation.messages)
         self.session.cost_usd = self.conversation.usage.cost_usd
+        self.session.compactions = self.conversation.compactions
         self.sessions.save_meta(self.session)
         self._refresh_sessions()
 
@@ -851,6 +980,19 @@ class App:
             return self._command(name, rest.strip())
         if text.startswith("!"):
             return self._run_shell_directly(text[1:].strip())
+
+        # @ references expand before anything else happens: the user asked for
+        # material to be in the prompt, and refusing or warning must land
+        # while the editor still holds the draft.
+        try:
+            text, warning = expand(text, self.config.paths.project,
+                                   context_limit=self.config.agent.context_limit,
+                                   redact=self._redact)
+        except Refusal as refusal:
+            self._toast(str(refusal), "bad", ttl=8.0)
+            return True
+        if warning:
+            self._toast(warning, "warn", ttl=8.0)
 
         self.state.entries.append(Entry("user", text))
         self.state.scroll = 0
@@ -1018,15 +1160,15 @@ class App:
     def cmd_mode(self, args: str) -> None:
         if args:
             mode = args.strip().lower()
-            if mode not in ("act", "plan", "chat"):
-                self._toast("mode must be act, plan or chat", "bad")
+            if mode not in ("act", "plan", "ask", "chat"):
+                self._toast("mode must be act, plan, ask or chat", "bad")
                 return
             self._set_mode(mode)
             return
         self._cycle_mode()
 
     def _cycle_mode(self) -> bool:
-        order = ["act", "plan", "chat"]
+        order = ["act", "plan", "ask", "chat"]
         current = self.config.agent.mode.lower()
         index = order.index(current) if current in order else 0
         self._set_mode(order[(index + 1) % len(order)])
@@ -1035,7 +1177,8 @@ class App:
     def _set_mode(self, mode: str) -> None:
         self.config.agent.mode = mode
         self.state.status.mode = mode
-        note = {"act": "full tools", "plan": "read-only", "chat": "no tools"}[mode]
+        note = {"act": "full tools", "plan": "read-only",
+                "ask": "read-only questions", "chat": "no tools"}[mode]
         self._toast(f"mode: {mode} ({note})", "accent", key="mode")
 
     def cmd_loop(self, args: str) -> None:
@@ -1056,6 +1199,10 @@ class App:
                     key="gateway")
 
     def cmd_memory(self, args: str) -> None:
+        """The two shelves: curated facts first, then the learned lessons."""
+        if args.strip().lower() in ("facts", "fact"):
+            self._facts_overlay()
+            return
         lessons = self.memory.search(args, limit=40)
         if not lessons:
             self.state.overlay = info_overlay(
@@ -1071,6 +1218,64 @@ class App:
         ]
         self.state.overlay = select_overlay(
             f"Memory ({len(lessons)})", items, self._memory_action)
+
+    def _facts_overlay(self, args: str = "") -> None:
+        """The curated shelf, staged proposals included when there are any."""
+        include_staged = args.strip().lower() == "pending"
+        entries = self.memory.fact_entries(include_staged=include_staged)
+        usage = self.memory.facts.usage_line()
+        if not entries:
+            self.state.overlay = info_overlay(
+                "Curated memory", f"Nothing here yet. Shelves: {usage}\n\n"
+                "Facts are one-sentence truths about this project and about "
+                "you, written down by the agent or by you with /teach, and "
+                "injected at the top of every turn.")
+            return
+        items = []
+        for fact in entries:
+            mark = ""
+            if fact.status == "staged":
+                mark = "  [staged — review]"
+            elif fact.pinned:
+                mark = "  [pinned]"
+            items.append((f"#{fact.id} ({fact.kind}) {fact.text}{mark}",
+                          f"{fact.status}"))
+        self.state.overlay = select_overlay(
+            f"Curated memory — {usage}", items,
+            lambda label: self._fact_action(label, include_staged))
+
+    def _fact_action(self, label: str, staged_view: bool) -> None:
+        try:
+            fact_id = int(label.split()[0].lstrip("#"))
+        except (ValueError, IndexError):
+            return
+        actions = [("pin", "always include this"), ("unpin", "back to normal"),
+                   ("remove", "delete it")]
+        if staged_view:
+            actions = [("approve", "write it into the memory"),
+                       ("reject", "discard the proposal")] + actions
+        self.state.overlay = select_overlay(
+            f"Fact #{fact_id}", actions,
+            lambda action: self._apply_fact_action(fact_id, action))
+
+    def _apply_fact_action(self, fact_id: int, action: str) -> None:
+        if action == "approve":
+            done = self.memory.decide_fact(fact_id, approve=True)
+        elif action == "reject":
+            done = self.memory.decide_fact(fact_id, approve=False)
+        elif action in ("pin", "unpin"):
+            done = self.memory.pin_fact(fact_id, action == "pin")
+        elif action == "remove":
+            done = self.memory.remove_fact(fact_id)
+        else:
+            return
+        if done and action in ("approve", "pin", "unpin"):
+            note = "" if action == "approve" else " pinned" if action == "pin" \
+                else " unpinned"
+            self._toast(f"fact{note or ' approved'}", "good")
+        elif not done:
+            self._toast("that did not take", "warn")
+        self._facts_overlay()
 
     def _memory_action(self, label: str) -> None:
         try:
@@ -1244,6 +1449,18 @@ class App:
             self._toast(str(error), "bad", ttl=6.0)
             return
 
+        # The draft came from a learned procedure in the brain, so the ledger
+        # names the brain as the author and the approval as the user's.
+        try:
+            from ..skills.ledger import Ledger
+
+            ledger = Ledger(self.config.paths.skills)
+            text = path.read_text(encoding="utf-8")
+            ledger.record(actor="brain", action="create",
+                          skill=chosen.name, after=ledger.keep(text))
+        except OSError:
+            pass
+
         count = self._load_skills()
         self.agent.skills = self.skills
         self.agent.tools = self.tools
@@ -1296,9 +1513,132 @@ class App:
         if len(tools) > 30:
             body.append(f"- … and {len(tools) - 30} more")
 
+        resources = self._mcp_resources()
+        if resources:
+            body += ["", f"### {len(resources)} resource(s) to read", ""]
+            for server, uri, label in resources[:20]:
+                body.append(f"- `{uri}` — {label} ({server})")
+            if len(resources) > 20:
+                body.append(f"- … and {len(resources) - 20} more")
+            body.append("")
+            body.append("The agent can read any of these when you ask it to.")
+
         body += ["", "`/mcp reload` reconnects after changing the configuration.",
+                 "`/prompt` runs a server's prompt template as your message.",
                  "`comodor mcp add <name>` adds one from a terminal."]
         self.state.overlay = info_overlay("MCP", "\n".join(body))
+
+    def _mcp_resources(self) -> list[tuple[str, str, str]]:
+        """(server, uri, label) for every resource a started server offers.
+
+        Reads only the states that already exist: starting servers to fill
+        a panel would put their startup cost into a keystroke.
+        """
+        found: list[tuple[str, str, str]] = []
+        for name in self.mcp.enabled_names():
+            state = self.mcp.states.get(name)
+            if state is None or not state.ok:
+                continue
+            for resource in state.resources:
+                found.append((name, resource.uri,
+                              resource.name or resource.description))
+        return found
+
+    def cmd_prompt(self, args: str) -> None:
+        """Run a server's prompt template as this conversation's next message.
+
+        Called with `server/name` and arguments it runs at once; called with
+        nothing it lists what the connected servers offer, so the templates
+        are discoverable without a trip to a terminal.
+        """
+        if self.mcp is None:
+            self._toast("MCP is switched off (mcp.enabled is false)", "warn")
+            return
+
+        words = args.strip().split()
+        if words and "/" in words[0]:
+            self._run_mcp_prompt(words[0], words[1:])
+            return
+
+        choices: list[tuple[str, str]] = []
+        for name in self.mcp.enabled_names():
+            state = self.mcp.start(name)
+            if not state.ok:
+                continue
+            for prompt in state.prompts:
+                note = f" — {prompt.description}" if prompt.description else ""
+                choices.append((f"{name}/{prompt.name}", note.strip()))
+        if not choices:
+            self._toast("no server offers prompt templates", "warn")
+            return
+        self.state.overlay = select_overlay("Run a prompt", choices,
+                                            self._select_mcp_prompt)
+
+    def _select_mcp_prompt(self, full_name: str) -> None:
+        self._run_mcp_prompt(full_name, [])
+
+    def _run_mcp_prompt(self, full_name: str, values: list[str]) -> None:
+        server_name, _, prompt_name = full_name.partition("/")
+        state = self.mcp.start(server_name)
+        if not state.ok:
+            self._toast(f"{server_name} would not start", "bad")
+            return
+        description = next((p for p in state.prompts
+                            if p.name == prompt_name), None)
+        if description is None:
+            self._toast(f"{server_name} has no prompt {prompt_name!r}", "bad")
+            return
+
+        # Prompts may declare arguments. Ones with defaults or none at all
+        # can run straight through; the required ones are asked for in the
+        # editor rather than in a chain of forms — a template is text, and
+        # text is easiest to edit.
+        missing = [entry.get("name", "") for entry in description.arguments
+                   if entry.get("required")]
+        supplied: dict[str, str] = {}
+        for pair in values:
+            key, _, value = pair.partition("=")
+            supplied[key] = value
+        if any(name and name not in supplied for name in missing):
+            wanted = ", ".join(name for name in missing if name not in supplied)
+            self._toast(f"{full_name} needs: {wanted}  — "
+                        f"run as /prompt {full_name} key=value …", "warn")
+            return
+
+        try:
+            text = self.mcp.get_prompt(server_name, prompt_name, supplied)
+        except Exception as error:
+            self._toast(f"{full_name}: {error}", "bad", ttl=8.0)
+            return
+
+        # Injected as the user's own words, visibly, the way an @reference
+        # is: the transcript shows exactly what the template expanded to.
+        self.state.entries.append(Entry("user", text))
+        self.state.scroll = 0
+        self._start_agent(text)
+
+    def cmd_plugins(self, args: str) -> None:
+        """What the plugins added, and what refused to load."""
+        plugins = self._plugins()
+        states = list(plugins.states.values()) if plugins else []
+        if not states:
+            self._toast("no plugins installed", "warn")
+            return
+
+        body = ["## Plugins", ""]
+        for state in states:
+            mark = "●" if state.ok else ("○" if state.trusted else "✗")
+            label = state.name if state.ok else \
+                f"{state.name} — {state.error or 'untrusted'}"
+            body.append(f"- {mark} **{label}**")
+            if state.ok and state.context:
+                for spec in state.context.tools:
+                    body.append(f"  - tool `{spec['name']}` ({spec['risk'].lower()})")
+                for kind, _ in state.context.hooks:
+                    body.append(f"  - listens on {kind}")
+        body += ["", "Project plugins stay inert until trusted:",
+                 "`comodor plugins trust <name>` from a terminal."]
+        self.state.overlay = info_overlay("Plugins", "\n".join(body))
 
     def cmd_good(self, args: str) -> None:
         self.memory.feedback(self.agent._recalled, good=True, note=args)
@@ -1396,11 +1736,53 @@ class App:
             self.memory.store.episodes(limit=300, scope=self.memory.project_scope),
             lessons=stats.get("lessons", 0),
             rules_active=stats.get("rules_active", 0),
+            facts=stats.get("facts_here", 0),
         )
         overlay = info_overlay("Progress", "")
         overlay.meta["renderable"] = render_progress(
             progress, self.theme, width=max(60, self.console.size.width - 10))
         self.state.overlay = overlay
+
+    def cmd_journey(self, args: str) -> None:
+        """The timeline of everything learned, oldest first. Pure rendering."""
+        from ..learning import journey
+
+        timeline = journey.build(self.memory.store)
+        overlay = info_overlay("Journey", "")
+        overlay.meta["renderable"] = journey.render(
+            timeline, self.theme, width=max(60, self.console.size.width - 10))
+        self.state.overlay = overlay
+
+    def cmd_delegates(self, args: str) -> None:
+        """`/delegates list` or `/delegates stop <id>` — the control plane."""
+        words = args.split()
+        if not words or words[0] == "list":
+            runs = self.delegates.listing()
+            if not runs:
+                self._toast("no background delegates", "good")
+                return
+            for run in runs:
+                self.state.entries.append(Entry(
+                    "tool", f"delegate {run['id']}",
+                    meta={"summary": (
+                        f"{run['state']} · {run['steps']} steps · "
+                        f"{run['elapsed']}s · {run['label']}"),
+                        "running": run["state"] == "running",
+                        "ok": run["state"] not in ("failed", "lost")}))
+            self.dirty = True
+            return
+        if words[0] == "stop" and len(words) == 2:
+            if self.delegates.stop(words[1]):
+                self._toast(f"stopping {words[1]}…", "good")
+            else:
+                self._toast(f"{words[1]} is not running", "warn")
+            return
+        if words[0] == "stop" and not words[1:]:
+            stopped = self.delegates.stop_all()
+            self._toast(f"stopping {stopped} delegate(s)…" if stopped
+                        else "nothing running", "warn" if not stopped else "good")
+            return
+        self._toast("usage: /delegates [list | stop <id> | stop]", "warn")
 
     def cmd_cost(self, args: str) -> None:
         usage = self.conversation.usage
@@ -1426,13 +1808,57 @@ class App:
             f"- context used: {self.state.status.context_used:,}"
             f" / {self.state.status.context_limit:,}",
             f"- compactions: {self.conversation.compactions}",
+        ]
+        # Generated images are dollars, not tokens, so they are reported
+        # from the brain's own fuse counter rather than the token usage.
+        image_spent = self._images_generated_today()
+        if image_spent is not None:
+            limit = self.config.image_gen.max_per_day
+            body.append(f"- images generated today: {image_spent} "
+                        f"(daily limit {limit})")
+        body += [
             "", "**Brain**", "",
             f"- lessons: {stats['lessons']}",
             f"- skills: {stats['skills']}",
+            f"- facts: {stats.get('facts', 0)}"
+            + (f" (review cost this session: ${stats['review_cost_usd']:.4f})"
+               if stats.get("review_cost_usd") else ""),
             f"- episodes: {stats['episodes']}"
             f" ({stats['success_rate']:.0%} succeeded)",
         ]
         self.state.overlay = info_overlay("Usage", "\n".join(body))
+
+    def _images_generated_today(self) -> int | None:
+        """Today's image-generation count, or None when there is no fuse.
+
+        None — not zero — when the brain or the setting is absent, so the
+        line only appears where the tool it reports on can actually run.
+        """
+        if not (getattr(self.config, "image_gen", None)
+                and self.config.image_gen.enabled):
+            return None
+        memory = getattr(self, "memory", None)
+        store = getattr(memory, "store", None)
+        if store is None:
+            return None
+        try:
+            from ..image_gen.registry import used_today
+
+            return used_today(store)
+        except Exception:
+            return None
+
+    def cmd_insights(self, args: str) -> None:
+        """The same session view, stretched across every session on disk."""
+        from ..insights import collect, render
+
+        try:
+            days = max(1, int(args.strip() or 30))
+        except ValueError:
+            self._toast("usage: /insights [days]", "warn")
+            return
+        self.state.overlay = info_overlay("Insights",
+                                          render(collect(self.config, days)))
 
     def cmd_export(self, args: str) -> None:
         fmt = (args or "md").strip().lower()
@@ -1475,11 +1901,15 @@ class App:
         self._toast(f"theme: {name}", "good", key="theme")
 
     def cmd_settings(self, args: str) -> None:
+        from ..paths import DEFAULT_PROFILE, profile_name
+
         config = self.config
         body = [
             "**Settings**", "",
             f"- provider: `{config.provider}` · model: `{config.active_model()}`",
-            f"- mode: `{config.agent.mode}` · loop: `{config.agent.loop}`",
+            f"- mode: `{config.agent.mode}` · loop: `{config.agent.loop}`"
+            + (f" · profile: `{profile_name()}`"
+               if profile_name() != DEFAULT_PROFILE else ""),
             f"- gateway: `{self.gateway.describe()}` (policy `{config.gateway.policy}`)",
             f"- auto-approve: writes `{config.safety.auto_approve_writes}`, "
             f"shell `{config.safety.auto_approve_shell}`",
@@ -1668,7 +2098,9 @@ class App:
             self._toast("no earlier sessions", "warn")
             return
         items = [(meta.id, f"{meta.title or 'untitled'}  ·  {meta.when}  ·  "
-                           f"{meta.messages} messages") for meta in sessions]
+                           f"{meta.messages} messages"
+                           + (f"  ·  compacted {meta.compactions}x"
+                              if meta.compactions else "")) for meta in sessions]
         self.state.overlay = select_overlay("Resume", items, self._resume)
 
     def _resume(self, session_id: str) -> None:
@@ -1797,15 +2229,18 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/mode": ("cmd_mode", "act, plan or chat"),
     "/loop": ("cmd_loop", "autonomous iteration on or off"),
     "/gw": ("cmd_gateway", "model gateway and routing policy"),
-    "/memory": ("cmd_memory", "browse what it has learned"),
+    "/memory": ("cmd_memory", "browse what it has learned "
+                                "(try /memory facts)"),
     "/rules": ("cmd_rules", "house rules learned from your code and edits"),
     "/progress": ("cmd_progress", "proof that it is getting better"),
+    "/journey": ("cmd_journey", "everything it has learned, oldest first"),
     "/teach": ("cmd_teach", "record something it should remember"),
     "/skills": ("cmd_skills", "saved procedures"),
     "/good": ("cmd_good", "that answer was right"),
     "/bad": ("cmd_bad", "that answer was wrong"),
     "/undo": ("cmd_undo", "restore the last file the agent changed"),
     "/cost": ("cmd_cost", "tokens, spend, and brain stats"),
+    "/insights": ("cmd_insights", "spend and progress across all sessions"),
     "/export": ("cmd_export", "write this session to a file"),
     "/theme": ("cmd_theme", "change the colours"),
     "/settings": ("cmd_settings", "current configuration"),
@@ -1819,6 +2254,9 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/resume": ("cmd_resume", "reopen an earlier session"),
     "/search": ("cmd_search", "find something in an earlier conversation"),
     "/mcp": ("cmd_mcp", "MCP servers and the tools they provide"),
+    "/prompt": ("cmd_prompt", "run a server's prompt template"),
+    "/plugins": ("cmd_plugins", "installed plugins and what they add"),
+    "/delegates": ("cmd_delegates", "background delegates: list, or stop one"),
     "/quit": ("cmd_quit", "exit"),
 }
 
