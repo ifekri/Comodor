@@ -1600,6 +1600,16 @@ class App:
             progress, self.theme, width=max(60, self.console.size.width - 10))
         self.state.overlay = overlay
 
+    def cmd_journey(self, args: str) -> None:
+        """The timeline of everything learned, oldest first. Pure rendering."""
+        from ..learning import journey
+
+        timeline = journey.build(self.memory.store)
+        overlay = info_overlay("Journey", "")
+        overlay.meta["renderable"] = journey.render(
+            timeline, self.theme, width=max(60, self.console.size.width - 10))
+        self.state.overlay = overlay
+
     def cmd_delegates(self, args: str) -> None:
         """`/delegates list` or `/delegates stop <id>` — the control plane."""
         words = args.split()
@@ -2029,6 +2039,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
                                 "(try /memory facts)"),
     "/rules": ("cmd_rules", "house rules learned from your code and edits"),
     "/progress": ("cmd_progress", "proof that it is getting better"),
+    "/journey": ("cmd_journey", "everything it has learned, oldest first"),
     "/teach": ("cmd_teach", "record something it should remember"),
     "/skills": ("cmd_skills", "saved procedures"),
     "/good": ("cmd_good", "that answer was right"),

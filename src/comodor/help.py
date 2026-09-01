@@ -366,6 +366,16 @@ subscription, not the agent, and it is the one flag worth thinking twice
 about: a machine talking to a machine is exactly the caller whose
 instructions nobody has read."""),
 
+    "journey": ("What it has learned, in order", """\
+  comodor journey                  the whole timeline, oldest first
+  comodor journey remove rule:3    retire one node (a rule is disabled,
+                                   not deleted — its evidence stays true)
+
+Lessons, rules, learned skills and facts, each with what backs it — the
+confidence, the observation counts, the episode it came from. Nothing here
+enters a prompt: it is rendering of the brain's own records, for the person
+wondering what the agent has actually picked up after a few weeks."""),
+
     "memory-provider": ("An external memory service (optional)", """\
   comodor memory-provider setup --base-url http://127.0.0.1:9310
   comodor memory-provider status     what is set, and whether it answers

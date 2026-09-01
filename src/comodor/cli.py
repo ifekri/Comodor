@@ -123,6 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
     from .cron.commands import register as register_cron
     from .discord.commands import register as register_discord
     from .learning.commands import register as register_curator
+    from .learning.journey_commands import register as register_journey
     from .learning.providers.commands import register as register_memory_provider
     from .local.commands import register as register_local
     from .mcp.commands import register as register_mcp
@@ -146,6 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_webhook(sub)
     register_acp(sub)
     register_memory_provider(sub)
+    register_journey(sub)
 
     serve = sub.add_parser(
         "serve", help="speak the OpenAI chat protocol, so other frontends "
@@ -1043,6 +1045,10 @@ def main(argv: list[str] | None = None) -> int:
         from .learning.providers.commands import run as run_memory_provider
 
         return run_memory_provider(config, args)
+    if args.command == "journey":
+        from .learning.journey_commands import run as run_journey
+
+        return run_journey(config, args)
     if args.command == "serve":
         from .api.server import run as run_api
 
