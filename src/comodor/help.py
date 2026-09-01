@@ -168,9 +168,15 @@ A skill is a written procedure - a markdown file with a name and a description
   comodor skills browse     what is available
   comodor skills add NAME   install one
   comodor skills list       what you have
+  comodor skills rollback --list
+                            every change the agent made, and how to undo it
   /skills                   the same, in the interface
+  /skills draft             procedures Comodor worked out and wants to save
+  /skills adopt NAME        save one of those drafts as your own skill
 
-Write your own in  ~/.comodor/skills/<name>/SKILL.md.
+Write your own in  ~/.comodor/skills/<name>/SKILL.md. The agent can write
+and patch them too (skill_manage); every change is recorded, and the
+injection scan flags anything suspicious at write time.
 Full guide: docs/skills.md"""),
 
     "curator": ("Keeping the brain tidy", """\

@@ -1427,6 +1427,18 @@ class App:
             self._toast(str(error), "bad", ttl=6.0)
             return
 
+        # The draft came from a learned procedure in the brain, so the ledger
+        # names the brain as the author and the approval as the user's.
+        try:
+            from ..skills.ledger import Ledger
+
+            ledger = Ledger(self.config.paths.skills)
+            text = path.read_text(encoding="utf-8")
+            ledger.record(actor="brain", action="create",
+                          skill=chosen.name, after=ledger.keep(text))
+        except OSError:
+            pass
+
         count = self._load_skills()
         self.agent.skills = self.skills
         self.agent.tools = self.tools

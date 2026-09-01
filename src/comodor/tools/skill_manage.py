@@ -176,13 +176,15 @@ class SkillManage(Tool):
         manifest = folder / MANIFEST
         body = (f"---\nname: {name}\ndescription: {description}\n---\n\n"
                 f"{instructions.rstrip()}\n")
+        flagged = self._threat_note(body)
         folder.mkdir(parents=True, exist_ok=True)
         manifest.write_text(body, encoding="utf-8")
+        self._mark_created(ctx, name)
         self._record(ctx, action="create", skill=name,
                      before_text="", after_text=body)
         findings = self._lint_note(ctx, folder)
         return ToolResult.success(
-            f"Wrote {manifest} in the user skills folder.{findings}",
+            f"Wrote {manifest} in the user skills folder.{flagged}{findings}",
             display=f"skill {name} created")
 
     def _patch(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
@@ -224,6 +226,7 @@ class SkillManage(Tool):
         match = matches[0]
         note = f" ({match.how})" if not match.exact else ""
         changed = text[:match.start] + new + text[match.end:]
+        flagged = self._threat_note(new)
         with manifest.open("w", encoding="utf-8", newline="") as handle:
             handle.write(changed)
         self._record(ctx, action="patch", skill=name, before_text=text,
@@ -232,7 +235,7 @@ class SkillManage(Tool):
         store.record_patch(name, note="patched by agent")
         findings = self._lint_note(ctx, folder)
         return ToolResult.success(
-            f"Patched {MANIFEST}{note or ''}.{findings}",
+            f"Patched {MANIFEST}{note or ''}.{flagged}{findings}",
             display=f"skill {name} patched")
 
     def _remove(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
@@ -264,6 +267,44 @@ class SkillManage(Tool):
         after = self._ledger.keep(after_text) if after_text else ""
         self._ledger.record(actor="agent", action=action, skill=skill,
                             before=before, after=after)
+
+    def _threat_note(self, text: str) -> str:
+        """What the injection scan saw, said once, at write time.
+
+        Advisory like the linter notes: the finding lands in the result the
+        person is already reading, and the person decides. Nothing is
+        blocked here — a scan that silently refuses text is a gate with a
+        pattern list for a brain, and that is not what this is.
+        """
+        from ..skills.threats import scan
+
+        hits = scan(text)
+        if not hits:
+            return ""
+        return ("\n\nSecurity note — this text also:\n" + "\n".join(
+            f"- {hit}" for hit in hits))
+
+    def _mark_created(self, ctx: ToolContext, name: str) -> None:
+        """Record who authored the skill, in the usage sidecar.
+
+        The curator exempts user-authored skills from archiving, so the
+        honest answer is "agent": this file was written by the tool, at the
+        model's request. A person editing it later is a patch, not a birth.
+        """
+        import time as _time
+
+        from ..skills.usage import UsageStore
+
+        def claim(record):
+            record.created_by = "agent"
+            if not record.created:
+                record.created = _time.strftime("%Y-%m-%dT%H:%M:%S")
+            return record
+
+        try:
+            UsageStore(ctx.config.paths.skills).update(name, claim)
+        except OSError:
+            pass
 
     def _lint_note(self, ctx: ToolContext, folder: Path) -> str:
         """What the reviewer would say, said once, at write time."""
