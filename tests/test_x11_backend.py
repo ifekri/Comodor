@@ -10,9 +10,22 @@ rather than raising an Xlib error number.
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
-from comodor.desktop import x11
+# The backend refuses at import on any other system - saying so is its job -
+# so the import has to sit behind the same platform test that skips the
+# tests, the way test_quartz_backend.py does for macOS. The name is still
+# bound either way, because the skipif decorators below evaluate at module
+# level too; where the module did not load it is None and everything skips.
+pytestmark = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="the X11 backend is for Linux")
+
+x11 = None
+if sys.platform.startswith("linux"):
+    from comodor.desktop import x11
 
 # --------------------------------------------------------------------------- #
 # the key table
@@ -113,7 +126,8 @@ def test_everything_refuses_with_a_sentence_when_x_is_not_there(monkeypatch):
     assert "libX11" in str(error.value)
 
 
-@pytest.mark.skipif(not x11.AVAILABLE, reason="needs the X11 libraries")
+@pytest.mark.skipif(x11 is None or not x11.AVAILABLE,
+                     reason="needs the X11 libraries")
 def test_looking_without_xtst_says_so_and_typing_is_refused_too(monkeypatch):
     monkeypatch.setattr(x11, "CAN_TYPE", False)
 
@@ -146,7 +160,8 @@ def test_screen_is_locked_is_honestly_false():
     assert x11.screen_is_locked() is False
 
 
-@pytest.mark.skipif(not x11.AVAILABLE, reason="needs the X11 libraries")
+@pytest.mark.skipif(x11 is None or not x11.AVAILABLE,
+                     reason="needs the X11 libraries")
 def test_wayland_style_failure_names_wayland(monkeypatch):
     """The refusal every Linux user without X will actually hit: no display to
     open, and the message has to say Wayland by name."""
