@@ -17,18 +17,25 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import sys
 
 import pytest
 
+# The backend raises at import on any other system - saying so is its job -
+# so the skip has to happen before the import, not as a marker on the tests.
 pytestmark = pytest.mark.skipif(
-    ctypes.util.find_library("CoreGraphics") is None,
+    sys.platform != "darwin" or ctypes.util.find_library("CoreGraphics") is None,
     reason="CoreGraphics is only on macOS")
 
-from comodor.desktop import quartz  # noqa: E402
+if sys.platform == "darwin" and ctypes.util.find_library("CoreGraphics"):
+    from comodor.desktop import quartz  # noqa: E402
 
 _cf = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
 _cf.CFRetain.restype = ctypes.c_void_p
 _cf.CFRetain.argtypes = [ctypes.c_void_p]
+
+# Pixel buffers CGDataProviderCreateWithData references instead of copies.
+_BUFFERS: list[object] = []
 
 
 # --------------------------------------------------------------------------- #
@@ -98,7 +105,12 @@ class CGRect(ctypes.Structure):
 
 def _display_image(pixels: bytes, width: int, height: int) -> int:
     """A display's image, built the way CGDisplayCreateImage hands it over:
-    top-down BGRA bytes behind a CGDataProvider."""
+    top-down BGRA bytes behind a CGDataProvider.
+
+    The provider references the buffer rather than copying it, so the buffer
+    is kept alive on a module list for the life of the process - a garbage
+    collect at the wrong moment turns the bands into noise.
+    """
     cg = ctypes.CDLL(ctypes.util.find_library("CoreGraphics"))
     cg.CGColorSpaceCreateDeviceRGB.restype = ctypes.c_void_p
     cspace = cg.CGColorSpaceCreateDeviceRGB()
@@ -110,7 +122,8 @@ def _display_image(pixels: bytes, width: int, height: int) -> int:
         ctypes.c_size_t, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_size_t,
         ctypes.c_size_t, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p,
         ctypes.c_void_p, ctypes.c_bool, ctypes.c_int]
-    data = (ctypes.c_char * len(pixels)).from_buffer(bytearray(pixels))
+    data = (ctypes.c_char * len(pixels)).from_buffer_copy(pixels)
+    _BUFFERS.append(data)
     provider = cg.CGDataProviderCreateWithData(
         None, ctypes.addressof(data), len(pixels), None)
     image = cg.CGImageCreate(width, height, 8, 32, width * 4, cspace,
