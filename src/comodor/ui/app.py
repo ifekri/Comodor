@@ -1664,6 +1664,18 @@ class App:
         ]
         self.state.overlay = info_overlay("Usage", "\n".join(body))
 
+    def cmd_insights(self, args: str) -> None:
+        """The same session view, stretched across every session on disk."""
+        from ..insights import collect, render
+
+        try:
+            days = max(1, int(args.strip() or 30))
+        except ValueError:
+            self._toast("usage: /insights [days]", "warn")
+            return
+        self.state.overlay = info_overlay("Insights",
+                                          render(collect(self.config, days)))
+
     def cmd_export(self, args: str) -> None:
         fmt = (args or "md").strip().lower()
         target_dir = self.config.paths.exports
@@ -2015,6 +2027,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/bad": ("cmd_bad", "that answer was wrong"),
     "/undo": ("cmd_undo", "restore the last file the agent changed"),
     "/cost": ("cmd_cost", "tokens, spend, and brain stats"),
+    "/insights": ("cmd_insights", "spend and progress across all sessions"),
     "/export": ("cmd_export", "write this session to a file"),
     "/theme": ("cmd_theme", "change the colours"),
     "/settings": ("cmd_settings", "current configuration"),

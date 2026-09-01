@@ -336,7 +336,8 @@ class LearningEngine:
     def record_outcome(self, goal: str, messages: list[Any], recalled: list[Lesson],
                        success: bool, stopped: str, steps: int, elapsed: float,
                        approvals: int = 0, tokens: int = 0,
-                       corrections: int = 0, cancel_reason: str = "") -> None:
+                       corrections: int = 0, cancel_reason: str = "",
+                       cost_usd: float = 0.0) -> None:
         """Close the loop on one task: credit, store, then reflect in the background."""
         tools_used = sorted({message.name for message in messages
                              if getattr(message.role, "value", "") == "tool" and message.name})
@@ -358,6 +359,7 @@ class LearningEngine:
             corrections=corrections,
             retries=len(errors),
             rules_active=len(self.active_rules()),
+            cost_usd=cost_usd,
         ))
 
         # One task is one bag of words that belonged together. This is where

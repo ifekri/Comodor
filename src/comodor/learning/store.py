@@ -282,6 +282,10 @@ class Episode:
     retries: int = 0
     tokens: int = 0
     rules_active: int = 0
+    #: What the task cost, from the provider's own accounting. Zero when the
+    #: model publishes no price — the insights view shows a dash for that,
+    #: never a guess.
+    cost_usd: float = 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -513,6 +517,7 @@ class BrainStore:
                 ("retries", "INTEGER NOT NULL DEFAULT 0"),
                 ("tokens", "INTEGER NOT NULL DEFAULT 0"),
                 ("rules_active", "INTEGER NOT NULL DEFAULT 0"),
+                ("cost_usd", "REAL NOT NULL DEFAULT 0"),
             ],
             "lessons": [
                 # The curator's status: 'active' is the default and the only
@@ -1018,13 +1023,13 @@ class BrainStore:
                 """INSERT INTO episodes(session_id, goal, scope, success, stopped,
                                         steps, elapsed, tools_used, error_kind, created_at,
                                         corrections, approvals_asked, retries, tokens,
-                                        rules_active)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                        rules_active, cost_usd)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (episode.session_id, episode.goal, episode.scope, int(episode.success),
                  episode.stopped, episode.steps, episode.elapsed,
                  json.dumps(episode.tools_used), episode.error_kind, episode.created_at,
                  episode.corrections, episode.approvals_asked, episode.retries,
-                 episode.tokens, episode.rules_active),
+                 episode.tokens, episode.rules_active, episode.cost_usd),
             )
             episode.id = int(cursor.lastrowid or 0)
         return episode
@@ -1049,6 +1054,7 @@ class BrainStore:
                 corrections=row["corrections"], approvals_asked=row["approvals_asked"],
                 retries=row["retries"], tokens=row["tokens"],
                 rules_active=row["rules_active"],
+                cost_usd=row["cost_usd"] if "cost_usd" in row.keys() else 0.0,
             )
             for row in reversed(rows)
         ]

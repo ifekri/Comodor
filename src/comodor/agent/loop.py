@@ -763,6 +763,7 @@ class AgentLoop:
                 elapsed=result.elapsed,
                 approvals=approvals,
                 tokens=self.conversation.usage.total,
+                cost_usd=self.conversation.usage.cost_usd,
             )
         except Exception:
             # Learning is a background nicety; it must never break a turn.

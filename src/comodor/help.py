@@ -197,6 +197,8 @@ tokens and never runs in the middle of a session."""),
 
     "cost": ("Paying less for the same work", """\
   /cost                     tokens, spend, and what the cache saved
+  /insights [days]          spend and progress across every session
+  comodor insights --json   the same numbers, for scripts
   agent.max_cost_usd        stop a task at a price
   agent.max_steps           stop it at a number of steps
 

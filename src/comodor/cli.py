@@ -101,6 +101,13 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument("--yes", action="store_true",
                         help="do not ask; for scripts")
 
+    insights = sub.add_parser(
+        "insights", help="spend, activity and progress over recent days")
+    insights.add_argument("--days", type=int, default=30,
+                          help="how far back to look (default 30)")
+    insights.add_argument("--json", action="store_true",
+                          help="emit the numbers as JSON, for scripts")
+
     approvals = sub.add_parser(
         "approvals",
         help="propose an allowlist from the commands you keep approving")
@@ -734,6 +741,26 @@ def _skill_count(config: Config) -> int:
         return 0
 
 
+def run_insights(config: Config, args: argparse.Namespace) -> int:
+    """The cross-session view: spend, activity, and whether the brain helps."""
+    import json as jsonlib
+
+    from .insights import collect, render, to_json
+
+    days = max(1, int(getattr(args, "days", 30) or 30))
+    result = collect(config, days=days)
+    if getattr(args, "json", False):
+        print(jsonlib.dumps(to_json(result), ensure_ascii=False, indent=2))
+    else:
+        from rich.console import Console
+
+        from .ui.console import force_utf8
+
+        force_utf8()
+        Console().print(render(result))
+    return 0
+
+
 def run_preview(config: Config, args: argparse.Namespace) -> int:
     """Render one frame at a fixed size — for screenshots and layout checks."""
     from . import __version__ as _version
@@ -979,6 +1006,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_acp(config, args)
     if args.command == "preview":
         return run_preview(config, args)
+    if args.command == "insights":
+        return run_insights(config, args)
     if args.command == "approvals":
         return run_approvals(config, args)
     if args.command == "setup":
