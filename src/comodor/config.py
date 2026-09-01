@@ -866,6 +866,35 @@ class WebhookConfig:
         return {"enabled": self.enabled, "bind": self.bind, "port": self.port}
 
 @dataclass
+class ImageGenConfig:
+    """Text-to-image (`image_gen`).
+
+    Off by default because every call costs money — a tool the user has to
+    switch on is a tool whose bill they agreed to. The key is named by
+    ``key_env`` and read from the environment only, the same rule the
+    memory provider follows: a config file can be committed by accident.
+    ``max_per_day`` is the fuse; exceeding it refuses in words, not in
+    silence or in a surprise charge.
+    """
+
+    enabled: bool = False
+    provider: str = "openai"
+    model: str = "gpt-image-1"
+    key_env: str = "OPENAI_API_KEY"
+    base_url: str = ""
+    max_per_day: int = 10
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "provider": self.provider,
+            "model": self.model,
+            "key_env": self.key_env,
+            "base_url": self.base_url,
+            "max_per_day": self.max_per_day,
+        }
+
+@dataclass
 class SafetyConfig:
     auto_approve_safe: bool = True       # read-only tools never prompt
     auto_approve_writes: bool = False
@@ -927,7 +956,8 @@ DEFAULT_DENY: tuple[str, ...] = (
 #: said nothing.
 SECTIONS = ("ui", "agent", "gateway", "learning", "curator", "skills", "safety",
             "browser", "computer", "telegram", "whatsapp", "slack", "discord",
-            "cron", "media", "voice", "delegation", "shell", "api", "webhook")
+            "cron", "media", "voice", "delegation", "shell", "api", "webhook",
+            "image_gen")
 
 
 @dataclass
@@ -954,6 +984,7 @@ class Config:
     shell: ShellConfig = field(default_factory=ShellConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
+    image_gen: ImageGenConfig = field(default_factory=ImageGenConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     paths: Paths = field(default_factory=resolve_paths)

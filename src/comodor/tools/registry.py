@@ -131,6 +131,14 @@ class ToolRegistry:
         # answers "I cannot look at images" every turn is a wasted schema.
         if config is not None:
             self._add_vision(config)
+        # Image generation, only when explicitly switched on — it is off by
+        # default because every call costs money, and a tool the model can
+        # see it might use is itself an invitation to spend.
+        if config is not None and getattr(config, "image_gen", None) \
+                and config.image_gen.enabled:
+            from .image_gen import ImageGen
+
+            self.add(ImageGen())
 
         # Whatever the enabled MCP servers offer, alongside the built-in tools
         # and subject to exactly the same permission gate.

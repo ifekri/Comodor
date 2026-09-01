@@ -390,6 +390,33 @@ The key lives in an environment variable (default $MEM0_API_KEY) and is never
 written to the config file. With the service down, nothing changes except a
 warning: the local write already happened."""),
 
+    "image-gen": ("Making pictures", """\
+The agent can generate an image from a prompt - an illustration for a page, a
+mock for a design, an asset for a game. It is off by default, because every
+image costs real money and an agent that can spend silently is not yours.
+
+  Turn it on        set  image_gen.enabled: true  in your config
+  Provider          image_gen.provider: openai
+                    (any endpoint speaking the images API works too — point
+                    image_gen.base_url at a local image server and no key
+                    is needed)
+  Model             image_gen.model: gpt-image-1
+  The key           in the environment: image_gen.key_env, OPENAI_API_KEY
+                    by default — never in the config file
+  Daily limit       image_gen.max_per_day: 10 — when it is reached the tool
+                    refuses in words until tomorrow, and /cost shows the
+                    count
+
+The tool is only offered to the model while it is switched on, and every call
+asks permission, like a shell command. The prompt is sent to the provider
+whole — nothing is redacted out of it — so an approving look at what it is
+about to send is worth having.
+
+Images land in  ~/.comodor/media/generated/  unless the model names another
+folder, and the transcript keeps the prompt and a fingerprint of what came
+back, not the bytes."""),
+
+
     "whatsapp": ("From WhatsApp", """\
   comodor whatsapp connect         guided: links each page, checks each value
   comodor whatsapp webhook         what to paste into Meta's dashboard

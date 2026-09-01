@@ -485,6 +485,7 @@ class AgentLoop:
                 cancel=self.cancel,
                 cwd=Path(self.config.paths.project),
                 rules=list(self._rules),
+                brain_store=self.memory.store if self.memory is not None else None,
                 emit_output=lambda text: self.bus.emit(Kind.TOOL_OUTPUT, text=text),
             )
         return self.tool_context

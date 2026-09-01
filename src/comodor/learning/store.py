@@ -1107,6 +1107,20 @@ class BrainStore:
                 (json.dumps(table.to_dict(), ensure_ascii=False),),
             )
 
+    def get_meta(self, key: str) -> str | None:
+        """One row of the metadata table, or None."""
+        with self._lock, self.connection as connection:
+            row = connection.execute(
+                "SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row is not None else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self._lock, self.connection as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+                (key, value),
+            )
+
     def consolidate(self, min_confidence: float, half_life_days: float) -> int:
         """Drop lessons that decayed below the floor. Returns how many went."""
         removed = 0

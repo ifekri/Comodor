@@ -73,6 +73,11 @@ class ToolContext:
     #: against, in a run that was otherwise correct.
     seen: set[str] = field(default_factory=set)
 
+    #: The learning brain's store, when one exists. Tools that count things
+    #: against the user — the daily image-generation fuse — share this one
+    #: metadata table, so a delegate cannot quietly sidestep the count.
+    brain_store: Any = None
+
     def note_read(self, path: Path) -> None:
         self.seen.add(self._key(path))
 

@@ -1665,6 +1665,15 @@ class App:
             f"- context used: {self.state.status.context_used:,}"
             f" / {self.state.status.context_limit:,}",
             f"- compactions: {self.conversation.compactions}",
+        ]
+        # Generated images are dollars, not tokens, so they are reported
+        # from the brain's own fuse counter rather than the token usage.
+        image_spent = self._images_generated_today()
+        if image_spent is not None:
+            limit = self.config.image_gen.max_per_day
+            body.append(f"- images generated today: {image_spent} "
+                        f"(daily limit {limit})")
+        body += [
             "", "**Brain**", "",
             f"- lessons: {stats['lessons']}",
             f"- skills: {stats['skills']}",
@@ -1675,6 +1684,26 @@ class App:
             f" ({stats['success_rate']:.0%} succeeded)",
         ]
         self.state.overlay = info_overlay("Usage", "\n".join(body))
+
+    def _images_generated_today(self) -> int | None:
+        """Today's image-generation count, or None when there is no fuse.
+
+        None — not zero — when the brain or the setting is absent, so the
+        line only appears where the tool it reports on can actually run.
+        """
+        if not (getattr(self.config, "image_gen", None)
+                and self.config.image_gen.enabled):
+            return None
+        memory = getattr(self, "memory", None)
+        store = getattr(memory, "store", None)
+        if store is None:
+            return None
+        try:
+            from ..image_gen.registry import used_today
+
+            return used_today(store)
+        except Exception:
+            return None
 
     def cmd_insights(self, args: str) -> None:
         """The same session view, stretched across every session on disk."""
