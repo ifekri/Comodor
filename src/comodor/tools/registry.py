@@ -66,7 +66,8 @@ class ToolRegistry:
                  session_id: str = "", mcp: Any = None,
                  spawn: Any = None, config: Any = None,
                  cron_store: Any = None, skill_ledger: Any = None,
-                 memory: Any = None, delegates: Any = None) -> None:
+                 memory: Any = None, delegates: Any = None,
+                 plugins: Any = None) -> None:
         self._tools: dict[str, Tool] = {}
         if tools is not None:
             for tool in tools:
@@ -153,6 +154,13 @@ class ToolRegistry:
                 from .mcp_resources import MCPReadResource
 
                 self.add(MCPReadResource(mcp))
+        # A plugin's tools sit in the same registry and pass the same gate.
+        # Only trusted, successfully loaded plugins contribute anything.
+        if plugins is not None:
+            from .plugin import PluginTool
+
+            for owner, spec in plugins.registered_tools():
+                self.add(PluginTool(owner, spec))
 
     def _add_computer(self, config: Any) -> None:
         """The computer tool, if this platform has a backend for it."""

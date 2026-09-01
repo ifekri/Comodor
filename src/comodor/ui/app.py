@@ -292,8 +292,22 @@ class App:
                                   config=self.config,
                                   session_id=self.session.id, mcp=self.mcp,
                                   cron_store=self._cron_store(),
-                                  memory=getattr(self.memory, "facts", None))
+                                  memory=getattr(self.memory, "facts", None),
+                                  plugins=self._plugins())
         return len(self.skills)
+
+    def _plugins(self) -> Any:
+        """The plugin manager, built once. Kept for `/plugins` and reload."""
+        if getattr(self, "_plugin_manager", None) is None:
+            from ..plugins import load_for
+
+            try:
+                self._plugin_manager = load_for(self.config)
+                self._plugin_manager.load_all()
+                self._plugin_bus_wired = False
+            except Exception:
+                self._plugin_manager = None
+        return self._plugin_manager
 
     def _warn_if_the_budget_is_a_decoration(self) -> None:
         """A spend ceiling that cannot fire, said before it fails to.
@@ -1597,6 +1611,29 @@ class App:
         self.state.scroll = 0
         self._start_agent(text)
 
+    def cmd_plugins(self, args: str) -> None:
+        """What the plugins added, and what refused to load."""
+        plugins = self._plugins()
+        states = list(plugins.states.values()) if plugins else []
+        if not states:
+            self._toast("no plugins installed", "warn")
+            return
+
+        body = ["## Plugins", ""]
+        for state in states:
+            mark = "●" if state.ok else ("○" if state.trusted else "✗")
+            label = state.name if state.ok else \
+                f"{state.name} — {state.error or 'untrusted'}"
+            body.append(f"- {mark} **{label}**")
+            if state.ok and state.context:
+                for spec in state.context.tools:
+                    body.append(f"  - tool `{spec['name']}` ({spec['risk'].lower()})")
+                for kind, _ in state.context.hooks:
+                    body.append(f"  - listens on {kind}")
+        body += ["", "Project plugins stay inert until trusted:",
+                 "`comodor plugins trust <name>` from a terminal."]
+        self.state.overlay = info_overlay("Plugins", "\n".join(body))
+
     def cmd_good(self, args: str) -> None:
         self.memory.feedback(self.agent._recalled, good=True, note=args)
         self._toast("thanks — reinforced", "good")
@@ -2190,6 +2227,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "/search": ("cmd_search", "find something in an earlier conversation"),
     "/mcp": ("cmd_mcp", "MCP servers and the tools they provide"),
     "/prompt": ("cmd_prompt", "run a server's prompt template"),
+    "/plugins": ("cmd_plugins", "installed plugins and what they add"),
     "/delegates": ("cmd_delegates", "background delegates: list, or stop one"),
     "/quit": ("cmd_quit", "exit"),
 }

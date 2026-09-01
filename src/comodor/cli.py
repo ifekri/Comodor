@@ -127,6 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
     from .learning.providers.commands import register as register_memory_provider
     from .local.commands import register as register_local
     from .mcp.commands import register as register_mcp
+    from .plugins.commands import register as register_plugins
     from .skills.commands import register as register_skills
     from .slack.commands import register as register_slack
     from .telegram.commands import register as register_telegram
@@ -148,6 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_acp(sub)
     register_memory_provider(sub)
     register_journey(sub)
+    register_plugins(sub)
 
     serve = sub.add_parser(
         "serve", help="speak the OpenAI chat protocol, so other frontends "
@@ -221,6 +223,39 @@ def _release() -> str:
     return __version__
 
 
+def _load_plugins(config: Config, bus: Any) -> Any:
+    """Discover and load the plugins, and wire their hooks to the bus.
+
+    Kept in one place so every entry point — terminal, web, phone — gets
+    the same plugins with the same rules. A hook callback that raises is
+    its author's bug, but it must not break the event it was listening to,
+    so each call is wrapped here rather than trusted.
+    """
+    try:
+        from .plugins import load_for
+
+        manager = load_for(config)
+    except Exception:
+        return None
+
+    manager.load_all()
+
+    def dispatch(event: Any) -> None:
+        for _, callback in manager.hook_callbacks(event.kind.value):
+            try:
+                callback(event)
+            except Exception:
+                pass                       # a broken hook is not a broken turn
+
+    # One subscription total, whatever the plugins registered; dispatch
+    # filters by kind, and a bus event without listeners of its own is a
+    # dictionary miss away.
+    if any(state.ok and state.context and state.context.hooks
+           for state in manager.states.values()):
+        bus.subscribe(dispatch)
+    return manager
+
+
 def run_headless(config: Config, args: argparse.Namespace) -> int:
     """One task, no TUI. Used by scripts, hooks and CI."""
     # Before anything can be printed. A Windows console is cp1252 by default,
@@ -267,6 +302,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     permissions.on_denied = memory.on_denied
     skills = load_skills(config)
     mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
+    plugins = _load_plugins(config, bus)
     cron_store = None
     if config.cron.enabled:
         from .cron.jobs import JobStore
@@ -275,7 +311,8 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     tools = ToolRegistry(skills=skills, mcp=mcp, config=config,
                          spawn=spawner(config, gateway, bus, skills=skills, mcp=mcp),
                          cron_store=cron_store,
-                         memory=getattr(memory, "facts", None))
+                         memory=getattr(memory, "facts", None),
+                         plugins=plugins)
     agent = AgentLoop(config, gateway, tools, bus,
                       permissions, Conversation(), memory, skills=skills)
 
@@ -1049,6 +1086,10 @@ def main(argv: list[str] | None = None) -> int:
         from .learning.journey_commands import run as run_journey
 
         return run_journey(config, args)
+    if args.command == "plugins":
+        from .plugins.commands import run as run_plugins
+
+        return run_plugins(config, args)
     if args.command == "serve":
         from .api.server import run as run_api
 
