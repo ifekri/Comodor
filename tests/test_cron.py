@@ -230,29 +230,56 @@ def _answer_mark(job):
 
 def _fake_run(store, outcome):
     """What _run_and_record does, minus the agent: record, keep the answer,
-    then let the scheduler's own delivery run for real."""
+    then let the scheduler's own delivery run for real.
+
+    The `finally` matters as much as the body. This replaces the whole method,
+    including the clause that takes the job out of `_running` — and that set
+    is how anything else knows the thread is done. Without it a caller waiting
+    for the scheduler to settle waits for ever.
+    """
     def run(self, job, now):
-        store.update(job.id, lambda j: _record(j, now, outcome.ok,
-                                               outcome.error))
-        store.update(job.id, _keep_answer(outcome))
-        self._deliver_to_channels(job, outcome)
+        try:
+            store.update(job.id, lambda j: _record(j, now, outcome.ok,
+                                                   outcome.error))
+            store.update(job.id, _keep_answer(outcome))
+            self._deliver_to_channels(job, outcome)
+        finally:
+            with self._lock:
+                self._running.discard(job.id)
     return run
 
 
-def _tick_and_settle(scheduler, store):
-    """Fire a tick and wait for the job's thread to finish its bookkeeping.
+def _tick_and_settle(scheduler, store, patience: float = 30.0):
+    """Fire a tick and wait for the job's thread to actually finish.
 
-    `_start` runs the job on its own thread; the tick returns before the
-    records are written, and the assertions need them on disk.
+    Waiting on `last_fire` was the obvious thing and the wrong one: the
+    scheduler records it and *then* delivers, so the flag appears while the
+    thread still has work to do. The helper slept ten more milliseconds and
+    called that settled, which held on an idle desktop and lost on a loaded CI
+    runner — `sent == []` on a delivery that had not happened yet, in one test
+    or another, roughly one run in ten.
+
+    `_running` is emptied in the thread's `finally`, after everything: the
+    record, the answer, the delivery and the log. That is what "finished"
+    means, so that is what this waits for. `tick` fills it before it returns,
+    so a tick that started nothing leaves it empty and this comes back at
+    once — which is correct.
     """
     scheduler.tick(now=datetime.now())
-    for _ in range(200):
-        job = store.get("job1")
-        if job is not None and job.last_fire:
-            time.sleep(0.01)
-            break
+
+    deadline = time.monotonic() + patience
+    while time.monotonic() < deadline:
+        with scheduler._lock:
+            still_going = bool(scheduler._running)
+        if not still_going:
+            # The thread has left `_run_and_record`, so every write it makes
+            # is done. Nothing after this is waiting on a race.
+            return
         time.sleep(0.01)
-    time.sleep(0.05)
+
+    raise AssertionError(
+        f"a job thread was still running {patience:.0f}s after the tick: "
+        f"{scheduler._running}")
 
 
 class _Outcome:
