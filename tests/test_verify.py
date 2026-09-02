@@ -124,9 +124,14 @@ def test_it_can_be_switched_off(tool_context):
     assert result.ok
 
 
+@pytest.mark.performance
 def test_checking_a_large_file_is_not_something_anyone_notices(tool_context):
     """It sits on the hottest path in the product. A tenth of a second per edit
-    would be felt; parsing in this process is three orders off that."""
+    would be felt; parsing in this process is three orders off that.
+
+    Marked, because it measures elapsed time: under the parallel suite it was
+    timing a machine with fifteen other workers on it and reported 0.54s
+    against a 0.5s budget. The budget is right — the measurement was not."""
     big = "\n".join(f"def f{index}():\n    return {index}" for index in range(2000))
 
     started = time.monotonic()

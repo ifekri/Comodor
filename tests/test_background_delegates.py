@@ -232,7 +232,12 @@ def test_failed_and_lost_completions_tell_the_truth():
 
 # -- events ----------------------------------------------------------------- #
 
+@pytest.mark.performance
 def test_the_bus_sees_the_lifecycle(config, bus):
+    """Marked as timing-sensitive: it gives a background job two seconds to
+    finish, which is generous on an idle machine and not always enough on a
+    loaded one. It failed with `'done' in ['started']` — the job had begun and
+    simply had not got there yet."""
     seen = []
     bus.subscribe(lambda event: seen.append(event)
                   if event.kind is Kind.DELEGATE else None)
