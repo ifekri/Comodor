@@ -126,15 +126,29 @@ def test_an_empty_answer_streams_without_pieces():
 
 @pytest.fixture
 def server(config):
+    """A bound *and serving* endpoint, torn down after the test.
+
+    `bind` only takes the port. Without a thread in `serve_forever` behind it
+    the socket accepts the connection and then says nothing, so every request
+    below sits until its own timeout and the failure reads as a hang rather
+    than as a fixture that never started the server.
+    """
+    import threading
+
     from comodor.api.server import Server
 
     made = Server(config, host="127.0.0.1", port=0)
     try:
         made.bind()
-    except PermissionError:
+    except (OSError, PermissionError):
         pytest.skip("cannot bind a socket in this environment")
+
+    thread = threading.Thread(target=made._httpd.serve_forever,
+                              kwargs={"poll_interval": 0.05}, daemon=True)
+    thread.start()
     yield made
-    made.stop()
+    made._httpd.shutdown()
+    made._httpd.server_close()
     made.map.close_all()
 
 

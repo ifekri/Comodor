@@ -1278,9 +1278,9 @@ class Session:
     def _channel_needs(name: str) -> list[dict[str, str]]:
         """The fields `connect` wants, so the page can draw the right form.
 
-        Described here rather than written into the page: the three channels
-        need one, two and four values, and one form that guessed would be
-        wrong for two of them.
+        Described here rather than written into the page: the channels need
+        one, one, two and four values, and one form that guessed would be
+        wrong for most of them.
         """
         if name == "telegram":
             return [{"key": "token", "label": "Bot token",
@@ -1291,6 +1291,10 @@ class Session:
                     {"key": "app_token", "label": "App-level token",
                      "hint": "xapp-... from Basic Information, "
                              "scope connections:write"}]
+        if name == "discord":
+            return [{"key": "token", "label": "Bot token",
+                     "hint": "from the developer portal: "
+                             "New Application, Bot, Reset Token"}]
         if name == "whatsapp":
             return [{"key": "phone_number_id", "label": "Phone number id",
                      "hint": "the numeric id beside the number, "
@@ -1389,6 +1393,18 @@ class Session:
                 self._save_channels()
                 return True, f"Connected to {who.get('team')}."
 
+            if channel.name == "discord":
+                from ..discord.api import Bot as DiscordBot
+
+                token = str(fields.get("token") or "").strip()
+                if not token:
+                    return False, "no token given"
+                me = DiscordBot(token).me()
+                settings.token = token
+                settings.enabled = True
+                self._save_channels()
+                return True, f"Connected to {me.get('username')}."
+
             if channel.name == "whatsapp":
                 from ..whatsapp.api import Cloud
                 from ..whatsapp.webhook import make_verify_token
@@ -1433,6 +1449,8 @@ class Session:
         try:
             if channel.name == "telegram":
                 from ..telegram.bot import Service
+            elif channel.name == "discord":
+                from ..discord.bot import Service
             else:
                 from ..slack.bot import Service
             service = Service(self.config, announce=lambda line: None)

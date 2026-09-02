@@ -28,6 +28,15 @@ renames it, so a reload can never see half a file.
 **What is not replaced.** Only the configuration. The conversations, the
 sockets and everything else the bot is holding are untouched — this answers
 "what am I allowed to do" and nothing else.
+
+**Except one thing, which had to be.** Replacing the configuration was not
+enough for `allow_writes`. A chat that had already entered Act held a session
+built with the old `Config`, and nothing rechecked the setting on later turns:
+`writes off` took effect for every chat that had not started yet and for none
+of the ones that had. Somebody revoking write access — the one action taken
+precisely because something is going wrong — kept the chats that worried them
+in Act, files and commands still reachable. `hold_the_line` is that recheck,
+and it runs where the conversation is fetched rather than where it is built.
 """
 
 from __future__ import annotations
@@ -132,3 +141,32 @@ def keep_current(service: Any) -> Config:
     if fresh is not service.config:
         service.config = fresh
     return fresh
+
+
+def hold_the_line(config: Any, section: str, talk: Any) -> bool:
+    """Force one conversation back to plan when its channel may not write.
+
+    Called every time a conversation is handed out, not only when it is made.
+    `set_mode` refused Act at the moment of asking and `_conversation` held a
+    new chat in plan, but between those two sits the case that matters: a chat
+    already in Act when the setting was turned off. It kept the session it was
+    built with and was never asked again.
+
+    Returns whether it actually moved, so a caller can say so — a mode that
+    changes underneath somebody with no explanation is its own bug.
+    """
+    settings = getattr(config, section, None)
+    if settings is None or getattr(settings, "allow_writes", False):
+        return False
+    session = getattr(talk, "session", None)
+    if session is None:
+        return False
+    try:
+        if getattr(session.config.agent, "mode", "") != "act":
+            return False
+        session.set_mode("plan")
+    except Exception:
+        # A recheck that raises must not take the turn with it. The gate in
+        # `set_mode` still refuses Act from here on.
+        return False
+    return True

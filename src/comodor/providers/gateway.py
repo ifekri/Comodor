@@ -51,9 +51,9 @@ def build_provider(entry: ProviderConfig, scripts: list[Script] | None = None,
         # gigabytes takes tens of seconds and would happen on every `comodor`
         # invocation, including the ones that never ask the model anything.
         from ..local.provider import build as build_local
-        from ..paths import resolve_paths
+        from ..paths import resolve
 
-        return build_local(entry, user_dir=resolve_paths().user)
+        return build_local(entry, user_dir=resolve().user)
     if entry.kind == "anthropic":
         return AnthropicProvider(
             name=entry.name, base_url=entry.base_url, api_key=entry.api_key,

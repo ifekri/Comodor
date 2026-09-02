@@ -147,6 +147,7 @@ class EdgePeer:
         self.listener.listen(1)
         self.port = self.listener.getsockname()[1]
         self.conn = None
+        self.heard: list[str] = []
         self.ready = threading.Event()
         threading.Thread(target=self._serve, daemon=True).start()
 
@@ -159,6 +160,26 @@ class EdgePeer:
         self.conn.sendall(b"HTTP/1.1 101 Switching Protocols\r\n"
                           b"Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
         self.ready.set()
+
+    def speak_when_spoken_to(self, frames: int = 2) -> None:
+        """Read `frames` client frames, then answer with the audio.
+
+        `synthesize` sends its two text frames and then blocks reading, so
+        nothing that runs after it returns can be what unblocks it. This runs
+        on its own thread and keeps what it read for the test to check.
+        """
+        def pump() -> None:
+            self.ready.wait(5)
+            try:
+                for _ in range(frames):
+                    self.heard.append(self.read_one())
+                self.answer()
+            except OSError:
+                pass                      # the test tore the peer down
+
+        thread = threading.Thread(target=pump, daemon=True)
+        thread.start()
+        return thread
 
     def read_one(self) -> str:
         assert self.conn is not None
@@ -213,14 +234,15 @@ def test_synthesize_collects_the_audio_and_stops_at_the_end(
                         f"ws://127.0.0.1:{edge_peer.port}/edge")
     edge_peer.ready.wait(5)
 
+    pump = edge_peer.speak_when_spoken_to()
+
     from comodor.voice.tts import synthesize
     result = synthesize("سلام", config)
+    pump.join(5)
 
-    edge_peer.ready.wait(5)
     assert result.startswith(b"ID3"), "the audio bytes, not a header, come back"
     # The two text frames the protocol wants, in order.
-    first = edge_peer.read_one()
-    second = edge_peer.read_one()
+    first, second = edge_peer.heard
     assert "Path:speech.config" in first
     assert "Path:ssml" in second and "سلام" in second
 
@@ -249,6 +271,7 @@ def test_a_binary_frame_comes_back_as_bytes_not_decoded_text(edge_peer):
     try:
         ws.send("go")
         edge_peer.read_one()
+        edge_peer.write_frame(0x2, b"ID3" + b"\x00" * 32)
         frame = ws.receive()
         assert isinstance(frame, bytes) and frame.startswith(b"ID3")
     finally:

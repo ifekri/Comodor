@@ -33,7 +33,7 @@ from typing import Any, Callable
 from ..channels.breaker import CircuitBreaker
 from ..channels.busy import interrupt_note, start_or_steer
 from ..channels.markdown import to_discord
-from ..channels.settings import Settings, keep_current
+from ..channels.settings import Settings, hold_the_line, keep_current
 from ..config import Config
 from .api import EDIT_EVERY, MOST_CHARACTERS, DiscordError, RateLimited, split
 from .api import Bot as Rest
@@ -214,6 +214,15 @@ class Service:
             if not self.config.discord.allow_writes:
                 talk.session.set_mode("plan")
             self.chats[user] = talk
+        if hold_the_line(self.config, "discord", talk):
+            # Saying so is the point, but the revocation has already taken
+            # effect and a failed send must not undo the turn with it.
+            try:
+                self._send(talk, "**Back in plan mode.** Write access was "
+                                 "turned off for Discord, so this chat can no "
+                                 "longer edit files or run commands.")
+            except Exception:
+                pass
         return talk
 
     # -- sending ------------------------------------------------------------ #

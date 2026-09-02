@@ -2716,9 +2716,12 @@ function pairingBox(channel, pairing) {
 
   const what = document.createElement('p');
   what.style.margin = '0 0 4px';
-  what.textContent = channel.name === 'telegram'
-    ? 'Message the bot on Telegram with this code:'
-    : 'Send Comodor a direct message in Slack with this code:';
+  const where = {
+    telegram: 'Message the bot on Telegram with this code:',
+    discord: 'Send the bot a direct message on Discord with this code:',
+    slack: 'Send Comodor a direct message in Slack with this code:',
+  };
+  what.textContent = where[channel.name] || where.slack;
 
   const code = document.createElement('strong');
   code.style.fontSize = '1.4em';

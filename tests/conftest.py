@@ -39,6 +39,12 @@ def a_home_of_our_own(monkeypatch, tmp_path: Path):
     home = tmp_path / "comodor-home"
     home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("COMODOR_HOME", str(home))
+    # And the profile, which moves the same directory again. A test that sets
+    # it through `os.environ` rather than `monkeypatch` leaks it into every
+    # test that runs after: `user_root` then answers `home/profiles/work`, the
+    # file just saved is not the file loaded back, and the failure lands on
+    # whichever test happened to be next rather than on the one at fault.
+    monkeypatch.delenv("COMODOR_PROFILE", raising=False)
 
 
 @pytest.fixture(autouse=True)

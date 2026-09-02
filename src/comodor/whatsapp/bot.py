@@ -36,7 +36,7 @@ from typing import Any, Callable
 from ..channels.breaker import CircuitBreaker
 from ..channels.busy import interrupt_note, start_or_steer
 from ..channels.markdown import to_whatsapp
-from ..channels.settings import Settings, keep_current
+from ..channels.settings import Settings, hold_the_line, keep_current
 from ..config import Config
 from ..media.ingest import MediaError, ingest
 from . import menu as ui
@@ -274,6 +274,13 @@ class Service:
                 # a keyboard, and the consequences are identical.
                 talk.session.set_mode("plan")
             self.chats[wa_id] = talk
+        if hold_the_line(self.config, "whatsapp", talk):
+            try:
+                self._send(wa_id, "*Back in plan mode.* Write access was "
+                                  "turned off for WhatsApp, so this chat can "
+                                  "no longer edit files or run commands.")
+            except Exception:
+                pass
         return talk
 
     # -- sending ----------------------------------------------------------- #

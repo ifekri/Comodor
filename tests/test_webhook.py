@@ -12,6 +12,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
+import stat
 
 import pytest
 
@@ -95,12 +97,23 @@ def test_a_null_field_is_empty_not_the_word_none():
 # subscriptions: the file, its secrets, its honesty
 # --------------------------------------------------------------------------- #
 
-def test_subscriptions_round_trip_and_are_0600(tmp_path):
+def test_subscriptions_round_trip(tmp_path):
     subs = Subscriptions(tmp_path / "hook")
     subs.add(Sub(name="ci", path="/ci", secret="s3cret",
                  template="{payload}"))
     assert subs.by_path("/ci").secret == "s3cret"
-    assert (tmp_path / "hook" / "subs.json").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions only")
+def test_the_subscriptions_file_is_not_readable_by_anybody_else(tmp_path):
+    """It holds every webhook secret. Windows has no mode bits to set, and
+    `chmod` there is a no-op that would fail this rather than report it."""
+    subs = Subscriptions(tmp_path / "hook")
+    subs.add(Sub(name="ci", path="/ci", secret="s3cret",
+                 template="{payload}"))
+
+    mode = (tmp_path / "hook" / "subs.json").stat().st_mode
+    assert stat.S_IMODE(mode) == 0o600
 
 
 def test_adding_replaces_by_name_not_duplicates(tmp_path):
@@ -130,6 +143,29 @@ def server(config, tmp_path):
     made.subs.add(Sub(name="ci", path="/ci", secret="s3cret",
                       template="Build: {.status}"))
     return made
+
+
+@pytest.fixture
+def listening(server):
+    """The same server, with something actually answering the socket.
+
+    `bind` takes the port and nothing more; `serve` is what reads from it.
+    A test that binds and then sends a request is talking to a socket whose
+    accept queue nobody drains, and waits out its own client timeout.
+    """
+    import threading
+
+    try:
+        server.bind()
+    except (OSError, PermissionError):
+        pytest.skip("cannot bind a socket in this environment")
+
+    thread = threading.Thread(target=server._httpd.serve_forever,
+                              kwargs={"poll_interval": 0.05}, daemon=True)
+    thread.start()
+    yield server
+    server._httpd.shutdown()
+    server._httpd.server_close()
 
 
 def test_a_verified_event_is_queued_not_run_inline(server):
@@ -230,47 +266,27 @@ def _deliver(port: int, path: str, secret: str, body: bytes,
         return problem.code, problem.read().decode("utf-8")
 
 
-def test_a_valid_delivery_is_accepted(server):
-    try:
-        server.bind()
-    except PermissionError:
-        pytest.skip("cannot bind a socket in this environment")
-    status, body = _deliver(server.port, "/ci", "s3cret",
+def test_a_valid_delivery_is_accepted(listening):
+    status, body = _deliver(listening.port, "/ci", "s3cret",
                             b'{"status": "green"}')
-    server.stop()
     assert status == 202
     assert json.loads(body)["status"] == "accepted"
 
 
-def test_a_forged_signature_is_a_404_that_says_nothing(server):
-    try:
-        server.bind()
-    except PermissionError:
-        pytest.skip("cannot bind a socket in this environment")
-    status, body = _deliver(server.port, "/ci", "wrong",
+def test_a_forged_signature_is_a_404_that_says_nothing(listening):
+    status, body = _deliver(listening.port, "/ci", "wrong",
                             b'{"status": "green"}')
-    server.stop()
     assert status == 404
     assert json.loads(body) == {"error": "not found"}
 
 
-def test_an_unknown_path_and_a_bad_signature_look_identical(server):
-    try:
-        server.bind()
-    except PermissionError:
-        pytest.skip("cannot bind a socket in this environment")
-    known = _deliver(server.port, "/ci", "wrong", b'{"a": 1}')
-    unknown = _deliver(server.port, "/never-existed", "wrong", b'{"a": 1}')
-    server.stop()
+def test_an_unknown_path_and_a_bad_signature_look_identical(listening):
+    known = _deliver(listening.port, "/ci", "wrong", b'{"a": 1}')
+    unknown = _deliver(listening.port, "/never-existed", "wrong", b'{"a": 1}')
     assert known == unknown, "a prober must not learn which paths exist"
 
 
-def test_an_unsigned_delivery_is_refused(server):
-    try:
-        server.bind()
-    except PermissionError:
-        pytest.skip("cannot bind a socket in this environment")
-    status, _ = _deliver(server.port, "/ci", "s3cret",
+def test_an_unsigned_delivery_is_refused(listening):
+    status, _ = _deliver(listening.port, "/ci", "s3cret",
                          b'{"status": "green"}', sign=False)
-    server.stop()
     assert status == 404

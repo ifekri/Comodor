@@ -126,18 +126,23 @@ def _files(skill) -> list[Finding]:
         return found
     root = Path(path).parent
     try:
-        names = {entry.name.lower() for entry in root.iterdir()
-                 if entry.is_file()}
+        # Two things are wanted from the listing and they are not the same:
+        # a folded name to compare against SCAFFOLD, and the name as it is
+        # actually spelled on disk to open. Folding both together worked only
+        # on a case-insensitive filesystem — everywhere else `SKILL.md` was
+        # looked up as `skill.md`, the read raised, and every link in it went
+        # unchecked while the linter reported the skill clean.
+        names = {entry.name for entry in root.iterdir() if entry.is_file()}
     except OSError:
         return found
-    scaffold = names & SCAFFOLD
+    scaffold = {name.lower() for name in names} & SCAFFOLD
     if scaffold:
         found.append(Finding(
             "warning", "files",
             f"scaffold file(s) {', '.join(sorted(scaffold))} in the skill "
             "folder — remove them; a skill is instructions, not a project"))
     for name in sorted(names):
-        if not name.endswith(".md"):
+        if not name.lower().endswith(".md"):
             continue
         try:
             body = (root / name).read_text(encoding="utf-8")
