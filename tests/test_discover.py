@@ -18,6 +18,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import pytest
+
 from comodor import catalogue
 from comodor.providers import discover
 
@@ -129,6 +131,7 @@ def test_an_error_from_the_port_is_not_a_runtime():
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.performance
 def test_finding_nothing_is_quick():
     """It used to cost 3.7 seconds: the client retried a refused connection
     twice, and `localhost` resolves to two addresses so each attempt was paid
@@ -141,6 +144,7 @@ def test_finding_nothing_is_quick():
     assert took < 1.5, f"{took:.2f}s on a machine with nothing running"
 
 
+@pytest.mark.performance
 def test_a_port_that_never_answers_does_not_hold_up_a_first_run():
     """A socket that neither accepts nor refuses is the case a timeout exists
     for, and the case that hangs a wizard if one is missing."""

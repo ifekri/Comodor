@@ -83,6 +83,7 @@ def test_a_broken_status_does_not_stop_the_drawing():
     assert True
 
 
+@pytest.mark.performance
 def test_it_does_not_block_the_caller(monkeypatch):
     """Announcing an action happens on the agent's thread, between a decision
     and a mouse movement. A queue put that waited on a window would put the
