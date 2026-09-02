@@ -1716,7 +1716,7 @@ def test_the_panel_reports_every_channel(served):
 
     assert status == 200
     names = [c["name"] for c in found["channels"]]
-    assert names == ["telegram", "whatsapp", "slack"]
+    assert names == ["telegram", "whatsapp", "slack", "discord"]
     for channel in found["channels"]:
         assert "connected" in channel and "running" in channel
         assert channel["needs"], f"{channel['name']} has no form to draw"
@@ -1733,18 +1733,20 @@ def test_the_panel_never_carries_a_token_or_an_account(served):
     served.config.whatsapp.token = "EAA-WHATSAPP-SECRET"
     served.config.whatsapp.app_secret = "WA-APP-SECRET"
     served.config.whatsapp.allowed = ["15559998888"]
+    served.config.discord.token = "MTA.DISCORD-SECRET"
+    served.config.discord.allowed = [246813579]
 
     _, found = call(served, "/api/channels", token=served.token)
     written = json.dumps(found)
 
     for secret in ("TELEGRAM-SECRET", "SLACK-SECRET", "SLACK-APP-SECRET",
-                   "WHATSAPP-SECRET", "WA-APP-SECRET",
-                   "987654321", "U12345SECRET", "15559998888"):
+                   "WHATSAPP-SECRET", "WA-APP-SECRET", "DISCORD-SECRET",
+                   "987654321", "U12345SECRET", "15559998888", "246813579"):
         assert secret not in written, f"{secret} left the machine"
 
     counts = {c["name"]: c["paired"] for c in found["channels"]}
-    assert counts == {"telegram": 1, "whatsapp": 1, "slack": 1}, \
-        "the count may be said"
+    assert counts == {"telegram": 1, "whatsapp": 1, "slack": 1,
+                      "discord": 1}, "the count may be said"
 
 
 def test_setting_up_a_channel_is_gated_on_being_at_the_machine():

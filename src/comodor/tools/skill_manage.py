@@ -178,7 +178,13 @@ class SkillManage(Tool):
                 f"{instructions.rstrip()}\n")
         flagged = self._threat_note(body)
         folder.mkdir(parents=True, exist_ok=True)
-        manifest.write_text(body, encoding="utf-8")
+        # newline="" for the same reason `patch` reads that way: `write_text`
+        # translates on Windows, so a body carrying CRLF is written back as
+        # CR CR LF and the file no longer holds what was composed. The two
+        # halves have to agree about endings or the matching ladder is asked
+        # to forgive damage this tool did itself.
+        with manifest.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(body)
         self._mark_created(ctx, name)
         self._record(ctx, action="create", skill=name,
                      before_text="", after_text=body)

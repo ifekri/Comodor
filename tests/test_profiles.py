@@ -28,34 +28,28 @@ def test_the_default_profile_is_the_root_itself(home):
     assert user_root() == home, "no migration, no surprise, no profiles/ hop"
 
 
-def test_a_named_profile_gets_its_own_subtree(home):
-    import os
-
-    os.environ["COMODOR_PROFILE"] = "work"
+def test_a_named_profile_gets_its_own_subtree(home, monkeypatch):
+    monkeypatch.setenv("COMODOR_PROFILE", "work")
     assert user_root() == home / "profiles" / "work"
 
 
 def test_two_profiles_resolve_to_two_brains(home, monkeypatch):
-    import os
-
     monkeypatch.delenv("COMODOR_PROFILE", raising=False)
     default_db = user_root() / "brain.db"
 
-    os.environ["COMODOR_PROFILE"] = "work"
+    monkeypatch.setenv("COMODOR_PROFILE", "work")
     work_db = user_root() / "brain.db"
 
     assert default_db != work_db
 
 
 def test_a_profile_loads_an_independent_config(home, monkeypatch, tmp_path):
-    import os
-
     monkeypatch.delenv("COMODOR_PROFILE", raising=False)
     config = load(str(tmp_path))
     config.ui.theme = "ember"
     config.save()
 
-    os.environ["COMODOR_PROFILE"] = "work"
+    monkeypatch.setenv("COMODOR_PROFILE", "work")
     work = load(str(tmp_path))
     assert work.first_run, "a profile starts fresh, not from the default's file"
 
@@ -67,14 +61,11 @@ def test_an_empty_profile_name_means_the_default(home, monkeypatch):
 
 def test_the_cli_flag_selects_the_profile(home, monkeypatch, tmp_path):
     """`comodor --profile work` must reach the stores that never see argv."""
-    import os
-
     from comodor.cli import build_parser
 
     args = build_parser().parse_args(["--profile", "work", "run", "hello"])
     assert args.profile == "work"
     # The flag's whole job is to set the variable before config loads; the
     # main() branch that does it is one line, exercised here directly.
-    monkeypatch.delenv("COMODOR_PROFILE", raising=False)
-    os.environ["COMODOR_PROFILE"] = args.profile
+    monkeypatch.setenv("COMODOR_PROFILE", args.profile)
     assert user_root() == home / "profiles" / "work"

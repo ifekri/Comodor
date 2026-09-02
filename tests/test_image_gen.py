@@ -163,9 +163,16 @@ def test_an_empty_prompt_is_refused(config, fake_images):
     with pytest.raises(ImageGenError):
         generate(config, _Store(), "   ", tmp_path_art(config))
 
-def test_the_key_comes_from_the_environment_not_the_config(config, fake_images,
+def test_the_key_comes_from_the_environment_not_the_config(config,
                                                            monkeypatch):
-    _enable(config, fake_images)
+    """A remote endpoint with no key in the environment must refuse and say
+    where the key belongs.
+
+    The endpoint here is deliberately *not* the loopback one the other tests
+    use: `127.0.0.1` needs no key by design, which is what the test below
+    checks, so pointing this at it would assert the opposite of that rule and
+    pass only while the code was wrong."""
+    _enable(config, "https://images.example.invalid/v1")
     monkeypatch.delenv("IMAGE_KEY", raising=False)
     with pytest.raises(ImageGenError) as caught:
         generate(config, _Store(), "a lighthouse", tmp_path_art(config))
