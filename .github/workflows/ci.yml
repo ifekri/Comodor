@@ -63,6 +63,10 @@ jobs:
       - name: Install
         run: python -m pip install --upgrade pip && pip install -e ".[dev]"
 
+      # `-n auto --dist loadfile` comes from pyproject, so this is the same
+      # command a developer runs. The suite is mostly waiting — sockets,
+      # subprocesses and deliberate timeouts — so the cores are nearly free:
+      # an hour of wall clock became about three minutes on a four-core runner.
       - name: Test
         run: pytest -q
 

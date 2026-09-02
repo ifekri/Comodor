@@ -32,6 +32,7 @@ switch off.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +57,31 @@ class Outcome:
     #: Set when the command could not be run at all, as opposed to failing.
     unusable: str = ""
 
+def _end_the_group(child: "subprocess.Popen") -> None:
+    """Kill the check and everything it started. Never raises.
+
+    `pytest` starting workers, `npm` starting a bundler: killing only the
+    shell leaves those behind, running against the user's project after the
+    turn that started them has been abandoned.
+    """
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(os.getpgid(child.pid), signal.SIGKILL)
+            return
+    except (OSError, AttributeError, ProcessLookupError):
+        pass
+    try:
+        # Windows: taskkill walks the tree, which Popen.kill does not.
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(child.pid)],
+                       capture_output=True, timeout=10)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    try:
+        child.kill()
+    except OSError:
+        pass
+
+
 def run(command: str, cwd: Path, patience: float = PATIENCE) -> Outcome:
     """Run the project's check and say what happened. Never raises."""
     if not command.strip():
@@ -65,18 +91,46 @@ def run(command: str, cwd: Path, patience: float = PATIENCE) -> Outcome:
     # A check that shells out to the agent would be a loop with a bill on it.
     environment["COMODOR_VERIFYING"] = "1"
 
+    # `shell=True` means the process started here is a shell, and the check is
+    # its child. Killing the shell on a timeout leaves that child running and
+    # holding the pipes open, so the read below goes on blocking — `patience`
+    # was a ceiling on nothing, and the message said "no result within 2s"
+    # after waiting twenty. The whole group has to go, which needs the platform
+    # to have been told to make one.
+    grouping: dict[str, object] = {}
+    if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):        # Windows
+        grouping["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    elif hasattr(os, "setsid"):                                # POSIX
+        grouping["start_new_session"] = True
+
     try:
-        finished = subprocess.run(
+        child = subprocess.Popen(
             command, shell=True, cwd=str(cwd), env=environment,
-            capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=patience)
-    except subprocess.TimeoutExpired:
-        return Outcome(ran=True, passed=False,
-                       output=f"(no result within {patience:.0f}s)")
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            encoding="utf-8", errors="replace", **grouping)
     except (OSError, ValueError) as problem:
         return Outcome(ran=False, passed=True, output="",
                        unusable=f"{type(problem).__name__}: {problem}")
 
+    try:
+        finished_out, finished_err = child.communicate(timeout=patience)
+    except subprocess.TimeoutExpired:
+        _end_the_group(child)
+        # Drained after the group is gone, so nothing is still writing into a
+        # pipe nobody will read. It cannot block now: every writer is dead.
+        try:
+            child.communicate(timeout=10)
+        except Exception:
+            pass
+        return Outcome(ran=True, passed=False,
+                       output=f"(no result within {patience:.0f}s)")
+    except (OSError, ValueError) as problem:
+        _end_the_group(child)
+        return Outcome(ran=False, passed=True, output="",
+                       unusable=f"{type(problem).__name__}: {problem}")
+
+    finished = subprocess.CompletedProcess(
+        command, child.returncode, finished_out, finished_err)
     output = ((finished.stdout or "") + (finished.stderr or "")).strip()
     if len(output) > MOST:
         output = "…\n" + output[-MOST:]

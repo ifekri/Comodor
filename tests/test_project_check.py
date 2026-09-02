@@ -81,6 +81,49 @@ def test_a_command_that_hangs_is_given_up_on(tmp_path):
     assert "no result within" in outcome.output
 
 
+def test_patience_is_a_ceiling_and_not_a_suggestion(tmp_path):
+    """The message said "no result within 2s" after waiting twenty.
+
+    `shell=True` starts a shell, and the check is its child. Killing the shell
+    on a timeout left that child alive holding the pipes open, so the read
+    carried on blocking until the command finished on its own. With the
+    default patience of ten minutes, one hung command held the turn for ten
+    minutes and then reported a number that had never been true.
+    """
+    import time
+
+    began = time.monotonic()
+    outcome = project.run(python_that("import time; time.sleep(20)"),
+                          tmp_path, patience=1.0)
+    took = time.monotonic() - began
+
+    assert not outcome.passed
+    assert took < 8, \
+        f"waited {took:.0f}s for a 1s ceiling — the child outlived the shell"
+
+
+def test_giving_up_does_not_leave_the_command_running(tmp_path):
+    """A check that starts workers — `pytest -n`, a bundler — leaves them
+    behind if only the shell is killed. They then run on against the user's
+    project after the turn that started them was abandoned.
+
+    The witness file is written after a delay the run is not allowed to reach,
+    so its absence a moment later means the process really is gone rather than
+    merely detached from.
+    """
+    import time
+
+    witness = tmp_path / "still-here"
+    project.run(
+        python_that(f"import time; time.sleep(3); "
+                    f"open({str(witness)!r}, 'w').write('x')"),
+        tmp_path, patience=0.5)
+
+    time.sleep(4)
+
+    assert not witness.exists(), "the command outlived the turn that ran it"
+
+
 def test_enormous_output_is_cut_from_the_front(tmp_path):
     """A failing suite prints megabytes and the useful part is at the end."""
     outcome = project.run(
