@@ -18,6 +18,7 @@ outside the process doing the testing.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -166,3 +167,68 @@ def test_stopping_is_registered_for_a_run_that_never_gets_there():
         "the cleanup is defined and never registered"
     assert "_remember(browser)" in text, \
         "a started browser is never added to the set that gets cleaned up"
+
+
+# --------------------------------------------------------------------------- #
+# killing a process group is not a thing to get wrong twice
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("module", ["comodor.browser.launch",
+                                    "comodor.agent.verify"])
+def test_anything_that_kills_a_group_first_gives_the_child_its_own(module):
+    """On POSIX a child inherits its parent's process group unless told
+    otherwise, so `killpg` on it kills the parent too.
+
+    This shipped and took out CI: every Linux and macOS job hung for its full
+    45-minute limit while Windows passed, because Windows has no `killpg` and
+    took the `taskkill` path instead. The same signal in the agent would end
+    the session that ran the command.
+
+    Two things have to hold together, so both are checked: the child is given
+    a session of its own, and the kill refuses to signal a group that is also
+    ours.
+    """
+    import ast
+    import importlib
+
+    path = Path(importlib.import_module(module).__file__)
+    source = path.read_text(encoding="utf-8")
+
+    if "killpg" not in source:
+        pytest.skip(f"{module} does not signal process groups")
+
+    # Parsed, not grepped. The first version of this test searched the text
+    # and passed with the real argument deleted, because a *comment* further
+    # down mentioned it — a guard that agrees with broken code.
+    tree = ast.parse(source)
+    spawns = [node for node in ast.walk(tree)
+              if isinstance(node, ast.Call)
+              and getattr(node.func, "attr", "") == "Popen"]
+    assert spawns, f"{module} signals process groups but starts no process"
+
+    for call in spawns:
+        names = {kw.arg for kw in call.keywords}
+        assert "start_new_session" in names, (
+            f"{module} line {call.lineno}: killpg on a child that inherits "
+            f"our group would kill whatever started us")
+
+    assert "os.getpgid(0)" in source, (
+        f"{module} signals a group without first checking it is not ours")
+
+
+def test_a_child_given_its_own_session_really_gets_one():
+    """The property itself rather than the source that should produce it."""
+    if not hasattr(os, "getpgid"):
+        pytest.skip("process groups are a POSIX idea")
+
+    import subprocess as sp
+
+    child = sp.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                     start_new_session=True)
+    try:
+        assert os.getpgid(child.pid) != os.getpgid(0), \
+            "start_new_session did not separate the child's group"
+    finally:
+        child.kill()
+        child.wait(timeout=10)

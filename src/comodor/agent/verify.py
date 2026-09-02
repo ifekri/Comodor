@@ -66,8 +66,15 @@ def _end_the_group(child: "subprocess.Popen") -> None:
     """
     try:
         if hasattr(os, "killpg"):
-            os.killpg(os.getpgid(child.pid), signal.SIGKILL)
-            return
+            group = os.getpgid(child.pid)
+            # Only a group the check has to itself. `start_new_session` above
+            # gives it one, but if that ever stops happening the child shares
+            # ours, and killing that group would end the agent along with the
+            # command it was running. The signal cannot be taken back, so the
+            # condition is checked rather than trusted.
+            if group != os.getpgid(0):
+                os.killpg(group, signal.SIGKILL)
+                return
     except (OSError, AttributeError, ProcessLookupError):
         pass
     try:
@@ -97,17 +104,18 @@ def run(command: str, cwd: Path, patience: float = PATIENCE) -> Outcome:
     # was a ceiling on nothing, and the message said "no result within 2s"
     # after waiting twenty. The whole group has to go, which needs the platform
     # to have been told to make one.
-    grouping: dict[str, object] = {}
-    if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):        # Windows
-        grouping["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    elif hasattr(os, "setsid"):                                # POSIX
-        grouping["start_new_session"] = True
-
+    # Written out rather than gathered into a dict and splatted: this argument
+    # is the difference between ending the check and ending the agent, and it
+    # should be readable as such at the call — by a person, and by anything
+    # checking that every `Popen` beside a `killpg` has one.
     try:
         child = subprocess.Popen(
             command, shell=True, cwd=str(cwd), env=environment,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            encoding="utf-8", errors="replace", **grouping)
+            encoding="utf-8", errors="replace",
+            start_new_session=(os.name != "nt"),
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP
+                           if os.name == "nt" else 0))
     except (OSError, ValueError) as problem:
         return Outcome(ran=False, passed=True, output="",
                        unusable=f"{type(problem).__name__}: {problem}")

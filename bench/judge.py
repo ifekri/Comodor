@@ -40,8 +40,21 @@ def tests_pass(workspace: Path, target: str = "") -> Verdict:
     registered is one strict-mode setting away from an exit code that reads as
     a failed task rather than a misconfigured judge.
     """
-    command = [sys.executable, "-m", "pytest", "-q",
-               "-p", "no:cacheprovider", "-c", os.devnull]
+    # An empty ini file inside the workspace, rather than `-c os.devnull`:
+    # on Windows that is `\\.\nul`, a device rather than a path, and pytest
+    # tries to open it as a file. It failed roughly one run in three, only
+    # under the parallel suite, with a `FileNotFoundError` about a name no
+    # test mentions — which reads as a broken task, not a broken judge.
+    workspace = Path(workspace)
+    empty_ini = workspace / ".bench-pytest.ini"
+    try:
+        empty_ini.write_text("[pytest]\n", encoding="utf-8")
+    except OSError:
+        empty_ini = None
+
+    command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    if empty_ini is not None:
+        command += ["-c", str(empty_ini)]
     if target:
         command.append(target)
 
@@ -59,6 +72,16 @@ def tests_pass(workspace: Path, target: str = "") -> Verdict:
                                   timeout=PATIENCE, env=environment)
     except subprocess.TimeoutExpired:
         return Verdict.no(f"the suite did not finish within {PATIENCE:.0f}s")
+    finally:
+        # Taken away again whatever happened: the workspace is compared
+        # against its own starting state, and a file the judge left there is
+        # a change the judge then reports.
+        if empty_ini is not None:
+            try:
+                empty_ini.unlink()
+            except OSError:
+                pass
+
     if finished.returncode == 0:
         return Verdict.ok()
     tail = (finished.stdout or finished.stderr).strip().splitlines()

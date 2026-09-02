@@ -238,6 +238,11 @@ class Browser:
                 stdin=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
                 if os.name == "nt" else 0,
+                # A group of its own, so ending the browser's group ends the
+                # browser. Without this the child inherits *our* group, and
+                # `killpg` on it kills whatever started us as well — the whole
+                # test run, the whole agent session.
+                start_new_session=(os.name != "nt"),
             )
         except OSError as error:
             complaints.close()
@@ -340,8 +345,15 @@ class Browser:
             return
         try:
             if hasattr(os, "killpg"):
-                os.killpg(os.getpgid(pid), signal.SIGKILL)
-                return
+                group = os.getpgid(pid)
+                # Only ever a group the browser has to itself. A child started
+                # without `start_new_session` inherits ours, and killing that
+                # group kills whoever started us — the test run, the agent, the
+                # shell. Checked rather than trusted: this signal cannot be
+                # taken back, and the cost of being wrong is the whole session.
+                if group != os.getpgid(0):
+                    os.killpg(group, signal.SIGKILL)
+                    return
         except (OSError, AttributeError, ProcessLookupError):
             pass
         try:
