@@ -1,22 +1,47 @@
-"""Against a real screen and a real mouse, when there is one.
+"""Against a real screen and a real mouse, when somebody has asked for one.
 
-Skipped everywhere else, the way `test_real_browser.py` is skipped without a
-browser. What is checked here cannot be checked against a stand-in: that the
-capture is a picture of the screen rather than a black rectangle, that
-`SendInput` actually moves the pointer, and that the coordinate arithmetic
-survives contact with a display whose shape nobody chose.
+What is checked here cannot be checked against a stand-in: that the capture is
+a picture of the screen rather than a black rectangle, that `SendInput` really
+moves the pointer, and that the coordinate arithmetic survives contact with a
+display whose shape nobody chose.
 
-These move the real mouse. They put it back.
+**These take over the machine they run on.** The pointer jumps across the
+screen and clicks land wherever the test aims them. That is fine on a machine
+set aside for it and unacceptable on the one somebody is working at — and the
+platform check that used to gate them, `sys.platform != "win32"`, is true of
+every Windows developer who types `pytest`. Their mouse moved, mid-sentence,
+with no explanation, on every run. The fixture below that puts the pointer back
+does not make that acceptable: the machine is unusable while they run, and a
+run that crashes puts nothing back at all.
+
+So they are opt-in. `COMODOR_REAL_DESKTOP=1` to run them, and CI does not set
+it — a hosted runner has no screen worth measuring anyway.
+
+    COMODOR_REAL_DESKTOP=1 pytest tests/test_real_desktop.py -n 0
+
+`-n 0` because two of these move the same pointer, and in parallel each would
+be measuring the other one's move.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
 
-pytestmark = pytest.mark.skipif(sys.platform != "win32",
-                                reason="the desktop backend is Windows-only so far")
+#: Set deliberately, on a machine nobody is using. Never in CI, never by
+#: default, and never from a plain `pytest` on somebody's laptop.
+ASKED_FOR = os.environ.get("COMODOR_REAL_DESKTOP", "").strip() not in ("", "0")
+
+pytestmark = [
+    pytest.mark.skipif(sys.platform != "win32",
+                       reason="the desktop backend is Windows-only so far"),
+    pytest.mark.skipif(not ASKED_FOR,
+                       reason="moves the real pointer — set "
+                              "COMODOR_REAL_DESKTOP=1 on a machine you are "
+                              "not using"),
+]
 
 
 @pytest.fixture

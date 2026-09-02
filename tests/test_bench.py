@@ -27,7 +27,7 @@ bench = pytest.importorskip("bench", reason="the benchmark is not in this tree")
 
 from bench import judge  # noqa: E402
 from bench.runner import _parse, _settings  # noqa: E402
-from bench.task import Attempt, load_tasks  # noqa: E402
+from bench.task import Attempt, fresh_copy, load_tasks  # noqa: E402
 
 TASKS = ROOT / "bench" / "tasks"
 
@@ -48,7 +48,7 @@ def copy_of(tmp_path):
     """A working copy of one task's repository, as an attempt would get."""
     def make(name: str) -> Path:
         workspace = tmp_path / name
-        shutil.copytree(TASKS / name / "repo", workspace)
+        fresh_copy(TASKS / name / "repo", workspace)
         return workspace
     return make
 
@@ -86,7 +86,7 @@ def test_the_repository_starts_in_the_state_the_task_needs(task, tmp_path):
     model.
     """
     workspace = tmp_path / task.name
-    shutil.copytree(task.repo, workspace)
+    fresh_copy(task.repo, workspace)
     if not list(workspace.rglob("test_*.py")):
         pytest.skip("no suite of its own to judge the starting state by")
 
@@ -745,3 +745,75 @@ def test_an_empty_answer_is_reported_as_an_empty_answer(copy_of):
     assert not verdict.passed
     assert "nothing at all" in verdict.reason
     assert "4 steps" in verdict.reason
+
+
+# --------------------------------------------------------------------------- #
+# the judge must measure the task, not this project's own settings
+# --------------------------------------------------------------------------- #
+
+
+def test_the_judge_reads_none_of_our_pytest_configuration(copy_of):
+    """A task repository is a couple of files with no `pyproject.toml`, so
+    pytest walks upward looking for one and finds ours.
+
+    That was harmless while ours said almost nothing. It now carries
+    `-n auto` — sixteen workers for two test files, 0.03s becoming 4.5s on
+    every judged run — and a `-m` marker filter naming a marker the task
+    repository has never registered. A filter that selects nothing exits 5,
+    and that reads as a failed task rather than as a misconfigured judge.
+    """
+    import inspect
+
+    from bench import judge
+
+    source = inspect.getsource(judge.tests_pass)
+
+    assert '"-c"' in source, "the judge still inherits whatever ini it finds"
+    assert "no:cacheprovider" in source, \
+        "a judged run leaves a cache in a workspace compared to its start"
+
+
+def test_judging_leaves_the_workspace_as_it_found_it(copy_of):
+    """`unchanged` compares the workspace against its starting state, so
+    anything the judge itself writes there is a change it then reports."""
+    from bench import judge
+
+    workspace = copy_of("fix-off-by-one")
+    before = {p.name for p in workspace.iterdir()}
+
+    judge.tests_pass(workspace)
+
+    assert {p.name for p in workspace.iterdir()} == before, \
+        "the judge left something behind in the workspace it judges"
+
+
+def test_the_judge_starts_no_workers_of_its_own(copy_of):
+    """Thirty-nine attempts, each judged, each spinning up sixteen workers for
+    two test files. A wall-clock assertion would be the obvious test and is
+    the wrong one — under the parallel suite the timing washes out and it
+    passes whether the fix is there or not. What can be checked exactly is
+    that no worker was ever started."""
+    import subprocess
+    import sys
+
+    from bench import judge
+
+    workspace = copy_of("fix-off-by-one")
+    seen = {}
+
+    real = subprocess.run
+
+    def remember(command, *args, **kwargs):
+        seen["command"] = list(command)
+        return real(command, *args, **kwargs)
+
+    subprocess.run = remember
+    try:
+        judge.tests_pass(workspace)
+    finally:
+        subprocess.run = real
+
+    command = seen.get("command", [])
+    assert command and command[0] == sys.executable
+    assert "-n" not in command, "the judge asked for workers itself"
+    assert "-c" in command, "it reads whatever ini pytest walks up and finds"

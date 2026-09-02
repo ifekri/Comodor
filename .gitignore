@@ -51,3 +51,14 @@ PROJECT.md
 # Editor and agent settings that are this machine, not this project.
 .claude/
 *-in-git.png
+
+# Whatever a machine that runs the benchmark keeps locally: the credentials
+# it needs, its run logs, and the script that drives it.
+#
+# None of that is in this repository on purpose. Publishing the runner would
+# publish where a key is kept and what is reachable from the machine holding
+# it, on a repository anybody can read — so it lives only on the machine that
+# uses it, inside a clone, and these rules keep it from being committed back
+# by accident. A key that reaches a public repository has to be revoked, not
+# deleted.
+bench/on-a-server/

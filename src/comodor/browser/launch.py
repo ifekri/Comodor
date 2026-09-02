@@ -16,8 +16,10 @@ performs on purpose survives, and obviously separate from the browser they use.
 
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -140,6 +142,33 @@ def _first_line(output: str) -> str:
     return f" It said: {first.strip()[:300]}"
 
 
+#: Every browser started and not yet stopped. A `finally` covers the ordinary
+#: path, and nothing covers the one that actually leaks: a run interrupted —
+#: Ctrl-C, a test-runner timeout, a session killed — never reaches its cleanup,
+#: and Chrome is a dozen processes that outlive the Python that started them.
+#: They hold their profile directory and their share of a gigabyte, and nothing
+#: in a later run knows to clean up an earlier one's. They accumulate for days
+#: until somebody notices their machine is full of browsers nobody opened.
+_LIVE: "set[Browser]" = set()
+
+
+def _remember(browser: "Browser") -> None:
+    _LIVE.add(browser)
+
+
+def _stop_everything_still_open() -> None:
+    """Registered with `atexit`, so an abandoned browser still goes away."""
+    for browser in list(_LIVE):
+        try:
+            browser.stop()
+        except Exception:
+            pass
+    _LIVE.clear()
+
+
+atexit.register(_stop_everything_still_open)
+
+
 class Browser:
     """A browser process we started, and are responsible for stopping."""
 
@@ -209,6 +238,11 @@ class Browser:
                 stdin=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
                 if os.name == "nt" else 0,
+                # A group of its own, so ending the browser's group ends the
+                # browser. Without this the child inherits *our* group, and
+                # `killpg` on it kills whatever started us as well — the whole
+                # test run, the whole agent session.
+                start_new_session=(os.name != "nt"),
             )
         except OSError as error:
             complaints.close()
@@ -216,6 +250,7 @@ class Browser:
 
         browser = cls(binary, profile, port, headless, process,
                       sandboxed=sandboxed)
+        _remember(browser)
         try:
             browser._await_port()
         except BrowserError as error:
@@ -270,9 +305,28 @@ class Browser:
         info = version(self.port)
         return info.get("Browser") or Path(self.executable).stem or "browser"
 
+    def _forget(self) -> None:
+        _LIVE.discard(self)
+
     def stop(self) -> None:
+        """Close the browser and everything it started.
+
+        A browser is not one process. Chrome starts a renderer per tab, a GPU
+        process, a crashpad handler and more, and `terminate` on the one we
+        launched leaves every one of them running — holding its profile
+        directory, and its share of a gigabyte of memory. Eight strays per
+        run, and nothing in a later run cleans up an earlier one's: they
+        accumulate until somebody notices their machine is full of browsers
+        nobody opened.
+        """
         if not self.ours or self.process is None:
             return
+
+        # The tree first, while the parent is still alive to name it. Killing
+        # the parent before asking leaves orphans whose parent id points at
+        # nothing, and then there is no tree left to walk.
+        self._end_the_tree()
+
         try:
             self.process.terminate()
             self.process.wait(timeout=8)
@@ -282,3 +336,30 @@ class Browser:
             except OSError:
                 pass
         self.process = None
+        self._forget()
+
+    def _end_the_tree(self) -> None:
+        """The browser and every process it started. Never raises."""
+        pid = getattr(self.process, "pid", None)
+        if pid is None:
+            return
+        try:
+            if hasattr(os, "killpg"):
+                group = os.getpgid(pid)
+                # Only ever a group the browser has to itself. A child started
+                # without `start_new_session` inherits ours, and killing that
+                # group kills whoever started us — the test run, the agent, the
+                # shell. Checked rather than trusted: this signal cannot be
+                # taken back, and the cost of being wrong is the whole session.
+                if group != os.getpgid(0):
+                    os.killpg(group, signal.SIGKILL)
+                    return
+        except (OSError, AttributeError, ProcessLookupError):
+            pass
+        try:
+            # `taskkill /T` walks the tree from a living parent; `Popen.kill`
+            # only ever ends the one process.
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                           capture_output=True, timeout=15)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass

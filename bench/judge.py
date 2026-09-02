@@ -13,6 +13,7 @@ whose goal is a green suite also pins the test file.
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -25,16 +26,62 @@ PATIENCE = 120.0
 
 
 def tests_pass(workspace: Path, target: str = "") -> Verdict:
-    """Run pytest in the workspace and read the exit code."""
-    command = [sys.executable, "-m", "pytest", "-q"]
+    """Run pytest in the workspace and read the exit code.
+
+    `-p no:cacheprovider` so a judged run leaves no `.pytest_cache` behind in
+    a workspace that is compared against its starting state, and `-c` pointing
+    at nothing so this reads no configuration at all.
+
+    The second one is not theoretical. A task repository is two files with no
+    `pyproject.toml`, so pytest walks upward looking for one — and outside a
+    copied workspace it finds *this* project's, whose `addopts` carry `-n auto`
+    and a marker filter. Sixteen workers for two test files turned 0.03s into
+    4.5s, and a `-m` filter naming a marker the task repository has never
+    registered is one strict-mode setting away from an exit code that reads as
+    a failed task rather than a misconfigured judge.
+    """
+    # An empty ini file inside the workspace, rather than `-c os.devnull`:
+    # on Windows that is `\\.\nul`, a device rather than a path, and pytest
+    # tries to open it as a file. It failed roughly one run in three, only
+    # under the parallel suite, with a `FileNotFoundError` about a name no
+    # test mentions — which reads as a broken task, not a broken judge.
+    workspace = Path(workspace)
+    empty_ini = workspace / ".bench-pytest.ini"
+    try:
+        empty_ini.write_text("[pytest]\n", encoding="utf-8")
+    except OSError:
+        empty_ini = None
+
+    command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    if empty_ini is not None:
+        command += ["-c", str(empty_ini)]
     if target:
         command.append(target)
+
+    # `no:cacheprovider` stops pytest writing `.pytest_cache`; the interpreter
+    # writes `__pycache__` on its own and needs telling separately. Both are in
+    # `NOISE` and so are not counted as changes, but a judge that leaves files
+    # in the workspace it is judging is one convention away from a wrong
+    # verdict, and the stale bytecode is real either way.
+    environment = dict(os.environ)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+
     try:
         finished = subprocess.run(command, cwd=workspace, capture_output=True,
                                   text=True, encoding="utf-8", errors="replace",
-                                  timeout=PATIENCE)
+                                  timeout=PATIENCE, env=environment)
     except subprocess.TimeoutExpired:
         return Verdict.no(f"the suite did not finish within {PATIENCE:.0f}s")
+    finally:
+        # Taken away again whatever happened: the workspace is compared
+        # against its own starting state, and a file the judge left there is
+        # a change the judge then reports.
+        if empty_ini is not None:
+            try:
+                empty_ini.unlink()
+            except OSError:
+                pass
+
     if finished.returncode == 0:
         return Verdict.ok()
     tail = (finished.stdout or finished.stderr).strip().splitlines()
