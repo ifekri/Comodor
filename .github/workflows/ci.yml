@@ -70,6 +70,14 @@ jobs:
       - name: Test
         run: pytest -q
 
+      # Alone, and on one process. These measure wall-clock time against a
+      # ceiling, so a worker sharing the runner with three others measures the
+      # runner rather than the code — recall came back at 313ms against a 5ms
+      # budget for exactly that reason. Excluded from the run above by marker,
+      # so they have to be run here or the ceilings stop being enforced.
+      - name: Performance ceilings
+        run: pytest -m performance -n 0 -q
+
       - name: The CLI actually starts
         run: |
           comodor --version

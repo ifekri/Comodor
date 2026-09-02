@@ -54,6 +54,9 @@ jobs:
         # eventually bypasses.
         run: pytest -q
 
+      - name: Performance ceilings
+        run: pytest -m performance -n 0 -q
+
       - name: Say what passed
         run: |
           {

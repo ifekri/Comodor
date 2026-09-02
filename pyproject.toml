@@ -102,4 +102,7 @@ pythonpath = ["src"]
 # grouping matters: several files build a real server or a browser in a
 # module-scoped fixture, and splitting a file across workers would build it
 # once per worker rather than once.
-addopts = "-n auto --dist loadfile"
+addopts = "-n auto --dist loadfile -m 'not performance'"
+markers = [
+    "performance: a wall-clock ceiling, measured alone. Run with `pytest -m performance -n 0`; the CI job does.",
+]
