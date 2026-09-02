@@ -37,7 +37,7 @@ from typing import Any
 from ..channels.breaker import RESUME_POLL, CircuitBreaker
 from ..channels.busy import interrupt_note, start_or_steer
 from ..channels.markdown import to_telegram
-from ..channels.settings import Settings, keep_current
+from ..channels.settings import Settings, hold_the_line, keep_current
 from ..config import Config
 from ..media.ingest import MediaError, ingest
 from . import keyboard as kb
@@ -891,7 +891,25 @@ class Service:
                     # Held in plan whatever the terminal is set to.
                     talk.session.set_mode("plan")
                 self.chats[chat] = talk
-            return talk
+            revoked = hold_the_line(self.config, "telegram", talk)
+
+        # Outside the lock: this is a call to Telegram, and every other chat
+        # would wait behind it.
+        if revoked:
+            # Said, not done quietly. A mode that changes underneath somebody
+            # with no explanation reads as the bot ignoring them, which is the
+            # bug this whole file exists to fix. Failing to say it must not
+            # cost the turn, though: the revocation itself has already
+            # happened, and that is the part that had to.
+            try:
+                self.bot.send(
+                    talk.chat,
+                    "<b>Back in plan mode.</b>\n\nWrite access was turned off "
+                    "for Telegram, so this chat can no longer edit files or "
+                    "run commands.")
+            except Exception:
+                pass
+        return talk
 
     def _menu(self, chat: int) -> dict[str, Any]:
         talk = self.chats.get(chat)

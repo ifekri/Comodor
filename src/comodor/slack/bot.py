@@ -37,7 +37,7 @@ from typing import Any, Callable
 from ..channels.breaker import CircuitBreaker
 from ..channels.busy import interrupt_note, start_or_steer
 from ..channels.markdown import to_slack
-from ..channels.settings import Settings, keep_current
+from ..channels.settings import Settings, hold_the_line, keep_current
 from ..config import Config
 from ..media.ingest import MediaError, ingest
 from . import blocks as ui
@@ -310,6 +310,13 @@ class Service:
             if not self.config.slack.allow_writes:
                 talk.session.set_mode("plan")
             self.chats[user] = talk
+        if hold_the_line(self.config, "slack", talk):
+            try:
+                self._send(talk, "*Back in plan mode.* Write access was "
+                                 "turned off for Slack, so this chat can no "
+                                 "longer edit files or run commands.")
+            except Exception:
+                pass
         return talk
 
     # -- sending ------------------------------------------------------------ #
