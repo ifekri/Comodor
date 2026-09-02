@@ -215,7 +215,11 @@ def test_a_review_that_finds_nothing_writes_nothing(store, service):
     assert service.entries() == []
 
 
+@pytest.mark.performance
 def test_a_new_review_replaces_the_result_of_an_in_flight_one(store, service):
+    """Marked as timing-sensitive: the ordering it asserts comes from a 0.3s
+    delay in the fake gateway, and under load the two threads no longer finish
+    in the order the delay was chosen to produce."""
     gateway = FakeGateway(
         [
             json.dumps({"facts": [{"kind": "memory", "text": "From the first turn"}]}),

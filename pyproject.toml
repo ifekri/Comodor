@@ -104,5 +104,11 @@ pythonpath = ["src"]
 # once per worker rather than once.
 addopts = "-n auto --dist loadfile -m 'not performance'"
 markers = [
-    "performance: a wall-clock ceiling, measured alone. Run with `pytest -m performance -n 0`; the CI job does.",
+    # Anything whose assertion is about elapsed time: a ceiling, a deadline
+    # for a background job, or an ordering that comes from one thing being
+    # deliberately slower than another. Under `-n auto` these measure a
+    # machine with fifteen other workers on it, and fail in a different file
+    # on a different platform every few runs. Run alone instead, in the same
+    # CI step, with the budgets untouched.
+    "performance: measures wall-clock time, so it runs alone. `pytest -m performance -n 0`; the CI job does.",
 ]

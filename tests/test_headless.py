@@ -82,6 +82,7 @@ def run(config, **overrides) -> argparse.Namespace:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.performance
 def test_a_question_nobody_can_answer_does_not_hold_the_run(scripted):
     """`ask` waits half an hour for an answer. Headless, one can never arrive.
 
