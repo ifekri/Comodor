@@ -16,6 +16,7 @@ written rather than how well the agent did.
 from __future__ import annotations
 
 import importlib.util
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -172,6 +173,25 @@ def _import(path: Path, name: str) -> Any:
 #: agent, and a task that fails because pytest left a cache behind is measuring
 #: pytest.
 NOISE = {"__pycache__", ".pytest_cache", ".comodor", ".git", ".ruff_cache"}
+
+
+def fresh_copy(repo: Path, workspace: Path) -> Path:
+    """A task's starting state, without anything a previous run left in it.
+
+    `NOISE` was only ever consulted when *comparing* two trees, so the copy
+    itself carried whatever was on disk — and running the suite in a task
+    repository leaves `__pycache__` in it. The attempt then started from a
+    state that depended on what somebody had run there recently: stale
+    bytecode for a module the task is about, which pytest may or may not
+    decide to reuse. It showed up as one intermittent failure per run, in a
+    different test each time.
+
+    The starting state has to be the files in git and nothing else, or the
+    benchmark is measuring the developer's disk.
+    """
+    shutil.copytree(repo, workspace,
+                    ignore=shutil.ignore_patterns(*NOISE))
+    return workspace
 
 
 def _files(root: Path) -> dict[str, bytes]:

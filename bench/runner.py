@@ -35,7 +35,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .task import Attempt, Task, Verdict
+from .task import Attempt, Task, Verdict, fresh_copy
 
 #: What a run is given to spend before it is stopped, whatever the task's own
 #: step budget says. A ceiling on the bill, not on the work.
@@ -112,7 +112,7 @@ def _one(task: Task, provider: str, model: str,
     root = Path(tempfile.mkdtemp(prefix=f"comodor-bench-{task.name}-"))
     workspace = root / "work"
     home = root / "home"
-    shutil.copytree(task.repo, workspace)
+    fresh_copy(task.repo, workspace)
     home.mkdir()
     _settings(home, task)
 
