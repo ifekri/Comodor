@@ -40,7 +40,10 @@ Changelog = "https://github.com/ifekri/Comodor/blob/main/CHANGELOG.md"
 # travel with it. PyYAML is here so the tests can read `docker-compose.yml` and
 # the workflows as documents rather than as strings; asserting on the text of a
 # YAML file is how a test ends up agreeing with a broken one.
-dev = ["pytest>=8.0", "ruff>=0.14", "pyyaml>=6.0"]
+# pytest-xdist because the suite is mostly waiting: sockets, subprocesses
+# and deliberate timeouts, none of which compete for a CPU. Serially it
+# ran for an hour on every CI job; the work itself was minutes.
+dev = ["pytest>=8.0", "pytest-xdist>=3.5", "ruff>=0.14", "pyyaml>=6.0"]
 
 [project.scripts]
 comodor = "comodor.cli:main"
@@ -95,3 +98,11 @@ include = ["src/comodor", "tests", "pyproject.toml", "README.md", "LICENSE"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# One process per core, and each test file kept whole on one worker. The
+# grouping matters: several files build a real server or a browser in a
+# module-scoped fixture, and splitting a file across workers would build it
+# once per worker rather than once.
+addopts = "-n auto --dist loadfile -m 'not performance'"
+markers = [
+    "performance: a wall-clock ceiling, measured alone. Run with `pytest -m performance -n 0`; the CI job does.",
+]

@@ -63,8 +63,20 @@ jobs:
       - name: Install
         run: python -m pip install --upgrade pip && pip install -e ".[dev]"
 
+      # `-n auto --dist loadfile` comes from pyproject, so this is the same
+      # command a developer runs. The suite is mostly waiting — sockets,
+      # subprocesses and deliberate timeouts — so the cores are nearly free:
+      # an hour of wall clock became about three minutes on a four-core runner.
       - name: Test
         run: pytest -q
+
+      # Alone, and on one process. These measure wall-clock time against a
+      # ceiling, so a worker sharing the runner with three others measures the
+      # runner rather than the code — recall came back at 313ms against a 5ms
+      # budget for exactly that reason. Excluded from the run above by marker,
+      # so they have to be run here or the ceilings stop being enforced.
+      - name: Performance ceilings
+        run: pytest -m performance -n 0 -q
 
       - name: The CLI actually starts
         run: |

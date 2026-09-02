@@ -21,6 +21,15 @@ import pytest
 from comodor.learning import BrainStore
 from comodor.learning.store import Lesson
 
+#: These are the one kind of test parallelism breaks rather than speeds up.
+#: They measure wall-clock time against a ceiling, and a worker sharing the
+#: machine with fifteen others measures the machine, not the code: recall came
+#: back at 313ms against a 5ms budget purely because three other workers were
+#: busy. Marked so the suite can run them on their own — the budgets stay where
+#: they are, because loosening a ceiling to survive noise is how a performance
+#: test stops meaning anything.
+pytestmark = pytest.mark.performance
+
 CORPUS = 5000
 RECALL_BUDGET_MS = 5.0
 DEDUP_BUDGET_MS = 5.0
@@ -265,3 +274,33 @@ def test_a_query_of_only_common_words_still_searches_for_something():
     index.rebuild([("lesson", i, "common everywhere", "global") for i in range(200)])
 
     assert index.selective(["common", "everywhere"]), "everything was dropped"
+
+
+# --------------------------------------------------------------------------- #
+# the ceilings have to actually be measured somewhere
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "release.yml"])
+def test_these_are_still_run_by_ci(workflow):
+    """A marker that excludes them from the main run is one line away from
+    excluding them from everything.
+
+    They are skipped by `addopts` because they measure wall-clock time and a
+    parallel worker measures the runner rather than the code. That is only
+    safe while a separate step runs them on their own — without it the budgets
+    would go on being written and never once checked, which is worse than not
+    having them.
+    """
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).resolve().parents[1]
+    text = (root / ".github" / "workflows" / workflow).read_text(
+        encoding="utf-8")
+
+    assert "-m performance" in text, (
+        f"{workflow} never runs the performance tests, so the budgets are "
+        f"written and never checked")
+    assert "-n 0" in text, (
+        f"{workflow} runs them in parallel, which is the one thing they "
+        f"cannot survive")
