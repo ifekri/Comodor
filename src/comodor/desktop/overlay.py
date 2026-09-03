@@ -84,8 +84,21 @@ class Overlay:
 
     def __init__(self, status: Callable[[], str] | None = None,
                  on_stop: Callable[[], None] | None = None,
-                 on_hide: Callable[[], None] | None = None) -> None:
+                 on_hide: Callable[[], None] | None = None,
+                 a_hand_is_on_it: Callable[[tuple[int, int]], bool] | None
+                 = None) -> None:
         self.status = status or (lambda: "")
+        #: Whether the pointer arrived somewhere by a hand rather than by the
+        #: agent. The agent drives the same system cursor, so without this a
+        #: `left_click` aimed at anything the panel happens to cover would
+        #: move the pointer into a button, make the window take clicks, and
+        #: land the agent's own click on Stop — quietly ending the grant and
+        #: making the whole top-centre strip of the screen unusable to it.
+        #:
+        #: `Guard` already answers this for the corner gesture, and this is
+        #: the same question. Nothing supplied means nothing is driving the
+        #: pointer, so every move is a person's.
+        self.a_hand_is_on_it = a_hand_is_on_it or (lambda at: True)
         #: Called when the person presses the stop button: end the grant, the
         #: same as moving the mouse into a corner. The corner gesture works
         #: without aiming, which is what you want when something is going
@@ -295,11 +308,16 @@ class Overlay:
         try:
             from . import win32
 
-            x, y = win32.cursor()
-            x -= self._origin[0]
-            y -= self._origin[1]
+            where = win32.cursor()
+            x = where[0] - self._origin[0]
+            y = where[1] - self._origin[1]
             over = any(x1 <= x <= x2 and y1 <= y <= y2
                        for _, x1, y1, x2, y2 in self._hits)
+            # Over a button is not the same as *reaching for* one. The agent
+            # moves this cursor too, and a click it aimed at something the
+            # panel covers must reach that thing, not the panel.
+            if over and not self.a_hand_is_on_it(where):
+                over = False
         except Exception:
             # Without a pointer position this cannot be decided, and the safe
             # answer is the one that never interferes with the desktop.

@@ -162,6 +162,88 @@ def test_it_can_check_itself_without_writing(mapper, tmp_path, monkeypatch):
     assert "write_text" not in check_half, "--check writes the file"
 
 
+def test_the_child_is_given_the_source_tree_explicitly(mapper):
+    """`sys.path.insert` at the top of the script changes *this* interpreter.
+
+    The child gets nothing from it, and `cwd` does not make a src-layout
+    package importable — so without an explicit PYTHONPATH the child imports
+    whatever is in site-packages, which is the exact stale copy this file
+    exists to catch. An uninstalled checkout could not import it at all.
+    """
+    import inspect
+
+    source = inspect.getsource(mapper.smoke)
+
+    assert "PYTHONPATH" in source, \
+        "the child is left to find comodor however it can"
+    assert "env=environment" in source, "the environment is built and not used"
+
+
+def test_a_child_that_cannot_import_comodor_is_not_reported_as_working(mapper):
+    """`python -m comodor` with the package missing exits 1, prints "No module
+    named comodor", and produces no traceback. An "exit 0 or 1 is fine" rule
+    called that a working command — for all twenty of them at once."""
+    import os
+
+    broken = dict(os.environ)
+    broken["PYTHONPATH"] = "nowhere-at-all"
+
+    finished = subprocess.run(
+        [sys.executable, "-S", "-m", "comodor", "--version"],
+        cwd=ROOT, capture_output=True, text=True, env=broken,
+        encoding="utf-8", errors="replace", timeout=180)
+    output = (finished.stdout or "") + (finished.stderr or "")
+
+    assert finished.returncode == 1
+    assert "Traceback (most recent call last)" not in output
+    assert "No module named" in output
+
+    # The rule the map applies to that answer.
+    allowed = {0, 1} if "comodor --version" in mapper.MAY_EXIT_ONE else {0}
+    assert finished.returncode not in allowed, \
+        "a missing package would be reported as a working command"
+
+
+def test_only_doctor_is_allowed_to_exit_one(mapper):
+    """It is documented as meaning "I found something to report". Extending
+    that to every command is what hid the failure above."""
+    assert mapper.MAY_EXIT_ONE == {"comodor doctor"}
+
+
+def test_nothing_in_the_safe_list_reaches_the_network(mapper):
+    """`comodor local list` calls the catalogue with `allow_network=True`: it
+    contacts a remote server and writes `local-models.json` into the user's
+    cache. Generating a supposedly read-only map must not do either, and must
+    not stall when the network is gone."""
+    reaching = {"local"}       # the ones known to fetch
+    for label, args in mapper.SAFE_COMMANDS:
+        assert args[0] not in reaching, \
+            f"{label} performs network I/O and writes to the user's cache"
+
+
+def test_check_does_not_need_a_baseline_file(mapper, tmp_path, monkeypatch):
+    """The map is git-ignored, so a clean checkout has none. Diffing against a
+    missing file failed every time on the exact machine `--check` is for."""
+    import inspect
+
+    source = inspect.getsource(mapper.check)
+
+    assert "OUT.read_text" not in source, \
+        "--check still compares against a file that will not be there"
+    assert "smoke()" in source, "--check no longer runs anything"
+
+
+def test_check_reports_what_is_wrong_rather_than_that_something_is(mapper):
+    """"Out of date" sent somebody to regenerate a file. A list of what failed
+    sends them to the thing that failed."""
+    import inspect
+
+    source = inspect.getsource(mapper.check)
+
+    assert "problems" in source
+    assert "has no form" in source, "a broken channel is not named"
+
+
 def test_the_map_is_not_committed():
     """It records what answered on one machine at one moment. A committed copy
     would be stale the next day and believed anyway."""

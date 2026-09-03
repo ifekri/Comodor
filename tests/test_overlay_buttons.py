@@ -397,6 +397,57 @@ def test_the_pointer_is_read_in_the_same_space_the_buttons_are_drawn_in(
         "the origin was not subtracted — the buttons are unreachable"
 
 
+def test_the_agents_own_pointer_does_not_arm_the_buttons(monkeypatch):
+    """The agent drives the same system cursor a person does.
+
+    So a `left_click` aimed at anything the panel happens to cover moves the
+    pointer into a button, the window takes clicks, and the agent's own click
+    lands on Stop — silently ending the grant, and making the whole top-centre
+    strip of the screen unusable to it. Which is where menus live.
+
+    `Guard` already answers "did a hand do this?" for the corner gesture. The
+    overlay asks the same question.
+    """
+    if sys.platform != "win32":
+        pytest.skip("the style flag is a Windows idea")
+
+    from comodor.desktop.guard import Guard
+
+    guard = Guard()
+    guard.allow(600, reason="test")
+
+    overlay = an_overlay(on_stop=lambda: None, on_hide=lambda: None)
+    overlay._origin = (0, 0)
+    overlay._handle = 1
+    overlay.a_hand_is_on_it = guard.a_hand_is_on_it
+    overlay._badge()
+
+    _, x1, y1, x2, y2 = overlay._hits[0]
+    middle = ((x1 + x2) // 2, (y1 + y2) // 2)
+
+    changes: list[bool] = []
+    monkeypatch.setattr(overlay, "_set_clickable",
+                        lambda wanted: changes.append(wanted))
+    monkeypatch.setattr("comodor.desktop.win32.cursor", lambda: middle)
+
+    guard.note_pointer(middle)          # the agent put it there
+    overlay._watch_the_pointer()
+    assert changes[-1] is False, \
+        "the overlay would swallow a click the agent aimed underneath it"
+
+    guard.note_pointer((10, 900))       # the agent left it elsewhere
+    overlay._watch_the_pointer()
+    assert changes[-1] is True, "the stop button now ignores a person"
+
+
+def test_with_nothing_driving_the_pointer_every_move_is_a_persons():
+    """An overlay built without a guard — a test, a preview — must not decide
+    that nobody is there."""
+    overlay = an_overlay(on_stop=lambda: None)
+
+    assert overlay.a_hand_is_on_it((5, 5)) is True
+
+
 def test_the_style_is_only_written_when_it_changes(monkeypatch):
     """`_watch_the_pointer` runs sixty times a second. Setting a window style
     that often, for no change, is a syscall per frame for nothing."""
@@ -468,6 +519,37 @@ def test_hiding_does_not_end_the_grant():
 
     assert tool.guard.active, "hiding the panel stopped the work"
     assert tool.overlay_hidden is True
+
+
+def test_the_overlay_is_told_how_to_recognise_the_agent():
+    """Without this the panel is a trap: the agent clicks its own stop button
+    the first time it aims at anything underneath the countdown."""
+    import inspect
+
+    from comodor.tools.computer import Computer
+
+    source = inspect.getsource(Computer._show)
+
+    assert "a_hand_is_on_it=" in source, \
+        "the overlay cannot tell the agent's pointer from a person's"
+
+
+def test_the_guard_answers_that_question_the_same_way_it_does_for_corners():
+    """One mechanism, two callers. A second implementation would be a second
+    thing to get wrong, and this one decides whether a stop works."""
+    from comodor.desktop.guard import Guard
+
+    guard = Guard()
+    guard.allow(600, reason="test")
+    guard.note_pointer((500, 500))
+
+    assert guard.a_hand_is_on_it((500, 500)) is False
+    assert guard.a_hand_is_on_it((900, 500)) is True
+
+    # And the corner check still goes through it, rather than repeating it.
+    corners = [(0, 0, 1920, 1080)]
+    assert guard.user_moved_away((500, 500), corners) is False
+    assert guard.user_moved_away((2, 2), corners) is True
 
 
 def test_the_overlay_is_given_both_callbacks():

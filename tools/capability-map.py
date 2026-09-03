@@ -6,11 +6,14 @@ somebody believed on the day they wrote it, and this file exists precisely
 because "I thought that part worked" is expensive to discover mid-task.
 
     python tools/capability-map.py            # rewrite CAPABILITIES.md
-    python tools/capability-map.py --check    # fail if it is out of date
+    python tools/capability-map.py --check    # fail if anything is broken
 
-The `--check` form is what a CI job or a pre-commit hook would run: it
-regenerates into memory and compares, so a capability added without updating
-the map is caught where it is cheap rather than three weeks later.
+The `--check` form is what a CI job or a pre-commit hook would run. It
+checks the *substance* rather than diffing against the file: the map is
+git-ignored, so a clean checkout has no baseline and a diff would fail every
+time on the machine the mode is meant for. Instead it asks whether every
+channel is connectable, every command in the smoke list is real, and every one
+of them answers.
 
 Everything in the output comes from importing the package and reading its
 registries. Nothing is typed in twice, so nothing can disagree with itself.
@@ -20,6 +23,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -196,6 +200,14 @@ def coverage() -> dict[str, object]:
 #: command would prove only that argparse works; these each reach into a
 #: subsystem and come back, which is the difference between "it parses" and
 #: "it runs".
+#: `doctor` is the one command that reports a finding as exit 1, and it does
+#: so on a healthy install with an unconfigured provider. Every other command
+#: exiting 1 has failed — including the one that matters most here, a child
+#: that cannot import the package at all: `python -m comodor` exits 1 with
+#: "No module named comodor" and no traceback, which an "exit 0 or 1 is fine"
+#: rule reports as twenty working subsystems.
+MAY_EXIT_ONE = {"comodor doctor"}
+
 SAFE_COMMANDS = [
     ("comodor --version", ["--version"]),
     ("comodor --help", ["--help"]),
@@ -213,7 +225,6 @@ SAFE_COMMANDS = [
     ("comodor insights", ["insights"]),
     ("comodor approvals", ["approvals"]),
     ("comodor plugins list", ["plugins", "list"]),
-    ("comodor local list", ["local", "list"]),
     ("comodor memory-provider status", ["memory-provider", "status"]),
     ("comodor journey", ["journey", "--help"]),
     ("comodor webhook list", ["webhook", "list"]),
@@ -228,6 +239,17 @@ def smoke() -> list[tuple[str, bool, str]]:
     failure is a traceback, because that is the program falling over rather
     than answering.
     """
+    # The child gets `src` on its path explicitly. `sys.path.insert` at the
+    # top of this file changes *this* interpreter and nothing else, and `cwd`
+    # does not make a src-layout package importable — so without this the
+    # child imports whatever is in site-packages, which is precisely the stale
+    # copy this file exists to catch. An uninstalled checkout could not import
+    # it at all.
+    environment = dict(os.environ)
+    existing = environment.get("PYTHONPATH", "")
+    environment["PYTHONPATH"] = (
+        str(ROOT / "src") + (os.pathsep + existing if existing else ""))
+
     out = []
     for label, args in SAFE_COMMANDS:
         try:
@@ -238,14 +260,21 @@ def smoke() -> list[tuple[str, bool, str]]:
             done = subprocess.run([sys.executable, "-m", "comodor", *args],
                                   cwd=ROOT, capture_output=True, text=True,
                                   encoding="utf-8", errors="replace",
-                                  timeout=180)
+                                  env=environment, timeout=180)
             output = (done.stdout or "") + (done.stderr or "")
+            allowed = {0, 1} if label in MAY_EXIT_ONE else {0}
+
             if "Traceback (most recent call last)" in output:
                 last = [line for line in output.strip().splitlines()
                         if line.strip()][-1]
                 out.append((label, False, f"crashed — {last.strip()[:90]}"))
-            elif done.returncode not in (0, 1):
-                out.append((label, False, f"exit {done.returncode}"))
+            elif done.returncode not in allowed:
+                # The last line, because "exit 1" alone is what let "No module
+                # named comodor" read as a working command.
+                said = ""
+                if output.strip():
+                    said = " — " + output.strip().splitlines()[-1][:70]
+                out.append((label, False, f"exit {done.returncode}{said}"))
             else:
                 out.append((label, True, f"exit {done.returncode}"))
         except subprocess.TimeoutExpired:
@@ -409,10 +438,78 @@ def render() -> str:
     return "\n".join(lines) + "\n"
 
 
+def check() -> int:
+    """Whether the things the map reports are actually true, right now.
+
+    Not a diff against the file on disk. The map is git-ignored — it records
+    what answered on one machine at one moment — so a clean checkout has no
+    baseline, and comparing against a missing file would fail every time on
+    the exact machine this mode is meant for.
+
+    What can be checked anywhere is the *substance*: every channel connectable,
+    every command in the smoke list real, and every one of them answering.
+    That is what a CI job or a hook wants to know.
+    """
+    problems: list[str] = []
+
+    for entry in channels():
+        if not entry["form"]:
+            problems.append(
+                f"channel {entry['name']} has no form — the panel lists it "
+                f"and cannot connect it")
+        if not entry["bot"]:
+            problems.append(f"channel {entry['name']} has no bot module")
+        if not entry["cli"]:
+            problems.append(f"channel {entry['name']} has no CLI")
+
+    # Every command named in the smoke list must exist. A name that does not
+    # reports a working subsystem as broken, which is the same lie reversed.
+    top: dict = {}
+    for action in _parser()._actions:
+        if isinstance(getattr(action, "choices", None), dict):
+            top = action.choices
+            break
+    for label, args in SAFE_COMMANDS:
+        if args[0].startswith("--"):
+            continue
+        command, *rest = args
+        if command not in top:
+            problems.append(f"{label}: there is no `{command}` command")
+            continue
+        if rest and not rest[0].startswith("--"):
+            nested: dict = {}
+            for inner in top[command]._actions:
+                if isinstance(getattr(inner, "choices", None), dict):
+                    nested = inner.choices
+                    break
+            if rest[0] not in nested:
+                problems.append(
+                    f"{label}: `{command}` has no `{rest[0]}` sub-command")
+
+    for label, ok, detail in smoke():
+        if not ok:
+            problems.append(f"{label}: {detail}")
+
+    if problems:
+        print(f"{len(problems)} problems:", file=sys.stderr)
+        for problem in problems:
+            print(f"  - {problem}", file=sys.stderr)
+        return 1
+
+    print("every channel is connectable and every checked command answered")
+    return 0
+
+
+def _parser():
+    from comodor.cli import build_parser
+
+    return build_parser()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true",
-                        help="fail if the file on disk is out of date")
+                        help="fail if any checked capability is broken")
     parser.add_argument("--json", action="store_true",
                         help="print the gathered facts instead of the page")
     args = parser.parse_args()
@@ -429,16 +526,10 @@ def main() -> int:
         }, indent=2))
         return 0
 
-    fresh = render()
     if args.check:
-        current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
-        if current != fresh:
-            print(f"{OUT.name} is out of date — run: "
-                  f"python tools/capability-map.py", file=sys.stderr)
-            return 1
-        print(f"{OUT.name} is current")
-        return 0
+        return check()
 
+    fresh = render()
     OUT.write_text(fresh, encoding="utf-8", newline="\n")
     print(f"wrote {OUT} ({len(fresh.splitlines())} lines)")
     return 0

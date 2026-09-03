@@ -434,7 +434,8 @@ class Computer(Tool):
         # the agent knows the countdown is no longer on screen.
         overlay = Overlay(status=self.guard.status,
                           on_stop=self._stopped_from_the_screen,
-                          on_hide=self._hidden_from_the_screen)
+                          on_hide=self._hidden_from_the_screen,
+                          a_hand_is_on_it=self.guard.a_hand_is_on_it)
         if not overlay.start():
             self.wants_overlay = False       # said once, not attempted again
             return
