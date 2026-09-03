@@ -87,8 +87,15 @@ def test_a_question_nobody_can_answer_does_not_hold_the_run(scripted):
     """`ask` waits half an hour for an answer. Headless, one can never arrive.
 
     The timing is the assertion. A wall-clock bound is usually a bad test, but
-    the failure being guarded against is *thirty minutes*, so a two-second
-    ceiling is not close to the line it is drawing.
+    the failure being guarded against is *thirty minutes*, so any ceiling in
+    seconds is nowhere near the line it is drawing.
+
+    Fifteen, not two. It measures at 0.15s on a developer's machine and went
+    over two seconds on a cold Windows CI runner — where the first `import
+    comodor` of a process is doing most of the work. Two seconds was chosen to
+    look tight; what it actually did was make an honest pass depend on how
+    busy somebody else's machine was, and the thirty-minute hang it exists to
+    catch is caught just as surely at fifteen.
     """
     config = scripted([
         Script(text="One thing first.", tool_calls=[a_question()]),
@@ -100,7 +107,7 @@ def test_a_question_nobody_can_answer_does_not_hold_the_run(scripted):
     elapsed = time.monotonic() - started
 
     assert code == 0
-    assert elapsed < 2.0, f"the run waited {elapsed:.0f}s for an answer"
+    assert elapsed < 15.0, f"the run waited {elapsed:.0f}s for an answer"
 
 
 def test_the_model_is_told_to_carry_on_rather_than_ask_again(scripted):
