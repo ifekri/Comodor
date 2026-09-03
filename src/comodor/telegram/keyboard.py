@@ -243,6 +243,19 @@ def confirm(action: str, *, back: str = "menu") -> dict[str, Any]:
     )
 
 
+def approve(action: str, *, back: str = "menu") -> dict[str, Any]:
+    """For granting a permission, rather than for doing a single thing.
+
+    Worded as approve/decline instead of yes/cancel because that is what it
+    is: the answer stays true for every later turn, and "Yes, do it" reads as
+    a one-off.
+    """
+    return rows(
+        [button("✅  APPROVE", action),
+         button("🚫  DECLINE", back)],
+    )
+
+
 def just_back(where: str = "menu") -> dict[str, Any]:
     return rows([button(f"{BACK}  Back", where)])
 

@@ -124,6 +124,19 @@ class Conversation:
         #: id or a session id will not always fit inside one — so the id stays
         #: here and the button carries an index into this.
         self.shelf: dict[str, list[tuple[str, str]]] = {}
+        #: Whether *this chat* was granted Act from its own approval prompt.
+        #:
+        #: Separate from `telegram.allow_writes`, which is the channel-wide
+        #: setting the terminal writes. The first version of the approval flow
+        #: set that flag, and the confirmation said "this chat" while granting
+        #: every chat: a second paired account could then pick Act and never
+        #: see the warning. Worse in the other direction — that chat leaving
+        #: Act turned the flag off, revoking a grant somebody had made at the
+        #: terminal and dropping every other Act conversation into plan.
+        #:
+        #: Held here instead, so an approval reaches exactly the conversation
+        #: that was shown the folder it applies to, and dies with it.
+        self.may_write = False
         self.lock = threading.Lock()
 
     def close(self) -> None:
@@ -478,6 +491,9 @@ class Service:
         elif verb == "mode":
             done(argument.capitalize())
             self._set_mode(talk, argument)
+        elif verb == "writes" and argument == "on":
+            done("Act mode on")
+            self._allow_writes(talk)
         elif verb == "status":
             done()
             self.bot.send(chat, self._status(talk), keyboard=kb.just_back())
@@ -502,7 +518,8 @@ class Service:
             self.bot.send(chat, self._help(), keyboard=kb.just_back())
         elif verb == "writes":
             done()
-            self.bot.send(chat, self._writes(), keyboard=kb.just_back("settings"))
+            self.bot.send(chat, self._writes(talk),
+                          keyboard=kb.just_back("settings"))
         elif verb == "chats":
             done()
             self._show_chats(talk, int(argument or 0))
@@ -717,19 +734,95 @@ class Service:
         self.bot.send(talk.chat, body, keyboard=self._menu(talk.chat))
 
     def _set_mode(self, talk: Conversation, mode: str) -> None:
-        if mode == "act" and not self.config.telegram.allow_writes:
-            self.bot.send(
-                talk.chat,
-                "<b>Act mode is off for Telegram.</b>\n\n"
-                "Approving a command with a thumb is a decision made with less "
-                "attention than the same one at a keyboard, so this starts off. "
-                "Turn it on from the terminal:\n\n"
-                + code("comodor telegram writes on"),
-                keyboard=kb.just_back())
+        if mode == "act" and not self._may_act(talk):
+            self._offer_act(talk)
             return
+
         talk.session.set_mode(mode)
-        self.bot.send(talk.chat, f"Mode is now <b>{escape(mode)}</b>.",
+
+        # Leaving Act gives back what this chat was given, and only that. The
+        # channel-wide flag belongs to whoever set it — the terminal, the web
+        # panel, another conversation — and a mode change here is not an
+        # instruction about any of them.
+        note = ""
+        if mode != "act" and talk.may_write:
+            talk.may_write = False
+            note = ("\n\nWrite access for this chat is off again. Choosing "
+                    "Act will ask for it once more.")
+
+        self.bot.send(talk.chat,
+                      f"Mode is now <b>{escape(mode)}</b>.{note}",
                       keyboard=self._menu(talk.chat))
+
+    def _may_act(self, talk: Conversation) -> bool:
+        """Whether this chat may enter Act without asking again.
+
+        Either source will do: the channel-wide setting, which somebody chose
+        deliberately at a terminal or in the web panel, or an approval this
+        conversation gave to its own prompt.
+        """
+        return bool(self.config.telegram.allow_writes or talk.may_write)
+
+    def _offer_act(self, talk: Conversation) -> None:
+        """Ask for write access here, rather than sending somebody to a shell.
+
+        This used to print `comodor telegram writes on` and stop. That is a
+        reasonable thing to write in documentation and a bad thing to answer a
+        button with: the person is on a phone, the terminal is somewhere else,
+        and the tap they just made is exactly the decision being asked for.
+
+        What the caution was protecting is real — a thumb approves with less
+        attention than a keyboard — so the caution stays. It is a warning with
+        two buttons now instead of an instruction with none, and it names the
+        folder, because "may edit files" means nothing without saying which.
+        """
+        where = str(talk.session.folder().get("current", "")) or "this folder"
+
+        self.bot.send(
+            talk.chat,
+            "<b>Allow Act mode?</b>\n\n"
+            "Act mode lets a turn started here edit files and run commands. "
+            "Each one still asks you first, and the approval is a button in "
+            "this chat.\n\n"
+            "Worth a moment before you tap: an approval made on a phone, in a "
+            "queue, is a decision made with less attention than the same one "
+            "at a keyboard. That is the only reason this is off by default.\n\n"
+            "This chat only, until the bot restarts. No other chat is "
+            "affected, and nothing on disk changes.\n\n"
+            "It works inside:\n"
+            f"<code>{escape(where)}</code>",
+            keyboard=kb.approve("writes:on", back="mode"))
+
+    def _allow_writes(self, talk: Conversation) -> None:
+        """Grant this chat write access and go straight into Act.
+
+        Straight in, because turning it on and then leaving the chat in Plan
+        would answer a tap with a setting nobody asked for — the person was
+        choosing a mode, not editing a preference.
+
+        Nothing is written to the configuration file. That was the first
+        version and it was wrong three ways at once: a chat's approval granted
+        every paired chat, leaving Act revoked a grant made at the terminal,
+        and a save that failed left the flag on in memory while the message
+        said Act stayed off. The grant belongs to this conversation, so it
+        lives on this conversation — which also means there is nothing that
+        can fail to be saved.
+
+        The consequence, said plainly below: it ends when the chat does. That
+        is a smaller promise than the old one and an honest one, and
+        `comodor telegram writes on` is still there for somebody who wants
+        write access to survive a restart.
+        """
+        talk.may_write = True
+        talk.session.set_mode("act")
+        self.bot.send(
+            talk.chat,
+            "<b>Act mode is on.</b>\n\n"
+            "This chat may now edit files and run commands, asking first "
+            "every time.\n\n"
+            "It applies to this chat only, and lasts until the bot restarts. "
+            "Choosing Plan, Ask or Chat ends it sooner.",
+            keyboard=self._menu(talk.chat))
 
     # -- what the agent asks ----------------------------------------------- #
 
@@ -1062,28 +1155,44 @@ class Service:
              else f"Could not {action} {escape(name)}."),
             keyboard=kb.just_back("skills"))
 
-    def _writes(self) -> str:
-        """What a Telegram turn is allowed to do, and where to change it.
+    def _writes(self, talk: Conversation | None = None) -> str:
+        """What a Telegram turn is allowed to do, and how to change it.
 
-        Read-only from a phone is the default and it is not changeable from the
-        phone: approving a shell command with a thumb, in a queue, is a
-        decision made with less attention than the same approval at a keyboard,
-        and the consequences are identical. Saying so plainly is better than a
-        button that refuses.
+        Read-only is the default, and it is deliberate: approving a shell
+        command with a thumb, in a queue, is a decision made with less
+        attention than the same approval at a keyboard, and the consequences
+        are identical.
+
+        It used to say the setting could only be changed at a terminal. That
+        was a caution written as a wall, and the wall was in the wrong place —
+        the person tapping Act is on a phone, and answering their tap with a
+        shell command is answering a question with a different question. The
+        caution is now a warning with two buttons, which is where a warning
+        belongs.
         """
-        on = self.config.telegram.allow_writes
+        channel_wide = self.config.telegram.allow_writes
+        this_chat = bool(talk is not None and getattr(talk, "may_write", False))
+
+        if not (channel_wide or this_chat):
+            return (
+                "<b>What it may do from here</b>\n\n"
+                "It <b>reads and plans only</b>. It will not edit a file or "
+                "run a command from Telegram.\n\nChoose Act under Mode to "
+                "allow it — it explains what that means and which folder it "
+                "covers before anything changes.")
+
+        # Which of the two is on decides how long it lasts, and that is the
+        # part somebody needs to know: one survives a restart, the other does
+        # not, and a screen that said only "it can" would leave them guessing.
         return (
             "<b>What it may do from here</b>\n\n"
-            + ("It <b>can</b> edit files and run commands, asking you first "
-               "each time.\n\n" if on else
-               "It <b>reads and plans only</b>. It will not edit a file or "
-               "run a command from Telegram.\n\n")
-            + "This one is changed at the terminal, on the machine it runs "
-              "on:\n\n<code>comodor telegram writes "
-            + ("off" if on else "on")
-            + "</code>\n\n<i>Not from here — a bot that could widen its own "
-              "permissions would only need somebody's phone.</i>"
-        )
+            "It <b>can</b> edit files and run commands, asking you first "
+            "each time.\n\n"
+            + ("Allowed for every chat, and kept between restarts — set with "
+               "<code>comodor telegram writes on</code>."
+               if channel_wide else
+               "Allowed for this chat only, until the bot restarts.")
+            + "\n\nChoose Plan, Ask or Chat under Mode to take it back.")
 
     def _welcome(self) -> str:
         """The first thing anybody sees, and the only screen they arrive on.
