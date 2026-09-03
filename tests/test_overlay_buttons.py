@@ -350,7 +350,14 @@ def test_it_stays_click_through_when_there_are_no_buttons(monkeypatch):
 
 def test_a_pointer_that_cannot_be_read_leaves_it_click_through(monkeypatch):
     """Without a position this cannot be decided, and the safe answer is the
-    one that never interferes with somebody's desktop."""
+    one that never interferes with somebody's desktop.
+
+    Not skipped off Windows, because the case is *identical* there and worth
+    checking on every platform: `from . import win32` raises on Linux, which
+    is one of the ways the position cannot be read. Patching the module by
+    name would import it to find the attribute and hit that same refusal, so
+    the failure is arranged through `_hits` and the guard instead.
+    """
     overlay = an_overlay(on_stop=lambda: None, on_hide=lambda: None)
     overlay._origin = (0, 0)
     overlay._handle = 1
@@ -360,10 +367,14 @@ def test_a_pointer_that_cannot_be_read_leaves_it_click_through(monkeypatch):
     monkeypatch.setattr(overlay, "_set_clickable",
                         lambda wanted: changes.append(wanted))
 
-    def refuse():
-        raise OSError("no cursor here")
+    if sys.platform == "win32":
+        def refuse():
+            raise OSError("no cursor here")
 
-    monkeypatch.setattr("comodor.desktop.win32.cursor", refuse)
+        monkeypatch.setattr("comodor.desktop.win32.cursor", refuse)
+    # On Linux the import inside `_watch_the_pointer` raises by itself, which
+    # is the same branch reached by a different door.
+
     overlay._watch_the_pointer()
 
     assert changes == [False]
@@ -451,6 +462,9 @@ def test_with_nothing_driving_the_pointer_every_move_is_a_persons():
 def test_the_style_is_only_written_when_it_changes(monkeypatch):
     """`_watch_the_pointer` runs sixty times a second. Setting a window style
     that often, for no change, is a syscall per frame for nothing."""
+    if sys.platform != "win32":
+        pytest.skip("patching user32 imports a module that is Windows-only")
+
     overlay = an_overlay(on_stop=lambda: None, on_hide=lambda: None)
     overlay._handle = 1
     overlay._clickable = False
@@ -476,6 +490,22 @@ def test_the_style_is_only_written_when_it_changes(monkeypatch):
 
     overlay._set_clickable(True)
     assert len(calls) == 1, "wrote the same style twice"
+
+
+def test_the_early_return_happens_before_anything_platform_specific():
+    """The "only on a change" rule is what makes this cheap sixty times a
+    second, and it must hold everywhere — including where the syscall behind
+    it does not exist. Checked without a platform, by counting what a broken
+    handle reaches: nothing, because the comparison comes first.
+    """
+    overlay = an_overlay(on_stop=lambda: None, on_hide=lambda: None)
+    overlay._handle = None                 # anything past the guard would raise
+    overlay._clickable = False
+
+    overlay._set_clickable(False)          # no change: must return at once
+
+    overlay._clickable = True
+    overlay._set_clickable(True)           # no change either way
 
 
 # --------------------------------------------------------------------------- #
@@ -519,6 +549,42 @@ def test_hiding_does_not_end_the_grant():
 
     assert tool.guard.active, "hiding the panel stopped the work"
     assert tool.overlay_hidden is True
+
+
+def test_nothing_here_patches_a_windows_module_without_saying_so():
+    """`monkeypatch.setattr("comodor.desktop.win32.x", ...)` imports that
+    module to find the attribute, and it refuses to import off Windows. Two
+    tests did it unguarded and took out all three Linux CI jobs — the failure
+    reads as a broken overlay rather than as a test that cannot run here.
+
+    Scanned rather than remembered: the next one would be added the same way.
+    """
+    import ast
+    from pathlib import Path
+
+    source = Path(__file__).read_text(encoding="utf-8")
+    lines = source.splitlines()
+    unguarded = []
+
+    # Built rather than written, so this scan does not find itself: the
+    # string it looks for cannot appear in the test that looks for it.
+    needle = "comodor.desktop." + "win32"
+    myself = "test_nothing_here_patches_a_windows_module"
+
+    for node in ast.parse(source).body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        if not node.name.startswith("test_") or node.name.startswith(myself):
+            continue
+        body = "\n".join(lines[node.lineno - 1:node.end_lineno])
+        if needle not in body:
+            continue
+        if "sys.platform" not in body:
+            unguarded.append(node.name)
+
+    assert unguarded == [], (
+        "these patch a Windows-only module with no platform check, so they "
+        f"fail on Linux and macOS: {unguarded}")
 
 
 def test_the_overlay_is_told_how_to_recognise_the_agent():
