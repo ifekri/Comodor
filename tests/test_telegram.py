@@ -728,15 +728,88 @@ def test_turning_act_on_asks_first_and_names_the_folder(talking):
     assert "mode" in buttons, "there is no way to decline"
 
 
-def test_approving_grants_it_writes_it_down_and_enters_act(talking):
-    """Through `_on_tap`, for the reason given below on the revoke test: the
-    fixture's config lives only in memory, and `_handle` reloads from disk."""
+def test_approving_grants_this_chat_and_enters_act(talking):
+    """The grant lives on the conversation, not in the configuration file.
+
+    The first version set `telegram.allow_writes` and saved it, which was
+    wrong three ways at once: a chat's approval granted every paired chat,
+    leaving Act revoked a grant somebody had made at the terminal, and a save
+    that failed left the flag on in memory while the message said Act stayed
+    off. Nothing is persisted now, so none of those can happen — and there is
+    nothing that can fail to be written.
+    """
     talking._on_tap(7, {"id": "q1", "data": "mode:act"})
     talking._on_tap(7, {"id": "q2", "data": "writes:on"})
 
-    assert talking.config.telegram.allow_writes is True
+    assert talking._conversation(7).may_write is True
     assert talking._conversation(7).session.config.agent.mode == "act"
+    assert talking.config.telegram.allow_writes is False, \
+        "the channel-wide setting was changed by one chat's approval"
     assert "Act mode is on" in talking.bot.sent[-1]["text"]
+
+
+def test_the_approval_says_how_far_it_reaches_and_how_long_it_lasts(talking):
+    """It is a smaller promise than the old one — this chat, until a restart —
+    and saying so is the difference between a limit and a surprise."""
+    talking._on_tap(7, {"id": "q1", "data": "mode:act"})
+    asked = talking.bot.sent[-1]["text"]
+
+    assert "This chat only" in asked
+    assert "restart" in asked
+    assert "nothing on disk changes" in asked
+
+    talking._on_tap(7, {"id": "q2", "data": "writes:on"})
+    granted = talking.bot.sent[-1]["text"]
+
+    assert "this chat only" in granted.lower()
+    assert "restart" in granted
+
+
+def test_one_chats_approval_does_not_grant_another(talking):
+    """Two paired accounts, or the same person in two chats. The confirmation
+    says "this chat"; before this it granted every chat, and the second one
+    entered Act having never been shown the warning or the folder."""
+    talking.config.telegram.allowed = [7, 9]
+
+    talking._on_tap(7, {"id": "q1", "data": "mode:act"})
+    talking._on_tap(7, {"id": "q2", "data": "writes:on"})
+    assert talking._conversation(7).may_write is True
+
+    talking.bot.sent.clear()
+    talking._on_tap(9, {"id": "q3", "data": "mode:act"})
+
+    assert "Allow Act mode?" in talking.bot.sent[-1]["text"], \
+        "the second chat entered Act without being asked"
+    assert talking._conversation(9).may_write is False
+
+
+def test_leaving_act_does_not_revoke_what_the_terminal_granted(talking):
+    """`comodor telegram writes on` is a deliberate, persistent choice. A mode
+    change in one chat is not an instruction about it — and revoking it here
+    would drop every *other* Act conversation into plan on its next message."""
+    talking.config.telegram.allow_writes = True
+
+    talking._on_tap(7, {"id": "q1", "data": "mode:plan"})
+
+    assert talking.config.telegram.allow_writes is True, \
+        "one chat's mode change turned off a channel-wide permission"
+
+
+def test_a_chat_granted_by_approval_is_not_dragged_back_out_of_act(talking):
+    """`hold_the_line` puts a conversation back into plan when the channel may
+    not write — which is the normal state for a chat holding its own grant. It
+    has to know the difference, or the approval ends on the next message."""
+    from comodor.channels.settings import hold_the_line
+
+    talking._on_tap(7, {"id": "q1", "data": "mode:act"})
+    talking._on_tap(7, {"id": "q2", "data": "writes:on"})
+    talk = talking._conversation(7)
+    assert talk.session.config.agent.mode == "act"
+
+    moved = hold_the_line(talking.config, "telegram", talk)
+
+    assert moved is False
+    assert talk.session.config.agent.mode == "act"
 
 
 def test_declining_changes_nothing(talking):
@@ -761,22 +834,23 @@ def test_leaving_act_gives_the_permission_back(talking):
     """Granted from the chat, so revocable from the chat. Otherwise the only
     way to undo a tap is the terminal command this replaced.
 
-    Driven through `_on_tap` rather than `_handle`: `_handle` reloads the
-    configuration from disk first — correctly, so a change made at the
-    terminal reaches a running bot — and this fixture's config was never
-    written anywhere, so the reload would discard the grant before the test
-    could revoke it. That reload is exercised by `test_live_settings.py`
-    against a real file; what is being checked here is the revocation.
+    What comes back is this chat's own grant, and nothing else — see
+    `test_leaving_act_does_not_revoke_what_the_terminal_granted`.
     """
     talking._on_tap(7, {"id": "q1", "data": "mode:act"})
     talking._on_tap(7, {"id": "q2", "data": "writes:on"})
-    assert talking.config.telegram.allow_writes is True
+    talk = talking._conversation(7)
+    assert talk.may_write is True
 
     talking._on_tap(7, {"id": "q3", "data": "mode:plan"})
 
-    assert talking.config.telegram.allow_writes is False, \
-        "the grant outlived the mode it was for"
+    assert talk.may_write is False, "the grant outlived the mode it was for"
     assert "off again" in talking.bot.sent[-1]["text"], "it never says so"
+
+    # And asking for Act again asks again, rather than remembering.
+    talking.bot.sent.clear()
+    talking._on_tap(7, {"id": "q4", "data": "mode:act"})
+    assert "Allow Act mode?" in talking.bot.sent[-1]["text"]
 
 
 # --------------------------------------------------------------------------- #

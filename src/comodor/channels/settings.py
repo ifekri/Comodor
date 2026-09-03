@@ -158,6 +158,12 @@ def hold_the_line(config: Any, section: str, talk: Any) -> bool:
     settings = getattr(config, section, None)
     if settings is None or getattr(settings, "allow_writes", False):
         return False
+    # A conversation that was granted Act by its own approval keeps it. The
+    # channel-wide flag being off is the normal state for those chats — it is
+    # what makes the approval prompt appear in the first place — so treating
+    # it as a revocation would end the grant on the very next message.
+    if getattr(talk, "may_write", False):
+        return False
     session = getattr(talk, "session", None)
     if session is None:
         return False
