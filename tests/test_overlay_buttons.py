@@ -310,13 +310,15 @@ def test_the_window_takes_clicks_only_while_the_pointer_is_on_a_button(
         monkeypatch):
     """The window must stay click-through, or it swallows the clicks the agent
     is making. It must also receive a click on a button. Both hold only if the
-    style changes with the pointer."""
-    if sys.platform != "win32":
-        pytest.skip("the style flag is a Windows idea")
+    style changes with the pointer.
 
+    Runs everywhere. Reading the pointer is Windows-specific and the decision
+    about it is not, so `_decide` takes the position — which means the logic
+    that can actually be got wrong is checked on all three CI platforms rather
+    than only on the one the window opens on.
+    """
     overlay = an_overlay(on_stop=lambda: None, on_hide=lambda: None)
     overlay._origin = (0, 0)
-    overlay._handle = 1
     overlay._badge()
 
     changes: list[bool] = []
@@ -324,26 +326,22 @@ def test_the_window_takes_clicks_only_while_the_pointer_is_on_a_button(
                         lambda wanted: changes.append(wanted))
 
     _, x1, y1, x2, y2 = overlay._hits[0]
-    monkeypatch.setattr("comodor.desktop.win32.cursor",
-                        lambda: ((x1 + x2) // 2, (y1 + y2) // 2))
-    overlay._watch_the_pointer()
+    overlay._decide(((x1 + x2) // 2, (y1 + y2) // 2))
     assert changes[-1] is True, "a click on the button would pass through"
 
-    monkeypatch.setattr("comodor.desktop.win32.cursor", lambda: (5, 900))
-    overlay._watch_the_pointer()
+    overlay._decide((5, 900))
     assert changes[-1] is False, "the overlay would swallow the agent's clicks"
 
 
 def test_it_stays_click_through_when_there_are_no_buttons(monkeypatch):
     overlay = an_overlay()
     overlay._origin = (0, 0)
-    overlay._handle = 1
     overlay._badge()
 
     changes: list[bool] = []
     monkeypatch.setattr(overlay, "_set_clickable",
                         lambda wanted: changes.append(wanted))
-    overlay._watch_the_pointer()
+    overlay._decide((100, 40))
 
     assert changes == [False]
 
@@ -352,11 +350,10 @@ def test_a_pointer_that_cannot_be_read_leaves_it_click_through(monkeypatch):
     """Without a position this cannot be decided, and the safe answer is the
     one that never interferes with somebody's desktop.
 
-    Not skipped off Windows, because the case is *identical* there and worth
-    checking on every platform: `from . import win32` raises on Linux, which
-    is one of the ways the position cannot be read. Patching the module by
-    name would import it to find the attribute and hit that same refusal, so
-    the failure is arranged through `_hits` and the guard instead.
+    This one goes through `_watch_the_pointer`, the whole path, because what
+    it checks is the `except` around reading the pointer — and every platform
+    reaches it: Windows through a cursor call that fails, Linux and macOS
+    through `from . import win32` refusing outright. Same branch, two doors.
     """
     overlay = an_overlay(on_stop=lambda: None, on_hide=lambda: None)
     overlay._origin = (0, 0)
@@ -372,8 +369,6 @@ def test_a_pointer_that_cannot_be_read_leaves_it_click_through(monkeypatch):
             raise OSError("no cursor here")
 
         monkeypatch.setattr("comodor.desktop.win32.cursor", refuse)
-    # On Linux the import inside `_watch_the_pointer` raises by itself, which
-    # is the same branch reached by a different door.
 
     overlay._watch_the_pointer()
 
@@ -385,13 +380,12 @@ def test_the_pointer_is_read_in_the_same_space_the_buttons_are_drawn_in(
     """The canvas starts at the virtual screen's origin, which is not (0, 0)
     on a multi-monitor desk with a second screen to the left. Comparing a
     screen coordinate against a canvas one puts the hit region somewhere
-    nobody can reach."""
-    if sys.platform != "win32":
-        pytest.skip("the style flag is a Windows idea")
+    nobody can reach.
 
+    Arithmetic, so it runs on every platform.
+    """
     overlay = an_overlay(on_stop=lambda: None, on_hide=lambda: None)
     overlay._origin = (-1920, 0)          # a monitor to the left of the main
-    overlay._handle = 1
     overlay._badge()
 
     changes: list[bool] = []
@@ -400,9 +394,7 @@ def test_the_pointer_is_read_in_the_same_space_the_buttons_are_drawn_in(
 
     _, x1, y1, x2, y2 = overlay._hits[0]
     # Where that button actually is on the desk.
-    monkeypatch.setattr("comodor.desktop.win32.cursor",
-                        lambda: ((x1 + x2) // 2 - 1920, (y1 + y2) // 2))
-    overlay._watch_the_pointer()
+    overlay._decide(((x1 + x2) // 2 - 1920, (y1 + y2) // 2))
 
     assert changes[-1] is True, \
         "the origin was not subtracted — the buttons are unreachable"
@@ -418,10 +410,11 @@ def test_the_agents_own_pointer_does_not_arm_the_buttons(monkeypatch):
 
     `Guard` already answers "did a hand do this?" for the corner gesture. The
     overlay asks the same question.
-    """
-    if sys.platform != "win32":
-        pytest.skip("the style flag is a Windows idea")
 
+    This is the one that must run everywhere. It is the P1 the review found,
+    and nothing about it is platform-specific: a real `Guard`, a real hit
+    region, and the same decision the frame loop makes.
+    """
     from comodor.desktop.guard import Guard
 
     guard = Guard()
@@ -429,7 +422,6 @@ def test_the_agents_own_pointer_does_not_arm_the_buttons(monkeypatch):
 
     overlay = an_overlay(on_stop=lambda: None, on_hide=lambda: None)
     overlay._origin = (0, 0)
-    overlay._handle = 1
     overlay.a_hand_is_on_it = guard.a_hand_is_on_it
     overlay._badge()
 
@@ -439,15 +431,14 @@ def test_the_agents_own_pointer_does_not_arm_the_buttons(monkeypatch):
     changes: list[bool] = []
     monkeypatch.setattr(overlay, "_set_clickable",
                         lambda wanted: changes.append(wanted))
-    monkeypatch.setattr("comodor.desktop.win32.cursor", lambda: middle)
 
     guard.note_pointer(middle)          # the agent put it there
-    overlay._watch_the_pointer()
+    overlay._decide(middle)
     assert changes[-1] is False, \
         "the overlay would swallow a click the agent aimed underneath it"
 
     guard.note_pointer((10, 900))       # the agent left it elsewhere
-    overlay._watch_the_pointer()
+    overlay._decide(middle)
     assert changes[-1] is True, "the stop button now ignores a person"
 
 

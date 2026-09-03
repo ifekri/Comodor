@@ -302,26 +302,40 @@ class Overlay:
         Nothing else on screen notices: the pointer is over the panel, so the
         click was never going anywhere else.
         """
-        if not self._hits:
-            self._set_clickable(False)
-            return
         try:
             from . import win32
 
-            where = win32.cursor()
-            x = where[0] - self._origin[0]
-            y = where[1] - self._origin[1]
-            over = any(x1 <= x <= x2 and y1 <= y <= y2
-                       for _, x1, y1, x2, y2 in self._hits)
-            # Over a button is not the same as *reaching for* one. The agent
-            # moves this cursor too, and a click it aimed at something the
-            # panel covers must reach that thing, not the panel.
-            if over and not self.a_hand_is_on_it(where):
-                over = False
+            self._decide(win32.cursor())
         except Exception:
             # Without a pointer position this cannot be decided, and the safe
-            # answer is the one that never interferes with the desktop.
+            # answer is the one that never interferes with the desktop. The
+            # import itself raises off Windows, which is one of the ways.
+            self._set_clickable(False)
+
+    def _decide(self, where: tuple[int, int]) -> None:
+        """Whether a pointer at `where` should arm the buttons.
+
+        Split from reading the pointer because the reading is the only part
+        that is Windows-specific. Everything that can be got wrong lives here
+        — the origin subtraction, the hit test, and telling a hand from the
+        agent — so it can be checked on every platform CI runs rather than on
+        the one the window happens to open on.
+        """
+        if not self._hits:
+            self._set_clickable(False)
+            return
+
+        x = where[0] - self._origin[0]
+        y = where[1] - self._origin[1]
+        over = any(x1 <= x <= x2 and y1 <= y <= y2
+                   for _, x1, y1, x2, y2 in self._hits)
+
+        # Over a button is not the same as *reaching for* one. The agent moves
+        # this cursor too, and a click it aimed at something the panel covers
+        # must reach that thing, not the panel.
+        if over and not self.a_hand_is_on_it(where):
             over = False
+
         self._set_clickable(over)
 
     def _set_clickable(self, wanted: bool) -> None:
