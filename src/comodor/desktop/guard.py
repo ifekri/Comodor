@@ -164,15 +164,36 @@ class Guard:
         with self._lock:
             self._expected = at
 
+    def a_hand_is_on_it(self, actual: tuple[int, int]) -> bool:
+        """Whether the pointer got where it is by a hand rather than by us.
+
+        The same reasoning the corner check rests on, asked as its own
+        question because two things need it now. `note_pointer` records where
+        the agent left the mouse; anywhere else means somebody moved it.
+
+        Used by the overlay: its buttons must answer a person and ignore the
+        agent, which drives the very same system cursor. Without this, a
+        `left_click` aimed at anything underneath the panel would move the
+        pointer into a button, make the window take clicks, and land the
+        agent's own click on Stop.
+
+        With no expectation recorded there is nothing to compare against, and
+        the safe answer is yes: a stop button that ignores a person is worse
+        than one that occasionally believes the agent is a person, because the
+        agent has no reason to be pointing at the panel in the first place.
+        """
+        with self._lock:
+            expected = self._expected
+        if expected is None:
+            return True
+        drift = max(abs(actual[0] - expected[0]), abs(actual[1] - expected[1]))
+        return drift >= DRIFT_PIXELS
+
     def user_moved_away(self, actual: tuple[int, int],
                         corners: list[tuple[int, int, int, int]]) -> bool:
         """Whether a human has taken the mouse to a corner."""
-        with self._lock:
-            expected = self._expected
-        if expected is not None:
-            drift = max(abs(actual[0] - expected[0]), abs(actual[1] - expected[1]))
-            if drift < DRIFT_PIXELS:
-                return False                     # this is where we left it
+        if not self.a_hand_is_on_it(actual):
+            return False                         # this is where we left it
 
         edge = self.corner_pixels
         for left, top, right, bottom in corners:
