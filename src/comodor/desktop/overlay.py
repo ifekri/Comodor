@@ -54,6 +54,14 @@ RIPPLE_SECONDS = 0.28
 LINGER_SECONDS = 1.6
 FRAME_MS = 16
 
+#: The two buttons on the panel. Sized from a photograph of the real thing
+#: rather than from a guess: at 22px they read as two marks crowded against
+#: the panel's edge. Big enough to hit with a mouse in a hurry — which is the
+#: situation the stop button exists for — and still small enough that the
+#: panel stays a strip rather than becoming a dialogue.
+BUTTON_SIZE = 26
+BUTTON_GAP = 10
+
 
 @dataclass
 class _Mark:
@@ -74,8 +82,25 @@ class Overlay:
     action, `did` after it.
     """
 
-    def __init__(self, status: Callable[[], str] | None = None) -> None:
+    def __init__(self, status: Callable[[], str] | None = None,
+                 on_stop: Callable[[], None] | None = None,
+                 on_hide: Callable[[], None] | None = None) -> None:
         self.status = status or (lambda: "")
+        #: Called when the person presses the stop button: end the grant, the
+        #: same as moving the mouse into a corner. The corner gesture works
+        #: without aiming, which is what you want when something is going
+        #: wrong — but it is also invisible unless you read the caption, and a
+        #: button is what people look for.
+        self.on_stop = on_stop
+        #: Called when they press hide: put the panel away and let the work
+        #: carry on. Two different wants — "make it stop" and "stop covering
+        #: what I am reading" — and one button for both would answer neither.
+        self.on_hide = on_hide
+        self._hidden = False
+        #: Where the two buttons were last drawn, in canvas coordinates, so a
+        #: click can be matched against them. Rebuilt every frame because the
+        #: panel is sized to its text and the text is a countdown.
+        self._hits: list[tuple[str, int, int, int, int]] = []
         self._queue: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
@@ -125,6 +150,16 @@ class Overlay:
     def say(self, text: str, *, alarm: bool = False) -> None:
         """A line of its own - a refusal, a stop, the end of a grant."""
         self._queue.put(("say", (text, alarm)))
+
+    def show(self) -> None:
+        """Bring the panel back after it was hidden.
+
+        Nothing on screen can call this — a hidden panel has no buttons — so
+        it exists for the agent: a new grant, or a new turn, puts the countdown
+        back rather than leaving somebody watching a desktop being driven with
+        nothing on screen saying for how much longer.
+        """
+        self._hidden = False
 
     # -- the thread that owns tkinter ------------------------------------- #
 
@@ -204,6 +239,13 @@ class Overlay:
         self._note = ""
         self._note_until = 0.0
         self._note_alarm = False
+        # The buttons need clicks, and the window is click-through so it does
+        # not swallow the ones it is illustrating. Both are true at once by
+        # dropping TRANSPARENT only while the pointer is over a button — see
+        # `_watch_the_pointer`. The binding is what receives the click during
+        # that moment.
+        self._clickable = False
+        self._canvas.bind("<Button-1>", self._pressed)
         self._root.after(FRAME_MS, self._tick)
 
     def _raise(self) -> None:
@@ -224,6 +266,7 @@ class Overlay:
 
         self._drain()
         self._paint()
+        self._watch_the_pointer()
 
         self._frames = getattr(self, "_frames", 0) + 1
         if self._frames % 60 == 0:
@@ -232,6 +275,53 @@ class Overlay:
             self._raise()
 
         self._root.after(FRAME_MS, self._tick)
+
+    def _watch_the_pointer(self) -> None:
+        """Take clicks only while the pointer is over a button. Never raises.
+
+        The window has to be click-through, or it swallows the very clicks the
+        agent is making and illustrating — that is not a detail, it is the
+        whole reason the overlay can exist over a live desktop. But a button
+        that cannot be clicked is a picture of a button.
+
+        Both hold if the window stops being click-through for exactly as long
+        as the pointer is inside a button, and goes back the moment it leaves.
+        Nothing else on screen notices: the pointer is over the panel, so the
+        click was never going anywhere else.
+        """
+        if not self._hits:
+            self._set_clickable(False)
+            return
+        try:
+            from . import win32
+
+            x, y = win32.cursor()
+            x -= self._origin[0]
+            y -= self._origin[1]
+            over = any(x1 <= x <= x2 and y1 <= y <= y2
+                       for _, x1, y1, x2, y2 in self._hits)
+        except Exception:
+            # Without a pointer position this cannot be decided, and the safe
+            # answer is the one that never interferes with the desktop.
+            over = False
+        self._set_clickable(over)
+
+    def _set_clickable(self, wanted: bool) -> None:
+        """Add or drop WS_EX_TRANSPARENT. Only on a real change."""
+        if wanted == self._clickable:
+            return
+        try:
+            from . import win32
+
+            style = win32.user32.GetWindowLongW(self._handle, -20)
+            if wanted:
+                style &= ~0x00000020
+            else:
+                style |= 0x00000020
+            win32.user32.SetWindowLongW(self._handle, -20, style)
+            self._clickable = wanted
+        except Exception:
+            pass
 
     def _drain(self) -> None:
         now = time.monotonic()
@@ -348,20 +438,40 @@ class Overlay:
         now = time.monotonic()
         note = self._note if now < self._note_until else ""
         if not status and not note:
+            self._hits = []
             return
+
+        if self._hidden:
+            # Put away on request. The halos and captions carry on — hiding
+            # the panel is asking for the corner of the screen back, not
+            # asking to stop being shown what the agent is doing. An alarm
+            # still comes through: the panel is the only way anything gets
+            # said, and silencing a refusal would be a different feature than
+            # the one that was asked for.
+            self._hits = []
+            if not (note and self._note_alarm):
+                return
 
         lines: list[tuple[str, str, tuple[str, int, str]]] = []
         if note:
             lines.append((note, ALARM, ("Consolas", 13, "bold")))
         if status:
             lines.append((f"Comodor · {status}", ACCENT, ("Consolas", 12, "normal")))
-            lines.append(("move the mouse to a corner to stop", QUIET,
+            # Both ways of stopping, because they suit different moments:
+            # the corner needs no aim and works when something is going
+            # wrong fast, the button is what somebody looks for first.
+            lines.append(("stop here, or move the mouse to any corner", QUIET,
                           ("Consolas", 10, "normal")))
 
+        # Room on the right for the two buttons, so the text is never drawn
+        # under them.
+        buttons = BUTTON_SIZE * 2 + BUTTON_GAP * 3 if self._can_be_pressed() else 0
+
         widest = max(self._width_of(text, font) for text, _, font in lines)
-        height = sum(font[1] + 9 for _, _, font in lines) + 12
+        height = max(sum(font[1] + 9 for _, _, font in lines) + 12,
+                     BUTTON_SIZE + 16)
         centre = int(self._canvas["width"]) // 2
-        half = widest // 2 + 18
+        half = (widest + buttons) // 2 + 18
         top = 14
 
         # A panel, not bare text. The border is the same amber as the halo, so
@@ -371,10 +481,80 @@ class Overlay:
                                       outline=ACCENT, width=1)
 
         y = top + 12
+        text_centre = centre - buttons // 2
         for text, colour, font in lines:
-            self._canvas.create_text(centre, y, text=text, fill=colour,
+            self._canvas.create_text(text_centre, y, text=text, fill=colour,
                                      font=font, anchor="n")
             y += font[1] + 9
+
+        if buttons:
+            self._buttons(centre + half - buttons, top, height)
+
+    def _can_be_pressed(self) -> bool:
+        """Whether there is anything for a button to do.
+
+        No callbacks means nothing would happen, and a control that does
+        nothing is worse than no control: the person presses it while
+        something is going wrong and concludes the stop is broken.
+        """
+        return self.on_stop is not None or self.on_hide is not None
+
+    def _buttons(self, left: int, top: int, height: int) -> None:
+        """Stop and hide, as icons, at the right-hand end of the panel.
+
+        No words on them. The panel is already three lines of text and two
+        more labels would make it a paragraph — and these two shapes are the
+        ones every application uses for exactly these two meanings.
+
+        Their positions are recorded in `_hits` as they are drawn, because the
+        panel is sized to a countdown and moves every second: a hit region
+        worked out anywhere else would be describing last second's layout.
+        """
+        self._hits = []
+        middle = top + height // 2
+        x = left + BUTTON_GAP
+
+        for name, glyph, colour, enabled in (
+            ("stop", "■", ALARM, self.on_stop is not None),
+            ("hide", "✕", QUIET, self.on_hide is not None),
+        ):
+            if not enabled:
+                continue
+            box = (x, middle - BUTTON_SIZE // 2,
+                   x + BUTTON_SIZE, middle + BUTTON_SIZE // 2)
+            self._canvas.create_rectangle(*box, fill="#221a16", outline=colour,
+                                          width=1)
+            self._canvas.create_text((box[0] + box[2]) // 2,
+                                     (box[1] + box[3]) // 2,
+                                     text=glyph, fill=colour,
+                                     font=("Segoe UI Symbol", 11, "bold"))
+            self._hits.append((name, *box))
+            x += BUTTON_SIZE + BUTTON_GAP
+
+    def _pressed(self, event: Any) -> None:
+        """A click that reached the canvas. Never raises.
+
+        Only ever reaches here while the window is briefly not click-through,
+        which only happens while the pointer is inside one of these regions —
+        so a click anywhere else went to whatever is underneath, as it should.
+        """
+        for name, x1, y1, x2, y2 in list(self._hits):
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                self._act_on(name)
+                return
+
+    def _act_on(self, name: str) -> None:
+        try:
+            if name == "stop" and self.on_stop is not None:
+                self.on_stop()
+                self.say("Stopped.", alarm=True)
+            elif name == "hide" and self.on_hide is not None:
+                self._hidden = True
+                self.on_hide()
+        except Exception:
+            # A callback that raises must not take the overlay with it: the
+            # window is the only thing telling the person what is happening.
+            pass
 
     def _width_of(self, text: str, font: tuple[str, int, str]) -> int:
         """How wide a line will be, so the panel fits it.

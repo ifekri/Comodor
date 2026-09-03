@@ -131,6 +131,10 @@ class Computer(Tool):
         self.guard = guard if guard is not None else Guard()
         self.watcher = watcher
         self.wants_overlay = overlay and watcher is None
+        #: Set when the person hides the panel from the screen. Read when a
+        #: fresh grant is made, so a new one puts the countdown back rather
+        #: than driving their desktop with nothing on screen saying so.
+        self.overlay_hidden = False
         self._desktop: Any = None
         self._last: Any = None            # the most recent Shot, for coordinates
 
@@ -228,6 +232,13 @@ class Computer(Tool):
                 scope = self._desk().foreground() if this_app else ""
                 self.guard.allow(seconds, scope=scope, reason="asked for it")
                 self._show()
+                # A panel hidden during the last grant does not stay hidden
+                # through a new one: this is a fresh permission, and the
+                # countdown is how somebody knows it is running.
+                self.overlay_hidden = False
+                shower = getattr(self.watcher, "show", None)
+                if callable(shower):
+                    shower()
                 return
 
         # A timeout returns the last option, which is "no" - the right decision
@@ -417,13 +428,37 @@ class Computer(Tool):
             return
         from ..desktop.overlay import Overlay
 
-        overlay = Overlay(status=self.guard.status)
+        # The buttons on the panel. Stop ends the grant — the same thing the
+        # corner gesture does, reachable by aiming rather than by knowing.
+        # Hide is handled inside the overlay itself; the callback is here so
+        # the agent knows the countdown is no longer on screen.
+        overlay = Overlay(status=self.guard.status,
+                          on_stop=self._stopped_from_the_screen,
+                          on_hide=self._hidden_from_the_screen)
         if not overlay.start():
             self.wants_overlay = False       # said once, not attempted again
             return
         self.watcher = overlay
         if self._desktop is not None:
             self._desktop.watcher = overlay
+
+    def _stopped_from_the_screen(self) -> None:
+        """The stop button. Ends the grant, exactly as a corner does.
+
+        Called on the overlay's own thread, so it does nothing but revoke —
+        `Guard` takes its own lock, and the next action asks the guard before
+        it happens, which is where the refusal is produced.
+        """
+        self.guard.revoke("you pressed stop")
+
+    def _hidden_from_the_screen(self) -> None:
+        """The hide button. The panel goes; the grant and the work continue.
+
+        Recorded rather than acted on: the person asked for the corner of
+        their screen back, not to stop being shown what is happening. Halos
+        and captions carry on, and an alarm still gets through.
+        """
+        self.overlay_hidden = True
 
     def _before(self, action: Any) -> None:
         """The guard, asked again for every single action."""
