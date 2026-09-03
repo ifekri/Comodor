@@ -478,6 +478,9 @@ class Service:
         elif verb == "mode":
             done(argument.capitalize())
             self._set_mode(talk, argument)
+        elif verb == "writes" and argument == "on":
+            done("Act mode on")
+            self._allow_writes(talk)
         elif verb == "status":
             done()
             self.bot.send(chat, self._status(talk), keyboard=kb.just_back())
@@ -718,18 +721,98 @@ class Service:
 
     def _set_mode(self, talk: Conversation, mode: str) -> None:
         if mode == "act" and not self.config.telegram.allow_writes:
+            self._offer_act(talk)
+            return
+
+        talk.session.set_mode(mode)
+
+        # Leaving Act gives the permission back. It was granted from here, so
+        # it has to be revocable from here — otherwise the only way to undo a
+        # tap is the terminal command this whole flow exists to avoid, and the
+        # grant would outlive the chat that asked for it.
+        note = ""
+        if mode != "act" and self.config.telegram.allow_writes:
+            if self._revoke_writes():
+                note = ("\n\nWrite access is off again. Choosing Act will ask "
+                        "for it once more.")
+
+        self.bot.send(talk.chat,
+                      f"Mode is now <b>{escape(mode)}</b>.{note}",
+                      keyboard=self._menu(talk.chat))
+
+    def _revoke_writes(self) -> bool:
+        """Take write access away and write it down. Never raises."""
+        from .. import config as config_mod
+
+        self.config.telegram.allow_writes = False
+        try:
+            config_mod.save_user_config(self.config)
+        except Exception:
+            # In memory it is already off, which is what governs this run.
+            # A file that could not be written is `doctor`'s problem, not a
+            # reason to leave the chat in Act.
+            return False
+        return True
+
+    def _offer_act(self, talk: Conversation) -> None:
+        """Ask for write access here, rather than sending somebody to a shell.
+
+        This used to print `comodor telegram writes on` and stop. That is a
+        reasonable thing to write in documentation and a bad thing to answer a
+        button with: the person is on a phone, the terminal is somewhere else,
+        and the tap they just made is exactly the decision being asked for.
+
+        What the caution was protecting is real — a thumb approves with less
+        attention than a keyboard — so the caution stays. It is a warning with
+        two buttons now instead of an instruction with none, and it names the
+        folder, because "may edit files" means nothing without saying which.
+        """
+        where = str(talk.session.folder().get("current", "")) or "this folder"
+
+        self.bot.send(
+            talk.chat,
+            "<b>Allow Act mode?</b>\n\n"
+            "Act mode lets a turn started here edit files and run commands. "
+            "Each one still asks you first, and the approval is a button in "
+            "this chat.\n\n"
+            "Worth a moment before you tap: an approval made on a phone, in a "
+            "queue, is a decision made with less attention than the same one "
+            "at a keyboard. That is the only reason this is off by default.\n\n"
+            "It works inside:\n"
+            f"<code>{escape(where)}</code>",
+            keyboard=kb.approve("writes:on", back="mode"))
+
+    def _allow_writes(self, talk: Conversation) -> None:
+        """Grant write access and go straight into Act.
+
+        Straight in, because turning it on and then leaving the chat in Plan
+        would answer a tap with a setting nobody asked for — the person was
+        choosing a mode, not editing a preference.
+        """
+        from .. import config as config_mod
+
+        self.config.telegram.allow_writes = True
+        try:
+            config_mod.save_user_config(self.config)
+        except Exception as problem:
             self.bot.send(
                 talk.chat,
-                "<b>Act mode is off for Telegram.</b>\n\n"
-                "Approving a command with a thumb is a decision made with less "
-                "attention than the same one at a keyboard, so this starts off. "
-                "Turn it on from the terminal:\n\n"
-                + code("comodor telegram writes on"),
+                "<b>That could not be saved.</b>\n\n"
+                f"{escape(str(problem))}\n\n"
+                "Act stays off, because a permission that is not written down "
+                "is one nobody can take back.",
                 keyboard=kb.just_back())
             return
-        talk.session.set_mode(mode)
-        self.bot.send(talk.chat, f"Mode is now <b>{escape(mode)}</b>.",
-                      keyboard=self._menu(talk.chat))
+
+        talk.session.set_mode("act")
+        self.bot.send(
+            talk.chat,
+            "<b>Act mode is on.</b>\n\n"
+            "This chat may now edit files and run commands, asking first "
+            "every time.\n\n"
+            "Choosing Plan, Ask or Chat takes the permission back — from here, "
+            "the same way it was given.",
+            keyboard=self._menu(talk.chat))
 
     # -- what the agent asks ----------------------------------------------- #
 
@@ -1063,26 +1146,31 @@ class Service:
             keyboard=kb.just_back("skills"))
 
     def _writes(self) -> str:
-        """What a Telegram turn is allowed to do, and where to change it.
+        """What a Telegram turn is allowed to do, and how to change it.
 
-        Read-only from a phone is the default and it is not changeable from the
-        phone: approving a shell command with a thumb, in a queue, is a
-        decision made with less attention than the same approval at a keyboard,
-        and the consequences are identical. Saying so plainly is better than a
-        button that refuses.
+        Read-only is the default, and it is deliberate: approving a shell
+        command with a thumb, in a queue, is a decision made with less
+        attention than the same approval at a keyboard, and the consequences
+        are identical.
+
+        It used to say the setting could only be changed at a terminal. That
+        was a caution written as a wall, and the wall was in the wrong place —
+        the person tapping Act is on a phone, and answering their tap with a
+        shell command is answering a question with a different question. The
+        caution is now a warning with two buttons, which is where a warning
+        belongs.
         """
         on = self.config.telegram.allow_writes
         return (
             "<b>What it may do from here</b>\n\n"
             + ("It <b>can</b> edit files and run commands, asking you first "
-               "each time.\n\n" if on else
+               "each time.\n\nChoose Plan, Ask or Chat under Mode to take "
+               "that back."
+               if on else
                "It <b>reads and plans only</b>. It will not edit a file or "
-               "run a command from Telegram.\n\n")
-            + "This one is changed at the terminal, on the machine it runs "
-              "on:\n\n<code>comodor telegram writes "
-            + ("off" if on else "on")
-            + "</code>\n\n<i>Not from here — a bot that could widen its own "
-              "permissions would only need somebody's phone.</i>"
+               "run a command from Telegram.\n\nChoose Act under Mode to "
+               "allow it — it explains what that means and which folder it "
+               "covers before anything changes.")
         )
 
     def _welcome(self) -> str:

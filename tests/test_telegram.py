@@ -517,9 +517,17 @@ def talking(config, monkeypatch):
             return {"rules": []}
 
         def folder(self):
-            return {"cwd": "/w", "siblings": []}
+            # `current` is what `Session.folder` actually returns. The
+            # stand-in said `cwd`, which no code anywhere reads — so anything
+            # depending on the folder read as empty and the tests agreed.
+            return {"current": "/w", "name": "w", "siblings": [],
+                    "confined": True}
 
         def set_mode(self, mode):
+            # The real one writes the mode into the config it holds, and
+            # callers read it back from there. Returning True and changing
+            # nothing let a test pass on a mode that was never set.
+            self.config.agent.mode = mode
             return True
 
         def interrupt(self):
@@ -559,10 +567,97 @@ def test_every_button_on_the_first_screen_does_something(talking):
         if not replies:
             dead.append(data)
             continue
-        queue.extend(taps(replies[-1]["keyboard"]))
+        # Only follow buttons that mean the same thing wherever they are
+        # tapped. A row — `model:6` — names a slot in a list the bot is
+        # holding, and a page step — `page:model:0` — moves within a list that
+        # has to be open. Tapping either after walking away is not a dead
+        # button, it is a stale one, and the bot says so correctly.
+        #
+        # Following them regardless made this walk depend on its own visiting
+        # order, and it went red the day an unrelated change reordered the
+        # queue. `test_a_row_on_a_paged_list_works_on_every_page` covers them
+        # properly: from the page they appear on.
+        queue.extend(tap for tap in taps(replies[-1]["keyboard"])
+                     if tap.split(":")[0] not in {"model", "skill", "chat",
+                                                  "page"})
 
     assert dead == [], f"buttons with nothing behind them: {dead}"
-    assert len(seen) > 20, "the walk should reach well past the first screen"
+    # Was 20, when the walk also followed rows and page steps. Those are now
+    # covered by the two tests below, from the screen they belong to, so this
+    # counts only the buttons that mean the same thing wherever they are
+    # tapped. Kept as a floor rather than deleted: it is what catches a screen
+    # falling out of the walk entirely.
+    assert len(seen) >= 15, "the walk should reach well past the first screen"
+
+
+@pytest.mark.parametrize("opens,picks", [
+    ("models", "model"),
+    ("skills", "skill"),
+])
+def test_a_row_on_a_paged_list_works_on_every_page(talking, opens, picks):
+    """What the walk above deliberately stops following, checked properly:
+    each row button is tapped from the page it appears on, which is the only
+    place it means anything.
+
+    The second page matters on its own — its rows carry indices past the first
+    page's, and an off-by-one in the shelving would leave exactly those dead
+    while the first page looked fine.
+    """
+    talking._handle(a_message(7, "/start"))
+
+    for page in (0, 1):
+        data = opens if page == 0 else f"page:{picks}:{page}"
+        talking._handle({"update_id": 2, "callback_query": {
+            "id": "q", "from": {"id": 7},
+            "message": {"chat": {"id": 7}}, "data": data}})
+
+        rows = [tap for tap in taps(talking.bot.sent[-1]["keyboard"])
+                if tap.startswith(f"{picks}:")]
+        assert rows, f"page {page} of {opens} offered nothing to choose"
+
+        for row in rows:
+            before = len(talking.bot.sent)
+            talking._handle({"update_id": 2, "callback_query": {
+                "id": "q", "from": {"id": 7},
+                "message": {"chat": {"id": 7}}, "data": row}})
+            assert len(talking.bot.sent) > before, f"{row} did nothing"
+            assert "moved on" not in talking.bot.sent[-1]["text"], \
+                f"{row} was on screen and the bot did not recognise it"
+
+            # Back to the page it came from: choosing sends a confirmation,
+            # not the list, so the next row needs the list open again.
+            talking._handle({"update_id": 2, "callback_query": {
+                "id": "q", "from": {"id": 7}, "message": {"chat": {"id": 7}},
+                "data": opens if page == 0 else f"page:{picks}:{page}"}})
+
+
+@pytest.mark.parametrize("opens,picks", [("models", "model"),
+                                         ("skills", "skill")])
+def test_paging_goes_both_ways(talking, opens, picks):
+    """Next and Previous, tapped from the page that offers them.
+
+    Previous is the one worth checking: it only exists on page two onward, so
+    a walk that never reaches page two never sees it, and it would be dead in
+    the product without a single test noticing.
+    """
+    talking._on_tap(7, {"id": "q", "data": opens})
+
+    forward = [tap for tap in taps(talking.bot.sent[-1]["keyboard"])
+               if tap.startswith("page:")]
+    assert forward == [f"page:{picks}:1"], \
+        f"page 0 of {opens} offers no way forward"
+
+    before = len(talking.bot.sent)
+    talking._on_tap(7, {"id": "q", "data": forward[0]})
+    assert len(talking.bot.sent) > before, "Next did nothing"
+
+    backward = [tap for tap in taps(talking.bot.sent[-1]["keyboard"])
+                if tap.startswith("page:")]
+    assert f"page:{picks}:0" in backward, "page 1 offers no way back"
+
+    before = len(talking.bot.sent)
+    talking._on_tap(7, {"id": "q", "data": f"page:{picks}:0"})
+    assert len(talking.bot.sent) > before, "Previous did nothing"
 
 
 def test_the_first_screen_names_the_settings_people_look_for(talking):
@@ -587,17 +682,101 @@ def test_a_stale_row_says_so_rather_than_doing_the_wrong_thing(talking):
     assert "moved on" in talking.bot.sent[-1]["text"]
 
 
-def test_the_phone_cannot_widen_its_own_permissions(talking):
-    """Read-only is changed at the terminal, and the bot says where."""
+def test_the_writes_screen_says_what_it_may_do_and_how_to_change_it(talking):
+    """This used to assert that the setting could *only* be changed at a
+    terminal, and that no button here could touch it.
+
+    That was a deliberate wall, and it was in the wrong place. The person
+    tapping Act is holding a phone; answering them with a shell command is
+    answering a question with a different question, and it is the reason the
+    feature went unused. Only a paired account reaches any of this — the same
+    account that could send the bot a message asking it to do the work anyway.
+
+    What the wall was protecting is still protected, by a warning that names
+    the folder and takes an explicit approval. So this now checks that the
+    screen explains itself rather than that it refuses.
+    """
     talking._handle(a_message(7, "/start"))
     talking._handle({"update_id": 2, "callback_query": {
         "id": "q", "from": {"id": 7},
         "message": {"chat": {"id": 7}}, "data": "writes"}})
 
     said = talking.bot.sent[-1]["text"]
-    assert "comodor telegram writes on" in said
-    assert taps(talking.bot.sent[-1]["keyboard"]) == ["settings"], \
-        "no button here may change it"
+    assert "reads and plans only" in said
+    assert "Act" in said, "it never says how to change this"
+    assert "comodor telegram writes" not in said, \
+        "it still sends somebody to a terminal they are not sitting at"
+
+
+def test_turning_act_on_asks_first_and_names_the_folder(talking):
+    """The tap must not silently grant write access. It has to say what is
+    being allowed, where it applies, and take a deliberate approval — that is
+    the whole of the protection now."""
+    talking._handle(a_message(7, "/start"))
+    talking._handle({"update_id": 2, "callback_query": {
+        "id": "q", "from": {"id": 7},
+        "message": {"chat": {"id": 7}}, "data": "mode:act"}})
+
+    said = talking.bot.sent[-1]["text"]
+    assert "Allow Act mode?" in said
+    assert "<code>" in said, "it never shows which folder this covers"
+    assert not talking.config.telegram.allow_writes, \
+        "asking is not granting"
+
+    buttons = taps(talking.bot.sent[-1]["keyboard"])
+    assert "writes:on" in buttons, "there is no way to approve"
+    assert "mode" in buttons, "there is no way to decline"
+
+
+def test_approving_grants_it_writes_it_down_and_enters_act(talking):
+    """Through `_on_tap`, for the reason given below on the revoke test: the
+    fixture's config lives only in memory, and `_handle` reloads from disk."""
+    talking._on_tap(7, {"id": "q1", "data": "mode:act"})
+    talking._on_tap(7, {"id": "q2", "data": "writes:on"})
+
+    assert talking.config.telegram.allow_writes is True
+    assert talking._conversation(7).session.config.agent.mode == "act"
+    assert "Act mode is on" in talking.bot.sent[-1]["text"]
+
+
+def test_declining_changes_nothing(talking):
+    """`agent.mode` defaults to `act`, so the mode is not what this can check:
+    what matters is that declining leaves the *permission* exactly as it was,
+    and that the chat is put back where it can choose again."""
+    talking._handle(a_message(7, "/start"))
+    talking._handle({"update_id": 2, "callback_query": {
+        "id": "q", "from": {"id": 7},
+        "message": {"chat": {"id": 7}}, "data": "mode:act"}})
+    talking._handle({"update_id": 3, "callback_query": {
+        "id": "q2", "from": {"id": 7},
+        "message": {"chat": {"id": 7}}, "data": "mode"}})
+
+    assert talking.config.telegram.allow_writes is False, \
+        "declining granted the thing it declined"
+    assert "Mode" in talking.bot.sent[-1]["text"], \
+        "declining left them somewhere other than the mode menu"
+
+
+def test_leaving_act_gives_the_permission_back(talking):
+    """Granted from the chat, so revocable from the chat. Otherwise the only
+    way to undo a tap is the terminal command this replaced.
+
+    Driven through `_on_tap` rather than `_handle`: `_handle` reloads the
+    configuration from disk first — correctly, so a change made at the
+    terminal reaches a running bot — and this fixture's config was never
+    written anywhere, so the reload would discard the grant before the test
+    could revoke it. That reload is exercised by `test_live_settings.py`
+    against a real file; what is being checked here is the revocation.
+    """
+    talking._on_tap(7, {"id": "q1", "data": "mode:act"})
+    talking._on_tap(7, {"id": "q2", "data": "writes:on"})
+    assert talking.config.telegram.allow_writes is True
+
+    talking._on_tap(7, {"id": "q3", "data": "mode:plan"})
+
+    assert talking.config.telegram.allow_writes is False, \
+        "the grant outlived the mode it was for"
+    assert "off again" in talking.bot.sent[-1]["text"], "it never says so"
 
 
 # --------------------------------------------------------------------------- #
