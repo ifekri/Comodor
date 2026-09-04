@@ -3,6 +3,7 @@
  *
  *   POST /api/integrations/github/install     start a flow, get a URL
  *   GET  /api/integrations/github/setup       where GitHub sends the browser
+ *   GET  /api/integrations/github/callback    where the user check comes back
  *   POST /api/integrations/github/claim       the agent collects the result
  *   POST /api/integrations/github/token       an installation access token
  *   POST /api/integrations/github/verify      what an installation is now
@@ -16,26 +17,43 @@
  * here — by instruction, and because one namespace existing for fifteen-minute
  * values is infrastructure for this integration alone.
  *
- * So the join is a signed receipt. `setup` verifies the installation against
- * GitHub, signs what GitHub said together with the nonce from the state, and
- * puts that receipt in the page it returns. The person copies it back, and
- * `claim` checks the signature and hands the agent the installation.
+ * So the join is a signed receipt. `callback` signs what GitHub said together
+ * with the nonce from the state and puts that receipt in the page it returns.
+ * The person copies it back, and `claim` checks the signature and hands the
+ * agent the installation.
  *
- * **What the state actually guarantees.** It is short-lived, signed, and bound
- * to a nonce only the agent that started the flow holds — it is *not*
- * server-side one-time, and calling it that would be a claim this
- * architecture cannot keep: marking a token used needs somewhere to write the
- * mark. What it does give: a state cannot be forged, cannot be edited, expires
- * in fifteen minutes, and a receipt produced from it is refused by any agent
- * whose nonce does not match. Reuse within the window returns the same
- * already-verified installation to the same holder, which grants nothing that
- * holder did not already have.
+ * **What the state actually guarantees.** It is short-lived and signed: it
+ * cannot be forged, cannot be edited, and expires in fifteen minutes. Two
+ * things it is *not*, both worth saying plainly because assuming either would
+ * be wrong:
+ *
+ * * It is **not server-side one-time.** Marking a token used needs somewhere
+ *   to write the mark, and there is nowhere.
+ * * Its **nonce is not a secret.** The payload is base64, not encrypted, so
+ *   anybody holding a state can read the nonce out of it. The nonce exists so
+ *   an agent can tell its own receipt from another attempt's — it is a
+ *   correlation id, and nothing here is allowed to rest on it being unknown.
+ *
+ * What does the security work is below, and none of it involves the nonce.
  *
  * **Who may ask for a token.** Not whoever knows an installation id. Every
- * connection carries a key pair the agent generates, and `setup` issues a
- * grant naming that key and that installation. `/token` and `/verify` take
- * the installation id *out of the grant* and require a signature from the key
- * it names. See `grant.js`.
+ * connection carries a key pair the agent generates, and the grant names that
+ * key and that installation. `/token` and `/verify` take the installation id
+ * *out of the grant* and require a signature from the key it names. See
+ * `grant.js`.
+ *
+ * **Who may be given a grant.** Not whoever can reach `setup` with an
+ * installation id. That was a real hole and it is why `callback` exists: the
+ * setup URL takes `installation_id` from a query string, and confirming with
+ * the app JWT that such an installation exists says nothing about whose it is.
+ * An attacker could start their own flow, walk to `setup` with somebody else's
+ * installation id, and be handed that installation's grant bound to their own
+ * key.
+ *
+ * So `setup` issues nothing. It starts a GitHub user authorisation, and the
+ * grant is issued at `callback` only after `GET /user/installations` — asked
+ * with a user token, not the app JWT — lists the installation in question. See
+ * `oauth.js`.
  *
  * **What is never returned.** The private key, any JWT, the webhook secret,
  * and the client secret. An installation token is returned, to an
@@ -45,6 +63,16 @@
 
 import { mintToken, readInstallation } from './api.js';
 import { authorise, issueGrant } from './grant.js';
+import {
+  begin as beginUserCheck,
+  challengeFor,
+  clearCookie,
+  exchangeCode,
+  installationForUser,
+  openState,
+  sameBytes,
+  verifierFrom,
+} from './oauth.js';
 import { issue, open, sameSecret } from './state.js';
 import { receive } from './webhook.js';
 
@@ -68,7 +96,7 @@ function json(body, status = 200) {
   });
 }
 
-function page(title, body) {
+function page(title, body, extra = {}) {
   return new Response(
     `<!doctype html><meta charset="utf-8">`
     + `<meta name="viewport" content="width=device-width,initial-scale=1">`
@@ -81,7 +109,7 @@ function page(title, body) {
     + `p{color:#b8aca2}</style>`
     + `<main><h1>${title}</h1>${body}</main>`,
     { status: 200, headers: { 'content-type': 'text/html; charset=utf-8',
-                              'cache-control': 'no-store' } });
+                              'cache-control': 'no-store', ...extra } });
 }
 
 /** A receipt: what GitHub confirmed, signed, tied to the flow's nonce. */
@@ -162,6 +190,11 @@ export async function handle(request, env) {
     return setup(request, env, secret, url);
   }
 
+  if (leaf === 'callback') {
+    if (request.method !== 'GET') return json({ error: 'GET only' }, 405);
+    return callback(request, env, secret, url);
+  }
+
   if (request.method !== 'POST') {
     return json({ error: 'POST only' }, 405);
   }
@@ -188,6 +221,31 @@ export async function handle(request, env) {
 
 // --------------------------------------------------------------------------- //
 
+/**
+ * Whether a string is a P-256 public key this Worker could later verify with.
+ *
+ * Checked here, at the only door it comes in by, rather than trusted until
+ * something downstream tries to use it. A key that is merely the right length
+ * used to travel through the whole install flow and fail at the last line, on
+ * an `atob` error, with the raw decoder message shown to the person - a bad
+ * answer to a question asked twenty minutes earlier.
+ */
+function usableKey(text) {
+  if (!text || text.length < 80 || text.length > 200) return false;
+  if (!/^[A-Za-z0-9_-]+$/.test(text)) return false;
+  let bytes;
+  try {
+    const padded = text.replace(/-/g, '+').replace(/_/g, '/')
+      + '='.repeat((4 - (text.length % 4)) % 4);
+    bytes = atob(padded);
+  } catch {
+    return false;
+  }
+  // Uncompressed point: one tag byte and two 32-byte coordinates. Anything
+  // else is not something `importKey('raw', ...)` will accept later.
+  return bytes.length === 65 && bytes.charCodeAt(0) === 0x04;
+}
+
 async function start(env, secret, body) {
   // The agent's public key for this connection, raw P-256, base64url. It goes
   // into the signed state so it arrives at `setup` unaltered without anything
@@ -196,7 +254,7 @@ async function start(env, secret, body) {
   // Required. Without it there is no identity to bind the installation to,
   // and `/token` would be back to trusting whatever id it was handed.
   const publicKey = String(body.public_key || '');
-  if (!publicKey || publicKey.length < 80 || publicKey.length > 200) {
+  if (!usableKey(publicKey)) {
     return json({ error: 'a connection needs a client public key' }, 400);
   }
 
@@ -215,8 +273,18 @@ async function start(env, secret, body) {
 /**
  * Where GitHub sends the browser once the app is installed.
  *
- * The `installation_id` in this URL is a number in a query string. It becomes
- * trustworthy on the line that asks GitHub what it is, and not before.
+ * This used to end the flow. It issued the grant here, having confirmed with
+ * the app JWT that the `installation_id` in the query string named a real
+ * installation — which is a different question from whether it is the
+ * installation of the person standing at this browser. It is not enough, and
+ * GitHub's own documentation says so: the setup URL can be called with any id.
+ *
+ * So nothing is issued here any more. What happens instead is a redirect into
+ * a GitHub user authorisation, and `callback` finishes the job.
+ *
+ * The cancel path still ends here, because there is nothing to authorise: a
+ * cancelled installation grants nobody anything, and the receipt says only
+ * that the person changed their mind.
  */
 async function setup(request, env, secret, url) {
   const installationId = url.searchParams.get('installation_id');
@@ -234,33 +302,139 @@ async function setup(request, env, secret, url) {
     return page('Cancelled', cameBack(receipt));
   }
 
-  let installation;
-  try {
-    installation = await readInstallation(env, installationId);
-  } catch (error) {
-    return page('That could not be confirmed',
-      `<p>${String(error.message || error).slice(0, 200)}</p>`);
+  const id = Number(installationId);
+  if (!Number.isInteger(id) || id <= 0) {
+    return page('That link is not right',
+      '<p>Start again from your terminal with '
+      + '<code>comodor github connect</code>.</p>');
   }
 
-  // The grant: this installation belongs to the key that started this flow.
-  // Issued here because this is the one moment both facts are known and both
-  // have been checked — GitHub confirmed the installation a line ago, and the
-  // key came out of a state this Worker signed.
-  let grant;
+  // Deliberately no `readInstallation` here. It would tell an unauthenticated
+  // caller whether an installation id exists and who owns it, which is a
+  // lookup service for other people's accounts. Everything this needs to know
+  // comes back at the callback, asked as the user.
+  let started;
   try {
-    grant = await issueGrant(secret, {
-      installationId: installation.installation_id,
+    started = await beginUserCheck(env, secret, {
+      installationId: id,
       publicKey: opened.k,
+      nonce: opened.n,
+      redirectUri: callbackUrl(url),
     });
   } catch (error) {
-    return page('That could not be completed',
+    if (error.status === 503) {
+      return page('Not configured',
+        '<p>This deployment cannot verify who you are, so it will not hand '
+        + 'out a connection. Nothing has been granted.</p>');
+    }
+    return page('That could not be started',
       `<p>${escapeHtml(String(error.message || error).slice(0, 200))}</p>`);
   }
 
+  // 302 rather than a page with a link: the person has already said yes twice
+  // and a third button that says "continue" teaches them to click through
+  // whatever a redirect asks for.
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: started.url,
+      'set-cookie': started.cookie,
+      'cache-control': 'no-store',
+    },
+  });
+}
+
+/** Where GitHub returns after the user authorises. Derived, never guessed. */
+function callbackUrl(url) {
+  return `${new URL(url).origin}${BASE}/callback`;
+}
+
+/**
+ * The end of the flow, and the only place a grant is issued.
+ *
+ * Five checks, in this order, and every one of them must pass:
+ *
+ *   1. the state opens under our secret, is a state of ours, and is fresh;
+ *   2. the browser has the cookie whose SHA-256 is the challenge in that
+ *      state — so this callback belongs to the browser that started it;
+ *   3. GitHub exchanges the code, server side, for a user access token;
+ *   4. that user's own installation list contains the installation this flow
+ *      is for;
+ *   5. only then, a grant.
+ *
+ * The user token exists between 3 and 4. It is not persisted, not logged, not
+ * put in the page, and not returned to the agent — the agent never learns that
+ * OAuth happened at all, and ordinary work continues to use installation
+ * access tokens alone.
+ */
+async function callback(request, env, secret, url) {
+  const clear = { 'set-cookie': clearCookie() };
+
+  const claims = await openState(secret, url.searchParams.get('state') || '');
+  if (!claims) {
+    // Expired, edited, invented, or an install state presented here. All the
+    // same answer: telling them apart tells a prober which guess was closer.
+    return page('That link has expired',
+      '<p>Start again from your terminal with '
+      + '<code>comodor github connect</code>.</p>', clear);
+  }
+
+  const verifier = verifierFrom(request);
+  if (!verifier || !sameBytes(await challengeFor(verifier), claims.c)) {
+    // The cookie is missing or belongs to a different flow. That is a callback
+    // arriving at a browser other than the one that started this, which is the
+    // shape of a state fed to somebody else.
+    return page('That did not come from the right place',
+      '<p>This has to finish in the same browser that started it. Run '
+      + '<code>comodor github connect</code> again.</p>', clear);
+  }
+
+  const code = url.searchParams.get('code') || '';
+  if (!code) {
+    return page('That authorisation was not completed',
+      '<p>Nothing has been granted. Run '
+      + '<code>comodor github connect</code> again.</p>', clear);
+  }
+
+  let user;
+  try {
+    // The token. From here to the end of the next call, and no further.
+    const token = await exchangeCode(env, {
+      code, verifier, redirectUri: callbackUrl(url),
+    });
+    user = await installationForUser(token, claims.i);
+  } catch (error) {
+    return page('That could not be confirmed',
+      `<p>${escapeHtml(String(error.message || error).slice(0, 200))}</p>`,
+      clear);
+  }
+
+  if (!user) {
+    // The installation exists — it is how we got here — but it is not one this
+    // person can reach. This is the attack the whole callback exists for, and
+    // the answer says nothing about whose it is instead.
+    return page('That installation is not yours',
+      '<p>You are signed in to GitHub as somebody who cannot reach the '
+      + 'installation this link is for, so nothing has been granted.</p>',
+      clear);
+  }
+
+  let grant;
+  try {
+    grant = await issueGrant(secret, {
+      installationId: user.installation_id,
+      publicKey: claims.k,
+    });
+  } catch (error) {
+    return page('That could not be completed',
+      `<p>${escapeHtml(String(error.message || error).slice(0, 200))}</p>`,
+      clear);
+  }
+
   const receipt = await sign(secret, {
-    n: opened.n,
+    n: claims.n,
     status: 'connected',
-    installation,
+    installation: user,
     grant,
     // Bounded independently of the state: the installation is verified now,
     // and the receipt should not outlive the terminal that is waiting.
@@ -268,9 +442,9 @@ async function setup(request, env, secret, url) {
   });
 
   return page(
-    `Connected to ${escapeHtml(installation.account.login)}`,
+    `Connected to ${escapeHtml(user.account.login)}`,
     `<p>Paste this line into the terminal that is waiting:</p>`
-    + cameBack(receipt));
+    + cameBack(receipt), clear);
 }
 
 /**

@@ -167,7 +167,8 @@ Six endpoints on `comodor.ai`, all behind that one prefix:
 | | |
 |---|---|
 | `POST /api/integrations/github/install` | start a flow; takes the agent's public key, returns a signed state and the URL to open |
-| `GET /api/integrations/github/setup` | where GitHub sends the browser after installing |
+| `GET /api/integrations/github/setup` | where GitHub sends the browser after installing; starts the user check |
+| `GET /api/integrations/github/callback` | where the user check returns; **the only place a grant is issued** |
 | `POST /api/integrations/github/claim` | exchange the receipt for the verified installation **and a grant** |
 | `POST /api/integrations/github/token` | an installation access token, one hour — **signed request** |
 | `POST /api/integrations/github/verify` | what an installation is now — **signed request** |
@@ -178,6 +179,49 @@ signing a JWT with a private key; that key cannot live in a static file or on
 each user's machine, so it is a Cloudflare secret this Worker reads and nothing
 else does. What crosses to an agent is an installation token that lasts an
 hour.
+
+#### Who may be *given* a grant
+
+`setup` receives `installation_id` in a query string. Confirming with the app
+JWT that such an installation exists is not the same question as whether it
+belongs to the person at the browser — the app JWT can see every installation
+of the app, so it answers yes about strangers. GitHub's documentation says this
+directly: to trust the setup URL you must authenticate the user and check the
+installation is one they can reach.
+
+Without that, this worked:
+
+```
+attacker → /install with the attacker's own key    → a valid state
+attacker → /setup?installation_id=VICTIM&state=THEIRS
+Worker   → the app JWT confirms the installation exists
+Worker   → issues the VICTIM's grant, naming the ATTACKER's key
+attacker → /token, signed with the key they hold
+```
+
+So `setup` issues nothing. It redirects into a GitHub user authorisation for
+the same App, and `callback` issues the grant only after all of:
+
+1. the OAuth state opens under our secret and has not expired;
+2. the browser presents the PKCE verifier for the challenge inside that state;
+3. GitHub exchanges the `code`, server side, for a user access token;
+4. `GET /user/installations` — asked **as the user**, not as the app — lists
+   the installation the flow is for.
+
+The user access token exists between 3 and 4. It is never persisted, never
+logged, never in a response, and never reaches the agent. Ordinary work is
+still installation access tokens alone; OAuth bootstraps a connection and
+appears nowhere in a turn.
+
+**On PKCE, precisely.** `code_challenge` is sent because GitHub's guidance asks
+for it, but GitHub does not currently verify it, so claiming it binds the code
+at GitHub would be false. What it does buy is enforced here: the callback must
+come from the browser that started the flow, because only that browser holds
+the cookie whose SHA-256 matches the challenge inside the signed state. A state
+fed to somebody else's browser has no verifier to present. The verifier is in a
+`HttpOnly; Secure; SameSite=Lax` cookie scoped to this path — `Lax` rather than
+`Strict` because the callback arrives as a top-level navigation from
+github.com, and `Strict` would withhold the cookie on exactly that hop.
 
 #### Who may ask for a token
 
@@ -203,12 +247,13 @@ request can be replayed inside it. That is stated rather than glossed: it
 requires breaking TLS first, and the grant fixes the installation, so a replay
 mints exactly what the original would have.
 
-Two test files cover this, and both run in `npm test`:
+Three test files cover this, and all run in `npm test`:
 
 ```bash
-npm test          # 64 tests, including:
-                  #   authorisation.test.mjs  — 26, forgery and replay
-                  #   agent-vector.test.mjs   —  8, against real agent output
+npm test          # 85 tests, including:
+                  #   authorisation.test.mjs        — 26, forgery and replay
+                  #   setup-authorisation.test.mjs  — 21, who may be given one
+                  #   agent-vector.test.mjs         —  8, real agent output
 ```
 
 `agent-vector.test.mjs` is the one worth knowing about: the agent signs in
@@ -225,7 +270,38 @@ npx wrangler secret put GITHUB_APP_ID
 npx wrangler secret put GITHUB_APP_PRIVATE_KEY     # PKCS#8 — see below
 npx wrangler secret put GITHUB_APP_WEBHOOK_SECRET
 npx wrangler secret put GITHUB_APP_SLUG            # the app's URL name
+npx wrangler secret put GITHUB_APP_CLIENT_ID       # user verification
+npx wrangler secret put GITHUB_APP_CLIENT_SECRET   # user verification
 ```
+
+All six are Cloudflare secrets. None is in this repository, in
+`wrangler.jsonc`, in a build output, or in anything a browser receives.
+
+### Settings on the GitHub App itself
+
+In the app's settings under the `comodor-ai` organisation:
+
+| Field | Value |
+|---|---|
+| **Setup URL** | `https://comodor.ai/api/integrations/github/setup` |
+| **Redirect on update** | on — so changing a selection reconnects cleanly |
+| **Callback URL** | `https://comodor.ai/api/integrations/github/callback` |
+| **Request user authorization (OAuth) during installation** | **off** |
+| **Webhook URL** | `https://comodor.ai/api/integrations/github/webhook` |
+| **Webhook secret** | the same value as `GITHUB_APP_WEBHOOK_SECRET` |
+
+The callback URL must match exactly; GitHub refuses a `redirect_uri` that
+differs by so much as a trailing slash.
+
+"Request user authorization during installation" stays **off** on purpose. It
+would send the browser to the callback immediately after installing, before the
+setup URL has established which flow this is — the state would not be there and
+the connection would fail. The user check is started by `setup`, which is the
+one place that knows.
+
+`GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` are on the same settings
+page. The client secret is shown once; if it is lost, generate a new one and
+put it back with `wrangler secret put` — nothing else has a copy.
 
 GitHub hands out a **PKCS#1** key (`BEGIN RSA PRIVATE KEY`); Web Crypto reads
 only **PKCS#8**. Convert it first, or the Worker refuses with this same line:
@@ -235,10 +311,16 @@ openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt \
   -in comodor.private-key.pem -out comodor-pkcs8.pem
 ```
 
-`GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` are deliberately **not**
-set. They are for OAuth, and nothing here needs a GitHub *user* identity — the
-app acts as itself against an installation. Setting them would keep a
-credential for a flow that does not run.
+`GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` were once deliberately
+unset, on the reasoning that installation is not OAuth and nothing here needs a
+GitHub *user* identity. That was right about ordinary work and wrong about one
+moment: confirming an installation belongs to the person claiming it is exactly
+a user-identity question, and nothing but a user token can answer it.
+
+So they are required, and the rest of that reasoning still holds. No OAuth
+token is stored, none is refreshed, none reaches an agent, and none is used for
+anything after the connection is made. Every turn afterwards acts as the app
+against an installation.
 
 Tests, none of which need a key or a network:
 

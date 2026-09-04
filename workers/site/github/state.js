@@ -20,22 +20,33 @@
  * a token used requires somewhere to write the mark, and there is nowhere.
  * Describing it as one-time would be a claim the architecture cannot keep.
  *
- * What it is: short-lived, unforgeable, unmodifiable, and bound to a nonce
- * that only the agent which started the flow holds. Those give:
+ * What it is: short-lived, unforgeable and unmodifiable.
  *
  * * a state cannot be invented — it carries an HMAC under a secret only this
  *   Worker has;
  * * a state cannot be edited — the signature covers the payload, including
  *   the client's public key;
- * * a state expires in fifteen minutes;
- * * a receipt derived from one is refused by any agent whose nonce does not
- *   match, so a state observed in a URL cannot be turned into a connection on
- *   somebody else's machine.
+ * * a state expires in fifteen minutes.
  *
- * Reuse inside the window returns the same already-verified installation to
- * the same holder. That is not an escalation — and since the resulting grant
- * names the client key from the state, a reused state cannot produce a grant
- * for a key its holder does not have.
+ * **The nonce is not a secret, and nothing may rest on it being one.** The
+ * payload is base64 of JSON — encoded, not encrypted — so anybody holding a
+ * state can read the nonce straight out of it, and a state travels in a URL
+ * where referrers, history and shoulders all see it. An earlier version of
+ * this comment described it as something only the agent that started the flow
+ * holds. That was wrong, and it mattered: it made the nonce sound like a
+ * credential.
+ *
+ * What the nonce is for is telling one attempt from another. An agent
+ * compares it so a receipt pasted from somebody else's flow is refused rather
+ * than connected — a correctness check against confusion, not a defence
+ * against an attacker, who could read the right nonce anyway.
+ *
+ * The security of the flow does not depend on this file. A state grants
+ * nothing on its own: it names an installation nobody has proved they own,
+ * and the grant is issued at the OAuth callback only after GitHub confirms,
+ * as the signed-in user, that the installation is theirs. Reuse of a state
+ * inside its window therefore buys an attacker a fresh trip through that
+ * check, which they fail.
  *
  * Fifteen minutes, because that is the outside of how long choosing
  * repositories takes, and because an unused state is a window during which a
@@ -96,8 +107,9 @@ export function sameSecret(left, right) {
 /**
  * A fresh state.
  *
- * The nonce is what the agent keeps and matches: it is random, it is inside
- * the signed payload, and nothing else knows it.
+ * The nonce is what the agent keeps and matches. It is random and it is
+ * inside the signed payload, so it cannot be changed - but it is readable by
+ * anybody holding the state, and nothing here treats it as a secret.
  */
 export async function issue(secret, { now = Date.now(), client = '',
                                       publicKey = '' } = {}) {
