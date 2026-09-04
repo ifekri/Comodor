@@ -54,6 +54,27 @@ issues the grant only if the one in front of it is on that list. Somebody who
 typed your installation id into their own connection reaches this step signed
 in as themselves, is not on the list, and gets nothing.
 
+**Being able to see it is not enough, either.** A connection covers the whole
+installation — every repository in it, at every permission the app was given
+— so it takes somebody who could have made that installation in the first
+place:
+
+| the app is installed on | who may connect it |
+| --- | --- |
+| your personal account | you, and only you. Being a collaborator on one of that account's repositories is not the same thing |
+| an organisation | an owner of that organisation |
+
+The reason is concrete. An organisation might have the app on `repo-a` and
+`repo-b`, and somebody with read on `repo-a` alone can see the installation. If
+seeing it were enough, connecting would have handed them write on `repo-b`. So
+membership is checked as well, and a member who is not an owner is refused with
+a sentence saying so — they can ask an owner to run it, or install the app on
+their own account instead.
+
+If that membership check cannot run — the app is missing the `Members: Read`
+organisation permission — the connection is refused rather than allowed. A
+check that did not happen has not passed.
+
 The token GitHub issues for that check is used for one request and dropped. It
 is not stored, not logged, not shown, and never sent to Comodor on your
 machine — the agent never learns that step happened. Everything after it uses
@@ -252,10 +273,17 @@ Least privilege, and each one is here because something uses it:
 | Checks | Read | What CI said about a commit |
 | Actions | Read | Workflow runs |
 | Commit statuses | Read | The older status API, which some repositories still use |
+| **Members** (organisation) | Read | Telling an organisation owner from an ordinary member, once, while connecting |
 
-Not asked for, and not needed: administration, secrets, members, deploy keys,
-workflow write. An app that can rewrite a workflow file can run arbitrary code
-in the repository's CI, and nothing here needs that.
+`Members` is the only one no turn ever uses. It is read once, during
+`comodor github connect`, to answer whether you are entitled to connect an
+organisation's installation — see [Why GitHub asks you
+twice](#why-github-asks-you-twice). Nothing about membership is stored, shown,
+or looked at again.
+
+Not asked for, and not needed: administration, secrets, deploy keys, workflow
+write. An app that can rewrite a workflow file can run arbitrary code in the
+repository's CI, and nothing here needs that.
 
 ---
 
