@@ -294,14 +294,24 @@ Least privilege, and each one is here because something uses it:
 | Issues | Read & write | Reading issues, and commenting on issues and pull requests |
 | Checks | Read | What CI said about a commit |
 | Actions | Read | Workflow runs |
-| Commit statuses | Read | The older status API, which some repositories still use |
-| **Members** (organisation) | Read | Telling an organisation owner from an ordinary member, once, while connecting |
+| **Members** (organisation) | Read | Telling an organisation owner from an ordinary member |
 
-`Members` is the only one no turn ever uses. It is read once, during
-`comodor github connect`, to answer whether you are entitled to connect an
-organisation's installation — see [Why GitHub asks you
-twice](#why-github-asks-you-twice). Nothing about membership is stored, shown,
-or looked at again.
+**`Members` is never in the token this machine receives.** It is used by
+`comodor.ai` alone: once while connecting, and again on every organisation
+entitlement refresh — which is every time a token is requested and every
+`comodor github refresh`, not a one-off. Nothing about membership is stored or
+shown, and no turn can read it, because the token a turn holds does not carry
+the permission at all.
+
+The token this machine is given asks GitHub for exactly the five operational
+permissions above and nothing else. A token minted without naming them would
+carry everything the app holds, `Members` included; it never is.
+
+`Commit statuses` used to be listed here and has been removed. The client has a
+`statuses()` method, nothing reaches it, and a permission for code that cannot
+run is one granted for no reason. Wiring it up means adding it back in three
+places: this table, the app's own permissions, and the Worker's runtime
+allowlist.
 
 Not asked for, and not needed: administration, secrets, deploy keys, workflow
 write. An app that can rewrite a workflow file can run arbitrary code in the

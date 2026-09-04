@@ -339,6 +339,19 @@ class GitHub:
                                key="check_runs"))
 
     def statuses(self, owner: str, name: str, ref: str) -> dict[str, Any]:
+        """The older commit status API, which some repositories still use.
+
+        Nothing reaches this: no tool action, no command. It is left here
+        because `checks` does not cover a repository whose CI reports statuses
+        instead, and wiring it up is a small change when somebody needs it.
+
+        It will fail with a 403 until then, and deliberately. The token a turn
+        holds is minted with an explicit permission list that does not include
+        `statuses`, because granting a permission for code nobody can run is
+        granting it for nothing. Wiring this up means adding `statuses: read`
+        in three places: the app's own permissions, `RUNTIME_PERMISSIONS` in
+        the Worker's `entitlement.js`, and the table in `docs/github.md`.
+        """
         return self.call("GET", f"repos/{owner}/{name}/commits/{ref}/status")
 
     def workflow_runs(self, owner: str, name: str, branch: str = ""
