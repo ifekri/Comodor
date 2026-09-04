@@ -32,12 +32,32 @@ comodor github connect
         │
         ├─ you choose an account, then repositories
         │
-        ├─ GitHub sends the browser to comodor.ai, which
-        │  asks GitHub what that installation actually is
+        ├─ GitHub sends the browser back to comodor.ai, which
+        │  asks GitHub to confirm who you are
+        │
+        ├─ you approve once more — this is the step that proves
+        │  the installation is yours and not somebody else's
         │
         └─ the page shows a signed line; you paste it back
            it carries a grant naming your public key
 ```
+
+### Why GitHub asks you twice
+
+The first screen installs the app. The second signs you in, and it is not
+ceremony: the installation id comes back to `comodor.ai` in a query string,
+where anybody could put any number. Confirming that an installation *exists*
+says nothing about whose it is.
+
+So `comodor.ai` asks GitHub, as you, which installations you can reach, and
+issues the grant only if the one in front of it is on that list. Somebody who
+typed your installation id into their own connection reaches this step signed
+in as themselves, is not on the list, and gets nothing.
+
+The token GitHub issues for that check is used for one request and dropped. It
+is not stored, not logged, not shown, and never sent to Comodor on your
+machine — the agent never learns that step happened. Everything after it uses
+an installation token, which is the app acting on the repositories you chose.
 
 The line you paste is a **receipt**: it says which installation GitHub
 confirmed, signed so it cannot be altered, and it expires in fifteen minutes.
@@ -84,13 +104,24 @@ connection is its own, and `comodor github status` says so.
 
 ### What can and cannot be replayed
 
-Stated plainly, because the honest version is short. The state is
-short-lived, signed and bound to a nonce only your terminal holds — it is not
-server-side one-time, because marking one used needs somewhere to write the
-mark and `comodor.ai` has no database. A signed request can be replayed within
-its 120-second window by somebody who captured it, which means breaking TLS
-first. What replay cannot do is widen anything: the grant fixes the
-installation, so a replayed request mints exactly what it always would have.
+Stated plainly, because the honest version is short.
+
+The state in the install URL is short-lived and signed, so it cannot be forged
+or edited. It is **not** server-side one-time — marking one used needs
+somewhere to write the mark, and `comodor.ai` has no database. Its nonce is
+**not a secret** either: the payload is encoded, not encrypted, so anybody
+holding the state can read it. The nonce is there so your terminal can tell its
+own receipt from another attempt's, and nothing rests on it being unknown.
+
+None of that gets anybody anything, because a state grants nothing. It names an
+installation nobody has proved they own. What turns one into a connection is
+the sign-in step above, and somebody replaying your state arrives there as
+themselves.
+
+A signed `/token` request can be replayed within its 120-second window by
+somebody who captured it, which means breaking TLS first. Replay cannot widen
+anything: the grant fixes the installation, so a replayed request mints exactly
+what it always would have.
 
 ---
 

@@ -90,7 +90,10 @@ def _connect(console, config: Config) -> int:
              "Open this in a browser:\n")
             + f"[bold]{pending.url}[/bold]\n\n"
             "Choose the account, then the repositories it may see.\n\n"
-            "GitHub sends you to a page that shows one line. Paste it here — "
+            "GitHub then asks you to sign in once more. That step is what proves "
+            "the installation is yours: an installation id alone is just a "
+            "number in a URL, and anybody could type one.\n\n"
+            "After it, a page shows one line. Paste it here — "
             "it says which installation was confirmed, signed so it cannot be "
             "altered, and nothing is saved until it checks out."),
         title=" Connect GitHub ", title_align="left", border_style="accent"))

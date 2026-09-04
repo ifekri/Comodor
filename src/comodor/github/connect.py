@@ -60,16 +60,23 @@ class ConnectError(RuntimeError):
 class Pending:
     """A flow that has been started and not yet finished."""
 
-    #: Signed by the Worker, short-lived, and bound to the nonce below. Not
+    #: Signed by the Worker, short-lived, unforgeable and unmodifiable. Not
     #: one-time: marking one used needs somewhere to write the mark and there
     #: is no store, so saying "one-time" would be a claim the architecture
-    #: cannot keep. What it does give is that a state cannot be invented or
-    #: edited, it expires in fifteen minutes, and a receipt derived from it is
-    #: refused by any agent whose nonce does not match - so a state seen in a
-    #: URL cannot become a connection on somebody else's machine.
+    #: cannot keep.
+    #:
+    #: It is also not a credential. A state names an installation nobody has
+    #: proved they own; what turns one into a connection is the browser
+    #: authorising with GitHub at the end of the flow, where GitHub confirms
+    #: the installation belongs to the person signed in. A state seen in a URL
+    #: gets its holder as far as that check and no further.
     state: str
-    #: The random half of the state, which the receipt is signed against. Kept
-    #: separately so this attempt can tell its own receipt from any other.
+    #: Which attempt this is. Inside the signed payload, so it cannot be
+    #: changed - but the payload is base64 rather than encrypted, so anybody
+    #: holding the state can read it. It is a correlation id, not a secret:
+    #: matching it means a receipt pasted from another flow is refused rather
+    #: than connected, which is a guard against confusion and not against an
+    #: attacker.
     nonce: str
     #: Where to send the person. Carries the state, so the Worker can tie the
     #: GitHub redirect back to this attempt.
@@ -186,8 +193,16 @@ class Connector:
 
         The nonce is checked here rather than only at the Worker. The Worker
         proves the receipt is one it issued; matching the nonce proves it
-        belongs to *this* attempt, so a receipt from somebody else's flow —
-        pasted in by mistake or otherwise — is refused rather than connected.
+        belongs to *this* attempt, so a receipt from another flow - pasted in
+        by mistake, most likely - is refused rather than connected.
+
+        That check is for confusion, not for an attacker. The nonce is
+        readable by anybody holding the state, so it stops nobody who is
+        trying. What stops them is the grant inside the receipt: it names the
+        public key of the machine that started the flow, and it is issued only
+        after GitHub confirms, as the signed-in user, that the installation is
+        theirs. A receipt collected by the wrong machine names a key that
+        machine does not have.
         """
         text = (receipt or "").strip()
         if not text:
