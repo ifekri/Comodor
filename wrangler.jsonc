@@ -1,12 +1,20 @@
 {
-  // The site, as static assets on Workers.
+  // The site, as static assets on Workers — and the GitHub App's endpoints.
   //
-  // There is no Worker script here on purpose. Next exports 85 files and
-  // nothing about serving them needs code to run — so this is an assets-only
-  // Worker, and Cloudflare's own words for what that costs are "requests to
-  // static assets are free and unlimited". A script would put every request
-  // through a function that had nothing to do, and put the free tier's daily
-  // request ceiling in front of a marketing page.
+  // This was assets-only, and the reason still holds: Next exports 85 files
+  // and nothing about serving them needs code to run, so Cloudflare serves
+  // them free and unlimited. A script in front of every request would put a
+  // marketing page behind the free tier's daily ceiling for nothing.
+  //
+  // So the script is not in front of every request. `run_worker_first` below
+  // names one prefix, and only requests under it reach the code in
+  // `workers/site/index.js`. Somebody reading the page never touches it and
+  // still costs nothing.
+  //
+  // Those four endpoints have to be here, and could not be anywhere else: a
+  // GitHub App authenticates by signing with a private key, and that key
+  // cannot live in a static file or on every user's machine. It is a
+  // Cloudflare secret this Worker reads and nothing else does.
   //
   // Build it first:
   //
@@ -16,9 +24,18 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "comodor-site",
   "compatibility_date": "2026-08-28",
+  "main": "workers/site/index.js",
 
   "assets": {
     "directory": "./out",
+
+    // How the script serves a file. Without it `env.ASSETS` is undefined and
+    // anything reaching the fallthrough would answer 500 instead of the page.
+    "binding": "ASSETS",
+
+    // The only prefix the script sees. Everything else goes straight to the
+    // asset server — which is what keeps the site free and unmetered.
+    "run_worker_first": ["/api/integrations/github/*"],
 
     // Next writes `index.html` into each route's directory and links to the
     // route without one. `auto-trailing-slash` serves `/about/index.html` for

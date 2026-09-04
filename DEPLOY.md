@@ -148,11 +148,309 @@ the name at all, and the routes only worked because of them.
 
 ### The assets Worker
 
-`wrangler.jsonc` declares no `main`, which is the point: serving 85 exported
-files needs nothing to run, and Cloudflare's own wording for what that costs is
-*"requests to static assets are free and unlimited"*. Adding a Worker script
-would route every request through a function with nothing to do and put the
-free plan's daily request ceiling in front of a marketing page.
+Serving 85 exported files needs nothing to run, and Cloudflare's own wording
+for what that costs is *"requests to static assets are free and unlimited"*. A
+script in front of every request would route each one through a function with
+nothing to do and put the free plan's daily request ceiling in front of a
+marketing page.
+
+`wrangler.jsonc` now declares a `main`, and that sentence still holds. The
+script is reached only through `assets.run_worker_first`, which names one
+prefix — `/api/integrations/github/*`. Every other request goes to the asset
+server without the script running at all. Nothing about serving the page
+changed.
+
+### The GitHub App
+
+Six endpoints on `comodor.ai`, all behind that one prefix:
+
+| | |
+|---|---|
+| `POST /api/integrations/github/install` | start a flow; takes the agent's public key, returns a signed state and the URL to open |
+| `GET /api/integrations/github/setup` | where GitHub sends the browser after installing; starts the user check |
+| `GET /api/integrations/github/callback` | where the user check returns; **the only place a grant is issued** |
+| `POST /api/integrations/github/claim` | exchange the receipt for the verified installation **and a grant** |
+| `POST /api/integrations/github/token` | an installation access token, one hour — **signed request** |
+| `POST /api/integrations/github/verify` | what an installation is now — **signed request** |
+| `POST /api/integrations/github/webhook` | what GitHub has to say |
+
+They are here and could not be anywhere else. A GitHub App authenticates by
+signing a JWT with a private key; that key cannot live in a static file or on
+each user's machine, so it is a Cloudflare secret this Worker reads and nothing
+else does. What crosses to an agent is an installation token that lasts an
+hour.
+
+#### Who may be *given* a grant
+
+`setup` receives `installation_id` in a query string. Confirming with the app
+JWT that such an installation exists is not the same question as whether it
+belongs to the person at the browser — the app JWT can see every installation
+of the app, so it answers yes about strangers. GitHub's documentation says this
+directly: to trust the setup URL you must authenticate the user and check the
+installation is one they can reach.
+
+Without that, this worked:
+
+```
+attacker → /install with the attacker's own key    → a valid state
+attacker → /setup?installation_id=VICTIM&state=THEIRS
+Worker   → the app JWT confirms the installation exists
+Worker   → issues the VICTIM's grant, naming the ATTACKER's key
+attacker → /token, signed with the key they hold
+```
+
+So `setup` issues nothing. It redirects into a GitHub user authorisation for
+the same App, and `callback` issues the grant only after all of:
+
+1. the OAuth state opens under our secret and has not expired;
+2. the browser presents the PKCE verifier for the challenge inside that state;
+3. GitHub exchanges the `code`, server side, for a user access token;
+4. `GET /user/installations` — asked **as the user**, not as the app — lists
+   the installation the flow is for;
+5. and that user is entitled to the **whole** of that installation.
+
+Step 5 is separate from step 4 and the gap between them was a privilege
+escalation. `/user/installations` answers "can this person see it", which an
+ordinary organisation member with read on one repository can. A grant covers
+the installation entire — `/token` mints with every repository and permission
+the app holds — so answering step 4 alone would have handed that member write
+on every other repository in it.
+
+| the installation sits on | who may connect it |
+|---|---|
+| a personal account | that account, and only it. Not a collaborator on one of its repositories |
+| an organisation | an active member with `role: admin` — what GitHub calls an owner |
+| anything else | nobody. An account type this does not recognise is refused rather than guessed at |
+
+Organisation owners are the people who could install, uninstall or re-scope the
+app anyway, so this grants nothing they could not already take.
+
+Membership is read as the user through `GET /user/memberships/orgs/{org}`. If
+that call fails for any reason — including a missing permission — the
+connection is refused: a check that cannot run has not passed.
+
+The user access token exists between 3 and 4. It is never persisted, never
+logged, never in a response, and never reaches the agent. Ordinary work is
+still installation access tokens alone; OAuth bootstraps a connection and
+appears nowhere in a turn.
+
+**PKCE, and what each half of it does.** GitHub supports `code_challenge` and
+`code_verifier` with S256, so the authorisation code is bound at GitHub to the
+verifier this Worker sends when redeeming it — a code intercepted on its way
+back cannot be exchanged by anybody who does not also hold the verifier.
+
+The same verifier is checked here too, against the challenge inside the signed
+state, and that is not redundant: it says the callback arrived at the browser
+that started the flow, which is a statement about this Worker's own state
+rather than about the code. A genuine state handed to somebody else's browser
+fails it before any code is redeemed.
+
+The verifier lives in a `HttpOnly; Secure; SameSite=Lax` cookie scoped to this
+path. `Lax` rather than `Strict` is forced rather than chosen: the callback
+arrives as a top-level navigation from github.com, and `Strict` would withhold
+the cookie on exactly that hop.
+
+#### Who may ask for a token
+
+`/token` and `/verify` do **not** accept an `installation_id`. An installation
+id is a small integer that appears in URLs, so granting on one would let anyone
+who learned another person's id obtain a working token for their repositories.
+
+Instead, each connection has a key pair the agent generates at
+`comodor github connect`. The public half travels in the signed state; the
+Worker returns a **grant** — `{version, installation_id, account id, account
+type, actor id, actor login, public key, fingerprint, issued_at}`, HMAC-signed
+under `GITHUB_APP_WEBHOOK_SECRET`. Every later request carries the grant, a
+timestamp, a nonce and an ECDSA P-256 signature over all four.
+`workers/site/github/grant.js` checks the grant first, then the signature
+against the key the grant names, then reads the installation id **out of the
+grant**.
+
+#### And whether they still may
+
+A grant has no expiry, so an entitlement checked once at issue time would be
+permanent: an organisation owner who connects on Monday and is demoted on
+Tuesday would still mint full installation tokens on Wednesday.
+
+So the grant names the person it was issued to, and `entitlement.js` asks
+GitHub again at **every** mint. For an organisation, in this order:
+
+1. resolve the installation as the app — and refuse if its account id or type
+   is no longer what the grant says;
+2. mint a token carrying **`members: read` and nothing else**;
+3. `GET /orgs/{org}/memberships/{actor_login}` with that token;
+4. require `state: active`, `role: admin`, and the membership's own `user.id`
+   to equal the grant's actor id — the id, because a login can be changed and
+   a freed one claimed by somebody else;
+5. only now, mint the full installation token.
+
+Step 2 is the part worth not skipping. Using the agent's token to decide
+whether the agent's token is allowed means the credential exists before the
+decision does.
+
+#### Two tokens, two permission sets
+
+Neither mint asks GitHub for the app's default set. A mint request with no
+`permissions` field returns **every permission the app holds**, and the app now
+holds `members: read` so this Worker can check entitlement — so an unnarrowed
+mint would hand a user's machine the permission that exists to check up on it.
+
+```js
+CHECKING_PERMISSIONS = { members: 'read' }          // never leaves the Worker
+
+RUNTIME_PERMISSIONS  = { contents: 'write',         // what the agent receives
+                         pull_requests: 'write',
+                         issues: 'write',
+                         checks: 'read',
+                         actions: 'read' }
+```
+
+Every line of the runtime set is there because a reachable agent operation
+needs it — checked against the agent's own action table, not assumed:
+`contents` for reading files, directories, commits and diffs and for creating a
+branch and committing to it; `pull_requests` for listing, reading and opening
+one; `issues` for reading issues and commenting (GitHub treats pull request
+comments as issue comments); `checks` and `actions` for what CI said.
+
+`metadata: read` is not listed because GitHub grants it implicitly.
+`statuses: read` is not listed either: the agent's client has a `statuses()`
+method that nothing reaches — no tool action, no command, no test — and a
+permission for unreachable code is a permission granted for nothing. Wiring it
+up means adding it here, to the app's permissions, and to the agent's docs.
+
+`members` appears in exactly one of these two sets, and that is the point of
+having two.
+
+A personal installation needs no call: the grant's actor id must equal the
+account id GitHub reports for the installation.
+
+**Everything fails closed** — a missing permission, a 404, a rename, an id
+mismatch, a network error, an unrecognised account type. There is no path back
+to what the grant said when it was issued.
+
+`/verify` runs the same check. An endpoint that refused to *act* but still
+described the installation would report a private organisation's account,
+repository selection and permission set to somebody who had left it.
+
+**The grant format is `g2`.** A `g1` grant does not name an actor and cannot be
+upgraded in place — the missing field is not something either side can look
+up — so it is refused with a message telling the person to run
+`comodor github connect` again. Anyone who connected before this deploys will
+need to.
+
+**What this cannot undo.** An installation token already minted stays valid for
+up to an hour, and GitHub offers no revocation for one. That window is not
+closable here. What is closed is the refresh: a grant cannot obtain another
+token once the person behind it loses access.
+
+Nothing is stored for any of this. The grant carries its own contents and its
+own signature, which is what makes it possible without a KV namespace or a D1
+database — neither of which exists for this integration.
+
+The freshness window is 120 seconds and there is no nonce ledger, so a captured
+request can be replayed inside it. That is stated rather than glossed: it
+requires breaking TLS first, and the grant fixes the installation, so a replay
+mints exactly what the original would have.
+
+Three test files cover this, and all run in `npm test`:
+
+```bash
+npm test          # 114 tests, including:
+                  #   authorisation.test.mjs        — 27, forgery and replay
+                  #   setup-authorisation.test.mjs  — 31, who may be given one
+                  #   entitlement.test.mjs          — 18, whether they still may
+                  #   agent-vector.test.mjs         —  8, real agent output
+```
+
+`agent-vector.test.mjs` is the one worth knowing about: the agent signs in
+pure Python (the project ships one dependency, so the curve arithmetic is
+written out) and this Worker verifies with Web Crypto. Two independent
+implementations, so the fixtures in that file were produced by the agent and
+are checked against `authorise()` here. A drift on either side fails there
+rather than in production.
+
+Set the secrets once:
+
+```bash
+npx wrangler secret put GITHUB_APP_ID
+npx wrangler secret put GITHUB_APP_PRIVATE_KEY     # PKCS#8 — see below
+npx wrangler secret put GITHUB_APP_WEBHOOK_SECRET
+npx wrangler secret put GITHUB_APP_SLUG            # the app's URL name
+npx wrangler secret put GITHUB_APP_CLIENT_ID       # user verification
+npx wrangler secret put GITHUB_APP_CLIENT_SECRET   # user verification
+```
+
+All six are Cloudflare secrets. None is in this repository, in
+`wrangler.jsonc`, in a build output, or in anything a browser receives.
+
+### Settings on the GitHub App itself
+
+In the app's settings under the `comodor-ai` organisation:
+
+| Field | Value |
+|---|---|
+| **Setup URL** | `https://comodor.ai/api/integrations/github/setup` |
+| **Redirect on update** | on — so changing a selection reconnects cleanly |
+| **Callback URL** | `https://comodor.ai/api/integrations/github/callback` |
+| **Request user authorization (OAuth) during installation** | **off** |
+| **Webhook URL** | `https://comodor.ai/api/integrations/github/webhook` |
+| **Webhook secret** | the same value as `GITHUB_APP_WEBHOOK_SECRET` |
+
+**Organisation permissions:** `Members: Read`.
+
+That one is not for doing anything with members. It is what
+`GET /user/memberships/orgs/{org}` needs while connecting, and what
+`GET /orgs/{org}/memberships/{user}` needs **at every organisation entitlement
+refresh** — which is every `/token` and every `/verify` for an organisation
+installation, not a one-off during connect. Those two calls are the only way to
+tell an organisation owner from an ordinary member.
+
+Without the permission, GitHub answers 403 (or refuses the narrowed token with
+422) and every organisation connection and every organisation mint is refused
+with a message naming this permission — the integration fails closed rather
+than falling back to trusting what it was told earlier.
+
+It is read-only, it is used for nothing else, no membership information is
+stored or shown, and **it never leaves the Worker**: see the two permission
+sets below.
+
+The callback URL must match exactly; GitHub refuses a `redirect_uri` that
+differs by so much as a trailing slash.
+
+"Request user authorization during installation" stays **off** on purpose. It
+would send the browser to the callback immediately after installing, before the
+setup URL has established which flow this is — the state would not be there and
+the connection would fail. The user check is started by `setup`, which is the
+one place that knows.
+
+`GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` are on the same settings
+page. The client secret is shown once; if it is lost, generate a new one and
+put it back with `wrangler secret put` — nothing else has a copy.
+
+GitHub hands out a **PKCS#1** key (`BEGIN RSA PRIVATE KEY`); Web Crypto reads
+only **PKCS#8**. Convert it first, or the Worker refuses with this same line:
+
+```bash
+openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt \
+  -in comodor.private-key.pem -out comodor-pkcs8.pem
+```
+
+`GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` were once deliberately
+unset, on the reasoning that installation is not OAuth and nothing here needs a
+GitHub *user* identity. That was right about ordinary work and wrong about one
+moment: confirming an installation belongs to the person claiming it is exactly
+a user-identity question, and nothing but a user token can answer it.
+
+So they are required, and the rest of that reasoning still holds. No OAuth
+token is stored, none is refreshed, none reaches an agent, and none is used for
+anything after the connection is made. Every turn afterwards acts as the app
+against an installation.
+
+Tests, none of which need a key or a network:
+
+```bash
+npm run test:github
+```
 
 ### `get.comodor.ai`
 
