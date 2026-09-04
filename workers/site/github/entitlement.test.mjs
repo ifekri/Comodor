@@ -25,6 +25,7 @@ import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 
 import { handle } from './routes.js';
+import { CHECKING_PERMISSIONS, RUNTIME_PERMISSIONS } from './entitlement.js';
 import { issueGrant } from './grant.js';
 
 const SECRET = 'a-webhook-secret-for-the-tests';
@@ -106,6 +107,23 @@ function mints() {
     .map((one) => (one.options.body ? JSON.parse(one.options.body) : {}));
 }
 
+/**
+ * Whether a mint request is the checking one.
+ *
+ * By what it asks for, not by whether it asks for anything. Both mints are
+ * narrowed now - a mint with no `permissions` at all would be the bug these
+ * tests exist to catch, so "has permissions" cannot be the thing that tells
+ * them apart.
+ */
+function isChecking(asked) {
+  return Boolean(asked.permissions && asked.permissions.members);
+}
+
+/** The mint that hands a token to the agent, if it happened. */
+function runtimeMints() {
+  return mints().filter((one) => !isChecking(one));
+}
+
 function stubGitHub({ installation = ORG, membership, membershipStatus = 200,
                       mintStatus = 200, restrictedMintStatus,
                       whenMinting } = {}) {
@@ -119,14 +137,14 @@ function stubGitHub({ installation = ORG, membership, membershipStatus = 200,
 
     if (target.includes('/app/installations/') && target.includes('/access_tokens')) {
       const asked = options.body ? JSON.parse(options.body) : {};
-      const restricted = Boolean(asked.permissions);
+      const checking = Boolean(asked.permissions && asked.permissions.members);
       if (whenMinting) whenMinting(asked);
-      const status = restricted
+      const status = checking
         ? (restrictedMintStatus || 200)
         : mintStatus;
       if (status !== 200) return reply(status, { message: 'refused' });
       return reply(200, {
-        token: restricted ? 'ghs_restricted_for_checking' : 'ghs_the_full_token',
+        token: checking ? 'ghs_restricted_for_checking' : 'ghs_the_agents_token',
         expires_at: new Date(Date.now() + 3_600_000).toISOString(),
         permissions: asked.permissions || { contents: 'write' },
       });
@@ -193,7 +211,7 @@ test('an organisation owner still gets a token', async () => {
   const said = await answer.json();
 
   assert.equal(answer.status, 200);
-  assert.equal(said.token, 'ghs_the_full_token');
+  assert.equal(said.token, 'ghs_the_agents_token');
 });
 
 test('the same grant is refused once the actor is only a member', async () => {
@@ -209,7 +227,7 @@ test('the same grant is refused once the actor is only a member', async () => {
   assert.equal(answer.status, 403);
   assert.ok(/owner/.test(said.error));
   assert.ok(!said.token);
-  assert.equal(mints().filter((one) => !one.permissions).length, 0,
+  assert.equal(runtimeMints().length, 0,
     'no full token may be minted for a demoted owner');
 });
 
@@ -223,7 +241,7 @@ test('the same grant is refused once the actor is removed', async () => {
   assert.equal(answer.status, 403);
   assert.ok(/no longer a member/.test(said.error));
   assert.ok(/comodor github connect/.test(said.error));
-  assert.equal(mints().filter((one) => !one.permissions).length, 0);
+  assert.equal(runtimeMints().length, 0);
 });
 
 test('an owner whose GitHub user id does not match the grant is refused',
@@ -240,7 +258,7 @@ test('an owner whose GitHub user id does not match the grant is refused',
 
     assert.equal(answer.status, 403);
     assert.ok(/not the one this connection was made by/.test(said.error));
-    assert.equal(mints().filter((one) => !one.permissions).length, 0);
+    assert.equal(runtimeMints().length, 0);
   });
 
 test('a pending membership is refused', async () => {
@@ -249,7 +267,7 @@ test('a pending membership is refused', async () => {
   const answer = await post('token', await signedBody(await aGrant(), 'token'));
 
   assert.equal(answer.status, 403);
-  assert.equal(mints().filter((one) => !one.permissions).length, 0);
+  assert.equal(runtimeMints().length, 0);
 });
 
 test('a missing Members permission is refused, and says so', async () => {
@@ -259,14 +277,14 @@ test('a missing Members permission is refused, and says so', async () => {
   let said = await (await post('token',
     await signedBody(await aGrant(), 'token'))).json();
   assert.ok(/Members/.test(said.error));
-  assert.equal(mints().filter((one) => !one.permissions).length, 0);
+  assert.equal(runtimeMints().length, 0);
 
   // ...and answers 403 on the membership call when it is narrower than needed.
   stubGitHub({ membershipStatus: 403 });
   said = await (await post('token',
     await signedBody(await aGrant(), 'token'))).json();
   assert.ok(/Members/.test(said.error));
-  assert.equal(mints().filter((one) => !one.permissions).length, 0);
+  assert.equal(runtimeMints().length, 0);
 });
 
 test('a membership API failure is refused, not waved through', async () => {
@@ -275,7 +293,7 @@ test('a membership API failure is refused, not waved through', async () => {
   const answer = await post('token', await signedBody(await aGrant(), 'token'));
 
   assert.notEqual(answer.status, 200);
-  assert.equal(mints().filter((one) => !one.permissions).length, 0,
+  assert.equal(runtimeMints().length, 0,
     'GitHub being unwell must not become an authorisation');
 });
 
@@ -292,33 +310,38 @@ test('the full token is not minted before the check passes', async () => {
   });
   await post('token', await signedBody(await aGrant(), 'token'));
 
-  assert.deepEqual(mints().map((one) => Boolean(one.permissions)), [true],
-    'only the restricted token may be minted when the check fails');
+  assert.deepEqual(mints().map(isChecking), [true],
+    'only the checking token may be minted when the check fails');
 
   stubGitHub({ membership: OWNER });
   await post('token', await signedBody(await aGrant(), 'token'));
 
   const order = calls.map((one) => one.url);
   const membershipAt = order.findIndex((one) => one.includes('/memberships/'));
-  const fullMintAt = order.findIndex((one, at) =>
+  const runtimeMintAt = order.findIndex((one, at) =>
     one.includes('/access_tokens')
-    && !JSON.parse(calls[at].options.body || '{}').permissions);
+    && !isChecking(JSON.parse(calls[at].options.body || '{}')));
 
-  assert.ok(membershipAt >= 0 && fullMintAt >= 0);
-  assert.ok(membershipAt < fullMintAt,
-    'the membership must be read before the full token is created');
+  assert.ok(membershipAt >= 0 && runtimeMintAt >= 0);
+  assert.ok(membershipAt < runtimeMintAt,
+    'the membership must be read before the agent\'s token is created');
 });
 
 test('the checking token carries Members read and nothing else', async () => {
   // If it carried more, the credential that decides whether the credential is
   // allowed would already be the credential.
+  // Only the checking mint. Both narrow now, so "has permissions" would
+  // capture whichever ran last rather than the one this test is about.
   let asked = null;
   stubGitHub({ membership: OWNER,
-               whenMinting: (body) => { if (body.permissions) asked = body; } });
+               whenMinting: (body) => {
+                 if (body.permissions && body.permissions.members) asked = body;
+               } });
 
   await post('token', await signedBody(await aGrant(), 'token'));
 
   assert.deepEqual(asked.permissions, { members: 'read' });
+  assert.deepEqual(asked.permissions, CHECKING_PERMISSIONS);
   assert.equal(Object.keys(asked.permissions).length, 1);
   assert.equal(asked.repository_ids, undefined);
 });
@@ -329,7 +352,7 @@ test('the checking token is never returned to the caller', async () => {
   const said = await (await post('token',
     await signedBody(await aGrant(), 'token'))).json();
 
-  assert.equal(said.token, 'ghs_the_full_token');
+  assert.equal(said.token, 'ghs_the_agents_token');
   assert.ok(!JSON.stringify(said).includes('ghs_restricted_for_checking'));
 });
 
@@ -344,7 +367,7 @@ test('a personal installation works for the account that owns it', async () => {
   const answer = await post('token', await signedBody(grant, 'token'));
 
   assert.equal(answer.status, 200);
-  assert.equal((await answer.json()).token, 'ghs_the_full_token');
+  assert.equal((await answer.json()).token, 'ghs_the_agents_token');
   assert.equal(calls.filter((one) => one.url.includes('/memberships/')).length, 0,
     'a personal account needs no membership call: both ids are already known');
 });
@@ -450,3 +473,101 @@ test('verify works for an owner, and says what the installation is now',
     assert.equal(said.status, 'ok');
     assert.equal(said.installation.account.login, 'comodor-ai');
   });
+
+// --------------------------------------------------------------------------- //
+// what the agent's token is allowed to be
+// --------------------------------------------------------------------------- //
+
+test('the runtime token never carries members', async () => {
+  // `members: read` was added to the app so this Worker could check
+  // entitlement. Minting without a permission list returns everything the app
+  // holds, which would put that permission in a credential handed to a user's
+  // machine - a server-side check leaking into the thing it checks.
+  stubGitHub({ membership: OWNER });
+
+  await post('token', await signedBody(await aGrant(), 'token'));
+  const [asked] = runtimeMints();
+
+  assert.ok(asked, 'a token should have been minted for the agent');
+  assert.ok(asked.permissions, 'the runtime mint must name its permissions');
+  assert.equal(asked.permissions.members, undefined);
+  assert.ok(!Object.keys(asked.permissions).includes('members'));
+});
+
+test('the runtime token asks for exactly the operational permissions',
+  async () => {
+    // Spelled out rather than compared to the constant alone, so widening the
+    // constant does not quietly widen the token every agent receives.
+    stubGitHub({ membership: OWNER });
+
+    await post('token', await signedBody(await aGrant(), 'token'));
+    const [asked] = runtimeMints();
+
+    assert.deepEqual(asked.permissions, {
+      contents: 'write',
+      pull_requests: 'write',
+      issues: 'write',
+      checks: 'read',
+      actions: 'read',
+    });
+    assert.deepEqual(asked.permissions, RUNTIME_PERMISSIONS);
+    assert.equal(asked.repository_ids, undefined,
+      'the installation already decides which repositories');
+  });
+
+test('no token is ever minted with the app default permissions', async () => {
+  // The bug in one assertion: a mint request with no `permissions` field gets
+  // whatever the app holds. Neither mint may ever look like that.
+  stubGitHub({ membership: OWNER });
+  await post('token', await signedBody(await aGrant(), 'token'));
+
+  for (const asked of mints()) {
+    assert.ok(asked.permissions,
+      'every mint must narrow; an unnarrowed one returns the app\'s full set');
+  }
+  assert.deepEqual(mints().map(isChecking), [true, false],
+    'the checking token first, the agent\'s token second');
+});
+
+test('the two permission sets are disjoint', async () => {
+  // If they ever overlap, the reason for having two of them has gone.
+  for (const name of Object.keys(CHECKING_PERMISSIONS)) {
+    assert.equal(RUNTIME_PERMISSIONS[name], undefined,
+      `${name} is the Worker's, and must not be in the agent's token`);
+  }
+});
+
+test('a personal installation narrows its token too', async () => {
+  // The personal path skips the membership call entirely, so it is a separate
+  // route to the mint and a separate chance to forget.
+  stubGitHub({ installation: PERSON });
+
+  const grant = await aGrant({ account: PERSON, actor: { id: 9, login: 'ifekri' } });
+  await post('token', await signedBody(grant, 'token'));
+  const [asked] = runtimeMints();
+
+  assert.deepEqual(asked.permissions, RUNTIME_PERMISSIONS);
+  assert.equal(asked.permissions.members, undefined);
+});
+
+test('a refused request mints nothing for the agent at all', async () => {
+  // Not "mints a narrow one" - nothing. Checked across every refusal shape,
+  // because each one is a different early return.
+  const refusals = [
+    { membership: { state: 'active', role: 'member', user: { id: 9 } } },
+    { membershipStatus: 404 },
+    { membershipStatus: 403 },
+    { membershipStatus: 500 },
+    { membership: { state: 'pending', role: 'admin', user: { id: 9 } } },
+    { membership: { state: 'active', role: 'admin', user: { id: 1 } } },
+    { membership: OWNER, restrictedMintStatus: 422 },
+  ];
+
+  for (const how of refusals) {
+    stubGitHub(how);
+    const answer = await post('token', await signedBody(await aGrant(), 'token'));
+
+    assert.notEqual(answer.status, 200, JSON.stringify(how));
+    assert.equal(runtimeMints().length, 0, JSON.stringify(how));
+  }
+});

@@ -284,8 +284,42 @@ GitHub again at **every** mint. For an organisation, in this order:
    a freed one claimed by somebody else;
 5. only now, mint the full installation token.
 
-Step 2 is the part worth not skipping. Using the full token to decide whether
-the full token is allowed means the credential exists before the decision does.
+Step 2 is the part worth not skipping. Using the agent's token to decide
+whether the agent's token is allowed means the credential exists before the
+decision does.
+
+#### Two tokens, two permission sets
+
+Neither mint asks GitHub for the app's default set. A mint request with no
+`permissions` field returns **every permission the app holds**, and the app now
+holds `members: read` so this Worker can check entitlement — so an unnarrowed
+mint would hand a user's machine the permission that exists to check up on it.
+
+```js
+CHECKING_PERMISSIONS = { members: 'read' }          // never leaves the Worker
+
+RUNTIME_PERMISSIONS  = { contents: 'write',         // what the agent receives
+                         pull_requests: 'write',
+                         issues: 'write',
+                         checks: 'read',
+                         actions: 'read' }
+```
+
+Every line of the runtime set is there because a reachable agent operation
+needs it — checked against the agent's own action table, not assumed:
+`contents` for reading files, directories, commits and diffs and for creating a
+branch and committing to it; `pull_requests` for listing, reading and opening
+one; `issues` for reading issues and commenting (GitHub treats pull request
+comments as issue comments); `checks` and `actions` for what CI said.
+
+`metadata: read` is not listed because GitHub grants it implicitly.
+`statuses: read` is not listed either: the agent's client has a `statuses()`
+method that nothing reaches — no tool action, no command, no test — and a
+permission for unreachable code is a permission granted for nothing. Wiring it
+up means adding it here, to the app's permissions, and to the agent's docs.
+
+`members` appears in exactly one of these two sets, and that is the point of
+having two.
 
 A personal installation needs no call: the grant's actor id must equal the
 account id GitHub reports for the installation.
@@ -366,15 +400,19 @@ In the app's settings under the `comodor-ai` organisation:
 
 That one is not for doing anything with members. It is what
 `GET /user/memberships/orgs/{org}` needs while connecting, and what
-`GET /orgs/{org}/memberships/{user}` needs at every mint afterwards. Those two
-calls are the only way to tell an organisation owner from an ordinary member.
+`GET /orgs/{org}/memberships/{user}` needs **at every organisation entitlement
+refresh** — which is every `/token` and every `/verify` for an organisation
+installation, not a one-off during connect. Those two calls are the only way to
+tell an organisation owner from an ordinary member.
+
 Without the permission, GitHub answers 403 (or refuses the narrowed token with
 422) and every organisation connection and every organisation mint is refused
 with a message naming this permission — the integration fails closed rather
 than falling back to trusting what it was told earlier.
 
-It is read-only, it is used for nothing else, and no membership information is
-stored or shown.
+It is read-only, it is used for nothing else, no membership information is
+stored or shown, and **it never leaves the Worker**: see the two permission
+sets below.
 
 The callback URL must match exactly; GitHub refuses a `redirect_uri` that
 differs by so much as a trailing slash.

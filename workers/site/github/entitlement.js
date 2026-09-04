@@ -46,6 +46,13 @@
  * said at issue time, because that is precisely the stale answer being
  * replaced.
  *
+ * **Two tokens, two permission sets.** Neither is a token with whatever the
+ * app happens to hold. `CHECKING_PERMISSIONS` is `members: read` and exists
+ * only inside this module; `RUNTIME_PERMISSIONS` is what the agent is given
+ * and does not contain `members`. Minting without either would return the
+ * app's full set, which would hand a user's machine the permission that was
+ * added so the server could check up on it.
+ *
  * **What this cannot do.** An installation token already minted stays valid
  * for up to an hour; GitHub offers no revocation for one and this Worker
  * stores nothing that could track them. So the window is an hour of a token
@@ -63,8 +70,54 @@ const HEADERS = {
   'user-agent': 'comodor-github-app',
 };
 
-/** The only permission the checking token may carry. */
+/**
+ * The only permission the checking token may carry.
+ *
+ * It reads one membership and can do nothing else, so a bug between minting it
+ * and deciding cannot have handed anything over.
+ */
 export const CHECKING_PERMISSIONS = { members: 'read' };
+
+/**
+ * What the agent's token is allowed to be, and nothing more.
+ *
+ * Without this, `mintToken` asks for no permissions and GitHub answers with
+ * every permission the app holds — which now includes `members: read`,
+ * added so the *Worker* could check entitlement. The agent would have received
+ * the ability to read organisation membership, which nothing in it does, and
+ * a permission that exists for a server-side check would have leaked into a
+ * credential handed to a user's machine.
+ *
+ * Each line below is here because an implemented, reachable operation needs
+ * it. Checked against `tools/github.py`'s action table rather than guessed:
+ *
+ *   contents: write        read a file, list a directory, read commits and
+ *                          diffs, create a branch, commit to one
+ *   pull_requests: write   list and read pull requests, open one
+ *   issues: write          list and read issues, comment on an issue or a
+ *                          pull request (GitHub treats both as issues)
+ *   checks: read           what CI said about a ref
+ *   actions: read          recent workflow runs
+ *
+ * `metadata: read` is not listed: GitHub grants it to every app and every
+ * token implicitly, and naming it would be inventing a line.
+ *
+ * `statuses: read` is not listed either, and that is deliberate rather than an
+ * oversight. `GitHub.statuses()` exists in the agent's client and nothing
+ * reaches it — no tool action, no command, not even a test. A permission for
+ * code nobody can run is a permission granted for nothing. If that method is
+ * ever wired up, add `statuses: read` here *and* to the app's own permissions,
+ * and the agent's docs table.
+ *
+ * `members` must never appear here. That is what the whole constant is for.
+ */
+export const RUNTIME_PERMISSIONS = {
+  contents: 'write',
+  pull_requests: 'write',
+  issues: 'write',
+  checks: 'read',
+  actions: 'read',
+};
 
 function refuse(why, status = 403) {
   const error = new Error(why);

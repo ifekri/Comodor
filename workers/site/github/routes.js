@@ -62,7 +62,7 @@
  */
 
 import { mintToken, readInstallation } from './api.js';
-import { stillEntitled } from './entitlement.js';
+import { RUNTIME_PERMISSIONS, stillEntitled } from './entitlement.js';
 import { authorise, issueGrant } from './grant.js';
 import {
   begin as beginUserCheck,
@@ -555,7 +555,12 @@ async function token(env, secret, body) {
   }
 
   try {
-    const made = await mintToken(env, claims.i);
+    // Narrowed, always. Minting without `permissions` returns a token carrying
+    // everything the app holds, and the app holds `members: read` so this
+    // Worker can check entitlement. That permission is the server's and must
+    // not travel to a user's machine inside the token it asks for.
+    const made = await mintToken(env, claims.i,
+      { permissions: RUNTIME_PERMISSIONS });
     // Only the token and its expiry. The JWT that fetched it does not exist
     // outside `api.js`, and nothing else here has anything to add.
     return json({ token: made.token, expires_at: made.expires_at });
