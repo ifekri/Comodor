@@ -122,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     from .acp.commands import register as register_acp
     from .cron.commands import register as register_cron
     from .discord.commands import register as register_discord
+    from .github.commands import register as register_github
     from .learning.commands import register as register_curator
     from .learning.journey_commands import register as register_journey
     from .learning.providers.commands import register as register_memory_provider
@@ -143,6 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_whatsapp(sub)
     register_slack(sub)
     register_discord(sub)
+    register_github(sub)
     register_skills(sub)
     register_web(sub)
     register_webhook(sub)
@@ -1058,6 +1060,11 @@ def main(argv: list[str] | None = None) -> int:
         from .slack.commands import run as run_slack
 
         return run_slack(config, args)
+    if args.command == "github":
+        from .github.commands import run as run_github
+
+        return run_github(config, args)
+
     if args.command == "discord":
         from .discord.commands import run as run_discord
 
