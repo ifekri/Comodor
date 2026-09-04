@@ -18,22 +18,33 @@
  *
  * So the join is a signed receipt. `setup` verifies the installation against
  * GitHub, signs what GitHub said together with the nonce from the state, and
- * puts that receipt in the page it returns. The person's browser sends it back
- * to `claim`, which checks the signature and hands the agent the installation.
- * Nothing is stored, and nothing can be claimed by a caller who did not start
- * the flow: the nonce is inside the signature, and only the agent that began
- * has it.
+ * puts that receipt in the page it returns. The person copies it back, and
+ * `claim` checks the signature and hands the agent the installation.
  *
- * The cost is one moment of user interface — the page has a button — and the
- * gain is no new infrastructure and no state to expire, leak or clean up.
+ * **What the state actually guarantees.** It is short-lived, signed, and bound
+ * to a nonce only the agent that started the flow holds — it is *not*
+ * server-side one-time, and calling it that would be a claim this
+ * architecture cannot keep: marking a token used needs somewhere to write the
+ * mark. What it does give: a state cannot be forged, cannot be edited, expires
+ * in fifteen minutes, and a receipt produced from it is refused by any agent
+ * whose nonce does not match. Reuse within the window returns the same
+ * already-verified installation to the same holder, which grants nothing that
+ * holder did not already have.
+ *
+ * **Who may ask for a token.** Not whoever knows an installation id. Every
+ * connection carries a key pair the agent generates, and `setup` issues a
+ * grant naming that key and that installation. `/token` and `/verify` take
+ * the installation id *out of the grant* and require a signature from the key
+ * it names. See `grant.js`.
  *
  * **What is never returned.** The private key, any JWT, the webhook secret,
- * and the client secret. An installation token is returned, to the agent, over
- * TLS, at the moment it asks — that is the one credential that crosses this
- * boundary and it lasts an hour.
+ * and the client secret. An installation token is returned, to an
+ * authenticated agent, over TLS, at the moment it asks — that is the one
+ * credential that crosses this boundary and it lasts an hour.
  */
 
 import { mintToken, readInstallation } from './api.js';
+import { authorise, issueGrant } from './grant.js';
 import { issue, open, sameSecret } from './state.js';
 import { receive } from './webhook.js';
 
@@ -164,8 +175,12 @@ export async function handle(request, env) {
 
   if (leaf === 'install') return start(env, secret, body);
   if (leaf === 'claim') return claim(secret, body);
-  if (leaf === 'token') return token(env, body);
-  if (leaf === 'verify') return verify(env, body);
+  if (leaf === 'token') return token(env, secret, body);
+  if (leaf === 'verify') return verify(env, secret, body);
+  // Nothing to forget: there is no server-side record of a connection. The
+  // agent deletes its own key and grant, and removing the app on GitHub is
+  // what actually revokes access. Answering rather than 404ing so a client
+  // calling it is not left thinking something failed.
   if (leaf === 'disconnect') return json({ status: 'forgotten' });
 
   return json({ error: 'no such endpoint' }, 404);
@@ -174,7 +189,21 @@ export async function handle(request, env) {
 // --------------------------------------------------------------------------- //
 
 async function start(env, secret, body) {
-  const made = await issue(secret, { client: String(body.client || '') });
+  // The agent's public key for this connection, raw P-256, base64url. It goes
+  // into the signed state so it arrives at `setup` unaltered without anything
+  // being stored: the state's own signature is what protects it.
+  //
+  // Required. Without it there is no identity to bind the installation to,
+  // and `/token` would be back to trusting whatever id it was handed.
+  const publicKey = String(body.public_key || '');
+  if (!publicKey || publicKey.length < 80 || publicKey.length > 200) {
+    return json({ error: 'a connection needs a client public key' }, 400);
+  }
+
+  const made = await issue(secret, {
+    client: String(body.client || ''),
+    publicKey,
+  });
   return json({
     state: made.state,
     nonce: made.nonce,
@@ -213,10 +242,26 @@ async function setup(request, env, secret, url) {
       `<p>${String(error.message || error).slice(0, 200)}</p>`);
   }
 
+  // The grant: this installation belongs to the key that started this flow.
+  // Issued here because this is the one moment both facts are known and both
+  // have been checked — GitHub confirmed the installation a line ago, and the
+  // key came out of a state this Worker signed.
+  let grant;
+  try {
+    grant = await issueGrant(secret, {
+      installationId: installation.installation_id,
+      publicKey: opened.k,
+    });
+  } catch (error) {
+    return page('That could not be completed',
+      `<p>${escapeHtml(String(error.message || error).slice(0, 200))}</p>`);
+  }
+
   const receipt = await sign(secret, {
     n: opened.n,
     status: 'connected',
     installation,
+    grant,
     // Bounded independently of the state: the installation is verified now,
     // and the receipt should not outlive the terminal that is waiting.
     e: Math.floor(Date.now() / 1000) + 900,
@@ -273,16 +318,33 @@ async function claim(secret, body) {
     // inside the signature — and it is a secret to everyone else, which is
     // exactly the property that makes the check worth doing.
     return json(found.status === 'connected'
-      ? { status: 'connected', nonce: found.n, installation: found.installation }
+      ? { status: 'connected', nonce: found.n,
+         installation: found.installation, grant: found.grant }
       : { status: found.status || 'cancelled', nonce: found.n });
   }
 
   return json({ error: 'no receipt' }, 400);
 }
 
-async function token(env, body) {
+/**
+ * An installation access token, for the machine that installed and no other.
+ *
+ * The installation id comes out of the signed grant. The first version took
+ * it from the request body, which meant anybody who learned an installation
+ * id — they are small integers and they appear in URLs — could have this
+ * Worker mint a working GitHub token for somebody else's repositories.
+ */
+async function token(env, secret, body) {
+  let installationId;
   try {
-    const made = await mintToken(env, body.installation_id);
+    ({ installationId } = await authorise(secret, body, 'token'));
+  } catch (error) {
+    return json({ error: String(error.message || error).slice(0, 200) },
+      error.status || 401);
+  }
+
+  try {
+    const made = await mintToken(env, installationId);
     // Only the token and its expiry. The JWT that fetched it does not exist
     // outside `api.js`, and nothing else here has anything to add.
     return json({ token: made.token, expires_at: made.expires_at });
@@ -292,10 +354,25 @@ async function token(env, body) {
   }
 }
 
-async function verify(env, body) {
+/**
+ * What an installation is now — for the machine that installed it.
+ *
+ * Authorised like `/token`, and for the same reason: an installation's
+ * account, its repository selection and its permissions are not public, and
+ * an endpoint that answered on an id alone would be a way to read them.
+ */
+async function verify(env, secret, body) {
+  let installationId;
+  try {
+    ({ installationId } = await authorise(secret, body, 'verify'));
+  } catch (error) {
+    return json({ error: String(error.message || error).slice(0, 200) },
+      error.status || 401);
+  }
+
   try {
     return json({ status: 'ok',
-                  installation: await readInstallation(env, body.installation_id) });
+                  installation: await readInstallation(env, installationId) });
   } catch (error) {
     if (error.status === 404) return json({ status: 'gone' });
     return json({ error: String(error.message || error).slice(0, 200) }, 502);

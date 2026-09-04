@@ -166,11 +166,11 @@ Six endpoints on `comodor.ai`, all behind that one prefix:
 
 | | |
 |---|---|
-| `POST /api/integrations/github/install` | start a flow; returns a signed state and the URL to open |
+| `POST /api/integrations/github/install` | start a flow; takes the agent's public key, returns a signed state and the URL to open |
 | `GET /api/integrations/github/setup` | where GitHub sends the browser after installing |
-| `POST /api/integrations/github/claim` | exchange the receipt for the verified installation |
-| `POST /api/integrations/github/token` | an installation access token, one hour |
-| `POST /api/integrations/github/verify` | what an installation is now |
+| `POST /api/integrations/github/claim` | exchange the receipt for the verified installation **and a grant** |
+| `POST /api/integrations/github/token` | an installation access token, one hour — **signed request** |
+| `POST /api/integrations/github/verify` | what an installation is now — **signed request** |
 | `POST /api/integrations/github/webhook` | what GitHub has to say |
 
 They are here and could not be anywhere else. A GitHub App authenticates by
@@ -178,6 +178,45 @@ signing a JWT with a private key; that key cannot live in a static file or on
 each user's machine, so it is a Cloudflare secret this Worker reads and nothing
 else does. What crosses to an agent is an installation token that lasts an
 hour.
+
+#### Who may ask for a token
+
+`/token` and `/verify` do **not** accept an `installation_id`. An installation
+id is a small integer that appears in URLs, so granting on one would let anyone
+who learned another person's id obtain a working token for their repositories.
+
+Instead, each connection has a key pair the agent generates at
+`comodor github connect`. The public half travels in the signed state; the
+Worker returns a **grant** — `{version, installation_id, public key,
+fingerprint, issued_at}`, HMAC-signed under `GITHUB_APP_WEBHOOK_SECRET`. Every
+later request carries the grant, a timestamp, a nonce and an ECDSA P-256
+signature over all four. `workers/site/github/grant.js` checks the grant first,
+then the signature against the key the grant names, then reads the installation
+id **out of the grant**.
+
+Nothing is stored for any of this. The grant carries its own contents and its
+own signature, which is what makes it possible without a KV namespace or a D1
+database — neither of which exists for this integration.
+
+The freshness window is 120 seconds and there is no nonce ledger, so a captured
+request can be replayed inside it. That is stated rather than glossed: it
+requires breaking TLS first, and the grant fixes the installation, so a replay
+mints exactly what the original would have.
+
+Two test files cover this, and both run in `npm test`:
+
+```bash
+npm test          # 64 tests, including:
+                  #   authorisation.test.mjs  — 26, forgery and replay
+                  #   agent-vector.test.mjs   —  8, against real agent output
+```
+
+`agent-vector.test.mjs` is the one worth knowing about: the agent signs in
+pure Python (the project ships one dependency, so the curve arithmetic is
+written out) and this Worker verifies with Web Crypto. Two independent
+implementations, so the fixtures in that file were produced by the agent and
+are checked against `authorise()` here. A drift on either side fails there
+rather than in production.
 
 Set the secrets once:
 

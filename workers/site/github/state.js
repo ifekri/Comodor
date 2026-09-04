@@ -15,13 +15,27 @@
  *
  *   comodor.<base64url payload>.<base64url hmac>
  *
- * That buys statelessness and costs one property: a signed token cannot be
- * marked used, because there is nowhere to write the mark. So single use is
- * enforced where the state is *spent* instead — the agent polls with it once,
- * gets the installation, and the flow is over. A replayed state returns the
- * same already-verified installation to the same agent, which is not a
- * privilege escalation; what it must never do is let a *different* caller
- * claim it, and the nonce inside it is what the agent matches against.
+ * That buys statelessness and costs one property, which is worth naming
+ * plainly rather than glossing: **this is not server-side one-time.** Marking
+ * a token used requires somewhere to write the mark, and there is nowhere.
+ * Describing it as one-time would be a claim the architecture cannot keep.
+ *
+ * What it is: short-lived, unforgeable, unmodifiable, and bound to a nonce
+ * that only the agent which started the flow holds. Those give:
+ *
+ * * a state cannot be invented — it carries an HMAC under a secret only this
+ *   Worker has;
+ * * a state cannot be edited — the signature covers the payload, including
+ *   the client's public key;
+ * * a state expires in fifteen minutes;
+ * * a receipt derived from one is refused by any agent whose nonce does not
+ *   match, so a state observed in a URL cannot be turned into a connection on
+ *   somebody else's machine.
+ *
+ * Reuse inside the window returns the same already-verified installation to
+ * the same holder. That is not an escalation — and since the resulting grant
+ * names the client key from the state, a reused state cannot produce a grant
+ * for a key its holder does not have.
  *
  * Fifteen minutes, because that is the outside of how long choosing
  * repositories takes, and because an unused state is a window during which a
@@ -85,13 +99,18 @@ export function sameSecret(left, right) {
  * The nonce is what the agent keeps and matches: it is random, it is inside
  * the signed payload, and nothing else knows it.
  */
-export async function issue(secret, { now = Date.now(), client = '' } = {}) {
+export async function issue(secret, { now = Date.now(), client = '',
+                                      publicKey = '' } = {}) {
   const nonce = base64url(crypto.getRandomValues(new Uint8Array(24)));
   const payload = {
     n: nonce,
     // Seconds, to keep the token short.
     e: Math.floor(now / 1000) + LIVES_FOR,
     c: String(client || '').slice(0, 40),
+    // The agent's public key for this connection. Carried here so it reaches
+    // `setup` unaltered with nothing stored — the signature over this payload
+    // is what makes that safe — and it is the key the grant will name.
+    k: String(publicKey || ''),
   };
   const encoded = base64url(new TextEncoder().encode(JSON.stringify(payload)));
   const signature = base64url(await hmac(secret, encoded));
