@@ -61,6 +61,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("comodor whatsapp start", "the same, from a WhatsApp number"),
         ("comodor skills browse", "procedures it follows when the work calls for them"),
         ("comodor mcp list", "tools from Model Context Protocol servers"),
+        ("comodor github connect", "repositories that are not checked out here"),
     ]),
     ("Mind and memory", [
         ("comodor curator run", "a maintenance pass over the brain, now"),
@@ -299,6 +300,28 @@ a fixed list of accounts and nobody else - a workspace can have hundreds of
 people in it, and this reads and writes your files.
 
 Full guide: docs/slack.md"""),
+
+    "github": ("Repositories on GitHub", """\
+  comodor github connect           install the app on an account, choose
+                                   which repositories it may see
+  comodor github status            what is connected, and what it may do
+  comodor github repos             everything the connection can see
+  comodor github writes on         let a turn open pull requests
+  comodor github refresh           re-read permissions after changing them
+  comodor github disconnect NAME   forget an installation here
+
+For repositories you have not cloned: read an issue, see what CI said,
+open a pull request. Everything Comodor does to a checkout works without
+it, and disconnecting takes nothing away.
+
+No access token to make or store. A GitHub App holds a private key on the
+server and mints an hour-long token when one is needed; the config file
+records which installations exist and nothing secret.
+
+Changes go to a comodor/... branch and a pull request, never to a default
+branch, and writes stay off until `comodor github writes on`.
+
+Full guide: docs/github.md"""),
 
     "discord": ("From Discord", """\
   comodor discord connect          guided: the token, and the one intent to

@@ -110,6 +110,18 @@ class ToolRegistry:
             from .memory import Memory
 
             self.add(Memory(memory))
+        # GitHub, where an installation has been connected. Absent otherwise
+        # rather than present-and-failing: a model that cannot see the tool
+        # says "that repository is not checked out here", which is true and
+        # actionable, instead of trying it and reporting a connection error.
+        if config is not None and getattr(config, "github", None) \
+                and config.github.enabled and config.github.installations:
+            from ..github.connect import Connector
+            from ..github.repos import Repositories
+            from .github import GitHubTool
+
+            connector = Connector(config)
+            self.add(GitHubTool(Repositories(config, connector.mint)))
         # The skills tool, where skills are enabled at all. It reaches the
         # managed skills directories only, and every change it makes is
         # recorded in the ledger so the person can put it back.

@@ -225,6 +225,7 @@ SAFE_COMMANDS = [
     ("comodor insights", ["insights"]),
     ("comodor approvals", ["approvals"]),
     ("comodor plugins list", ["plugins", "list"]),
+    ("comodor github status", ["github", "status"]),
     ("comodor memory-provider status", ["memory-provider", "status"]),
     ("comodor journey", ["journey", "--help"]),
     ("comodor webhook list", ["webhook", "list"]),

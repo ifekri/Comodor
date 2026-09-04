@@ -36,6 +36,7 @@ ends with the agent doing something useful.
 | [In your editor](acp.md) | Drive Comodor from Zed or any Agent Client Protocol client |
 | [In Docker](docker.md) | One command, in a container |
 | [MCP servers](mcp.md) | Tools from the Model Context Protocol |
+| [Repositories on GitHub](github.md) | Read and change repositories that are not checked out here |
 
 ### Understand it
 

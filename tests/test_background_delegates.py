@@ -68,6 +68,31 @@ def make_manager(config, bus, spawner=None, persist=None):
 
 # -- slots ------------------------------------------------------------------ #
 
+
+def settle(manager, seconds: float = 30.0) -> None:
+    """Wait until no delegate is still running, and say so if none ever stops.
+
+    The old shape here was a two-second deadline the loop fell out of in
+    silence, so a runner slow enough to miss it went on to assert against work
+    that was genuinely still in flight. That produced a failure describing the
+    wrong thing: `test_finished_work_is_not_labelled_lost` reported a finished
+    delegate marked lost, when nothing had finished at all.
+
+    Thirty seconds because the bug actually being guarded is a delegate that
+    never lands, and against that a generous ceiling costs nothing - a healthy
+    run leaves in milliseconds. A `pytest.fail` rather than falling through,
+    because "it did not finish" and "it finished wrongly" are different
+    failures and only one of them is about this test.
+    """
+    deadline = time.monotonic() + seconds
+    while manager.slots_busy:
+        if time.monotonic() >= deadline:
+            pytest.fail(
+                f"{manager.slots_busy} delegate(s) still running after "
+                f"{seconds:g}s, so nothing this test asserts would be about "
+                f"what it is checking")
+        time.sleep(0.01)
+
 def test_slots_limit_launches_and_refuses_beyond_them(config, bus):
     gate = threading.Event()
 
@@ -93,9 +118,7 @@ def test_a_slot_frees_when_a_delegate_finishes(config, bus):
     manager = make_manager(
         config, bus, lambda **kwargs: FakeLoop(delay=0.05))
     manager.start("quick one")
-    deadline = time.monotonic() + 2.0
-    while manager.slots_busy and time.monotonic() < deadline:
-        time.sleep(0.01)
+    settle(manager)
     ok, _, why = manager.start("next one")
     assert ok, why
 
@@ -106,9 +129,7 @@ def test_completions_wait_until_drained(config, bus):
     manager = make_manager(
         config, bus, lambda **kwargs: FakeLoop(delay=0.05))
     _, identifier, _ = manager.start("read something")
-    deadline = time.monotonic() + 2.0
-    while manager.slots_busy and time.monotonic() < deadline:
-        time.sleep(0.01)
+    settle(manager)
     # finished, but nothing delivered until it is taken
     records = manager.take_pending()
     assert [record["id"] for record in records] == [identifier]
@@ -137,9 +158,7 @@ def test_stop_interrupts_the_child(config, bus):
     assert ok
     started.wait(2.0)
     assert manager.stop(identifier)
-    deadline = time.monotonic() + 2.0
-    while manager.slots_busy and time.monotonic() < deadline:
-        time.sleep(0.01)
+    settle(manager)
     records = manager.take_pending()
     assert records and records[0]["state"] == "stopped"
 
@@ -152,9 +171,7 @@ def test_a_crash_is_recorded_not_lost(config, bus, tmp_path):
                            lambda **kwargs: FakeLoop(fail=True),
                            persist=persist)
     manager.start("doomed")
-    deadline = time.monotonic() + 2.0
-    while manager.slots_busy and time.monotonic() < deadline:
-        time.sleep(0.01)
+    settle(manager)
     records = manager.take_pending()
     assert records and records[0]["state"] == "failed"
     assert "exploded" in records[0]["error"]
@@ -188,9 +205,7 @@ def test_finished_work_is_not_labelled_lost(config, bus, tmp_path):
                          lambda **kwargs: FakeLoop(delay=0.01),
                          persist=persist)
     first.start("finished fine")
-    deadline = time.monotonic() + 2.0
-    while first.slots_busy and time.monotonic() < deadline:
-        time.sleep(0.01)
+    settle(first)
 
     second = make_manager(config, bus, persist=persist)
     assert second.take_pending() == []
@@ -244,9 +259,7 @@ def test_the_bus_sees_the_lifecycle(config, bus):
     manager = make_manager(config, bus,
                            lambda **kwargs: FakeLoop(delay=0.05))
     manager.start("watched")
-    deadline = time.monotonic() + 2.0
-    while manager.slots_busy and time.monotonic() < deadline:
-        time.sleep(0.01)
+    settle(manager)
     states = [event.get("state") for event in seen]
     assert "started" in states
     assert "done" in states

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
@@ -636,6 +637,212 @@ class DiscordConfig:
         return bool(user_id) and int(user_id) in {int(x) for x in self.allowed}
 
 
+#: The grant format this agent can use.
+#:
+#: Version 1 grants said which key owned which installation and nothing more,
+#: so an endpoint holding one could not tell whether the person who made the
+#: connection still had access to it. Version 2 names them. There is no
+#: upgrade path - the missing field is not something either side can look up -
+#: so an old grant is reported as needing a reconnection rather than tried.
+GRANT_FORMAT = "g2"
+
+
+@dataclass
+class GitHubInstallation:
+    """One GitHub App installation, as this machine knows it.
+
+    An installation is the unit GitHub actually grants against: somebody
+    installs the app onto an account — their own or an organisation's — and
+    chooses which repositories it may see. One person can have several, and a
+    repository belongs to exactly one, so `github_connected = true` would be a
+    lie about a shape that is genuinely plural.
+
+    What is *not* here is any credential. An installation access token lasts an
+    hour and is minted from the app's private key when it is needed; writing
+    one to a config file would leave a working key on disk long after the
+    session that fetched it, for no gain over asking again.
+
+    The grant is not a credential either, and that is worth being precise
+    about because it looks like one. It is a signed statement that this
+    installation belongs to a particular public key, and it is useless without
+    the private half - which is not in this file, and is not in any file this
+    one links to. Somebody who copies their config into a gist has published
+    nothing that can be used.
+    """
+
+    installation_id: int = 0
+    #: The account it was installed on, and what kind. Kept because it is what
+    #: a person recognises — "ifekri" or "comodor-ai" — where the id is not.
+    account_id: int = 0
+    account_login: str = ""
+    account_type: str = ""              # "User" or "Organization"
+    #: "all" or "selected", as GitHub reports it. Worth storing: it is the
+    #: difference between "this will see the next repository you make" and
+    #: "it will not", which somebody deciding whether to widen it needs.
+    repository_selection: str = ""
+    #: What the app was granted, verbatim from GitHub. A capability check
+    #: reads this rather than assuming, so a narrowed permission is a clear
+    #: refusal instead of a 403 from the middle of an operation.
+    permissions: dict[str, str] = field(default_factory=dict)
+    #: Seconds since the epoch. Two timestamps rather than one because
+    #: "connected in March, last confirmed yesterday" and "connected in March,
+    #: never seen since" are different situations.
+    created_at: float = 0.0
+    updated_at: float = 0.0
+    #: The Worker's signed statement that this installation belongs to this
+    #: machine's key for it, and to the person who connected it. Sent with
+    #: every request that could do something, and the only place the
+    #: installation id is read from - a request that merely names an id proves
+    #: nothing, which is what an earlier version of this got wrong.
+    #:
+    #: It is not a licence. The endpoint asks GitHub whether the person named
+    #: in it is *still* entitled before it hands anything over, so a grant kept
+    #: after somebody loses access stops working rather than outliving it.
+    grant: str = ""
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "installation_id": int(self.installation_id),
+            "account_id": int(self.account_id),
+            "account_login": self.account_login,
+            "account_type": self.account_type,
+            "repository_selection": self.repository_selection,
+            "permissions": dict(self.permissions),
+            "created_at": float(self.created_at),
+            "updated_at": float(self.updated_at),
+            "grant": self.grant,
+        }
+
+    @property
+    def usable(self) -> bool:
+        """Whether this connection can still do anything.
+
+        Two ways it cannot. No grant at all is a leftover from a version that
+        did not have them, or a connection whose key was lost. A `g1.` grant is
+        from before the grant named the person it was issued to, which means
+        the endpoint has no way to re-check whether that person still has
+        access - so it refuses them, and reconnecting is the fix.
+
+        Both read as connected and fail at the first request, which is why
+        `status` says so up front instead.
+        """
+        return bool(self.installation_id and self.grant
+                    and self.grant.startswith(f"{GRANT_FORMAT}."))
+
+    def may(self, permission: str, level: str = "read") -> bool:
+        """Whether this installation was granted `permission` at `level`.
+
+        GitHub reports "read" or "write"; write implies read. Asked before an
+        operation so a missing grant is a sentence naming what to change,
+        rather than a 403 from four calls into a sequence.
+        """
+        granted = str(self.permissions.get(permission, "")).lower()
+        if not granted:
+            return False
+        return granted == "write" or level == "read"
+
+
+@dataclass
+class GitHubConfig:
+    """Repositories on GitHub, reached through a GitHub App.
+
+    A provider like any other, and deliberately not load-bearing: everything
+    Comodor does to a local checkout works with none of this configured. What
+    it adds is the ability to open a pull request on a repository this machine
+    has never cloned.
+
+    No token lives here. The app holds a private key on the server that mints
+    short-lived installation tokens, and this file holds only which
+    installations exist and what they cover. Nothing in it is a secret, which
+    is why it can sit in a config file people read and paste from.
+    """
+
+    enabled: bool = False
+    #: The installations this machine has connected, newest last. Plural
+    #: because a person with a personal account and two organisations has
+    #: three, and a repository resolves to exactly one of them.
+    installations: list[GitHubInstallation] = field(default_factory=list)
+    #: Where the installation flow is served. Overridable for a self-hosted
+    #: deployment; the default is the one this project runs.
+    endpoint: str = "https://comodor.ai"
+    #: What a branch the agent opens is called. The kind is appended:
+    #: `comodor/fix-...`, `comodor/feature-...`.
+    branch_prefix: str = "comodor/"
+    #: Whether a turn may write to a repository at all. Off until somebody
+    #: says otherwise, for the same reason the channels are: a pull request
+    #: opened by mistake is public and cannot be unseen.
+    allow_writes: bool = False
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "installations": [one.to_json() for one in self.installations],
+            "endpoint": self.endpoint,
+            "branch_prefix": self.branch_prefix,
+            "allow_writes": self.allow_writes,
+        }
+
+    def find(self, owner: str) -> GitHubInstallation | None:
+        """The installation covering `owner`, or None.
+
+        By login rather than by id because that is what a person types and
+        what a repository string carries: `ifekri/Comodor` names the owner in
+        the half before the slash.
+        """
+        wanted = (owner or "").strip().lower()
+        for one in self.installations:
+            if one.account_login.lower() == wanted:
+                return one
+        return None
+
+    def find_by_id(self, installation_id: int) -> GitHubInstallation | None:
+        """The installation with this id, or None.
+
+        By id rather than by login, because this is what the signing path
+        needs: it is handed an id and has to find the grant that goes with it.
+        Returning None means there is no grant, which means no request, rather
+        than a request that would be refused.
+        """
+        try:
+            wanted = int(installation_id)
+        except (TypeError, ValueError):
+            return None
+        for one in self.installations:
+            if one.installation_id == wanted:
+                return one
+        return None
+
+    def remember(self, installation: GitHubInstallation) -> None:
+        """Add or replace one installation, keyed by its id.
+
+        Replacing matters: reinstalling, or widening the repository
+        selection, produces the same installation id with different contents,
+        and appending would leave the old permissions to be found first.
+        """
+        for index, existing in enumerate(self.installations):
+            if existing.installation_id == installation.installation_id:
+                installation.created_at = (existing.created_at
+                                           or installation.created_at)
+                # The grant is carried over only when the new record has none
+                # - a `verify` refreshes permissions and has no grant to give,
+                # and dropping it there would break the connection it just
+                # confirmed. A `connect` brings its own, newer, and matching a
+                # key that has just replaced the old one on disk, so it wins.
+                if not installation.grant:
+                    installation.grant = existing.grant
+                self.installations[index] = installation
+                return
+        self.installations.append(installation)
+
+    def forget(self, installation_id: int) -> bool:
+        """Drop one. True if it was there — a revocation nobody had is not an
+        error, but it is worth being able to say so."""
+        before = len(self.installations)
+        self.installations = [one for one in self.installations
+                              if one.installation_id != int(installation_id)]
+        return len(self.installations) != before
+
+
 @dataclass
 class MCPConfig:
     """Servers, and the master switch over all of them."""
@@ -957,7 +1164,7 @@ DEFAULT_DENY: tuple[str, ...] = (
 SECTIONS = ("ui", "agent", "gateway", "learning", "curator", "skills", "safety",
             "browser", "computer", "telegram", "whatsapp", "slack", "discord",
             "cron", "media", "voice", "delegation", "shell", "api", "webhook",
-            "image_gen")
+            "image_gen", "github")
 
 
 @dataclass
@@ -976,6 +1183,7 @@ class Config:
     whatsapp: WhatsAppConfig = field(default_factory=WhatsAppConfig)
     slack: SlackConfig = field(default_factory=SlackConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
+    github: GitHubConfig = field(default_factory=GitHubConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     cron: CronConfig = field(default_factory=CronConfig)
     media: MediaConfig = field(default_factory=MediaConfig)
@@ -1370,6 +1578,43 @@ def _coerce(key: str, value: Any, current: Any) -> tuple[bool, Any, str]:
         return False, None, "must be an object"
     return True, value, ""
 
+def _list_of_dataclasses(field_info: Any, value: Any) -> list[Any] | None:
+    """Rebuild `list[SomeDataclass]` from the dicts JSON gives back.
+
+    `_apply` understood a nested dataclass and a list of scalars, and a list of
+    dataclasses fell between them: the dicts were stored as dicts, and the
+    first attribute access on one raised `AttributeError` from wherever it
+    happened to be read. Nothing had this shape until now, which is why the
+    gap survived.
+
+    Returns None when the field is not that shape, so the caller falls through
+    to the ordinary coercion.
+    """
+    if not isinstance(value, list):
+        return None
+
+    annotation = field_info.type
+    # `from __future__ import annotations` makes these strings, so the type is
+    # read from the text rather than from the object.
+    text = annotation if isinstance(annotation, str) else str(annotation)
+    match = re.fullmatch(r"list\[([A-Za-z_][A-Za-z0-9_]*)\]", text.strip())
+    if not match:
+        return None
+
+    kind = globals().get(match.group(1))
+    if not (isinstance(kind, type) and is_dataclass(kind)):
+        return None
+
+    rebuilt = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue                     # a malformed row is dropped, not fatal
+        made = kind()
+        _apply(made, entry)
+        rebuilt.append(made)
+    return rebuilt
+
+
 def _apply(section: Any, values: dict[str, Any], where: str = "",
            complaints: list[str] | None = None) -> None:
     """Copy known keys onto a dataclass, ignoring unknown ones.
@@ -1384,12 +1629,17 @@ def _apply(section: Any, values: dict[str, Any], where: str = "",
     as a string that is true.
     """
     valid = {f.name for f in fields(section)}
+    annotated = {f.name: f for f in fields(section)}
     for key, value in values.items():
         if key not in valid:
             continue
         current = getattr(section, key)
         if is_dataclass(current) and isinstance(value, dict):
             _apply(current, value, f"{where}{key}.", complaints)
+            continue
+        rebuilt = _list_of_dataclasses(annotated[key], value)
+        if rebuilt is not None:
+            setattr(section, key, rebuilt)
             continue
         ok, coerced, why = _coerce(key, value, current)
         if not ok:
