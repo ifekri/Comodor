@@ -1,7 +1,5 @@
 # A label whose name contains a colon has to be quoted, or YAML reads it
-# as a nested mapping and the whole file fails to parse. Both `Area:`
-# labels did, so this workflow has never once applied a label — it failed
-# on the first pull request that ran it.
+# as a nested mapping and the whole file fails to parse.
 
 Documentation:
   - changed-files:
@@ -13,6 +11,8 @@ Testing:
   - changed-files:
       - any-glob-to-any-file:
           - "tests/**"
+          - "workers/**/*.test.mjs"
+          - "workers/**/*.test.js"
 
 Benchmark:
   - changed-files:
@@ -39,6 +39,32 @@ CI:
           - "**/*.yml"
           - ".env.example"
 
+"Area: GitHub":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/comodor/github/**"
+          - "src/comodor/tools/github.py"
+          - "workers/site/github/**"
+          - "docs/github.md"
+
+"Area: Cloudflare":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "workers/**"
+          - "wrangler.json"
+          - "wrangler.jsonc"
+
+Security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/comodor/github/identity.py"
+          - "src/comodor/github/tokens.py"
+          - "workers/site/github/jwt.js"
+          - "workers/site/github/oauth.js"
+          - "workers/site/github/grant.js"
+          - "workers/site/github/state.js"
+          - "workers/site/github/webhook.js"
+
 Build:
   - changed-files:
       - any-glob-to-any-file:
@@ -63,4 +89,3 @@ Release:
       - any-glob-to-any-file:
           - ".github/workflows/release.yml"
           - "RELEASING.md"
-
