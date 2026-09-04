@@ -62,6 +62,7 @@
  */
 
 import { mintToken, readInstallation } from './api.js';
+import { stillEntitled } from './entitlement.js';
 import { authorise, issueGrant } from './grant.js';
 import {
   begin as beginUserCheck,
@@ -444,6 +445,11 @@ async function callback(request, env, secret, url) {
   try {
     grant = await issueGrant(secret, {
       installationId: user.installation_id,
+      // What it is installed on, and who is connecting it. Both are checked
+      // again at every mint, which is the only reason a grant with no expiry
+      // is not permanent authority.
+      account: { id: user.account.id, type: user.account.type },
+      actor: entitled.actor,
       publicKey: claims.k,
     });
   } catch (error) {
@@ -530,16 +536,26 @@ async function claim(secret, body) {
  * Worker mint a working GitHub token for somebody else's repositories.
  */
 async function token(env, secret, body) {
-  let installationId;
+  let claims;
   try {
-    ({ installationId } = await authorise(secret, body, 'token'));
+    ({ claims } = await authorise(secret, body, 'token'));
   } catch (error) {
     return json({ error: String(error.message || error).slice(0, 200) },
       error.status || 401);
   }
 
+  // Whether they still may, asked now rather than remembered from whenever the
+  // grant was issued. Before the mint, never after: a token that exists has
+  // already been handed over, whatever is decided next. See `entitlement.js`.
   try {
-    const made = await mintToken(env, installationId);
+    await stillEntitled(env, claims);
+  } catch (error) {
+    return json({ error: String(error.message || error).slice(0, 200) },
+      error.status || 403);
+  }
+
+  try {
+    const made = await mintToken(env, claims.i);
     // Only the token and its expiry. The JWT that fetched it does not exist
     // outside `api.js`, and nothing else here has anything to add.
     return json({ token: made.token, expires_at: made.expires_at });
@@ -557,19 +573,30 @@ async function token(env, secret, body) {
  * an endpoint that answered on an id alone would be a way to read them.
  */
 async function verify(env, secret, body) {
-  let installationId;
+  let claims;
   try {
-    ({ installationId } = await authorise(secret, body, 'verify'));
+    ({ claims } = await authorise(secret, body, 'verify'));
   } catch (error) {
     return json({ error: String(error.message || error).slice(0, 200) },
       error.status || 401);
   }
 
+  // The same check as `token`, and for the same reason. An installation's
+  // account, its repository selection and its permission set are things a
+  // former owner should stop being able to read the moment they stop being
+  // one — an endpoint that only refused to *act* would still be reporting
+  // on a private account to somebody who left it.
   try {
-    return json({ status: 'ok',
-                  installation: await readInstallation(env, installationId) });
+    const installation = await stillEntitled(env, claims);
+    return json({ status: 'ok', installation });
   } catch (error) {
-    if (error.status === 404) return json({ status: 'gone' });
-    return json({ error: String(error.message || error).slice(0, 200) }, 502);
+    // An uninstalled app is not a refusal, it is an answer: the agent forgets
+    // the connection on `gone`, which is what should happen.
+    if (error.status === 404
+        && String(error.message).includes('no longer available')) {
+      return json({ status: 'gone' });
+    }
+    return json({ error: String(error.message || error).slice(0, 200) },
+      error.status || 403);
   }
 }

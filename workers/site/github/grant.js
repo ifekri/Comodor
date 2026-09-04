@@ -22,13 +22,20 @@
  *     the grant, a timestamp, a nonce, and a signature over all of it
  *     made with the private key that never leaves the agent
  *
- * So two checks, in order, and both must pass:
+ * So two checks here, in order, and both must pass:
  *
  *   1. the grant is one this Worker issued and has not been edited
  *   2. the request is signed by the key the grant names
  *
  * `installation_id` is then read *out of the grant*. It is never taken from
  * the request body, which is what made the original hole possible.
+ *
+ * **And a third check, which is not here.** Passing both of these says the
+ * holder is who the grant says. It does not say they are still allowed to be:
+ * an organisation owner who connected yesterday and was demoted this morning
+ * would still hold a valid grant and a valid key. So the grant names the
+ * person it was issued to, and `entitlement.js` asks GitHub whether that
+ * person is still entitled before any usable token is minted. See there.
  *
  * **Replay, honestly.** With no storage there is no nonce ledger, so a
  * captured request can be replayed inside its freshness window. Three things
@@ -43,8 +50,20 @@
 /** How far out of date a signed request may be. */
 export const FRESH_FOR = 120;
 
-/** What the grant format is. Bumped if its meaning ever changes. */
-export const GRANT_VERSION = 1;
+/**
+ * What the grant format is.
+ *
+ * Bumped to 2 when the grant started naming the person it was issued to. A
+ * version 1 grant cannot be upgraded in place — it does not say who asked
+ * for it, and there is nowhere to look that up — so it is refused and the
+ * connection is made again. That is one command for the few people who
+ * connected before this, against a credential that outlives the authority it
+ * was granted under.
+ */
+export const GRANT_VERSION = 2;
+
+/** The prefix a grant of this version carries. */
+export const GRANT_PREFIX = 'g2';
 
 function base64url(bytes) {
   let binary = '';
@@ -108,23 +127,47 @@ export async function fingerprint(publicKeyBase64url) {
  * client's public key so later requests can be checked against it without
  * anything having been written down.
  */
-export async function issueGrant(secret, { installationId, publicKey,
-                                           now = Date.now() }) {
+export async function issueGrant(secret, { installationId, account, actor,
+                                           publicKey, now = Date.now() }) {
   const id = Number(installationId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new Error('a grant needs an installation id');
   }
   if (!publicKey) throw new Error('a grant needs a client public key');
 
+  const accountId = Number((account || {}).id);
+  const accountType = String((account || {}).type || '');
+  if (!Number.isInteger(accountId) || accountId <= 0 || !accountType) {
+    throw new Error('a grant needs the account it is installed on');
+  }
+
+  const actorId = Number((actor || {}).id);
+  const actorLogin = String((actor || {}).login || '');
+  if (!Number.isInteger(actorId) || actorId <= 0 || !actorLogin) {
+    throw new Error('a grant needs the person it was issued to');
+  }
+
   const claims = {
     v: GRANT_VERSION,
     i: id,
+    // What the installation sits on. Carried so a later check can notice that
+    // the installation is no longer the account the grant was issued about,
+    // rather than trusting an id whose meaning may have moved.
+    ai: accountId,
+    at: accountType,
+    // Who asked for it. This is the field the whole version bump exists for:
+    // without it there is no one to re-check, and a grant becomes permanent
+    // authority for whoever holds the key.
+    ui: actorId,
+    // The login is for looking the membership up. The id is what the answer is
+    // compared against, because a login can be changed and reused.
+    ul: actorLogin,
     k: String(publicKey),
     f: await fingerprint(publicKey),
     iat: Math.floor(now / 1000),
   };
   const encoded = base64url(new TextEncoder().encode(JSON.stringify(claims)));
-  return `g1.${encoded}.${await hmacHex(secret, encoded)}`;
+  return `${GRANT_PREFIX}.${encoded}.${await hmacHex(secret, encoded)}`;
 }
 
 /**
@@ -134,14 +177,15 @@ export async function issueGrant(secret, { installationId, publicKey,
  * are the same answer to a caller, and distinguishing them tells a prober
  * which of their guesses was closer.
  *
- * No expiry. A grant is a long-lived statement about which key owns which
- * installation; the freshness that stops replay is on the *request*, not
- * here. A grant that should stop working is stopped by uninstalling the app,
- * which makes GitHub refuse the mint.
+ * No expiry, and that is not the same as no revocation. A grant says which key
+ * belongs to which person for which installation; whether that person is still
+ * entitled to it is asked again at every mint, against GitHub, in
+ * `entitlement.js`. An expiry here would only mean a fixed delay before a
+ * removed owner stopped working, which is worse than asking.
  */
 export async function openGrant(secret, grant) {
   const parts = String(grant || '').split('.');
-  if (parts.length !== 3 || parts[0] !== 'g1') return null;
+  if (parts.length !== 3 || parts[0] !== GRANT_PREFIX) return null;
 
   const [, encoded, signature] = parts;
   if (!sameBytes(signature, await hmacHex(secret, encoded))) return null;
@@ -155,9 +199,18 @@ export async function openGrant(secret, grant) {
   if (!claims || typeof claims !== 'object') return null;
   if (claims.v !== GRANT_VERSION) return null;
   if (!Number.isInteger(claims.i) || claims.i <= 0) return null;
+  if (!Number.isInteger(claims.ai) || claims.ai <= 0) return null;
+  if (typeof claims.at !== 'string' || !claims.at) return null;
+  if (!Number.isInteger(claims.ui) || claims.ui <= 0) return null;
+  if (typeof claims.ul !== 'string' || !claims.ul) return null;
   if (typeof claims.k !== 'string' || !claims.k) return null;
 
   return claims;
+}
+
+/** Whether a string is a grant from before the actor was named. */
+export function isOldGrant(grant) {
+  return String(grant || '').startsWith('g1.');
 }
 
 /**
@@ -184,6 +237,18 @@ export function signedPayload({ grant, timestamp, nonce, action }) {
 export async function authorise(secret, body, action, { now = Date.now() } = {}) {
   const claims = await openGrant(secret, body && body.grant);
   if (!claims) {
+    // A grant from before the actor was named is told apart from a forgery,
+    // and only here. The version of a token format is not a secret — it is
+    // the first three characters of something the holder already has — and
+    // somebody whose connection has stopped working deserves to know it is
+    // their connection rather than their key.
+    if (isOldGrant(body && body.grant)) {
+      const error = new Error(
+        'this connection predates a security fix and cannot be checked '
+        + 'against your current access. Run `comodor github connect` again.');
+      error.status = 401;
+      throw error;
+    }
     const error = new Error('that grant is not one of ours');
     error.status = 401;
     throw error;
@@ -246,5 +311,9 @@ export async function authorise(secret, body, action, { now = Date.now() } = {})
 
   // Read from the grant, never from the body. Taking it from the body is what
   // let anybody who knew an installation id mint a token for it.
-  return { installationId: claims.i, fingerprint: claims.f };
+  //
+  // The whole claim set comes back, not just the id: what happens next has to
+  // ask GitHub whether the person named here is still entitled, and it needs
+  // the name to ask with.
+  return { installationId: claims.i, fingerprint: claims.f, claims };
 }

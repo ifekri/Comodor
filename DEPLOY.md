@@ -258,12 +258,56 @@ who learned another person's id obtain a working token for their repositories.
 
 Instead, each connection has a key pair the agent generates at
 `comodor github connect`. The public half travels in the signed state; the
-Worker returns a **grant** — `{version, installation_id, public key,
-fingerprint, issued_at}`, HMAC-signed under `GITHUB_APP_WEBHOOK_SECRET`. Every
-later request carries the grant, a timestamp, a nonce and an ECDSA P-256
-signature over all four. `workers/site/github/grant.js` checks the grant first,
-then the signature against the key the grant names, then reads the installation
-id **out of the grant**.
+Worker returns a **grant** — `{version, installation_id, account id, account
+type, actor id, actor login, public key, fingerprint, issued_at}`, HMAC-signed
+under `GITHUB_APP_WEBHOOK_SECRET`. Every later request carries the grant, a
+timestamp, a nonce and an ECDSA P-256 signature over all four.
+`workers/site/github/grant.js` checks the grant first, then the signature
+against the key the grant names, then reads the installation id **out of the
+grant**.
+
+#### And whether they still may
+
+A grant has no expiry, so an entitlement checked once at issue time would be
+permanent: an organisation owner who connects on Monday and is demoted on
+Tuesday would still mint full installation tokens on Wednesday.
+
+So the grant names the person it was issued to, and `entitlement.js` asks
+GitHub again at **every** mint. For an organisation, in this order:
+
+1. resolve the installation as the app — and refuse if its account id or type
+   is no longer what the grant says;
+2. mint a token carrying **`members: read` and nothing else**;
+3. `GET /orgs/{org}/memberships/{actor_login}` with that token;
+4. require `state: active`, `role: admin`, and the membership's own `user.id`
+   to equal the grant's actor id — the id, because a login can be changed and
+   a freed one claimed by somebody else;
+5. only now, mint the full installation token.
+
+Step 2 is the part worth not skipping. Using the full token to decide whether
+the full token is allowed means the credential exists before the decision does.
+
+A personal installation needs no call: the grant's actor id must equal the
+account id GitHub reports for the installation.
+
+**Everything fails closed** — a missing permission, a 404, a rename, an id
+mismatch, a network error, an unrecognised account type. There is no path back
+to what the grant said when it was issued.
+
+`/verify` runs the same check. An endpoint that refused to *act* but still
+described the installation would report a private organisation's account,
+repository selection and permission set to somebody who had left it.
+
+**The grant format is `g2`.** A `g1` grant does not name an actor and cannot be
+upgraded in place — the missing field is not something either side can look
+up — so it is refused with a message telling the person to run
+`comodor github connect` again. Anyone who connected before this deploys will
+need to.
+
+**What this cannot undo.** An installation token already minted stays valid for
+up to an hour, and GitHub offers no revocation for one. That window is not
+closable here. What is closed is the refresh: a grant cannot obtain another
+token once the person behind it loses access.
 
 Nothing is stored for any of this. The grant carries its own contents and its
 own signature, which is what makes it possible without a KV namespace or a D1
@@ -277,9 +321,10 @@ mints exactly what the original would have.
 Three test files cover this, and all run in `npm test`:
 
 ```bash
-npm test          # 85 tests, including:
-                  #   authorisation.test.mjs        — 26, forgery and replay
-                  #   setup-authorisation.test.mjs  — 21, who may be given one
+npm test          # 114 tests, including:
+                  #   authorisation.test.mjs        — 27, forgery and replay
+                  #   setup-authorisation.test.mjs  — 31, who may be given one
+                  #   entitlement.test.mjs          — 18, whether they still may
                   #   agent-vector.test.mjs         —  8, real agent output
 ```
 
@@ -320,14 +365,16 @@ In the app's settings under the `comodor-ai` organisation:
 **Organisation permissions:** `Members: Read`.
 
 That one is not for doing anything with members. It is what
-`GET /user/memberships/orgs/{org}` needs, and that call is the only way to tell
-an organisation owner from an ordinary member during the connection. Without
-it, GitHub answers 403 and every organisation connection is refused with a page
-naming this permission — the integration fails closed rather than falling back
-to trusting the installation list.
+`GET /user/memberships/orgs/{org}` needs while connecting, and what
+`GET /orgs/{org}/memberships/{user}` needs at every mint afterwards. Those two
+calls are the only way to tell an organisation owner from an ordinary member.
+Without the permission, GitHub answers 403 (or refuses the narrowed token with
+422) and every organisation connection and every organisation mint is refused
+with a message naming this permission — the integration fails closed rather
+than falling back to trusting what it was told earlier.
 
-It is read-only, it is never used outside the connection flow, and no
-membership information is stored or shown.
+It is read-only, it is used for nothing else, and no membership information is
+stored or shown.
 
 The callback URL must match exactly; GitHub refuses a `redirect_uri` that
 differs by so much as a trailing slash.

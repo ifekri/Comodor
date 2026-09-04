@@ -97,13 +97,18 @@ export async function readInstallation(env, installationId) {
  * cache that is sometimes there is a cache whose absence is a bug that shows
  * up under load. The agent caches, where the lifetime is a session.
  */
-export async function mintToken(env, installationId) {
+export async function mintToken(env, installationId, { permissions } = {}) {
   const id = Number(installationId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new Error('installation_id is not an installation id');
   }
+  // `permissions` narrows the token below what the installation holds. It is
+  // used for the entitlement check, which needs to read one membership and
+  // must not be able to do anything else: minting the full token to decide
+  // whether the full token is allowed would be the check arriving too late.
+  const body = permissions ? { permissions } : {};
   const made = await asApp(env, 'POST',
-    `/app/installations/${id}/access_tokens`, {});
+    `/app/installations/${id}/access_tokens`, body);
 
   const token = String(made.token || '');
   if (!token) throw new Error('GitHub returned no token');

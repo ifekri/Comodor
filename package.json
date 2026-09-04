@@ -11,8 +11,8 @@
     "deploy": "wrangler deploy",
     "test:get": "node --test workers/get/dispatch.test.mjs",
     "test:version": "node tools/version.mjs",
-    "test:github": "node --test workers/site/github/github.test.mjs workers/site/github/authorisation.test.mjs workers/site/github/setup-authorisation.test.mjs workers/site/github/agent-vector.test.mjs",
-    "test": "node --test workers/get/dispatch.test.mjs workers/site/github/github.test.mjs workers/site/github/authorisation.test.mjs workers/site/github/setup-authorisation.test.mjs workers/site/github/agent-vector.test.mjs"
+    "test:github": "node --test workers/site/github/github.test.mjs workers/site/github/authorisation.test.mjs workers/site/github/setup-authorisation.test.mjs workers/site/github/entitlement.test.mjs workers/site/github/agent-vector.test.mjs",
+    "test": "node --test workers/get/dispatch.test.mjs workers/site/github/github.test.mjs workers/site/github/authorisation.test.mjs workers/site/github/setup-authorisation.test.mjs workers/site/github/entitlement.test.mjs workers/site/github/agent-vector.test.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

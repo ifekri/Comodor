@@ -438,9 +438,14 @@ async function asUser(token, path) {
 /**
  * Whether this user is entitled to a grant for the whole of this installation.
  *
- * Returns `{ ok, why }`. `why` is for the page and names what is missing
- * without naming who does have it — telling somebody "the owner is X" turns a
- * refusal into a directory lookup.
+ * Returns `{ ok, why, actor }`. `actor` is who GitHub says is signed in, and
+ * it goes into the grant: the grant has no expiry, so the only way this answer
+ * does not become permanent is for the name to travel with it and be asked
+ * about again at every mint. See `entitlement.js`.
+ *
+ * `why` is for the page and names what is missing without naming who does have
+ * it — telling somebody "the owner is X" turns a refusal into a directory
+ * lookup.
  *
  * Fails closed everywhere. A membership call that errors, an account type this
  * does not know, a `GET /user` that does not come back: all refusals. The
@@ -451,19 +456,25 @@ export async function mayReceiveGrant(token, installation) {
   const account = (installation && installation.account) || {};
   const kind = String(account.type || '');
 
+  // Who is asking, first and for every path. The grant has to name them, so a
+  // `/user` that will not answer is a refusal rather than a connection nobody
+  // can later re-check.
+  let me;
+  try {
+    me = await asUser(token, '/user');
+  } catch {
+    return { ok: false, why: 'GitHub would not say who you are.' };
+  }
+  const actor = { id: Number(me.id), login: String(me.login || '') };
+  if (!actor.id || !actor.login) {
+    return { ok: false, why: 'GitHub would not say who you are.' };
+  }
+
   if (kind === 'User') {
     // The installation is on a personal account, so the person connecting must
     // be that account. Being a collaborator on one of its repositories is not
     // the same thing and would carry the same escalation as an org member.
-    let me;
-    try {
-      me = await asUser(token, '/user');
-    } catch {
-      return { ok: false, why: 'GitHub would not say who you are.' };
-    }
-    if (Number(me.id) && Number(me.id) === Number(account.id)) {
-      return { ok: true, why: '' };
-    }
+    if (actor.id === Number(account.id)) return { ok: true, why: '', actor };
     return {
       ok: false,
       why: 'This installation is on somebody else\'s personal account. Only '
@@ -502,7 +513,9 @@ export async function mayReceiveGrant(token, installation) {
 
     const state = String(membership.state || '');
     const role = String(membership.role || '');
-    if (state === 'active' && role === 'admin') return { ok: true, why: '' };
+    if (state === 'active' && role === 'admin') {
+      return { ok: true, why: '', actor };
+    }
 
     if (state === 'pending') {
       return {

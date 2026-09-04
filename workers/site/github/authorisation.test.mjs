@@ -96,6 +96,22 @@ test('a request with no grant at all is refused', async () => {
     /not one of ours/);
 });
 
+/**
+ * A grant, with the fields a test is not about filled in.
+ *
+ * Version 2 names the account the installation sits on and the person it was
+ * issued to, because both are re-checked at every mint. A test about signature
+ * forgery does not care what they are, but a grant without them cannot exist -
+ * so they are defaulted here rather than repeated thirty times.
+ */
+function aGrant(secret, options) {
+  return issueGrant(secret, {
+    account: { id: 4242, type: 'Organization' },
+    actor: { id: 9, login: 'ifekri' },
+    ...options,
+  });
+}
+
 // --------------------------------------------------------------------------- //
 // the grant
 // --------------------------------------------------------------------------- //
@@ -103,7 +119,7 @@ test('a request with no grant at all is refused', async () => {
 test('a grant this Worker issued opens, and names the key and installation',
   async () => {
     const client = await aClient();
-    const grant = await issueGrant(SECRET, {
+    const grant = await aGrant(SECRET, {
       installationId: 42, publicKey: client.publicKey });
 
     const claims = await openGrant(SECRET, grant);
@@ -116,7 +132,7 @@ test('a grant this Worker issued opens, and names the key and installation',
 
 test('a grant signed with another secret does not open', async () => {
   const client = await aClient();
-  const grant = await issueGrant('somebody elses secret', {
+  const grant = await aGrant('somebody elses secret', {
     installationId: 42, publicKey: client.publicKey });
 
   assert.equal(await openGrant(SECRET, grant), null);
@@ -124,7 +140,7 @@ test('a grant signed with another secret does not open', async () => {
 
 test('a grant edited after signing does not open', async () => {
   const client = await aClient();
-  const grant = await issueGrant(SECRET, {
+  const grant = await aGrant(SECRET, {
     installationId: 42, publicKey: client.publicKey });
 
   const [prefix, payload, signature] = grant.split('.');
@@ -142,14 +158,51 @@ test('a grant of an unknown version does not open', async () => {
   const payload = btoa(JSON.stringify(claims))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-  assert.equal(await openGrant(SECRET, `g1.${payload}.deadbeef`), null);
+  assert.equal(await openGrant(SECRET, `g2.${payload}.deadbeef`), null);
 });
 
-test('a grant needs an installation and a key to be issued', async () => {
+test('a grant needs everything it will later be checked against', async () => {
+  // Every one of these is a field the entitlement check reads. A grant issued
+  // without one could not be re-checked, which is the whole failure this
+  // version exists to prevent - so it must be impossible to make, not merely
+  // unusual.
+  const whole = {
+    installationId: 1, publicKey: 'x',
+    account: { id: 7, type: 'Organization' },
+    actor: { id: 9, login: 'ifekri' },
+  };
+  const without = (field, value) => ({ ...whole, [field]: value });
+
+  await assert.rejects(() => issueGrant(SECRET, without('installationId', 0)));
+  await assert.rejects(() => issueGrant(SECRET, without('publicKey', '')));
+  await assert.rejects(() => issueGrant(SECRET, without('account', undefined)));
+  await assert.rejects(() =>
+    issueGrant(SECRET, without('account', { id: 0, type: 'User' })));
+  await assert.rejects(() =>
+    issueGrant(SECRET, without('account', { id: 7, type: '' })));
+  await assert.rejects(() => issueGrant(SECRET, without('actor', undefined)));
+  await assert.rejects(() =>
+    issueGrant(SECRET, without('actor', { id: 0, login: 'ifekri' })));
+  await assert.rejects(() =>
+    issueGrant(SECRET, without('actor', { id: 9, login: '' })));
+});
+
+test('a grant from before the actor was named is refused by name', async () => {
+  // Told apart from a forgery deliberately. Somebody whose connection stopped
+  // working should learn it is their connection, not their key, and the
+  // version of a token format is the first three characters of something they
+  // already hold.
+  const client = await aClient();
+  const old = `g1.${btoa(JSON.stringify({
+    v: 1, i: 42, k: client.publicKey, f: 'x', iat: 1,
+  })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}.abc`;
+
+  assert.equal(await openGrant(SECRET, old), null);
   await assert.rejects(
-    () => issueGrant(SECRET, { installationId: 0, publicKey: 'x' }));
-  await assert.rejects(
-    () => issueGrant(SECRET, { installationId: 1, publicKey: '' }));
+    authorise(SECRET, { grant: old, timestamp: Math.floor(Date.now() / 1000),
+                        nonce: 'a-nonce-long-enough', signature: 'x' }, 'token'),
+    (error) => error.status === 401
+      && /comodor github connect/.test(error.message));
 });
 
 // --------------------------------------------------------------------------- //
@@ -159,7 +212,7 @@ test('a grant needs an installation and a key to be issued', async () => {
 test('a valid signed request authorises, and says which installation',
   async () => {
     const client = await aClient();
-    const grant = await issueGrant(SECRET, {
+    const grant = await aGrant(SECRET, {
       installationId: 4242, publicKey: client.publicKey });
 
     const found = await authorise(SECRET, await aRequest(client, grant, 'token'),
@@ -170,7 +223,7 @@ test('a valid signed request authorises, and says which installation',
 
 test('a request with no signature is refused', async () => {
   const client = await aClient();
-  const grant = await issueGrant(SECRET, {
+  const grant = await aGrant(SECRET, {
     installationId: 1, publicKey: client.publicKey });
 
   const request = await aRequest(client, grant, 'token');
@@ -182,7 +235,7 @@ test('a request with no signature is refused', async () => {
 
 test('a forged signature is refused', async () => {
   const client = await aClient();
-  const grant = await issueGrant(SECRET, {
+  const grant = await aGrant(SECRET, {
     installationId: 1, publicKey: client.publicKey });
 
   const request = await aRequest(client, grant, 'token');
@@ -195,7 +248,7 @@ test('a forged signature is refused', async () => {
 test('a signature by a different key is refused', async () => {
   const owner = await aClient();
   const attacker = await aClient();
-  const grant = await issueGrant(SECRET, {
+  const grant = await aGrant(SECRET, {
     installationId: 1, publicKey: owner.publicKey });
 
   // A real signature, over the right payload, by the wrong key.
@@ -207,7 +260,7 @@ test('a signature by a different key is refused', async () => {
 
 test('a grant for one installation cannot be used with another', async () => {
   const client = await aClient();
-  const mine = await issueGrant(SECRET, {
+  const mine = await aGrant(SECRET, {
     installationId: 1, publicKey: client.publicKey });
 
   // The attempt: present my grant, and ask for a different installation by
@@ -223,9 +276,9 @@ test('a grant for one installation cannot be used with another', async () => {
 
 test('a signature over a different grant is refused', async () => {
   const client = await aClient();
-  const one = await issueGrant(SECRET, {
+  const one = await aGrant(SECRET, {
     installationId: 1, publicKey: client.publicKey });
-  const two = await issueGrant(SECRET, {
+  const two = await aGrant(SECRET, {
     installationId: 2, publicKey: client.publicKey });
 
   // Signed over grant one, sent with grant two: swapping the grant after
@@ -239,7 +292,7 @@ test('a signature over a different grant is refused', async () => {
 
 test('a signature for one action cannot be replayed as another', async () => {
   const client = await aClient();
-  const grant = await issueGrant(SECRET, {
+  const grant = await aGrant(SECRET, {
     installationId: 1, publicKey: client.publicKey });
 
   const request = await aRequest(client, grant, 'verify');
@@ -254,7 +307,7 @@ test('a signature for one action cannot be replayed as another', async () => {
 
 test('a request older than the window is refused', async () => {
   const client = await aClient();
-  const grant = await issueGrant(SECRET, {
+  const grant = await aGrant(SECRET, {
     installationId: 1, publicKey: client.publicKey });
 
   const stale = await aRequest(client, grant, 'token', {
@@ -266,7 +319,7 @@ test('a request older than the window is refused', async () => {
 
 test('a request from the future is refused too', async () => {
   const client = await aClient();
-  const grant = await issueGrant(SECRET, {
+  const grant = await aGrant(SECRET, {
     installationId: 1, publicKey: client.publicKey });
 
   const ahead = await aRequest(client, grant, 'token', {
@@ -279,7 +332,7 @@ test('a request from the future is refused too', async () => {
 
 test('a request with no timestamp is refused', async () => {
   const client = await aClient();
-  const grant = await issueGrant(SECRET, {
+  const grant = await aGrant(SECRET, {
     installationId: 1, publicKey: client.publicKey });
 
   const request = await aRequest(client, grant, 'token');
@@ -291,7 +344,7 @@ test('a request with no timestamp is refused', async () => {
 
 test('a request with no nonce is refused', async () => {
   const client = await aClient();
-  const grant = await issueGrant(SECRET, {
+  const grant = await aGrant(SECRET, {
     installationId: 1, publicKey: client.publicKey });
 
   const request = await aRequest(client, grant, 'token', { nonce: 'short' });
@@ -305,7 +358,7 @@ test('replay is bounded by the window, and cannot widen scope', async () => {
   // guarantee is that replaying it gains nothing beyond what the original
   // request already got — the same installation, never a different one.
   const client = await aClient();
-  const grant = await issueGrant(SECRET, {
+  const grant = await aGrant(SECRET, {
     installationId: 77, publicKey: client.publicKey });
 
   const captured = await aRequest(client, grant, 'token');

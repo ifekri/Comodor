@@ -33,19 +33,24 @@ const SECRET = 'a-test-secret';
 const PUBLIC_KEY = 'BGD-1LolWp0xyWHrdMY1bWjASbiSO2H6bOZpYi5g8p'
   + '-2eQP-EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk';
 
+/** The account the installation sits on, and who connected it. */
+const ACCOUNT = { id: 4242, type: 'Organization' };
+const ACTOR = { id: 9, login: 'ifekri' };
+
 /** The grant this Worker issues for it, at a fixed moment. */
-const GRANT = 'g1.eyJ2IjoxLCJpIjo3LCJrIjoiQkdELTFMb2xXcDB4eVdIcmRNWTFiV2pBU2'
-  + 'JpU08ySDZiT1pwWWk1ZzhwLTJlUVAtRUFpNHZKbWtHdW5wVmlpOFpQTHhzZ3d0ZnA5UmQ2UE'
-  + 'NsTlJHSXBrIiwiZiI6InNZdUd6aE9KNUczb2VxU2xFeHpvUEJGZy1qUEFoNnNWdUdOWFRUSF'
-  + 'lfenciLCJpYXQiOjE3MDAwMDAwMDB9.0599ef933b944926ab387c1ef3fb0f8868fc044ee'
-  + '6ac03f678206d6ed85c632c';
+const GRANT = 'g2.eyJ2IjoyLCJpIjo3LCJhaSI6NDI0MiwiYXQiOiJPcmdhbml6YXRpb24iLC'
+  + 'J1aSI6OSwidWwiOiJpZmVrcmkiLCJrIjoiQkdELTFMb2xXcDB4eVdIcmRNWTFiV2pBU2JpU0'
+  + '8ySDZiT1pwWWk1ZzhwLTJlUVAtRUFpNHZKbWtHdW5wVmlpOFpQTHhzZ3d0ZnA5UmQ2UENsTl'
+  + 'JHSXBrIiwiZiI6InNZdUd6aE9KNUczb2VxU2xFeHpvUEJGZy1qUEFoNnNWdUdOWFRUSFlfen'
+  + 'ciLCJpYXQiOjE3MDAwMDAwMDB9.8f70aefea5aad3bedc753f64b2cb13fc4814800d3daeaa'
+  + '42a42dc3990c55efa2';
 
 const TIMESTAMP = 1700000000;
 const NONCE = 'a-nonce-of-sufficient-length';
 
 /** What the agent signed over exactly those values. */
-const SIGNATURE = 'A7z-FsBJSi1IiY6CLjzVKj23JavcD_fzYdHFW58ZU_l0zGN'
-  + '_q_5xu_-mMvN5zbk5rNRVo0GNhFsxRQLMietzdw';
+const SIGNATURE = 'e0PiMrkDpPn7TLQQtG3jQXTbcouAHn1GtIAXzSmaS2kMFva1P3A3'
+  + 'MLAwn59fc9vMsD0amlSwx3B1JcmH05Umwg';
 
 /** The instant the fixtures are fresh at. */
 const WHEN = TIMESTAMP * 1000;
@@ -54,7 +59,8 @@ test('this Worker issues exactly the grant the agent was given', async () => {
   // If this drifts, every deployed agent's stored grant stops opening. It is
   // the one value in the system that outlives a single request.
   const made = await issueGrant(SECRET, {
-    installationId: 7, publicKey: PUBLIC_KEY, now: WHEN,
+    installationId: 7, account: ACCOUNT, actor: ACTOR,
+    publicKey: PUBLIC_KEY, now: WHEN,
   });
 
   assert.equal(made, GRANT);
@@ -90,6 +96,12 @@ test('the grant the agent stores names the key the agent holds', async () => {
   assert.equal(claims.k, PUBLIC_KEY);
   assert.equal(claims.i, 7);
   assert.equal(claims.f, await fingerprint(PUBLIC_KEY));
+  // The fields the entitlement check reads. If these ever stop travelling,
+  // a grant becomes uncheckable and therefore permanent.
+  assert.equal(claims.ai, ACCOUNT.id);
+  assert.equal(claims.at, ACCOUNT.type);
+  assert.equal(claims.ui, ACTOR.id);
+  assert.equal(claims.ul, ACTOR.login);
 });
 
 test('that same agent signature is refused at the other endpoint', async () => {
