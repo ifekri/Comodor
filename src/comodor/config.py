@@ -637,6 +637,16 @@ class DiscordConfig:
         return bool(user_id) and int(user_id) in {int(x) for x in self.allowed}
 
 
+#: The grant format this agent can use.
+#:
+#: Version 1 grants said which key owned which installation and nothing more,
+#: so an endpoint holding one could not tell whether the person who made the
+#: connection still had access to it. Version 2 names them. There is no
+#: upgrade path - the missing field is not something either side can look up -
+#: so an old grant is reported as needing a reconnection rather than tried.
+GRANT_FORMAT = "g2"
+
+
 @dataclass
 class GitHubInstallation:
     """One GitHub App installation, as this machine knows it.
@@ -680,10 +690,14 @@ class GitHubInstallation:
     created_at: float = 0.0
     updated_at: float = 0.0
     #: The Worker's signed statement that this installation belongs to this
-    #: machine's key for it. Sent with every request that could do something,
-    #: and the only place the installation id is read from - a request that
-    #: merely names an id proves nothing, which is what an earlier version of
-    #: this got wrong.
+    #: machine's key for it, and to the person who connected it. Sent with
+    #: every request that could do something, and the only place the
+    #: installation id is read from - a request that merely names an id proves
+    #: nothing, which is what an earlier version of this got wrong.
+    #:
+    #: It is not a licence. The endpoint asks GitHub whether the person named
+    #: in it is *still* entitled before it hands anything over, so a grant kept
+    #: after somebody loses access stops working rather than outliving it.
     grant: str = ""
 
     def to_json(self) -> dict[str, Any]:
@@ -703,11 +717,17 @@ class GitHubInstallation:
     def usable(self) -> bool:
         """Whether this connection can still do anything.
 
-        A record without a grant is a leftover from a version that did not
-        have them, or a connection whose key was lost. It reads fine and
-        refuses at the first request, so `status` says so up front instead.
+        Two ways it cannot. No grant at all is a leftover from a version that
+        did not have them, or a connection whose key was lost. A `g1.` grant is
+        from before the grant named the person it was issued to, which means
+        the endpoint has no way to re-check whether that person still has
+        access - so it refuses them, and reconnecting is the fix.
+
+        Both read as connected and fail at the first request, which is why
+        `status` says so up front instead.
         """
-        return bool(self.installation_id and self.grant)
+        return bool(self.installation_id and self.grant
+                    and self.grant.startswith(f"{GRANT_FORMAT}."))
 
     def may(self, permission: str, level: str = "read") -> bool:
         """Whether this installation was granted `permission` at `level`.

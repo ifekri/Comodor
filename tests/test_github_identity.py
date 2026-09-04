@@ -98,7 +98,7 @@ def connected(tmp_path, monkeypatch, endpoint: Endpoint,
     config.github.remember(GitHubInstallation(
         installation_id=installation_id, account_id=1,
         account_login="ifekri", account_type="User",
-        permissions={"contents": "write"}, grant="g1.the-grant.sig"))
+        permissions={"contents": "write"}, grant="g2.the-grant.sig"))
 
     return Connector(config), config, key
 
@@ -286,7 +286,7 @@ def test_a_token_request_carries_a_grant_and_never_an_installation_id(
     connector.mint(7)
     sent = endpoint.body("token")
 
-    assert sent["grant"] == "g1.the-grant.sig"
+    assert sent["grant"] == "g2.the-grant.sig"
     assert "installation_id" not in sent
     assert set(sent) == {"grant", "timestamp", "nonce", "signature"}
 
@@ -306,7 +306,7 @@ def test_a_verify_request_is_signed_too(tmp_path, monkeypatch):
     connector.verify(7)
     sent = endpoint.body("verify")
 
-    assert sent["grant"] == "g1.the-grant.sig"
+    assert sent["grant"] == "g2.the-grant.sig"
     assert "installation_id" not in sent
     assert sent["signature"]
 
@@ -401,11 +401,11 @@ def test_the_grant_decides_the_installation_not_the_argument(tmp_path,
     identity.save(config.paths.user, 9, other)
     config.github.remember(GitHubInstallation(
         installation_id=9, account_id=2, account_login="comodor-ai",
-        account_type="Organization", grant="g1.the-other-grant.sig"))
+        account_type="Organization", grant="g2.the-other-grant.sig"))
 
     connector.mint(9)
 
-    assert endpoint.body("token")["grant"] == "g1.the-other-grant.sig"
+    assert endpoint.body("token")["grant"] == "g2.the-other-grant.sig"
 
 
 def test_each_connection_signs_with_its_own_key(tmp_path, monkeypatch):
@@ -417,7 +417,7 @@ def test_each_connection_signs_with_its_own_key(tmp_path, monkeypatch):
     second = identity.generate()
     identity.save(config.paths.user, 9, second)
     config.github.remember(GitHubInstallation(
-        installation_id=9, account_login="comodor-ai", grant="g1.other.sig"))
+        installation_id=9, account_login="comodor-ai", grant="g2.other.sig"))
 
     assert first.public != second.public
     assert identity.key_path(config.paths.user, 7) \
@@ -461,7 +461,7 @@ def test_an_abandoned_flow_leaves_no_key_on_disk(tmp_path, monkeypatch):
 
 def test_completing_a_flow_stores_the_grant_and_the_key(tmp_path, monkeypatch):
     endpoint = Endpoint({"claim": {
-        "status": "connected", "nonce": "mine", "grant": "g1.issued.sig",
+        "status": "connected", "nonce": "mine", "grant": "g2.issued.sig",
         "installation": {"installation_id": 11,
                          "account": {"id": 1, "login": "ifekri",
                                      "type": "User"}}}})
@@ -473,7 +473,7 @@ def test_completing_a_flow_stores_the_grant_and_the_key(tmp_path, monkeypatch):
                       expires_at=time.time() + 900, key=key)
     found = Connector(config).collect(pending, "a-receipt")
 
-    assert found.grant == "g1.issued.sig"
+    assert found.grant == "g2.issued.sig"
     assert found.usable
     assert identity.load(config.paths.user, 11).public == key.public
 
@@ -548,7 +548,18 @@ def test_a_record_without_a_grant_is_not_usable():
     """A leftover from before grants existed reads fine and fails at first
     use. `usable` is how `status` says so up front instead."""
     assert not GitHubInstallation(installation_id=7).usable
-    assert GitHubInstallation(installation_id=7, grant="g1.x.y").usable
+    assert GitHubInstallation(installation_id=7, grant="g2.x.y").usable
+
+
+def test_a_grant_from_before_the_actor_was_named_is_not_usable():
+    """A `g1.` grant says which key owns which installation and no more.
+
+    The endpoint cannot tell from one whether the person who made the
+    connection still has access, so it refuses them. Reporting that here means
+    `comodor github status` says "reconnect" rather than the refusal arriving
+    in the middle of a turn.
+    """
+    assert not GitHubInstallation(installation_id=7, grant="g1.old.sig").usable
 
 
 def test_refreshing_permissions_does_not_drop_the_grant():
@@ -556,14 +567,14 @@ def test_refreshing_permissions_does_not_drop_the_grant():
     with it must not silently break the connection it just confirmed."""
     config = Config()
     config.github.remember(GitHubInstallation(
-        installation_id=7, account_login="ifekri", grant="g1.kept.sig"))
+        installation_id=7, account_login="ifekri", grant="g2.kept.sig"))
 
     config.github.remember(GitHubInstallation(
         installation_id=7, account_login="ifekri",
         permissions={"contents": "read"}))
 
     found = config.github.find_by_id(7)
-    assert found.grant == "g1.kept.sig"
+    assert found.grant == "g2.kept.sig"
     assert found.permissions == {"contents": "read"}
 
 
@@ -575,9 +586,9 @@ def test_reconnecting_replaces_the_grant_rather_than_keeping_the_old_one():
         installation_id=7, grant="g1.old.sig"))
 
     config.github.remember(GitHubInstallation(
-        installation_id=7, grant="g1.new.sig"))
+        installation_id=7, grant="g2.new.sig"))
 
-    assert config.github.find_by_id(7).grant == "g1.new.sig"
+    assert config.github.find_by_id(7).grant == "g2.new.sig"
 
 
 def test_a_grant_is_written_to_the_config_and_read_back(tmp_path, monkeypatch):
@@ -588,13 +599,13 @@ def test_a_grant_is_written_to_the_config_and_read_back(tmp_path, monkeypatch):
 
     config = Config(paths=resolve_paths(tmp_path))
     config.github.remember(GitHubInstallation(
-        installation_id=7, account_login="ifekri", grant="g1.persisted.sig"))
+        installation_id=7, account_login="ifekri", grant="g2.persisted.sig"))
     config.save()
 
     from comodor.config import load
     back = load(tmp_path)
 
-    assert back.github.find_by_id(7).grant == "g1.persisted.sig"
+    assert back.github.find_by_id(7).grant == "g2.persisted.sig"
 
 
 # --------------------------------------------------------------------------- #

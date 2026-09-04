@@ -75,6 +75,9 @@ If that membership check cannot run — the app is missing the `Members: Read`
 organisation permission — the connection is refused rather than allowed. A
 check that did not happen has not passed.
 
+The same check runs again every time a token is requested, not only while
+connecting. See [A connection is not a licence](#a-connection-is-not-a-licence).
+
 The token GitHub issues for that check is used for one request and dropped. It
 is not stored, not logged, not shown, and never sent to Comodor on your
 machine — the agent never learns that step happened. Everything after it uses
@@ -122,6 +125,25 @@ Your private key is at `github/<installation id>.key` in Comodor's data
 directory, written so only your account can read it. Losing it does not lose
 access to anything on GitHub; it means this machine can no longer prove the
 connection is its own, and `comodor github status` says so.
+
+### A connection is not a licence
+
+The grant does not expire, and it is not meant to: what it names is checked
+again every single time a token is asked for.
+
+If you connect as an owner of an organisation and later stop being one —
+demoted to member, or removed — the next token request is refused. Not at the
+next renewal, not after an expiry: at the next request. The same is true if the
+installation moves to a different account, or if your GitHub account is not the
+one that made the connection any more.
+
+The one thing this cannot reach backwards for is a token already issued. Those
+last up to an hour and GitHub gives nobody a way to cancel one, so there is a
+window of at most an hour where an already-minted token still works. After it,
+nothing more can be obtained.
+
+Reconnecting is `comodor github connect`, and it is the fix for every one of
+these.
 
 ### What can and cannot be replayed
 

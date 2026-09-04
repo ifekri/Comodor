@@ -533,7 +533,7 @@ def a_connector(answers: dict[str, Any], monkeypatch, tmp_path=None,
     identity.save(config.paths.user, connected, identity.generate())
     config.github.remember(GitHubInstallation(
         installation_id=connected, account_login="ifekri",
-        grant=f"g1.grant-for-{connected}.sig"))
+        grant=f"g2.grant-for-{connected}.sig"))
     return Connector(config)
 
 
@@ -583,7 +583,7 @@ def test_a_receipt_from_another_attempt_is_refused(monkeypatch):
 def test_a_matching_receipt_becomes_an_installation(tmp_path, monkeypatch):
     monkeypatch.setenv("COMODOR_HOME", str(tmp_path))
     connector = a_connector({"claim": {
-        "status": "connected", "nonce": "mine", "grant": "g1.issued.sig",
+        "status": "connected", "nonce": "mine", "grant": "g2.issued.sig",
         "installation": {
             "installation_id": 7,
             "account": {"id": 42, "login": "comodor-ai",

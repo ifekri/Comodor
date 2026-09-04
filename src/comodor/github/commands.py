@@ -154,6 +154,7 @@ def _status(console, config: Config) -> int:
     table.add_column("May")
 
     unusable = []
+    organisations = []
     for one in settings.installations:
         may = ", ".join(sorted(
             f"{name}:{level}" for name, level in one.permissions.items()))
@@ -165,6 +166,8 @@ def _status(console, config: Config) -> int:
         # middle of a turn.
         if not one.usable or not _has_key(config, one.installation_id):
             unusable.append(one.account_login or str(one.installation_id))
+        elif one.account_type == "Organization":
+            organisations.append(one.account_login)
 
     console.print(table)
     console.print()
@@ -173,12 +176,24 @@ def _status(console, config: Config) -> int:
         console.print(Panel(
             Text.from_markup(
                 f"[bold]{', '.join(unusable)}[/bold] cannot be used.\n\n"
-                f"This machine no longer holds the key that proves the "
-                f"connection is its own, so no token can be requested for it. "
+                f"Either this machine no longer holds the key that proves the "
+                f"connection is its own, or the connection predates a security "
+                f"fix and cannot be checked against your current access. "
                 f"Nothing is wrong on GitHub.\n\n"
                 f"[bold]comodor github connect[/bold] establishes a new one."),
             title=" Needs reconnecting ", title_align="left",
             border_style="yellow"))
+        console.print()
+
+    if organisations:
+        # Said here rather than discovered at the first refusal. Losing owner
+        # rights is not a failure of anything on this machine, and somebody
+        # whose connection stops working should already know why it might.
+        console.print(
+            f"An organisation connection ({', '.join(organisations)}) keeps "
+            f"working only while the account that made it is still an owner "
+            f"there. That is checked with GitHub every time, not remembered "
+            f"from when you connected.")
         console.print()
     console.print(
         f"Turns may {'change' if settings.allow_writes else 'read'} "
