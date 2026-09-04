@@ -206,22 +206,49 @@ the same App, and `callback` issues the grant only after all of:
 2. the browser presents the PKCE verifier for the challenge inside that state;
 3. GitHub exchanges the `code`, server side, for a user access token;
 4. `GET /user/installations` — asked **as the user**, not as the app — lists
-   the installation the flow is for.
+   the installation the flow is for;
+5. and that user is entitled to the **whole** of that installation.
+
+Step 5 is separate from step 4 and the gap between them was a privilege
+escalation. `/user/installations` answers "can this person see it", which an
+ordinary organisation member with read on one repository can. A grant covers
+the installation entire — `/token` mints with every repository and permission
+the app holds — so answering step 4 alone would have handed that member write
+on every other repository in it.
+
+| the installation sits on | who may connect it |
+|---|---|
+| a personal account | that account, and only it. Not a collaborator on one of its repositories |
+| an organisation | an active member with `role: admin` — what GitHub calls an owner |
+| anything else | nobody. An account type this does not recognise is refused rather than guessed at |
+
+Organisation owners are the people who could install, uninstall or re-scope the
+app anyway, so this grants nothing they could not already take.
+
+Membership is read as the user through `GET /user/memberships/orgs/{org}`. If
+that call fails for any reason — including a missing permission — the
+connection is refused: a check that cannot run has not passed.
 
 The user access token exists between 3 and 4. It is never persisted, never
 logged, never in a response, and never reaches the agent. Ordinary work is
 still installation access tokens alone; OAuth bootstraps a connection and
 appears nowhere in a turn.
 
-**On PKCE, precisely.** `code_challenge` is sent because GitHub's guidance asks
-for it, but GitHub does not currently verify it, so claiming it binds the code
-at GitHub would be false. What it does buy is enforced here: the callback must
-come from the browser that started the flow, because only that browser holds
-the cookie whose SHA-256 matches the challenge inside the signed state. A state
-fed to somebody else's browser has no verifier to present. The verifier is in a
-`HttpOnly; Secure; SameSite=Lax` cookie scoped to this path — `Lax` rather than
-`Strict` because the callback arrives as a top-level navigation from
-github.com, and `Strict` would withhold the cookie on exactly that hop.
+**PKCE, and what each half of it does.** GitHub supports `code_challenge` and
+`code_verifier` with S256, so the authorisation code is bound at GitHub to the
+verifier this Worker sends when redeeming it — a code intercepted on its way
+back cannot be exchanged by anybody who does not also hold the verifier.
+
+The same verifier is checked here too, against the challenge inside the signed
+state, and that is not redundant: it says the callback arrived at the browser
+that started the flow, which is a statement about this Worker's own state
+rather than about the code. A genuine state handed to somebody else's browser
+fails it before any code is redeemed.
+
+The verifier lives in a `HttpOnly; Secure; SameSite=Lax` cookie scoped to this
+path. `Lax` rather than `Strict` is forced rather than chosen: the callback
+arrives as a top-level navigation from github.com, and `Strict` would withhold
+the cookie on exactly that hop.
 
 #### Who may ask for a token
 
@@ -289,6 +316,18 @@ In the app's settings under the `comodor-ai` organisation:
 | **Request user authorization (OAuth) during installation** | **off** |
 | **Webhook URL** | `https://comodor.ai/api/integrations/github/webhook` |
 | **Webhook secret** | the same value as `GITHUB_APP_WEBHOOK_SECRET` |
+
+**Organisation permissions:** `Members: Read`.
+
+That one is not for doing anything with members. It is what
+`GET /user/memberships/orgs/{org}` needs, and that call is the only way to tell
+an organisation owner from an ordinary member during the connection. Without
+it, GitHub answers 403 and every organisation connection is refused with a page
+naming this permission — the integration fails closed rather than falling back
+to trusting the installation list.
+
+It is read-only, it is never used outside the connection flow, and no
+membership information is stored or shown.
 
 The callback URL must match exactly; GitHub refuses a `redirect_uri` that
 differs by so much as a trailing slash.

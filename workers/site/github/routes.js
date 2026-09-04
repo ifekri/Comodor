@@ -69,6 +69,7 @@ import {
   clearCookie,
   exchangeCode,
   installationForUser,
+  mayReceiveGrant,
   openState,
   sameBytes,
   verifierFrom,
@@ -352,7 +353,7 @@ function callbackUrl(url) {
 /**
  * The end of the flow, and the only place a grant is issued.
  *
- * Five checks, in this order, and every one of them must pass:
+ * Six checks, in this order, and every one of them must pass:
  *
  *   1. the state opens under our secret, is a state of ours, and is fresh;
  *   2. the browser has the cookie whose SHA-256 is the challenge in that
@@ -360,9 +361,17 @@ function callbackUrl(url) {
  *   3. GitHub exchanges the code, server side, for a user access token;
  *   4. that user's own installation list contains the installation this flow
  *      is for;
- *   5. only then, a grant.
+ *   5. that user is entitled to the whole of it — they are the personal
+ *      account it sits on, or an owner of the organisation it sits on;
+ *   6. only then, a grant.
  *
- * The user token exists between 3 and 4. It is not persisted, not logged, not
+ * Four and five are different questions and the gap between them was a
+ * privilege escalation. Four asks whether the person can *see* the
+ * installation, which an ordinary member with read on one repository can. The
+ * grant is for the installation entire, so answering four alone handed that
+ * member write on every other repository in it. See `mayReceiveGrant`.
+ *
+ * The user token exists between 3 and 5. It is not persisted, not logged, not
  * put in the page, and not returned to the agent — the agent never learns that
  * OAuth happened at all, and ordinary work continues to use installation
  * access tokens alone.
@@ -397,12 +406,16 @@ async function callback(request, env, secret, url) {
   }
 
   let user;
+  let entitled;
   try {
-    // The token. From here to the end of the next call, and no further.
+    // The token. From here to the end of the entitlement check, and no
+    // further: it is not assigned outside this block and nothing below can
+    // reach it.
     const token = await exchangeCode(env, {
       code, verifier, redirectUri: callbackUrl(url),
     });
     user = await installationForUser(token, claims.i);
+    entitled = user ? await mayReceiveGrant(token, user) : null;
   } catch (error) {
     return page('That could not be confirmed',
       `<p>${escapeHtml(String(error.message || error).slice(0, 200))}</p>`,
@@ -411,11 +424,19 @@ async function callback(request, env, secret, url) {
 
   if (!user) {
     // The installation exists — it is how we got here — but it is not one this
-    // person can reach. This is the attack the whole callback exists for, and
-    // the answer says nothing about whose it is instead.
+    // person can reach. The answer says nothing about whose it is instead.
     return page('That installation is not yours',
       '<p>You are signed in to GitHub as somebody who cannot reach the '
       + 'installation this link is for, so nothing has been granted.</p>',
+      clear);
+  }
+
+  if (!entitled || !entitled.ok) {
+    // Reachable, but not theirs to hand over. A grant covers the installation
+    // entire, so this is the difference between a member of an organisation
+    // and an owner of it.
+    return page('That is not yours to connect',
+      `<p>${escapeHtml(entitled ? entitled.why : 'That could not be confirmed.')}</p>`,
       clear);
   }
 

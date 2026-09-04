@@ -24,26 +24,56 @@
  *   2. the browser presents the verifier for the challenge in that state;
  *   3. GitHub exchanges the code for a user access token, server side;
  *   4. `GET /user/installations` lists what *that user* can reach;
- *   5. the installation the flow is for is in that list.
+ *   5. the installation the flow is for is in that list;
+ *   6. and that user is entitled to the *whole* of it.
  *
- * Only then. The user token is used for step 4 and dropped: it is never
+ * **Step 6 exists because step 5 is not enough.** `/user/installations` answers
+ * "can this person see this installation", and an ordinary member of an
+ * organisation with read on a single repository can see one. The grant that
+ * follows is for the installation entire: `/token` mints against it with every
+ * repository and every permission the app holds. So a member with read on
+ * `repo-a` would have obtained write on `repo-b` — a privilege escalation
+ * inside a check that appeared to have passed.
+ *
+ * What entitlement means depends on what the installation sits on:
+ *
+ * * **a personal account** — the authenticated user must *be* that account.
+ *   Not a collaborator on one of its repositories: the account itself.
+ * * **an organisation** — the authenticated user must be an active member with
+ *   `role: admin`, which is what GitHub calls an organisation owner. Owners
+ *   are the people who could install, uninstall or re-scope the app anyway, so
+ *   this grants nothing they could not already take.
+ * * **anything else** — refused. An account type this does not recognise is
+ *   not a case to guess at.
+ *
+ * Membership is read with the user's own token, through
+ * `GET /user/memberships/orgs/{org}`, which needs the app's `members: read`
+ * organisation permission. If that permission is missing the call fails and
+ * the connection is refused: a check that cannot run has not passed.
+ *
+ * Only then. The user token is used for steps 4 to 6 and dropped: it is never
  * persisted, never logged, never in a response, and never reaches the agent.
  * Ordinary work continues to use installation access tokens alone — OAuth
  * exists here to bootstrap one connection and appears nowhere in a turn.
  *
  * **No new storage.** The OAuth state carries its own contents and its own
  * HMAC, exactly as the install state does. The one value that cannot live in
- * the state is the PKCE verifier — putting it next to its own challenge would
- * make the challenge decorative — so it goes in a short-lived cookie, which is
- * storage in the browser rather than a namespace to provision.
+ * the state is the PKCE verifier: a verifier travelling beside its own
+ * challenge proves nothing about who is carrying it, which is the whole point
+ * of having them be two different things. So it goes in a short-lived cookie
+ * — storage in the browser rather than a namespace to provision.
  *
- * **What PKCE buys here, stated precisely.** GitHub does not currently verify
- * `code_challenge`; it is sent because GitHub's own guidance asks for it and
- * because that may change. The property it actually provides today is enforced
- * on this side: the callback must come from the browser that started the flow,
- * because only that browser has the cookie whose SHA-256 matches the challenge
- * inside the signed state. A state observed in transit, replayed from
- * somewhere else, has no verifier to present.
+ * **PKCE, and what each half of it does.** GitHub supports `code_challenge`
+ * and `code_verifier` with S256, so the authorisation code is bound at GitHub
+ * to the verifier this Worker sends when redeeming it: a code intercepted on
+ * its way back cannot be exchanged by anybody who does not also hold the
+ * verifier.
+ *
+ * The same verifier is checked here as well, against the challenge inside the
+ * signed state, and that second check is not redundant. It says the callback
+ * arrived at the browser that started the flow, which is a statement about
+ * *this* Worker's own state rather than about the code — a genuine state
+ * handed to somebody else's browser fails it before any code is redeemed.
  */
 
 const AUTHORISE = 'https://github.com/login/oauth/authorize';
@@ -374,6 +404,128 @@ export async function installationForUser(token, installationId) {
     if (found.length < 100) return null;
   }
   return null;
+}
+
+/** One call as the user. Throws with a message safe to show. */
+async function asUser(token, path) {
+  let answer;
+  try {
+    answer = await fetch(`${API}${path}`, {
+      headers: { ...HEADERS, authorization: `Bearer ${token}` },
+    });
+  } catch (error) {
+    const problem = new Error(`GitHub could not be reached: ${error}`);
+    problem.status = 502;
+    throw problem;
+  }
+
+  let parsed = {};
+  try {
+    parsed = JSON.parse(await answer.text());
+  } catch {
+    parsed = {};
+  }
+
+  if (!answer.ok) {
+    const problem = new Error(`GitHub answered ${answer.status}`);
+    problem.status = answer.status;
+    problem.parsed = parsed;
+    throw problem;
+  }
+  return parsed;
+}
+
+/**
+ * Whether this user is entitled to a grant for the whole of this installation.
+ *
+ * Returns `{ ok, why }`. `why` is for the page and names what is missing
+ * without naming who does have it — telling somebody "the owner is X" turns a
+ * refusal into a directory lookup.
+ *
+ * Fails closed everywhere. A membership call that errors, an account type this
+ * does not know, a `GET /user` that does not come back: all refusals. The
+ * failure mode of a check that quietly degrades is that it stops being a
+ * check, and this one is load-bearing.
+ */
+export async function mayReceiveGrant(token, installation) {
+  const account = (installation && installation.account) || {};
+  const kind = String(account.type || '');
+
+  if (kind === 'User') {
+    // The installation is on a personal account, so the person connecting must
+    // be that account. Being a collaborator on one of its repositories is not
+    // the same thing and would carry the same escalation as an org member.
+    let me;
+    try {
+      me = await asUser(token, '/user');
+    } catch {
+      return { ok: false, why: 'GitHub would not say who you are.' };
+    }
+    if (Number(me.id) && Number(me.id) === Number(account.id)) {
+      return { ok: true, why: '' };
+    }
+    return {
+      ok: false,
+      why: 'This installation is on somebody else\'s personal account. Only '
+        + 'the account it belongs to can connect it.',
+    };
+  }
+
+  if (kind === 'Organization') {
+    const org = String(account.login || '');
+    if (!org) return { ok: false, why: 'That organisation has no name.' };
+
+    let membership;
+    try {
+      membership = await asUser(token,
+        `/user/memberships/orgs/${encodeURIComponent(org)}`);
+    } catch (error) {
+      if (error.status === 403) {
+        // The app is missing `members: read`. Refusing rather than proceeding:
+        // a check that cannot run has not passed.
+        return {
+          ok: false,
+          why: 'This deployment cannot read organisation membership, so it '
+            + 'cannot confirm you may connect this installation. The app needs '
+            + 'the "Members" organisation permission at read.',
+        };
+      }
+      if (error.status === 404) {
+        return {
+          ok: false,
+          why: `You are not a member of ${org}, so this installation is not `
+            + 'yours to connect.',
+        };
+      }
+      return { ok: false, why: 'That membership could not be confirmed.' };
+    }
+
+    const state = String(membership.state || '');
+    const role = String(membership.role || '');
+    if (state === 'active' && role === 'admin') return { ok: true, why: '' };
+
+    if (state === 'pending') {
+      return {
+        ok: false,
+        why: `Your membership of ${org} has not been accepted yet.`,
+      };
+    }
+    return {
+      ok: false,
+      // Named precisely, because the person may well be a legitimate member
+      // wondering why this failed, and "ask an owner" is the actual next step.
+      why: `Connecting an organisation installation covers every repository `
+        + `and permission the app holds there, so it takes an owner of ${org}. `
+        + `You are a member, which is not the same thing. An owner can run `
+        + `this, or you can install the app on your own account instead.`,
+    };
+  }
+
+  return {
+    ok: false,
+    why: `This installation is on a ${kind || 'kind of'} account this cannot `
+      + 'verify ownership of, so nothing has been granted.',
+  };
 }
 
 /** One installation, in the shape the agent is given. */
