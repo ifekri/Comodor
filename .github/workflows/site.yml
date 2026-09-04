@@ -1,0 +1,44 @@
+# The site branch had no CI, so nothing here ever ran on its own.
+#
+# That was survivable while `workers/` was a router and a build script. It
+# stopped being survivable when the GitHub App landed: `grant.js` is what
+# decides whether a request may mint a GitHub installation token, and its
+# tests are the only thing standing between a refactor and handing somebody
+# else's repositories out. Tests nobody runs are documentation.
+#
+# Node only. No build, no deploy, no secrets, no Cloudflare credentials — a
+# pull request from anywhere can run this and learn nothing it should not.
+
+name: Site
+
+on:
+  push:
+    branches: [site]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes an in-flight run pointless.
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Worker tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # No `npm ci`. Nothing under test imports a dependency: the Workers use
+      # the runtime's own Web Crypto and `node --test` is in Node itself. So
+      # this needs no lockfile install, which is both faster and one less
+      # supply chain in the path of a security test.
+      - name: Test
+        run: npm test
