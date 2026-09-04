@@ -10,7 +10,9 @@
     "build:cloudflare": "node tools/build-export.mjs && node tools/early-hints.mjs",
     "deploy": "wrangler deploy",
     "test:get": "node --test workers/get/dispatch.test.mjs",
-    "test:version": "node tools/version.mjs"
+    "test:version": "node tools/version.mjs",
+    "test:github": "node --test workers/site/github/github.test.mjs",
+    "test": "node --test workers/get/dispatch.test.mjs workers/site/github/github.test.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

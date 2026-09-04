@@ -148,11 +148,64 @@ the name at all, and the routes only worked because of them.
 
 ### The assets Worker
 
-`wrangler.jsonc` declares no `main`, which is the point: serving 85 exported
-files needs nothing to run, and Cloudflare's own wording for what that costs is
-*"requests to static assets are free and unlimited"*. Adding a Worker script
-would route every request through a function with nothing to do and put the
-free plan's daily request ceiling in front of a marketing page.
+Serving 85 exported files needs nothing to run, and Cloudflare's own wording
+for what that costs is *"requests to static assets are free and unlimited"*. A
+script in front of every request would route each one through a function with
+nothing to do and put the free plan's daily request ceiling in front of a
+marketing page.
+
+`wrangler.jsonc` now declares a `main`, and that sentence still holds. The
+script is reached only through `assets.run_worker_first`, which names one
+prefix — `/api/integrations/github/*`. Every other request goes to the asset
+server without the script running at all. Nothing about serving the page
+changed.
+
+### The GitHub App
+
+Six endpoints on `comodor.ai`, all behind that one prefix:
+
+| | |
+|---|---|
+| `POST /api/integrations/github/install` | start a flow; returns a signed state and the URL to open |
+| `GET /api/integrations/github/setup` | where GitHub sends the browser after installing |
+| `POST /api/integrations/github/claim` | exchange the receipt for the verified installation |
+| `POST /api/integrations/github/token` | an installation access token, one hour |
+| `POST /api/integrations/github/verify` | what an installation is now |
+| `POST /api/integrations/github/webhook` | what GitHub has to say |
+
+They are here and could not be anywhere else. A GitHub App authenticates by
+signing a JWT with a private key; that key cannot live in a static file or on
+each user's machine, so it is a Cloudflare secret this Worker reads and nothing
+else does. What crosses to an agent is an installation token that lasts an
+hour.
+
+Set the secrets once:
+
+```bash
+npx wrangler secret put GITHUB_APP_ID
+npx wrangler secret put GITHUB_APP_PRIVATE_KEY     # PKCS#8 — see below
+npx wrangler secret put GITHUB_APP_WEBHOOK_SECRET
+npx wrangler secret put GITHUB_APP_SLUG            # the app's URL name
+```
+
+GitHub hands out a **PKCS#1** key (`BEGIN RSA PRIVATE KEY`); Web Crypto reads
+only **PKCS#8**. Convert it first, or the Worker refuses with this same line:
+
+```bash
+openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt \
+  -in comodor.private-key.pem -out comodor-pkcs8.pem
+```
+
+`GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` are deliberately **not**
+set. They are for OAuth, and nothing here needs a GitHub *user* identity — the
+app acts as itself against an installation. Setting them would keep a
+credential for a flow that does not run.
+
+Tests, none of which need a key or a network:
+
+```bash
+npm run test:github
+```
 
 ### `get.comodor.ai`
 
