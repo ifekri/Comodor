@@ -4,6 +4,64 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 ## Unreleased
 
+### 1.1.1 shipped without the release it was cut for
+
+The tag was placed on a commit eighteen behind `main`, so the GitHub App
+integration — merged an hour earlier — was not in it. The package on PyPI is a
+valid build of an older tree: `comodor github` is not a command in it, and
+`comodor/github/` is not in the wheel.
+
+Nothing in the pipeline asked whether the tag was current. The gate passed, the
+build passed, PyPI accepted it, and the only way to find out was to install the
+package and look.
+
+The release workflow now refuses a tag that is behind `main`, saying how far
+behind and printing the commands to move it. A tag on a branch that was never
+merged is still allowed — a maintenance hotfix is a real thing — but it says so
+in the summary rather than passing silently.
+
+1.1.1 cannot be replaced. PyPI never lets a version be re-uploaded, even after
+a delete, so the fix is 1.1.2 and 1.1.1 stays on the index as a release that
+was a no-op.
+
+### Repositories on GitHub, through a GitHub App
+
+`comodor github connect` installs an app on an account, you choose which
+repositories it may see, and turns can read them — issues, pull requests,
+files, CI — without a personal access token and without an account to make.
+With `comodor github writes on` a turn may open a pull request, on a
+`comodor/…` branch, never on a default branch.
+
+Local work depends on none of it. Every repository already checked out here
+works with nothing configured.
+
+```
+comodor github connect      install the app on an account
+comodor github status       what is connected, and what it may do
+comodor github repos        which repositories are reachable
+comodor github refresh      ask GitHub what each installation is now
+comodor github writes on    let turns open pull requests
+comodor github disconnect   forget it, and delete the key
+```
+
+**No credential is stored.** The app's private key is a Cloudflare secret the
+server holds; installation tokens last an hour, live in memory, and are never
+written to disk. What is in `config.json` is which installations exist, what
+they cover, and a signed grant that is useless without a private key kept
+outside it at mode 0600.
+
+**Who may ask for a token.** Each connection generates an ECDSA P-256 key pair;
+every request carries a grant, a timestamp, a nonce and a signature. Knowing an
+installation id is worth nothing, holding the key is everything, and the
+installation id is read out of the grant rather than out of the request.
+
+**A connection is not a licence.** Whether the person who connected still has
+access is asked of GitHub at every token request, not remembered from when they
+connected. An organisation owner who is demoted stops being able to mint the
+next time, not at some renewal. The token a turn holds carries five
+permissions and nothing else — `members` is the server's, and never travels.
+
+
 ### The user's own rules, put back where they apply — and what it did not do
 
 Every `careful` failure the benchmark finds has one shape. The user says "do
