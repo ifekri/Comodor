@@ -22,7 +22,11 @@ to make, store, or remember to rotate.
 ```
 comodor github connect
         │
-        ├─ comodor.ai issues a signed, one-time state
+        ├─ your machine generates a key pair for this connection
+        │  the private half never leaves it
+        │
+        ├─ comodor.ai issues a short-lived signed state
+        │  carrying your public key
         │
         ├─ browser opens github.com/apps/comodor/installations/new
         │
@@ -32,6 +36,7 @@ comodor github connect
         │  asks GitHub what that installation actually is
         │
         └─ the page shows a signed line; you paste it back
+           it carries a grant naming your public key
 ```
 
 The line you paste is a **receipt**: it says which installation GitHub
@@ -48,6 +53,44 @@ GitHub sends `installation_id` to `comodor.ai` as a query parameter, and a
 query parameter is something anybody can type. Before anything is signed,
 `comodor.ai` authenticates as the app and asks GitHub what that installation
 is. What you paste is that verified answer, not the number from the URL.
+
+### Why knowing an installation id gets you nothing
+
+An installation id is not a credential. It is a small integer, it appears in
+URLs, and other people can see it. So it is never what a request is granted
+on.
+
+What a request is granted on is the **grant**: `comodor.ai`'s signed statement
+that installation *n* belongs to a particular public key. Every request that
+could do something carries four things —
+
+| | |
+|---|---|
+| the grant | says which installation, and which key speaks for it |
+| a timestamp | so a captured request stops working |
+| a nonce | so two requests in the same second are still distinct |
+| a signature | over all of the above, made with your private key |
+
+`comodor.ai` checks the grant is one it issued and unedited, then checks the
+signature against the key the grant names, and only then reads the
+installation id — **out of the grant, never out of the request**. A request
+that merely names an id proves nothing and is refused before GitHub is
+contacted.
+
+Your private key is at `github/<installation id>.key` in Comodor's data
+directory, written so only your account can read it. Losing it does not lose
+access to anything on GitHub; it means this machine can no longer prove the
+connection is its own, and `comodor github status` says so.
+
+### What can and cannot be replayed
+
+Stated plainly, because the honest version is short. The state is
+short-lived, signed and bound to a nonce only your terminal holds — it is not
+server-side one-time, because marking one used needs somewhere to write the
+mark and `comodor.ai` has no database. A signed request can be replayed within
+its 120-second window by somebody who captured it, which means breaking TLS
+first. What replay cannot do is widen anything: the grant fixes the
+installation, so a replayed request mints exactly what it always would have.
 
 ---
 
@@ -66,12 +109,17 @@ On your machine, in `config.json`, under `github`:
         "account_login": "ifekri",
         "account_type": "User",
         "repository_selection": "selected",
-        "permissions": { "contents": "write", "pull_requests": "write" }
+        "permissions": { "contents": "write", "pull_requests": "write" },
+        "grant": "g1.…"
       }
     ]
   }
 }
 ```
+
+**Nothing in there is a secret**, the grant included. It is a signed statement
+about a public key, and it is useless to anybody who does not hold the private
+half — which is not in this file. You can paste this config into a bug report.
 
 **No token is in there.** A GitHub App does not have a long-lived credential to
 store. It has a private key — held by the app, on the server, never on your

@@ -651,6 +651,13 @@ class GitHubInstallation:
     hour and is minted from the app's private key when it is needed; writing
     one to a config file would leave a working key on disk long after the
     session that fetched it, for no gain over asking again.
+
+    The grant is not a credential either, and that is worth being precise
+    about because it looks like one. It is a signed statement that this
+    installation belongs to a particular public key, and it is useless without
+    the private half - which is not in this file, and is not in any file this
+    one links to. Somebody who copies their config into a gist has published
+    nothing that can be used.
     """
 
     installation_id: int = 0
@@ -672,6 +679,12 @@ class GitHubInstallation:
     #: never seen since" are different situations.
     created_at: float = 0.0
     updated_at: float = 0.0
+    #: The Worker's signed statement that this installation belongs to this
+    #: machine's key for it. Sent with every request that could do something,
+    #: and the only place the installation id is read from - a request that
+    #: merely names an id proves nothing, which is what an earlier version of
+    #: this got wrong.
+    grant: str = ""
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -683,7 +696,18 @@ class GitHubInstallation:
             "permissions": dict(self.permissions),
             "created_at": float(self.created_at),
             "updated_at": float(self.updated_at),
+            "grant": self.grant,
         }
+
+    @property
+    def usable(self) -> bool:
+        """Whether this connection can still do anything.
+
+        A record without a grant is a leftover from a version that did not
+        have them, or a connection whose key was lost. It reads fine and
+        refuses at the first request, so `status` says so up front instead.
+        """
+        return bool(self.installation_id and self.grant)
 
     def may(self, permission: str, level: str = "read") -> bool:
         """Whether this installation was granted `permission` at `level`.
@@ -751,6 +775,23 @@ class GitHubConfig:
                 return one
         return None
 
+    def find_by_id(self, installation_id: int) -> GitHubInstallation | None:
+        """The installation with this id, or None.
+
+        By id rather than by login, because this is what the signing path
+        needs: it is handed an id and has to find the grant that goes with it.
+        Returning None means there is no grant, which means no request, rather
+        than a request that would be refused.
+        """
+        try:
+            wanted = int(installation_id)
+        except (TypeError, ValueError):
+            return None
+        for one in self.installations:
+            if one.installation_id == wanted:
+                return one
+        return None
+
     def remember(self, installation: GitHubInstallation) -> None:
         """Add or replace one installation, keyed by its id.
 
@@ -762,6 +803,13 @@ class GitHubConfig:
             if existing.installation_id == installation.installation_id:
                 installation.created_at = (existing.created_at
                                            or installation.created_at)
+                # The grant is carried over only when the new record has none
+                # - a `verify` refreshes permissions and has no grant to give,
+                # and dropping it there would break the connection it just
+                # confirmed. A `connect` brings its own, newer, and matching a
+                # key that has just replaced the old one on disk, so it wins.
+                if not installation.grant:
+                    installation.grant = existing.grant
                 self.installations[index] = installation
                 return
         self.installations.append(installation)

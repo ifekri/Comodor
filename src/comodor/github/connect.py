@@ -17,6 +17,14 @@ that: it reads the Worker's response over TLS and nothing else.
 completed the flow, recorded in that machine's own config. There is no
 `comodor_user_id`, because Comodor has no users to have ids — it is a program
 somebody runs, and the file it writes is theirs.
+
+**What makes it this machine's.** An installation id is not a credential: it is
+a small integer that appears in URLs. So `connect` generates a key pair for the
+connection, sends only the public half, and gets back a *grant* — the Worker's
+signed statement that this installation belongs to that key. Every later
+request carries the grant and a signature made with the private half, and the
+Worker reads the installation id out of the grant rather than out of the
+request. Knowing an id is then worth nothing; holding the key is everything.
 """
 
 from __future__ import annotations
@@ -30,10 +38,18 @@ from typing import Any
 
 from ..config import Config, GitHubInstallation
 from ..net import http
+from . import identity
+from .identity import ClientKey, IdentityError
 from .tokens import InstallationToken, TokenError, redact
 
 #: One call to the Worker.
 TIMEOUT = 30.0
+
+#: What joins the fields of a signed request. A newline, because none of the
+#: fields can contain one - so no two different sets of fields can produce the
+#: same bytes to sign, and a boundary cannot be shifted to move meaning from
+#: one field into the next.
+SEPARATOR = "\n"
 
 
 class ConnectError(RuntimeError):
@@ -44,9 +60,13 @@ class ConnectError(RuntimeError):
 class Pending:
     """A flow that has been started and not yet finished."""
 
-    #: Cryptographically random, one-time, and known to the Worker. The agent
-    #: proves it started this flow by presenting it; without that, anybody who
-    #: could reach the endpoint could claim somebody else's installation.
+    #: Signed by the Worker, short-lived, and bound to the nonce below. Not
+    #: one-time: marking one used needs somewhere to write the mark and there
+    #: is no store, so saying "one-time" would be a claim the architecture
+    #: cannot keep. What it does give is that a state cannot be invented or
+    #: edited, it expires in fifteen minutes, and a receipt derived from it is
+    #: refused by any agent whose nonce does not match - so a state seen in a
+    #: URL cannot become a connection on somebody else's machine.
     state: str
     #: The random half of the state, which the receipt is signed against. Kept
     #: separately so this attempt can tell its own receipt from any other.
@@ -55,6 +75,11 @@ class Pending:
     #: GitHub redirect back to this attempt.
     url: str
     expires_at: float
+    #: This connection's key pair. Generated before the flow starts, because
+    #: the public half has to travel inside the state the Worker signs — it is
+    #: what the grant will name. Written to disk only once the installation is
+    #: known, so an abandoned flow leaves no key behind.
+    key: ClientKey | None = None
 
     @property
     def expired(self) -> bool:
@@ -109,11 +134,21 @@ class Connector:
         whether one has been used. A state the agent invented would have to be
         registered anyway, which is the same round trip with an extra way to
         get it wrong.
+
+        The key pair is made here, first, and only its public half is sent. The
+        Worker puts that key inside the signed state, so it arrives at `setup`
+        unaltered and becomes the key the grant names. Nothing about this
+        connection can be claimed by a machine that does not hold the other
+        half.
         """
+        key = identity.generate()
         found = self._post("install", {
             # Not a secret and not an identity: a label, so somebody looking at
             # a half-finished flow can tell which machine started it.
             "client": "comodor-agent",
+            # Public, by construction. It is safe in a URL, safe in a log, and
+            # useless without the private half that stays on this machine.
+            "public_key": key.public,
         })
         state = str(found.get("state") or "")
         nonce = str(found.get("nonce") or "")
@@ -125,7 +160,7 @@ class Connector:
 
         seconds = float(found.get("expires_in") or 900)
         return Pending(state=state, nonce=nonce, url=url,
-                       expires_at=time.time() + seconds)
+                       expires_at=time.time() + seconds, key=key)
 
     def open(self, pending: Pending) -> bool:
         """Open the browser. False if there is none — the URL is printed then."""
@@ -172,17 +207,86 @@ class Connector:
                 "Run `comodor github connect` again and use the line from "
                 "the page it opens.")
 
-        return _installation_from(found.get("installation") or {})
+        grant = str(found.get("grant") or "")
+        if not grant:
+            raise ConnectError(
+                "the endpoint completed the installation but issued no grant, "
+                "so this machine could not prove the connection is its own. "
+                "Nothing has been saved.")
+        if pending.key is None:
+            raise ConnectError("this attempt has no client key to save")
+
+        installation = _installation_from(found.get("installation") or {})
+        installation.grant = grant
+
+        # Written only now. An abandoned flow - a browser closed, a receipt
+        # never pasted - leaves nothing on disk, and the file is named after an
+        # installation that has been verified rather than one somebody typed.
+        try:
+            identity.save(self.config.paths.user,
+                          installation.installation_id, pending.key)
+        except IdentityError as problem:
+            raise ConnectError(
+                f"the connection was made but its key could not be saved: "
+                f"{problem}. Nothing has been recorded, because a connection "
+                f"whose key is missing cannot be used.") from None
+
+        return installation
 
     # -- using it ----------------------------------------------------------- #
+
+    def _signed(self, action: str, installation_id: int) -> dict[str, Any]:
+        """A request body that proves who is asking.
+
+        Four things, and each is load-bearing:
+
+        * the **grant**, which is the Worker's own signed statement of which
+          installation belongs to which key. The installation id is read from
+          there, so it is never something the caller gets to choose;
+        * a **timestamp**, so a captured request stops working;
+        * a **nonce**, so two requests in the same second are still distinct;
+        * a **signature** over all of it, made with the private key, which is
+          the only part an attacker cannot produce.
+
+        The signed bytes are laid out exactly as the Worker lays them out -
+        including the action - so a signature made for `verify` cannot be
+        presented at `token`.
+        """
+        found = self.config.github.find_by_id(installation_id)
+        if found is None or not found.grant:
+            raise TokenError(
+                f"installation {installation_id} has no grant on this machine. "
+                f"Run `comodor github connect` to reconnect it.")
+
+        try:
+            key = identity.load(self.config.paths.user, installation_id)
+        except IdentityError as problem:
+            raise TokenError(str(problem)) from None
+
+        timestamp = int(time.time())
+        nonce = secrets.token_urlsafe(24)
+        # The separator is a newline and no field can contain one, so no two
+        # different sets of fields ever sign the same bytes.
+        message = SEPARATOR.join(("comodor-github-v1", action, found.grant,
+                                  str(timestamp), nonce)).encode("utf-8")
+        return {
+            "grant": found.grant,
+            "timestamp": timestamp,
+            "nonce": nonce,
+            "signature": key.sign(message),
+        }
 
     def mint(self, installation_id: int) -> InstallationToken:
         """One short-lived installation token, from the Worker.
 
         The Worker signs an app JWT with the private key, exchanges it for
         this token, and returns the token alone. The JWT never leaves it.
+
+        The request carries no installation id. It carries a grant, and the
+        Worker takes the id out of that - which is the whole of the fix, since
+        an id in the body was something anybody could write.
         """
-        found = self._post("token", {"installation_id": int(installation_id)})
+        found = self._post("token", self._signed("token", int(installation_id)))
         token = str(found.get("token") or "")
         if not token:
             raise TokenError("the endpoint returned no token")
@@ -196,8 +300,12 @@ class Connector:
         None when it is gone — uninstalled, or suspended. Permissions change
         after a connection is made, and a stale record either refuses work
         that would succeed or attempts work that cannot.
+
+        Signed like `mint`, and for the same reason: an unsigned `verify` would
+        answer questions about installations the asker has no relationship
+        with, which is a directory of other people's accounts.
         """
-        found = self._post("verify", {"installation_id": int(installation_id)})
+        found = self._post("verify", self._signed("verify", int(installation_id)))
         if str(found.get("status") or "") == "gone":
             return None
         installation = _installation_from(found.get("installation") or {})
@@ -210,11 +318,17 @@ class Connector:
         Best effort. The local record is removed either way: somebody
         disconnecting because they no longer trust something should not be
         told "sorry, the server is down".
+
+        The private key goes with it. Leaving it behind would leave the one
+        piece of this connection that is actually secret sitting on disk after
+        the person asked for the connection to be gone.
         """
         try:
-            self._post("disconnect", {"installation_id": int(installation_id)})
-        except ConnectError:
+            self._post("disconnect", self._signed("disconnect",
+                                                  int(installation_id)))
+        except (ConnectError, TokenError):
             pass
+        identity.forget(self.config.paths.user, int(installation_id))
 
 
 def _installation_from(payload: dict[str, Any]) -> GitHubInstallation:

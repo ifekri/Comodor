@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 
 from comodor.config import Config, GitHubConfig, GitHubInstallation
+from comodor.github import identity
 from comodor.github.api import (
     GitHub,
     GitHubError,
@@ -35,6 +36,7 @@ from comodor.github.api import (
 from comodor.github.connect import ConnectError, Connector, Pending
 from comodor.github.repos import Repositories, branch_name, split
 from comodor.github.tokens import InstallationToken, TokenError, Tokens, redact
+from comodor.paths import resolve as resolve_paths
 
 # --------------------------------------------------------------------------- #
 # standing in for HTTP
@@ -504,7 +506,16 @@ def test_a_url_with_a_query_is_not_recorded_whole(monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def a_connector(answers: dict[str, Any], monkeypatch) -> Connector:
+def a_connector(answers: dict[str, Any], monkeypatch, tmp_path=None,
+                connected: int | None = None) -> Connector:
+    """A connector talking to a stand-in Worker.
+
+    `connected` sets up what a finished `comodor github connect` leaves
+    behind: a grant in the config and a private key on disk. Anything that
+    reaches `token`, `verify` or `disconnect` needs both, because those
+    requests are signed - a test that skipped them would be exercising a path
+    the product does not have.
+    """
     def post(url, **kwargs):
         leaf = url.rstrip("/").rsplit("/", 1)[-1]
         found = answers.get(leaf)
@@ -513,7 +524,17 @@ def a_connector(answers: dict[str, Any], monkeypatch) -> Connector:
         return Answer(200, found if found is not None else {})
 
     monkeypatch.setattr("comodor.net.http.post", post)
-    return Connector(Config())
+
+    if connected is None:
+        return Connector(Config())
+
+    monkeypatch.setenv("COMODOR_HOME", str(tmp_path))
+    config = Config(paths=resolve_paths(tmp_path))
+    identity.save(config.paths.user, connected, identity.generate())
+    config.github.remember(GitHubInstallation(
+        installation_id=connected, account_login="ifekri",
+        grant=f"g1.grant-for-{connected}.sig"))
+    return Connector(config)
 
 
 def test_a_flow_starts_with_a_state_and_a_url(monkeypatch):
@@ -551,7 +572,7 @@ def test_a_receipt_from_another_attempt_is_refused(monkeypatch):
         monkeypatch)
 
     pending = Pending(state="s", nonce="mine", url="https://x",
-                      expires_at=time.time() + 900)
+                      expires_at=time.time() + 900, key=identity.generate())
 
     with pytest.raises(ConnectError) as caught:
         connector.collect(pending, "a-receipt")
@@ -559,18 +580,20 @@ def test_a_receipt_from_another_attempt_is_refused(monkeypatch):
     assert "different connection attempt" in str(caught.value)
 
 
-def test_a_matching_receipt_becomes_an_installation(monkeypatch):
+def test_a_matching_receipt_becomes_an_installation(tmp_path, monkeypatch):
+    monkeypatch.setenv("COMODOR_HOME", str(tmp_path))
     connector = a_connector({"claim": {
-        "status": "connected", "nonce": "mine",
+        "status": "connected", "nonce": "mine", "grant": "g1.issued.sig",
         "installation": {
             "installation_id": 7,
             "account": {"id": 42, "login": "comodor-ai",
                         "type": "Organization"},
             "repository_selection": "all",
             "permissions": {"contents": "write"}}}}, monkeypatch)
+    connector.config = Config(paths=resolve_paths(tmp_path))
 
     pending = Pending(state="s", nonce="mine", url="https://x",
-                      expires_at=time.time() + 900)
+                      expires_at=time.time() + 900, key=identity.generate())
     found = connector.collect(pending, "a-receipt")
 
     assert found.installation_id == 7
@@ -602,19 +625,22 @@ def test_an_installation_with_no_id_is_refused(monkeypatch):
         connector.collect(pending, "a-receipt")
 
 
-def test_a_revoked_installation_comes_back_as_gone(monkeypatch):
-    connector = a_connector({"verify": {"status": "gone"}}, monkeypatch)
+def test_a_revoked_installation_comes_back_as_gone(tmp_path, monkeypatch):
+    connector = a_connector({"verify": {"status": "gone"}}, monkeypatch,
+                            tmp_path, connected=1)
 
     assert connector.verify(1) is None
 
 
-def test_a_verified_installation_carries_its_current_permissions(monkeypatch):
+def test_a_verified_installation_carries_its_current_permissions(tmp_path,
+                                                                monkeypatch):
     connector = a_connector({"verify": {
         "status": "ok",
         "installation": {
             "installation_id": 1,
             "account": {"id": 1, "login": "ifekri", "type": "User"},
-            "permissions": {"contents": "read"}}}}, monkeypatch)
+            "permissions": {"contents": "read"}}}}, monkeypatch,
+        tmp_path, connected=1)
 
     found = connector.verify(1)
 
@@ -622,9 +648,10 @@ def test_a_verified_installation_carries_its_current_permissions(monkeypatch):
     assert found.updated_at > 0
 
 
-def test_a_refusal_from_the_endpoint_is_readable(monkeypatch):
+def test_a_refusal_from_the_endpoint_is_readable(tmp_path, monkeypatch):
     connector = a_connector(
-        {"token": Answer(502, {"error": "GitHub answered 404"})}, monkeypatch)
+        {"token": Answer(502, {"error": "GitHub answered 404"})}, monkeypatch,
+        tmp_path, connected=1)
 
     with pytest.raises(ConnectError) as caught:
         connector.mint(1)

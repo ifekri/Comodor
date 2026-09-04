@@ -150,21 +150,54 @@ def _status(console, config: Config) -> int:
     table.add_column("Repositories")
     table.add_column("May")
 
+    unusable = []
     for one in settings.installations:
         may = ", ".join(sorted(
             f"{name}:{level}" for name, level in one.permissions.items()))
         table.add_row(one.account_login, one.account_type.lower(),
                       "all" if one.repository_selection == "all" else "selected",
                       may or "—")
+        # A record whose grant or key is missing reads as connected and fails
+        # at the first request. Said here, rather than discovered in the
+        # middle of a turn.
+        if not one.usable or not _has_key(config, one.installation_id):
+            unusable.append(one.account_login or str(one.installation_id))
 
     console.print(table)
     console.print()
+
+    if unusable:
+        console.print(Panel(
+            Text.from_markup(
+                f"[bold]{', '.join(unusable)}[/bold] cannot be used.\n\n"
+                f"This machine no longer holds the key that proves the "
+                f"connection is its own, so no token can be requested for it. "
+                f"Nothing is wrong on GitHub.\n\n"
+                f"[bold]comodor github connect[/bold] establishes a new one."),
+            title=" Needs reconnecting ", title_align="left",
+            border_style="yellow"))
+        console.print()
     console.print(
         f"Turns may {'change' if settings.allow_writes else 'read'} "
         f"repositories. Changes open a pull request from a "
         f"{settings.branch_prefix}… branch; nothing is pushed to a default "
         f"branch.")
     return 0
+
+
+def _has_key(config: Config, installation_id: int) -> bool:
+    """Whether the private key for this connection is still on this machine.
+
+    The grant alone is not an identity - it is a public statement that would
+    survive being copied out of a config file. The key is the half that
+    matters, and it lives outside the config, so it can go missing on its own.
+    """
+    from . import identity
+    try:
+        identity.load(config.paths.user, installation_id)
+    except identity.IdentityError:
+        return False
+    return True
 
 
 def _refresh(console, config: Config) -> int:
