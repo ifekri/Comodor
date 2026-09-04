@@ -42,6 +42,53 @@ jobs:
           python-version: '3.12'
           cache: pip
 
+      # v1.1.1 shipped from a tag placed on a commit eighteen behind `main`,
+      # so a release that had just been merged went out without any of it. The
+      # gate passed, the build passed, PyPI accepted it, and the only way to
+      # find out was to install the package and look. Nothing in the pipeline
+      # asked the one question that mattered.
+      - name: The tag must be on main
+        if: github.event_name == 'push'
+        run: |
+          git fetch --quiet origin main
+          tag="${GITHUB_REF_NAME}"
+          if git merge-base --is-ancestor "$tag" origin/main; then
+            behind=$(git rev-list --count "$tag"..origin/main)
+            if [ "$behind" -gt 0 ]; then
+              {
+                echo "## Refusing to release"
+                echo
+                echo "\`$tag\` is **$behind commit(s) behind \`main\`**."
+                echo
+                echo "Whatever was merged in those commits is not in this tag,"
+                echo "so publishing it would ship an older tree under a newer"
+                echo "number. That is not recoverable: PyPI never lets a"
+                echo "version be replaced."
+                echo
+                echo "Move the tag and push it again:"
+                echo
+                echo '```bash'
+                echo "git checkout main && git pull"
+                echo "git tag -d $tag && git push origin :refs/tags/$tag"
+                echo "git tag $tag && git push origin $tag"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::$tag is $behind commit(s) behind main"
+              exit 1
+            fi
+          else
+            # Not an ancestor at all: a tag on a branch that was never merged.
+            # Allowed deliberately - a hotfix release from a maintenance branch
+            # is a real thing - but said out loud, because it is unusual.
+            echo "::warning::$tag is not on main. Releasing from it anyway."
+            {
+              echo "## Note"
+              echo
+              echo "\`$tag\` is not an ancestor of \`main\`. Releasing from"
+              echo "a branch, which is allowed but worth noticing."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Install
         run: python -m pip install --upgrade pip && pip install -e ".[dev]"
 
