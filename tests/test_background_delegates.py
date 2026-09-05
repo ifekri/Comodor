@@ -1407,3 +1407,83 @@ def test_wait_survives_a_runtime_that_will_not_start_the_final_writer(
         manager.wait(timeout=1.0)          # must return, not raise
     finally:
         threading.Thread.start = original
+
+
+def test_no_delegate_is_admitted_once_shutdown_has_begun(config, bus, tmp_path):
+    """A turn reaching a delegate tool call during a shutdown.
+
+    `stop_all()` cancels what it can see. One arriving after it is not in
+    `_cancelled`, so nothing stopped it: if its record write outlasted
+    `wait()`, the worker started once the disk answered -- against tools and a
+    history `_shutdown()` had already closed.
+    """
+    persist = tmp_path / "delegates.json"
+    ran = threading.Event()
+
+    class Watched:
+        def run(self, brief):
+            ran.set()
+            return FakeResult()
+
+    manager = make_manager(config, bus, lambda **kwargs: Watched(),
+                           persist=persist)
+
+    manager.closing()
+    manager.stop_all()
+
+    ok, identifier, why = manager.start("too late")
+    manager.wait(timeout=2.0)
+
+    assert not ok
+    assert "shutting down" in why
+    assert not ran.is_set(), "a delegate started after shutdown had begun"
+    assert manager.slots_busy == 0
+
+
+def test_stopping_everything_is_not_shutting_down(config, bus, tmp_path):
+    """`/stop` stops the delegates; it does not close the session.
+
+    Latching in `stop_all()` would have been simpler and wrong: a user who
+    stopped their delegates could never start another one.
+    """
+    persist = tmp_path / "delegates.json"
+    release = threading.Event()
+    manager = make_manager(config, bus,
+                           lambda **kwargs: HeldLoop(release), persist=persist)
+
+    manager.start("the first one")
+    manager.stop_all()
+    release.set()
+    settle(manager)
+
+    ok, identifier, _ = manager.start("and one after it")
+    release.set()
+    settle(manager)
+
+    assert ok, "stopping everything must not close the manager"
+    flushed(manager)
+    assert states(persist)[identifier] == "done"
+
+
+def test_no_event_says_a_settled_run_is_still_going(config, bus, tmp_path):
+    """`stop()` emits `stopping` after releasing the lock, so a run that
+    settles in between could have its terminal event overtaken -- and a panel
+    would keep showing a delegate that had already finished.
+
+    A settled run reports what it settled as, whoever is doing the telling.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    seen: list = []
+    bus.subscribe(seen.append)
+
+    with manager._lock:
+        manager._runs["d1"] = DelegateRun(id="d1", brief="one")
+        manager._runs["d1"].state = "stopped"
+
+    manager._emit("d1", "stopping")          # the late notice
+
+    states_seen = [event.payload.get("state") for event in seen
+                   if event.kind is Kind.DELEGATE]
+    assert states_seen == ["stopped"], states_seen

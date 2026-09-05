@@ -359,6 +359,9 @@ class App:
         # Children that are still running cannot finish a job whose parent is
         # closing, and a daemon thread dies half-way through a write. Asked
         # to stop, each gets a moment to save its own state.
+        # Said before anything is stopped, so a turn reaching a delegate
+        # tool call during the shutdown cannot slip a new one past it.
+        self.delegates.closing()
         self.delegates.stop_all()
         self.delegates.wait(SHUTDOWN_JOIN_SECONDS)
         self.tools.close()

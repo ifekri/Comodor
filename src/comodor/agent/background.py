@@ -88,6 +88,10 @@ class BackgroundDelegates:
         #: gap that can last as long as the disk does — and shutdown must not
         #: mistake it for nothing happening.
         self._launching = 0
+        #: Set once, when the process is on its way out. Distinct from
+        #: `stop_all()`, which is also what `/stop` calls: stopping everything
+        #: is something a session recovers from, and closing is not.
+        self._closing = False
         #: Which snapshot is which. Assigned under `_lock`, so the numbers run
         #: in the order the state actually changed.
         self._revision = 0
@@ -130,6 +134,10 @@ class BackgroundDelegates:
         limit = self.config.delegation.max_background
         cancel = Cancellation()
         with self._lock:
+            if self._closing:
+                return False, "", (
+                    "Comodor is shutting down, so a background delegate would "
+                    "outlive the tools it needs. Nothing was started.")
             running = sum(1 for run in self._runs.values()
                           if run.state == "running")
             if running >= limit:
@@ -334,6 +342,22 @@ class BackgroundDelegates:
         self._emit(identifier, "stopping")
         return True
 
+    def closing(self) -> None:
+        """No more delegates. Called once, when the process is shutting down.
+
+        Without it there is a launch nobody accounts for: a turn reaching a
+        delegate tool call *after* `stop_all()` has run is not in `_cancelled`,
+        so it is admitted, and if its record write outlasts `wait()` the worker
+        starts once the disk answers — against tools and a history that
+        `_shutdown()` has already closed.
+
+        Separate from `stop_all()` deliberately. That is also the `/stop`
+        command, and a session that stops its delegates must still be able to
+        start another one.
+        """
+        with self._settled:
+            self._closing = True
+
     def stop_all(self) -> int:
         with self._lock:
             running = [run.id for run in self._runs.values()
@@ -449,12 +473,26 @@ class BackgroundDelegates:
 
     # -- plumbing ---------------------------------------------------------- #
 
+    #: States a run does not come back from.
+    TERMINAL = ("done", "failed", "stopped", "lost")
+
     def _emit(self, identifier: str, state: str) -> None:
+        """Tell the bus where a run is.
+
+        `state` is what the caller believes, and the run itself is consulted
+        before that is taken at face value. `stop()` emits `stopping` after
+        releasing the lock, so a launch cancelled before it started can settle
+        and emit `stopped` in between — and a subscriber would see the two
+        arrive in that order and keep the live one. A settled run reports what
+        it settled as, whoever is doing the telling.
+        """
         try:
             with self._lock:
                 run = self._runs.get(identifier)
                 payload = run.as_dict() if run else {"id": identifier}
-            payload["state"] = state
+                settled = (run.state if run is not None
+                           and run.state in self.TERMINAL else "")
+            payload["state"] = settled or state
             self.bus.emit(Kind.DELEGATE, **payload)
         except Exception:
             pass
