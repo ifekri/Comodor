@@ -146,6 +146,251 @@ def test_a_corrupt_cache_falls_back_rather_than_failing(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# the network path, which had never been tested and had never worked
+# --------------------------------------------------------------------------- #
+#
+# `CATALOGUE_URL` pointed at a file on the `skills` branch that was never
+# published there. Every install fell through to the bundled snapshot, and
+# nothing said so, because the fallback chain is deliberately quiet: somebody
+# with no network still gets a list, which is the case the whole feature exists
+# for.
+#
+# The quietness is right and it is also why this went unnoticed for as long as
+# it did. The tests below are the part that was missing: they exercise the live
+# path and every way it can fail, and one of them pins the URL itself.
+
+
+class _Answer:
+    """What `http.get` returns, in the parts the loader touches."""
+
+    def __init__(self, text: str, status: int = 200) -> None:
+        self.text = text
+        self.status_code = status
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise OSError(f"HTTP {self.status_code}")
+
+
+def _serving(monkeypatch, answer, *, url_seen=None):
+    """Point the loader's HTTP client at `answer` instead of the internet."""
+    def get(url, **kwargs):
+        if url_seen is not None:
+            url_seen.append(url)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    from comodor.net import http
+
+    monkeypatch.setattr(http, "get", get)
+
+
+def _aged(path: Path, seconds: float) -> None:
+    """Backdate a file, so a cache can be made stale without waiting a day."""
+    import os
+
+    when = time.time() - seconds
+    os.utime(path, (when, when))
+
+
+def test_the_catalogue_url_is_the_published_one():
+    """The bug in one assertion.
+
+    This is not a style check. The URL named a branch that has no such file,
+    so the live catalogue never loaded once, anywhere, for anybody — and the
+    fallback made that look like normal operation. If it ever points somewhere
+    unpublished again, this is the test that says so.
+    """
+    assert cat.CATALOGUE_URL == (
+        "https://raw.githubusercontent.com/ifekri/Comodor/"
+        "catalogues/local-models.json")
+
+    assert "skills/local-models.json" not in cat.CATALOGUE_URL, \
+        "the local model catalogue is not on the skills branch"
+
+
+def test_the_bundled_snapshot_parses_with_the_real_parser():
+    """The floor everything else falls back to. If this file is ever malformed
+    there is nothing underneath it."""
+    parsed = cat.parse(cat.bundled_path().read_text(encoding="utf-8"), "bundled")
+
+    assert len(parsed) >= 1
+    ids = [model.id for model in parsed.models]
+    assert len(ids) == len(set(ids)), "a duplicate id would silently vanish"
+    assert all(model.url.startswith("https://") for model in parsed.models)
+    assert all(isinstance(model.size, int) and model.size > 0
+               for model in parsed.models)
+
+
+def test_a_published_catalogue_is_used_when_it_can_be_reached(tmp_path,
+                                                              monkeypatch):
+    """The path that had never run. Everything below is a way for it to fail;
+    this is the one where it works."""
+    seen: list[str] = []
+    _serving(monkeypatch, _Answer(json.dumps(a_document(an_entry(id="live-one")))),
+             url_seen=seen)
+
+    parsed = cat.load(tmp_path)
+
+    assert parsed.source == "live"
+    assert parsed.get("live-one") is not None
+    assert seen == [cat.CATALOGUE_URL], "it must ask for the published location"
+
+
+def test_a_fetched_catalogue_is_cached_for_next_time(tmp_path, monkeypatch):
+    _serving(monkeypatch, _Answer(json.dumps(a_document(an_entry(id="live-one")))))
+
+    cat.load(tmp_path)
+
+    assert (tmp_path / "local-models.json").is_file(), \
+        "a fetch that is not cached is a fetch repeated on every start"
+
+
+def test_a_network_that_is_not_there_does_not_crash(tmp_path, monkeypatch):
+    """A refused connection, a DNS failure, a captive portal. None of them is
+    an error the caller should see: there is a list either way."""
+    _serving(monkeypatch, OSError("no route to host"))
+
+    parsed = cat.load(tmp_path)
+
+    assert parsed.source == "bundled"
+    assert len(parsed) >= 1
+
+
+def test_a_404_falls_back_rather_than_failing(tmp_path, monkeypatch):
+    """Exactly the state this fix repaired: the URL resolves, the file is not
+    there. It must be survivable — it was survived for weeks — and it must not
+    be indistinguishable from working, which is what the health check is for."""
+    _serving(monkeypatch, _Answer("404: Not Found", status=404))
+
+    parsed = cat.load(tmp_path)
+
+    assert parsed.source == "bundled"
+    assert len(parsed) >= 1
+
+
+def test_malformed_json_from_the_network_falls_back(tmp_path, monkeypatch):
+    """A half-written file, a proxy login page, a truncated response."""
+    _serving(monkeypatch, _Answer("{ not json at all"))
+
+    parsed = cat.load(tmp_path)
+
+    assert parsed.source == "bundled"
+    assert not (tmp_path / "local-models.json").is_file(), \
+        "an unparseable answer must not be cached as a catalogue"
+
+
+def test_valid_json_that_is_not_a_catalogue_falls_back(tmp_path, monkeypatch):
+    """Parses, means nothing. A repository page, an error object, an empty
+    list — each is valid JSON and none of them is a list of models."""
+    for body in ('{"models": []}', '{"message": "Not Found"}', '[]', '"hello"'):
+        _serving(monkeypatch, _Answer(body))
+
+        parsed = cat.load(tmp_path)
+
+        assert parsed.source == "bundled", body
+        assert len(parsed) >= 1, body
+
+
+def test_one_bad_published_entry_does_not_cost_the_whole_list(tmp_path,
+                                                              monkeypatch):
+    """A malformed entry is skipped on its own, and that holds for a document
+    off the network as much as for one parsed directly. The alternative is that
+    one typo in a published file empties the picker for everybody."""
+    document = a_document(an_entry(id="good-one"))
+    document["models"].append({"id": "broken", "url": "http://insecure",
+                               "size": 1})
+    _serving(monkeypatch, _Answer(json.dumps(document)))
+
+    parsed = cat.load(tmp_path)
+
+    assert parsed.source == "live"
+    assert parsed.get("good-one") is not None
+    assert parsed.get("broken") is None, "http:// is refused, and rightly"
+
+
+def test_a_fresh_cache_is_used_before_the_network(tmp_path, monkeypatch):
+    """The daily budget. A cached copy under a day old is the answer, and the
+    network is not asked at all."""
+    (tmp_path / "local-models.json").write_text(
+        json.dumps(a_document(an_entry(id="from-cache"))), encoding="utf-8")
+
+    seen: list[str] = []
+    _serving(monkeypatch, _Answer(json.dumps(a_document(an_entry(id="live-one")))),
+             url_seen=seen)
+
+    parsed = cat.load(tmp_path)
+
+    assert parsed.source == "cached"
+    assert parsed.get("from-cache") is not None
+    assert seen == [], "a fresh cache must not cost a request"
+
+
+def test_a_stale_cache_is_used_when_the_network_fails(tmp_path, monkeypatch):
+    """Order matters here, and this is the rung that is easy to lose: a cache
+    from last week is a better answer than the snapshot from the last release,
+    and it is only reached when the network has already failed."""
+    cached = tmp_path / "local-models.json"
+    cached.write_text(json.dumps(a_document(an_entry(id="from-cache"))),
+                      encoding="utf-8")
+    _aged(cached, cat.FRESH_FOR + 60)
+
+    _serving(monkeypatch, OSError("still no network"))
+
+    parsed = cat.load(tmp_path)
+
+    assert parsed.source == "cached"
+    assert parsed.get("from-cache") is not None
+
+
+def test_a_stale_cache_loses_to_a_reachable_network(tmp_path, monkeypatch):
+    """The other side of the same rung. Stale means stale: if the network
+    answers, what it says wins."""
+    cached = tmp_path / "local-models.json"
+    cached.write_text(json.dumps(a_document(an_entry(id="from-cache"))),
+                      encoding="utf-8")
+    _aged(cached, cat.FRESH_FOR + 60)
+
+    _serving(monkeypatch, _Answer(json.dumps(a_document(an_entry(id="live-one")))))
+
+    parsed = cat.load(tmp_path)
+
+    assert parsed.source == "live"
+    assert parsed.get("live-one") is not None
+
+
+def test_the_whole_order_holds(tmp_path, monkeypatch):
+    """All four rungs, in one place, in order.
+
+    Written as one test because the property is the *sequence*, and four
+    separate assertions each passing does not say the order between them is
+    the one documented.
+    """
+    cached = tmp_path / "local-models.json"
+
+    # 4. nothing anywhere
+    _serving(monkeypatch, OSError("offline"))
+    assert cat.load(tmp_path).source == "bundled"
+
+    # 3. a stale cache beats the bundled snapshot
+    cached.write_text(json.dumps(a_document(an_entry(id="c"))), encoding="utf-8")
+    _aged(cached, cat.FRESH_FOR + 60)
+    assert cat.load(tmp_path).source == "cached"
+
+    # 2. a reachable network beats a stale cache
+    _serving(monkeypatch, _Answer(json.dumps(a_document(an_entry(id="l")))))
+    assert cat.load(tmp_path).source == "live"
+
+    # 1. a fresh cache beats the network — the fetch above wrote one
+    seen: list[str] = []
+    _serving(monkeypatch, _Answer(json.dumps(a_document(an_entry(id="l")))),
+             url_seen=seen)
+    assert cat.load(tmp_path).source == "cached"
+    assert seen == []
+
+
+# --------------------------------------------------------------------------- #
 # the download
 # --------------------------------------------------------------------------- #
 

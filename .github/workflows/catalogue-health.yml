@@ -1,0 +1,106 @@
+# Is the published catalogue still there, and can Comodor still read it?
+#
+# The local model list is fetched from the `catalogues` branch rather than
+# shipped, so that adding a model is an edit to a file instead of a release.
+# That is the point of it and also the failure mode: nothing in the program
+# complains when the fetch fails, because falling back to the bundled snapshot
+# is *correct* for somebody with no network. A 404 and a laptop on a train look
+# identical from inside.
+#
+# So the URL pointed at a file that had never been published, and every install
+# quietly used the snapshot for weeks. This is the thing that would have said
+# so on the first morning.
+#
+# Not a unit test on purpose. The suite must not need the internet — a check
+# that skips when the network is absent reports success on the day it matters.
+#
+# It needs no secrets and touches nothing: a fetch and a parse.
+
+name: Catalogue health
+
+on:
+  schedule:
+    # Daily, a few minutes past the hour to stay off the top-of-hour crush that
+    # GitHub delays. A catalogue changes rarely; checking it every minute would
+    # find nothing more and cost every day.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+  # Also on a change to either side of the contract: the URL constant, the
+  # loader, the bundled snapshot, or the checker itself. A pull request that
+  # points the constant somewhere unpublished should fail here, not in a user's
+  # terminal.
+  pull_request:
+    paths:
+      - src/comodor/local/catalogue.py
+      - src/comodor/local/models.json
+      - tools/check-catalogue.py
+      - .github/workflows/catalogue-health.yml
+  push:
+    branches: [main]
+    paths:
+      - src/comodor/local/catalogue.py
+      - src/comodor/local/models.json
+      - tools/check-catalogue.py
+      - .github/workflows/catalogue-health.yml
+
+concurrency:
+  group: catalogue-health-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  published:
+    name: The published catalogue
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # No install. The checker adds `src` to the path and imports the parser
+      # directly, so what runs here is the same code the program runs — and a
+      # health check that needed a build step would be one more thing that can
+      # be broken on the day it is needed.
+      - name: The bundled snapshot
+        run: python tools/check-catalogue.py src/comodor/local/models.json
+
+      - name: The published catalogue
+        run: python tools/check-catalogue.py
+
+      - name: Say what passed
+        if: success()
+        run: |
+          {
+            echo "## Catalogue health"
+            echo
+            echo "The published catalogue is reachable and Comodor's own"
+            echo "parser accepts it. The bundled snapshot parses too, which is"
+            echo "the floor everything falls back to."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Say what failed
+        if: failure()
+        run: |
+          {
+            echo "## Catalogue health failed"
+            echo
+            echo "Comodor is falling back to the snapshot bundled in the"
+            echo "package. Nothing is broken for anybody using it — that"
+            echo "fallback is the whole reason one ships — but the live"
+            echo "catalogue is not being read, so any model published since"
+            echo "the last release is invisible."
+            echo
+            echo "The URL is \`CATALOGUE_URL\` in"
+            echo "\`src/comodor/local/catalogue.py\`, and what it points at"
+            echo "lives on the \`catalogues\` branch."
+            echo
+            echo "To reproduce:"
+            echo
+            echo '```bash'
+            echo "python tools/check-catalogue.py"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
