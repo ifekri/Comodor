@@ -788,3 +788,100 @@ def test_the_thread_list_is_only_touched_under_the_lock():
     walk(tree, under_lock=False)
 
     assert unguarded == [], f"_threads touched without the lock at {unguarded}"
+
+
+def test_shutdown_cannot_step_over_a_launch_in_progress(config, bus, tmp_path):
+    """`wait()` must not return having joined nothing while a delegate starts.
+
+    Appending the thread after `start()` keeps unstarted threads out of the
+    list, and leaves the opposite gap: a thread that is running and not yet
+    listed. A `wait()` landing there snapshots without it, returns, and
+    `_shutdown()` closes the tools and the history underneath a worker that is
+    still going.
+
+    Forced by holding the launch open at its widest point -- the persist --
+    and calling `wait()` from another thread while it sits there. Under a
+    correct implementation `wait()` blocks on the same lock the launch holds,
+    so by the time it takes its snapshot the delegate is registered and gets
+    joined.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    launching = threading.Event()
+    real_persist = manager._persist
+
+    def slow_persist():
+        real_persist()
+        if threading.current_thread() is threading.main_thread():
+            launching.set()
+            time.sleep(0.05)          # long enough for wait() to be waiting
+
+    manager._persist = slow_persist
+
+    busy_when_wait_returned: list[int] = []
+
+    def shut_down():
+        launching.wait(5)
+        manager.wait(timeout=5)
+        busy_when_wait_returned.append(manager.slots_busy)
+
+    helper = threading.Thread(target=shut_down)
+    helper.start()
+    ok, identifier, _ = manager.start("racing the shutdown")
+    helper.join(10)
+    settle(manager)
+
+    assert ok
+    assert busy_when_wait_returned == [0], (
+        "wait() returned while a delegate was still running: shutdown would "
+        "have closed the tools underneath it")
+
+
+def test_a_launch_is_one_step_as_far_as_the_thread_list_is_concerned():
+    """Start and registration happen under one lock hold.
+
+    Stated in the source rather than inferred: `thread.start()` and the append
+    that records it must be inside the same `with self._lock` block. Either of
+    them alone outside it reopens one of the two windows above.
+    """
+    import ast
+    import inspect
+
+    from comodor.agent import background
+
+    tree = ast.parse(inspect.getsource(background))
+
+    def locked(node) -> bool:
+        return any(
+            isinstance(item.context_expr, ast.Attribute)
+            and item.context_expr.attr == "_lock"
+            for item in getattr(node, "items", []))
+
+    starts: list[int] = []
+    appends: list[int] = []
+
+    def walk(node, under_lock: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if (isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "start"
+                    and isinstance(child.func.value, ast.Name)
+                    and child.func.value.id == "thread"):
+                starts.append(child.lineno if under_lock else -child.lineno)
+            if (isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "append"
+                    and isinstance(child.func.value, ast.Attribute)
+                    and child.func.value.attr == "_threads"):
+                appends.append(child.lineno if under_lock else -child.lineno)
+            walk(child, under_lock or (isinstance(child, ast.With) and locked(child)))
+
+    walk(tree, under_lock=False)
+
+    assert starts and all(line > 0 for line in starts), (
+        f"thread.start() outside the lock at "
+        f"{[-n for n in starts if n < 0]}")
+    assert appends and all(line > 0 for line in appends), (
+        f"_threads.append outside the lock at "
+        f"{[-n for n in appends if n < 0]}")

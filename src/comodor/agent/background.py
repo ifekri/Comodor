@@ -139,27 +139,34 @@ class BackgroundDelegates:
             # earlier.
             self._persist()
 
-        try:
-            thread.start()
-        except RuntimeError as problem:
-            # The runtime would not give us a thread. Nothing is going to move
-            # this run out of `running`, so it must not be left there: the slot
-            # would be occupied for the rest of the session, and the next one
-            # would read the record and report a task that never ran as lost.
-            with self._lock:
+            # Started and registered without letting go of the lock, so a
+            # launch is one indivisible step as far as `wait()` is concerned.
+            #
+            # Both orderings are wrong on their own. Appending first exposes a
+            # thread that has not started, and joining one of those raises
+            # `RuntimeError: cannot join thread before it is started`, which
+            # aborts the rest of shutdown. Appending afterwards leaves a
+            # started-but-unlisted thread, and a `wait()` landing there returns
+            # having joined nothing — so shutdown closes the tools and the
+            # history underneath a delegate that is still working.
+            #
+            # `wait()` takes this same lock to take its snapshot, so it either
+            # sees the finished launch or waits for it. The worker does not
+            # need the lock until it has a result, so holding it across
+            # `start()` blocks nobody who is doing anything.
+            try:
+                thread.start()
+            except RuntimeError as problem:
+                # The runtime would not give us a thread. Nothing is going to
+                # move this run out of `running`, so it must not be left there:
+                # the slot would be occupied for the rest of the session, and
+                # the next one would read the record and report a task that
+                # never ran as lost.
                 self._runs.pop(identifier, None)
                 self._persist()
-            self._cancels.pop(identifier, None)
-            return False, "", (
-                f"the delegate could not be started: {problem}")
-
-        # Appended only once it is running. `wait()` joins everything in here
-        # at shutdown, and joining a thread that has not started raises
-        # `RuntimeError: cannot join thread before it is started` — which would
-        # abort the rest of shutdown. The window between starting and
-        # recording is now nothing but a list append; before this change a
-        # filesystem write sat inside it.
-        with self._lock:
+                self._cancels.pop(identifier, None)
+                return False, "", (
+                    f"the delegate could not be started: {problem}")
             self._threads.append(thread)
 
         self._emit(identifier, "started")
