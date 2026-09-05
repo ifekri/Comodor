@@ -306,10 +306,100 @@ def completions(text: str, commands: list[tuple[str, str]]) -> list[tuple[str, s
             if name.startswith(prefix)]
 
 
+#: The most rows the completion menu may ever occupy, indicator included.
+#:
+#: Four commands and a line saying how many more there are. Taller would start
+#: covering the conversation to list things nobody is reading; shorter stops
+#: being a menu.
+MENU_CEILING = 5
+
+
+def menu_budget(total: int, available: int, ceiling: int = MENU_CEILING) -> int:
+    """How many rows the completion menu gets. Rows, not items.
+
+    `limit` used to mean "items", and the renderer then added an overflow line
+    on top of it — so a composer that budgeted four rows got five, and the
+    prompt sat one row lower than the layout said. Counting every row the menu
+    can draw, including the indicator, is the only definition both sides can
+    honour.
+
+    Called by the screen to lay out and by the app to work out how far a
+    keypress may scroll, so that the two cannot drift apart.
+    """
+    if total <= 0:
+        return 0
+    return min(total, max(0, min(available, ceiling)))
+
+
+def visible_items(total: int, budget: int) -> int:
+    """How many commands fit, given the rows the menu was granted.
+
+    One row goes to the indicator whenever there is something it needs to
+    point at. The exception is a menu one row tall: an indicator alone would
+    be a list showing none of the list, so the row goes to the command.
+    """
+    if total <= 0 or budget <= 0:
+        return 0
+    if total <= budget:
+        return total                    # everything fits; no indicator needed
+    return budget if budget <= 1 else budget - 1
+
+
+def scroll_into_view(selected: int, top: int, total: int, capacity: int) -> int:
+    """Where the window starts, so that `selected` is inside it.
+
+    Selection and viewport are separate things, and conflating them is what
+    made arrow-down look broken: the index moved through all thirty-four
+    commands while the menu kept drawing the first four, so past the fourth
+    there was no highlight on screen at all and every keypress looked ignored.
+
+    The rule is the ordinary one, and the important half is the first line of
+    it: a selection already on screen does not move the window. Scrolling on
+    every keypress is as disorienting as never scrolling.
+
+    Arithmetic only — no scan of the list — so it costs the same for five
+    commands as for a thousand.
+    """
+    if total <= 0 or capacity <= 0:
+        return 0
+
+    furthest = max(0, total - capacity)
+    top = max(0, min(top, furthest))
+
+    if selected < top:
+        top = selected                          # walked off the top
+    elif selected >= top + capacity:
+        top = selected - capacity + 1           # walked off the bottom
+
+    return max(0, min(top, furthest))
+
+
 def render_completions(matches: list[tuple[str, str]], theme: Theme,
-                       selected: int = 0, limit: int = 6) -> RenderableType:
+                       selected: int = 0, limit: int = MENU_CEILING,
+                       top: int = 0) -> RenderableType:
+    """The commands a prefix could mean, as many as `limit` rows allows.
+
+    `limit` is the total number of rows this may draw. It never returns more,
+    so the composer's arithmetic holds and the prompt does not move while
+    somebody scrolls.
+
+    `top` is a hint, not an instruction. The window is clamped here as well as
+    where it is kept, because a stale index arriving from anywhere must not be
+    able to produce a menu with nothing highlighted — that failure is silent
+    on screen and is exactly what happened before.
+    """
+    total = len(matches)
+    if total <= 0 or limit <= 0:
+        return Group()
+
+    capacity = visible_items(total, limit)
+    selected = max(0, min(selected, total - 1))
+    top = scroll_into_view(selected, top, total, capacity)
+    window = matches[top:top + capacity]
+
     rows: list[Text] = []
-    for index, (name, description) in enumerate(matches[:limit]):
+    for offset, (name, description) in enumerate(window):
+        index = top + offset
         marker = theme.glyphs.arrow if index == selected else " "
         row = Text()
         row.append(f"{marker} ", style=theme.style("accent"))
@@ -318,6 +408,28 @@ def render_completions(matches: list[tuple[str, str]], theme: Theme,
             bold=index == selected))
         row.append(description, style=theme.style("dim"))
         rows.append(row)
-    if len(matches) > limit:
-        rows.append(Text(f"  … {len(matches) - limit} more", style=theme.style("dim")))
+
+    hidden = _overflow(top, capacity, total)
+    if hidden and len(rows) < limit:
+        rows.append(Text(f"  … {hidden}", style=theme.style("dim")))
     return Group(*rows)
+
+
+def _overflow(top: int, capacity: int, total: int) -> str:
+    """What the indicator says, or "" when the whole list is on screen.
+
+    It reports the window that is actually drawn. It used to say
+    `len(matches) - limit` regardless of where the window was, which was
+    right only for the first screenful and then quietly wrong — and it was the
+    one thing on screen that could have revealed the selection had gone
+    somewhere invisible.
+    """
+    above = top
+    below = max(0, total - (top + capacity))
+    if above and below:
+        return f"{above} above · {below} more"
+    if above:
+        return f"{above} above"
+    if below:
+        return f"{below} more"
+    return ""
