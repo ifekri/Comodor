@@ -10,7 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from comodor.agent.background import BackgroundDelegates, completion_turn
+from comodor.agent.background import (
+    BackgroundDelegates,
+    DelegateRun,
+    completion_turn,
+)
 from comodor.config import Config
 from comodor.events import EventBus, Kind
 
@@ -325,39 +329,34 @@ class Interleave:
     taken its snapshot, and the main thread is then held until the worker has
     written.
 
-    `escape` is what stops a *fixed* implementation from deadlocking here. Once
-    the snapshot and the write are one atomic step under the lock, the worker
-    cannot reach its own write while the main thread waits — so the wait has to
-    end by itself. It does not decide the outcome, only how long the correct
-    path pauses: on the broken code the worker writes and the wait ends early,
-    and on the fixed code the wait expires and the assertion still holds.
+    The hold is between staging and flushing, which is exactly where the two
+    halves of a write are separable — and separable is the point: the revision
+    decides which snapshot wins, not which write happens to arrive last.
+
+    `escape` only stops a run that never reaches the worker's write from
+    hanging the suite. It does not decide the outcome.
     """
 
-    def __init__(self, manager, escape: float = 0.5) -> None:
+    def __init__(self, manager, escape: float = 5.0) -> None:
         self.manager = manager
         self.escape = escape
         self.snapshotted = threading.Event()
         self.worker_wrote = threading.Event()
-        self._real_snapshot = manager._snapshot
-        self._real_persist = manager._persist
+        self._real_flush = manager._flush
         self.main_thread = threading.current_thread()
 
-        manager._snapshot = self._snapshot
-        manager._persist = self._persist
+        manager._flush = self._flush
 
-    def _snapshot(self):
-        document = self._real_snapshot()
+    def _flush(self, revision, document):
         if threading.current_thread() is self.main_thread:
-            # The main thread has read the state. Let the worker finish, then
-            # hold here so its write lands first.
+            # The main thread holds an older snapshot. Let the worker finish
+            # and write first, so this one is attempted last and stale.
             self.snapshotted.set()
             self.worker_wrote.wait(self.escape)
-        return document
-
-    def _persist(self):
-        self._real_persist()
-        if threading.current_thread() is not self.main_thread:
-            self.worker_wrote.set()
+            self._real_flush(revision, document)
+            return
+        self._real_flush(revision, document)
+        self.worker_wrote.set()
 
 
 class HeldLoop:
@@ -625,7 +624,10 @@ def test_every_persist_happens_while_the_lock_is_held():
     def locked(node) -> bool:
         return any(
             isinstance(item.context_expr, ast.Attribute)
-            and item.context_expr.attr == "_lock"
+            # `_settled` is a Condition built on `_lock`; entering it holds
+            # the same lock, so a checker that only knew one of the two names
+            # would be reading the spelling rather than the property.
+            and item.context_expr.attr in {"_lock", "_settled"}
             for item in getattr(node, "items", []))
 
     unguarded: list[int] = []
@@ -671,15 +673,17 @@ def test_shutdown_never_joins_a_thread_that_has_not_started(config, bus,
 
     inside = threading.Event()
     release = threading.Event()
-    real_persist = manager._persist
+    real_flush = manager._flush
 
-    def slow_persist():
-        real_persist()
+    # The flush is the widest part of a launch and the part that is *not*
+    # under the lock, which is precisely the gap `_launching` exists to cover.
+    def slow_flush(revision, document):
+        real_flush(revision, document)
         if threading.current_thread() is threading.main_thread():
             inside.set()
             release.wait(5)
 
-    manager._persist = slow_persist
+    manager._flush = slow_flush
 
     failure: list[BaseException] = []
 
@@ -817,20 +821,22 @@ def test_shutdown_cannot_step_over_a_launch_in_progress(config, bus, tmp_path):
     manager = make_manager(config, bus, persist=persist)
 
     launching = threading.Event()
-    real_persist = manager._persist
+    arrived = threading.Event()
+    real_flush = manager._flush
 
-    def slow_persist():
-        real_persist()
+    def slow_flush(revision, document):
+        real_flush(revision, document)
         if threading.current_thread() is threading.main_thread():
             launching.set()
-            time.sleep(0.05)          # long enough for wait() to be waiting
+            arrived.wait(5)           # held until wait() is genuinely waiting
 
-    manager._persist = slow_persist
+    manager._flush = slow_flush
 
     busy_when_wait_returned: list[int] = []
 
     def shut_down():
         launching.wait(5)
+        arrived.set()                 # the launch may proceed; wait() must not
         manager.wait(timeout=5)
         busy_when_wait_returned.append(manager.slots_busy)
 
@@ -863,7 +869,10 @@ def test_a_launch_is_one_step_as_far_as_the_thread_list_is_concerned():
     def locked(node) -> bool:
         return any(
             isinstance(item.context_expr, ast.Attribute)
-            and item.context_expr.attr == "_lock"
+            # `_settled` is a Condition built on `_lock`; entering it holds
+            # the same lock, so a checker that only knew one of the two names
+            # would be reading the spelling rather than the property.
+            and item.context_expr.attr in {"_lock", "_settled"}
             for item in getattr(node, "items", []))
 
     starts: list[int] = []
@@ -895,59 +904,194 @@ def test_a_launch_is_one_step_as_far_as_the_thread_list_is_concerned():
         f"{[-n for n in appends if n < 0]}")
 
 
-def test_waiting_is_bounded_even_when_the_disk_is_slow(config, bus, tmp_path):
-    """`wait(timeout)` is a budget for the whole call, lock included.
+def test_a_stalled_disk_cannot_block_shutdown_cancellation(config, bus,
+                                                           tmp_path):
+    """`stop_all()` must not wait on the filesystem.
 
-    `start()` holds the lock across a write to the user directory. On a
-    network mount or a full disk that write can take as long as it likes, and
-    an unbounded acquisition here would let a two-second shutdown hang for
-    exactly as long -- after which `_shutdown()` closes the tools and the
-    history under a live worker anyway.
+    `_shutdown()` calls `stop_all()` and then `wait()`, and both take the
+    lifecycle lock. While the write happened under that lock, a user directory
+    that stopped answering could hang either of them -- and bounding only
+    `wait()` moved the hang one line earlier, into `stop_all()`.
 
-    Measured rather than asserted in the abstract: with a three-second stall
-    in the persist, a two-second wait took 3.00s before this and 2.01s after.
+    Held with an event rather than a sleep: the write does not finish until
+    this test says so, and `stop_all()` must have returned long before then.
     """
     persist = tmp_path / "delegates.json"
     manager = make_manager(config, bus, persist=persist)
 
     stalled = threading.Event()
-    real_persist = manager._persist
+    let_go = threading.Event()
+    real_flush = manager._flush
 
-    def slow_persist():
-        real_persist()
+    def stalled_flush(revision, document):
         if threading.current_thread() is threading.main_thread():
             stalled.set()
-            time.sleep(1.5)          # a filesystem that is not answering
+            let_go.wait(10)          # a filesystem that is not answering
+        real_flush(revision, document)
 
-    manager._persist = slow_persist
+    manager._flush = stalled_flush
 
-    taken: list[float] = []
+    cancelled: list[int] = []
 
     def shut_down():
         stalled.wait(5)
-        started = time.monotonic()
-        manager.wait(timeout=0.4)
-        taken.append(time.monotonic() - started)
+        # The write is in progress and going nowhere. Neither of these may
+        # wait for it.
+        cancelled.append(manager.stop_all())
+        manager.listing()
+        manager.running_ids()
+        let_go.set()
 
     helper = threading.Thread(target=shut_down)
     helper.start()
-    manager.start("while the disk is slow")
+    manager.start("while the disk is stalled")
     helper.join(15)
     settle(manager)
 
-    assert taken, "the shutdown helper never ran"
-    assert taken[0] < 1.0, (
-        f"wait(timeout=0.4) took {taken[0]:.2f}s -- the budget does not cover "
-        f"acquiring the lock, so shutdown can hang on a slow write")
+    assert cancelled == [1], (
+        "stop_all() did not run while the write was stalled -- shutdown is "
+        "waiting on the disk")
+
+
+def test_the_lifecycle_lock_is_never_held_across_a_write():
+    """The invariant behind the one above, checked in the source.
+
+    A write is the only unbounded operation here. Holding the lifecycle lock
+    across one makes every other caller -- `stop_all()`, `slots_busy`,
+    `listing()`, `wait()` -- wait on a disk, and that is what hung shutdown.
+
+    Checked structurally rather than by timing, because the property is about
+    where the call sits and a test that measured it would be measuring the
+    filesystem.
+    """
+    import ast
+    import inspect
+
+    from comodor.agent import background
+
+    tree = ast.parse(inspect.getsource(background))
+    held: list[int] = []
+
+    def locking(node) -> bool:
+        return any(
+            isinstance(item.context_expr, ast.Attribute)
+            and item.context_expr.attr in {"_lock", "_settled"}
+            for item in getattr(node, "items", []))
+
+    def walk(node, under_lock: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if (isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "_flush"
+                    and under_lock):
+                held.append(child.lineno)
+            walk(child, under_lock
+                 or (isinstance(child, ast.With) and locking(child)))
+
+    walk(tree, under_lock=False)
+
+    assert held == [], f"_flush called while holding the lock at {held}"
+
+
+def test_a_lower_revision_never_becomes_the_durable_state(config, bus, tmp_path):
+    """Writing outside the lock is safe only because the revision orders it.
+
+    Physical completion order is reversed deliberately here: the newer
+    snapshot is written first and the older one attempted afterwards. The
+    older one must be dropped.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    with manager._lock:
+        manager._runs["d1"] = DelegateRun(id="d1", brief="one")
+        older = manager._stage()                 # says "running"
+        manager._runs["d1"].state = "done"
+        newer = manager._stage()                 # says "done"
+
+    manager._flush(*newer)                       # the newer one lands first
+    manager._flush(*older)                       # the older one arrives late
+
+    assert states(persist) == {"d1": "done"}, "a stale revision was written"
+
+
+def test_concurrent_writers_cannot_reorder_the_durable_state(config, bus,
+                                                             tmp_path):
+    """The same property under real threads, with the writes released in
+    reverse order."""
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    with manager._lock:
+        manager._runs["d1"] = DelegateRun(id="d1", brief="one")
+        older = manager._stage()
+        manager._runs["d1"].state = "done"
+        newer = manager._stage()
+
+    newer_done = threading.Event()
+
+    def write_newer():
+        manager._flush(*newer)
+        newer_done.set()
+
+    def write_older():
+        newer_done.wait(5)                       # strictly afterwards
+        manager._flush(*older)
+
+    threads = [threading.Thread(target=write_newer),
+               threading.Thread(target=write_older)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+
+    assert states(persist) == {"d1": "done"}
+
+
+def test_a_write_that_fails_leaves_the_manager_usable(config, bus, tmp_path):
+    """An `OSError` from the filesystem must not corrupt the state machine,
+    strand the lock, or stop the next delegate from running."""
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    real_flush = manager._flush
+    refuse_once = [True]
+
+    def sometimes(revision, document):
+        if refuse_once[0]:
+            refuse_once[0] = False
+            raise OSError("no space left on device")
+        real_flush(revision, document)
+
+    manager._flush = sometimes
+
+    with pytest.raises(OSError):
+        manager.start("the one that cannot be written")
+
+    # The lock is free, and the manager still works.
+    assert manager.slots_busy <= 1
+    manager._flush = real_flush
+    manager.stop_all()
+    settle(manager)
+
+    ok, identifier, _ = manager.start("the one after it")
+    assert ok
+    settle(manager)
+    assert states(persist)[identifier] == "done"
 
 
 def _holds_the_lock(node) -> bool:
-    """Whether a `with` block is `with self._lock:`."""
+    """Whether a `with` block holds the lifecycle lock.
+
+    `_settled` is a Condition built on `_lock`, so entering it holds the same
+    lock. A checker that knew only one of the two names would be reading the
+    spelling rather than the property.
+    """
     import ast
 
     return any(
         isinstance(item.context_expr, ast.Attribute)
-        and item.context_expr.attr == "_lock"
+        and item.context_expr.attr in {"_lock", "_settled"}
         for item in getattr(node, "items", []))
 
 
@@ -960,4 +1104,61 @@ def _acquires_the_lock(node) -> bool:
             and isinstance(call.func, ast.Attribute)
             and call.func.attr == "acquire"
             and isinstance(call.func.value, ast.Attribute)
-            and call.func.value.attr == "_lock")
+            and call.func.value.attr in {"_lock", "_settled"})
+
+
+def test_the_real_shutdown_sequence_does_not_hang_or_leave_a_worker(config, bus,
+                                                                    tmp_path):
+    """The pair `_shutdown()` actually calls, in that order.
+
+    `app.py` does `stop_all()` and then `wait(SHUTDOWN_JOIN_SECONDS)` before
+    closing the tools and the history. Both used to be able to block on a
+    stalled write, and the second could return having joined nothing.
+
+    Driven here at the manager rather than through the whole App, because what
+    is being checked belongs to the manager and an App fixture would bring a
+    provider, a terminal and a history along with it.
+    """
+    from comodor.ui.app import SHUTDOWN_JOIN_SECONDS
+
+    persist = tmp_path / "delegates.json"
+    release = threading.Event()
+    manager = make_manager(config, bus,
+                           lambda **kwargs: HeldLoop(release), persist=persist)
+
+    stalled = threading.Event()
+    let_go = threading.Event()
+    real_flush = manager._flush
+
+    def stalled_flush(revision, document):
+        if threading.current_thread() is threading.main_thread():
+            stalled.set()
+            let_go.wait(10)
+        real_flush(revision, document)
+
+    manager._flush = stalled_flush
+
+    outcome: list[tuple[float, int]] = []
+
+    def shut_down():
+        stalled.wait(5)
+        started = time.monotonic()
+        manager.stop_all()
+        release.set()                     # the child notices the cancellation
+        let_go.set()                      # and the write finally lands
+        manager.wait(SHUTDOWN_JOIN_SECONDS)
+        outcome.append((time.monotonic() - started, manager.slots_busy))
+
+    helper = threading.Thread(target=shut_down)
+    helper.start()
+    manager.start("racing the shutdown")
+    helper.join(20)
+    settle(manager)
+
+    assert outcome, "the shutdown helper never finished"
+    taken, busy = outcome[0]
+    assert taken < SHUTDOWN_JOIN_SECONDS + 1.0, (
+        f"shutdown took {taken:.2f}s against a {SHUTDOWN_JOIN_SECONDS}s budget")
+    assert busy == 0, (
+        "wait() returned with a delegate still running: the tools and the "
+        "history would be closed underneath it")
