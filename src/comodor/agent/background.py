@@ -287,21 +287,46 @@ class BackgroundDelegates:
     def wait(self, timeout: float = 30.0) -> None:
         """Block until everything running settles — used at shutdown.
 
-        The copy is taken under the lock. Reading the list while `start()`
-        appends to it is the sort of race that costs nothing until the day it
-        costs a shutdown, and the copy is three items long.
+        `timeout` is a budget for the whole call, and that includes waiting
+        for the lock. `start()` holds it across a write to the user directory,
+        and a directory on a network mount or a full disk can make that write
+        take as long as it likes — so an unbounded acquisition here would let
+        a two-second shutdown hang for as long as the filesystem felt like.
+
+        Failing to get it is not a reason to join nothing. The list is read
+        anyway, best-effort: in CPython that read cannot tear against an
+        append, and joining most of the delegates beats joining none of them.
+
+        Nothing unstarted is joined either. `start()` keeps them out of the
+        list, and this checks as well, because `join()` on a thread that has
+        not started raises and would take the rest of shutdown with it. Two
+        guards for one property is right when the second costs a comparison
+        and the first depends on a lock this method may not have got.
         """
         deadline = time.monotonic() + timeout
-        with self._lock:
+
+        got = self._lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
+        try:
             threads = list(self._threads)
+        finally:
+            if got:
+                self._lock.release()
+
         for thread in threads:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
+            if not thread.is_alive():
+                continue                # never started, or already finished
             thread.join(timeout=remaining)
-        with self._lock:
+
+        got = self._lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
+        try:
             self._threads = [thread for thread in self._threads
                              if thread.is_alive()]
+        finally:
+            if got:
+                self._lock.release()
 
     # -- plumbing ---------------------------------------------------------- #
 

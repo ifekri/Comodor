@@ -769,13 +769,19 @@ def test_the_thread_list_is_only_touched_under_the_lock():
         return (isinstance(node, ast.Attribute) and node.attr == "_threads"
                 and isinstance(node.value, ast.Name) and node.value.id == "self")
 
-    def locked(node) -> bool:
-        return any(
-            isinstance(item.context_expr, ast.Attribute)
-            and item.context_expr.attr == "_lock"
-            for item in getattr(node, "items", []))
-
     def walk(node, under_lock: bool) -> None:
+        # A `try` immediately after `self._lock.acquire(...)` holds the lock
+        # just as a `with` block does. `wait()` uses that form because its
+        # acquisition is bounded by the shutdown budget, and a checker that
+        # only understood `with` would be checking the spelling rather than
+        # the property.
+        acquired: set[int] = set()
+        body = getattr(node, "body", [])
+        if isinstance(body, list):
+            for first, second in zip(body, body[1:], strict=False):
+                if _acquires_the_lock(first) and isinstance(second, ast.Try):
+                    acquired.add(id(second))
+
         for child in ast.iter_child_nodes(node):
             # `__init__` runs before any thread exists, so the list cannot be
             # contended there and requiring the lock would be theatre.
@@ -783,7 +789,9 @@ def test_the_thread_list_is_only_touched_under_the_lock():
                 continue
             if uses_threads(child) and not under_lock:
                 unguarded.append(child.lineno)
-            walk(child, under_lock or (isinstance(child, ast.With) and locked(child)))
+            walk(child, under_lock
+                 or (isinstance(child, ast.With) and _holds_the_lock(child))
+                 or id(child) in acquired)
 
     walk(tree, under_lock=False)
 
@@ -885,3 +893,71 @@ def test_a_launch_is_one_step_as_far_as_the_thread_list_is_concerned():
     assert appends and all(line > 0 for line in appends), (
         f"_threads.append outside the lock at "
         f"{[-n for n in appends if n < 0]}")
+
+
+def test_waiting_is_bounded_even_when_the_disk_is_slow(config, bus, tmp_path):
+    """`wait(timeout)` is a budget for the whole call, lock included.
+
+    `start()` holds the lock across a write to the user directory. On a
+    network mount or a full disk that write can take as long as it likes, and
+    an unbounded acquisition here would let a two-second shutdown hang for
+    exactly as long -- after which `_shutdown()` closes the tools and the
+    history under a live worker anyway.
+
+    Measured rather than asserted in the abstract: with a three-second stall
+    in the persist, a two-second wait took 3.00s before this and 2.01s after.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    stalled = threading.Event()
+    real_persist = manager._persist
+
+    def slow_persist():
+        real_persist()
+        if threading.current_thread() is threading.main_thread():
+            stalled.set()
+            time.sleep(1.5)          # a filesystem that is not answering
+
+    manager._persist = slow_persist
+
+    taken: list[float] = []
+
+    def shut_down():
+        stalled.wait(5)
+        started = time.monotonic()
+        manager.wait(timeout=0.4)
+        taken.append(time.monotonic() - started)
+
+    helper = threading.Thread(target=shut_down)
+    helper.start()
+    manager.start("while the disk is slow")
+    helper.join(15)
+    settle(manager)
+
+    assert taken, "the shutdown helper never ran"
+    assert taken[0] < 1.0, (
+        f"wait(timeout=0.4) took {taken[0]:.2f}s -- the budget does not cover "
+        f"acquiring the lock, so shutdown can hang on a slow write")
+
+
+def _holds_the_lock(node) -> bool:
+    """Whether a `with` block is `with self._lock:`."""
+    import ast
+
+    return any(
+        isinstance(item.context_expr, ast.Attribute)
+        and item.context_expr.attr == "_lock"
+        for item in getattr(node, "items", []))
+
+
+def _acquires_the_lock(node) -> bool:
+    """Whether a statement is `... = self._lock.acquire(...)`."""
+    import ast
+
+    call = node.value if isinstance(node, (ast.Assign, ast.Expr)) else None
+    return (isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "acquire"
+            and isinstance(call.func.value, ast.Attribute)
+            and call.func.value.attr == "_lock")
