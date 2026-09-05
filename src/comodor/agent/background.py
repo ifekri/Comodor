@@ -61,6 +61,26 @@ class DelegateRun:
         }
 
 
+class DelegateCancellation(Cancellation):
+    """A stop a delegate cannot start its way out of.
+
+    `AgentLoop.run()` opens with `cancel.reset()`. For the interactive loop
+    that is right: a cancelled turn ends, and the next one begins clean. A
+    delegate has one turn and does not come back from being stopped, so the
+    same line erases any stop that arrives before the child's first step --
+    including the one `_shutdown()` just issued.
+
+    Checking for the flag instead only moves the window, because there is
+    always a line after the check: before the thread exists, before the loop is
+    constructed, during construction. This is the same question asked once,
+    where the answer cannot go stale.
+    """
+
+    def reset(self) -> None:
+        if not self.cancelled:
+            super().reset()
+
+
 class BackgroundDelegates:
     """The slots, the threads, and the finished answers waiting to be read.
 
@@ -132,7 +152,7 @@ class BackgroundDelegates:
         one instead of a repeat.
         """
         limit = self.config.delegation.max_background
-        cancel = Cancellation()
+        cancel = DelegateCancellation()
         with self._lock:
             if self._closing:
                 return False, "", (
@@ -250,11 +270,11 @@ class BackgroundDelegates:
         run: DelegateRun | None = None
         staged: tuple[int, dict[str, Any]] | None = None
 
-        # Cancelled between the thread starting and this line. `start()`
-        # catches the ones stopped before the thread exists; this catches the
-        # rest, and it has to be here rather than trusted to the flag, because
-        # `AgentLoop.run()` opens with `cancel.reset()` -- a cancellation set
-        # in this window is erased by the first thing the child does with it.
+        # Cancelled between the thread starting and this line: settle without
+        # building a loop and a toolset for a turn nobody is waiting for. The
+        # guarantee is `DelegateCancellation`, not this -- a check has a window
+        # after it, and a stop landing inside `self.spawner(...)` below would
+        # walk straight through one placed here.
         with self._lock:
             if identifier in self._cancelled:
                 run = self._runs.get(identifier)
@@ -302,8 +322,13 @@ class BackgroundDelegates:
             with self._lock:
                 run = self._runs.get(identifier)
                 if run is not None:
-                    run.state = "failed"
-                    run.error = f"{type(error).__name__}: {error}"
+                    # A run the user stopped reports as stopped even when the
+                    # child threw on its way out. `failed` would blame the
+                    # delegate for doing what it was told.
+                    stopped = identifier in self._cancelled
+                    run.state = "stopped" if stopped else "failed"
+                    run.error = ("" if stopped
+                                 else f"{type(error).__name__}: {error}")
                     run.ended_at = time.time()
                     staged = self._stage()
 

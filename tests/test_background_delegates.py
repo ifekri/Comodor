@@ -12,11 +12,12 @@ import pytest
 
 from comodor.agent.background import (
     BackgroundDelegates,
+    DelegateCancellation,
     DelegateRun,
     completion_turn,
 )
 from comodor.config import Config
-from comodor.events import EventBus, Kind
+from comodor.events import Cancelled, EventBus, Kind
 
 
 @dataclass
@@ -1534,5 +1535,73 @@ def test_a_delegate_stopped_before_its_first_turn_never_runs(config, bus,
     flushed(manager)
 
     assert not ran.is_set(), "the loop ran after the delegate was stopped"
+    assert states(persist)[identifier] == "stopped"
+    assert manager.running_ids() == []
+
+
+def test_a_delegate_stop_survives_the_loop_resetting_it():
+    """The one line every check-then-act in this file was working around.
+
+    `AgentLoop.run()` opens with `cancel.reset()`. For a delegate a stop is
+    terminal, so the handle refuses to un-cancel itself -- and no window before
+    the child's first step can erase what a user asked for.
+    """
+    cancel = DelegateCancellation()
+
+    cancel.reset()
+    assert not cancel.cancelled, "an untouched handle should reset freely"
+
+    cancel.cancel()
+    cancel.reset()
+    assert cancel.cancelled, "the stop was erased by the child's start-up"
+    with pytest.raises(Cancelled):
+        cancel.raise_if_cancelled()
+
+
+def test_a_stop_during_the_childs_construction_is_not_erased(config, bus,
+                                                             tmp_path):
+    """The window a check inside `_work` cannot close.
+
+    Building the child's loop and toolset takes real time. A `stop_all()`
+    landing in the middle of it is past every check `_work` could make, and
+    used to be erased by `run()` the moment construction finished.
+    """
+    persist = tmp_path / "delegates.json"
+    building = threading.Event()
+    release = threading.Event()
+    ran = threading.Event()
+
+    class Child:
+        def __init__(self, cancel):
+            self.cancel = cancel
+
+        def run(self, brief):
+            # What `AgentLoop.run` does: reset on the way in, and catch its own
+            # `Cancelled` on the first step -- `loop.py:163`.
+            self.cancel.reset()
+            try:
+                self.cancel.raise_if_cancelled()
+            except Cancelled:
+                return FakeResult(text="", stopped="cancelled")
+            ran.set()
+            return FakeResult()
+
+    def slow_spawner(**kwargs):
+        building.set()
+        assert release.wait(30.0), "construction was never released"
+        return Child(kwargs["cancel"])
+
+    manager = make_manager(config, bus, slow_spawner, persist=persist)
+
+    ok, identifier, _ = manager.start("a turn stopped mid-construction")
+    assert ok
+    assert building.wait(30.0), "the child was never constructed"
+
+    manager.stop_all()
+    release.set()
+    manager.wait(timeout=30.0)
+    flushed(manager)
+
+    assert not ran.is_set(), "the stop was lost while the child was built"
     assert states(persist)[identifier] == "stopped"
     assert manager.running_ids() == []
