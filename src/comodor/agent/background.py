@@ -130,9 +130,45 @@ class BackgroundDelegates:
             daemon=True, name=f"comodor-delegate-{identifier}",
         )
         with self._lock:
+            # Written before the thread exists, not after it. Two reasons, and
+            # the second is the bug this change is for: a crash in the gap
+            # between starting a worker and recording it left no evidence of
+            # the delegate at all, which is the one thing this file is for.
+            # And a worker that finished inside that gap wrote `done`, which
+            # this line then overwrote with the `running` it had read a moment
+            # earlier.
+            self._persist()
+
+            # Started and registered without letting go of the lock, so a
+            # launch is one indivisible step as far as `wait()` is concerned.
+            #
+            # Both orderings are wrong on their own. Appending first exposes a
+            # thread that has not started, and joining one of those raises
+            # `RuntimeError: cannot join thread before it is started`, which
+            # aborts the rest of shutdown. Appending afterwards leaves a
+            # started-but-unlisted thread, and a `wait()` landing there returns
+            # having joined nothing — so shutdown closes the tools and the
+            # history underneath a delegate that is still working.
+            #
+            # `wait()` takes this same lock to take its snapshot, so it either
+            # sees the finished launch or waits for it. The worker does not
+            # need the lock until it has a result, so holding it across
+            # `start()` blocks nobody who is doing anything.
+            try:
+                thread.start()
+            except RuntimeError as problem:
+                # The runtime would not give us a thread. Nothing is going to
+                # move this run out of `running`, so it must not be left there:
+                # the slot would be occupied for the rest of the session, and
+                # the next one would read the record and report a task that
+                # never ran as lost.
+                self._runs.pop(identifier, None)
+                self._persist()
+                self._cancels.pop(identifier, None)
+                return False, "", (
+                    f"the delegate could not be started: {problem}")
             self._threads.append(thread)
-        thread.start()
-        self._persist()
+
         self._emit(identifier, "started")
         return True, identifier, ""
 
@@ -249,14 +285,48 @@ class BackgroundDelegates:
                     if run.state == "running"]
 
     def wait(self, timeout: float = 30.0) -> None:
-        """Block until everything running settles — used at shutdown."""
+        """Block until everything running settles — used at shutdown.
+
+        `timeout` is a budget for the whole call, and that includes waiting
+        for the lock. `start()` holds it across a write to the user directory,
+        and a directory on a network mount or a full disk can make that write
+        take as long as it likes — so an unbounded acquisition here would let
+        a two-second shutdown hang for as long as the filesystem felt like.
+
+        Failing to get it is not a reason to join nothing. The list is read
+        anyway, best-effort: in CPython that read cannot tear against an
+        append, and joining most of the delegates beats joining none of them.
+
+        Nothing unstarted is joined either. `start()` keeps them out of the
+        list, and this checks as well, because `join()` on a thread that has
+        not started raises and would take the rest of shutdown with it. Two
+        guards for one property is right when the second costs a comparison
+        and the first depends on a lock this method may not have got.
+        """
         deadline = time.monotonic() + timeout
-        for thread in list(self._threads):
+
+        got = self._lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
+        try:
+            threads = list(self._threads)
+        finally:
+            if got:
+                self._lock.release()
+
+        for thread in threads:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
+            if not thread.is_alive():
+                continue                # never started, or already finished
             thread.join(timeout=remaining)
-        self._threads = [thread for thread in self._threads if thread.is_alive()]
+
+        got = self._lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
+        try:
+            self._threads = [thread for thread in self._threads
+                             if thread.is_alive()]
+        finally:
+            if got:
+                self._lock.release()
 
     # -- plumbing ---------------------------------------------------------- #
 
@@ -278,6 +348,27 @@ class BackgroundDelegates:
         This is not a queue and not a resume mechanism. It is the evidence:
         after a crash the next session can say plainly what was running and
         mark it lost, rather than leaving silent orphans behind.
+
+        **The caller must hold `_lock`.** Snapshotting and writing are one
+        step, and separating them is not a style question — it is how a
+        finished delegate came to be recorded as running:
+
+            main                                  worker
+            ──────────────────────────────────────────────────────────
+            _snapshot()  → "running"
+                                                  state = "done"
+                                                  _snapshot() → "done"
+                                                  write("done")
+            write("running")   ← older, and last
+
+        The next session read `running` and reported a delegate that had
+        finished perfectly well as lost.
+
+        The lock is not taken here because `_work` calls this while already
+        holding it and `threading.Lock` is not reentrant. Making it an
+        `RLock` would work and would also make the requirement invisible;
+        requiring it of callers keeps it somewhere a reader can see it, and
+        `test_every_persist_happens_while_the_lock_is_held` keeps it true.
         """
         if self.persist_path is None:
             return
@@ -290,9 +381,13 @@ class BackgroundDelegates:
             pass
 
     def _snapshot(self) -> dict[str, Any]:
-        """The document to persist. Lock-free: callers hold the lock when the
-        snapshot must agree with the state they just changed, and take it
-        themselves otherwise."""
+        """The document to persist. The caller holds `_lock`.
+
+        It used to say the lock was needed only "when the snapshot must agree
+        with the state they just changed", which sounds like a narrow case and
+        is in fact every case: a snapshot that does not agree with the state is
+        one that can be written after a newer one.
+        """
         return {
             "saved_at": time.time(),
             "runs": [vars(run) | {} for run in self._runs.values()],
@@ -337,7 +432,11 @@ class BackgroundDelegates:
         if changed:
             with self._lock:
                 self._counter = itertools.count(highest + 1)
-            self._persist()
+                # Nothing else is running yet - this is construction - but the
+                # rule is that every write happens under the lock, and a rule
+                # with one exception is a rule somebody will copy the exception
+                # from.
+                self._persist()
 
 
 def _id_number(identifier: str) -> int:
