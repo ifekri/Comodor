@@ -378,6 +378,36 @@ def states(path: Path) -> dict[str, str]:
     return {record["id"]: record["state"] for record in persisted(path)["runs"]}
 
 
+def flushed(manager, seconds: float = 30.0) -> None:
+    """Wait until every staged snapshot has reached the disk.
+
+    `settle()` waits for no delegate to be running, which used to imply the
+    file agreed: the write happened under the same lock that published the
+    state. It does not any more, and deliberately -- the write is outside the
+    lock so a stalled disk cannot hang shutdown -- so "finished" and
+    "written" are now two moments, microseconds apart.
+
+    Nothing in the product depends on the gap: `_load` reads the file in a
+    later process, and no code re-reads it inside one. Only a test that
+    inspects the file needs to know, and this is how it waits -- on the
+    revision counters rather than on a duration, so it is a wait for the thing
+    itself and not for a guess about how long it takes.
+    """
+    deadline = time.monotonic() + seconds
+    while True:
+        with manager._lock:
+            latest = manager._revision
+        with manager._write_lock:
+            written = manager._written
+        if written >= latest:
+            return
+        if time.monotonic() >= deadline:
+            pytest.fail(
+                f"revision {written} is on disk and {latest} was staged, "
+                f"after {seconds:g}s")
+        time.sleep(0.005)
+
+
 def test_a_finished_delegate_is_never_persisted_as_running(config, bus, tmp_path):
     """The race, forced.
 
@@ -396,6 +426,7 @@ def test_a_finished_delegate_is_never_persisted_as_running(config, bus, tmp_path
     settle(manager)
     interleave.worker_wrote.wait(5)
 
+    flushed(manager)
     assert states(persist) == {"d1": "done"}, \
         "a delegate that finished was persisted as still running"
 
@@ -447,6 +478,7 @@ def test_a_terminal_state_is_never_overwritten_by_running(config, bus, tmp_path,
     settle(manager)
     interleave.worker_wrote.wait(5)
 
+    flushed(manager)
     assert states(persist) == {"d1": expected}
 
 
@@ -465,6 +497,7 @@ def test_a_stopped_delegate_stays_stopped_on_disk(config, bus, tmp_path):
     settle(manager)
     release.set()
 
+    flushed(manager)
     assert states(persist)["d1"] in {"stopped", "cancelled"}
 
 
@@ -486,6 +519,7 @@ def test_two_delegates_finishing_at_once_both_land(config, bus, tmp_path):
     gate.set()
     settle(manager)
 
+    flushed(manager)
     on_disk = states(persist)
     assert set(on_disk) == set(identifiers)
     assert all(state == "done" for state in on_disk.values()), on_disk
@@ -504,6 +538,7 @@ def test_the_file_stays_valid_json_throughout(config, bus, tmp_path):
     gate.set()
     settle(manager)
 
+    flushed(manager)
     document = persisted(persist)
     assert isinstance(document.get("runs"), list)
     assert isinstance(document.get("saved_at"), float)
@@ -527,6 +562,7 @@ def test_the_record_exists_before_the_worker_can_change_it(config, bus, tmp_path
 
     gate.set()
     settle(manager)
+    flushed(manager)
     assert states(persist) == {"d1": "done"}
 
 
@@ -566,6 +602,7 @@ def test_a_reload_after_finished_work_starts_clean(config, bus, tmp_path):
     first.start("one")
     gate.set()
     settle(first)
+    flushed(first)
     assert states(persist) == {"d1": "done"}
 
     second = make_manager(config, bus, persist=persist)
@@ -755,6 +792,7 @@ def test_a_failed_start_does_not_consume_a_slot_forever(config, bus, tmp_path):
     settle(manager)
 
     assert ok
+    flushed(manager)
     assert states(persist)[identifier] == "done"
 
 
@@ -1012,6 +1050,7 @@ def test_a_lower_revision_never_becomes_the_durable_state(config, bus, tmp_path)
     manager._flush(*newer)                       # the newer one lands first
     manager._flush(*older)                       # the older one arrives late
 
+    flushed(manager)
     assert states(persist) == {"d1": "done"}, "a stale revision was written"
 
 
@@ -1045,6 +1084,7 @@ def test_concurrent_writers_cannot_reorder_the_durable_state(config, bus,
     for thread in threads:
         thread.join(10)
 
+    flushed(manager)
     assert states(persist) == {"d1": "done"}
 
 
@@ -1077,6 +1117,7 @@ def test_a_write_that_fails_leaves_the_manager_usable(config, bus, tmp_path):
     ok, identifier, _ = manager.start("the one after it")
     assert ok
     settle(manager)
+    flushed(manager)
     assert states(persist)[identifier] == "done"
 
 
