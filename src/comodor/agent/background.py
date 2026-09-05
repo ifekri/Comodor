@@ -430,8 +430,17 @@ class BackgroundDelegates:
 
             writer = threading.Thread(target=write_it, daemon=True,
                                       name="comodor-delegate-final-write")
-            writer.start()
-            writer.join(timeout=remaining)
+            try:
+                writer.start()
+            except RuntimeError:
+                # The runtime would not give us a thread. This write was always
+                # best-effort, and shutdown has tools, history and MCP still to
+                # close: an exception escaping here would leave all of them
+                # open, which is a far worse outcome than a file one revision
+                # behind.
+                pass
+            else:
+                writer.join(timeout=remaining)
 
     # -- plumbing ---------------------------------------------------------- #
 

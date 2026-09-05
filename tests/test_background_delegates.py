@@ -1368,3 +1368,32 @@ def test_wait_gives_up_on_a_write_that_never_returns(config, bus, tmp_path):
     assert taken < 2.0, (
         f"wait(timeout=0.3) took {taken:.2f}s -- the write itself is not "
         f"bounded, only the wait for the lock")
+
+
+def test_wait_survives_a_runtime_that_will_not_start_the_final_writer(
+        config, bus, tmp_path):
+    """The last write is best-effort, and so is the thread that does it.
+
+    `_shutdown()` still has the tools, the history and MCP to close after
+    `wait()` returns. An exception escaping here would leave all of them open
+    -- a far worse outcome than a file one revision behind.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    with manager._lock:
+        manager._runs["d1"] = DelegateRun(id="d1", brief="one")
+        manager._stage()
+
+    original = threading.Thread.start
+
+    def refuse(self):
+        if self.name == "comodor-delegate-final-write":
+            raise RuntimeError("can't start new thread")
+        original(self)
+
+    threading.Thread.start = refuse
+    try:
+        manager.wait(timeout=1.0)          # must return, not raise
+    finally:
+        threading.Thread.start = original
