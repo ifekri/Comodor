@@ -368,7 +368,12 @@ class BackgroundDelegates:
         with self._lock:
             self._threads = [thread for thread in self._threads
                              if thread.is_alive()]
-            staged = self._stage()
+            # Only when something staged has not reached the disk. A session
+            # that never started a delegate has nothing to write, and making
+            # every shutdown pay for a file it does not need would be a cost
+            # on the common path for the sake of the rare one.
+            staged = (self._stage()
+                      if self._revision > self._written else None)
 
         # The last word, written on the way out. Moving the write off the lock
         # made "finished" and "written" two moments, so a graceful exit could
@@ -377,7 +382,8 @@ class BackgroundDelegates:
         # this returns, what is on disk is what the manager believes.
         #
         # A process killed outright is a different question and always was.
-        self._flush(*staged)
+        if staged is not None:
+            self._flush(*staged)
 
     # -- plumbing ---------------------------------------------------------- #
 
