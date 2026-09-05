@@ -457,6 +457,9 @@ class App:
                 changed |= self._on_mouse(event)
             elif isinstance(event, PasteEvent):
                 self.state.editor.insert(event.text)
+                # Pasted text is a text change like any other, and it does not
+                # pass through the key handler that settles them.
+                self._settle_completions()
                 changed = True
         return changed
 
@@ -506,6 +509,20 @@ class App:
         return self._editor_key(event)
 
     def _editor_key(self, event: KeyEvent) -> bool:
+        """One keypress in the prompt, then the completion menu made sane.
+
+        The settling is here rather than in each branch that changes the text.
+        Backspace, delete, ctrl+w, ctrl+u, ctrl+k and a paste all move the
+        selection out from under itself, and only typing a character used to
+        reset it — so deleting could leave the index pointing past the end of a
+        shorter list, and Enter would then accept a command nobody chose.
+        """
+        handled = self._editor_key_dispatch(event)
+        if handled:
+            self._settle_completions()
+        return handled
+
+    def _editor_key_dispatch(self, event: KeyEvent) -> bool:
         editor = self.state.editor
         matches = self._completions()
 
@@ -574,6 +591,9 @@ class App:
             return True
         if event.key == "char" and not event.ctrl:
             editor.insert(event.char)
+            # Back to the top: a narrower prefix is a different list, and
+            # holding a position in it means holding a position in something
+            # else. `_settle_completions` brings the window along.
             self.state.completion_index = 0
             return True
         return False
@@ -632,12 +652,46 @@ class App:
 
         return completions(self.state.editor.text, self.state.slash_commands)
 
+    def _settle_completions(self) -> None:
+        """Make the selection and the window valid for the list as it is now.
+
+        The single place either is corrected. Everything that can change the
+        matches — typing, deleting, pasting, accepting — passes through here
+        afterwards, so no branch has to remember to reset anything and no two
+        of them can disagree.
+
+        The window is *nudged*, not recomputed: a selection already on screen
+        leaves it exactly where it was. That is the difference between a menu
+        that scrolls when it has to and one that lurches on every keypress.
+        """
+        from .widgets.prompt import menu_budget, scroll_into_view, visible_items
+
+        total = len(self._completions())
+        if total <= 0:
+            self.state.completion_index = 0
+            self.state.completion_top = 0
+            return
+
+        self.state.completion_index = max(
+            0, min(self.state.completion_index, total - 1))
+
+        # The same arithmetic the screen lays out with, from the same place,
+        # so the two cannot drift into disagreeing about how many commands fit.
+        rows = self.geometry.prompt.height if self.geometry else 0
+        budget = menu_budget(total, max(0, rows - 1))
+        self.state.completion_top = scroll_into_view(
+            self.state.completion_index, self.state.completion_top,
+            total, visible_items(total, budget))
+
     def _accept_completion(self, matches: list[tuple[str, str]]) -> None:
         index = min(self.state.completion_index, len(matches) - 1)
         name = matches[index][0]
         self.state.editor.text = name + " "
         self.state.editor.cursor = len(self.state.editor.text)
+        # The list is about to be the one command just accepted, or nothing.
+        # Either way the old position means nothing.
         self.state.completion_index = 0
+        self.state.completion_top = 0
 
     # ------------------------------------------------------------------ #
     # overlays

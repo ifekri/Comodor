@@ -31,7 +31,13 @@ from .widgets.chat import Entry, render_transcript
 from .widgets.history import HistoryModel, render_history
 from .widgets.overlay import Overlay, render_overlay
 from .widgets.panel import rule, too_small_notice
-from .widgets.prompt import Editor, completions, render_completions, render_editor
+from .widgets.prompt import (
+    Editor,
+    completions,
+    menu_budget,
+    render_completions,
+    render_editor,
+)
 from .widgets.statusbar import StatusModel, activity_line, footer_line
 from .widgets.toast import ToastQueue
 
@@ -51,6 +57,13 @@ class ScreenState:
     spinner: int = 0
     slash_commands: list[tuple[str, str]] = field(default_factory=list)
     completion_index: int = 0
+    #: The first command drawn in the completion menu.
+    #:
+    #: Separate from the selection on purpose. They used to be the same
+    #: thing by omission — the menu always drew from the top — so a
+    #: selection past the fourth command had nowhere to appear and
+    #: arrow-down looked like a key that did nothing.
+    completion_top: int = 0
     sidebar_visible: bool = True
     transcript_rows: int = 0              # filled in by the renderer
 
@@ -152,16 +165,26 @@ class Screen:
         rows = max(1, rect.height)
 
         matches = completions(state.editor.text, state.slash_commands)
-        listed = min(len(matches), max(0, rows - 1), 4) if matches else 0
+        # Rows, including the indicator. `render_completions` draws no more
+        # than this, so the editor keeps the rest and the prompt stays put
+        # while somebody scrolls the menu. It used to be a count of *items*
+        # with the indicator added on top, which put the composer one row over
+        # its own budget whenever the list overflowed.
+        listed = menu_budget(len(matches), rows - 1)
 
         editor = render_editor(state.editor, rect, self.theme,
                                focused=state.focus == "prompt",
                                rows=max(1, rows - listed))
         if not listed:
             return editor
+        # The width as well as the height. A row wider than the prompt wraps,
+        # and a wrapped row is a second physical line the budget above did not
+        # allow for — which is how a five-row menu came to draw eight.
         return Group(editor, render_completions(matches, self.theme,
                                                 state.completion_index,
-                                                limit=listed))
+                                                limit=listed,
+                                                top=state.completion_top,
+                                                width=rect.width))
 
     # -- the footer -------------------------------------------------------- #
 
