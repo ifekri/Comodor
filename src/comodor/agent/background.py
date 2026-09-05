@@ -130,15 +130,38 @@ class BackgroundDelegates:
             daemon=True, name=f"comodor-delegate-{identifier}",
         )
         with self._lock:
-            self._threads.append(thread)
             # Written before the thread exists, not after it. Two reasons, and
-            # the second is the bug: a crash in the gap between starting a
-            # worker and recording it left no evidence of the delegate at all,
-            # which is the one thing this file is for. And a worker that
-            # finished inside that gap wrote `done`, which this line then
-            # overwrote with the `running` it had read a moment earlier.
+            # the second is the bug this change is for: a crash in the gap
+            # between starting a worker and recording it left no evidence of
+            # the delegate at all, which is the one thing this file is for.
+            # And a worker that finished inside that gap wrote `done`, which
+            # this line then overwrote with the `running` it had read a moment
+            # earlier.
             self._persist()
-        thread.start()
+
+        try:
+            thread.start()
+        except RuntimeError as problem:
+            # The runtime would not give us a thread. Nothing is going to move
+            # this run out of `running`, so it must not be left there: the slot
+            # would be occupied for the rest of the session, and the next one
+            # would read the record and report a task that never ran as lost.
+            with self._lock:
+                self._runs.pop(identifier, None)
+                self._persist()
+            self._cancels.pop(identifier, None)
+            return False, "", (
+                f"the delegate could not be started: {problem}")
+
+        # Appended only once it is running. `wait()` joins everything in here
+        # at shutdown, and joining a thread that has not started raises
+        # `RuntimeError: cannot join thread before it is started` — which would
+        # abort the rest of shutdown. The window between starting and
+        # recording is now nothing but a list append; before this change a
+        # filesystem write sat inside it.
+        with self._lock:
+            self._threads.append(thread)
+
         self._emit(identifier, "started")
         return True, identifier, ""
 
@@ -255,14 +278,23 @@ class BackgroundDelegates:
                     if run.state == "running"]
 
     def wait(self, timeout: float = 30.0) -> None:
-        """Block until everything running settles — used at shutdown."""
+        """Block until everything running settles — used at shutdown.
+
+        The copy is taken under the lock. Reading the list while `start()`
+        appends to it is the sort of race that costs nothing until the day it
+        costs a shutdown, and the copy is three items long.
+        """
         deadline = time.monotonic() + timeout
-        for thread in list(self._threads):
+        with self._lock:
+            threads = list(self._threads)
+        for thread in threads:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             thread.join(timeout=remaining)
-        self._threads = [thread for thread in self._threads if thread.is_alive()]
+        with self._lock:
+            self._threads = [thread for thread in self._threads
+                             if thread.is_alive()]
 
     # -- plumbing ---------------------------------------------------------- #
 

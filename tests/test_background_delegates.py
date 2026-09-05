@@ -642,3 +642,149 @@ def test_every_persist_happens_while_the_lock_is_held():
         f"_persist() is called without the lock at line(s) {unguarded}. "
         f"Snapshot and write must be one step, or a stale snapshot can land "
         f"on top of a newer one.")
+
+
+# --------------------------------------------------------------------------- #
+# starting a thread, and the two ways it can go wrong
+# --------------------------------------------------------------------------- #
+#
+# Both found by review of the change above, and both caused by it. Moving the
+# persist before `thread.start()` put a filesystem write inside the window
+# between recording a thread and starting it -- a window that already existed
+# and was previously a few instructions wide.
+
+
+def test_shutdown_never_joins_a_thread_that_has_not_started(config, bus,
+                                                            tmp_path):
+    """`wait()` joins everything in `_threads`, and joining an unstarted
+    thread raises `RuntimeError: cannot join thread before it is started` --
+    which would abort the rest of shutdown.
+
+    The window is forced open here: the persist blocks, so `start()` is held
+    at exactly the point where the thread used to be listed and not yet
+    running, and `wait()` is called from another thread while it sits there.
+    """
+    persist = tmp_path / "delegates.json"
+    gate = threading.Event()
+    manager = make_manager(config, bus,
+                           lambda **kwargs: HeldLoop(gate), persist=persist)
+
+    inside = threading.Event()
+    release = threading.Event()
+    real_persist = manager._persist
+
+    def slow_persist():
+        real_persist()
+        if threading.current_thread() is threading.main_thread():
+            inside.set()
+            release.wait(5)
+
+    manager._persist = slow_persist
+
+    failure: list[BaseException] = []
+
+    def shut_down():
+        inside.wait(5)
+        try:
+            manager.wait(timeout=0.2)
+        except BaseException as problem:      # noqa: BLE001 - recording it
+            failure.append(problem)
+        finally:
+            release.set()
+
+    helper = threading.Thread(target=shut_down)
+    helper.start()
+    manager.start("one")
+    helper.join(10)
+
+    gate.set()
+    settle(manager)
+
+    assert failure == [], f"shutdown raised: {failure}"
+
+
+def test_a_thread_that_cannot_start_leaves_no_record_behind(config, bus,
+                                                            tmp_path):
+    """The runtime refusing another thread is rare and not impossible.
+
+    The record is written before the thread starts, so a failure to start
+    leaves a run nothing will ever move out of `running`: the slot stays
+    occupied for the session, and the next one reads the file and reports a
+    task that never ran as lost.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    def refuse(self):
+        raise RuntimeError("can't start new thread")
+
+    original = threading.Thread.start
+    threading.Thread.start = refuse
+    try:
+        ok, identifier, why = manager.start("one that cannot run")
+    finally:
+        threading.Thread.start = original
+
+    assert not ok, "a delegate that could not start was reported as started"
+    assert "could not be started" in why
+    assert manager.slots_busy == 0, "the slot was left occupied"
+
+    second = make_manager(config, bus, persist=persist)
+    assert second.take_pending() == [],         "a delegate that never ran was reported as lost"
+
+
+def test_a_failed_start_does_not_consume_a_slot_forever(config, bus, tmp_path):
+    """After a refusal the manager must still be usable, and the next delegate
+    must still be able to run."""
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    original = threading.Thread.start
+    threading.Thread.start = lambda self: (_ for _ in ()).throw(
+        RuntimeError("no threads"))
+    try:
+        manager.start("doomed")
+    finally:
+        threading.Thread.start = original
+
+    ok, identifier, _ = manager.start("this one works")
+    settle(manager)
+
+    assert ok
+    assert states(persist)[identifier] == "done"
+
+
+def test_the_thread_list_is_only_touched_under_the_lock():
+    """`wait()` used to copy and rebuild `_threads` without it, while
+    `start()` appended under it."""
+    import ast
+    import inspect
+
+    from comodor.agent import background
+
+    tree = ast.parse(inspect.getsource(background))
+    unguarded: list[int] = []
+
+    def uses_threads(node) -> bool:
+        return (isinstance(node, ast.Attribute) and node.attr == "_threads"
+                and isinstance(node.value, ast.Name) and node.value.id == "self")
+
+    def locked(node) -> bool:
+        return any(
+            isinstance(item.context_expr, ast.Attribute)
+            and item.context_expr.attr == "_lock"
+            for item in getattr(node, "items", []))
+
+    def walk(node, under_lock: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            # `__init__` runs before any thread exists, so the list cannot be
+            # contended there and requiring the lock would be theatre.
+            if isinstance(child, ast.FunctionDef) and child.name == "__init__":
+                continue
+            if uses_threads(child) and not under_lock:
+                unguarded.append(child.lineno)
+            walk(child, under_lock or (isinstance(child, ast.With) and locked(child)))
+
+    walk(tree, under_lock=False)
+
+    assert unguarded == [], f"_threads touched without the lock at {unguarded}"
