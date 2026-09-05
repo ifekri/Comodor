@@ -144,6 +144,9 @@ class BackgroundDelegates:
         self._threads: list[threading.Thread] = []
         self._cancelled: set[str] = set()
         self._cancels: dict[str, Cancellation] = {}
+        #: The last state announced for each run, so an event that was
+        #: overtaken cannot walk one backwards.
+        self._announced: dict[str, str] = {}
         self._load()
 
     # -- launching --------------------------------------------------------- #
@@ -266,6 +269,7 @@ class BackgroundDelegates:
                     # record and report a task that never ran as lost.
                     self._runs.pop(identifier, None)
                     self._cancels.pop(identifier, None)
+                    self._announced.pop(identifier, None)
                     undo = self._stage()
                 self._launching -= 1
                 self._settled.notify_all()
@@ -539,23 +543,41 @@ class BackgroundDelegates:
     #: States a run does not come back from.
     TERMINAL = ("done", "failed", "stopped", "lost")
 
+    #: How far along a run an event says it is. A run only ever moves forward,
+    #: so an event may never report less progress than one already sent for it
+    #: — `started` arriving behind `stopping` would tell a subscriber the work
+    #: it just stopped had come back to life.
+    PROGRESS = {"started": 0, "stopping": 1,
+                "done": 2, "failed": 2, "stopped": 2, "lost": 2}
+
     def _emit(self, identifier: str, state: str) -> None:
         """Tell the bus where a run is.
 
-        `state` is what the caller believes, and the run itself is consulted
-        before that is taken at face value. `stop()` emits `stopping` after
-        releasing the lock, so a launch cancelled before it started can settle
-        and emit `stopped` in between — and a subscriber would see the two
-        arrive in that order and keep the live one. A settled run reports what
-        it settled as, whoever is doing the telling.
+        `state` is what the caller believes, and it is not taken at face
+        value. Everything about a launch happens on two threads, so an event
+        can be prepared before another one and sent after it: `stop()` emits
+        `stopping` with the lock released, and `start()` emits `started` after
+        registering the thread. Either can overtake the other.
+
+        Two things settle it, in order. A run that has reached a state it does
+        not come back from reports that state, whoever is doing the telling.
+        And no event may report less progress than one already sent for the
+        same run — a late `started` says `stopping`, because that is where the
+        run had already been announced to be.
         """
         try:
             with self._lock:
                 run = self._runs.get(identifier)
                 payload = run.as_dict() if run else {"id": identifier}
-                settled = (run.state if run is not None
-                           and run.state in self.TERMINAL else "")
-            payload["state"] = settled or state
+                if (run is not None and run.state in self.TERMINAL):
+                    state = run.state
+                told = self._announced.get(identifier, "")
+                if (self.PROGRESS.get(state, 0)
+                        < self.PROGRESS.get(told, -1)):
+                    state = told
+                else:
+                    self._announced[identifier] = state
+            payload["state"] = state
             self.bus.emit(Kind.DELEGATE, **payload)
         except Exception:
             pass

@@ -1652,3 +1652,66 @@ def test_a_stop_is_never_lost_between_the_check_and_the_clear():
     assert not cancel.stopper.is_alive()
 
     assert cancel.cancelled, "a stop made during reset() was thrown away"
+
+
+def test_no_event_walks_a_run_backwards(config, bus, tmp_path):
+    """A `started` overtaken by a `stopping` must not undo it.
+
+    Both events are prepared on one thread and sent on another, so either can
+    arrive second. The run is still `running` at that moment, so preferring a
+    terminal state does not help -- there is not one yet.
+    """
+    manager = make_manager(config, bus, persist=tmp_path / "delegates.json")
+
+    seen: list = []
+    bus.subscribe(seen.append)
+
+    with manager._lock:
+        manager._runs["d1"] = DelegateRun(id="d1", brief="one")
+
+    manager._emit("d1", "stopping")
+    manager._emit("d1", "started")           # the overtaken notice
+
+    states_seen = [event.payload.get("state") for event in seen
+                   if event.kind is Kind.DELEGATE]
+    assert states_seen == ["stopping", "stopping"], states_seen
+
+
+def test_a_stop_landing_mid_launch_is_not_undone_by_started(config, bus,
+                                                            tmp_path):
+    """The same thing along the real path.
+
+    `stop()` runs once the worker is registered and before `start()` has
+    emitted; forced here rather than waited for.
+    """
+    persist = tmp_path / "delegates.json"
+    release = threading.Event()
+    manager = make_manager(config, bus, lambda **kwargs: HeldLoop(release),
+                           persist=persist)
+
+    seen: list = []
+    bus.subscribe(seen.append)
+
+    emit = manager._emit
+    stopped_first = threading.Event()
+
+    def racing(identifier, state):
+        if state == "started" and not stopped_first.is_set():
+            stopped_first.set()
+            manager.stop(identifier)         # emits `stopping` first
+        emit(identifier, state)
+
+    manager._emit = racing
+
+    ok, identifier, _ = manager.start("a turn stopped as it starts")
+    assert ok
+    assert stopped_first.is_set(), "the stop never raced the start"
+
+    states_seen = [event.payload.get("state") for event in seen
+                   if event.kind is Kind.DELEGATE]
+    assert "started" not in states_seen, states_seen
+    assert states_seen[0] == "stopping", states_seen
+
+    release.set()
+    manager.stop_all()
+    manager.wait(timeout=30.0)
