@@ -349,7 +349,7 @@ class Interleave:
 
         manager._flush = self._flush
 
-    def _flush(self, revision, document):
+    def _flush(self, revision, document, timeout=None):
         if threading.current_thread() is self.main_thread:
             # The main thread holds an older snapshot. Let the worker finish
             # and write first, so this one is attempted last and stale.
@@ -719,7 +719,7 @@ def test_shutdown_never_joins_a_thread_that_has_not_started(config, bus,
 
     # The flush is the widest part of a launch and the part that is *not*
     # under the lock, which is precisely the gap `_launching` exists to cover.
-    def slow_flush(revision, document):
+    def slow_flush(revision, document, timeout=None):
         real_flush(revision, document)
         if threading.current_thread() is threading.main_thread():
             inside.set()
@@ -867,7 +867,7 @@ def test_shutdown_cannot_step_over_a_launch_in_progress(config, bus, tmp_path):
     arrived = threading.Event()
     real_flush = manager._flush
 
-    def slow_flush(revision, document):
+    def slow_flush(revision, document, timeout=None):
         real_flush(revision, document)
         if threading.current_thread() is threading.main_thread():
             launching.set()
@@ -966,7 +966,7 @@ def test_a_stalled_disk_cannot_block_shutdown_cancellation(config, bus,
     let_go = threading.Event()
     real_flush = manager._flush
 
-    def stalled_flush(revision, document):
+    def stalled_flush(revision, document, timeout=None):
         if threading.current_thread() is threading.main_thread():
             stalled.set()
             let_go.wait(10)          # a filesystem that is not answering
@@ -1102,7 +1102,7 @@ def test_a_write_that_fails_leaves_the_manager_usable(config, bus, tmp_path):
     real_flush = manager._flush
     refuse_once = [True]
 
-    def sometimes(revision, document):
+    def sometimes(revision, document, timeout=None):
         if refuse_once[0]:
             refuse_once[0] = False
             raise OSError("no space left on device")
@@ -1176,7 +1176,7 @@ def test_the_real_shutdown_sequence_does_not_hang_or_leave_a_worker(config, bus,
     let_go = threading.Event()
     real_flush = manager._flush
 
-    def stalled_flush(revision, document):
+    def stalled_flush(revision, document, timeout=None):
         if threading.current_thread() is threading.main_thread():
             stalled.set()
             let_go.wait(10)
@@ -1275,3 +1275,96 @@ def test_wait_does_not_queue_behind_a_write_that_is_already_stuck(config, bus,
     assert taken < 2.0, (
         f"wait(timeout=0.3) took {taken:.2f}s -- the final write queued "
         f"behind a stuck one instead of giving up")
+
+
+def test_a_launch_cancelled_while_it_was_recorded_never_starts(config, bus,
+                                                               tmp_path):
+    """`stop_all()` during a launch must actually stop it.
+
+    Cancelling before the worker starts does not survive: `AgentLoop.run()`
+    opens with `cancel.reset()`, so a flag set a moment earlier is erased and
+    the delegate runs on -- after `_shutdown()` has begun closing the tools
+    and the history it would use.
+
+    The window is held open at the record write, which is where it is widest.
+    """
+    persist = tmp_path / "delegates.json"
+    ran = threading.Event()
+
+    class Watched:
+        def run(self, brief):
+            ran.set()
+            return FakeResult()
+
+    manager = make_manager(config, bus, lambda **kwargs: Watched(),
+                           persist=persist)
+
+    recording = threading.Event()
+    let_go = threading.Event()
+    real_flush = manager._flush
+
+    def slow_flush(revision, document, timeout=None):
+        real_flush(revision, document, timeout=timeout)
+        if threading.current_thread() is threading.main_thread():
+            recording.set()
+            let_go.wait(10)
+
+    manager._flush = slow_flush
+
+    def shut_down():
+        recording.wait(5)
+        manager.stop_all()
+        let_go.set()
+
+    helper = threading.Thread(target=shut_down)
+    helper.start()
+    ok, identifier, why = manager.start("cancelled on the way in")
+    helper.join(10)
+    settle(manager)
+
+    assert not ok, "a delegate cancelled before it started was reported started"
+    assert "stopped" in why
+    assert not ran.is_set(), "the worker ran after shutdown had begun"
+    assert manager.slots_busy == 0
+
+    flushed(manager)
+    assert states(persist) == {"d1": "stopped"}
+
+
+def test_wait_gives_up_on_a_write_that_never_returns(config, bus, tmp_path):
+    """A timeout on the lock does not bound the write itself.
+
+    `write_text` returns when the filesystem says so and cannot be
+    interrupted, so the final write happens on a thread `wait()` is willing to
+    abandon. The file is then left one revision behind -- where an
+    unresponsive disk was always going to leave it -- and shutdown still ends
+    on time.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    with manager._lock:
+        manager._runs["d1"] = DelegateRun(id="d1", brief="one")
+        manager._stage()
+
+    inside = threading.Event()
+    let_go = threading.Event()
+    real_flush = manager._flush
+
+    def never_returns(revision, document, timeout=None):
+        inside.set()
+        let_go.wait(10)                  # the write that does not come back
+        real_flush(revision, document, timeout=timeout)
+
+    manager._flush = never_returns
+
+    started = time.monotonic()
+    manager.wait(timeout=0.3)
+    taken = time.monotonic() - started
+
+    let_go.set()
+
+    assert inside.is_set(), "the final write never began"
+    assert taken < 2.0, (
+        f"wait(timeout=0.3) took {taken:.2f}s -- the write itself is not "
+        f"bounded, only the wait for the lock")

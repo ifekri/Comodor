@@ -160,6 +160,7 @@ class BackgroundDelegates:
         )
 
         started = False
+        cancelled = False
         undo: tuple[int, dict[str, Any]] | None = None
         refusal = ""
         try:
@@ -172,25 +173,45 @@ class BackgroundDelegates:
             self._flush(*staged)
 
             with self._settled:
-                try:
-                    # Started and registered without letting go of the lock,
-                    # so there is no instant where a thread is running and
-                    # unlisted. Appending first would be worse still: joining a
-                    # thread that has not started raises, and that would abort
-                    # the rest of shutdown.
-                    thread.start()
-                except RuntimeError as problem:
-                    refusal = f"the delegate could not be started: {problem}"
+                if identifier in self._cancelled:
+                    # `stop_all()` reached this run while its record was being
+                    # written. Starting the worker anyway would be worse than
+                    # doing nothing: `AgentLoop.run()` opens with
+                    # `cancel.reset()`, so the cancellation set a moment ago is
+                    # erased and the delegate runs on — after `_shutdown()` has
+                    # begun closing the tools and the history it would use.
+                    cancelled = True
                 else:
-                    self._threads.append(thread)
-                    started = True
+                    try:
+                        # Started and registered without letting go of the
+                        # lock, so there is no instant where a thread is
+                        # running and unlisted. Appending first would be worse
+                        # still: joining a thread that has not started raises,
+                        # and that would abort the rest of shutdown.
+                        thread.start()
+                    except RuntimeError as problem:
+                        refusal = (
+                            f"the delegate could not be started: {problem}")
+                    else:
+                        self._threads.append(thread)
+                        started = True
         finally:
             # The counter comes down whatever happened, including an exception
             # nobody expected. Leaking it would leave `wait()` believing a
             # launch is still in flight, and shutdown would block until its
             # timeout on every exit for the rest of the session.
             with self._settled:
-                if not started:
+                if cancelled:
+                    # It existed and was stopped, which is a different thing
+                    # from never having been accepted — so it keeps its record
+                    # and settles terminally rather than vanishing.
+                    run = self._runs.get(identifier)
+                    if run is not None:
+                        run.state = "stopped"
+                        run.ended_at = time.time()
+                    self._cancels.pop(identifier, None)
+                    undo = self._stage()
+                elif not started:
                     # Nothing is going to move this run out of `running`, so it
                     # must not be left there: the slot would be occupied for
                     # the rest of the session, and the next one would read the
@@ -203,6 +224,8 @@ class BackgroundDelegates:
 
         if undo is not None:
             self._flush(*undo)
+        if cancelled:
+            return False, "", "the delegate was stopped before it started"
         if refusal:
             return False, "", refusal
 
@@ -383,13 +406,32 @@ class BackgroundDelegates:
         #
         # A process killed outright is a different question and always was.
         #
-        # Bounded, and skipped once the budget is gone. Without that, a launch
-        # stalled inside its own write holds `_write_lock`, and this would
-        # queue behind it for as long as the filesystem took -- after the
-        # deadline had already passed.
+        # Bounded by the budget, and skipped once it is gone. Two things can
+        # take longer than the caller has: waiting for another writer, and the
+        # write itself. The first is a timeout on the lock. The second cannot
+        # be interrupted at all — `write_text` returns when the filesystem says
+        # so — so it happens on a thread this one is willing to abandon.
+        #
+        # Abandoning it is the honest outcome: the process is on its way out,
+        # the file is left one revision behind, and that is where an
+        # unresponsive disk was always going to leave it.
         remaining = deadline - time.monotonic()
         if staged is not None and remaining > 0:
-            self._flush(*staged, timeout=remaining)
+            def write_it(revision: int = staged[0],
+                         document: dict[str, Any] = staged[1],
+                         budget: float = remaining) -> None:
+                # Nothing may escape here. An exception on a thread nobody
+                # joins is printed to stderr and otherwise invisible, and this
+                # is a best-effort write on the way out of the process.
+                try:
+                    self._flush(revision, document, timeout=budget)
+                except Exception:
+                    pass
+
+            writer = threading.Thread(target=write_it, daemon=True,
+                                      name="comodor-delegate-final-write")
+            writer.start()
+            writer.join(timeout=remaining)
 
     # -- plumbing ---------------------------------------------------------- #
 
