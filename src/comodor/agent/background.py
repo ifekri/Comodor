@@ -147,6 +147,11 @@ class BackgroundDelegates:
         #: The last state announced for each run, so an event that was
         #: overtaken cannot walk one backwards.
         self._announced: dict[str, str] = {}
+        #: Held across deciding an event and sending it, so subscribers read
+        #: them in the order they were decided. Reentrant only so that a
+        #: subscriber emitting from inside `bus.emit` cannot deadlock the
+        #: manager; nothing here relies on taking it twice.
+        self._telling = threading.RLock()
         self._load()
 
     # -- launching --------------------------------------------------------- #
@@ -564,21 +569,30 @@ class BackgroundDelegates:
         And no event may report less progress than one already sent for the
         same run — a late `started` says `stopping`, because that is where the
         run had already been announced to be.
+
+        Deciding and sending happen together. Deciding alone under the
+        lifecycle lock is not enough: a thread that has decided `started` can
+        be descheduled before it sends, another can decide *and send*
+        `stopping`, and the first then sends a payload that is already out of
+        date. `_lock` cannot be the one held across the send — a subscriber is
+        arbitrary code — so this is its own lock, taken before `_lock` and
+        never the other way round.
         """
         try:
-            with self._lock:
-                run = self._runs.get(identifier)
-                payload = run.as_dict() if run else {"id": identifier}
-                if (run is not None and run.state in self.TERMINAL):
-                    state = run.state
-                told = self._announced.get(identifier, "")
-                if (self.PROGRESS.get(state, 0)
-                        < self.PROGRESS.get(told, -1)):
-                    state = told
-                else:
-                    self._announced[identifier] = state
-            payload["state"] = state
-            self.bus.emit(Kind.DELEGATE, **payload)
+            with self._telling:
+                with self._lock:
+                    run = self._runs.get(identifier)
+                    payload = run.as_dict() if run else {"id": identifier}
+                    if run is not None and run.state in self.TERMINAL:
+                        state = run.state
+                    told = self._announced.get(identifier, "")
+                    if self.PROGRESS.get(state, 0) < self.PROGRESS.get(told,
+                                                                       -1):
+                        state = told
+                    else:
+                        self._announced[identifier] = state
+                payload["state"] = state
+                self.bus.emit(Kind.DELEGATE, **payload)
         except Exception:
             pass
 

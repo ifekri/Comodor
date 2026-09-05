@@ -1715,3 +1715,87 @@ def test_a_stop_landing_mid_launch_is_not_undone_by_started(config, bus,
     release.set()
     manager.stop_all()
     manager.wait(timeout=30.0)
+
+
+def test_events_reach_the_bus_in_the_order_they_were_decided(config, bus,
+                                                             tmp_path):
+    """Deciding in order is not enough; they have to be sent in order too.
+
+    A thread that has decided `started` can be descheduled after it lets go of
+    the lifecycle lock and before it sends. Another decides *and sends*
+    `stopping`, and the first then sends a payload that is already out of date
+    -- so a panel is told the run it just stopped is alive again.
+
+    The hand-off is forced at exactly that point: the payload is finished, the
+    lifecycle lock is released, nothing has been sent.
+    """
+    manager = make_manager(config, bus, persist=tmp_path / "delegates.json")
+
+    seen: list = []
+    bus.subscribe(seen.append)
+
+    with manager._lock:
+        manager._runs["d1"] = DelegateRun(id="d1", brief="one")
+
+    sent = threading.Event()
+    other = threading.Thread(
+        target=lambda: (manager._emit("d1", "stopping"), sent.set()),
+        daemon=True)
+
+    class HandsOver(dict):
+        """Lets the other thread try to overtake, once, at the worst moment."""
+
+        def __setitem__(self, key, value):
+            super().__setitem__(key, value)
+            if key == "state" and value == "started" and not other.is_alive():
+                other.start()
+                # Where deciding and sending are one step the other thread
+                # cannot get past the door and this bound is never met; where
+                # they are two it sails through. The bound is the escape
+                # hatch, not the assertion.
+                sent.wait(2.0)
+
+    shape = manager._runs["d1"].as_dict
+    manager._runs["d1"].as_dict = lambda: HandsOver(shape())
+
+    manager._emit("d1", "started")
+    other.join(30.0)
+    assert not other.is_alive()
+
+    states_seen = [event.payload.get("state") for event in seen
+                   if event.kind is Kind.DELEGATE]
+    assert states_seen == ["started", "stopping"], states_seen
+
+
+def test_the_bus_is_never_told_anything_under_the_lifecycle_lock():
+    """`bus.emit` runs a subscriber, which is arbitrary code.
+
+    Under `_lock` that would make every panel, log and web session a party to
+    the manager's own deadlocks -- and the lock order here is `_telling` then
+    `_lock`, never the reverse, so an `_emit` under `_lock` could invert it.
+    """
+    import ast
+
+    from comodor.agent import background
+
+    source = Path(background.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    def holds_the_lifecycle_lock(node):
+        return isinstance(node, ast.With) and any(
+            isinstance(item.context_expr, ast.Attribute)
+            and item.context_expr.attr in {"_lock", "_settled"}
+            for item in node.items)
+
+    offenders = []
+    for node in ast.walk(tree):
+        if not holds_the_lifecycle_lock(node):
+            continue
+        for inner in ast.walk(node):
+            if (isinstance(inner, ast.Call)
+                    and isinstance(inner.func, ast.Attribute)
+                    and inner.func.attr in {"_emit", "emit"}):
+                offenders.append(inner.lineno)
+
+    assert not offenders, (
+        f"the bus is told something under the lifecycle lock at {offenders}")
