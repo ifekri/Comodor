@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from dataclasses import dataclass, field
@@ -286,3 +287,358 @@ def test_the_tool_refuses_background_without_an_executor():
     result = tool.run(context, task="try it", background=True)
     assert not result.ok
     assert "interface" in result.content
+
+
+# --------------------------------------------------------------------------- #
+# the persisted file, and two threads writing it
+# --------------------------------------------------------------------------- #
+#
+# `start()` wrote the record after `thread.start()`, so the main thread and a
+# worker could both be inside `_persist()` at once. `_persist()` takes a
+# snapshot and then writes it, and the two halves were not atomic, so a
+# snapshot taken before a delegate finished could be written after the snapshot
+# that said it had:
+#
+#     main                                  worker
+#     ────────────────────────────────────────────────────────────────────
+#     _snapshot()  → "running"
+#                                           state = "done"
+#                                           _snapshot() → "done"
+#                                           write("done")
+#     write("running")   ← last write wins, and it is the older one
+#
+# The file then says a finished delegate is running, and the next session
+# reads that and reports it lost. It failed `test_finished_work_is_not_
+# labelled_lost` once on py3.11 in CI, which is the only way anybody was ever
+# going to notice: the window is a few microseconds wide and closes on its own
+# almost every time.
+#
+# The tests below force that interleaving rather than hoping for it.
+
+
+class Interleave:
+    """Holds the main thread between its snapshot and its write.
+
+    The bug needs one specific order, and waiting for it to happen by accident
+    is how a test ends up passing on a fast machine and failing in CI. So the
+    order is imposed: the worker is released only once the main thread has
+    taken its snapshot, and the main thread is then held until the worker has
+    written.
+
+    `escape` is what stops a *fixed* implementation from deadlocking here. Once
+    the snapshot and the write are one atomic step under the lock, the worker
+    cannot reach its own write while the main thread waits — so the wait has to
+    end by itself. It does not decide the outcome, only how long the correct
+    path pauses: on the broken code the worker writes and the wait ends early,
+    and on the fixed code the wait expires and the assertion still holds.
+    """
+
+    def __init__(self, manager, escape: float = 0.5) -> None:
+        self.manager = manager
+        self.escape = escape
+        self.snapshotted = threading.Event()
+        self.worker_wrote = threading.Event()
+        self._real_snapshot = manager._snapshot
+        self._real_persist = manager._persist
+        self.main_thread = threading.current_thread()
+
+        manager._snapshot = self._snapshot
+        manager._persist = self._persist
+
+    def _snapshot(self):
+        document = self._real_snapshot()
+        if threading.current_thread() is self.main_thread:
+            # The main thread has read the state. Let the worker finish, then
+            # hold here so its write lands first.
+            self.snapshotted.set()
+            self.worker_wrote.wait(self.escape)
+        return document
+
+    def _persist(self):
+        self._real_persist()
+        if threading.current_thread() is not self.main_thread:
+            self.worker_wrote.set()
+
+
+class HeldLoop:
+    """A child that does not finish until it is told to."""
+
+    def __init__(self, release: threading.Event) -> None:
+        self.release = release
+
+    def run(self, brief: str) -> FakeResult:
+        self.release.wait(10)
+        return FakeResult()
+
+
+def persisted(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def states(path: Path) -> dict[str, str]:
+    return {record["id"]: record["state"] for record in persisted(path)["runs"]}
+
+
+def test_a_finished_delegate_is_never_persisted_as_running(config, bus, tmp_path):
+    """The race, forced.
+
+    The main thread takes its snapshot while the delegate is still running, the
+    delegate then finishes and writes `done`, and only then is the main thread
+    allowed to write what it read. Whatever order the two writes land in, the
+    file must not end up claiming that a delegate which has finished is still
+    going.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+    interleave = Interleave(manager)
+    manager.spawner = lambda **kwargs: HeldLoop(interleave.snapshotted)
+
+    manager.start("finished fine")
+    settle(manager)
+    interleave.worker_wrote.wait(5)
+
+    assert states(persist) == {"d1": "done"}, \
+        "a delegate that finished was persisted as still running"
+
+
+def test_the_next_session_does_not_report_finished_work_as_lost(config, bus,
+                                                                tmp_path):
+    """What the race costs, end to end.
+
+    The same forced interleaving, then a reload. This is the failure a user
+    would see: a delegate that finished perfectly well, reported as lost.
+    """
+    persist = tmp_path / "delegates.json"
+    first = make_manager(config, bus, persist=persist)
+    interleave = Interleave(first)
+    first.spawner = lambda **kwargs: HeldLoop(interleave.snapshotted)
+
+    first.start("finished fine")
+    settle(first)
+    interleave.worker_wrote.wait(5)
+
+    second = make_manager(config, bus, persist=persist)
+
+    assert second.take_pending() == [], "finished work was reported as lost"
+
+
+@pytest.mark.parametrize(("spawner", "expected"), [
+    (lambda **kwargs: FakeLoop(), "done"),
+    (lambda **kwargs: FakeLoop(fail=True), "failed"),
+])
+def test_a_terminal_state_is_never_overwritten_by_running(config, bus, tmp_path,
+                                                          spawner, expected):
+    """Every way a delegate can end, against the same interleaving.
+
+    `running` is the only state that may be replaced. Once a delegate has
+    reached a terminal one, a snapshot taken before it got there must not be
+    able to land on top.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+    interleave = Interleave(manager)
+
+    def held(**kwargs):
+        interleave.snapshotted.wait(10)
+        return spawner(**kwargs)
+
+    manager.spawner = held
+
+    manager.start("one task")
+    settle(manager)
+    interleave.worker_wrote.wait(5)
+
+    assert states(persist) == {"d1": expected}
+
+
+def test_a_stopped_delegate_stays_stopped_on_disk(config, bus, tmp_path):
+    """The third terminal state, which arrives by a different path: the run is
+    cancelled rather than finishing or raising."""
+    persist = tmp_path / "delegates.json"
+    release = threading.Event()
+    manager = make_manager(config, bus,
+                           lambda **kwargs: FakeLoop(delay=5,
+                                                     cancel=kwargs.get("cancel")),
+                           persist=persist)
+
+    manager.start("a long one")
+    manager.stop("d1")
+    settle(manager)
+    release.set()
+
+    assert states(persist)["d1"] in {"stopped", "cancelled"}
+
+
+def test_two_delegates_finishing_at_once_both_land(config, bus, tmp_path):
+    """Starting one delegate while another finishes is the same hazard by a
+    different route: `start()` persists a snapshot that includes the other
+    delegate, and can carry a stale copy of it."""
+    persist = tmp_path / "delegates.json"
+    gate = threading.Event()
+    manager = make_manager(config, bus,
+                           lambda **kwargs: HeldLoop(gate), persist=persist)
+
+    identifiers = []
+    for index in range(3):
+        ok, identifier, _ = manager.start(f"task {index}")
+        assert ok, "the slot limit changed; this test needs three"
+        identifiers.append(identifier)
+
+    gate.set()
+    settle(manager)
+
+    on_disk = states(persist)
+    assert set(on_disk) == set(identifiers)
+    assert all(state == "done" for state in on_disk.values()), on_disk
+
+
+def test_the_file_stays_valid_json_throughout(config, bus, tmp_path):
+    """Whatever the ordering, the thing on disk is always readable. A reader
+    that has to cope with half a document is a second bug waiting."""
+    persist = tmp_path / "delegates.json"
+    gate = threading.Event()
+    manager = make_manager(config, bus,
+                           lambda **kwargs: HeldLoop(gate), persist=persist)
+
+    manager.start("one")
+    manager.start("two")
+    gate.set()
+    settle(manager)
+
+    document = persisted(persist)
+    assert isinstance(document.get("runs"), list)
+    assert isinstance(document.get("saved_at"), float)
+
+
+def test_the_record_exists_before_the_worker_can_change_it(config, bus, tmp_path):
+    """A delegate that is still running must be on disk while it runs.
+
+    The record used to be written after `thread.start()`, so a crash in the
+    gap between them left no evidence at all — the case the file exists for.
+    """
+    persist = tmp_path / "delegates.json"
+    gate = threading.Event()
+    manager = make_manager(config, bus,
+                           lambda **kwargs: HeldLoop(gate), persist=persist)
+
+    manager.start("still going")
+
+    assert states(persist) == {"d1": "running"}, \
+        "nothing was on disk while the delegate was running"
+
+    gate.set()
+    settle(manager)
+    assert states(persist) == {"d1": "done"}
+
+
+def test_a_genuinely_lost_delegate_is_still_reported(config, bus, tmp_path):
+    """The behaviour that must survive the fix. A process that dies with work
+    in flight leaves `running` on disk, and the next session says so."""
+    persist = tmp_path / "delegates.json"
+    gate = threading.Event()
+    first = make_manager(config, bus,
+                         lambda **kwargs: HeldLoop(gate), persist=persist)
+    first.start("never finished")
+    assert first.slots_busy == 1
+
+    # No settle: the process "dies" here, with the delegate still going.
+    second = make_manager(config, bus, persist=persist)
+    records = second.take_pending()
+
+    assert [record["id"] for record in records] == ["d1"]
+    assert records[0]["state"] == "lost"
+    gate.set()
+
+
+def test_a_reload_after_finished_work_starts_clean(config, bus, tmp_path):
+    """What a reload does with a delegate that finished, stated as it is.
+
+    `_load` carries forward only records that say `running`, turning those
+    into `lost`. A finished one is deliberately dropped: there is nothing to
+    report and nothing to resume, so the counter is not advanced either and
+    the next session numbers from the start again. That is by design, and it
+    is only safe because the finished record is not kept — which is precisely
+    what the race broke, by leaving `running` on disk for work that was done.
+    """
+    persist = tmp_path / "delegates.json"
+    gate = threading.Event()
+    first = make_manager(config, bus,
+                         lambda **kwargs: HeldLoop(gate), persist=persist)
+    first.start("one")
+    gate.set()
+    settle(first)
+    assert states(persist) == {"d1": "done"}
+
+    second = make_manager(config, bus, persist=persist)
+
+    assert second.take_pending() == [], "a finished delegate has nothing to report"
+    assert second.slots_busy == 0, "and holds no slot"
+
+    ok, identifier, _ = second.start("after the reload")
+    assert ok
+    settle(second)
+
+
+def test_ids_continue_past_a_lost_delegate(config, bus, tmp_path):
+    """The case where the counter *is* carried: a record left saying
+    `running` becomes `lost` and stays in the list, so a new delegate must not
+    be given its id."""
+    persist = tmp_path / "delegates.json"
+    gate = threading.Event()
+    first = make_manager(config, bus,
+                         lambda **kwargs: HeldLoop(gate), persist=persist)
+    first.start("never finished")
+
+    second = make_manager(config, bus, persist=persist)
+    ok, identifier, _ = second.start("after the crash")
+
+    assert ok
+    assert identifier != "d1"
+    assert int(identifier[1:]) > 1
+    gate.set()
+    settle(second)
+
+
+def test_every_persist_happens_while_the_lock_is_held():
+    """The invariant, checked in the source rather than trusted to review.
+
+    `_persist` snapshots and writes, and the two must not be separable — that
+    separability is the whole bug. It has no lock of its own because the worker
+    calls it while already holding one and `threading.Lock` is not reentrant,
+    so the rule is that every caller holds it. A rule like that survives
+    exactly as long as the next person reads the docstring, unless something
+    checks.
+    """
+    import ast
+    import inspect
+
+    from comodor.agent import background
+
+    source = inspect.getsource(background)
+    tree = ast.parse(source)
+
+    def persists(node) -> bool:
+        return (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "_persist")
+
+    def locked(node) -> bool:
+        return any(
+            isinstance(item.context_expr, ast.Attribute)
+            and item.context_expr.attr == "_lock"
+            for item in getattr(node, "items", []))
+
+    unguarded: list[int] = []
+
+    def walk(node, under_lock: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if persists(child) and not under_lock:
+                unguarded.append(child.lineno)
+            walk(child, under_lock or (isinstance(child, ast.With) and locked(child)))
+
+    walk(tree, under_lock=False)
+
+    assert unguarded == [], (
+        f"_persist() is called without the lock at line(s) {unguarded}. "
+        f"Snapshot and write must be one step, or a stale snapshot can land "
+        f"on top of a newer one.")
