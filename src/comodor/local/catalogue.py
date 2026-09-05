@@ -32,8 +32,19 @@ from typing import Any
 #: Where a fresher list is published. Fetched at most once a day; the copy that
 #: ships with Comodor is used when this cannot be reached, which is the whole
 #: point of shipping one.
+#:
+#: On `catalogues`, an orphan branch that holds nothing but lists this program
+#: reads. It pointed at `skills` and that file was never published there, so
+#: every install had been falling through to the bundled snapshot -- silently,
+#: because the fallback chain below is built not to complain. The feature was
+#: not broken so much as never switched on.
+#:
+#: Not on `skills`, which distributes skills, and not on `main`, because a
+#: catalogue that ships inside the package can only change when the package
+#: does -- and the whole point of this one is that adding a model is an edit to
+#: a file rather than a release.
 CATALOGUE_URL = ("https://raw.githubusercontent.com/ifekri/Comodor/"
-                 "skills/local-models.json")
+                 "catalogues/local-models.json")
 
 #: How long a fetched copy is trusted before another is attempted. Long,
 #: because a model list changes rarely and a failed fetch must never be the
