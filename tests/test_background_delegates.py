@@ -1487,3 +1487,52 @@ def test_no_event_says_a_settled_run_is_still_going(config, bus, tmp_path):
     states_seen = [event.payload.get("state") for event in seen
                    if event.kind is Kind.DELEGATE]
     assert states_seen == ["stopped"], states_seen
+
+
+
+def test_a_delegate_stopped_before_its_first_turn_never_runs(config, bus,
+                                                             tmp_path):
+    """The other half of the window `start()` closes.
+
+    `start()` catches a cancellation that arrives before the thread exists.
+    This is the one that arrives after: the thread is running but has not
+    reached `loop.run()` yet, and `run()` opens with `cancel.reset()`, so the
+    flag on its own is wiped by the first thing the child does with it.
+    """
+    persist = tmp_path / "delegates.json"
+    ran = threading.Event()
+
+    class Watched:
+        def run(self, brief):
+            ran.set()
+            return FakeResult()
+
+    manager = make_manager(config, bus, lambda **kwargs: Watched(),
+                           persist=persist)
+
+    # The worker is parked on its way in, so the cancellation lands after the
+    # thread is alive and before it has touched the loop -- the exact window,
+    # held open by an event rather than hoped for.
+    entered = threading.Event()
+    released = threading.Event()
+    work = manager._work
+
+    def parked(*arguments):
+        entered.set()
+        assert released.wait(30.0), "the worker was never released"
+        work(*arguments)
+
+    manager._work = parked
+
+    ok, identifier, _ = manager.start("a turn that is about to be stopped")
+    assert ok
+    assert entered.wait(30.0), "the worker never started"
+
+    manager.stop_all()
+    released.set()
+    manager.wait(timeout=30.0)
+    flushed(manager)
+
+    assert not ran.is_set(), "the loop ran after the delegate was stopped"
+    assert states(persist)[identifier] == "stopped"
+    assert manager.running_ids() == []

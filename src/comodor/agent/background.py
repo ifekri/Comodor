@@ -249,6 +249,24 @@ class BackgroundDelegates:
               cancel: Cancellation) -> None:
         run: DelegateRun | None = None
         staged: tuple[int, dict[str, Any]] | None = None
+
+        # Cancelled between the thread starting and this line. `start()`
+        # catches the ones stopped before the thread exists; this catches the
+        # rest, and it has to be here rather than trusted to the flag, because
+        # `AgentLoop.run()` opens with `cancel.reset()` -- a cancellation set
+        # in this window is erased by the first thing the child does with it.
+        with self._lock:
+            if identifier in self._cancelled:
+                run = self._runs.get(identifier)
+                if run is not None:
+                    run.state = "stopped"
+                    run.ended_at = time.time()
+                staged = self._stage()
+        if staged is not None:
+            self._flush(*staged)
+            self._emit(identifier, "stopped")
+            return
+
         try:
             loop = self.spawner(cwd=cwd, mode="act" if write else "plan",
                                 max_steps=12, max_seconds=600.0, cancel=cancel)
