@@ -1230,3 +1230,48 @@ def test_wait_leaves_the_file_agreeing_with_the_manager(config, bus, tmp_path):
     assert states(persist) == {"d1": "done"}
     assert manager._written == manager._revision, (
         "a staged snapshot was still unwritten when wait() returned")
+
+
+def test_wait_does_not_queue_behind_a_write_that_is_already_stuck(config, bus,
+                                                                  tmp_path):
+    """The final flush must respect the budget it was given.
+
+    A launch stalled inside its own write holds `_write_lock` for as long as
+    the filesystem takes. `wait()` stages the unwritten state on the way out
+    and writes it -- and an unbounded write there would queue behind the stuck
+    one, after the deadline had already passed.
+
+    The lock is held by this test rather than by a stalled delegate, which is
+    the same thing from `wait()`'s side and does not depend on timing to
+    arrange.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    # Something staged and not yet written, so the flush at the end has work.
+    with manager._lock:
+        manager._runs["d1"] = DelegateRun(id="d1", brief="one")
+        manager._stage()
+
+    holding = threading.Event()
+    let_go = threading.Event()
+
+    def hold_the_writer():
+        with manager._write_lock:
+            holding.set()
+            let_go.wait(10)
+
+    holder = threading.Thread(target=hold_the_writer)
+    holder.start()
+    holding.wait(5)
+
+    started = time.monotonic()
+    manager.wait(timeout=0.3)
+    taken = time.monotonic() - started
+
+    let_go.set()
+    holder.join(10)
+
+    assert taken < 2.0, (
+        f"wait(timeout=0.3) took {taken:.2f}s -- the final write queued "
+        f"behind a stuck one instead of giving up")

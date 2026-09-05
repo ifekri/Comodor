@@ -382,8 +382,14 @@ class BackgroundDelegates:
         # this returns, what is on disk is what the manager believes.
         #
         # A process killed outright is a different question and always was.
-        if staged is not None:
-            self._flush(*staged)
+        #
+        # Bounded, and skipped once the budget is gone. Without that, a launch
+        # stalled inside its own write holds `_write_lock`, and this would
+        # queue behind it for as long as the filesystem took -- after the
+        # deadline had already passed.
+        remaining = deadline - time.monotonic()
+        if staged is not None and remaining > 0:
+            self._flush(*staged, timeout=remaining)
 
     # -- plumbing ---------------------------------------------------------- #
 
@@ -429,17 +435,27 @@ class BackgroundDelegates:
         self._revision += 1
         return self._revision, self._snapshot()
 
-    def _flush(self, revision: int, document: dict[str, Any]) -> None:
+    def _flush(self, revision: int, document: dict[str, Any],
+               timeout: float | None = None) -> None:
         """Write one staged snapshot. **The caller must NOT hold `_lock`.**
 
         The check and the write happen under `_write_lock` together, so two
         writers cannot interleave: if a higher revision has already landed,
         this one is dropped rather than written on top of it. That is what
         makes it safe to do the writing outside the lock that ordered it.
+
+        `timeout` bounds the wait for that lock, and only `wait()` passes one.
+        A write already in progress on an unresponsive filesystem holds
+        `_write_lock` for as long as the filesystem takes, and shutdown cannot
+        afford to queue behind it. Giving up leaves the file one revision
+        behind, which is where it would have been anyway.
         """
         if self.persist_path is None:
             return
-        with self._write_lock:
+        if not self._write_lock.acquire(
+                timeout=-1 if timeout is None else max(0.0, timeout)):
+            return          # somebody is writing, and there is no time to wait
+        try:
             if revision <= self._written:
                 return                  # a newer snapshot got here first
             try:
@@ -449,6 +465,8 @@ class BackgroundDelegates:
             except OSError:
                 return
             self._written = revision
+        finally:
+            self._write_lock.release()
 
     def _snapshot(self) -> dict[str, Any]:
         """The document to persist. The caller holds `_lock`.
