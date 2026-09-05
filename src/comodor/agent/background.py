@@ -225,6 +225,11 @@ class BackgroundDelegates:
         if undo is not None:
             self._flush(*undo)
         if cancelled:
+            # The same terminal event the worker would have sent. `stop()`
+            # emitted `stopping` a moment ago, and without this a subscriber
+            # watches a delegate enter that state and never learns it settled
+            # -- while the listing and the file both say it did.
+            self._emit(identifier, "stopped")
             return False, "", "the delegate was stopped before it started"
         if refusal:
             return False, "", refusal

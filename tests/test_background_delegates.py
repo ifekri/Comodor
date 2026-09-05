@@ -1299,6 +1299,9 @@ def test_a_launch_cancelled_while_it_was_recorded_never_starts(config, bus,
     manager = make_manager(config, bus, lambda **kwargs: Watched(),
                            persist=persist)
 
+    seen: list = []
+    bus.subscribe(seen.append)
+
     recording = threading.Event()
     let_go = threading.Event()
     real_flush = manager._flush
@@ -1329,6 +1332,13 @@ def test_a_launch_cancelled_while_it_was_recorded_never_starts(config, bus,
 
     flushed(manager)
     assert states(persist) == {"d1": "stopped"}
+
+    # And the watchers are told it settled. `stop_all()` emitted `stopping`;
+    # without a terminal event after it, a delegate panel shows one that never
+    # finishes while the listing and the file both say it did.
+    delegate_states = [event.payload.get("state") for event in seen
+                       if event.kind is Kind.DELEGATE]
+    assert "stopped" in delegate_states, delegate_states
 
 
 def test_wait_gives_up_on_a_write_that_never_returns(config, bus, tmp_path):
