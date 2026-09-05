@@ -61,6 +61,13 @@ class DelegateRun:
         }
 
 
+#: How long a shutdown waits for background delegates to settle. Long enough
+#: for a worker asked to stop to record where it got to, short enough that a
+#: user quitting does not feel held. Shared, so no surface quietly picks its
+#: own.
+SHUTDOWN_SECONDS = 2.0
+
+
 class DelegateCancellation(Cancellation):
     """A stop a delegate cannot start its way out of.
 
@@ -76,9 +83,22 @@ class DelegateCancellation(Cancellation):
     where the answer cannot go stale.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        # Read-and-clear is two operations, and a stop landing between them
+        # would be cleared by the second -- the very race this class exists to
+        # remove, reintroduced one level down. They happen together or not at
+        # all.
+        self._settling = threading.Lock()
+
+    def cancel(self) -> None:
+        with self._settling:
+            super().cancel()
+
     def reset(self) -> None:
-        if not self.cancelled:
-            super().reset()
+        with self._settling:
+            if not self.cancelled:
+                super().reset()
 
 
 class BackgroundDelegates:

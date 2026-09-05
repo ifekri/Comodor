@@ -21,6 +21,9 @@ from typing import Any
 from rich.live import Live
 
 from ..agent import AgentLoop, Conversation
+from ..agent.background import (
+    SHUTDOWN_SECONDS as DELEGATE_SHUTDOWN_SECONDS,
+)
 from ..agent.background import BackgroundDelegates, completion_turn
 from ..agent.spawn import spawner
 from ..config import Config, save_user_config, unenforceable_budget
@@ -59,7 +62,7 @@ from .widgets.statusbar import StatusModel
 #: the agent a moment to stop rather than abandoning it, so shutting down can
 #: legitimately take this long — which is what anything timing the exit has to
 #: allow for.
-SHUTDOWN_JOIN_SECONDS = 2.0
+SHUTDOWN_JOIN_SECONDS = DELEGATE_SHUTDOWN_SECONDS
 IDLE_SLEEP = 0.02
 SPINNER_INTERVAL = 0.1
 # How long the prompt must sit still before recall is warmed for the draft.

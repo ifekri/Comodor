@@ -1605,3 +1605,50 @@ def test_a_stop_during_the_childs_construction_is_not_erased(config, bus,
     assert not ran.is_set(), "the stop was lost while the child was built"
     assert states(persist)[identifier] == "stopped"
     assert manager.running_ids() == []
+
+
+
+class Interleaved(DelegateCancellation):
+    """A handle that stops itself at the worst possible instant.
+
+    `reset()` reads the flag and then clears it. This one cancels from another
+    thread while that read is happening, which is the only moment where a stop
+    can be made and then thrown away.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calling = threading.Event()
+        self.reached = threading.Event()
+        self.stopper = threading.Thread(target=self._stop, daemon=True)
+
+    def _stop(self) -> None:
+        self.calling.set()
+        self.cancel()
+
+    @property
+    def cancelled(self) -> bool:
+        answer = super().cancelled
+        if not self.reached.is_set():
+            self.reached.set()
+            self.stopper.start()
+            assert self.calling.wait(30.0), "the stop was never attempted"
+            # The stop is in flight. Where the check and the clear are one
+            # operation it has to wait for this one to finish; where they are
+            # two it lands between them. The bound is an escape hatch, not the
+            # thing being measured -- it cannot be met while the pair is held
+            # together, and two seconds is not a race for a set() that has
+            # already been entered.
+            self.stopper.join(timeout=2.0)
+        return answer
+
+
+def test_a_stop_is_never_lost_between_the_check_and_the_clear():
+    """The race this class exists to remove, reintroduced one level down."""
+    cancel = Interleaved()
+
+    cancel.reset()
+    cancel.stopper.join(30.0)
+    assert not cancel.stopper.is_alive()
+
+    assert cancel.cancelled, "a stop made during reset() was thrown away"

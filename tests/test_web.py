@@ -1808,3 +1808,25 @@ def test_an_unknown_channel_is_refused(served):
 
     assert status == 400
     assert "carrier-pigeon" in answer["error"]
+
+
+
+def test_closing_a_web_session_closes_its_delegates_first(config):
+    """Parity with the terminal, which the Web had never had.
+
+    `close()` closed tools, memory and MCP and left the delegate manager
+    running: a worker mid-turn kept reaching into a toolset that had just been
+    shut, and a turn arriving during the shutdown could start one more.
+    """
+    session = Server(config, host="127.0.0.1", port=0).session
+    order = []
+
+    session.delegates.closing = lambda: order.append("closing")
+    session.delegates.stop_all = lambda: (order.append("stop_all"), 0)[1]
+    session.delegates.wait = lambda *a, **k: order.append("wait")
+    shut = session.agent.tools.close
+    session.agent.tools.close = lambda: (order.append("tools"), shut())[1]
+
+    session.close()
+
+    assert order[:4] == ["closing", "stop_all", "wait", "tools"], order

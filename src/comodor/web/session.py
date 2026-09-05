@@ -27,6 +27,9 @@ from pathlib import Path
 from typing import Any
 
 from ..agent import AgentLoop, Conversation
+from ..agent.background import (
+    SHUTDOWN_SECONDS as DELEGATE_SHUTDOWN_SECONDS,
+)
 from ..agent.background import BackgroundDelegates, completion_turn
 from ..agent.spawn import spawner
 from ..config import Config
@@ -1709,6 +1712,16 @@ class Session:
             if not request.answered:
                 request.answer(request.options[-1] if request.options else "no")
         self._pending.clear()
+        # Before the tools, and in the order the terminal uses. A delegate
+        # still running holds the toolset it was given; closing that first
+        # leaves a live worker reaching into it. `closing()` comes first of
+        # all, so a turn arriving mid-shutdown cannot start one more.
+        try:
+            self.delegates.closing()
+            self.delegates.stop_all()
+            self.delegates.wait(DELEGATE_SHUTDOWN_SECONDS)
+        except Exception:
+            pass
         try:
             self.agent.tools.close()
         except Exception:
