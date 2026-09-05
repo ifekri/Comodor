@@ -306,6 +306,12 @@ def completions(text: str, commands: list[tuple[str, str]]) -> list[tuple[str, s
             if name.startswith(prefix)]
 
 
+#: Where the description starts, in cells from the marker.
+#:
+#: Wide enough for every command there is, so the descriptions line up into a
+#: column instead of stepping in and out with the length of each name.
+NAME_COLUMN = 12
+
 #: The most rows the completion menu may ever occupy, indicator included.
 #:
 #: Four commands and a line saying how many more there are. Taller would start
@@ -376,17 +382,25 @@ def scroll_into_view(selected: int, top: int, total: int, capacity: int) -> int:
 
 def render_completions(matches: list[tuple[str, str]], theme: Theme,
                        selected: int = 0, limit: int = MENU_CEILING,
-                       top: int = 0) -> RenderableType:
-    """The commands a prefix could mean, as many as `limit` rows allows.
+                       top: int = 0, width: int = 0) -> RenderableType:
+    """The commands a prefix could mean, in no more than `limit` terminal rows.
 
-    `limit` is the total number of rows this may draw. It never returns more,
-    so the composer's arithmetic holds and the prompt does not move while
-    somebody scrolls.
+    `limit` counts **physical** rows — what the terminal actually draws, not
+    entries in a list. Those were the same thing until a description ran past
+    the edge of a narrow window: Rich wraps a `Text` by default, so one entry
+    became two lines, and a menu budgeted five rows drew eight. The composer's
+    arithmetic held; the drawing did not.
+
+    So every row is truncated to `width` before it leaves here. One entry is
+    one line, always, and the menu occupies exactly what it was granted.
+
+    `width` of 0 means "do not know", and nothing is truncated. Only a caller
+    that has no geometry should pass that — the screen always knows.
 
     `top` is a hint, not an instruction. The window is clamped here as well as
     where it is kept, because a stale index arriving from anywhere must not be
     able to produce a menu with nothing highlighted — that failure is silent
-    on screen and is exactly what happened before.
+    on screen.
     """
     total = len(matches)
     if total <= 0 or limit <= 0:
@@ -403,19 +417,42 @@ def render_completions(matches: list[tuple[str, str]], theme: Theme,
         marker = theme.glyphs.arrow if index == selected else " "
         row = Text()
         row.append(f"{marker} ", style=theme.style("accent"))
-        row.append(name.ljust(12), style=theme.style(
+        row.append(name.ljust(NAME_COLUMN), style=theme.style(
             "value" if index == selected else "text",
             bold=index == selected))
         row.append(description, style=theme.style("dim"))
-        rows.append(row)
+        rows.append(_one_line(row, width))
 
-    hidden = _overflow(top, capacity, total)
+    hidden = _overflow(top, capacity, total, width)
     if hidden and len(rows) < limit:
-        rows.append(Text(f"  … {hidden}", style=theme.style("dim")))
+        rows.append(_one_line(Text(f"  … {hidden}", style=theme.style("dim")),
+                              width))
     return Group(*rows)
 
 
-def _overflow(top: int, capacity: int, total: int) -> str:
+def _one_line(row: Text, width: int) -> Text:
+    """A row the terminal will draw on exactly one line.
+
+    `Text.truncate` is the part that does the work, and it is used rather than
+    `no_wrap` because `no_wrap` does not do what its name suggests here: a
+    `Text` marked `no_wrap` printed to a narrower console still comes back as
+    two lines. Truncating is the only thing that holds.
+
+    It counts cells rather than characters, so a description in Chinese or one
+    carrying an emoji is cut where the terminal would actually run out of room
+    instead of two columns past it.
+
+    What survives a cut is decided by order: the marker is first, then the
+    command, then the description. So the thing somebody is choosing between
+    stays legible and the explanation of it is what gives way.
+    """
+    if width > 0:
+        row.truncate(width, overflow="ellipsis")
+    row.no_wrap = True          # belt and braces; truncate is what guarantees it
+    return row
+
+
+def _overflow(top: int, capacity: int, total: int, width: int = 0) -> str:
     """What the indicator says, or "" when the whole list is on screen.
 
     It reports the window that is actually drawn. It used to say
@@ -423,13 +460,23 @@ def _overflow(top: int, capacity: int, total: int) -> str:
     right only for the first screenful and then quietly wrong — and it was the
     one thing on screen that could have revealed the selection had gone
     somewhere invisible.
+
+    In a narrow window the long form is shortened rather than cut, because
+    `… 7 above · 23 mo` reads as a bug and `↑7 ↓23` reads as a fact. The
+    compact form says the same two numbers in a third of the room, and the
+    row is still truncated afterwards in case even that does not fit.
     """
     above = top
     below = max(0, total - (top + capacity))
+    if not above and not below:
+        return ""
+
     if above and below:
-        return f"{above} above · {below} more"
+        spelled = f"{above} above · {below} more"
+        # 4 = the two leading spaces and the "… " the caller adds.
+        if width and cell_len(spelled) + 4 > width:
+            return f"↑{above} ↓{below}"
+        return spelled
     if above:
         return f"{above} above"
-    if below:
-        return f"{below} more"
-    return ""
+    return f"{below} more"

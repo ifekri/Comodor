@@ -20,6 +20,7 @@ The shape of what follows:
 from __future__ import annotations
 
 import pytest
+from rich.cells import cell_len
 from rich.console import Console
 
 from comodor.ui import layout as layout_module
@@ -30,6 +31,7 @@ from comodor.ui.input.keys import (
     KeyEvent,
     PasteEvent,
 )
+from comodor.ui.layout import MIN_HEIGHT, MIN_WIDTH
 from comodor.ui.theme import Theme
 from comodor.ui.widgets.prompt import (
     MENU_CEILING,
@@ -93,6 +95,20 @@ def composer_rows(app: App) -> list[str]:
     with console.capture() as captured:
         console.print(app.screen._composer(app.state, app.geometry))
     return [line.rstrip() for line in captured.get().splitlines() if line.strip()]
+
+
+def physical_rows(app: App) -> list[str]:
+    """What the terminal actually draws, at the width the prompt actually has.
+
+    `composer_rows` above drops blank lines and renders at a comfortable
+    width, which is right for asking *what* is on screen and wrong for asking
+    *how tall* it is. A wrapped row is still a row even when the second line
+    of it is one word, so nothing is filtered out here.
+    """
+    console = Console(width=app.geometry.prompt.width, no_color=True)
+    with console.capture() as captured:
+        console.print(app.screen._composer(app.state, app.geometry))
+    return captured.get().splitlines()
 
 
 # --------------------------------------------------------------------------- #
@@ -583,3 +599,223 @@ def test_a_decoded_arrow_moves_the_selection(app, sequence):
     assert any(row.lstrip().startswith(arrow) and name in row for row in rows), \
         "the selection moved and the menu did not follow it"
     assert total > 5
+
+
+# --------------------------------------------------------------------------- #
+# rows the terminal draws, not rows the code counted
+# --------------------------------------------------------------------------- #
+#
+# The budget counted entries. Rich wraps a `Text` to the console width by
+# default, so an entry whose description ran past the edge became two lines and
+# the menu drew more rows than the layout had given it. At 40 columns — the
+# supported minimum — a five-row budget drew eight, and the footer moved.
+#
+# Measured on the code before this fix:
+#
+#     40x12  budget=2  worst physical=3   at /loop
+#     40x18  budget=3  worst physical=4   at /loop
+#     40x24  budget=4  worst physical=6   at /gw
+#     40x34  budget=5  worst physical=8   at /memory
+#     60x12  budget=2  worst physical=3   at /memory
+#
+# Not only at the minimum width, and not only for one command.
+
+
+SUPPORTED = [(40, 12), (40, 18), (40, 24), (40, 34), (60, 12), (80, 12)]
+
+
+def test_the_supported_minimum_is_what_these_tests_assume():
+    """If the floor moves, the width these tests defend has to move with it."""
+    assert (MIN_WIDTH, MIN_HEIGHT) == (40, 12)
+
+
+@pytest.mark.parametrize(("width", "height"), SUPPORTED)
+def test_the_menu_fits_its_budget_in_physical_rows(config, width, height):
+    """The finding, at every supported size, over every selection.
+
+    Real commands with their real descriptions — `/memory`, `/rules`, `/loop`
+    and `/gw` are the ones that wrapped, and they only wrap because of what
+    they actually say.
+    """
+    app = App(config, demo=True)
+    app.geometry = layout_module.compute(width, height)
+    total = opened(app)
+    budget = app.geometry.prompt.height
+
+    worst = 0
+    for _ in range(total):
+        drawn_rows = len(physical_rows(app))
+        worst = max(worst, drawn_rows)
+        assert drawn_rows <= budget, (
+            f"{width}x{height}: drew {drawn_rows} rows into {budget} at "
+            f"{selected_name(app)}")
+        app._on_key(key("down"))
+
+    assert worst > 0
+
+
+@pytest.mark.parametrize("width", [40, 41, 50, 59, 60, 79, 80, 100, 140, 200])
+@pytest.mark.parametrize("height", [12, 24, 34])
+def test_no_width_makes_the_menu_overrun(config, width, height):
+    """Across the breakpoints, not only at the ones that happened to break.
+
+    A fix that worked at 40 and nowhere else would be a hard-coded width
+    wearing a general solution's clothes.
+    """
+    app = App(config, demo=True)
+    app.geometry = layout_module.compute(width, height)
+    total = opened(app)
+    budget = app.geometry.prompt.height
+
+    for _ in range(total):
+        assert len(physical_rows(app)) <= budget, f"{width}x{height}"
+        app._on_key(key("down"))
+
+
+@pytest.mark.parametrize(("width", "height"), SUPPORTED)
+def test_the_footer_does_not_move_while_the_menu_scrolls(config, width, height):
+    """The consequence the user would notice. A composer one row too tall
+    pushes the footer off the bottom or crops it."""
+    app = App(config, demo=True)
+    app.geometry = layout_module.compute(width, height)
+    total = opened(app)
+
+    heights = {len(physical_rows(app))}
+    for _ in range(total):
+        app._on_key(key("down"))
+        heights.add(len(physical_rows(app)))
+
+    assert len(heights) == 1, f"{width}x{height}: height varied {sorted(heights)}"
+    assert heights.pop() <= app.geometry.prompt.height
+
+
+def test_a_description_far_too_long_for_the_row_does_not_wrap():
+    """Deliberately absurd, so the property is about the rule and not about
+    how long today's descriptions happen to be."""
+    matches = [("/one", "x" * 500), ("/two", "y" * 500)]
+
+    console = Console(width=38, no_color=True)
+    with console.capture() as captured:
+        console.print(render_completions(matches, Theme(), 0, limit=5, width=38))
+    lines = captured.get().splitlines()
+
+    assert len(lines) == 2, "one entry, one line"
+    assert all(cell_len(line.rstrip()) <= 38 for line in lines)
+
+
+def test_the_command_name_survives_and_the_description_gives_way():
+    """Order of priority: marker, then the thing being chosen, then the
+    explanation of it. Truncating the name would leave a menu of ellipses."""
+    matches = [("/memory", "w" * 200)]
+
+    console = Console(width=30, no_color=True)
+    with console.capture() as captured:
+        console.print(render_completions(matches, Theme(), 0, limit=5, width=30))
+    line = captured.get().splitlines()[0]
+
+    assert "/memory" in line, "the command must stay readable"
+    assert line.rstrip().endswith("…"), "the description should be cut"
+    assert cell_len(line.rstrip()) <= 30
+
+
+def test_a_name_wider_than_the_terminal_is_cut_rather_than_wrapped():
+    """Graceful and deterministic when even the name does not fit: one line,
+    inside the width, rather than two lines of it."""
+    matches = [("/" + "n" * 60, "a description")]
+
+    console = Console(width=20, no_color=True)
+    with console.capture() as captured:
+        console.print(render_completions(matches, Theme(), 0, limit=5, width=20))
+    lines = captured.get().splitlines()
+
+    assert len(lines) == 1
+    assert cell_len(lines[0].rstrip()) <= 20
+
+
+@pytest.mark.parametrize("filler", ["中文字", "🙂", "日本語のせつめい"])
+def test_truncation_counts_cells_and_not_characters(filler):
+    """A wide glyph is two columns. Cutting by character count would leave a
+    row one column over the edge, which wraps, which is the whole bug."""
+    matches = [("/wide", filler * 40)]
+
+    for width in (20, 30, 38):
+        console = Console(width=width, no_color=True)
+        with console.capture() as captured:
+            console.print(
+                render_completions(matches, Theme(), 0, limit=5, width=width))
+        lines = captured.get().splitlines()
+
+        assert len(lines) == 1, f"wrapped at width {width}"
+        assert cell_len(lines[0].rstrip()) <= width, f"over the edge at {width}"
+
+
+def test_the_indicator_is_one_row_however_narrow_it_gets():
+    """`… 7 above · 23 more` is wider than a narrow prompt. It shortens
+    rather than wrapping, and keeps both numbers."""
+    matches = a_menu(34)
+
+    for width in (20, 24, 30, 38, 80):
+        console = Console(width=width, no_color=True)
+        with console.capture() as captured:
+            console.print(render_completions(matches, Theme(), 10, limit=5,
+                                             top=7, width=width))
+        last = captured.get().splitlines()[-1]
+
+        assert cell_len(last.rstrip()) <= width, f"indicator over the edge at {width}"
+        assert "7" in last and "23" in last, f"lost a number at {width}: {last!r}"
+
+
+def test_the_indicator_stays_readable_when_there_is_room():
+    """Compact only when it has to be. The spelled-out form is the one people
+    read, so it is not traded away for tidiness."""
+    console = Console(width=80, no_color=True)
+    with console.capture() as captured:
+        console.print(render_completions(a_menu(34), Theme(), 10, limit=5,
+                                         top=7, width=80))
+
+    assert captured.get().splitlines()[-1].strip() == "… 7 above · 23 more"
+
+
+def test_a_renderer_told_no_width_still_works():
+    """The default. Nothing in the app takes it — the screen always knows its
+    geometry — but a caller without one should get a menu, not an exception."""
+    rows = drawn(a_menu(34), selected=0, limit=5)
+
+    assert len(rows) == 5
+    assert marked(rows) == "/cmd00"
+
+
+@pytest.mark.parametrize(("width", "height"), SUPPORTED)
+def test_navigation_still_works_at_every_supported_size(config, width, height):
+    """The previous fix, re-checked at the sizes this one is about: a
+    truncated row must still be a selectable one."""
+    app = App(config, demo=True)
+    app.geometry = layout_module.compute(width, height)
+    total = opened(app)
+    arrow = app.theme.glyphs.arrow
+
+    for index in range(total):
+        assert app.state.completion_index == index
+        name = selected_name(app)
+        rows = [line for line in physical_rows(app) if line.strip()]
+        assert any(row.lstrip().startswith(arrow) for row in rows), \
+            f"{width}x{height}: nothing selected at {name}"
+        app._on_key(key("down"))
+
+    assert app.state.completion_index == total - 1
+
+
+def test_accepting_a_truncated_row_takes_the_whole_command(config):
+    """What is drawn is cut; what is accepted is not. Truncation is a
+    presentation concern and must not reach the text."""
+    app = App(config, demo=True)
+    app.geometry = layout_module.compute(40, 34)
+    opened(app)
+    for _ in range(12):
+        app._on_key(key("down"))
+    wanted = selected_name(app)
+
+    app._on_key(key("enter"))
+
+    assert app.state.editor.text == f"{wanted} "
+    assert "…" not in app.state.editor.text

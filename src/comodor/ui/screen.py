@@ -177,10 +177,14 @@ class Screen:
                                rows=max(1, rows - listed))
         if not listed:
             return editor
+        # The width as well as the height. A row wider than the prompt wraps,
+        # and a wrapped row is a second physical line the budget above did not
+        # allow for — which is how a five-row menu came to draw eight.
         return Group(editor, render_completions(matches, self.theme,
                                                 state.completion_index,
                                                 limit=listed,
-                                                top=state.completion_top))
+                                                top=state.completion_top,
+                                                width=rect.width))
 
     # -- the footer -------------------------------------------------------- #
 
