@@ -368,6 +368,16 @@ class BackgroundDelegates:
         with self._lock:
             self._threads = [thread for thread in self._threads
                              if thread.is_alive()]
+            staged = self._stage()
+
+        # The last word, written on the way out. Moving the write off the lock
+        # made "finished" and "written" two moments, so a graceful exit could
+        # in principle leave the newest state a few microseconds behind. This
+        # is the one place that matters -- shutdown -- and it closes it: after
+        # this returns, what is on disk is what the manager believes.
+        #
+        # A process killed outright is a different question and always was.
+        self._flush(*staged)
 
     # -- plumbing ---------------------------------------------------------- #
 

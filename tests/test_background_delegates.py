@@ -191,6 +191,7 @@ def test_running_work_is_labelled_lost_on_reload(config, bus, tmp_path):
     _, identifier, _ = first.start("never finished")
     assert first.slots_busy == 1
 
+    flushed(first)
     second = make_manager(config, bus, persist=persist)
     records = second.take_pending()
     assert [record["id"] for record in records] == [identifier]
@@ -212,6 +213,7 @@ def test_finished_work_is_not_labelled_lost(config, bus, tmp_path):
     first.start("finished fine")
     settle(first)
 
+    flushed(first)
     second = make_manager(config, bus, persist=persist)
     assert second.take_pending() == []
 
@@ -447,6 +449,7 @@ def test_the_next_session_does_not_report_finished_work_as_lost(config, bus,
     settle(first)
     interleave.worker_wrote.wait(5)
 
+    flushed(first)
     second = make_manager(config, bus, persist=persist)
 
     assert second.take_pending() == [], "finished work was reported as lost"
@@ -577,6 +580,7 @@ def test_a_genuinely_lost_delegate_is_still_reported(config, bus, tmp_path):
     assert first.slots_busy == 1
 
     # No settle: the process "dies" here, with the delegate still going.
+    flushed(first)
     second = make_manager(config, bus, persist=persist)
     records = second.take_pending()
 
@@ -625,6 +629,7 @@ def test_ids_continue_past_a_lost_delegate(config, bus, tmp_path):
                          lambda **kwargs: HeldLoop(gate), persist=persist)
     first.start("never finished")
 
+    flushed(first)
     second = make_manager(config, bus, persist=persist)
     ok, identifier, _ = second.start("after the crash")
 
@@ -1203,3 +1208,25 @@ def test_the_real_shutdown_sequence_does_not_hang_or_leave_a_worker(config, bus,
     assert busy == 0, (
         "wait() returned with a delegate still running: the tools and the "
         "history would be closed underneath it")
+
+
+def test_wait_leaves_the_file_agreeing_with_the_manager(config, bus, tmp_path):
+    """After `wait()` returns, what is on disk is what the manager believes.
+
+    Taking the write off the lifecycle lock made "finished" and "written" two
+    moments -- microseconds apart, but two. `_shutdown()` calls `wait()` and
+    then closes everything, so that is the one place the gap would matter, and
+    `wait()` closes it before returning.
+
+    No `flushed()` here on purpose: this test is the assertion that waiting is
+    enough on its own.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    manager.start("one")
+    manager.wait(timeout=10)
+
+    assert states(persist) == {"d1": "done"}
+    assert manager._written == manager._revision, (
+        "a staged snapshot was still unwritten when wait() returned")
