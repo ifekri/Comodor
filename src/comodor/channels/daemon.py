@@ -40,6 +40,9 @@ from . import Channel
 #: How long `stop` waits for a polite exit before it insists.
 PATIENCE = 6.0
 
+#: How long `start` watches a new child before it believes it is running.
+SETTLE = 1.5
+
 
 def pid_file(config: Config, channel: Channel) -> Path:
     return Path(config.paths.user) / f"{channel.name}.pid"
@@ -244,20 +247,23 @@ def start(config: Config, channel: Channel) -> tuple[bool, str]:
     pid_file(config, channel).write_text(str(child.pid), encoding="utf-8")
 
     # Give it long enough to fail. A token Telegram refuses, a port already
-    # taken, a missing dependency — all of those end the process in under a
-    # second, and reporting "started" for something that is already gone is
-    # worse than reporting the failure.
-    time.sleep(1.5)
-    if child.poll() is not None:
-        try:
-            pid_file(config, channel).unlink()
-        except OSError:
-            pass
-        tail = _tail(log, 6)
-        return False, ("It started and stopped immediately."
-                       + (f"\n\n{tail}" if tail else ""))
+    # taken, a missing dependency — all of those end the process early, and
+    # reporting "started" for something that is already gone is worse than
+    # reporting the failure. Waiting on the child rather than sleeping for the
+    # whole window means the failure is reported when it happens, not at the
+    # end of a fixed pause every start pays for.
+    try:
+        child.wait(timeout=SETTLE)
+    except subprocess.TimeoutExpired:
+        return True, f"Running in the background (pid {child.pid})."
 
-    return True, f"Running in the background (pid {child.pid})."
+    try:
+        pid_file(config, channel).unlink()
+    except OSError:
+        pass
+    tail = _tail(log, 6)
+    return False, ("It started and stopped immediately."
+                   + (f"\n\n{tail}" if tail else ""))
 
 
 def stop(config: Config, channel: Channel) -> tuple[bool, str]:
