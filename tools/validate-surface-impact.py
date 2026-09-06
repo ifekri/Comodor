@@ -90,12 +90,35 @@ COLLAPSED_OPEN = re.compile(r"<details(?=\s|/?>|$)", re.IGNORECASE)
 COLLAPSED_END = re.compile(r"</details\s*>", re.IGNORECASE)
 
 
+def _tag_text(line: str, comment: bool) -> tuple[str, bool]:
+    """The part of a line a tag could be written in, and the comment state after it.
+
+    Comment bodies are dropped and inline code is blanked, because a closing tag
+    quoted as code or commented out is text GFM renders rather than the tag it
+    names — and counting it would end a container the document leaves open.
+    """
+    text = ""
+    while line:
+        if comment:
+            _, delimiter, line = line.partition("-->")
+            comment = not delimiter
+            continue
+        token = re.search(r"\\[\\`<]|(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)|<!--", line)
+        if token is None:
+            return text + line, comment
+        text += line[: token.start()]
+        comment = token[0] == "<!--"
+        line = line[token.end() :]
+    return text, comment
+
+
 def _visible_lines(body: str) -> list[str]:
     lines = []
     fence = ""
     comment = False
     raw_html = ""
     collapsed = 0
+    folded_fence = ""
     list_indent = 0
     blank = True
     paragraph = False
@@ -109,6 +132,7 @@ def _visible_lines(body: str) -> list[str]:
             raw_html = "unclosed-comment" if raw_html == "-->" else ""
             fence = ""
             collapsed = 0
+            folded_fence = ""
             list_indent = 0
         if raw_html:
             if (raw_html == "blank" and not line.strip()) or (
@@ -122,8 +146,22 @@ def _visible_lines(body: str) -> list[str]:
             blank = not line.strip()
             continue
         if collapsed:
-            collapsed = max(collapsed + len(COLLAPSED_OPEN.findall(line))
-                            - len(COLLAPSED_END.findall(line)), 0)
+            inner = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+            if folded_fence:
+                if (
+                    inner
+                    and inner[1][0] == folded_fence[0]
+                    and len(inner[1]) >= len(folded_fence)
+                    and not inner[2].strip()
+                ):
+                    folded_fence = ""
+            elif inner and (inner[1][0] == "~" or "`" not in inner[2]):
+                folded_fence = inner[1]
+            else:
+                text, comment = _tag_text(line, comment)
+                collapsed = max(collapsed + len(COLLAPSED_OPEN.findall(text))
+                                - len(COLLAPSED_END.findall(text)), 0)
+                folded_fence = folded_fence if collapsed else ""
             lines.append("")
             blank = not line.strip()
             paragraph = False

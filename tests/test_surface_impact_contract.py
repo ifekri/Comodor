@@ -483,6 +483,34 @@ def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
     assert validator.validate_body(example + VALID_BODY) == []
 
 
+@pytest.mark.parametrize(
+    "quoted",
+    [
+        "`</details>`",
+        "<!-- </details> -->",
+        "<!--\n</details>\n-->",
+        "```\n</details>\n```",
+        "~~~\n</details>\n~~~",
+    ],
+)
+def test_a_quoted_closing_tag_does_not_reopen_the_document(validator, quoted):
+    """GFM renders a closer written as code or inside a comment; it does not end
+    the element, so the section after it is still folded away."""
+    assert validator.validate_body("<details>\n\n" + quoted + "\n\n" + VALID_BODY)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<details>\n</details>\n\n",
+        "<details>\n\nnote\n</details>\n\n",
+        "<details>\n\n```\nx\n```\n</details>\n\n",
+    ],
+)
+def test_a_real_closing_tag_ends_the_collapsed_state(validator, body):
+    assert validator.validate_body(body + VALID_BODY) == []
+
+
 def test_a_contract_nested_under_an_open_details_stays_hidden(validator):
     contract = VALID_BODY[VALID_BODY.index("## Surface Impact"):]
     nested = "\n".join("  " + line for line in contract.splitlines())
