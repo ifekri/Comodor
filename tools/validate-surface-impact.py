@@ -318,16 +318,18 @@ def _visible_lines(body: str) -> list[str]:
             if line.strip() and not line.startswith(" " * folded_list):
                 folded_list = 0
             carried = line[folded_list:]
-            while not re.match(r"^ {0,3}(?:[-*_] *){3,}$", carried):
+            while not re.match(r"^ {0,3}([-*_])(?: *\1){2,} *$", carried):
                 # Nested, an item is indented inside the one holding it, so what
                 # it carries down is its own indentation added to that — and the
                 # items it opens may all be written on the one line. A row of
                 # dashes is a thematic break rather than a marker, and opens
                 # nothing.
                 item = re.match(r"^ {0,3}(?:[-+*]|\d{1,9}[.)])( +|$)", carried)
-                if not item:
+                if not item or not carried[item.end() :].strip():
+                    # A marker with nothing after it on its line opens an item the
+                    # blank line below ends, so it carries no indentation down.
                     break
-                padding = len(item[1]) if carried[item.end() :] and len(item[1]) <= 4 else 1
+                padding = len(item[1]) if len(item[1]) <= 4 else 1
                 width = item.start(1) + padding
                 folded_list += width
                 carried = carried[width:]

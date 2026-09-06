@@ -655,6 +655,9 @@ def test_a_closing_tag_after_indented_code_still_ends_it(validator, closer):
         "- one\n- two\n\n    </details>",
         # Both items opened on the one line, and both count.
         "- - inner\n\n      </details>",
+        # Mixed characters are markers rather than a break, and the last of them
+        # has nothing after it, so it opens an item the blank line ends.
+        "- * -\n\n    </details>",
     ],
 )
 def test_a_closing_tag_inside_a_list_item_still_ends_the_disclosure(validator, inside):
