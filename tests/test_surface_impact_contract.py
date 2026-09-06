@@ -493,6 +493,12 @@ def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
         "~~~\n</details>\n~~~",
         '<span title="</details>">',
         "<span title='</details>'></span>",
+        # A closing tag takes no attributes and no slash, so neither is one.
+        "A literal </details foo> marker.",
+        "A literal </details/> marker.",
+        # The tag runs past the end of the line, and what it encloses is
+        # attribute text rather than a tag of its own.
+        '<span\ntitle="</details>">',
     ],
 )
 def test_a_quoted_closing_tag_does_not_reopen_the_document(validator, quoted):
@@ -510,6 +516,8 @@ def test_a_quoted_closing_tag_does_not_reopen_the_document(validator, quoted):
         # Quotes around it are prose, not an attribute: the renderer passes the
         # tag through and the widget ends there.
         '<details>\n\nHe wrote "</details>" here.\n\n',
+        "<details>\n\ntext </details > more\n\n",
+        '<details>\n\n<span\ntitle="x">\n</details>\n\n',
     ],
 )
 def test_a_real_closing_tag_ends_the_collapsed_state(validator, body):

@@ -86,19 +86,47 @@ DELIMITED_HTML_START = re.compile(r"^ {0,3}(<!--|<\?|<![A-Z]|<!\[(?i:CDATA)\[)")
 # disclosure widget. What the contract asks for is a section at the top level, so
 # the state has to survive to the closing tag rather than to the first blank line.
 COLLAPSED_START = re.compile(r"^ {0,3}<details(?=\s|/?>|$)", re.IGNORECASE)
-# Whole tags, so a closer written inside an attribute value is part of the tag that
-# quotes it rather than a tag of its own — the renderer escapes it and the element
-# stays open. A closer in ordinary text is not quoted and still counts.
-HTML_TAG = re.compile(
-    r"<(?P<close>/?)(?P<name>[A-Za-z][A-Za-z0-9-]*)"
-    r"""(?:\s+[^\s"'=<>`/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*/?>"""
+# A closing tag takes no attributes and no slash: `</details foo>` is text GFM
+# prints rather than a tag that ends anything.
+CLOSING_TAG = re.compile(r"</([A-Za-z][A-Za-z0-9-]*)\s*>")
+OPENING_TAG = re.compile(
+    r"""<([A-Za-z][A-Za-z0-9-]*)(?:\s+[^\s"'=<>`/]+"""
+    r"""(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*/?>"""
 )
+TAG_START = re.compile(r"</?[A-Za-z]")
 
 
-def _folded(text: str) -> int:
-    """How far a line of tags opens or closes a disclosure widget."""
-    return sum(-1 if tag["close"] else 1
-               for tag in HTML_TAG.finditer(text) if tag["name"].lower() == "details")
+def _folded(text: str, pending: bool) -> tuple[int, bool]:
+    """How far a line moves the disclosure depth, and whether a tag is still open.
+
+    Only whole tags count. A tag carries its quoted attributes with it and may run
+    past the end of a line, and what it encloses is attribute text the renderer
+    escapes — so a closer written in there ends nothing.
+    """
+    depth = 0
+    at = 0
+    while at < len(text):
+        if pending:
+            end = text.find(">", at)
+            if end < 0:
+                return depth, True
+            at, pending = end + 1, False
+            continue
+        start = text.find("<", at)
+        if start < 0:
+            break
+        closing = CLOSING_TAG.match(text, start)
+        opening = None if closing else OPENING_TAG.match(text, start)
+        if closing or opening:
+            tag = closing or opening
+            if tag[1].lower() == "details":
+                depth += -1 if closing else 1
+            at = tag.end()
+            continue
+        if TAG_START.match(text, start) and ">" not in text[start:]:
+            return depth, True
+        at = start + 1
+    return depth, pending
 
 
 def _tag_text(line: str, comment: bool) -> tuple[str, bool]:
@@ -130,6 +158,7 @@ def _visible_lines(body: str) -> list[str]:
     raw_html = ""
     collapsed = 0
     folded_fence = ""
+    folded_tag = False
     list_indent = 0
     blank = True
     paragraph = False
@@ -144,6 +173,7 @@ def _visible_lines(body: str) -> list[str]:
             fence = ""
             collapsed = 0
             folded_fence = ""
+            folded_tag = False
             list_indent = 0
         if raw_html:
             if (raw_html == "blank" and not line.strip()) or (
@@ -170,7 +200,8 @@ def _visible_lines(body: str) -> list[str]:
                 folded_fence = inner[1]
             else:
                 text, comment = _tag_text(line, comment)
-                collapsed = max(collapsed + _folded(text), 0)
+                depth, folded_tag = _folded(text, folded_tag)
+                collapsed = max(collapsed + depth, 0)
                 folded_fence = folded_fence if collapsed else ""
             lines.append("")
             blank = not line.strip()
@@ -208,7 +239,8 @@ def _visible_lines(body: str) -> list[str]:
             if COLLAPSED_START.match(line):
                 if line.index("<") < list_indent:
                     list_indent = 0
-                collapsed = max(_folded(line), 0)
+                depth, folded_tag = _folded(line, False)
+                collapsed = max(depth, 0)
                 lines.append("")
                 blank = False
                 paragraph = False
