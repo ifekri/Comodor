@@ -653,6 +653,8 @@ def test_a_closing_tag_after_indented_code_still_ends_it(validator, closer):
         # Nested, the indentation of each item adds to the one holding it.
         "- outer\n  - inner\n\n      </details>",
         "- one\n- two\n\n    </details>",
+        # Both items opened on the one line, and both count.
+        "- - inner\n\n      </details>",
     ],
 )
 def test_a_closing_tag_inside_a_list_item_still_ends_the_disclosure(validator, inside):
@@ -667,6 +669,10 @@ def test_a_closing_tag_inside_a_list_item_still_ends_the_disclosure(validator, i
         "- item\n\n    ~~~\n    </details>\n    ~~~",
         # Four spaces past the inner item's own margin is code again.
         "- outer\n  - inner\n\n        </details>",
+        # A row of dashes is a thematic break, so it opens no item and the
+        # indentation after it is measured without one.
+        "- outer\n  - - -\n\n      </details>",
+        "- - -\n\n    </details>",
     ],
 )
 def test_code_inside_a_list_item_still_hides_its_closer(validator, inside):
