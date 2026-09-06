@@ -119,7 +119,7 @@ BLOCK_START = re.compile(r"^ {0,3}(?:>|#{1,6}(?:\s|$)|(?:[-*_] *){3,}$)")
 # A comment that begins a block runs to `-->` through blank lines. Inside a
 # blockquote or a list item the block begins after the marker, so those count too
 # — but four spaces is an indented code block, where the opener is printed.
-BLOCK_COMMENT = re.compile(r"^ {0,3}(?:(?:>|[-+*]|\d{1,9}[.)]) {0,4})*<!--")
+BLOCK_COMMENT = re.compile(r"^ {0,3}(?:> {0,4}|(?:[-+*]|\d{1,9}[.)]) {1,4})*<!--")
 
 
 def _tag_end(text: str, at: int, quote: str = "") -> tuple[int | None, str]:
@@ -309,8 +309,10 @@ def _visible_lines(body: str) -> list[str]:
                     folded_fence = ""
             elif inner and (inner[1][0] == "~" or "`" not in inner[2]):
                 folded_fence = inner[1]
-            elif line.startswith("    ") and not comment:
-                # Indented code. The tag written here is printed, not acted on.
+            elif line.startswith("    ") and blank and not comment:
+                # Indented code, where the tag written here is printed rather
+                # than acted on. Only where a block may begin: indentation does
+                # not interrupt a paragraph, it goes on writing one.
                 pass
             else:
                 block_comment = comment and not folded_inline_comment

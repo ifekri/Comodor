@@ -617,9 +617,24 @@ def test_an_indented_comment_opener_is_code_not_a_block(validator, opener):
 
 
 def test_an_indented_closing_tag_is_code_not_a_closer(validator):
-    """Indented four spaces it is printed, so it ends nothing and what follows
-    is still folded away."""
+    """Indented four spaces where a block may begin it is printed, so it ends
+    nothing and what follows is still folded away."""
     assert validator.validate_body("<details>\n\n    </details>\n\n" + VALID_BODY)
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        # Indentation does not interrupt a paragraph, so the tag is still a tag.
+        "text\n    </details>",
+        # A list marker needs whitespace after it, so this is ordinary text and
+        # the opener it carries is inline.
+        "-<!--\n\n</details>",
+        "1.<!--\n\n</details>",
+    ],
+)
+def test_a_tag_in_continuing_prose_still_ends_the_disclosure(validator, prose):
+    assert validator.validate_body("<details>\n\n" + prose + "\n\n" + VALID_BODY) == []
 
 
 def test_a_contract_nested_under_an_open_details_stays_hidden(validator):
