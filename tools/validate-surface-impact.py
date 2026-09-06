@@ -116,6 +116,9 @@ ATTRS_PARTIAL = re.compile(
 # block that starts here ends that paragraph, and what was being read as a tag is
 # printed as the text it turned out to be.
 BLOCK_START = re.compile(r"^ {0,3}(?:>|#{1,6}(?:\s|$)|(?:[-*_] *){3,}$)")
+# A comment that begins a block runs to `-->` through blank lines. Inside a
+# blockquote the block begins after the marker, so that counts too.
+BLOCK_COMMENT = re.compile(r"^ {0,3}(?:>[ \t]?)*<!--")
 
 
 def _tag_end(text: str, at: int, quote: str = "") -> tuple[int | None, str]:
@@ -208,8 +211,12 @@ def _tag_text(line: str, comment: bool, code: str = "") -> tuple[str, bool, str]
     text = ""
     while line:
         if comment:
-            _, delimiter, line = line.partition("-->")
-            comment = not delimiter
+            _, delimiter, rest = line.partition("-->")
+            if not delimiter:
+                # Kept rather than dropped: if the opener turns out to be inline
+                # and its paragraph ends, none of this was ever commented out.
+                return text, comment, code, line
+            comment, line = False, rest
             continue
         if code:
             closer = re.search(f"(?<!`){code}(?!`)", line)
@@ -299,24 +306,23 @@ def _visible_lines(body: str) -> list[str]:
             elif inner and (inner[1][0] == "~" or "`" not in inner[2]):
                 folded_fence = inner[1]
             else:
-                if not line.strip() or BLOCK_START.match(line):
+                block_comment = comment and not folded_inline_comment
+                if (not line.strip() or BLOCK_START.match(line)) and not block_comment:
                     # An inline comment opener with no `-->` is printed once the
-                    # paragraph holding it ends, so it hides nothing after that.
-                    # One that begins its own block is a comment until `-->`,
-                    # blank lines and all, and has to be left alone.
-                    folded_tag = None
-                    comment = comment and not folded_inline_comment
-                    folded_inline_comment = False
+                    # paragraph holding it ends, and so is everything it looked
+                    # like it was hiding. One that begins its own block is a
+                    # comment until `-->`, blank lines and all, and is left alone.
+                    folded_tag, comment, folded_inline_comment = None, False, False
                     depth, folded_tag = _folded(_literal(folded_span), folded_tag)
                     collapsed = max(collapsed + depth, 0)
                     folded_code, folded_span = "", ""
                 opened = not comment
                 text, comment, folded_code, deferred = _tag_text(line, comment, folded_code)
                 folded_inline_comment = (
-                    not re.match(r"^ {0,3}<!--", line) if comment and opened
+                    not BLOCK_COMMENT.match(line) if comment and opened
                     else folded_inline_comment and comment
                 )
-                folded_span = f"{folded_span}\n{deferred}" if folded_code else ""
+                folded_span = f"{folded_span}\n{deferred}" if folded_code or comment else ""
                 depth, folded_tag = _folded(text, folded_tag)
                 collapsed = max(collapsed + depth, 0)
                 folded_fence = folded_fence if collapsed else ""

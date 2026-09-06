@@ -508,6 +508,8 @@ def test_collapsed_container_hides_contract(validator, prefix, suffix):
         "<details>\n\ntext <!--\n\n</details>\n\n",
         # A tag that goes on to spell something that is not a tag never was one.
         '<details>\n\n<span title="\n" ! </details>\n\n',
+        # The closer is on the same line as the opener the paragraph turns to text.
+        "<details>\n\ntext <!-- </details>\n\n",
         # One that does finish is a tag, and takes its attribute text with it.
         '<details>\n\n<span title="\n" id="x"> </details>\n\n',
     ],
@@ -576,11 +578,14 @@ def test_a_real_closing_tag_ends_the_collapsed_state(validator, body):
     assert validator.validate_body(body + VALID_BODY) == []
 
 
-def test_a_block_comment_inside_a_disclosure_keeps_hiding(validator):
+@pytest.mark.parametrize("marker", ["", "> ", "> > "])
+def test_a_block_comment_inside_a_disclosure_keeps_hiding(validator, marker):
     """A comment that begins its own block runs to `-->` through blank lines, so
-    the closer and the section inside it are commented out rather than rendered."""
+    the closer and the section inside it are commented out rather than rendered.
+    Inside a blockquote the block begins after the marker."""
     contract = VALID_BODY[VALID_BODY.index("## Surface Impact"):]
-    assert validator.validate_body("<details>\n\n<!--\n\n</details>\n" + contract + "\n-->")
+    quoted = "\n".join(marker + line for line in ["<!--", "</details>", "-->"])
+    assert validator.validate_body("<details>\n\n" + quoted + "\n" + contract)
 
 
 def test_a_contract_nested_under_an_open_details_stays_hidden(validator):
