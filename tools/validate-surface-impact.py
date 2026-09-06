@@ -103,6 +103,7 @@ PARTIAL_TAG = re.compile(
     r"""(?:\s+[^\s"'=<>`/]*(?:\s*=\s*(?:"[^"]*|'[^']*|[^\s"'=<>`]*)?)?)?\s*/?$"""
 )
 PARTIAL_CLOSE = re.compile(r"</[A-Za-z][A-Za-z0-9-]*\s*$")
+INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
 # An unfinished tag is inline HTML, and inline HTML belongs to one paragraph. A
 # block that starts here ends that paragraph, and what was being read as a tag is
 # printed as the text it turned out to be.
@@ -226,7 +227,7 @@ def _visible_lines(body: str) -> list[str]:
             lines.append("")
             blank = not line.strip()
             continue
-        if collapsed or folded_tag is not None:
+        if collapsed or (folded_tag is not None and folded_tag[0]):
             inner = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
             if folded_fence:
                 if (
@@ -274,6 +275,7 @@ def _visible_lines(body: str) -> list[str]:
                 lines.append("")
                 blank = True
                 paragraph = False
+                folded_tag = None
                 continue
             if line.startswith("    "):
                 lines.append("")
@@ -341,6 +343,12 @@ def _visible_lines(body: str) -> list[str]:
         lines.append("" if item or nested else visible.strip())
         blank = not visible.strip()
         paragraph = not blank and not block and not item and not setext
+        # A disclosure opens from ordinary prose as readily as from a line of its
+        # own, and folds everything after it just the same.
+        if BLOCK_START.match(line):
+            folded_tag = None
+        depth, folded_tag = _folded(INLINE_CODE.sub("", visible), folded_tag)
+        collapsed = max(collapsed + depth, 0)
     return lines
 
 

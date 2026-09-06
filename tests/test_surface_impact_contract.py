@@ -458,6 +458,10 @@ def test_even_backslashes_do_not_escape_inline_comment(validator, count):
         ("<details\n open>\n\n", ""),
         ("<details>\n\n", ""),
         ("<details>\n<details>\n\n", "\n</details>\n</details>"),
+        # Opened from the middle of a sentence, which folds what follows just
+        # as readily as an opener on a line of its own.
+        ("text <details>\n\n", "\n</details>"),
+        ("text <details>\n\n", ""),
     ],
 )
 def test_collapsed_container_hides_contract(validator, prefix, suffix):
@@ -480,6 +484,10 @@ def test_collapsed_container_hides_contract(validator, prefix, suffix):
         # Left open inside a list item, and closed with it: what follows at the
         # top level is rendered there rather than folded into the widget.
         "- assessment:\n\n  <details>\n\n",
+        "- text <details>\n\n",
+        "text <details>x</details>\n\n",
+        "text <details>\n\nnote\n</details>\n\n",
+        "Documented the `<details>` wrapper in the template.\n\n",
     ],
 )
 def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
