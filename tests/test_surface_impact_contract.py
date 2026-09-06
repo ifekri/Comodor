@@ -623,6 +623,10 @@ def test_an_indented_comment_opener_is_code_not_a_block(validator, opener):
         # The block runs on, so a closer on its second line is printed too.
         "    code\n    </details>",
         "    code\n\n    </details>",
+        # Inside a container the block begins after the marker, so indentation
+        # is measured from there.
+        ">     </details>",
+        "-     </details>",
     ],
 )
 def test_an_indented_closing_tag_is_code_not_a_closer(validator, code):
@@ -631,8 +635,10 @@ def test_an_indented_closing_tag_is_code_not_a_closer(validator, code):
     assert validator.validate_body("<details>\n\n" + code + "\n\n" + VALID_BODY)
 
 
-def test_a_closing_tag_after_indented_code_still_ends_it(validator):
-    assert validator.validate_body("<details>\n\n    code\n\n</details>\n\n" + VALID_BODY) == []
+@pytest.mark.parametrize("closer", ["</details>", "> </details>"])
+def test_a_closing_tag_after_indented_code_still_ends_it(validator, closer):
+    assert validator.validate_body(
+        "<details>\n\n    code\n\n" + closer + "\n\n" + VALID_BODY) == []
 
 
 @pytest.mark.parametrize(

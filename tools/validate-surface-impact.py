@@ -119,7 +119,19 @@ BLOCK_START = re.compile(r"^ {0,3}(?:>|#{1,6}(?:\s|$)|(?:[-*_] *){3,}$)")
 # A comment that begins a block runs to `-->` through blank lines. Inside a
 # blockquote or a list item the block begins after the marker, so those count too
 # — but four spaces is an indented code block, where the opener is printed.
-BLOCK_COMMENT = re.compile(r"^ {0,3}(?:> {0,4}|(?:[-+*]|\d{1,9}[.)]) {1,4})*<!--")
+# Inside a blockquote or a list item, a block begins after the marker, so what
+# counts as indentation is measured from there rather than from the margin.
+# A marker pads its content by one to four spaces; past that only one is padding
+# and the rest is indentation, which is how an indented code block begins there.
+MARKER = r"(?:> ?|(?:[-+*]|\d{1,9}[.)])(?: (?= {4,})| {1,4}))"
+CONTAINER_PREFIX = re.compile(f"^ {{0,3}}{MARKER}+")
+BLOCK_COMMENT = re.compile(f"^ {{0,3}}{MARKER}*<!--")
+
+
+def _inside(line: str) -> str:
+    """The line as its container sees it, with the markers that opened one gone."""
+    prefix = CONTAINER_PREFIX.match(line)
+    return line[prefix.end() :] if prefix else line
 
 
 def _tag_end(text: str, at: int, quote: str = "") -> tuple[int | None, str]:
@@ -311,7 +323,11 @@ def _visible_lines(body: str) -> list[str]:
                     folded_fence = ""
             elif inner and (inner[1][0] == "~" or "`" not in inner[2]):
                 folded_fence = inner[1]
-            elif line.startswith("    ") and (blank or folded_indent) and not comment:
+            elif (
+                _inside(line).startswith("    ")
+                and (blank or folded_indent)
+                and not comment
+            ):
                 # Indented code, where the tag written here is printed rather
                 # than acted on. Only where a block may begin: indentation does
                 # not interrupt a paragraph, it goes on writing one. Once one
