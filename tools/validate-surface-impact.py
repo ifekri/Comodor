@@ -277,6 +277,7 @@ def _visible_lines(body: str) -> list[str]:
     folded_span = ""
     folded_inline_comment = False
     folded_indent = False
+    folded_list = 0
     list_indent = 0
     blank = True
     paragraph = False
@@ -296,6 +297,7 @@ def _visible_lines(body: str) -> list[str]:
             folded_span = ""
             folded_inline_comment = False
             folded_indent = False
+            folded_list = 0
             list_indent = 0
         if raw_html:
             if (raw_html == "blank" and not line.strip()) or (
@@ -310,8 +312,17 @@ def _visible_lines(body: str) -> list[str]:
             continue
         if collapsed or (folded_tag is not None and folded_tag[0]):
             # Read as the container reads it: a fence, an indentation or a blank
-            # line inside a blockquote or a list item begins after its marker.
-            content = _inside(line)
+            # line inside a blockquote or a list item begins after its marker —
+            # and inside a list item that marker was on an earlier line, so its
+            # content indentation is carried down the lines that follow.
+            if line.strip() and not line.startswith(" " * folded_list):
+                folded_list = 0
+            carried = line[folded_list:]
+            item = re.match(r"^ {0,3}(?:[-+*]|\d{1,9}[.)])( +|$)", carried)
+            if item and not folded_list:
+                padding = len(item[1]) if carried[item.end() :] and len(item[1]) <= 4 else 1
+                folded_list = item.start(1) + padding
+            content = _inside(carried)
             inner = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", content)
             if folded_fence:
                 if (

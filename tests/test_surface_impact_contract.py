@@ -643,6 +643,26 @@ def test_a_closing_tag_after_indented_code_still_ends_it(validator, closer):
         "<details>\n\n    code\n\n" + closer + "\n\n" + VALID_BODY) == []
 
 
+@pytest.mark.parametrize(
+    "inside",
+    [
+        # Four spaces is two inside the item, which is prose, not code.
+        "- item\n\n    </details>",
+        # And the same after a fenced block that has closed.
+        "- item\n\n    ~~~\n    x\n    ~~~\n    </details>",
+    ],
+)
+def test_a_closing_tag_inside_a_list_item_still_ends_the_disclosure(validator, inside):
+    """A list item carries its content indentation down the lines that follow it,
+    so what looks indented from the margin is at the item's own margin."""
+    assert validator.validate_body("<details>\n\n" + inside + "\n\n" + VALID_BODY) == []
+
+
+def test_a_fence_inside_a_list_item_still_hides_its_closer(validator):
+    assert validator.validate_body(
+        "<details>\n\n- item\n\n    ~~~\n    </details>\n    ~~~\n\n" + VALID_BODY)
+
+
 @pytest.mark.parametrize("tag", ["script", "style", "textarea", "pre"])
 def test_a_closer_beside_a_stripped_raw_tag_still_ends_the_disclosure(validator, tag):
     """GitHub escapes these tags rather than passing their bodies through, so a
