@@ -119,7 +119,7 @@ BLOCK_START = re.compile(r"^ {0,3}(?:>|#{1,6}(?:\s|$)|(?:[-*_] *){3,}$)")
 # A comment that begins a block runs to `-->` through blank lines. Inside a
 # blockquote or a list item the block begins after the marker, so those count too
 # — but four spaces is an indented code block, where the opener is printed.
-BLOCK_COMMENT = re.compile(r"^ {0,3}(?:(?:>|[-+*]|\d{1,9}[.)]) {0,3})*<!--")
+BLOCK_COMMENT = re.compile(r"^ {0,3}(?:(?:>|[-+*]|\d{1,9}[.)]) *)*<!--")
 
 
 def _tag_end(text: str, at: int, quote: str = "") -> tuple[int | None, str]:

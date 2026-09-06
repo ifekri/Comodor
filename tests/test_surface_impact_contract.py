@@ -578,11 +578,14 @@ def test_a_real_closing_tag_ends_the_collapsed_state(validator, body):
     assert validator.validate_body(body + VALID_BODY) == []
 
 
-@pytest.mark.parametrize("marker", ["", "> ", "> > ", "- ", "1. "])
+@pytest.mark.parametrize(
+    "marker", ["", "  ", "> ", "> > ", "- ", "1. ", "-    ", "-     "]
+)
 def test_a_block_comment_inside_a_disclosure_keeps_hiding(validator, marker):
     """A comment that begins its own block runs to `-->` through blank lines, so
     the closer and the section inside it are commented out rather than rendered.
-    Inside a blockquote or a list item the block begins after the marker."""
+    Inside a blockquote or a list item the block begins after the marker, and a
+    marker may be followed by more padding than a block may be indented by."""
     contract = VALID_BODY[VALID_BODY.index("## Surface Impact"):]
     inside = "\n".join(marker + line for line in ["<!--", "</details>", "-->"])
     assert validator.validate_body("<details>\n\n" + inside + "\n" + contract)
