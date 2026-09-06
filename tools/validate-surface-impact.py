@@ -81,6 +81,13 @@ COMPLETE_HTML_TAG = re.compile(
 # GFM declarations require an initial uppercase ASCII letter, unlike CommonMark 0.31.
 # GitHub's renderer also suppresses case variants of CDATA.
 DELIMITED_HTML_START = re.compile(r"^ {0,3}(<!--|<\?|<![A-Z]|<!\[(?i:CDATA)\[)")
+# A blank line ends the HTML *block*, but the element stays open: the heading and
+# table after it are parsed as Markdown and then rendered folded away inside the
+# disclosure widget. What the contract asks for is a section at the top level, so
+# the state has to survive to the closing tag rather than to the first blank line.
+COLLAPSED_START = re.compile(r"^ {0,3}<details(?=\s|/?>|$)", re.IGNORECASE)
+COLLAPSED_OPEN = re.compile(r"<details(?=\s|/?>|$)", re.IGNORECASE)
+COLLAPSED_END = re.compile(r"</details\s*>", re.IGNORECASE)
 
 
 def _visible_lines(body: str) -> list[str]:
@@ -88,17 +95,20 @@ def _visible_lines(body: str) -> list[str]:
     fence = ""
     comment = False
     raw_html = ""
+    collapsed = 0
     list_indent = 0
     blank = True
     paragraph = False
     for line in body.splitlines():
         line = line.expandtabs(4)
-        if (raw_html or fence) and list_indent and line.strip() and not line.startswith(
-            " " * list_indent
-        ):
+        if (raw_html or fence or collapsed) and list_indent and line.strip() \
+                and not line.startswith(" " * list_indent):
             # Outside the container, a closer is escaped text, not a raw HTML terminator.
+            # An unclosed element is closed with the list item it was opened in, so what
+            # follows at the top level is rendered there rather than folded into it.
             raw_html = "unclosed-comment" if raw_html == "-->" else ""
             fence = ""
+            collapsed = 0
             list_indent = 0
         if raw_html:
             if (raw_html == "blank" and not line.strip()) or (
@@ -110,6 +120,13 @@ def _visible_lines(body: str) -> list[str]:
                 )
             lines.append("")
             blank = not line.strip()
+            continue
+        if collapsed:
+            collapsed = max(collapsed + len(COLLAPSED_OPEN.findall(line))
+                            - len(COLLAPSED_END.findall(line)), 0)
+            lines.append("")
+            blank = not line.strip()
+            paragraph = False
             continue
         marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
         if comment and (not line.strip() or re.match(r"^ {0,3}#{1,6}(?: |$)", line)):
@@ -139,6 +156,15 @@ def _visible_lines(body: str) -> list[str]:
                 continue
             if line.startswith("    "):
                 lines.append("")
+                continue
+            if COLLAPSED_START.match(line):
+                if line.index("<") < list_indent:
+                    list_indent = 0
+                collapsed = max(len(COLLAPSED_OPEN.findall(line))
+                                - len(COLLAPSED_END.findall(line)), 0)
+                lines.append("")
+                blank = False
+                paragraph = False
                 continue
             html_start = RAW_HTML_START.match(line)
             delimited_html_start = DELIMITED_HTML_START.match(line)

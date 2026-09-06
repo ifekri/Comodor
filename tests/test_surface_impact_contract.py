@@ -447,6 +447,53 @@ def test_even_backslashes_do_not_escape_inline_comment(validator, count):
     assert validator._visible_lines(hidden) == ["Ordinary prose " + "\\" * count]
 
 
+@pytest.mark.parametrize(
+    "prefix,suffix",
+    [
+        ("<details>\n\n", "\n</details>"),
+        ("<details>\n<summary>Assessment</summary>\n\n", "\n</details>"),
+        ("<details open>\n\n", "\n</details>"),
+        ("<details>\n\n", ""),
+        ("<details>\n<details>\n\n", "\n</details>\n</details>"),
+    ],
+)
+def test_collapsed_container_hides_contract(validator, prefix, suffix):
+    """A blank line ends the HTML block but not the element: GitHub folds the
+    heading and table into the disclosure widget, where the contract is not the
+    top-level section it is required to be."""
+    assert validator.validate_body(prefix + VALID_BODY + suffix)
+
+
+@pytest.mark.parametrize(
+    "example",
+    [
+        "<details>\n<summary>Logs</summary>\n\nhidden\n</details>\n\n",
+        "<details>example</details>\n\n",
+        "<details>\n<summary>Logs</summary>\n\nhidden\n</details>\n<details>\nmore\n</details>\n\n",
+        "```html\n<details>\n```\n\n",
+        "~~~html\n<details>\n~~~\n\n",
+        "Mentioned `<details>` in prose.\n\n",
+        "<detailsish>\n\n",
+        # Left open inside a list item, and closed with it: what follows at the
+        # top level is rendered there rather than folded into the widget.
+        "- assessment:\n\n  <details>\n\n",
+    ],
+)
+def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
+    assert validator.validate_body(example + VALID_BODY) == []
+
+
+def test_a_contract_nested_under_an_open_details_stays_hidden(validator):
+    contract = VALID_BODY[VALID_BODY.index("## Surface Impact"):]
+    nested = "\n".join("  " + line for line in contract.splitlines())
+    assert validator.validate_body("- assessment:\n\n  <details>\n\n" + nested)
+
+
+def test_details_after_the_contract_does_not_hide_it(validator):
+    assert validator.validate_body(
+        VALID_BODY + "\n<details>\n<summary>Logs</summary>\n\nhidden\n</details>\n") == []
+
+
 def test_inline_raw_html_tag_does_not_start_block(validator):
     assert validator.validate_body("Mentioned `<pre>` in prose.\n\n" + VALID_BODY) == []
     assert validator.validate_body("<!-- <pre> -->\n\n" + VALID_BODY) == []
