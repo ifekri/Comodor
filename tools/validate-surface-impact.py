@@ -206,7 +206,8 @@ def _folded(text: str, pending: tuple[int, str] | None) -> tuple[int, tuple[int,
 
 
 TAG_TOKEN = re.compile(
-    r"\\[\\`<]|(?<!`)(?P<span>`+)(?!`).*?(?<!`)(?P=span)(?!`)|(?<!`)(?P<open>`+)(?!`)|<!--"
+    r"\\[\\`<]|\]\( *<[^<>\n]*>|(?<!`)(?P<span>`+)(?!`).*?(?<!`)(?P=span)(?!`)"
+    r"|(?<!`)(?P<open>`+)(?!`)|<!--"
 )
 
 

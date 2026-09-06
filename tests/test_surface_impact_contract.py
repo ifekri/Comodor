@@ -540,6 +540,10 @@ def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
         '<span title="\nx> </details>">',
         # Split across lines, a closer is printed rather than acted on.
         "text </details\n> more",
+        # A link whose destination is written in angle brackets is a link, and
+        # what it points at is an address rather than a tag.
+        "[details](</details>)",
+        '[d](</details> "t")',
         # One code span, opened on one line and closed on the next.
         "text `\ncontinued </details>`",
         # A matched span before the tag hides nothing after itself.
