@@ -103,7 +103,6 @@ PARTIAL_TAG = re.compile(
     r"""(?:\s+[^\s"'=<>`/]*(?:\s*=\s*(?:"[^"]*|'[^']*|[^\s"'=<>`]*)?)?)?\s*/?$"""
 )
 PARTIAL_CLOSE = re.compile(r"</[A-Za-z][A-Za-z0-9-]*\s*$")
-INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
 # An unfinished tag is inline HTML, and inline HTML belongs to one paragraph. A
 # block that starts here ends that paragraph, and what was being read as a tag is
 # printed as the text it turned out to be.
@@ -347,7 +346,7 @@ def _visible_lines(body: str) -> list[str]:
         # own, and folds everything after it just the same.
         if BLOCK_START.match(line):
             folded_tag = None
-        depth, folded_tag = _folded(INLINE_CODE.sub("", visible), folded_tag)
+        depth, folded_tag = _folded(_tag_text(visible, False)[0], folded_tag)
         collapsed = max(collapsed + depth, 0)
     return lines
 

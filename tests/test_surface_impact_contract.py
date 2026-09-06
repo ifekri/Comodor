@@ -462,6 +462,9 @@ def test_even_backslashes_do_not_escape_inline_comment(validator, count):
         # as readily as an opener on a line of its own.
         ("text <details>\n\n", "\n</details>"),
         ("text <details>\n\n", ""),
+        # Escaped backticks are printed, not delimiters, so the tag between them
+        # is a real opener.
+        ("text \\`<details>\\`\n\n", "\n</details>"),
     ],
 )
 def test_collapsed_container_hides_contract(validator, prefix, suffix):
@@ -488,6 +491,8 @@ def test_collapsed_container_hides_contract(validator, prefix, suffix):
         "text <details>x</details>\n\n",
         "text <details>\n\nnote\n</details>\n\n",
         "Documented the `<details>` wrapper in the template.\n\n",
+        # An escaped angle bracket is printed rather than opening anything.
+        "text \\<details>\n\n",
     ],
 )
 def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
