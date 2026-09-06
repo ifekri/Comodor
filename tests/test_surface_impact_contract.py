@@ -588,11 +588,24 @@ def test_a_block_comment_inside_a_disclosure_keeps_hiding(validator, marker):
     assert validator.validate_body("<details>\n\n" + inside + "\n" + contract)
 
 
-def test_a_span_inside_replayed_comment_text_still_hides_its_closer(validator):
-    """The text an unmatched opener seemed to hide is read again, line by line,
-    so a code span across the break inside it is still a code span."""
-    assert validator.validate_body(
-        "<details>\n\ntext <!-- `\ncontinued </details>`\n\n" + VALID_BODY)
+@pytest.mark.parametrize(
+    "hidden",
+    [
+        # The text an unmatched opener seemed to hide is read again, line by
+        # line, so a span across the break inside it is still a span.
+        "text <!-- `\ncontinued </details>`",
+        # And a comment inside it is still a comment until `-->`.
+        "text ` <!--\ncontinued </details> -->",
+    ],
+)
+def test_replayed_text_keeps_what_it_hides(validator, hidden):
+    assert validator.validate_body("<details>\n\n" + hidden + "\n\n" + VALID_BODY)
+
+
+def test_an_indented_comment_opener_is_code_not_a_block(validator):
+    """Four spaces make an indented code block, where the opener is printed, so
+    the closing tag after it still ends the disclosure."""
+    assert validator.validate_body("<details>\n\n    <!--\n\n</details>\n\n" + VALID_BODY) == []
 
 
 def test_a_contract_nested_under_an_open_details_stays_hidden(validator):

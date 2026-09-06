@@ -117,8 +117,9 @@ ATTRS_PARTIAL = re.compile(
 # printed as the text it turned out to be.
 BLOCK_START = re.compile(r"^ {0,3}(?:>|#{1,6}(?:\s|$)|(?:[-*_] *){3,}$)")
 # A comment that begins a block runs to `-->` through blank lines. Inside a
-# blockquote or a list item the block begins after the marker, so those count too.
-BLOCK_COMMENT = re.compile(r"^[ \t]*(?:(?:>|[-+*]|\d{1,9}[.)])[ \t]+)*<!--")
+# blockquote or a list item the block begins after the marker, so those count too
+# — but four spaces is an indented code block, where the opener is printed.
+BLOCK_COMMENT = re.compile(r"^ {0,3}(?:(?:>|[-+*]|\d{1,9}[.)]) {0,3})*<!--")
 
 
 def _tag_end(text: str, at: int, quote: str = "") -> tuple[int | None, str]:
@@ -245,12 +246,13 @@ def _literal(text: str) -> str:
     that never closes seemed to hide is read again in its turn.
     """
     kept = ""
+    comment = False
     code = ""
     skipped = ""
     for line in text.split("\n"):
-        part, _, code, deferred = _tag_text(line, False, code)
+        part, comment, code, deferred = _tag_text(line, comment, code)
         kept += part + " "
-        skipped = f"{skipped}\n{deferred}" if code else ""
+        skipped = f"{skipped}\n{deferred}" if code or comment else ""
     return kept + _literal(skipped) if skipped else kept
 
 
