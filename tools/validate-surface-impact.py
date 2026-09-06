@@ -267,6 +267,7 @@ def _visible_lines(body: str) -> list[str]:
     folded_code = ""
     folded_span = ""
     folded_inline_comment = False
+    folded_indent = False
     list_indent = 0
     blank = True
     paragraph = False
@@ -285,6 +286,7 @@ def _visible_lines(body: str) -> list[str]:
             folded_code = ""
             folded_span = ""
             folded_inline_comment = False
+            folded_indent = False
             list_indent = 0
         if raw_html:
             if (raw_html == "blank" and not line.strip()) or (
@@ -309,12 +311,15 @@ def _visible_lines(body: str) -> list[str]:
                     folded_fence = ""
             elif inner and (inner[1][0] == "~" or "`" not in inner[2]):
                 folded_fence = inner[1]
-            elif line.startswith("    ") and blank and not comment:
+            elif line.startswith("    ") and (blank or folded_indent) and not comment:
                 # Indented code, where the tag written here is printed rather
                 # than acted on. Only where a block may begin: indentation does
-                # not interrupt a paragraph, it goes on writing one.
-                pass
+                # not interrupt a paragraph, it goes on writing one. Once one
+                # has begun it runs on, line after line, until something else
+                # starts.
+                folded_indent = True
             else:
+                folded_indent = folded_indent and not line.strip()
                 block_comment = comment and not folded_inline_comment
                 if (not line.strip() or BLOCK_START.match(line)) and not block_comment:
                     # An inline comment opener with no `-->` is printed once the

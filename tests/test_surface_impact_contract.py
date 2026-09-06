@@ -616,10 +616,23 @@ def test_an_indented_comment_opener_is_code_not_a_block(validator, opener):
         "<details>\n\n" + opener + "\n\n</details>\n-->\n\n" + VALID_BODY) == []
 
 
-def test_an_indented_closing_tag_is_code_not_a_closer(validator):
+@pytest.mark.parametrize(
+    "code",
+    [
+        "    </details>",
+        # The block runs on, so a closer on its second line is printed too.
+        "    code\n    </details>",
+        "    code\n\n    </details>",
+    ],
+)
+def test_an_indented_closing_tag_is_code_not_a_closer(validator, code):
     """Indented four spaces where a block may begin it is printed, so it ends
     nothing and what follows is still folded away."""
-    assert validator.validate_body("<details>\n\n    </details>\n\n" + VALID_BODY)
+    assert validator.validate_body("<details>\n\n" + code + "\n\n" + VALID_BODY)
+
+
+def test_a_closing_tag_after_indented_code_still_ends_it(validator):
+    assert validator.validate_body("<details>\n\n    code\n\n</details>\n\n" + VALID_BODY) == []
 
 
 @pytest.mark.parametrize(
