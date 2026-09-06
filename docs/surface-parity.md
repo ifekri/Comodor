@@ -71,11 +71,17 @@ or Markdown emphasis to a non-answer does not make it evidence.
 
 Use exactly one visible, top-level `## Surface Impact` section and one contiguous
 three-column Markdown table inside it, before the next level-one or level-two
-heading. The header is `| Surface | Status | Evidence / Notes |`, followed by
+heading. Top-level means top-level in Markdown container structure: the section
+must not be nested in a blockquote, a list item, a code fence or block, an HTML
+comment, raw HTML that stops Markdown from being parsed, or a `<details>` widget
+that folds it away. A visible HTML wrapper that hides nothing, such as `<div>`,
+is allowed — the requirement is that a reader sees the contract, not that it is a
+child of the document root once GitHub has rendered it.
+
+The header is `| Surface | Status | Evidence / Notes |`, followed by
 `| --- | --- | --- |` (alignment colons are allowed), then the ten canonical rows.
-Use leading/trailing pipes on every row. Do not put the table in a code fence,
-HTML comment, blockquote or indented code block. Keep evidence on one line per
-row and escape literal pipes as `\|`.
+Use leading/trailing pipes on every row. Keep evidence on one line per row and
+escape literal pipes as `\|`.
 
 Raw HTML blocks, including processing instructions, declarations, CDATA and
 comments, cannot supply the section or table. Their closing line is still raw

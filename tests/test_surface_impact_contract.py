@@ -709,6 +709,22 @@ def test_a_tag_in_continuing_prose_still_ends_the_disclosure(validator, prose):
     assert validator.validate_body("<details>\n\n" + prose + "\n\n" + VALID_BODY) == []
 
 
+@pytest.mark.parametrize(
+    "prefix,suffix",
+    [
+        ("<div>\n\n", "\n</div>"),
+        ("<div>\n\n", ""),
+        ("<div class='note'>\n\n", "\n</div>"),
+        ("<section>\n\n", "\n</section>"),
+    ],
+)
+def test_a_wrapper_that_hides_nothing_is_allowed(validator, prefix, suffix):
+    """Top-level is about Markdown container structure. A `<div>` renders the
+    heading and table where a reader finds them, so it is not the nesting the
+    contract refuses — unlike a blockquote, a list item or a `<details>`."""
+    assert validator.validate_body(prefix + VALID_BODY + suffix) == []
+
+
 def test_a_contract_nested_under_an_open_details_stays_hidden(validator):
     contract = VALID_BODY[VALID_BODY.index("## Surface Impact"):]
     nested = "\n".join("  " + line for line in contract.splitlines())
