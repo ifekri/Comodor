@@ -504,6 +504,8 @@ def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
         '<span\ntitle="</details>">',
         # The `>` that would finish the tag early is inside the quoted value.
         '<span\n title="> </details>">',
+        # The value opens on one line and the misleading `>` is on the next.
+        '<span title="\nx> </details>">',
         # Split across lines, a closer is printed rather than acted on.
         "text </details\n> more",
     ],
@@ -525,6 +527,11 @@ def test_a_quoted_closing_tag_does_not_reopen_the_document(validator, quoted):
         '<details>\n\nHe wrote "</details>" here.\n\n',
         "<details>\n\ntext </details > more\n\n",
         '<details>\n\n<span\ntitle="x">\n</details>\n\n',
+        # An unfinished tag is inline HTML, and a block ends the paragraph that
+        # holds it: what follows is text, and the closer in it is a real one.
+        '<details>\n\n<span title="\n> </details>">\n\n',
+        '<details>\n\n<span title="\n\n</details>\n\n',
+        '<details>\n\n<span title="\n# note\n</details>\n\n',
     ],
 )
 def test_a_real_closing_tag_ends_the_collapsed_state(validator, body):

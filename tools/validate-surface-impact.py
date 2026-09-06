@@ -94,15 +94,18 @@ OPENING_TAG = re.compile(
     r"""(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*/?>"""
 )
 TAG_NAME = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)")
+# An unfinished tag is inline HTML, and inline HTML belongs to one paragraph. A
+# block that starts here ends that paragraph, and what was being read as a tag is
+# printed as the text it turned out to be.
+BLOCK_START = re.compile(r"^ {0,3}(?:>|#{1,6}(?:\s|$)|(?:[-*_] *){3,}$)")
 
 
-def _tag_end(text: str, at: int) -> int | None:
-    """Where a tag started before `at` finishes, or None if it runs past this line.
+def _tag_end(text: str, at: int, quote: str = "") -> tuple[int | None, str]:
+    """Where a tag finishes, or None and the quote still open at the end of the line.
 
     A `>` inside a quoted attribute value is part of the value, not the end of the
-    tag that carries it.
+    tag that carries it, and the value may have been opened on an earlier line.
     """
-    quote = ""
     while at < len(text):
         character = text[at]
         if quote:
@@ -110,27 +113,28 @@ def _tag_end(text: str, at: int) -> int | None:
         elif character in "\"'":
             quote = character
         elif character == ">":
-            return at + 1
+            return at + 1, ""
         at += 1
-    return None
+    return None, quote
 
 
-def _folded(text: str, pending: int | None) -> tuple[int, int | None]:
+def _folded(text: str, pending: tuple[int, str] | None) -> tuple[int, tuple[int, str] | None]:
     """How far a line moves the disclosure depth, and what an unfinished tag owes.
 
     Only whole tags count. A tag carries its quoted attributes with it and may run
     past the end of a line, so what it encloses is attribute text the renderer
     escapes — a closer written in there ends nothing. `pending` is what the tag
-    still being read will do to the depth once it finishes.
+    still being read will do to the depth once it finishes, and the quote it is in.
     """
     depth = 0
     at = 0
     while at < len(text):
         if pending is not None:
-            end = _tag_end(text, at)
+            owed, quote = pending
+            end, quote = _tag_end(text, at, quote)
             if end is None:
-                return depth, pending
-            depth += pending
+                return depth, (owed, quote)
+            depth += owed
             at, pending = end, None
             continue
         start = text.find("<", at)
@@ -143,12 +147,14 @@ def _folded(text: str, pending: int | None) -> tuple[int, int | None]:
             at = tag.end()
             continue
         started = TAG_NAME.match(text, start)
-        if started and _tag_end(text, start) is None:
-            # An opening tag still owes its depth when it finishes. A closer split
-            # across lines owes nothing: the renderer prints it and the element it
-            # names stays open.
-            opens = not started[1] and started[2].lower() == "details"
-            return depth, int(opens)
+        if started:
+            end, quote = _tag_end(text, start)
+            if end is None:
+                # An opening tag still owes its depth when it finishes. A closer
+                # split across lines owes nothing: the renderer prints it and the
+                # element it names stays open.
+                opens = not started[1] and started[2].lower() == "details"
+                return depth, (int(opens), quote)
         at = start + 1
     return depth, pending
 
@@ -223,6 +229,8 @@ def _visible_lines(body: str) -> list[str]:
             elif inner and (inner[1][0] == "~" or "`" not in inner[2]):
                 folded_fence = inner[1]
             else:
+                if not line.strip() or BLOCK_START.match(line):
+                    folded_tag = None
                 text, comment = _tag_text(line, comment)
                 depth, folded_tag = _folded(text, folded_tag)
                 collapsed = max(collapsed + depth, 0)
