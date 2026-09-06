@@ -117,8 +117,8 @@ ATTRS_PARTIAL = re.compile(
 # printed as the text it turned out to be.
 BLOCK_START = re.compile(r"^ {0,3}(?:>|#{1,6}(?:\s|$)|(?:[-*_] *){3,}$)")
 # A comment that begins a block runs to `-->` through blank lines. Inside a
-# blockquote the block begins after the marker, so that counts too.
-BLOCK_COMMENT = re.compile(r"^ {0,3}(?:>[ \t]?)*<!--")
+# blockquote or a list item the block begins after the marker, so those count too.
+BLOCK_COMMENT = re.compile(r"^[ \t]*(?:(?:>|[-+*]|\d{1,9}[.)])[ \t]+)*<!--")
 
 
 def _tag_end(text: str, at: int, quote: str = "") -> tuple[int | None, str]:
@@ -237,19 +237,21 @@ def _tag_text(line: str, comment: bool, code: str = "") -> tuple[str, bool, str]
 
 
 def _literal(text: str) -> str:
-    """The tag text of a span that turned out never to close.
+    """The tag text of a paragraph whose delimiter turned out never to close.
 
     A delimiter with no match is printed, so what followed it was never code and
-    has to be read again — including any further delimiter with no match.
+    has to be read again. The buffer holds whole lines, and a span inside it can
+    close on a later one, so it is read line by line — and whatever a delimiter
+    that never closes seemed to hide is read again in its turn.
     """
     kept = ""
-    while text:
-        part, _, code, deferred = _tag_text(text, False)
-        kept += part
-        if not code:
-            break
-        text = deferred
-    return kept
+    code = ""
+    skipped = ""
+    for line in text.split("\n"):
+        part, _, code, deferred = _tag_text(line, False, code)
+        kept += part + " "
+        skipped = f"{skipped}\n{deferred}" if code else ""
+    return kept + _literal(skipped) if skipped else kept
 
 
 def _visible_lines(body: str) -> list[str]:

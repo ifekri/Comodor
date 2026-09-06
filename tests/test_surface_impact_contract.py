@@ -578,14 +578,21 @@ def test_a_real_closing_tag_ends_the_collapsed_state(validator, body):
     assert validator.validate_body(body + VALID_BODY) == []
 
 
-@pytest.mark.parametrize("marker", ["", "> ", "> > "])
+@pytest.mark.parametrize("marker", ["", "> ", "> > ", "- ", "1. "])
 def test_a_block_comment_inside_a_disclosure_keeps_hiding(validator, marker):
     """A comment that begins its own block runs to `-->` through blank lines, so
     the closer and the section inside it are commented out rather than rendered.
-    Inside a blockquote the block begins after the marker."""
+    Inside a blockquote or a list item the block begins after the marker."""
     contract = VALID_BODY[VALID_BODY.index("## Surface Impact"):]
-    quoted = "\n".join(marker + line for line in ["<!--", "</details>", "-->"])
-    assert validator.validate_body("<details>\n\n" + quoted + "\n" + contract)
+    inside = "\n".join(marker + line for line in ["<!--", "</details>", "-->"])
+    assert validator.validate_body("<details>\n\n" + inside + "\n" + contract)
+
+
+def test_a_span_inside_replayed_comment_text_still_hides_its_closer(validator):
+    """The text an unmatched opener seemed to hide is read again, line by line,
+    so a code span across the break inside it is still a code span."""
+    assert validator.validate_body(
+        "<details>\n\ntext <!-- `\ncontinued </details>`\n\n" + VALID_BODY)
 
 
 def test_a_contract_nested_under_an_open_details_stays_hidden(validator):
