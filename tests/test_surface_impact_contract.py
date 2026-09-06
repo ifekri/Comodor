@@ -465,6 +465,10 @@ def test_even_backslashes_do_not_escape_inline_comment(validator, count):
         # Escaped backticks are printed, not delimiters, so the tag between them
         # is a real opener.
         ("text \\`<details>\\`\n\n", "\n</details>"),
+        # A delimiter with no match anywhere in the paragraph is printed too, so
+        # what follows it was never code.
+        ("text ` <details>\n\n", "\n</details>"),
+        ("text `\nmore <details>\n\n", "\n</details>"),
     ],
 )
 def test_collapsed_container_hides_contract(validator, prefix, suffix):
@@ -495,6 +499,8 @@ def test_collapsed_container_hides_contract(validator, prefix, suffix):
         "text \\<details>\n\n",
         # The opener is inside a code span that closes on the next line.
         "text `\ncontinued <details>`\n\n",
+        # An unmatched delimiter before a real closer leaves it a real closer.
+        "<details>\n\ntext ` </details>\n\n",
     ],
 )
 def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
@@ -525,6 +531,8 @@ def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
         "text </details\n> more",
         # One code span, opened on one line and closed on the next.
         "text `\ncontinued </details>`",
+        # A matched span before the tag hides nothing after itself.
+        "text `x` <details>",
     ],
 )
 def test_a_quoted_closing_tag_does_not_reopen_the_document(validator, quoted):
