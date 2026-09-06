@@ -93,38 +93,62 @@ OPENING_TAG = re.compile(
     r"""<([A-Za-z][A-Za-z0-9-]*)(?:\s+[^\s"'=<>`/]+"""
     r"""(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*/?>"""
 )
-TAG_START = re.compile(r"</?[A-Za-z]")
+TAG_NAME = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)")
 
 
-def _folded(text: str, pending: bool) -> tuple[int, bool]:
-    """How far a line moves the disclosure depth, and whether a tag is still open.
+def _tag_end(text: str, at: int) -> int | None:
+    """Where a tag started before `at` finishes, or None if it runs past this line.
+
+    A `>` inside a quoted attribute value is part of the value, not the end of the
+    tag that carries it.
+    """
+    quote = ""
+    while at < len(text):
+        character = text[at]
+        if quote:
+            quote = "" if character == quote else quote
+        elif character in "\"'":
+            quote = character
+        elif character == ">":
+            return at + 1
+        at += 1
+    return None
+
+
+def _folded(text: str, pending: int | None) -> tuple[int, int | None]:
+    """How far a line moves the disclosure depth, and what an unfinished tag owes.
 
     Only whole tags count. A tag carries its quoted attributes with it and may run
-    past the end of a line, and what it encloses is attribute text the renderer
-    escapes — so a closer written in there ends nothing.
+    past the end of a line, so what it encloses is attribute text the renderer
+    escapes — a closer written in there ends nothing. `pending` is what the tag
+    still being read will do to the depth once it finishes.
     """
     depth = 0
     at = 0
     while at < len(text):
-        if pending:
-            end = text.find(">", at)
-            if end < 0:
-                return depth, True
-            at, pending = end + 1, False
+        if pending is not None:
+            end = _tag_end(text, at)
+            if end is None:
+                return depth, pending
+            depth += pending
+            at, pending = end, None
             continue
         start = text.find("<", at)
         if start < 0:
             break
-        closing = CLOSING_TAG.match(text, start)
-        opening = None if closing else OPENING_TAG.match(text, start)
-        if closing or opening:
-            tag = closing or opening
+        tag = CLOSING_TAG.match(text, start) or OPENING_TAG.match(text, start)
+        if tag:
             if tag[1].lower() == "details":
-                depth += -1 if closing else 1
+                depth += -1 if text[start + 1] == "/" else 1
             at = tag.end()
             continue
-        if TAG_START.match(text, start) and ">" not in text[start:]:
-            return depth, True
+        started = TAG_NAME.match(text, start)
+        if started and _tag_end(text, start) is None:
+            # An opening tag still owes its depth when it finishes. A closer split
+            # across lines owes nothing: the renderer prints it and the element it
+            # names stays open.
+            opens = not started[1] and started[2].lower() == "details"
+            return depth, int(opens)
         at = start + 1
     return depth, pending
 
@@ -158,7 +182,7 @@ def _visible_lines(body: str) -> list[str]:
     raw_html = ""
     collapsed = 0
     folded_fence = ""
-    folded_tag = False
+    folded_tag = None
     list_indent = 0
     blank = True
     paragraph = False
@@ -173,7 +197,7 @@ def _visible_lines(body: str) -> list[str]:
             fence = ""
             collapsed = 0
             folded_fence = ""
-            folded_tag = False
+            folded_tag = None
             list_indent = 0
         if raw_html:
             if (raw_html == "blank" and not line.strip()) or (
@@ -186,7 +210,7 @@ def _visible_lines(body: str) -> list[str]:
             lines.append("")
             blank = not line.strip()
             continue
-        if collapsed:
+        if collapsed or folded_tag is not None:
             inner = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
             if folded_fence:
                 if (
@@ -239,7 +263,7 @@ def _visible_lines(body: str) -> list[str]:
             if COLLAPSED_START.match(line):
                 if line.index("<") < list_indent:
                     list_indent = 0
-                depth, folded_tag = _folded(line, False)
+                depth, folded_tag = _folded(line, None)
                 collapsed = max(depth, 0)
                 lines.append("")
                 blank = False

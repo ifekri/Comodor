@@ -453,6 +453,9 @@ def test_even_backslashes_do_not_escape_inline_comment(validator, count):
         ("<details>\n\n", "\n</details>"),
         ("<details>\n<summary>Assessment</summary>\n\n", "\n</details>"),
         ("<details open>\n\n", "\n</details>"),
+        # The opening tag finishes on a later line and still opens the widget.
+        ("<details\n open>\n\n", "\n</details>"),
+        ("<details\n open>\n\n", ""),
         ("<details>\n\n", ""),
         ("<details>\n<details>\n\n", "\n</details>\n</details>"),
     ],
@@ -499,6 +502,10 @@ def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
         # The tag runs past the end of the line, and what it encloses is
         # attribute text rather than a tag of its own.
         '<span\ntitle="</details>">',
+        # The `>` that would finish the tag early is inside the quoted value.
+        '<span\n title="> </details>">',
+        # Split across lines, a closer is printed rather than acted on.
+        "text </details\n> more",
     ],
 )
 def test_a_quoted_closing_tag_does_not_reopen_the_document(validator, quoted):
