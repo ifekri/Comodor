@@ -94,6 +94,15 @@ OPENING_TAG = re.compile(
     r"""(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*/?>"""
 )
 TAG_NAME = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)")
+# What a tag looks like when the line ends in the middle of it: whole attributes,
+# then at most one being written. Anything else — a bare quote where an attribute
+# name belongs — is not a tag the renderer will ever finish, so it is text.
+PARTIAL_TAG = re.compile(
+    r"""<[A-Za-z][A-Za-z0-9-]*(?:\s+[^\s"'=<>`/]+"""
+    r"""(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*"""
+    r"""(?:\s+[^\s"'=<>`/]*(?:\s*=\s*(?:"[^"]*|'[^']*|[^\s"'=<>`]*)?)?)?\s*/?$"""
+)
+PARTIAL_CLOSE = re.compile(r"</[A-Za-z][A-Za-z0-9-]*\s*$")
 # An unfinished tag is inline HTML, and inline HTML belongs to one paragraph. A
 # block that starts here ends that paragraph, and what was being read as a tag is
 # printed as the text it turned out to be.
@@ -149,7 +158,8 @@ def _folded(text: str, pending: tuple[int, str] | None) -> tuple[int, tuple[int,
         started = TAG_NAME.match(text, start)
         if started:
             end, quote = _tag_end(text, start)
-            if end is None:
+            partial = PARTIAL_CLOSE if started[1] else PARTIAL_TAG
+            if end is None and partial.match(text, start):
                 # An opening tag still owes its depth when it finishes. A closer
                 # split across lines owes nothing: the renderer prints it and the
                 # element it names stays open.

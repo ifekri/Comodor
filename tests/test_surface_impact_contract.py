@@ -532,6 +532,10 @@ def test_a_quoted_closing_tag_does_not_reopen_the_document(validator, quoted):
         '<details>\n\n<span title="\n> </details>">\n\n',
         '<details>\n\n<span title="\n\n</details>\n\n',
         '<details>\n\n<span title="\n# note\n</details>\n\n',
+        # A bare quote where an attribute name belongs is not a tag the renderer
+        # will ever finish, so it is text and the closer after it is real.
+        '<details>\n\n<span "\nx > </details>">\n\n',
+        "<details>\n\n</details foo\n> </details>\n\n",
     ],
 )
 def test_a_real_closing_tag_ends_the_collapsed_state(validator, body):
