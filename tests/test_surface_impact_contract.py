@@ -469,6 +469,9 @@ def test_even_backslashes_do_not_escape_inline_comment(validator, count):
         # what follows it was never code.
         ("text ` <details>\n\n", "\n</details>"),
         ("text `\nmore <details>\n\n", "\n</details>"),
+        # An opener at the start of a line is a block, which ends the paragraph
+        # before it rather than continuing a span opened there.
+        ("text ` ``\n<details> ``\n\n", "\n</details>"),
     ],
 )
 def test_collapsed_container_hides_contract(validator, prefix, suffix):
@@ -501,6 +504,8 @@ def test_collapsed_container_hides_contract(validator, prefix, suffix):
         "text `\ncontinued <details>`\n\n",
         # An unmatched delimiter before a real closer leaves it a real closer.
         "<details>\n\ntext ` </details>\n\n",
+        # So does an inline comment opener the end of the paragraph turns to text.
+        "<details>\n\ntext <!--\n\n</details>\n\n",
     ],
 )
 def test_closed_or_quoted_details_keeps_visible_contract(validator, example):

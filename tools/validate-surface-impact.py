@@ -275,7 +275,9 @@ def _visible_lines(body: str) -> list[str]:
                 folded_fence = inner[1]
             else:
                 if not line.strip() or BLOCK_START.match(line):
-                    folded_tag = None
+                    # An inline comment opener with no `-->` is printed once the
+                    # paragraph holding it ends, so it hides nothing after that.
+                    folded_tag, comment = None, False
                     depth, folded_tag = _folded(_literal(folded_span), folded_tag)
                     collapsed = max(collapsed + depth, 0)
                     folded_code, folded_span = "", ""
