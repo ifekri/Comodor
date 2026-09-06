@@ -650,6 +650,9 @@ def test_a_closing_tag_after_indented_code_still_ends_it(validator, closer):
         "- item\n\n    </details>",
         # And the same after a fenced block that has closed.
         "- item\n\n    ~~~\n    x\n    ~~~\n    </details>",
+        # Nested, the indentation of each item adds to the one holding it.
+        "- outer\n  - inner\n\n      </details>",
+        "- one\n- two\n\n    </details>",
     ],
 )
 def test_a_closing_tag_inside_a_list_item_still_ends_the_disclosure(validator, inside):
@@ -658,9 +661,16 @@ def test_a_closing_tag_inside_a_list_item_still_ends_the_disclosure(validator, i
     assert validator.validate_body("<details>\n\n" + inside + "\n\n" + VALID_BODY) == []
 
 
-def test_a_fence_inside_a_list_item_still_hides_its_closer(validator):
-    assert validator.validate_body(
-        "<details>\n\n- item\n\n    ~~~\n    </details>\n    ~~~\n\n" + VALID_BODY)
+@pytest.mark.parametrize(
+    "inside",
+    [
+        "- item\n\n    ~~~\n    </details>\n    ~~~",
+        # Four spaces past the inner item's own margin is code again.
+        "- outer\n  - inner\n\n        </details>",
+    ],
+)
+def test_code_inside_a_list_item_still_hides_its_closer(validator, inside):
+    assert validator.validate_body("<details>\n\n" + inside + "\n\n" + VALID_BODY)
 
 
 @pytest.mark.parametrize("tag", ["script", "style", "textarea", "pre"])

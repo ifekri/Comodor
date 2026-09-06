@@ -319,9 +319,11 @@ def _visible_lines(body: str) -> list[str]:
                 folded_list = 0
             carried = line[folded_list:]
             item = re.match(r"^ {0,3}(?:[-+*]|\d{1,9}[.)])( +|$)", carried)
-            if item and not folded_list:
+            if item:
+                # Nested, an item is indented inside the one holding it, so what
+                # it carries down is its own indentation added to that.
                 padding = len(item[1]) if carried[item.end() :] and len(item[1]) <= 4 else 1
-                folded_list = item.start(1) + padding
+                folded_list += item.start(1) + padding
             content = _inside(carried)
             inner = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", content)
             if folded_fence:
