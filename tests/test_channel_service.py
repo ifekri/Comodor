@@ -12,11 +12,16 @@ Nothing here starts a real bot. What is checked is the bookkeeping around the
 process — the part that goes wrong quietly: a stale pid file naming a number
 the kernel has since given to somebody else, a `start` that reports success for
 a child that has already died, a `stop` that kills the wrong thing.
+
+The two tests that need a real process start one we control instead. Starting
+the bot itself would make the result depend on how long a loaded machine takes
+to reach the failure, which is a stopwatch pretending to be an assertion.
 """
 
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 
 import pytest
@@ -143,20 +148,97 @@ def test_uptime_reads_as_a_duration(seconds, expected):
 
 
 # --------------------------------------------------------------------------- #
-# the real thing, once
+# a real process, and one we control
 # --------------------------------------------------------------------------- #
 
 
+class Controlled:
+    """`start`, running a child of our choosing rather than the bot.
+
+    Everything else stays real: the detached process options, the pid file, the
+    wait, the log the failure is read from. Only what the child *is* changes,
+    because how long the bot takes to reach its own failure says nothing about
+    whether this code notices.
+    """
+
+    def __init__(self) -> None:
+        self.commands: list[list[str]] = []
+        self.children: list[subprocess.Popen] = []
+        self._real = subprocess.Popen
+
+    def start(self, config, channel, script: str, *, exits: bool):
+        def popen(command, **options):
+            self.commands.append(command)
+            child = self._real([sys.executable, "-c", script], **options)
+            self.children.append(child)
+            if exits:
+                # Gone before `start` ever looks at it. Waiting here rather
+                # than hoping is the whole point: the assertion must not
+                # depend on how quickly this machine starts an interpreter.
+                child.wait()
+            return child
+
+        # Only for the one call. `state` and `stop` shell out to ask whether a
+        # process id is ours, and those must reach the real subprocess.
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(subprocess, "Popen", popen)
+            return service.start(config, channel)
+
+    def clean(self) -> None:
+        for child in self.children:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+
+
+@pytest.fixture
+def controlled():
+    made = Controlled()
+    yield made
+    made.clean()
+
+
 @BOTH
-def test_a_child_that_dies_at_once_is_not_reported_as_started(channel, config):
-    """`start` waits long enough to catch a token Telegram refuses. Reporting
-    success for a process that is already gone is worse than the failure."""
-    channel.settings(config).token = "definitely-not-a-token"
-    ok, why = service.start(config, channel)
+def test_a_child_that_dies_at_once_is_not_reported_as_started(
+        channel, config, controlled):
+    """A token Telegram refuses, a port already taken, a missing dependency —
+    all of them end the child early. Reporting success for a process that is
+    already gone is worse than reporting the failure."""
+    ok, why = controlled.start(config, channel, "raise SystemExit(1)",
+                               exits=True)
 
     assert ok is False
     assert "stopped immediately" in why
     assert not service.pid_file(config, channel).exists()
+
+
+@BOTH
+def test_a_child_that_is_still_running_is_reported_as_started(
+        channel, config, controlled):
+    """The other half of the same contract. A `start` that always failed would
+    satisfy the test above and leave nobody able to run a bot."""
+    ok, why = controlled.start(config, channel, "import time; time.sleep(60)",
+                               exits=False)
+
+    assert ok is True
+    assert "background" in why
+    assert service.state(config, channel).running
+
+    stopped, _ = service.stop(config, channel)
+
+    assert stopped is True
+    assert not service.pid_file(config, channel).exists()
+
+
+@BOTH
+def test_the_background_child_runs_this_interpreter_not_a_console_script(
+        channel, config, controlled):
+    """`comodor` is not always on PATH: a `pipx` install puts it somewhere a
+    detached process started from another shell may not see."""
+    controlled.start(config, channel, "raise SystemExit(1)", exits=True)
+
+    assert controlled.commands == [
+        [sys.executable, "-m", "comodor", channel.name, "start"]]
 
 
 # --------------------------------------------------------------------------- #
