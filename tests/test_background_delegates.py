@@ -2065,3 +2065,127 @@ def test_a_rollback_refused_as_stale_is_still_written(config, bus, tmp_path):
     assert not ok and "could not be started" in why
     assert states(persist) == {}, (
         f"a delegate that never ran was left on the disk: {states(persist)}")
+
+
+def test_every_unbounded_write_repairs_a_refusal():
+    """One rule instead of one review round per call site.
+
+    `_flush` can refuse -- a newer write was tried and failed -- and a caller
+    that ignores the answer leaves the disk behind with nobody coming back.
+    Every write outside `_flush_or_catch_up` therefore has to be the one that
+    cannot repair: shutdown's, which has a budget, and a repair is unbounded
+    by construction.
+    """
+    import ast
+    import inspect
+
+    from comodor.agent import background
+
+    tree = ast.parse(inspect.getsource(background))
+    bare: list[int] = []
+
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "_flush"):
+            continue
+        bounded = any(keyword.arg == "timeout" for keyword in node.keywords)
+        inside_the_repair = any(
+            isinstance(parent, ast.FunctionDef)
+            and parent.name == "_flush_or_catch_up"
+            for parent in ast.walk(tree)
+            if isinstance(parent, ast.FunctionDef)
+            and node.lineno >= parent.lineno
+            and node.lineno <= max(
+                child.lineno for child in ast.walk(parent)
+                if hasattr(child, "lineno")))
+        if not bounded and not inside_the_repair:
+            bare.append(node.lineno)
+
+    assert not bare, (
+        f"a write that cannot repair a refusal, at {bare}; use "
+        f"_flush_or_catch_up unless it is the bounded shutdown write")
+
+
+def test_a_pre_start_stop_refused_as_stale_is_still_written(config, bus,
+                                                            tmp_path):
+    """A delegate stopped before its first turn is terminal, so it must land.
+
+    Refused, the file keeps it `running` and the next session calls it lost --
+    the exact lie this file exists to stop, for a delegate that was stopped on
+    purpose.
+    """
+    persist = tmp_path / "delegates.json"
+    ran = threading.Event()
+
+    class Watched:
+        def run(self, brief):
+            ran.set()
+            return FakeResult()
+
+    manager = make_manager(config, bus, lambda **kwargs: Watched(),
+                           persist=persist)
+
+    entered = threading.Event()
+    released = threading.Event()
+    work = manager._work
+
+    def parked(*arguments):
+        entered.set()
+        assert released.wait(30.0), "the worker was never released"
+        work(*arguments)
+
+    manager._work = parked
+
+    write = manager._flush
+    once = threading.Event()
+
+    def racing(revision, document, timeout=None):
+        if not once.is_set():
+            # A newer write, failing, between this snapshot being numbered and
+            # being offered -- which is what makes it stale.
+            once.set()
+            with manager._lock:
+                newer = manager._stage()
+
+            def refusing(*arguments, **keywords):
+                raise OSError("the disk said no")
+
+            kept, Path.write_text = Path.write_text, refusing
+            try:
+                write(*newer)           # fails, and takes the number
+            finally:
+                Path.write_text = kept
+        return write(revision, document, timeout)
+
+    # The stop is recorded and then announced, so the announcement is the
+    # signal that the record is as final as it is going to get.
+    settled = threading.Event()
+    emit = manager._emit
+
+    def watching(identifier_, state):
+        emit(identifier_, state)
+        if state == "stopped":
+            settled.set()
+
+    ok, identifier, _ = manager.start("a turn that is about to be stopped")
+    assert ok
+    assert entered.wait(30.0), "the worker never started"
+
+    manager._emit = watching
+    manager._flush = racing
+    manager.stop_all()
+    released.set()
+    assert settled.wait(30.0), "the worker never recorded the stop"
+    manager._flush = write
+    manager._emit = emit
+
+    # Asserted before `wait()`, which stages a fresh snapshot on the way out
+    # and would repair this for free -- a guarantee that only holds at
+    # shutdown is not the guarantee a running session needs.
+    assert not ran.is_set(), "the loop ran after it had been stopped"
+    assert states(persist)[identifier] == "stopped", (
+        f"a stopped delegate was left on the disk as running: "
+        f"{states(persist)}")
+
+    manager.wait(timeout=30.0)

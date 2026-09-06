@@ -325,7 +325,9 @@ class BackgroundDelegates:
                     run.ended_at = time.time()
                 staged = self._stage()
         if staged is not None:
-            self._flush(*staged)
+            # Terminal, so it has to reach the disk: refused, the file keeps
+            # this delegate `running` and the next session calls it lost.
+            self._flush_or_catch_up(staged)
             self._emit(identifier, "stopped")
             return
 
@@ -674,7 +676,9 @@ class BackgroundDelegates:
         by the next change and by `wait()`, both of which carry a newer
         number.
 
-        `timeout` bounds the wait for that lock, and only `wait()` passes one.
+        `timeout` bounds the wait for that lock, and only `wait()` passes one,
+        which is also the one caller that must not use `_flush_or_catch_up` —
+        a repair is unbounded by construction, and shutdown has a budget.
         A write already in progress on an unresponsive filesystem holds
         `_write_lock` for as long as the filesystem takes, and shutdown cannot
         afford to queue behind it. Giving up leaves the file one revision
@@ -793,7 +797,10 @@ class BackgroundDelegates:
             with self._lock:
                 self._counter = itertools.count(highest + 1)
                 staged = self._stage()
-            self._flush(*staged)
+            # A reload rewrites what it just decided about the last session's
+            # work. Refused, the file still says those runs are `running`, and
+            # the session after this one repeats the same guess.
+            self._flush_or_catch_up(staged)
 
 
 def _id_number(identifier: str) -> int:
