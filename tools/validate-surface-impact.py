@@ -103,6 +103,15 @@ PARTIAL_TAG = re.compile(
     r"""(?:\s+[^\s"'=<>`/]*(?:\s*=\s*(?:"[^"]*|'[^']*|[^\s"'=<>`]*)?)?)?\s*/?$"""
 )
 PARTIAL_CLOSE = re.compile(r"</[A-Za-z][A-Za-z0-9-]*\s*$")
+# What is left of a tag once the line it started on has been read: the attributes
+# it still has to spell, and either the `>` that ends it or the end of the line.
+ATTRS_END = re.compile(
+    r"""(?:\s+[^\s"'=<>`/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*/?>"""
+)
+ATTRS_PARTIAL = re.compile(
+    r"""(?:\s+[^\s"'=<>`/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*"""
+    r"""(?:\s+[^\s"'=<>`/]*(?:\s*=\s*(?:"[^"]*|'[^']*|[^\s"'=<>`]*)?)?)?\s*/?$"""
+)
 # An unfinished tag is inline HTML, and inline HTML belongs to one paragraph. A
 # block that starts here ends that paragraph, and what was being read as a tag is
 # printed as the text it turned out to be.
@@ -140,11 +149,25 @@ def _folded(text: str, pending: tuple[int, str] | None) -> tuple[int, tuple[int,
     while at < len(text):
         if pending is not None:
             owed, quote = pending
-            end, quote = _tag_end(text, at, quote)
-            if end is None:
-                return depth, (owed, quote)
-            depth += owed
-            at, pending = end, None
+            resume = at
+            if quote:
+                closed = text.find(quote, at)
+                if closed < 0:
+                    return depth, (owed, quote)
+                resume = closed + 1
+            # The line break the tag was carried over is itself the whitespace
+            # that separates what came before from the attribute written here.
+            rest = " " + text[resume:]
+            finished = ATTRS_END.match(rest)
+            if finished:
+                depth += owed
+                at, pending = resume + finished.end() - 1, None
+                continue
+            if ATTRS_PARTIAL.match(rest):
+                return depth, (owed, _tag_end(text, resume)[1])
+            # What it went on to spell is not a tag, so none of it ever was one:
+            # the renderer prints it, and the line is read as the text it is.
+            pending = None
             continue
         start = text.find("<", at)
         if start < 0:
@@ -232,6 +255,7 @@ def _visible_lines(body: str) -> list[str]:
     folded_tag = None
     folded_code = ""
     folded_span = ""
+    folded_inline_comment = False
     list_indent = 0
     blank = True
     paragraph = False
@@ -249,6 +273,7 @@ def _visible_lines(body: str) -> list[str]:
             folded_tag = None
             folded_code = ""
             folded_span = ""
+            folded_inline_comment = False
             list_indent = 0
         if raw_html:
             if (raw_html == "blank" and not line.strip()) or (
@@ -277,11 +302,20 @@ def _visible_lines(body: str) -> list[str]:
                 if not line.strip() or BLOCK_START.match(line):
                     # An inline comment opener with no `-->` is printed once the
                     # paragraph holding it ends, so it hides nothing after that.
-                    folded_tag, comment = None, False
+                    # One that begins its own block is a comment until `-->`,
+                    # blank lines and all, and has to be left alone.
+                    folded_tag = None
+                    comment = comment and not folded_inline_comment
+                    folded_inline_comment = False
                     depth, folded_tag = _folded(_literal(folded_span), folded_tag)
                     collapsed = max(collapsed + depth, 0)
                     folded_code, folded_span = "", ""
+                opened = not comment
                 text, comment, folded_code, deferred = _tag_text(line, comment, folded_code)
+                folded_inline_comment = (
+                    not re.match(r"^ {0,3}<!--", line) if comment and opened
+                    else folded_inline_comment and comment
+                )
                 folded_span = f"{folded_span}\n{deferred}" if folded_code else ""
                 depth, folded_tag = _folded(text, folded_tag)
                 collapsed = max(collapsed + depth, 0)

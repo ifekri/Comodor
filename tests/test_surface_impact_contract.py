@@ -506,6 +506,10 @@ def test_collapsed_container_hides_contract(validator, prefix, suffix):
         "<details>\n\ntext ` </details>\n\n",
         # So does an inline comment opener the end of the paragraph turns to text.
         "<details>\n\ntext <!--\n\n</details>\n\n",
+        # A tag that goes on to spell something that is not a tag never was one.
+        '<details>\n\n<span title="\n" ! </details>\n\n',
+        # One that does finish is a tag, and takes its attribute text with it.
+        '<details>\n\n<span title="\n" id="x"> </details>\n\n',
     ],
 )
 def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
@@ -570,6 +574,13 @@ def test_a_quoted_closing_tag_does_not_reopen_the_document(validator, quoted):
 )
 def test_a_real_closing_tag_ends_the_collapsed_state(validator, body):
     assert validator.validate_body(body + VALID_BODY) == []
+
+
+def test_a_block_comment_inside_a_disclosure_keeps_hiding(validator):
+    """A comment that begins its own block runs to `-->` through blank lines, so
+    the closer and the section inside it are commented out rather than rendered."""
+    contract = VALID_BODY[VALID_BODY.index("## Surface Impact"):]
+    assert validator.validate_body("<details>\n\n<!--\n\n</details>\n" + contract + "\n-->")
 
 
 def test_a_contract_nested_under_an_open_details_stays_hidden(validator):
