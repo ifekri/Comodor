@@ -623,10 +623,12 @@ def test_an_indented_comment_opener_is_code_not_a_block(validator, opener):
         # The block runs on, so a closer on its second line is printed too.
         "    code\n    </details>",
         "    code\n\n    </details>",
-        # Inside a container the block begins after the marker, so indentation
-        # is measured from there.
+        # Inside a container the block begins after the marker, so indentation,
+        # a blank line and a fence are all read from there.
         ">     </details>",
         "-     </details>",
+        "> \n>     </details>",
+        "> ```\n> </details>\n> ```",
     ],
 )
 def test_an_indented_closing_tag_is_code_not_a_closer(validator, code):
@@ -639,6 +641,14 @@ def test_an_indented_closing_tag_is_code_not_a_closer(validator, code):
 def test_a_closing_tag_after_indented_code_still_ends_it(validator, closer):
     assert validator.validate_body(
         "<details>\n\n    code\n\n" + closer + "\n\n" + VALID_BODY) == []
+
+
+@pytest.mark.parametrize("tag", ["script", "style", "textarea", "pre"])
+def test_a_closer_beside_a_stripped_raw_tag_still_ends_the_disclosure(validator, tag):
+    """GitHub escapes these tags rather than passing their bodies through, so a
+    closing tag written between them is a tag and the contract is visible."""
+    raw = f"<{tag}>\n</details>\n</{tag}>"
+    assert validator.validate_body("<details>\n\n" + raw + "\n\n" + VALID_BODY) == []
 
 
 @pytest.mark.parametrize(
