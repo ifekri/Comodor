@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -176,6 +177,14 @@ class Controlled:
                 # than hoping is the whole point: the assertion must not
                 # depend on how quickly this machine starts an interpreter.
                 child.wait()
+            else:
+                # Reaped as soon as it dies. The real `start` is called by a
+                # command that exits, leaving the bot to be reparented; here
+                # the test process stays its parent, and on POSIX an unreaped
+                # child is a zombie that `os.kill(pid, 0)` still answers for —
+                # which would make `stop` wait out `PATIENCE` for a process
+                # that is already gone.
+                threading.Thread(target=child.wait, daemon=True).start()
             return child
 
         # Only for the one call. `state` and `stop` shell out to ask whether a
