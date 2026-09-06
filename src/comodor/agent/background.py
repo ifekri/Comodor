@@ -290,7 +290,10 @@ class BackgroundDelegates:
                 self._settled.notify_all()
 
         if undo is not None:
-            self._flush(*undo)
+            # The rollback matters as much as the record it undoes: refused,
+            # the file keeps a `running` delegate that never existed, and the
+            # next session calls it lost.
+            self._flush_or_catch_up(undo)
         if cancelled:
             # The same terminal event the worker would have sent. `stop()`
             # emitted `stopping` a moment ago, and without this a subscriber
@@ -688,39 +691,54 @@ class BackgroundDelegates:
                 timeout=-1 if timeout is None else max(0.0, timeout)):
             return False    # somebody is writing, and there is no time to wait
         try:
-            if revision <= self._written:
-                return True             # a newer snapshot already landed
-            if revision <= self._attempted:
-                return False            # a newer write was tried, and failed
-            self._attempted = revision
-            try:
-                self.persist_path.parent.mkdir(parents=True, exist_ok=True)
-                self.persist_path.write_text(json.dumps(document, indent=1),
-                                             encoding="utf-8")
-            except OSError:
-                return False
-            self._written = revision
-            return True
+            return self._write(revision, document)
         finally:
             self._write_lock.release()
+
+    def _write(self, revision: int, document: dict[str, Any]) -> bool:
+        """The decision and the write. **The caller holds `_write_lock`.**"""
+        if revision <= self._written:
+            return True                 # a newer snapshot already landed
+        if revision <= self._attempted:
+            return False                # a newer write was tried, and failed
+        self._attempted = revision
+        try:
+            self.persist_path.parent.mkdir(parents=True, exist_ok=True)
+            self.persist_path.write_text(json.dumps(document, indent=1),
+                                         encoding="utf-8")
+        except OSError:
+            return False
+        self._written = revision
+        return True
 
     def _flush_or_catch_up(self, staged: tuple[int, dict[str, Any]]) -> None:
         """Write a staged snapshot, or the state as it stands if that is stale.
 
         A snapshot refused because a newer write failed leaves the disk behind
         with nobody coming back for it — and the caller was relying on its own
-        record being there. Staging again is the honest repair: it is current,
-        and it carries a number nothing has attempted.
+        record being there. Staging again is the honest repair: it is current.
 
-        Once. If the filesystem is not answering, `wait()` tries again on the
-        way out and the file is left a revision behind, which is where an
-        unresponsive disk was always going to leave it.
+        Numbered and written **without letting go of `_write_lock`**, which is
+        what makes this terminate. Trying again and hoping would not: the
+        second number can be overtaken exactly as the first was, and "twice"
+        is as arbitrary an answer as "once". `_attempted` only moves under
+        this lock, so a number taken while holding it cannot already be behind
+        one. What remains is a filesystem that will not answer, and no number
+        of attempts helps with that — `wait()` tries once more on the way out
+        and the file is left a revision behind, which is where an unresponsive
+        disk was always going to leave it.
         """
         if self._flush(*staged):
             return
-        with self._lock:
-            fresh = self._stage()
-        self._flush(*fresh)
+        if self.persist_path is None:
+            return
+        self._write_lock.acquire()
+        try:
+            with self._lock:
+                fresh = self._stage()
+            self._write(*fresh)
+        finally:
+            self._write_lock.release()
 
     def _snapshot(self) -> dict[str, Any]:
         """The document to persist. The caller holds `_lock`.

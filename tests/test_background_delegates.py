@@ -1029,7 +1029,8 @@ def test_the_lifecycle_lock_is_never_held_across_a_write():
         for child in ast.iter_child_nodes(node):
             if (isinstance(child, ast.Call)
                     and isinstance(child.func, ast.Attribute)
-                    and child.func.attr == "_flush"
+                    and child.func.attr in {"_flush", "_flush_or_catch_up",
+                                            "_write"}
                     and under_lock):
                 held.append(child.lineno)
             walk(child, under_lock
@@ -1941,3 +1942,126 @@ def test_a_launch_whose_snapshot_is_refused_is_still_recorded(config, bus,
     release.set()
     manager.stop_all()
     manager.wait(timeout=30.0)
+
+
+def test_the_catch_up_cannot_itself_be_overtaken(config, bus, tmp_path):
+    """Trying again and hoping is not a fix.
+
+    The repair stages a fresh number, and a number can be overtaken exactly as
+    the first one was -- so a catch-up that lets go in between is a race with
+    fewer rounds, not one fewer. It holds the write lock across numbering and
+    writing, and the proof is that a competitor trying to slip in during the
+    repair cannot.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    with manager._lock:
+        manager._runs["a"] = DelegateRun(id="a", brief="one")
+        stale = manager._stage()
+
+    with manager._lock:
+        manager._runs["a"].state = "done"
+        newer = manager._stage()
+
+    def refusing(*arguments, **keywords):
+        raise OSError("the disk said no")
+
+    kept, Path.write_text = Path.write_text, refusing
+    try:
+        manager._flush(*newer)               # fails, and takes the number
+    finally:
+        Path.write_text = kept
+
+    # A competitor that attempts a newer write, and fails, the moment the
+    # repair lets go of the write lock. Written as the mark a failed write
+    # leaves rather than as another patched `write_text`, because patching
+    # that from a second thread would break the repair's own write and prove
+    # the wrong thing.
+    stage = manager._stage
+    competitor_done = threading.Event()
+
+    def competing():
+        with manager._write_lock:
+            manager._attempted = manager._revision + 1
+        competitor_done.set()
+
+    other = threading.Thread(target=competing, daemon=True)
+    slipped = threading.Event()
+
+    def racing():
+        numbered = stage()
+        if not slipped.is_set():
+            slipped.set()
+            other.start()
+            # The bound is the escape hatch: the competitor cannot get in
+            # while the repair holds the write lock, and two seconds is not a
+            # race for a thread that is free to run.
+            competitor_done.wait(2.0)
+        return numbered
+
+    manager._stage = racing
+    manager._flush_or_catch_up(stale)
+    manager._stage = stage
+    other.join(30.0)
+    assert not other.is_alive()
+
+    assert persist.exists(), "the repair never landed"
+    assert states(persist)["a"] == "done"
+
+
+def test_a_rollback_refused_as_stale_is_still_written(config, bus, tmp_path):
+    """A launch that could not start must not stay on the disk.
+
+    The rollback matters as much as the record it undoes: refused, the file
+    keeps a `running` delegate that never existed, and the next session calls
+    it lost -- for work nobody ever did.
+
+    The newer failed write is placed between the rollback being staged and
+    being written, which is the only order that makes it stale.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    write = manager._flush
+    calls = []
+
+    def racing(revision, document, timeout=None):
+        calls.append(revision)
+        if len(calls) == 2:                  # the rollback, on its way out
+            with manager._lock:
+                newer = manager._stage()
+
+            def refusing(*arguments, **keywords):
+                raise OSError("the disk said no")
+
+            kept, Path.write_text = Path.write_text, refusing
+            try:
+                write(*newer)                # fails, and takes the number
+            finally:
+                Path.write_text = kept
+        return write(revision, document, timeout)
+
+    class Refused:
+        """A thread the runtime will not start."""
+
+        def start(self):
+            raise RuntimeError("no threads today")
+
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            return None
+
+    manager._flush = racing
+    kept_thread, threading.Thread = threading.Thread, lambda *a, **k: Refused()
+    try:
+        ok, _, why = manager.start("a launch the runtime refuses")
+    finally:
+        threading.Thread = kept_thread
+        manager._flush = write
+
+    assert not ok and "could not be started" in why
+    assert states(persist) == {}, (
+        f"a delegate that never ran was left on the disk: {states(persist)}")
