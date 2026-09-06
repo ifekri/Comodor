@@ -169,12 +169,18 @@ def _folded(text: str, pending: tuple[int, str] | None) -> tuple[int, tuple[int,
     return depth, pending
 
 
-def _tag_text(line: str, comment: bool) -> tuple[str, bool]:
-    """The part of a line a tag could be written in, and the comment state after it.
+TAG_TOKEN = re.compile(
+    r"\\[\\`<]|(?<!`)(?P<span>`+)(?!`).*?(?<!`)(?P=span)(?!`)|(?<!`)(?P<open>`+)(?!`)|<!--"
+)
+
+
+def _tag_text(line: str, comment: bool, code: str = "") -> tuple[str, bool, str]:
+    """The part of a line a tag could be written in, and the state after it.
 
     Comment bodies are dropped and inline code is blanked, because a closing tag
     quoted as code or commented out is text GFM renders rather than the tag it
-    names — and counting it would end a container the document leaves open.
+    names — and counting it would end a container the document leaves open. A
+    code span runs to its matching delimiter, which may be on a later line.
     """
     text = ""
     while line:
@@ -182,13 +188,22 @@ def _tag_text(line: str, comment: bool) -> tuple[str, bool]:
             _, delimiter, line = line.partition("-->")
             comment = not delimiter
             continue
-        token = re.search(r"\\[\\`<]|(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)|<!--", line)
+        if code:
+            closer = re.search(f"(?<!`){code}(?!`)", line)
+            if closer is None:
+                return text, comment, code
+            line = line[closer.end() :]
+            code = ""
+            continue
+        token = TAG_TOKEN.search(line)
         if token is None:
-            return text + line, comment
+            return text + line, comment, code
         text += line[: token.start()]
+        if token["open"]:
+            return text, comment, token["open"]
         comment = token[0] == "<!--"
         line = line[token.end() :]
-    return text, comment
+    return text, comment, code
 
 
 def _visible_lines(body: str) -> list[str]:
@@ -199,6 +214,7 @@ def _visible_lines(body: str) -> list[str]:
     collapsed = 0
     folded_fence = ""
     folded_tag = None
+    folded_code = ""
     list_indent = 0
     blank = True
     paragraph = False
@@ -214,6 +230,7 @@ def _visible_lines(body: str) -> list[str]:
             collapsed = 0
             folded_fence = ""
             folded_tag = None
+            folded_code = ""
             list_indent = 0
         if raw_html:
             if (raw_html == "blank" and not line.strip()) or (
@@ -241,7 +258,8 @@ def _visible_lines(body: str) -> list[str]:
             else:
                 if not line.strip() or BLOCK_START.match(line):
                     folded_tag = None
-                text, comment = _tag_text(line, comment)
+                    folded_code = ""
+                text, comment, folded_code = _tag_text(line, comment, folded_code)
                 depth, folded_tag = _folded(text, folded_tag)
                 collapsed = max(collapsed + depth, 0)
                 folded_fence = folded_fence if collapsed else ""
@@ -275,6 +293,7 @@ def _visible_lines(body: str) -> list[str]:
                 blank = True
                 paragraph = False
                 folded_tag = None
+                folded_code = ""
                 continue
             if line.startswith("    "):
                 lines.append("")
@@ -346,7 +365,9 @@ def _visible_lines(body: str) -> list[str]:
         # own, and folds everything after it just the same.
         if BLOCK_START.match(line):
             folded_tag = None
-        depth, folded_tag = _folded(_tag_text(visible, False)[0], folded_tag)
+            folded_code = ""
+        bare, _, folded_code = _tag_text(visible, False, folded_code)
+        depth, folded_tag = _folded(bare, folded_tag)
         collapsed = max(collapsed + depth, 0)
     return lines
 

@@ -493,6 +493,8 @@ def test_collapsed_container_hides_contract(validator, prefix, suffix):
         "Documented the `<details>` wrapper in the template.\n\n",
         # An escaped angle bracket is printed rather than opening anything.
         "text \\<details>\n\n",
+        # The opener is inside a code span that closes on the next line.
+        "text `\ncontinued <details>`\n\n",
     ],
 )
 def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
@@ -521,6 +523,8 @@ def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
         '<span title="\nx> </details>">',
         # Split across lines, a closer is printed rather than acted on.
         "text </details\n> more",
+        # One code span, opened on one line and closed on the next.
+        "text `\ncontinued </details>`",
     ],
 )
 def test_a_quoted_closing_tag_does_not_reopen_the_document(validator, quoted):
