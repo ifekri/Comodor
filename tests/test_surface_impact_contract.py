@@ -605,10 +605,21 @@ def test_replayed_text_keeps_what_it_hides(validator, hidden):
     assert validator.validate_body("<details>\n\n" + hidden + "\n\n" + VALID_BODY)
 
 
-def test_an_indented_comment_opener_is_code_not_a_block(validator):
+@pytest.mark.parametrize(
+    "opener", ["    <!--", "-      <!--"]
+)
+def test_an_indented_comment_opener_is_code_not_a_block(validator, opener):
     """Four spaces make an indented code block, where the opener is printed, so
-    the closing tag after it still ends the disclosure."""
-    assert validator.validate_body("<details>\n\n    <!--\n\n</details>\n\n" + VALID_BODY) == []
+    the closing tag after it still ends the disclosure. A list marker may pad its
+    content by four, and past that the content is code again."""
+    assert validator.validate_body(
+        "<details>\n\n" + opener + "\n\n</details>\n-->\n\n" + VALID_BODY) == []
+
+
+def test_an_indented_closing_tag_is_code_not_a_closer(validator):
+    """Indented four spaces it is printed, so it ends nothing and what follows
+    is still folded away."""
+    assert validator.validate_body("<details>\n\n    </details>\n\n" + VALID_BODY)
 
 
 def test_a_contract_nested_under_an_open_details_stays_hidden(validator):
