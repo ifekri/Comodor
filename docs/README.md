@@ -51,6 +51,8 @@ ends with the agent doing something useful.
 | [Safety and permissions](safety.md) | What it can do, what it asks, what it never does |
 | [Cost](cost.md) | Caching, budgets, and paying less for the same work |
 | [Configuration](configuration.md) | Every setting, where files live, what wins |
+| [Architecture](architecture.md) | Shared ownership, dependency direction, and product surfaces |
+| [Surface parity contract](surface-parity.md) | Required PR impact assessment and verification evidence |
 
 ### When something is wrong
 
