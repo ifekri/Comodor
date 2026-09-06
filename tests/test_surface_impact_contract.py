@@ -491,6 +491,8 @@ def test_closed_or_quoted_details_keeps_visible_contract(validator, example):
         "<!--\n</details>\n-->",
         "```\n</details>\n```",
         "~~~\n</details>\n~~~",
+        '<span title="</details>">',
+        "<span title='</details>'></span>",
     ],
 )
 def test_a_quoted_closing_tag_does_not_reopen_the_document(validator, quoted):
@@ -505,6 +507,9 @@ def test_a_quoted_closing_tag_does_not_reopen_the_document(validator, quoted):
         "<details>\n</details>\n\n",
         "<details>\n\nnote\n</details>\n\n",
         "<details>\n\n```\nx\n```\n</details>\n\n",
+        # Quotes around it are prose, not an attribute: the renderer passes the
+        # tag through and the widget ends there.
+        '<details>\n\nHe wrote "</details>" here.\n\n',
     ],
 )
 def test_a_real_closing_tag_ends_the_collapsed_state(validator, body):

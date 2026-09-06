@@ -86,8 +86,19 @@ DELIMITED_HTML_START = re.compile(r"^ {0,3}(<!--|<\?|<![A-Z]|<!\[(?i:CDATA)\[)")
 # disclosure widget. What the contract asks for is a section at the top level, so
 # the state has to survive to the closing tag rather than to the first blank line.
 COLLAPSED_START = re.compile(r"^ {0,3}<details(?=\s|/?>|$)", re.IGNORECASE)
-COLLAPSED_OPEN = re.compile(r"<details(?=\s|/?>|$)", re.IGNORECASE)
-COLLAPSED_END = re.compile(r"</details\s*>", re.IGNORECASE)
+# Whole tags, so a closer written inside an attribute value is part of the tag that
+# quotes it rather than a tag of its own — the renderer escapes it and the element
+# stays open. A closer in ordinary text is not quoted and still counts.
+HTML_TAG = re.compile(
+    r"<(?P<close>/?)(?P<name>[A-Za-z][A-Za-z0-9-]*)"
+    r"""(?:\s+[^\s"'=<>`/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*/?>"""
+)
+
+
+def _folded(text: str) -> int:
+    """How far a line of tags opens or closes a disclosure widget."""
+    return sum(-1 if tag["close"] else 1
+               for tag in HTML_TAG.finditer(text) if tag["name"].lower() == "details")
 
 
 def _tag_text(line: str, comment: bool) -> tuple[str, bool]:
@@ -159,8 +170,7 @@ def _visible_lines(body: str) -> list[str]:
                 folded_fence = inner[1]
             else:
                 text, comment = _tag_text(line, comment)
-                collapsed = max(collapsed + len(COLLAPSED_OPEN.findall(text))
-                                - len(COLLAPSED_END.findall(text)), 0)
+                collapsed = max(collapsed + _folded(text), 0)
                 folded_fence = folded_fence if collapsed else ""
             lines.append("")
             blank = not line.strip()
@@ -198,8 +208,7 @@ def _visible_lines(body: str) -> list[str]:
             if COLLAPSED_START.match(line):
                 if line.index("<") < list_indent:
                     list_indent = 0
-                collapsed = max(len(COLLAPSED_OPEN.findall(line))
-                                - len(COLLAPSED_END.findall(line)), 0)
+                collapsed = max(_folded(line), 0)
                 lines.append("")
                 blank = False
                 paragraph = False
