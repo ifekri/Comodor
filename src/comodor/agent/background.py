@@ -140,6 +140,11 @@ class BackgroundDelegates:
         #: the one thing here that can block for an unbounded time.
         self._write_lock = threading.Lock()
         self._written = 0
+        #: The highest revision a write has been attempted for. A write that
+        #: fails leaves `_written` behind but must still close the door on
+        #: everything older, or a snapshot that was already out of date gets
+        #: to become the record.
+        self._attempted = 0
         self._counter = itertools.count(1)
         self._threads: list[threading.Thread] = []
         self._cancelled: set[str] = set()
@@ -654,9 +659,17 @@ class BackgroundDelegates:
         """Write one staged snapshot. **The caller must NOT hold `_lock`.**
 
         The check and the write happen under `_write_lock` together, so two
-        writers cannot interleave: if a higher revision has already landed,
-        this one is dropped rather than written on top of it. That is what
-        makes it safe to do the writing outside the lock that ordered it.
+        writers cannot interleave: if a higher revision has already been
+        attempted, this one is dropped rather than written after it. That is
+        what makes it safe to do the writing outside the lock that ordered it.
+
+        Attempted, not landed. A newer write that fails leaves the file where
+        it was, and letting an older snapshot in behind it would put a state
+        the manager already knows is out of date on the disk — a delegate that
+        has finished, recorded as running, which is the lie this whole file
+        exists to stop. Nothing is lost by refusing: the record is staged again
+        by the next change and by `wait()`, both of which carry a newer
+        number.
 
         `timeout` bounds the wait for that lock, and only `wait()` passes one.
         A write already in progress on an unresponsive filesystem holds
@@ -670,14 +683,15 @@ class BackgroundDelegates:
                 timeout=-1 if timeout is None else max(0.0, timeout)):
             return          # somebody is writing, and there is no time to wait
         try:
-            if revision <= self._written:
+            if revision <= self._attempted:
                 return                  # a newer snapshot got here first
+            self._attempted = revision
             try:
                 self.persist_path.parent.mkdir(parents=True, exist_ok=True)
                 self.persist_path.write_text(json.dumps(document, indent=1),
                                              encoding="utf-8")
             except OSError:
-                return
+                return          # `_written` stays behind, so this is restaged
             self._written = revision
         finally:
             self._write_lock.release()

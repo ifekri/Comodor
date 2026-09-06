@@ -1838,3 +1838,46 @@ def test_a_subscriber_emitting_cannot_jump_the_queue_it_is_in(config, bus,
     manager._emit("d1", "started")
 
     assert behind == ["started", "stopping"], behind
+
+
+def test_a_failed_write_does_not_let_an_older_snapshot_in(config, bus,
+                                                          tmp_path,
+                                                          monkeypatch):
+    """A newer write that fails must still close the door on older ones.
+
+    Two delegates finish together, so an older staged snapshot can still be
+    in flight when a newer one reaches the disk. If the newer write fails and
+    the older one is then admitted, the file ends up saying a delegate that
+    has finished is running -- and a reload calls it lost. Dropping it says
+    nothing at all, which is true.
+    """
+    persist = tmp_path / "delegates.json"
+    manager = make_manager(config, bus, persist=persist)
+
+    with manager._lock:
+        manager._runs["a"] = DelegateRun(id="a", brief="one")
+        manager._runs["b"] = DelegateRun(id="b", brief="two")
+        older = manager._stage()                 # both running
+
+    with manager._lock:
+        manager._runs["a"].state = "done"
+        manager._runs["a"].answer = "finished"
+        newer = manager._stage()                 # `a` has finished
+
+    def refusing(self, *arguments, **keywords):
+        raise OSError("the disk said no")
+
+    monkeypatch.setattr(Path, "write_text", refusing)
+    manager._flush(*newer)
+    monkeypatch.undo()
+
+    manager._flush(*older)                       # the delayed older write
+
+    assert not persist.exists(), (
+        f"a snapshot the manager knew was stale became the record: "
+        f"{states(persist)}")
+
+    # And the state is not lost: the next write carries a newer number.
+    manager.wait(timeout=30.0)
+    flushed(manager)
+    assert states(persist)["a"] == "done"
