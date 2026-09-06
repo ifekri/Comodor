@@ -148,10 +148,15 @@ class BackgroundDelegates:
         #: overtaken cannot walk one backwards.
         self._announced: dict[str, str] = {}
         #: Held across deciding an event and sending it, so subscribers read
-        #: them in the order they were decided. Reentrant only so that a
-        #: subscriber emitting from inside `bus.emit` cannot deadlock the
-        #: manager; nothing here relies on taking it twice.
+        #: them in the order they were decided.
         self._telling = threading.RLock()
+        #: Set while an event is being delivered. A subscriber that emits from
+        #: inside `bus.emit` is on this same thread and would walk straight
+        #: through a reentrant lock, delivering its event to everybody before
+        #: the one they are still being told about.
+        self._delivering = False
+        #: What such a subscriber asked for, sent once the current one is out.
+        self._queued: list[tuple[str, str]] = []
         self._load()
 
     # -- launching --------------------------------------------------------- #
@@ -578,21 +583,37 @@ class BackgroundDelegates:
         arbitrary code — so this is its own lock, taken before `_lock` and
         never the other way round.
         """
+        with self._telling:
+            if self._delivering:
+                # Asked for by a subscriber, from inside the delivery of
+                # another event. Sending it now would put it in front of the
+                # one everybody is still hearing.
+                self._queued.append((identifier, state))
+                return
+            self._delivering = True
+            try:
+                self._tell(identifier, state)
+                while self._queued:
+                    self._tell(*self._queued.pop(0))
+            finally:
+                self._delivering = False
+                self._queued.clear()
+
+    def _tell(self, identifier: str, state: str) -> None:
+        """Decide one event and send it. Called only from `_emit`."""
         try:
-            with self._telling:
-                with self._lock:
-                    run = self._runs.get(identifier)
-                    payload = run.as_dict() if run else {"id": identifier}
-                    if run is not None and run.state in self.TERMINAL:
-                        state = run.state
-                    told = self._announced.get(identifier, "")
-                    if self.PROGRESS.get(state, 0) < self.PROGRESS.get(told,
-                                                                       -1):
-                        state = told
-                    else:
-                        self._announced[identifier] = state
-                payload["state"] = state
-                self.bus.emit(Kind.DELEGATE, **payload)
+            with self._lock:
+                run = self._runs.get(identifier)
+                payload = run.as_dict() if run else {"id": identifier}
+                if run is not None and run.state in self.TERMINAL:
+                    state = run.state
+                told = self._announced.get(identifier, "")
+                if self.PROGRESS.get(state, 0) < self.PROGRESS.get(told, -1):
+                    state = told
+                else:
+                    self._announced[identifier] = state
+            payload["state"] = state
+            self.bus.emit(Kind.DELEGATE, **payload)
         except Exception:
             pass
 

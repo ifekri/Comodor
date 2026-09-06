@@ -1710,7 +1710,12 @@ def test_a_stop_landing_mid_launch_is_not_undone_by_started(config, bus,
     states_seen = [event.payload.get("state") for event in seen
                    if event.kind is Kind.DELEGATE]
     assert "started" not in states_seen, states_seen
-    assert states_seen[0] == "stopping", states_seen
+    # Which state comes first is the run's business, not this test's: if it
+    # had already settled by then, `stopped` is the honest answer and
+    # `stopping` would be the lie. What must hold either way is that nothing
+    # goes backwards.
+    steps = [BackgroundDelegates.PROGRESS[state] for state in states_seen]
+    assert steps == sorted(steps), states_seen
 
     release.set()
     manager.stop_all()
@@ -1799,3 +1804,37 @@ def test_the_bus_is_never_told_anything_under_the_lifecycle_lock():
 
     assert not offenders, (
         f"the bus is told something under the lifecycle lock at {offenders}")
+
+
+def test_a_subscriber_emitting_cannot_jump_the_queue_it_is_in(config, bus,
+                                                              tmp_path):
+    """A subscriber that stops a delegate on hearing it started.
+
+    That call re-enters the manager on the same thread, so a reentrant lock
+    lets it straight through. The subscriber that made the call has already
+    heard `started`; every subscriber behind it in the delivery hears
+    `stopping` first and `started` afterwards -- told the run came back.
+    """
+    manager = make_manager(config, bus, persist=tmp_path / "delegates.json")
+
+    with manager._lock:
+        manager._runs["d1"] = DelegateRun(id="d1", brief="one")
+        manager._cancels["d1"] = DelegateCancellation()
+
+    def stopper(event):
+        if (event.kind is Kind.DELEGATE
+                and event.payload.get("state") == "started"):
+            manager.stop("d1")               # straight back in, same thread
+
+    behind: list = []
+
+    def listener(event):
+        if event.kind is Kind.DELEGATE:
+            behind.append(event.payload.get("state"))
+
+    bus.subscribe(stopper)
+    bus.subscribe(listener)                  # behind it in the delivery
+
+    manager._emit("d1", "started")
+
+    assert behind == ["started", "stopping"], behind
