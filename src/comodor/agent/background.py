@@ -61,6 +61,46 @@ class DelegateRun:
         }
 
 
+#: How long a shutdown waits for background delegates to settle. Long enough
+#: for a worker asked to stop to record where it got to, short enough that a
+#: user quitting does not feel held. Shared, so no surface quietly picks its
+#: own.
+SHUTDOWN_SECONDS = 2.0
+
+
+class DelegateCancellation(Cancellation):
+    """A stop a delegate cannot start its way out of.
+
+    `AgentLoop.run()` opens with `cancel.reset()`. For the interactive loop
+    that is right: a cancelled turn ends, and the next one begins clean. A
+    delegate has one turn and does not come back from being stopped, so the
+    same line erases any stop that arrives before the child's first step --
+    including the one `_shutdown()` just issued.
+
+    Checking for the flag instead only moves the window, because there is
+    always a line after the check: before the thread exists, before the loop is
+    constructed, during construction. This is the same question asked once,
+    where the answer cannot go stale.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Read-and-clear is two operations, and a stop landing between them
+        # would be cleared by the second -- the very race this class exists to
+        # remove, reintroduced one level down. They happen together or not at
+        # all.
+        self._settling = threading.Lock()
+
+    def cancel(self) -> None:
+        with self._settling:
+            super().cancel()
+
+    def reset(self) -> None:
+        with self._settling:
+            if not self.cancelled:
+                super().reset()
+
+
 class BackgroundDelegates:
     """The slots, the threads, and the finished answers waiting to be read.
 
@@ -75,11 +115,53 @@ class BackgroundDelegates:
         self.spawner = spawner
         self.persist_path = persist_path
         self._runs: dict[str, DelegateRun] = {}
+        #: Guards the lifecycle state below, and nothing else. It is never
+        #: held across a filesystem write: `stop_all()` and `wait()` take it
+        #: during shutdown, and a user directory on a network mount would
+        #: otherwise be able to hold either of them for as long as it liked.
         self._lock = threading.Lock()
+        #: Raised when a launch finishes, so `wait()` can let one drain instead
+        #: of polling for it.
+        self._settled = threading.Condition(self._lock)
+        #: Launches between "the run is visible" and "its thread is
+        #: registered". The record is written to disk in that gap, so it is a
+        #: gap that can last as long as the disk does — and shutdown must not
+        #: mistake it for nothing happening.
+        self._launching = 0
+        #: Set once, when the process is on its way out. Distinct from
+        #: `stop_all()`, which is also what `/stop` calls: stopping everything
+        #: is something a session recovers from, and closing is not.
+        self._closing = False
+        #: Which snapshot is which. Assigned under `_lock`, so the numbers run
+        #: in the order the state actually changed.
+        self._revision = 0
+        #: Serialises the writes themselves, and holds the highest revision
+        #: that has reached the disk. Separate from `_lock` because a write is
+        #: the one thing here that can block for an unbounded time.
+        self._write_lock = threading.Lock()
+        self._written = 0
+        #: The highest revision a write has been attempted for. A write that
+        #: fails leaves `_written` behind but must still close the door on
+        #: everything older, or a snapshot that was already out of date gets
+        #: to become the record.
+        self._attempted = 0
         self._counter = itertools.count(1)
         self._threads: list[threading.Thread] = []
         self._cancelled: set[str] = set()
         self._cancels: dict[str, Cancellation] = {}
+        #: The last state announced for each run, so an event that was
+        #: overtaken cannot walk one backwards.
+        self._announced: dict[str, str] = {}
+        #: Held across deciding an event and sending it, so subscribers read
+        #: them in the order they were decided.
+        self._telling = threading.RLock()
+        #: Set while an event is being delivered. A subscriber that emits from
+        #: inside `bus.emit` is on this same thread and would walk straight
+        #: through a reentrant lock, delivering its event to everybody before
+        #: the one they are still being told about.
+        self._delivering = False
+        #: What such a subscriber asked for, sent once the current one is out.
+        self._queued: list[tuple[str, str]] = []
         self._load()
 
     # -- launching --------------------------------------------------------- #
@@ -108,8 +190,12 @@ class BackgroundDelegates:
         one instead of a repeat.
         """
         limit = self.config.delegation.max_background
-        cancel = Cancellation()
+        cancel = DelegateCancellation()
         with self._lock:
+            if self._closing:
+                return False, "", (
+                    "Comodor is shutting down, so a background delegate would "
+                    "outlive the tools it needs. Nothing was started.")
             running = sum(1 for run in self._runs.values()
                           if run.state == "running")
             if running >= limit:
@@ -122,23 +208,129 @@ class BackgroundDelegates:
             identifier = f"d{next(self._counter)}"
             run = DelegateRun(id=identifier, brief=brief, label=label)
             self._runs[identifier] = run
+            # The handle goes in with the run it belongs to. Set outside the
+            # lock, there was a moment where `stop_all()` could see a delegate
+            # as running and find nothing to cancel it with.
+            self._cancels[identifier] = cancel
+            # A launch is now in flight. The record is written to disk before
+            # the thread starts, and that write is deliberately not under this
+            # lock — so this counter is what tells `wait()` that something is
+            # happening in a gap where there is no thread to see yet.
+            self._launching += 1
+            staged = self._stage()
 
-        self._cancels[identifier] = cancel
         thread = threading.Thread(
             target=self._work,
             args=(identifier, brief, write, cwd, cancel),
             daemon=True, name=f"comodor-delegate-{identifier}",
         )
-        with self._lock:
-            self._threads.append(thread)
-        thread.start()
-        self._persist()
+
+        started = False
+        cancelled = False
+        undo: tuple[int, dict[str, Any]] | None = None
+        refusal = ""
+        try:
+            # Durable before the worker exists, and written with the lock
+            # released. A crash in the gap between starting a worker and
+            # recording it left no evidence of the delegate at all, which is
+            # the one thing this file is for — and a worker that finished
+            # inside that gap wrote `done`, which the write here then
+            # overwrote with the `running` it had read a moment earlier.
+            self._flush_or_catch_up(staged)
+
+            with self._settled:
+                if identifier in self._cancelled:
+                    # `stop_all()` reached this run while its record was being
+                    # written. Starting the worker anyway would be worse than
+                    # doing nothing: `AgentLoop.run()` opens with
+                    # `cancel.reset()`, so the cancellation set a moment ago is
+                    # erased and the delegate runs on — after `_shutdown()` has
+                    # begun closing the tools and the history it would use.
+                    cancelled = True
+                else:
+                    try:
+                        # Started and registered without letting go of the
+                        # lock, so there is no instant where a thread is
+                        # running and unlisted. Appending first would be worse
+                        # still: joining a thread that has not started raises,
+                        # and that would abort the rest of shutdown.
+                        thread.start()
+                    except RuntimeError as problem:
+                        refusal = (
+                            f"the delegate could not be started: {problem}")
+                    else:
+                        self._threads.append(thread)
+                        started = True
+        finally:
+            # The counter comes down whatever happened, including an exception
+            # nobody expected. Leaking it would leave `wait()` believing a
+            # launch is still in flight, and shutdown would block until its
+            # timeout on every exit for the rest of the session.
+            with self._settled:
+                if cancelled:
+                    # It existed and was stopped, which is a different thing
+                    # from never having been accepted — so it keeps its record
+                    # and settles terminally rather than vanishing.
+                    run = self._runs.get(identifier)
+                    if run is not None:
+                        run.state = "stopped"
+                        run.ended_at = time.time()
+                    self._cancels.pop(identifier, None)
+                    undo = self._stage()
+                elif not started:
+                    # Nothing is going to move this run out of `running`, so it
+                    # must not be left there: the slot would be occupied for
+                    # the rest of the session, and the next one would read the
+                    # record and report a task that never ran as lost.
+                    self._runs.pop(identifier, None)
+                    self._cancels.pop(identifier, None)
+                    self._announced.pop(identifier, None)
+                    undo = self._stage()
+                self._launching -= 1
+                self._settled.notify_all()
+
+        if undo is not None:
+            # The rollback matters as much as the record it undoes: refused,
+            # the file keeps a `running` delegate that never existed, and the
+            # next session calls it lost.
+            self._flush_or_catch_up(undo)
+        if cancelled:
+            # The same terminal event the worker would have sent. `stop()`
+            # emitted `stopping` a moment ago, and without this a subscriber
+            # watches a delegate enter that state and never learns it settled
+            # -- while the listing and the file both say it did.
+            self._emit(identifier, "stopped")
+            return False, "", "the delegate was stopped before it started"
+        if refusal:
+            return False, "", refusal
+
         self._emit(identifier, "started")
         return True, identifier, ""
 
     def _work(self, identifier: str, brief: str, write: bool, cwd: Any,
               cancel: Cancellation) -> None:
         run: DelegateRun | None = None
+        staged: tuple[int, dict[str, Any]] | None = None
+
+        # Cancelled between the thread starting and this line: settle without
+        # building a loop and a toolset for a turn nobody is waiting for. The
+        # guarantee is `DelegateCancellation`, not this -- a check has a window
+        # after it, and a stop landing inside `self.spawner(...)` below would
+        # walk straight through one placed here.
+        with self._lock:
+            if identifier in self._cancelled:
+                run = self._runs.get(identifier)
+                if run is not None:
+                    run.state = "stopped"
+                    run.ended_at = time.time()
+                staged = self._stage()
+        if staged is not None:
+            # Terminal, so it has to reach the disk: refused, the file keeps
+            # this delegate `running` and the next session calls it lost.
+            self._flush_or_catch_up(staged)
+            self._emit(identifier, "stopped")
+            return
+
         try:
             loop = self.spawner(cwd=cwd, mode="act" if write else "plan",
                                 max_steps=12, max_seconds=600.0, cancel=cancel)
@@ -164,19 +356,31 @@ class BackgroundDelegates:
                 else:
                     run.state = "done"
                     run.answer = (result.text or "").strip()
-                # Persisted before releasing the lock: the moment `slots_busy`
-                # says this run is finished, the file must agree. Persisting
-                # outside it once let a reload read "running" for work that
-                # had visibly ended — exactly the lie `lost` must never tell.
-                self._persist()
+                # Staged before releasing the lock: the moment `slots_busy`
+                # says this run is finished, the snapshot that says so has its
+                # number. Numbering it afterwards once let a reload read
+                # "running" for work that had visibly ended — exactly the lie
+                # `lost` must never tell.
+                staged = self._stage()
         except Exception as error:               # the thread must never leak
             with self._lock:
                 run = self._runs.get(identifier)
                 if run is not None:
-                    run.state = "failed"
-                    run.error = f"{type(error).__name__}: {error}"
+                    # A run the user stopped reports as stopped even when the
+                    # child threw on its way out. `failed` would blame the
+                    # delegate for doing what it was told.
+                    stopped = identifier in self._cancelled
+                    run.state = "stopped" if stopped else "failed"
+                    run.error = ("" if stopped
+                                 else f"{type(error).__name__}: {error}")
                     run.ended_at = time.time()
-                    self._persist()
+                    staged = self._stage()
+
+        # Written with the lock released, so a slow disk delays this delegate's
+        # record and holds up nobody else. The revision decides which snapshot
+        # wins, not which write happens to finish first.
+        if staged is not None:
+            self._flush_or_catch_up(staged)
         if run is not None:
             self._emit(identifier, run.state)
 
@@ -225,6 +429,22 @@ class BackgroundDelegates:
         self._emit(identifier, "stopping")
         return True
 
+    def closing(self) -> None:
+        """No more delegates. Called once, when the process is shutting down.
+
+        Without it there is a launch nobody accounts for: a turn reaching a
+        delegate tool call *after* `stop_all()` has run is not in `_cancelled`,
+        so it is admitted, and if its record write outlasts `wait()` the worker
+        starts once the disk answers — against tools and a history that
+        `_shutdown()` has already closed.
+
+        Separate from `stop_all()` deliberately. That is also the `/stop`
+        command, and a session that stops its delegates must still be able to
+        start another one.
+        """
+        with self._settled:
+            self._closing = True
+
     def stop_all(self) -> int:
         with self._lock:
             running = [run.id for run in self._runs.values()
@@ -249,22 +469,159 @@ class BackgroundDelegates:
                     if run.state == "running"]
 
     def wait(self, timeout: float = 30.0) -> None:
-        """Block until everything running settles — used at shutdown."""
+        """Block until everything running settles — used at shutdown.
+
+        A launch in flight is waited for before the list is read. Between
+        recording a delegate and registering its thread there is a gap — the
+        record is written to disk in it — and a `wait()` landing there would
+        otherwise snapshot an empty list, return having joined nothing, and let
+        shutdown close the tools underneath a worker about to start.
+
+        `_launching` is what makes that gap visible; the condition is what
+        makes waiting for it cheap. Neither costs anything when no launch is
+        happening, which is almost always.
+
+        `timeout` bounds the whole call. Nothing here can block on the disk
+        any more — the writes happen outside `_lock` — so the bound is about
+        delegates that will not stop, which is what it was always for.
+        """
         deadline = time.monotonic() + timeout
-        for thread in list(self._threads):
+
+        with self._settled:
+            self._settled.wait_for(
+                lambda: self._launching == 0,
+                timeout=max(0.0, deadline - time.monotonic()))
+            threads = list(self._threads)
+
+        for thread in threads:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
+            # `join()` on a thread that has not started raises, and that would
+            # take the rest of shutdown with it. `start()` keeps unstarted
+            # threads out of the list; this is the cheap second guard.
+            if not thread.is_alive():
+                continue
             thread.join(timeout=remaining)
-        self._threads = [thread for thread in self._threads if thread.is_alive()]
+
+        with self._lock:
+            self._threads = [thread for thread in self._threads
+                             if thread.is_alive()]
+            # Only when something staged has not reached the disk. A session
+            # that never started a delegate has nothing to write, and making
+            # every shutdown pay for a file it does not need would be a cost
+            # on the common path for the sake of the rare one.
+            staged = (self._stage()
+                      if self._revision > self._written else None)
+
+        # The last word, written on the way out. Moving the write off the lock
+        # made "finished" and "written" two moments, so a graceful exit could
+        # in principle leave the newest state a few microseconds behind. This
+        # is the one place that matters -- shutdown -- and it closes it: after
+        # this returns, what is on disk is what the manager believes.
+        #
+        # A process killed outright is a different question and always was.
+        #
+        # Bounded by the budget, and skipped once it is gone. Two things can
+        # take longer than the caller has: waiting for another writer, and the
+        # write itself. The first is a timeout on the lock. The second cannot
+        # be interrupted at all — `write_text` returns when the filesystem says
+        # so — so it happens on a thread this one is willing to abandon.
+        #
+        # Abandoning it is the honest outcome: the process is on its way out,
+        # the file is left one revision behind, and that is where an
+        # unresponsive disk was always going to leave it.
+        remaining = deadline - time.monotonic()
+        if staged is not None and remaining > 0:
+            def write_it(revision: int = staged[0],
+                         document: dict[str, Any] = staged[1],
+                         budget: float = remaining) -> None:
+                # Nothing may escape here. An exception on a thread nobody
+                # joins is printed to stderr and otherwise invisible, and this
+                # is a best-effort write on the way out of the process.
+                try:
+                    self._flush(revision, document, timeout=budget)
+                except Exception:
+                    pass
+
+            writer = threading.Thread(target=write_it, daemon=True,
+                                      name="comodor-delegate-final-write")
+            try:
+                writer.start()
+            except RuntimeError:
+                # The runtime would not give us a thread. This write was always
+                # best-effort, and shutdown has tools, history and MCP still to
+                # close: an exception escaping here would leave all of them
+                # open, which is a far worse outcome than a file one revision
+                # behind.
+                pass
+            else:
+                writer.join(timeout=remaining)
 
     # -- plumbing ---------------------------------------------------------- #
 
+    #: States a run does not come back from.
+    TERMINAL = ("done", "failed", "stopped", "lost")
+
+    #: How far along a run an event says it is. A run only ever moves forward,
+    #: so an event may never report less progress than one already sent for it
+    #: — `started` arriving behind `stopping` would tell a subscriber the work
+    #: it just stopped had come back to life.
+    PROGRESS = {"started": 0, "stopping": 1,
+                "done": 2, "failed": 2, "stopped": 2, "lost": 2}
+
     def _emit(self, identifier: str, state: str) -> None:
+        """Tell the bus where a run is.
+
+        `state` is what the caller believes, and it is not taken at face
+        value. Everything about a launch happens on two threads, so an event
+        can be prepared before another one and sent after it: `stop()` emits
+        `stopping` with the lock released, and `start()` emits `started` after
+        registering the thread. Either can overtake the other.
+
+        Two things settle it, in order. A run that has reached a state it does
+        not come back from reports that state, whoever is doing the telling.
+        And no event may report less progress than one already sent for the
+        same run — a late `started` says `stopping`, because that is where the
+        run had already been announced to be.
+
+        Deciding and sending happen together. Deciding alone under the
+        lifecycle lock is not enough: a thread that has decided `started` can
+        be descheduled before it sends, another can decide *and send*
+        `stopping`, and the first then sends a payload that is already out of
+        date. `_lock` cannot be the one held across the send — a subscriber is
+        arbitrary code — so this is its own lock, taken before `_lock` and
+        never the other way round.
+        """
+        with self._telling:
+            if self._delivering:
+                # Asked for by a subscriber, from inside the delivery of
+                # another event. Sending it now would put it in front of the
+                # one everybody is still hearing.
+                self._queued.append((identifier, state))
+                return
+            self._delivering = True
+            try:
+                self._tell(identifier, state)
+                while self._queued:
+                    self._tell(*self._queued.pop(0))
+            finally:
+                self._delivering = False
+                self._queued.clear()
+
+    def _tell(self, identifier: str, state: str) -> None:
+        """Decide one event and send it. Called only from `_emit`."""
         try:
             with self._lock:
                 run = self._runs.get(identifier)
                 payload = run.as_dict() if run else {"id": identifier}
+                if run is not None and run.state in self.TERMINAL:
+                    state = run.state
+                told = self._announced.get(identifier, "")
+                if self.PROGRESS.get(state, 0) < self.PROGRESS.get(told, -1):
+                    state = told
+                else:
+                    self._announced[identifier] = state
             payload["state"] = state
             self.bus.emit(Kind.DELEGATE, **payload)
         except Exception:
@@ -272,27 +629,129 @@ class BackgroundDelegates:
 
     # -- crash safety -------------------------------------------------------- #
 
-    def _persist(self) -> None:
-        """Write the runs to the session's directory, best-effort.
+    def _stage(self) -> tuple[int, dict[str, Any]]:
+        """Number a snapshot of the state. **The caller must hold `_lock`.**
 
-        This is not a queue and not a resume mechanism. It is the evidence:
-        after a crash the next session can say plainly what was running and
-        mark it lost, rather than leaving silent orphans behind.
+        Writing used to happen here too, and the two halves were not atomic, so
+        a snapshot taken before a delegate finished could be written after the
+        one that said it had:
+
+            main                                  worker
+            ──────────────────────────────────────────────────────────
+            _snapshot()  → "running"
+                                                  state = "done"
+                                                  _snapshot() → "done"
+                                                  write("done")
+            write("running")   ← older, and last
+
+        The next session read `running` and reported a delegate that had
+        finished perfectly well as lost.
+
+        Holding `_lock` across the write fixed the order and bought something
+        worse: `stop_all()` and `wait()` both take that lock during shutdown,
+        so a filesystem that stopped answering could hang the whole exit.
+
+        Numbering under the lock gives the order without the waiting. Revisions
+        are assigned in the order the state changed, and `_flush` writes only
+        increasing ones — so the disk holds the newest snapshot that has been
+        staged, whatever order the writes are attempted in.
+        """
+        self._revision += 1
+        return self._revision, self._snapshot()
+
+    def _flush(self, revision: int, document: dict[str, Any],
+               timeout: float | None = None) -> bool:
+        """Write one staged snapshot. **The caller must NOT hold `_lock`.**
+
+        The check and the write happen under `_write_lock` together, so two
+        writers cannot interleave: if a higher revision has already been
+        attempted, this one is dropped rather than written after it. That is
+        what makes it safe to do the writing outside the lock that ordered it.
+
+        Attempted, not landed. A newer write that fails leaves the file where
+        it was, and letting an older snapshot in behind it would put a state
+        the manager already knows is out of date on the disk — a delegate that
+        has finished, recorded as running, which is the lie this whole file
+        exists to stop. Nothing is lost by refusing: the record is staged again
+        by the next change and by `wait()`, both of which carry a newer
+        number.
+
+        `timeout` bounds the wait for that lock, and only `wait()` passes one,
+        which is also the one caller that must not use `_flush_or_catch_up` —
+        a repair is unbounded by construction, and shutdown has a budget.
+        A write already in progress on an unresponsive filesystem holds
+        `_write_lock` for as long as the filesystem takes, and shutdown cannot
+        afford to queue behind it. Giving up leaves the file one revision
+        behind, which is where it would have been anyway.
+
+        Returns whether the file holds this revision or a newer one. `False`
+        says the disk is behind and this snapshot was not the way to fix it:
+        the caller's own record may not be on disk at all, so somebody has to
+        come back with a current one.
         """
         if self.persist_path is None:
-            return
+            return True                 # nowhere to be behind
+        if not self._write_lock.acquire(
+                timeout=-1 if timeout is None else max(0.0, timeout)):
+            return False    # somebody is writing, and there is no time to wait
         try:
-            document = self._snapshot()
+            return self._write(revision, document)
+        finally:
+            self._write_lock.release()
+
+    def _write(self, revision: int, document: dict[str, Any]) -> bool:
+        """The decision and the write. **The caller holds `_write_lock`.**"""
+        if revision <= self._written:
+            return True                 # a newer snapshot already landed
+        if revision <= self._attempted:
+            return False                # a newer write was tried, and failed
+        self._attempted = revision
+        try:
             self.persist_path.parent.mkdir(parents=True, exist_ok=True)
             self.persist_path.write_text(json.dumps(document, indent=1),
                                          encoding="utf-8")
         except OSError:
-            pass
+            return False
+        self._written = revision
+        return True
+
+    def _flush_or_catch_up(self, staged: tuple[int, dict[str, Any]]) -> None:
+        """Write a staged snapshot, or the state as it stands if that is stale.
+
+        A snapshot refused because a newer write failed leaves the disk behind
+        with nobody coming back for it — and the caller was relying on its own
+        record being there. Staging again is the honest repair: it is current.
+
+        Numbered and written **without letting go of `_write_lock`**, which is
+        what makes this terminate. Trying again and hoping would not: the
+        second number can be overtaken exactly as the first was, and "twice"
+        is as arbitrary an answer as "once". `_attempted` only moves under
+        this lock, so a number taken while holding it cannot already be behind
+        one. What remains is a filesystem that will not answer, and no number
+        of attempts helps with that — `wait()` tries once more on the way out
+        and the file is left a revision behind, which is where an unresponsive
+        disk was always going to leave it.
+        """
+        if self._flush(*staged):
+            return
+        if self.persist_path is None:
+            return
+        self._write_lock.acquire()
+        try:
+            with self._lock:
+                fresh = self._stage()
+            self._write(*fresh)
+        finally:
+            self._write_lock.release()
 
     def _snapshot(self) -> dict[str, Any]:
-        """The document to persist. Lock-free: callers hold the lock when the
-        snapshot must agree with the state they just changed, and take it
-        themselves otherwise."""
+        """The document to persist. The caller holds `_lock`.
+
+        It used to say the lock was needed only "when the snapshot must agree
+        with the state they just changed", which sounds like a narrow case and
+        is in fact every case: a snapshot that does not agree with the state is
+        one that can be written after a newer one.
+        """
         return {
             "saved_at": time.time(),
             "runs": [vars(run) | {} for run in self._runs.values()],
@@ -337,7 +796,11 @@ class BackgroundDelegates:
         if changed:
             with self._lock:
                 self._counter = itertools.count(highest + 1)
-            self._persist()
+                staged = self._stage()
+            # A reload rewrites what it just decided about the last session's
+            # work. Refused, the file still says those runs are `running`, and
+            # the session after this one repeats the same guess.
+            self._flush_or_catch_up(staged)
 
 
 def _id_number(identifier: str) -> int:
