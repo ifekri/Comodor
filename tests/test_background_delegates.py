@@ -356,10 +356,13 @@ class Interleave:
             # and write first, so this one is attempted last and stale.
             self.snapshotted.set()
             self.worker_wrote.wait(self.escape)
-            self._real_flush(revision, document)
-            return
-        self._real_flush(revision, document)
+            # The answer is passed back, not swallowed: a caller told its
+            # snapshot was refused comes back with a current one, and a stand-in
+            # that always says nothing would hide that from every test here.
+            return self._real_flush(revision, document)
+        wrote = self._real_flush(revision, document)
         self.worker_wrote.set()
+        return wrote
 
 
 class HeldLoop:
@@ -1881,3 +1884,60 @@ def test_a_failed_write_does_not_let_an_older_snapshot_in(config, bus,
     manager.wait(timeout=30.0)
     flushed(manager)
     assert states(persist)["a"] == "done"
+
+
+def test_a_launch_whose_snapshot_is_refused_is_still_recorded(config, bus,
+                                                              tmp_path):
+    """A refusal is not a reason to leave a delegate off the disk.
+
+    A launch stages its record and writes it before the worker exists, so a
+    crash in that gap still leaves evidence of the delegate. If a completing
+    delegate's newer write reaches the disk first and fails, the launch's
+    snapshot is stale by the time it is offered -- correctly refused, and the
+    launch would have had no record at all.
+
+    The newer write is made to happen in exactly that gap, between the
+    launch's stage and its flush.
+    """
+    persist = tmp_path / "delegates.json"
+    release = threading.Event()
+    manager = make_manager(config, bus, lambda **kwargs: HeldLoop(release),
+                           persist=persist)
+
+    with manager._lock:
+        manager._runs["old"] = DelegateRun(id="old", brief="finished")
+        manager._runs["old"].state = "done"
+
+    write = manager._flush
+    once = threading.Event()
+
+    def racing(revision, document, timeout=None):
+        if not once.is_set():
+            once.set()
+            with manager._lock:
+                newer = manager._stage()
+            def refusing(*arguments, **keywords):
+                raise OSError("the disk said no")
+            kept, Path.write_text = Path.write_text, refusing
+            try:
+                write(*newer)                    # fails, but takes the number
+            finally:
+                Path.write_text = kept
+        return write(revision, document, timeout)
+
+    manager._flush = racing
+    ok, identifier, _ = manager.start("a launch behind a failed write")
+    manager._flush = write
+    assert ok
+
+    # Asserted here, not after the worker has been and gone: `start()` writes
+    # the record before the worker exists precisely so a crash in that gap
+    # still leaves evidence. A later write by somebody else is not the same
+    # guarantee, and waiting for one would let this test agree with the bug.
+    assert persist.exists(), "the launch left no record at all"
+    assert identifier in states(persist), (
+        f"the launch left no record: {persisted(persist)}")
+
+    release.set()
+    manager.stop_all()
+    manager.wait(timeout=30.0)

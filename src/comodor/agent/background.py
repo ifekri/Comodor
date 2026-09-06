@@ -236,7 +236,7 @@ class BackgroundDelegates:
             # the one thing this file is for — and a worker that finished
             # inside that gap wrote `done`, which the write here then
             # overwrote with the `running` it had read a moment earlier.
-            self._flush(*staged)
+            self._flush_or_catch_up(staged)
 
             with self._settled:
                 if identifier in self._cancelled:
@@ -375,7 +375,7 @@ class BackgroundDelegates:
         # record and holds up nobody else. The revision decides which snapshot
         # wins, not which write happens to finish first.
         if staged is not None:
-            self._flush(*staged)
+            self._flush_or_catch_up(staged)
         if run is not None:
             self._emit(identifier, run.state)
 
@@ -655,7 +655,7 @@ class BackgroundDelegates:
         return self._revision, self._snapshot()
 
     def _flush(self, revision: int, document: dict[str, Any],
-               timeout: float | None = None) -> None:
+               timeout: float | None = None) -> bool:
         """Write one staged snapshot. **The caller must NOT hold `_lock`.**
 
         The check and the write happen under `_write_lock` together, so two
@@ -676,25 +676,51 @@ class BackgroundDelegates:
         `_write_lock` for as long as the filesystem takes, and shutdown cannot
         afford to queue behind it. Giving up leaves the file one revision
         behind, which is where it would have been anyway.
+
+        Returns whether the file holds this revision or a newer one. `False`
+        says the disk is behind and this snapshot was not the way to fix it:
+        the caller's own record may not be on disk at all, so somebody has to
+        come back with a current one.
         """
         if self.persist_path is None:
-            return
+            return True                 # nowhere to be behind
         if not self._write_lock.acquire(
                 timeout=-1 if timeout is None else max(0.0, timeout)):
-            return          # somebody is writing, and there is no time to wait
+            return False    # somebody is writing, and there is no time to wait
         try:
+            if revision <= self._written:
+                return True             # a newer snapshot already landed
             if revision <= self._attempted:
-                return                  # a newer snapshot got here first
+                return False            # a newer write was tried, and failed
             self._attempted = revision
             try:
                 self.persist_path.parent.mkdir(parents=True, exist_ok=True)
                 self.persist_path.write_text(json.dumps(document, indent=1),
                                              encoding="utf-8")
             except OSError:
-                return          # `_written` stays behind, so this is restaged
+                return False
             self._written = revision
+            return True
         finally:
             self._write_lock.release()
+
+    def _flush_or_catch_up(self, staged: tuple[int, dict[str, Any]]) -> None:
+        """Write a staged snapshot, or the state as it stands if that is stale.
+
+        A snapshot refused because a newer write failed leaves the disk behind
+        with nobody coming back for it — and the caller was relying on its own
+        record being there. Staging again is the honest repair: it is current,
+        and it carries a number nothing has attempted.
+
+        Once. If the filesystem is not answering, `wait()` tries again on the
+        way out and the file is left a revision behind, which is where an
+        unresponsive disk was always going to leave it.
+        """
+        if self._flush(*staged):
+            return
+        with self._lock:
+            fresh = self._stage()
+        self._flush(*fresh)
 
     def _snapshot(self) -> dict[str, Any]:
         """The document to persist. The caller holds `_lock`.
