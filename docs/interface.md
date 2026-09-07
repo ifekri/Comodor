@@ -29,7 +29,7 @@ to read, so that screen is arranged around the one thing you can act on:
 │      │                                                          │      │
 │      └──────────────────────────────────────────────────────────┘      │
 │                                                                        │
-│  Mode: ACT [TAB]  ● Command /  ● Sub-agent off [ctrl+s]  MODEL mimo…   │
+│  Mode: ACT [TAB]  ● Command /  ● Sub-agent off /delegates  MODEL mimo… │
 │                                                                        │
 │  Workspace: …/my-project         Skill: 4            version: 1.1.2    │
 └────────────────────────────────────────────────────────────────────────┘
@@ -118,6 +118,7 @@ runs.
 | `Ctrl+J` | newline inside a message |
 | `Esc` | stop what it is doing |
 | `Ctrl+C` | stop; twice to quit |
+| `Ctrl+D` | quit |
 | `F1` | help |
 | `F2` | the sidebar |
 | `F3` | mode |

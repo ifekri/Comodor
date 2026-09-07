@@ -838,3 +838,84 @@ def test_a_resumed_session_never_shows_the_opening_screen(app):
 
     assert stage_of(app) == layout_module.ACTIVE
     assert any(entry.kind == "user" for entry in app.state.entries)
+
+
+# --------------------------------------------------------------------------- #
+# the footer has to describe the keyboard that exists
+# --------------------------------------------------------------------------- #
+
+
+#: How to press each stroke the status line advertises.
+STROKES = {
+    "/": lambda: key("char", "/"),
+    "ctrl+d": lambda: key("char", "d", ctrl=True),
+    "ctrl+o": lambda: key("char", "o", ctrl=True),
+    "ctrl+l": lambda: key("char", "l", ctrl=True),
+    "esc": lambda: key("escape"),
+    "ctrl+s": lambda: key("char", "s", ctrl=True),
+    "[TAB]": lambda: key("tab"),
+}
+
+
+def test_every_key_the_footer_advertises_is_actually_bound(app):
+    """The test that would have caught this, and will catch the next one.
+
+    Asserting that one wrong string is gone only proves that one wrong string
+    is gone. This presses each stroke the status line names, on an idle Active
+    Session, and requires the application to handle it — which is what a hint
+    is promising. `Setting : [ctrl + s]` failed exactly here: nothing in the
+    program binds ctrl+s outside an open question form, so the advertised key
+    did nothing at all.
+    """
+    from comodor.ui.widgets.statusbar import KEY_HINTS
+
+    unbound = []
+    for name, stroke in KEY_HINTS:
+        assert stroke in STROKES, f"no way to press {stroke!r} in this test"
+        app.state.overlay = None
+        app.state.editor.clear()
+        app.state.scroll = 0
+        app.state.status.busy = False
+        if not app._on_key(STROKES[stroke]()):
+            unbound.append(f"{name} : {stroke}")
+
+    assert not unbound, f"the footer advertises keys that do nothing: {unbound}"
+
+
+def test_control_s_does_nothing_so_it_is_not_advertised(app):
+    """Both halves, because either alone is half a proof: the key really is
+    unbound, and the footer really does not name it."""
+    from comodor.ui.widgets.statusbar import KEY_HINTS
+
+    app.state.overlay = None
+    assert app._on_key(key("char", "s", ctrl=True)) is False
+
+    assert not any(stroke == "ctrl+s" for _, stroke in KEY_HINTS)
+    assert not any(name.lower().startswith("setting") for name, _ in KEY_HINTS)
+
+
+def test_escape_does_not_exit_which_is_why_the_footer_stopped_saying_so(app):
+    """It stops a running turn and clears a scrollback position. On an idle
+    session it is not handled at all, so `Exit : esc` was a second promise the
+    keyboard did not keep."""
+    app.running = True
+    app.state.status.busy = False
+    app.state.scroll = 0
+
+    assert app._on_key(key("escape")) is False
+    assert app.running is True, "escape must not end the session"
+
+    # And the key that does.
+    assert app._on_key(key("char", "d", ctrl=True)) is True
+    assert app.running is False
+
+
+def test_the_settings_are_still_reachable(app):
+    """Removing the hint must not remove the route. There is no keyboard
+    shortcut, and none was invented; `/settings` is the control, and the
+    footer's `Command : /` is how you get to it."""
+    assert "/settings" in COMMANDS
+
+    app.state.overlay = None
+    app._command("/settings", "")
+    assert app.state.overlay is not None

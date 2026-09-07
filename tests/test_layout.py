@@ -206,8 +206,12 @@ def test_the_reference_size_shows_the_designed_furniture():
     # The name lives in the sidebar's footer now rather than in a header row
     # of its own, the tasks are titled rather than shouted, and the keys are on
     # the status line instead of in a second row beside it.
+    # `Setting : [ctrl + s]` used to be asserted here. Nothing binds ctrl+s,
+    # so the row was promising a key that did nothing, and this test was
+    # holding it in place — which is what a test asserting a string rather
+    # than a behaviour will do.
     for expected in ("Comodor", "Tasks", "Mode :", "Act",
-                     "Setting :", "Command :"):
+                     "Command :", "Exit : ctrl+d"):
         assert expected in text, f"{expected!r} is missing from the interface"
 
     # Nothing but the rule character: a fenced code block in the transcript has
@@ -677,3 +681,70 @@ def test_a_frame_reads_nothing_and_runs_nothing(kind, monkeypatch):
     render(128, 36, state=state)
 
     assert not seen, f"a frame opened {seen}"
+
+
+# --------------------------------------------------------------------------- #
+# the footer says only what the keyboard does
+# --------------------------------------------------------------------------- #
+
+
+def footer_of(width: int, height: int, **over) -> str:
+    """The status row of a drawn Active Session."""
+    state = make_state()
+    for name, value in over.items():
+        setattr(state.status, name, value)
+    lines = render(width, height, state=state, **over.pop("render", {}))
+    return "\n".join(lines)
+
+
+@pytest.mark.parametrize("ascii_borders", [False, True])
+@pytest.mark.parametrize("theme_name", ["cyan", "ember", "mono"])
+def test_the_active_footer_advertises_no_control_s(theme_name, ascii_borders):
+    """It did, and the key does nothing. Checked in Unicode and in ASCII, and
+    in the colourless theme, because a hint that is wrong is wrong in all
+    three — dropping the colour must not change what the row claims."""
+    text = "\n".join(render(128, 36, theme_name=theme_name,
+                            ascii_borders=ascii_borders))
+
+    assert "ctrl + s" not in text
+    assert "ctrl+s" not in text
+    assert "Setting" not in text
+
+
+@pytest.mark.parametrize("ascii_borders", [False, True])
+def test_the_active_footer_names_the_key_that_really_exits(ascii_borders):
+    text = "\n".join(render(128, 36, ascii_borders=ascii_borders))
+
+    assert "Exit : ctrl+d" in text
+    assert "Exit : esc" not in text, "escape stops a turn; it does not exit"
+    assert "Command : /" in text
+
+
+def test_the_new_screen_advertises_no_control_s():
+    """The opening screen names `/delegates`, which exists. Checked here as
+    well so that neither screen can regress without the other noticing."""
+    text = "\n".join(render(128, 36, state=make_state(populated=False)))
+
+    assert "ctrl+s" not in text and "ctrl + s" not in text
+    assert "/delegates" in text
+
+
+def test_the_hints_are_the_first_thing_a_narrow_terminal_drops():
+    """They are the least urgent part of the row, and the row must not wrap:
+    there is no border holding it open, so one cell too many takes the whole
+    layout down a line."""
+    for width, height in [(128, 36), (100, 30), (80, 24), (60, 20), (50, 15)]:
+        lines = render(width, height)
+        for line in lines:
+            assert cell_len(line) <= width, (
+                f"the footer overflowed {width} columns: {line!r}")
+
+
+@pytest.mark.parametrize("theme_name", ["cyan", "mono"])
+def test_dropping_the_colour_does_not_change_what_the_row_says(theme_name):
+    """`--no-color` is a rendering choice, not a different interface."""
+    coloured = "\n".join(render(128, 36, theme_name="cyan"))
+    plain = "\n".join(render(128, 36, theme_name="mono"))
+
+    for claim in ("Command : /", "Exit : ctrl+d", "Mode : "):
+        assert claim in coloured and claim in plain
