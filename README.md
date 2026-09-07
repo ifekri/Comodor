@@ -48,6 +48,9 @@ or the next one. Not a setting you turn on. Not a file you maintain.
 ---
 
 [![](.github/ascii-comodor.svg)]()
+
+[![](.github/install-anim.svg)](https://comodor.ai 'Comodor.ai Install in Linux and Mac')
+
 </div>
 
 ## Why this one
