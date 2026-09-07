@@ -14,7 +14,7 @@ import json
 import pytest
 
 from comodor import protocol as P
-from comodor.application import CoreService
+from comodor.application import CoreService, Refused
 from comodor.transport.jsonl import Channel
 from comodor.transport.server import Server
 
@@ -438,4 +438,59 @@ def test_a_local_provider_with_no_key_is_reported_as_configured(config):
     try:
         assert service.model()["configured"] is True
     finally:
+        service.close()
+
+
+def test_a_session_that_is_already_working_refuses_a_second_turn(config):
+    """One turn per session, refused rather than queued.
+
+    Two turns interleaving their events would be indistinguishable to a client
+    correlating on a message id.
+
+    In-process and gated, because the obvious version of this test is a race:
+    over a real pipe with a scripted provider the first turn can finish before
+    the second request arrives, and then there is nothing to refuse. That is
+    how it was written first, and macOS found it — passing on three platforms
+    and failing on the fourth is the worst possible result, because it reads
+    as an infrastructure problem rather than as a test that proves nothing.
+    """
+    import threading
+
+    from comodor.providers.base import EventType, StreamEvent, Usage
+
+    held = threading.Event()
+    started = threading.Event()
+
+    class Blocking:
+        """Answers only once the test says so."""
+
+        name = "fake"
+        label = "Blocking"
+        model = "fake-1"
+
+        def stream(self, messages, **kwargs):
+            started.set()
+            held.wait(timeout=10)
+            yield StreamEvent(type=EventType.TEXT, text="done")
+            yield StreamEvent(type=EventType.USAGE, usage=Usage())
+
+        def close(self):
+            pass
+
+    service = CoreService(config)
+    try:
+        session = service.create_session()["id"]
+        handle = service.session(session)
+        handle.assembly.gateway._instances["fake"] = Blocking()
+
+        service.send(session, "one")
+        service.release()
+        assert started.wait(timeout=10), "the first turn never began"
+
+        with pytest.raises(Refused):
+            service.send(session, "two")
+
+        assert service.get_session(session)["busy"] is True
+    finally:
+        held.set()
         service.close()

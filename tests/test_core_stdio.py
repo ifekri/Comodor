@@ -289,21 +289,6 @@ def test_a_turn_streams_deltas_and_finishes(core):
     assert "".join(text)
 
 
-def test_a_session_that_is_already_working_refuses_a_second_turn(core):
-    core.hello()
-    session = core.answer_to(core.send("session.create"))["result"]["session"]
-    core.answer_to(core.send("session.send",
-                             {"session_id": session["id"], "text": "one"}))
-    second = core.answer_to(core.send("session.send",
-                                      {"session_id": session["id"],
-                                       "text": "two"}))
-
-    # Refused rather than queued: two turns interleaving their events would
-    # be indistinguishable to a client correlating on a message id.
-    assert second["type"] == "error"
-    assert second["error"]["code"] in (P.NOT_ALLOWED,)
-
-
 # --------------------------------------------------------------------------- #
 # going away
 # --------------------------------------------------------------------------- #
