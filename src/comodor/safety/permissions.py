@@ -28,6 +28,7 @@ from typing import Any, Callable
 
 from ..config import Config
 from ..events import EventBus, Request
+from .modes import policy_for
 
 
 class Risk(IntEnum):
@@ -80,12 +81,18 @@ class PermissionEngine:
     # -- policy ----------------------------------------------------------- #
 
     def mode_allows(self, risk: Risk) -> tuple[bool, str]:
-        mode = (self.config.agent.mode or Mode.ACT).lower()
-        if mode == Mode.CHAT:
-            return False, "Chat mode has tools switched off — press F3 to switch to Act."
-        if mode in (Mode.PLAN, Mode.ASK) and risk > Risk.SAFE:
-            return False, (f"{mode.capitalize()} mode is read-only, so this "
-                           "step was skipped. Switch to Act mode to let it run.")
+        """The outer gate: does this mode permit a call at this risk tier?
+
+        The rule itself lives in `safety.modes`, which the tool registry reads
+        too. Restating it here — as this did — meant one file could be edited
+        and the other left, with the disagreement showing up as a tool that is
+        offered to the model and then refused when called.
+        """
+        policy = policy_for(self.config.agent.mode)
+        if not policy.may_use_any_tool:
+            return False, policy.refusal
+        if risk > Risk.SAFE and not policy.may_use_mutating_tools:
+            return False, policy.refusal
         return True, ""
 
     def auto_approved(self, risk: Risk) -> bool:
