@@ -707,3 +707,215 @@ def test_a_second_request_waits_its_turn(app, asked):
     app._on_key(key("escape"))
     assert app.state.overlay is not None
     assert app.state.overlay.request is second
+
+
+# --------------------------------------------------------------------------- #
+# the two screens, and moving between them
+# --------------------------------------------------------------------------- #
+
+
+def stage_of(app: App) -> str:
+    """The stage the next frame would be drawn at.
+
+    Read by drawing one. Asking the predicate directly would test the
+    predicate; this tests the thing the application does with it.
+    """
+    app._frame()
+    return app.geometry.stage
+
+
+def test_a_fresh_session_starts_on_the_opening_screen(app):
+    assert stage_of(app) == layout_module.NEW
+    assert app.geometry.sidebar is None
+    assert app.geometry.composer is not None
+
+
+def test_a_startup_warning_does_not_start_the_session(app):
+    """`_complain_about_the_config` and a failed MCP server both speak before
+    the user does. Neither is a conversation."""
+    app.bus.emit(Kind.NOTICE, text="config: max_cost_usd cannot be enforced")
+    app.bus.emit(Kind.ERROR, text="mcp: filesystem did not start")
+    app._pump_events()
+
+    assert app.state.entries, "the warnings were dropped"
+    assert stage_of(app) == layout_module.NEW
+
+
+def test_the_first_message_moves_to_the_active_session(app, monkeypatch):
+    monkeypatch.setattr(app, "_start_agent", lambda text: None)
+    assert stage_of(app) == layout_module.NEW
+
+    type_text(app, "add a health endpoint")
+    app._on_key(key("enter"))
+
+    assert stage_of(app) == layout_module.ACTIVE
+
+
+def test_the_first_message_survives_the_move(app, monkeypatch):
+    """The composer on the opening screen is the same editor the active
+    session uses. If it were a second widget, the text typed into it would be
+    lost at exactly the moment it stopped being drawn."""
+    monkeypatch.setattr(app, "_start_agent", lambda text: None)
+
+    type_text(app, "add a health endpoint")
+    app._on_key(key("enter"))
+
+    said = [entry for entry in app.state.entries if entry.kind == "user"]
+    assert [entry.text for entry in said] == ["add a health endpoint"]
+
+
+def test_the_first_message_is_not_delivered_twice(app):
+    """One entry, and one run. A transition that re-submits looks identical on
+    screen to one that does not, until the bill arrives."""
+    started: list[str] = []
+    app._start_agent = lambda text: started.append(text)
+
+    type_text(app, "hello")
+    app._on_key(key("enter"))
+    app._frame()                      # the frame that changes screens
+    app._frame()                      # and the one after it
+
+    assert started == ["hello"]
+    assert [entry.text for entry in app.state.entries
+            if entry.kind == "user"] == ["hello"]
+
+
+def test_the_move_happens_once_and_stays(app, monkeypatch):
+    """No flicker back to the opening screen while the answer streams in."""
+    monkeypatch.setattr(app, "_start_agent", lambda text: None)
+    type_text(app, "hello")
+    app._on_key(key("enter"))
+
+    stages = [stage_of(app)]
+    app.bus.emit(Kind.ASSISTANT_START)
+    app._pump_events()
+    stages.append(stage_of(app))
+    app.bus.emit(Kind.ASSISTANT_DELTA, text="wor")
+    app._pump_events()
+    stages.append(stage_of(app))
+    app.bus.emit(Kind.ASSISTANT_END)
+    app._pump_events()
+    stages.append(stage_of(app))
+
+    assert stages == [layout_module.ACTIVE] * 4
+
+
+def test_keystrokes_during_the_move_are_not_lost(app, monkeypatch):
+    """Typing the next question while the first is still running goes into the
+    same buffer. Nothing is re-created between the screens, so there is
+    nowhere for it to fall."""
+    monkeypatch.setattr(app, "_start_agent", lambda text: None)
+    type_text(app, "first")
+    app._on_key(key("enter"))
+    app._frame()
+    type_text(app, "second")
+
+    assert app.state.editor.text == "second"
+
+
+def test_clearing_a_conversation_returns_to_the_opening_screen(app, monkeypatch):
+    monkeypatch.setattr(app, "_start_agent", lambda text: None)
+    type_text(app, "hello")
+    app._on_key(key("enter"))
+    assert stage_of(app) == layout_module.ACTIVE
+
+    app.cmd_clear("")
+
+    assert stage_of(app) == layout_module.NEW
+
+
+def test_a_resumed_session_never_shows_the_opening_screen(app):
+    """Restoring fills the transcript in the constructor, before the first
+    frame. A session with history must not flash a welcome at somebody who
+    asked to carry on."""
+    from comodor.providers.base import Message, Role
+
+    for message in (Message(role=Role.USER, content="add a health endpoint"),
+                    Message(role=Role.ASSISTANT, content="I'll add the route.")):
+        app.sessions.append("resumed-session", message)
+
+    app._resume("resumed-session")
+
+    assert stage_of(app) == layout_module.ACTIVE
+    assert any(entry.kind == "user" for entry in app.state.entries)
+
+
+# --------------------------------------------------------------------------- #
+# the footer has to describe the keyboard that exists
+# --------------------------------------------------------------------------- #
+
+
+#: How to press each stroke the status line advertises.
+STROKES = {
+    "/": lambda: key("char", "/"),
+    "ctrl+d": lambda: key("char", "d", ctrl=True),
+    "ctrl+o": lambda: key("char", "o", ctrl=True),
+    "ctrl+l": lambda: key("char", "l", ctrl=True),
+    "esc": lambda: key("escape"),
+    "ctrl+s": lambda: key("char", "s", ctrl=True),
+    "[TAB]": lambda: key("tab"),
+}
+
+
+def test_every_key_the_footer_advertises_is_actually_bound(app):
+    """The test that would have caught this, and will catch the next one.
+
+    Asserting that one wrong string is gone only proves that one wrong string
+    is gone. This presses each stroke the status line names, on an idle Active
+    Session, and requires the application to handle it — which is what a hint
+    is promising. `Setting : [ctrl + s]` failed exactly here: nothing in the
+    program binds ctrl+s outside an open question form, so the advertised key
+    did nothing at all.
+    """
+    from comodor.ui.widgets.statusbar import KEY_HINTS
+
+    unbound = []
+    for name, stroke in KEY_HINTS:
+        assert stroke in STROKES, f"no way to press {stroke!r} in this test"
+        app.state.overlay = None
+        app.state.editor.clear()
+        app.state.scroll = 0
+        app.state.status.busy = False
+        if not app._on_key(STROKES[stroke]()):
+            unbound.append(f"{name} : {stroke}")
+
+    assert not unbound, f"the footer advertises keys that do nothing: {unbound}"
+
+
+def test_control_s_does_nothing_so_it_is_not_advertised(app):
+    """Both halves, because either alone is half a proof: the key really is
+    unbound, and the footer really does not name it."""
+    from comodor.ui.widgets.statusbar import KEY_HINTS
+
+    app.state.overlay = None
+    assert app._on_key(key("char", "s", ctrl=True)) is False
+
+    assert not any(stroke == "ctrl+s" for _, stroke in KEY_HINTS)
+    assert not any(name.lower().startswith("setting") for name, _ in KEY_HINTS)
+
+
+def test_escape_does_not_exit_which_is_why_the_footer_stopped_saying_so(app):
+    """It stops a running turn and clears a scrollback position. On an idle
+    session it is not handled at all, so `Exit : esc` was a second promise the
+    keyboard did not keep."""
+    app.running = True
+    app.state.status.busy = False
+    app.state.scroll = 0
+
+    assert app._on_key(key("escape")) is False
+    assert app.running is True, "escape must not end the session"
+
+    # And the key that does.
+    assert app._on_key(key("char", "d", ctrl=True)) is True
+    assert app.running is False
+
+
+def test_the_settings_are_still_reachable(app):
+    """Removing the hint must not remove the route. There is no keyboard
+    shortcut, and none was invented; `/settings` is the control, and the
+    footer's `Command : /` is how you get to it."""
+    assert "/settings" in COMMANDS
+
+    app.state.overlay = None
+    app._command("/settings", "")
+    assert app.state.overlay is not None

@@ -256,6 +256,33 @@ PALETTES: dict[str, Palette] = {
 }
 
 
+#: What a widget asks for, mapped onto the field a palette actually carries.
+#:
+#: A widget should name the *role* — the surface behind what you typed, the
+#: colour of a danger — and not the field a palette happens to store it in.
+#: Two things follow from that. A widget stops carrying colour decisions of its
+#: own, which is what kept `#00e1fa` out of this file's neighbours. And the
+#: seven palettes keep working untouched: a role is resolved here, so adding
+#: one costs a line in this table rather than a field in every palette.
+#:
+#: `background`, `border`, `accent` and `text` are already roles, so they are
+#: not repeated below — a name absent from this table is looked up directly.
+SEMANTIC: dict[str, str] = {
+    "brand": "accent",
+    "border_active": "accent",
+    "danger": "bad",
+    "muted": "dim",
+    "panel": "button_bg",
+    "primary_text": "value",
+    "secondary_text": "dim",
+    "success": "good",
+    "surface": "assistant_bg",
+    "surface_assistant": "assistant_bg",
+    "surface_user": "user_bg",
+    "warning": "warn",
+}
+
+
 @dataclass(frozen=True)
 class Glyphs:
     """Every non-ASCII character the interface draws, in one place."""
@@ -271,6 +298,15 @@ class Glyphs:
     unticked: str = "☐"
     active: str = "◐"
     blocked: str = "✗"
+    #: What a tool call did, in one cell. Separate from the dots above, which
+    #: report whether a *step* has happened: these report the outcome of
+    #: something the agent ran, and a reader scanning a column of them is
+    #: asking a different question. The ASCII forms are wider, so anything
+    #: aligning a column of these measures the glyph rather than assuming one.
+    ok: str = "✓"
+    running: str = "●"
+    queued: str = "○"
+    failed: str = "×"
     spinner: tuple[str, ...] = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
     gauge_full: str = "█"
     gauge_empty: str = "░"
@@ -296,6 +332,7 @@ class Glyphs:
 ASCII_GLYPHS = Glyphs(
     bullet="*", arrow=">", check="[x]", pending="[ ]", active="[~]", blocked="[!]",
     ticked="[x]", unticked="[ ]",
+    ok="[OK]", running="[..]", queued="[--]", failed="[!!]",
     spinner=("|", "/", "-", "\\"), gauge_full="#", gauge_empty=".", cursor="_",
     divider="-", tool="*", memory="+", warn="!",
     rise="^", fall="v", left="<", right=">", dot="-", dash="-",
@@ -328,7 +365,7 @@ class Theme:
         """A palette colour by name, or ``default`` in no-colour mode."""
         if self.no_color:
             return "default"
-        return getattr(self.palette, token, "default")
+        return getattr(self.palette, SEMANTIC.get(token, token), "default")
 
     def palette_colour(self, token: str) -> str:
         """One colour by name, or empty when this theme has no colour.
@@ -338,7 +375,7 @@ class Theme:
         """
         if self.no_color:
             return ""
-        return getattr(self.palette, token, "") or ""
+        return getattr(self.palette, SEMANTIC.get(token, token), "") or ""
 
     def style(self, token: str, bold: bool = False, dim: bool = False,
               on: str = "") -> Style:

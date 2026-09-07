@@ -23,6 +23,28 @@ from ... import APP_NAME as APP
 from ...agent.tokens import humanise
 from ..theme import Theme
 
+#: What the status line says the keyboard does — and nothing else.
+#:
+#: Every entry is a key `App._on_key` really binds, checked against it rather
+#: than against what the interface was meant to offer. Two used to be here that
+#: are not now:
+#:
+#: * `Setting : [ctrl + s]`. Nothing in the program binds ctrl+s outside an
+#:   open question form, so on this screen it did nothing at all. There is no
+#:   keyboard route to the settings, and inventing one to justify the label
+#:   would be answering the wrong question — `/settings` is the control, and
+#:   `Command : /` already says how commands are reached.
+#: * `Exit : esc`. Escape stops a running turn and clears a scrollback
+#:   position; on an idle session it is not handled at all. `ctrl+d` is what
+#:   ends the session, so `ctrl+d` is what this says.
+#:
+#: A hint is a promise. One that is merely aspirational teaches people that the
+#: bottom line is decoration, which costs more than the row it saved.
+KEY_HINTS: tuple[tuple[str, str], ...] = (
+    ("Command", "/"),
+    ("Exit", "ctrl+d"),
+)
+
 
 @dataclass
 class StatusModel:
@@ -147,11 +169,7 @@ def footer_line(model: StatusModel, width: int = 0, theme: Theme = None) -> Text
     context.append(f"{fill:.0%}", style=theme.style(tone))
     context.append(f" of {humanise(model.context_limit)}", style=dim)
 
-    keys = [
-        _key("Setting", "[ctrl + s]", theme),
-        _key("Command", "/", theme),
-        _key("Exit", "esc", theme),
-    ]
+    keys = [_key(name, stroke, theme) for name, stroke in KEY_HINTS]
 
     money: Text | None = None
     if model.cost_usd:

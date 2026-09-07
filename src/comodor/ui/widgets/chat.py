@@ -5,18 +5,25 @@ the window we want. It is the only approach that stays correct when content
 wraps: a markdown answer, a diff and a table each occupy an unpredictable number
 of rows, so counting entries would put the viewport in the wrong place.
 
-**Indentation carries the speaker.** What you asked sits at the margin with a
-caret; everything the agent did in reply is indented under it, the way a reply
-is indented in a printed exchange. There is no coloured badge and no bracketed
-role name, because a page has never needed one.
+**Three things carry the speaker, and each works where the others do not.**
+Indentation: what you asked sits at the margin, everything the agent did in
+reply is indented under it, the way a reply is indented in a printed exchange.
+A surface: a different quiet band behind each, one band per message rather than
+per paragraph. And a name — `You`, `Comodor` — because the first two are the
+first to go. A band needs colour, which `--no-color` does not have and a
+red/green-blind reader may not see the point of; indentation survives being
+copied out and pasted somewhere that reflows it, but only just. The word
+survives all of it, and costs one column.
 
 **The newest line is at the bottom**, against the composer, with the empty
 space above. That is where a conversation ends, and it is where the eye already
 is when the next line arrives.
 
-Tool calls render as a verb and a target with the time on the right, rather
-than as raw JSON: `edit  src/app.py    0.2s` with a coloured diff under it says
-what happened; an arguments blob does not.
+Tool calls render as a mark, a verb and a target with the time on the right,
+rather than as raw JSON: `✓ edit  src/app.py    0.2s` with a coloured diff
+under it says what happened; an arguments blob does not. The mark has an ASCII
+form, so the outcome of a call is legible on a terminal that can draw neither
+the glyph nor the colour.
 """
 
 from __future__ import annotations
@@ -48,6 +55,28 @@ class Entry:
     streaming: bool = False
 
 
+#: The entry kinds that mean a conversation has started.
+#:
+#: A notice or an error is not one of them, and that distinction is the whole
+#: point of this list. A server that would not connect, or a setting the config
+#: asked for and did not get, both arrive before anybody has typed anything —
+#: and testing the transcript for emptiness would let either of them replace
+#: the opening screen with a conversation containing one warning and nothing
+#: else. What ends that screen is somebody saying something.
+SPEAKERS = ("user", "assistant")
+
+
+def is_new_session(entries: list[Entry]) -> bool:
+    """Whether this session is still the one that has not started.
+
+    True for a fresh session and for one that has just been cleared; false the
+    instant the first message is added, and false for a restored conversation
+    from its first frame, because restoring fills the transcript before the
+    first frame is drawn.
+    """
+    return not any(entry.kind in SPEAKERS for entry in entries)
+
+
 class Lines:
     """A pre-rendered slice of segment lines, ready to place in a panel."""
 
@@ -71,6 +100,13 @@ INDENT = "    "
 #: The verb column: `edit`, `run`, `learned`, `recalled`. One width, so a run
 #: of them reads as the table it already is.
 VERB = 8
+
+#: Who said it. The band behind a turn already answers this, and on most
+#: terminals that is enough — but `--no-color` has no bands at all, and neither
+#: does a screen reader. A word costs one column and works everywhere a colour
+#: does not, which is the whole argument for putting it there.
+YOU = "You"
+ASSISTANT = "Comodor"
 
 
 def render_entry(entry: Entry, theme: Theme, width: int) -> RenderableType:
@@ -105,7 +141,13 @@ def _indented(body: RenderableType, theme: Theme) -> RenderableType:
 
 
 def _user(entry: Entry, theme: Theme) -> RenderableType:
-    """At the margin, with the caret. The only thing that starts a column.
+    """At the margin, named, on its own surface.
+
+    The name goes on the same row as the words rather than above them. A
+    one-line question with a label over it is two rows to say one thing, and a
+    conversation is mostly one-line questions — measured on a twenty-row
+    window, a row per turn is a whole exchange off the top of the screen. The
+    answer below can afford the row; this cannot.
 
     Right-to-left text is set to the right of the column, which is where a
     Persian or Arabic reader's line begins. Left-aligning it would be the
@@ -113,9 +155,10 @@ def _user(entry: Entry, theme: Theme) -> RenderableType:
     margin: legible, and obviously not meant for you.
     """
     body = Text(justify="right" if is_rtl(entry.text) else "left")
-    body.append(f"{theme.glyphs.arrow} ", style=theme.style("user", bold=True))
+    body.append(f"{YOU} ", style=theme.style("user", bold=True))
+    body.append(f"{theme.glyphs.arrow} ", style=theme.style("user", dim=True))
     body.append(isolate(entry.text), style=theme.style("user"))
-    return _banded(body, theme, "user_bg")
+    return _banded(body, theme, "surface_user")
 
 
 def _banded(body: RenderableType, theme: Theme, token: str,
@@ -159,7 +202,14 @@ def _assistant(entry: Entry, theme: Theme, width: int) -> RenderableType:
         body = render_streaming(entry.text, theme, justify=justify)
     else:
         body = render_markdown(entry.text, theme, justify=justify)
-    return _banded(body, theme, "assistant_bg", indent=len(INDENT))
+
+    # The name on a row of its own, which the question above could not afford
+    # and this can. An answer is prose, a diff and a fenced block; prefixing
+    # its first line would put a label inside the Markdown and lose it the
+    # moment the answer opens with a heading or a list.
+    name = Text(ASSISTANT, style=theme.style("assistant", bold=True))
+    return _banded(Group(name, body), theme, "surface_assistant",
+                   indent=len(INDENT))
 
 
 def _memory(entry: Entry, theme: Theme) -> RenderableType:
@@ -182,12 +232,36 @@ def _memory(entry: Entry, theme: Theme) -> RenderableType:
     return _indented(text, theme)
 
 
-def _tool(entry: Entry, theme: Theme, width: int) -> RenderableType:
-    """``edit  src/app.py                                          0.2s``
+def marker(theme: Theme, ok: bool = True, running: bool = False,
+           queued: bool = False) -> tuple[str, str]:
+    """What a tool call did, and the colour to say it in.
 
-    A verb, a target, and the time against the right margin. Aligned in
+    Four states and four marks: done, working, waiting, failed. They are the
+    marks a terminal has always used for this, not icons — a glyph that only
+    renders in a patched font is a state nobody on a plain terminal can read,
+    and every one of these has an ASCII form for the terminals that cannot
+    draw even these.
+    """
+    glyphs = theme.glyphs
+    if queued:
+        return glyphs.queued, "muted"
+    if running:
+        return glyphs.running, "brand"
+    if ok:
+        return glyphs.ok, "success"
+    return glyphs.failed, "danger"
+
+
+def _tool(entry: Entry, theme: Theme, width: int) -> RenderableType:
+    """``✓ edit  src/app.py                                        0.2s``
+
+    A mark, a verb, a target, and the time against the right margin. Aligned in
     columns, because a run of tool calls is a table whether or not it is drawn
     as one, and a ragged left edge makes it unreadable.
+
+    The mark is what makes the column scannable. Colour said the same thing
+    already, and said it to nobody running `--no-color`, nobody colour-blind on
+    the red/green axis, and nobody reading a copied transcript.
     """
     meta = entry.meta
     ok = meta.get("ok", True)
@@ -195,7 +269,9 @@ def _tool(entry: Entry, theme: Theme, width: int) -> RenderableType:
     elapsed = meta.get("elapsed", 0.0)
 
     verb, _, target = (meta.get("summary") or entry.text).partition(" ")
+    glyph, tone = marker(theme, ok=ok, running=running)
     header = Text()
+    header.append(f"{glyph} ", style=theme.style(tone, bold=True))
     header.append(verb.ljust(VERB - 1)[:VERB - 1],
                   style=theme.style("accent" if running else
                                     ("tool" if ok else "bad"), bold=True))
@@ -266,8 +342,8 @@ def _diff(text: str, theme: Theme) -> Text:
 
 
 def render_transcript(entries: list[Entry], rect: Rect, theme: Theme,
-                      console: Console, scroll: int = 0,
-                      status: object | None = None) -> tuple[RenderableType, int]:
+                      console: Console, scroll: int = 0
+                      ) -> tuple[RenderableType, int]:
     """Return the visible slice and the total number of rendered rows.
 
     ``scroll`` counts rows *up from the bottom*, so zero means pinned to the
@@ -278,20 +354,11 @@ def render_transcript(entries: list[Entry], rect: Rect, theme: Theme,
     height = max(1, rect.height)
 
     if not entries:
-        # The branded welcome box for a fresh session, or the simplified
-        # greeting when the terminal is too narrow for the panel.
-        from .welcome import WelcomeInfo, render_welcome
-        info = WelcomeInfo(
-            version=getattr(status, "version", "") if status else "",
-            model=getattr(status, "model", "") if status else "",
-            provider=getattr(status, "provider", "") if status else "",
-            project=getattr(status, "project", "") if status else "",
-            skills=getattr(status, "skills", 0) if status else 0,
-        )
-        welcome = render_welcome(info, width, height, theme)
-        options = console.options.update(width=width, height=None)
-        lines = console.render_lines(welcome, options, pad=False)
-        return Lines(_exactly(lines, height)), 0
+        # An empty column, not a greeting. The opening screen is its own
+        # layout now — logo, composer and the two rows under it — and drawing
+        # a second one inside the transcript would mean two places deciding
+        # what a fresh session looks like.
+        return Lines(_exactly([], height)), 0
 
     recent = entries[-MAX_RENDERED_ENTRIES:]
     blocks: list[RenderableType] = []
@@ -328,31 +395,6 @@ def _exactly(lines: list, height: int) -> list:
     if len(lines) < height:
         return lines + [[]] * (height - len(lines))
     return lines[:height]
-
-
-def _welcome(theme: Theme) -> RenderableType:
-    """The empty state — the first thing a new user reads.
-
-    Centred rather than pinned to the bottom. A transcript grows upward from
-    the composer because that is where its last line belongs; an empty screen
-    has no last line, and a paragraph hanging off the bottom edge of an
-    otherwise blank page reads as a mistake.
-    """
-    rows = (
-        ("type a task", "and press Enter"),
-        ("/help", "every command"),
-        ("/mode", "act, plan or chat"),
-        ("/memory", "what it has learned"),
-        ("F2", "the task list"),
-    )
-
-    body = Text()
-    body.append("It learns the way you correct it.\n\n", style=theme.style("title"))
-    for key, description in rows:
-        body.append(key.ljust(14), style=theme.style("value"))
-        body.append(f"{description}\n", style=theme.style("dim"))
-
-    return body
 
 
 def entries_from(messages: Iterable[Any]) -> list[Entry]:
