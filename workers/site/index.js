@@ -20,6 +20,12 @@
 
 import { handle, isGitHubRoute } from './github/routes.js';
 
+// One Durable Object per connection flow, holding one result for a few
+// minutes so the terminal can collect it instead of the person carrying it.
+// Exported here because that is where Wrangler looks for the class its
+// binding names; nothing else in this file touches it.
+export { ConnectionFlow } from './github/rendezvous.js';
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
