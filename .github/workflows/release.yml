@@ -1,18 +1,32 @@
 name: Release
 
-# Two ways to release:
+# Release paths:
 #
-#   * push a tag `vX.Y.Z` — the normal path, so what ships is a specific,
-#     immutable commit;
-#   * run it by hand and untick "dry run" — for the first publish, or to
-#     recover from a failed one.
+# 1. Push a tag `vX.Y.Z`:
+#    Normal production release path. The tag identifies the exact immutable
+#    source commit that is being published.
 #
-# Every run ends with a summary saying exactly what it did, because a workflow
-# called "Release" that finishes green without publishing anything is the most
-# confusing outcome available.
+# 2. workflow_dispatch:
+#    Build/verify by default. Publishing is enabled only when dry_run=false.
+#
+# The workflow is intentionally split into:
+#
+#   Quality gate
+#       ↓
+#   Build distributions
+#       ↓
+#   Publish to PyPI
+#      ↙         ↘
+# GitHub Release  Container Image
+#
+# GitHub Release and Container Image are independent after PyPI succeeds.
+# A pre-existing GitHub Release must never prevent PyPI or Docker publication.
+
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+
   workflow_dispatch:
     inputs:
       dry_run:
@@ -24,303 +38,574 @@ permissions:
   contents: read
 
 env:
-  # Publishing happens on a tag push, or on a manual run with dry run turned
-  # off. Written once here so the jobs cannot drift apart.
   SHOULD_PUBLISH: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) }}
 
 jobs:
+
+  # ---------------------------------------------------------------------------
+  # Quality Gate
+  # ---------------------------------------------------------------------------
+
   gate:
     name: Quality gate
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
 
-      # v1.1.1 shipped from a tag placed on a commit eighteen behind `main`,
-      # so a release that had just been merged went out without any of it. The
-      # gate passed, the build passed, PyPI accepted it, and the only way to
-      # find out was to install the package and look. Nothing in the pipeline
-      # asked the one question that mattered.
-      - name: The tag must be on main
+      # A production tag must not silently point at an older main commit.
+      #
+      # A tag outside main is allowed deliberately for maintenance/hotfix
+      # releases, but a tag that is merely behind main is rejected.
+      - name: The tag must not be behind main
         if: github.event_name == 'push'
+        shell: bash
         run: |
+          set -euo pipefail
+
           git fetch --quiet origin main
+
           tag="${GITHUB_REF_NAME}"
+
           if git merge-base --is-ancestor "$tag" origin/main; then
-            behind=$(git rev-list --count "$tag"..origin/main)
+            behind="$(git rev-list --count "$tag"..origin/main)"
+
             if [ "$behind" -gt 0 ]; then
               {
                 echo "## Refusing to release"
                 echo
                 echo "\`$tag\` is **$behind commit(s) behind \`main\`**."
                 echo
-                echo "Whatever was merged in those commits is not in this tag,"
-                echo "so publishing it would ship an older tree under a newer"
-                echo "number. That is not recoverable: PyPI never lets a"
-                echo "version be replaced."
+                echo "Publishing this tag would ship an older tree under a newer"
+                echo "version number."
                 echo
-                echo "Move the tag and push it again:"
+                echo "PyPI versions are immutable and cannot be replaced."
                 echo
-                echo '```bash'
-                echo "git checkout main && git pull"
-                echo "git tag -d $tag && git push origin :refs/tags/$tag"
-                echo "git tag $tag && git push origin $tag"
-                echo '```'
+                echo "Create the tag from the current intended release commit."
               } >> "$GITHUB_STEP_SUMMARY"
+
               echo "::error::$tag is $behind commit(s) behind main"
               exit 1
             fi
           else
-            # Not an ancestor at all: a tag on a branch that was never merged.
-            # Allowed deliberately - a hotfix release from a maintenance branch
-            # is a real thing - but said out loud, because it is unusual.
-            echo "::warning::$tag is not on main. Releasing from it anyway."
+            echo "::warning::$tag is not an ancestor of main. Treating it as a maintenance/hotfix release."
+
             {
-              echo "## Note"
+              echo "## Release branch notice"
               echo
-              echo "\`$tag\` is not an ancestor of \`main\`. Releasing from"
-              echo "a branch, which is allowed but worth noticing."
+              echo "\`$tag\` is not an ancestor of \`main\`."
+              echo
+              echo "The workflow will allow the release, assuming this is an intentional"
+              echo "maintenance or hotfix release."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Install
-        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
 
       - name: Lint
         run: ruff check src tests
 
       - name: Tests
-        # The whole suite, not a fast subset. A gate that runs something other
-        # than what the developer runs is a gate nobody trusts and everybody
-        # eventually bypasses.
         run: pytest -q
 
       - name: Performance ceilings
         run: pytest -m performance -n 0 -q
 
-      - name: Say what passed
+      - name: Record quality gate
+        shell: bash
         run: |
           {
-            echo "## Gate"
+            echo "## Quality gate"
             echo
-            echo "Lint and the full test suite passed. Building."
+            echo "All required release checks passed:"
+            echo
+            echo "- Lint"
+            echo "- Full test suite"
+            echo "- Performance ceilings"
           } >> "$GITHUB_STEP_SUMMARY"
+
+
+  # ---------------------------------------------------------------------------
+  # Build
+  # ---------------------------------------------------------------------------
 
   build:
     name: Build distributions
     needs: gate
     runs-on: ubuntu-latest
+
     outputs:
       version: ${{ steps.version.outputs.version }}
       publish: ${{ env.SHOULD_PUBLISH }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          # The version is derived from the tag, so the tag has to be here.
-          # A shallow checkout gets the commit and none of the history, and
-          # every build would come out as 0.1.dev1.
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install build tooling
-        run: python -m pip install --upgrade pip build twine
+        run: |
+          python -m pip install --upgrade pip build twine
 
       - name: Build sdist and wheel
         run: python -m build
 
-      - name: Read the version off the artefact
+      - name: Read version from built wheel
         id: version
-        # Nothing in the tree carries a version number: hatch-vcs derives it
-        # from the tag, so the two cannot disagree - which is exactly what
-        # v0.2.1 did on its first attempt, failing the release because a
-        # literal in __init__.py had been left behind at 0.2.0.
-        #
-        # Read from the built wheel rather than by asking the build backend
-        # what it would do. The filename is the answer that is actually going
-        # to PyPI, and it needs no library to interpret.
+        shell: bash
         run: |
-          wheel=$(ls dist/*.whl | head -1)
-          version=$(basename "$wheel" | cut -d- -f2)
-          if [ -z "$version" ]; then
-            echo "::error::No version in the wheel name: $wheel"
+          set -euo pipefail
+
+          wheel="$(find dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
+
+          if [ -z "$wheel" ]; then
+            echo "::error::No wheel was produced."
             exit 1
           fi
+
+          version="$(basename "$wheel" | cut -d- -f2)"
+
+          if [ -z "$version" ]; then
+            echo "::error::Could not determine package version from: $wheel"
+            exit 1
+          fi
+
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Package version: $version"
 
       - name: A tag must produce its own version
         if: github.ref_type == 'tag'
-        # It cannot fail without something being badly wrong - a shallow
-        # checkout, or a tag that is not an ancestor of this commit - but the
-        # cost of finding out afterwards is a version number PyPI will never
-        # let us use again.
+        shell: bash
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          version="${{ steps.version.outputs.version }}"
-          if [ "$tag" != "$version" ]; then
-            echo "::error::Tag v$tag built version $version."
-            echo "The checkout is probably shallow, or the tag is not an ancestor." >&2
+          set -euo pipefail
+
+          tag_version="${GITHUB_REF_NAME#v}"
+          built_version="${{ steps.version.outputs.version }}"
+
+          if [ "$tag_version" != "$built_version" ]; then
+            echo "::error::Tag v$tag_version produced package version $built_version."
+            echo "::error::The release tag and built artefact must have exactly the same version."
             exit 1
           fi
 
-      - name: Check the metadata PyPI will render
+      - name: Check package metadata
         run: twine check --strict dist/*
 
-      - name: The wheel installs, runs, and agrees with the tag
-        # The last word on what is about to be published is the artefact
-        # itself, not the metadata that produced it.
+      - name: Verify the built wheel
+        shell: bash
         run: |
-          python -m venv /tmp/verify
-          /tmp/verify/bin/pip install --quiet dist/*.whl
-          reported=$(/tmp/verify/bin/comodor --version | awk '{print $2}')
-          echo "The wheel reports: $reported"
+          set -euo pipefail
+
+          python -m venv /tmp/comodor-release-verify
+          /tmp/comodor-release-verify/bin/pip install --quiet dist/*.whl
+
+          reported="$(
+            /tmp/comodor-release-verify/bin/comodor --version |
+            awk '{print $2}'
+          )"
+
+          echo "Installed wheel reports version: $reported"
+
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-            tag="${GITHUB_REF_NAME#v}"
-            if [ "$reported" != "$tag" ]; then
-              echo "::error::Tag v$tag produced a wheel reporting $reported."
-              echo "The checkout is probably shallow, or the tag is not an ancestor." >&2
+            tag_version="${GITHUB_REF_NAME#v}"
+
+            if [ "$reported" != "$tag_version" ]; then
+              echo "::error::Tag v$tag_version produced a wheel reporting $reported."
               exit 1
             fi
           fi
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload distributions artifact
+        uses: actions/upload-artifact@v4
         with:
           name: distributions
           path: dist/
           if-no-files-found: error
 
-      - name: Say what this run is going to do
+      - name: Record build
+        shell: bash
         run: |
           {
             echo "## Comodor ${{ steps.version.outputs.version }}"
             echo
-            echo '```'
+            echo "Built distributions:"
+            echo
+            echo '```text'
             ls -1 dist/
             echo '```'
             echo
+
             if [ "$SHOULD_PUBLISH" = "true" ]; then
-              echo "**Publishing to PyPI.**"
+              echo "**Production publication is enabled for this run.**"
             else
-              echo "### Dry run — nothing was published"
-              echo
-              echo "The distributions above were built and verified, and that is all."
-              echo "To publish for real:"
-              echo
-              echo "- push a tag: \`git tag v${{ steps.version.outputs.version }} && git push --tags\`, or"
-              echo "- run this workflow again with **dry run** unticked."
-              echo
-              echo "PyPI also needs a trusted publisher configured first — see RELEASING.md."
+              echo "**Dry run — no package, release or production image will be published.**"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+
+  # ---------------------------------------------------------------------------
+  # PyPI
+  # ---------------------------------------------------------------------------
 
   publish:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
+
     if: needs.build.outputs.publish == 'true'
 
-    # The environment is what PyPI's trusted publisher is scoped to, and it is
-    # also where a required reviewer can be added if you want releases to pause
-    # for a human.
     environment:
       name: pypi
       url: https://pypi.org/p/comodor
 
     permissions:
-      # Trusted publishing: GitHub mints a short-lived OIDC token that PyPI
-      # verifies. No API token is stored anywhere, so there is nothing to leak
-      # and nothing to rotate.
       id-token: write
 
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download distributions
+        uses: actions/download-artifact@v4
         with:
           name: distributions
           path: dist/
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
 
-      - name: Record what shipped
+      - name: Record PyPI publication
+        shell: bash
         run: |
           {
-            echo "## Published"
+            echo "## PyPI"
             echo
-            echo "comodor ${{ needs.build.outputs.version }} is on PyPI."
+            echo "Published:"
+            echo
+            echo "\`comodor==${{ needs.build.outputs.version }}\`"
             echo
             echo '```bash'
             echo "pipx install comodor==${{ needs.build.outputs.version }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+
+  # ---------------------------------------------------------------------------
+  # GitHub Release
+  # ---------------------------------------------------------------------------
+  #
+  # Important:
+  #
+  # GitHub can make published releases immutable. If the repository owner
+  # creates and publishes the release from the GitHub UI before this workflow
+  # reaches this job, uploading assets afterwards will fail.
+  #
+  # Therefore:
+  #
+  # - Published release already exists:
+  #     Treat this stage as satisfied.
+  #     Do NOT try to mutate it.
+  #     Missing assets produce a warning only.
+  #
+  # - Draft release already exists:
+  #     Attach/replace the distributions and publish the draft.
+  #
+  # - No release exists:
+  #     Create a draft first, upload all assets while mutation is still allowed,
+  #     then publish it.
+  #
+  # This makes the GitHub Release stage idempotent without hiding real errors.
+
   github-release:
-    name: Attach to the GitHub release
+    name: GitHub release
     needs: [build, publish]
     runs-on: ubuntu-latest
+
     if: startsWith(github.ref, 'refs/tags/v')
+
     permissions:
       contents: write
+
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download distributions
+        uses: actions/download-artifact@v4
         with:
           name: distributions
           path: dist/
 
-      - uses: softprops/action-gh-release@v2
+      - name: Inspect existing GitHub release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          endpoint="repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
+
+          if gh api "$endpoint" > /tmp/release.json 2> /tmp/release.err; then
+            draft="$(jq -r '.draft // false' /tmp/release.json)"
+            immutable="$(jq -r '.immutable // false' /tmp/release.json)"
+            release_id="$(jq -r '.id' /tmp/release.json)"
+
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "draft=$draft" >> "$GITHUB_OUTPUT"
+            echo "immutable=$immutable" >> "$GITHUB_OUTPUT"
+            echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+            echo "GitHub Release $TAG already exists."
+            echo "draft=$draft"
+            echo "immutable=$immutable"
+
+          else
+            if grep -q "HTTP 404" /tmp/release.err; then
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              echo "draft=false" >> "$GITHUB_OUTPUT"
+              echo "immutable=false" >> "$GITHUB_OUTPUT"
+              echo "release_id=" >> "$GITHUB_OUTPUT"
+
+              echo "GitHub Release $TAG does not exist."
+            else
+              echo "::error::Unable to determine whether GitHub Release $TAG exists."
+              cat /tmp/release.err >&2
+              exit 1
+            fi
+          fi
+
+      # A published release is already a valid release result.
+      #
+      # In particular, an immutable release MUST NOT receive another upload
+      # attempt. Doing so is the exact failure this branch prevents.
+      - name: Existing published release satisfies this stage
+        if: steps.release.outputs.exists == 'true' && steps.release.outputs.draft != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          endpoint="repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
+
+          mapfile -t published_assets < <(
+            gh api "$endpoint" --jq '.assets[].name'
+          )
+
+          missing=0
+
+          for file in dist/*; do
+            name="$(basename "$file")"
+
+            if ! printf '%s\n' "${published_assets[@]}" | grep -Fxq "$name"; then
+              echo "::warning::Existing release $TAG does not contain asset: $name"
+              missing=1
+            fi
+          done
+
+          {
+            echo "## GitHub Release"
+            echo
+            echo "\`$TAG\` already exists and is published."
+            echo
+            echo "The existing release is treated as a completed release stage."
+            echo
+            echo "No attempt was made to modify or upload assets to it."
+
+            if [ "${{ steps.release.outputs.immutable }}" = "true" ]; then
+              echo
+              echo "The release is immutable."
+            fi
+
+            if [ "$missing" -eq 1 ]; then
+              echo
+              echo "> [!WARNING]"
+              echo "> One or more distribution assets are not attached to the existing"
+              echo "> GitHub Release. This does not fail the workflow because the"
+              echo "> release was already published and may be immutable."
+              echo ">"
+              echo "> The package itself was published to PyPI successfully."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # A draft release can still accept assets safely.
+      - name: Attach distributions to existing draft
+        if: steps.release.outputs.exists == 'true' && steps.release.outputs.draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh release upload "$TAG" \
+            dist/* \
+            --clobber \
+            --repo "$GITHUB_REPOSITORY"
+
+      # If no release exists, create it as a draft first.
+      #
+      # Assets must be attached before publication because published releases
+      # may become immutable.
+      - name: Create draft release and attach distributions
+        if: steps.release.outputs.exists != 'true'
+        uses: softprops/action-gh-release@v2
         with:
+          draft: true
           files: dist/*
+          fail_on_unmatched_files: true
           generate_release_notes: true
+
           body: |
             ## Install
-            ### Linux and MacOS
-              ```bash
-              curl -fsSL get.comodor.ai | sh
-              ```
+
+            ### Linux and macOS
+
+            ```bash
+            curl -fsSL get.comodor.ai | sh
+            ```
+
             ### Windows
-              ```bash
-              irm get.comodor.ai | iex
-              ```
+
+            ```powershell
+            irm get.comodor.ai | iex
+            ```
+
             ### UV
 
-              ```bash
-              uv tool install comodor==${{ needs.build.outputs.version }}
-              ```
+            ```bash
+            uv tool install comodor==${{ needs.build.outputs.version }}
+            ```
 
             ### PIP
-              ```bash
-              pip install comodor==${{ needs.build.outputs.version }}
-              ```
+
+            ```bash
+            pip install comodor==${{ needs.build.outputs.version }}
+            ```
 
             ### PIPX
-              ```bash
-            pipx install comodor==${{ needs.build.outputs.version }}
-              ```
 
-  # The container image, built from this release and pushed to both registries.
+            ```bash
+            pipx install comodor==${{ needs.build.outputs.version }}
+            ```
+
+      # Publish either:
+      #
+      # - the draft we found before this job, or
+      # - the draft we just created.
+      #
+      # A release that was already published never reaches this step.
+      - name: Publish prepared draft release
+        if: steps.release.outputs.exists != 'true' || steps.release.outputs.draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_id="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              --jq '.id'
+          )"
+
+          if [ -z "$release_id" ]; then
+            echo "::error::Could not determine GitHub Release ID for $TAG."
+            exit 1
+          fi
+
+          gh api \
+            --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            -F draft=false \
+            > /dev/null
+
+          echo "Published GitHub Release $TAG."
+
+      - name: Verify GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          draft="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              --jq '.draft'
+          )"
+
+          if [ "$draft" = "true" ]; then
+            echo "::error::GitHub Release $TAG still exists only as a draft."
+            exit 1
+          fi
+
+          url="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              --jq '.html_url'
+          )"
+
+          {
+            echo "## GitHub Release verified"
+            echo
+            echo "Release: \`$TAG\`"
+            echo
+            echo "$url"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+
+  # ---------------------------------------------------------------------------
+  # Container Image
+  # ---------------------------------------------------------------------------
   #
-  # Chained here rather than triggered by `release: [published]`, which does not
-  # fire when the release is created by a workflow — GitHub does not raise
-  # events for anything done with GITHUB_TOKEN. v0.20.3 shipped and no image was
-  # ever built. Running it here also puts it after `publish`, so PyPI has the
-  # version the Dockerfile is about to ask for.
+  # Docker publication deliberately does NOT depend on the GitHub Release job.
+  #
+  # Once the package is successfully on PyPI, the container can be built.
+  # A manually-created or immutable GitHub Release must never prevent Docker
+  # publication.
+
   image:
     name: Container image
     needs: [build, publish]
+
     if: startsWith(github.ref, 'refs/tags/v')
+
     uses: ./.github/workflows/image.yml
+
     with:
       version: ${{ needs.build.outputs.version }}
+
     permissions:
       contents: read
       packages: write
-    # DOCKERHUB_USERNAME and DOCKERHUB_TOKEN. A called workflow gets no secrets
-    # unless they are passed, and the push would silently fall back to GHCR.
+
+    # Required for optional Docker Hub publication.
+    #
+    # GHCR uses GITHUB_TOKEN automatically.
+    # Docker Hub requires:
+    #
+    #   DOCKERHUB_USERNAME
+    #   DOCKERHUB_TOKEN
+    #
+    # The called workflow handles the absence of those secrets and falls back
+    # to GHCR-only publication.
     secrets: inherit
