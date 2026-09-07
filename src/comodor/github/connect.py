@@ -45,6 +45,37 @@ from .tokens import InstallationToken, TokenError, redact
 #: One call to the Worker.
 TIMEOUT = 30.0
 
+#: Which connection protocol this agent speaks.
+#:
+#: 1. The browser shows a signed receipt and the person copies it into the
+#:    terminal. Every released Comodor before this one.
+#: 2. The Worker holds the result briefly and this machine collects it itself,
+#:    by signing a poll with the key the grant already names. Nothing to copy.
+#:
+#: Asked for on `install`. The Worker answers with what it actually gave —
+#: a deployment that cannot hold a result says 1 — so an agent talking to an
+#: older Worker falls back rather than polling something that will never have
+#: an answer for it.
+PROTOCOL = 2
+PROTOCOL_RECEIPT = 1
+
+#: How often to ask whether the browser has finished.
+#:
+#: Two seconds is under the threshold where a person starts wondering whether
+#: it is working, and thirty polls a minute is nothing to a Worker. It is a
+#: floor rather than a target: `wait_for` sleeps between calls rather than
+#: spinning, so a slow round trip simply makes the interval longer.
+POLL_EVERY = 2.0
+
+#: What a signed poll is asking to do. Part of what is signed, so a signature
+#: made for one action cannot be presented as another.
+CLAIM_ACTION = "claim"
+
+#: The version tag on what a poll signs. Distinct from the grant's on purpose:
+#: two schemes that share a prefix are two schemes one of which can be
+#: presented as the other.
+FLOW_SCHEME = "comodor-github-flow-v1"
+
 #: What joins the fields of a signed request. A newline, because none of the
 #: fields can contain one - so no two different sets of fields can produce the
 #: same bytes to sign, and a boundary cannot be shifted to move meaning from
@@ -53,7 +84,23 @@ SEPARATOR = "\n"
 
 
 class ConnectError(RuntimeError):
-    """The connection could not be completed. Safe to show."""
+    """The connection could not be completed. Safe to show.
+
+    `status` is the HTTP code when there was one, and `None` when the request
+    never got an answer at all. A poller needs the difference: a timeout or a
+    503 is worth trying again, and a 401 is the server saying no.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def transient(self) -> bool:
+        """Whether asking again could plausibly get a different answer."""
+        if self.status is None:
+            return True                      # never reached the server
+        return self.status == 429 or 500 <= self.status < 600
 
 
 @dataclass(frozen=True)
@@ -87,10 +134,23 @@ class Pending:
     #: what the grant will name. Written to disk only once the installation is
     #: known, so an abandoned flow leaves no key behind.
     key: ClientKey | None = None
+    #: What the Worker actually agreed to, which may be less than was asked
+    #: for. An older deployment cannot hold a result, so it answers 1 and the
+    #: person copies a line as before.
+    protocol: int = PROTOCOL_RECEIPT
 
     @property
     def expired(self) -> bool:
         return time.time() >= self.expires_at
+
+    @property
+    def automatic(self) -> bool:
+        """Whether the terminal can collect the result by itself."""
+        return self.protocol >= PROTOCOL and self.key is not None
+
+    @property
+    def seconds_left(self) -> float:
+        return max(0.0, self.expires_at - time.time())
 
 
 class Connector:
@@ -123,12 +183,14 @@ class Connector:
         except ValueError:
             raise ConnectError(
                 f"{self.base} answered {answer.status_code} with "
-                f"something that is not JSON") from None
+                f"something that is not JSON",
+                status=answer.status_code) from None
 
         if not (200 <= answer.status_code < 300):
             said = str(found.get("error") or found.get("message") or "")
             raise ConnectError(
-                f"{self.base} refused: {redact(said) or answer.status_code}")
+                f"{self.base} refused: {redact(said) or answer.status_code}",
+                status=answer.status_code)
         return found if isinstance(found, dict) else {}
 
     # -- starting ---------------------------------------------------------- #
@@ -151,11 +213,15 @@ class Connector:
         key = identity.generate()
         found = self._post("install", {
             # Not a secret and not an identity: a label, so somebody looking at
-            # a half-finished flow can tell which machine started it.
+            # a half-finished flow can tell which machine started it. It shares
+            # a spelling with the GitHub App's slug and is not the same thing —
+            # this says what started the flow, not which app is being installed.
             "client": "comodor-agent",
             # Public, by construction. It is safe in a URL, safe in a log, and
             # useless without the private half that stays on this machine.
             "public_key": key.public,
+            # What this agent can do. The Worker decides what it actually gets.
+            "protocol": PROTOCOL,
         })
         state = str(found.get("state") or "")
         nonce = str(found.get("nonce") or "")
@@ -165,9 +231,15 @@ class Connector:
         if not url.startswith("https://"):
             raise ConnectError(f"refusing to open a non-HTTPS URL: {url[:60]}")
 
+        # The deadline comes from the Worker. A second copy of the lifetime
+        # here would drift the first time the server's changed, and the
+        # terminal would either give up early or wait past the point where a
+        # result can still exist.
         seconds = float(found.get("expires_in") or 900)
+        agreed = int(found.get("protocol") or PROTOCOL_RECEIPT)
         return Pending(state=state, nonce=nonce, url=url,
-                       expires_at=time.time() + seconds, key=key)
+                       expires_at=time.time() + seconds, key=key,
+                       protocol=agreed)
 
     def open(self, pending: Pending) -> bool:
         """Open the browser. False if there is none — the URL is printed then."""
@@ -177,6 +249,112 @@ class Connector:
             return False
 
     # -- finishing ---------------------------------------------------------- #
+
+    def _poll_once(self, pending: Pending) -> dict[str, Any]:
+        """Ask the Worker whether the browser has finished.
+
+        Signed, because a state is not a secret. It travels in a URL — the
+        address bar, the history, the referrer GitHub sends — and its nonce is
+        plain base64 inside it, so anybody who saw the link knows the flow.
+        What they do not have is the private half of the key this machine
+        generated before the flow started, whose public half is inside the
+        signed state and is the key the grant names. Signing with it proves
+        this is the machine the grant is *for*, which is the actual question.
+
+        The timestamp and per-request nonce bound replay: the Worker refuses a
+        signature outside a small window, and the result is handed over once
+        and deleted, so a replay that arrives after this one gets nothing.
+        """
+        if pending.key is None:
+            raise ConnectError("this attempt has no client key to sign with")
+
+        timestamp = int(time.time())
+        # Long enough that two polls a second apart cannot collide, and it is
+        # inside what is signed so it cannot be swapped for another request's.
+        request_nonce = secrets.token_urlsafe(18)
+        message = SEPARATOR.join((FLOW_SCHEME, CLAIM_ACTION, pending.state,
+                                  str(timestamp), request_nonce))
+        return self._post("claim", {
+            "state": pending.state,
+            "timestamp": timestamp,
+            "nonce": request_nonce,
+            "signature": pending.key.sign(message.encode("utf-8")),
+        })
+
+    def wait_for(self, pending: Pending, *, on_tick=None,
+                 interval: float = POLL_EVERY,
+                 sleep=time.sleep, now=time.monotonic) -> GitHubInstallation:
+        """Wait for the browser, and return what it authorised.
+
+        The deadline is the Worker's, carried on `pending`. A second lifetime
+        written here would drift the first time the server's changed, and this
+        end would either give up while a result still existed or wait past the
+        point where one could.
+
+        `sleep` and `now` are arguments so a test can run the whole loop
+        without spending the time. Nothing here busy-waits: every pass either
+        blocks on a request or sleeps.
+        """
+        if not pending.automatic:
+            raise ConnectError(
+                "this connection is not one the terminal can finish by itself")
+
+        deadline = now() + pending.seconds_left
+        # Kept so that giving up can say what kept going wrong, rather than
+        # reporting a timeout when every attempt was refused.
+        last_trouble: ConnectError | None = None
+
+        while True:
+            try:
+                found = self._poll_once(pending)
+                last_trouble = None
+            except ConnectError as problem:
+                # A poll every couple of seconds for up to fifteen minutes is
+                # hundreds of requests, and one dropped connection, one 502
+                # from an edge, or one rate limit must not throw away a flow
+                # the browser may already have completed. A refusal is
+                # different: asking again would be refused again.
+                if not problem.transient:
+                    raise
+                last_trouble = problem
+                found = {"status": "pending"}
+
+            status = str(found.get("status") or "")
+
+            if status == "connected":
+                return self._accept(pending, found)
+            if status == "cancelled":
+                raise ConnectError("the installation was cancelled on GitHub")
+            if status == "expired":
+                raise ConnectError(
+                    "that connection link expired before it was used. Run "
+                    "`comodor github connect` again.")
+            if status == "not_permitted":
+                raise ConnectError(
+                    "GitHub would not confirm that installation is yours to "
+                    "connect, so nothing has been granted."
+                    + (f" ({found['reason']})" if found.get("reason") else ""))
+            if status == "failed":
+                raise ConnectError(
+                    "the authorisation was not completed"
+                    + (f": {found['reason']}" if found.get("reason") else "")
+                    + ". Nothing has been connected.")
+            if status and status != "pending":
+                raise ConnectError(f"the endpoint said {status}")
+
+            if on_tick is not None:
+                on_tick()
+            if now() >= deadline:
+                if last_trouble is not None:
+                    raise ConnectError(
+                        f"gave up waiting: {last_trouble}") from None
+                raise ConnectError(
+                    "nobody finished the authorisation in time. Nothing has "
+                    "been connected.")
+            # Never past the deadline: a sleep that overshoots turns a clean
+            # timeout into one extra pointless request.
+            sleep(min(interval, max(0.0, deadline - now())))
+
 
     def collect(self, pending: Pending, receipt: str) -> GitHubInstallation:
         """Turn the receipt from the browser into a verified installation.
@@ -216,11 +394,28 @@ class Connector:
         if status != "connected":
             raise ConnectError(f"the endpoint said {status or 'nothing'}")
 
+        return self._accept(pending, found)
+
+    def _accept(self, pending: Pending, found: dict[str, Any]) -> GitHubInstallation:
+        """Everything that has to be true before anything is written down.
+
+        One place, called by both protocols. The receipt path and the polling
+        path differ in how the answer arrives and in nothing else that
+        matters, and two copies of these checks would be two things to keep in
+        step — with the copy that drifts being the one nobody is looking at.
+
+        The nonce is checked here rather than only at the Worker. The Worker
+        proves the answer is one it issued; matching the nonce proves it
+        belongs to *this* attempt. That check is against confusion rather than
+        against an attacker: the nonce is readable by anybody holding the
+        state. What stops an attacker is the grant, which names the public key
+        of the machine that started the flow and is issued only after GitHub
+        confirms, as the signed-in user, that the installation is theirs.
+        """
         if str(found.get("nonce") or "") != pending.nonce:
             raise ConnectError(
-                "that receipt belongs to a different connection attempt. "
-                "Run `comodor github connect` again and use the line from "
-                "the page it opens.")
+                "that result belongs to a different connection attempt. "
+                "Run `comodor github connect` again.")
 
         grant = str(found.get("grant") or "")
         if not grant:
@@ -234,9 +429,10 @@ class Connector:
         installation = _installation_from(found.get("installation") or {})
         installation.grant = grant
 
-        # Written only now. An abandoned flow - a browser closed, a receipt
-        # never pasted - leaves nothing on disk, and the file is named after an
-        # installation that has been verified rather than one somebody typed.
+        # Written only now. An abandoned flow - a browser closed, an
+        # authorisation never finished - leaves nothing on disk, and the file
+        # is named after an installation that has been verified rather than
+        # one somebody typed.
         try:
             identity.save(self.config.paths.user,
                           installation.installation_id, pending.key)
