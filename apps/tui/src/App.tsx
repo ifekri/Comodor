@@ -24,9 +24,12 @@ import {
   answerable,
   begin,
   cancel as cancelOf,
+  current as currentQuestion,
+  isSelected,
   move,
+  step,
   toggle,
-  type QuestionState,
+  type FormState,
 } from "@comodor/questions";
 
 import { build, type Screen } from "./commands.ts";
@@ -45,7 +48,7 @@ export function App({ client, onQuit }: AppProps): React.ReactNode {
   const [draft, setDraft] = useState("");
   const [palette, setPalette] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
-  const [question, setQuestion] = useState<QuestionState | undefined>();
+  const [question, setQuestion] = useState<FormState | undefined>();
   const { width } = useTerminalDimensions();
 
   const registry = useMemo(() => build(), []);
@@ -122,6 +125,9 @@ export function App({ client, onQuit }: AppProps): React.ReactNode {
         setQuestion(undefined);
       } else if (named === "up") setQuestion(move(question, -1));
       else if (named === "down") setQuestion(move(question, 1));
+      // A form has several questions; left and right walk between them.
+      else if (named === "left") setQuestion(step(question, -1));
+      else if (named === "right") setQuestion(step(question, 1));
       else if (named === "space") setQuestion(toggle(question));
       else if (named === "return" && answerable(question)) {
         void client.call("question.answer", answerOf(question) as never);
@@ -291,33 +297,44 @@ function Footer({ registry, narrow, state }: {
   );
 }
 
-function QuestionCard({ question }: { question: QuestionState }):
+function QuestionCard({ question }: { question: FormState }):
     React.ReactNode {
+  const asked = currentQuestion(question);
+  const total = question.form.questions.length;
+  if (!asked) return null;
+
   return (
     <box style={{ borderStyle: "single", flexDirection: "column", padding: 1,
                   borderColor: theme["border.active"],
                   backgroundColor: theme["surface.overlay"] }}>
-      <text style={{ fg: theme["text.primary"] }}>{question.question.title}</text>
-      {question.question.options.map((option, index) => {
+      {total > 1
+        ? <text style={{ fg: theme["text.muted"] }}>
+            {`${question.at + 1} of ${total}`}
+          </text>
+        : null}
+      <text style={{ fg: theme["text.primary"] }}>{asked.prompt}</text>
+      {asked.options.map((option, index) => {
         const here = index === question.cursor;
-        const chosen = question.selected.includes(option.id);
-        const box = question.question.multiple
+        const chosen = isSelected(question, option.id);
+        const mark = asked.multiple
           ? (chosen ? "[x]" : "[ ]")
           : (chosen ? "(*)" : "( )");
-        // The background is only set on the row the cursor is on: passing
-        // `undefined` and passing nothing are different under
+        // Only the row under the cursor takes a background: passing
+        // `undefined` and passing nothing are different things under
         // `exactOptionalPropertyTypes`, and the renderer wants the latter.
         const style = here
           ? { fg: theme["text.primary"], bg: theme["surface.selected"] }
           : { fg: theme["text.secondary"] };
         return (
           <text key={option.id} style={style}>
-            {`${box} ${option.label}`}
+            {`${mark} ${option.label}`}
           </text>
         );
       })}
       <text style={{ fg: theme["text.muted"] }}>
-        ↑↓ Move   space Choose   enter Confirm   esc Cancel
+        {total > 1
+          ? "↑↓ Move   ←→ Question   space Choose   enter Send   esc Cancel"
+          : "↑↓ Move   space Choose   enter Send   esc Cancel"}
       </text>
     </box>
   );

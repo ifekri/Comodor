@@ -319,3 +319,123 @@ def test_every_method_in_the_schema_has_a_handler(service):
 def test_every_event_the_schema_names_has_a_shape():
     for name in P.EVENTS:
         assert P.event_shape(name) in P._generated.SHAPES
+
+
+# --------------------------------------------------------------------------- #
+# what a turn may not overtake
+# --------------------------------------------------------------------------- #
+
+def test_a_turn_cannot_stream_before_its_own_acceptance(config):
+    """The acceptance names the message id every delta will carry.
+
+    The turn runs on its own thread, and the transport only holds events
+    raised on the thread answering a request — so without a barrier a fast
+    provider could emit `message.started` before `session.send` returned. A
+    client correlating on `message_id` would see a stream begin for a turn it
+    had not been told about; one that subscribes after the response would drop
+    the opening of every fast answer.
+    """
+    import time
+
+    from comodor.providers.fake import FakeProvider, Script
+
+    class Slow(Server):
+        """Widens the window between dispatching and writing the answer.
+
+        The race is real and narrow: `send` returns, and the answer is written
+        a few instructions later. In an ordinary run the worker thread has not
+        been scheduled yet, so a test without this passes whether the barrier
+        is there or not — which is worse than no test, because it reports the
+        guarantee as held.
+        """
+
+        def _answer(self, message):
+            answer = super()._answer(message)
+            if message.method == "session.send":
+                time.sleep(0.25)
+            return answer
+
+    service = CoreService(config)
+    try:
+        # Made directly, because `serve` returning closes the sessions that
+        # connection opened — so creating it through a first Driver would
+        # leave nothing to send to.
+        session = service.create_session()["id"]
+        handle = service.session(session)
+        handle.assembly.gateway._instances["fake"] = FakeProvider(
+            [Script(text="an answer that arrives immediately")])
+
+        out = io.StringIO()
+        lines = "\n".join(json.dumps(line) for line in [
+            hello(),
+            call("2", "session.send", {"session_id": session, "text": "go"}),
+        ])
+        channel = Channel(reader=io.StringIO(lines + "\n"), writer=out,
+                          log=io.StringIO())
+        server = Slow(service, channel)
+        server.serve()
+
+        transcript = [json.loads(row) for row in out.getvalue().splitlines()]
+        order = [entry.get("event") or f"answer:{entry.get('id')}"
+                 for entry in transcript]
+
+        accepted = order.index("answer:2")
+        streamed = [index for index, name in enumerate(order)
+                    if str(name).startswith("message.")]
+        assert streamed, "nothing streamed, so the ordering was not exercised"
+        assert min(streamed) > accepted, (
+            f"a message event preceded its acceptance: {order}")
+    finally:
+        service.close()
+
+
+def test_closing_the_core_closes_what_each_session_was_holding(config):
+    """Not just the bus.
+
+    The learning engine flushes on close, so leaving assemblies to process
+    teardown lost whatever the last turn had learned on every ordinary exit —
+    silently, because nothing reports it.
+    """
+    closed: list[str] = []
+
+    class Watched:
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def close(self):
+            closed.append("assembly")
+            self._real.close()
+
+    from comodor.application import assemble as real_assemble
+
+    service = CoreService(config,
+                          assemble_with=lambda cfg, **kw: Watched(
+                              real_assemble(cfg, **kw)))
+    service.create_session()
+    service.close()
+
+    assert closed == ["assembly"]
+
+
+def test_a_local_provider_with_no_key_is_reported_as_configured(config):
+    """A model on this machine has no key by design.
+
+    Reading credential presence alone told a client to send somebody to set up
+    a provider that was already working.
+    """
+    from comodor.config import ProviderConfig
+
+    config.providers["ollama"] = ProviderConfig(
+        name="ollama", kind="openai", base_url="http://localhost:11434/v1",
+        api_key="", model="qwen3:8b", label="Ollama")
+    config.provider = "ollama"
+    config.model = "qwen3:8b"
+
+    service = CoreService(config)
+    try:
+        assert service.model()["configured"] is True
+    finally:
+        service.close()

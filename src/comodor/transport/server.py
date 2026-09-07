@@ -92,6 +92,9 @@ class Server:
         self.channel.send(answer)
         # After the answer, in the order they were raised.
         self._flush()
+        # And only now may a turn started by this call begin to stream, so its
+        # first event cannot overtake the acceptance that named its message id.
+        self.service.release()
         if answer["type"] == "response" and message.method == "shutdown":
             self.running = False
             self.channel.close()
@@ -213,11 +216,50 @@ class Server:
         """
         if not self.initialized or self.channel.closed:
             return
+        if self._unsupported(name, params):
+            return
         queue = getattr(self._deferred, "queue", None)
         if queue is not None:
             queue.append((name, params))
             return
         self._send_event(name, params)
+
+    def _unsupported(self, name: str, params: dict[str, Any]) -> bool:
+        """Answer for a client that said it cannot, instead of waiting on it.
+
+        The handshake is a promise in both directions. A client that does not
+        announce `questions` is one that will never draw a form — so sending
+        it `question.requested` blocks the agent for the full timeout on
+        something nobody will ever answer, which reads to a person as the
+        agent having hung.
+
+        The fallback is the same one a headless run already uses: the form is
+        cancelled at once, and the tool tells the model to choose sensible
+        defaults and say which it chose. A refused permission is a refusal,
+        which is the safe end of that decision.
+        """
+        if name == "question.requested" and "questions" not in self.client_capabilities:
+            self._decline(params, "questions")
+            return True
+        if name == "permission.requested" and "permissions" not in self.client_capabilities:
+            self._decline(params, "permissions")
+            return True
+        return False
+
+    def _decline(self, params: dict[str, Any], capability: str) -> None:
+        request_id = str(params.get("id", ""))
+        if not request_id:
+            return
+        self.channel.warn(
+            f"the client did not announce {capability!r}; answering "
+            f"{request_id} on its behalf")
+        try:
+            if capability == "questions":
+                self.service.answer_question(request_id, cancelled=True)
+            else:
+                self.service.reply_permission(request_id, "deny")
+        except Exception as problem:  # pragma: no cover - defensive
+            self.channel.warn(f"could not answer {request_id}: {problem!r}")
 
     def _flush(self) -> None:
         """Release the events this call raised, in the order it raised them."""

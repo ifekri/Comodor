@@ -115,13 +115,19 @@ leave a core running with nobody attached.
 
 ## Questions
 
-`question.requested` is a protocol primitive, not a numbered list in prose. A
-card renders it, `↑↓` moves, `space` chooses, `enter` confirms, `esc` cancels,
-and the answer travels back as `question.answer` naming the question id.
+`question.requested` is a protocol primitive, not a numbered list in prose —
+and it carries a **form**, because the `ask` tool exists to put several short
+questions before a person in one round trip rather than several.
+
+A card renders it: `↑↓` moves between options, `←→` between questions, `space`
+chooses, `enter` sends the whole form, `esc` cancels. Every question gets a
+write-your-own row, which the tool appends itself.
 
 The selection logic is in `@comodor/questions` and has no rendering in it, so
 a browser form and a terminal card agree about what is selected because there
-is one reducer.
+is one reducer. An answer names its question by `header`, never by position:
+a reordered form would otherwise silently reattach every answer to the wrong
+question.
 
 ---
 

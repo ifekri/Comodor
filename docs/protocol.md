@@ -130,6 +130,13 @@ mode.changed         model.changed       notification.created
 `message.delta` carries a `channel`, so extended thinking can be shown or
 hidden by name rather than guessed at from the prose.
 
+`question.requested` carries a **form** — several questions at once, each with
+its own options and its own `multiple` flag — because that is what the agent
+asks. An answer names each question by its `header` rather than its position,
+so a reordered form cannot silently reattach answers to the wrong questions.
+Every question carries exactly one option marked `free`: the write-your-own
+row, which the core appends and which a client should render as a text field.
+
 `tool.output` has no `call_id`, and that is deliberate: the core does not tag
 streamed output with the call it came from, and two tools can run at once.
 Attributing it to the most recently started call would be right most of the

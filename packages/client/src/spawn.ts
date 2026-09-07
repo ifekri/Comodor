@@ -76,6 +76,19 @@ export function spawnCore(options: SpawnOptions = {}): SpawnedCore {
     grace.unref?.();
   };
 
+  // Without this listener a failure to launch — the commonest being
+  // `comodor` not on PATH — is an unhandled `error` event, which ends the
+  // whole process instead of letting the client reject and the TUI print the
+  // diagnostic it has ready.
+  child.on("error", (problem: Error) => {
+    stopped = true;
+    options.onDiagnostic?.(`could not start ${command}: ${problem.message}`);
+    // Ending the line stream is what turns a launch failure into a rejected
+    // handshake rather than a wait for a core that will never speak.
+    child.stdout.push(null);
+    options.onExit?.(null, null);
+  });
+
   child.on("exit", (code, signal) => {
     stopped = true;
     diagnostics.close();

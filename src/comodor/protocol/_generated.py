@@ -170,28 +170,23 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "id": ("str", True),
         "label": ("str", True),
         "description": ("str", False),
+        "free": ("bool", False),
     },
     "QuestionRequest": {
         "id": ("str", True),
         "session_id": ("str", True),
         "title": ("str", True),
-        "description": ("str", False),
-        "options": ("list", True),
-        "multiple": ("bool", True),
-        "allow_custom": ("bool", False),
-        "default": ("list", False),
+        "questions": ("list", True),
     },
     "QuestionResolved": {
         "id": ("str", True),
         "session_id": ("str", True),
-        "selected": ("list", False),
-        "custom": ("str", False),
+        "answers": ("list", False),
         "cancelled": ("bool", False),
     },
     "AnswerParams": {
         "id": ("str", True),
-        "selected": ("list", False),
-        "custom": ("str", False),
+        "answers": ("list", False),
         "cancelled": ("bool", False),
     },
     "PermissionRequest": {
@@ -270,6 +265,17 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "code": ("str", True),
         "message": ("str", True),
         "data": ("dict", False),
+    },
+    "QuestionField": {
+        "header": ("str", True),
+        "prompt": ("str", True),
+        "options": ("list", True),
+        "multiple": ("bool", True),
+    },
+    "QuestionAnswer": {
+        "header": ("str", True),
+        "chosen": ("list", True),
+        "written": ("str", False),
     },
 }
 
@@ -394,25 +400,26 @@ class _QuestionOptionRequired(TypedDict):
 
 
 class QuestionOption(_QuestionOptionRequired, total=False):
-    description: str
-
-
-class _QuestionRequestRequired(TypedDict):
-    id: str
-    session_id: str
-    title: str
-    options: list[QuestionOption]
-    multiple: bool
-
-
-class QuestionRequest(_QuestionRequestRequired, total=False):
-    """A question as a protocol primitive, so every client renders a control
-    rather than parsing a numbered list out of prose.
+    """One row a person can pick. `id` is what travels back in `chosen`.
+    `free` marks the write-your-own row, which carries typed text instead
+    of a fixed label and is rendered differently.
     """
 
     description: str
-    allow_custom: bool
-    default: list[str]
+    free: bool
+
+
+class QuestionRequest(TypedDict):
+    """A form the agent is waiting on, as a protocol primitive rather than a
+    numbered list in prose. It carries *several* questions because the
+    agent asks several at once — one round trip rather than four — so a
+    client renders a form, not a prompt.
+    """
+
+    id: str
+    session_id: str
+    title: str
+    questions: list[QuestionField]
 
 
 class _QuestionResolvedRequired(TypedDict):
@@ -421,8 +428,7 @@ class _QuestionResolvedRequired(TypedDict):
 
 
 class QuestionResolved(_QuestionResolvedRequired, total=False):
-    selected: list[str]
-    custom: str
+    answers: list[QuestionAnswer]
     cancelled: bool
 
 
@@ -431,8 +437,7 @@ class _AnswerParamsRequired(TypedDict):
 
 
 class AnswerParams(_AnswerParamsRequired, total=False):
-    selected: list[str]
-    custom: str
+    answers: list[QuestionAnswer]
     cancelled: bool
 
 
@@ -574,3 +579,28 @@ class _ErrorRequired(TypedDict):
 
 class Error(_ErrorRequired, total=False):
     data: dict[str, Any]
+
+
+class QuestionField(TypedDict):
+    """One question within a form. `header` is its stable name and is what an
+    answer is matched on — not the position, which would silently reattach
+    every answer if a question were reordered.
+    """
+
+    header: str
+    prompt: str
+    options: list[QuestionOption]
+    multiple: bool
+
+
+class _QuestionAnswerRequired(TypedDict):
+    header: str
+    chosen: list[str]
+
+
+class QuestionAnswer(_QuestionAnswerRequired, total=False):
+    """What came back for one question. `chosen` holds option ids; `written`
+    holds what was typed into the free row.
+    """
+
+    written: str

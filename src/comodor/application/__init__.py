@@ -151,6 +151,9 @@ class SessionHandle:
     _worker: threading.Thread | None = None
     _pending: dict[str, Request] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    #: Held closed until the acceptance for this turn has been written. See
+    #: `CoreService.send`.
+    _released: threading.Event = field(default_factory=threading.Event)
 
     @property
     def mode(self) -> str:
@@ -276,8 +279,23 @@ class CoreService:
             handle.busy = True
         message_id = uuid.uuid4().hex[:12]
         handle.message_id = message_id
+        handle._released.clear()
 
         def work() -> None:
+            # The turn waits for its own acceptance to be on the wire.
+            #
+            # Without this the worker can emit `message.started` and the first
+            # deltas before `send` has returned — the transport holds events
+            # raised on the *answering* thread, and this is a different one.
+            # A client correlating on `message_id` would then see a stream
+            # begin for a turn it has not been told about, and a client that
+            # waits for the response before subscribing would drop the
+            # opening of every fast answer.
+            #
+            # Bounded, so a caller that never releases — an embedder using the
+            # service directly — degrades to a slightly late start rather than
+            # a turn that never runs.
+            handle._released.wait(timeout=5.0)
             try:
                 handle.assembly.agent.run(text)
             except Exception as problem:  # pragma: no cover - defensive
@@ -295,7 +313,20 @@ class CoreService:
         handle._worker = worker
         self._emit(handle, "session.updated", {"session": handle.describe()})
         worker.start()
+        if self.on_event is None:
+            # Nobody is transporting, so nobody will call `release`.
+            handle._released.set()
         return {"accepted": True, "message_id": message_id}
+
+    def release(self) -> None:
+        """Let any waiting turn begin.
+
+        Called by the transport once a response has been written, which is
+        what makes "a request is answered before the events it caused" true
+        for `session.send` as well as for the calls that emit inline.
+        """
+        for handle in self.list_handles():
+            handle._released.set()
 
     def cancel(self, session_id: str) -> dict[str, Any]:
         handle = self.session(session_id)
@@ -318,10 +349,11 @@ class CoreService:
         return {
             "provider": provider,
             "model": config.active_model() or "",
-            # Whether a key exists, never the key. This is how a client shows
-            # "this provider needs setting up" without being handed the secret
-            # that would let it set anything up itself.
-            "configured": bool(entry and entry.api_key),
+            # Whether it could answer right now, never the key. `ready` and
+            # not `api_key`: a model on this machine has no key by design, and
+            # reading credential presence alone told a client to send somebody
+            # to set up a provider that was already working.
+            "configured": bool(entry and entry.ready),
         }
 
     def set_model(self, model: str, provider: str = "") -> dict[str, Any]:
@@ -351,20 +383,23 @@ class CoreService:
 
     # -- answering what the agent asked ------------------------------------ #
 
-    def answer_question(self, request_id: str, selected: list[str] | None = None,
-                        custom: str = "", cancelled: bool = False) -> dict[str, Any]:
+    def answer_question(self, request_id: str,
+                        answers: list[dict[str, Any]] | None = None,
+                        cancelled: bool = False) -> dict[str, Any]:
         handle, request = self._pending(request_id)
         from .. import questions as forms
 
         if cancelled:
             request.answer(forms.CANCELLED)
         else:
-            request.answer(_encode_answer(selected or [], custom))
+            request.answer(_encode_answer(answers or []))
         handle._pending.pop(request_id, None)
-        self._emit(handle, "question.resolved", {
-            "id": request_id, "session_id": handle.id,
-            "selected": list(selected or []), "custom": custom,
-            "cancelled": cancelled})
+        resolved: dict[str, Any] = {"id": request_id, "session_id": handle.id}
+        if cancelled:
+            resolved["cancelled"] = True
+        else:
+            resolved["answers"] = list(answers or [])
+        self._emit(handle, "question.resolved", resolved)
         return {"ok": True}
 
     def reply_permission(self, request_id: str, choice: str) -> dict[str, Any]:
@@ -387,13 +422,27 @@ class CoreService:
     # -- lifecycle --------------------------------------------------------- #
 
     def close(self) -> None:
-        """Stop every session. Turns are daemon threads and do not hold exit."""
+        """Stop every session, and close what it was holding.
+
+        The interrupt comes first so a running turn stops before the things it
+        is using are taken away. Then the assembly, which flushes the learning
+        store and releases tool, provider and MCP resources — leaving those to
+        process teardown lost whatever the last turn had learned on every
+        ordinary exit, which is the kind of thing nobody notices because
+        nothing reports it.
+        """
         for handle in self.list_handles():
             try:
                 if handle.busy:
                     handle.assembly.agent.interrupt("shutting down")
             except Exception:
                 pass
+            # Let the worker notice the interrupt rather than closing the bus
+            # out from under it.
+            worker = handle._worker
+            if worker is not None and worker.is_alive():
+                worker.join(timeout=5.0)
+            handle.assembly.close()
             try:
                 handle.assembly.bus.close()
             except Exception:
@@ -409,16 +458,30 @@ class CoreService:
             self.on_event(handle.id, name, params)
 
 
-def _encode_answer(selected: list[str], custom: str) -> str:
-    """What the `ask` tool expects back.
+def _encode_answer(answers: list[dict[str, Any]]) -> str:
+    """What the `ask` tool actually reads back.
 
-    The tool reads a plain string, so a structured answer is flattened here
-    rather than the tool learning a second shape. Custom text wins when both
-    arrive, because a person who typed something meant it.
+    Not a sentence. `Ask.run` passes whatever arrives straight to
+    `questions.decode_answers`, which accepts only the JSON list that
+    `encode_answers` produces — anything else is read as a cancelled form and
+    the agent carries on with its own defaults.
+
+    This wrote a comma-joined string, which meant every answer a client sent
+    was silently discarded and the model was told the person had declined to
+    answer. There was no error anywhere; the form simply had no effect.
     """
-    if custom:
-        return custom
-    return ", ".join(selected)
+    from .. import questions as forms
+
+    built = [
+        forms.Answer(
+            header=str(entry.get("header", "")),
+            prompt=str(entry.get("prompt", "")),
+            chosen=[str(choice) for choice in entry.get("chosen", []) or []],
+            written=str(entry.get("written", "")),
+        )
+        for entry in answers
+    ]
+    return forms.encode_answers(built)
 
 
 def _relay(service: CoreService, handle: SessionHandle):
@@ -528,30 +591,48 @@ def _relay_request(service: CoreService, handle: SessionHandle,
 
 
 def _question_shape(session_id: str, request: Request) -> dict[str, Any]:
-    """A `Request` from the `ask` tool in the protocol's question shape."""
-    meta = request.meta or {}
-    raw_options = meta.get("options") or request.options or []
-    options: list[dict[str, Any]] = []
-    for index, option in enumerate(raw_options):
-        if isinstance(option, dict):
-            options.append({
-                "id": str(option.get("id", option.get("label", index))),
-                "label": str(option.get("label", option.get("id", index))),
-                **({"description": str(option["description"])}
-                   if option.get("description") else {}),
-            })
-        else:
-            options.append({"id": str(option), "label": str(option)})
+    """A form from the `ask` tool, in the protocol's shape.
 
-    body: dict[str, Any] = {
+    The questions are in `meta["questions"]` — `Ask` leaves `request.options`
+    empty on purpose, because the answer is a JSON document rather than one of
+    a fixed set and the interfaces that validate `options` by membership would
+    reject every real answer.
+
+    Reading `options` instead, as this did, produced an event carrying zero
+    of them: a form a client could render and nobody could fill in.
+
+    A form is several questions. `Ask` exists to ask four short things in one
+    round trip rather than four, so flattening it to one prompt would undo the
+    tool.
+    """
+    from .. import questions as forms
+
+    meta = request.meta or {}
+    questions = forms.decode(meta.get("questions") or [])
+
+    return {
         "id": request.id,
         "session_id": session_id,
         "title": request.prompt,
-        "options": options,
-        "multiple": bool(meta.get("multiple", False)),
+        "questions": [
+            {
+                # The header is the stable name an answer is matched on.
+                # Position would silently reattach every answer if a question
+                # were reordered.
+                "header": question.header,
+                "prompt": question.prompt,
+                "multiple": bool(question.multi),
+                "options": [
+                    {
+                        "id": option.label,
+                        "label": option.label,
+                        **({"description": option.description}
+                           if option.description else {}),
+                        **({"free": True} if option.free else {}),
+                    }
+                    for option in question.options
+                ],
+            }
+            for question in questions
+        ],
     }
-    if request.detail:
-        body["description"] = request.detail
-    if meta.get("allow_custom", True):
-        body["allow_custom"] = True
-    return body

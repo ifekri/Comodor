@@ -182,39 +182,41 @@ export interface WorkspaceResult {
   name?: string;
 }
 
+/**
+ * One row a person can pick. `id` is what travels back in `chosen`. `free`
+ * marks the write-your-own row, which carries typed text instead of a fixed
+ * label and is rendered differently.
+ */
 export interface QuestionOption {
   id: string;
   label: string;
   description?: string;
+  free?: boolean;
 }
 
 /**
- * A question as a protocol primitive, so every client renders a control
- * rather than parsing a numbered list out of prose.
+ * A form the agent is waiting on, as a protocol primitive rather than a
+ * numbered list in prose. It carries *several* questions because the agent
+ * asks several at once — one round trip rather than four — so a client
+ * renders a form, not a prompt.
  */
 export interface QuestionRequest {
   id: string;
   session_id: string;
   title: string;
-  description?: string;
-  options: Array<QuestionOption>;
-  multiple: boolean;
-  allow_custom?: boolean;
-  default?: Array<string>;
+  questions: Array<QuestionField>;
 }
 
 export interface QuestionResolved {
   id: string;
   session_id: string;
-  selected?: Array<string>;
-  custom?: string;
+  answers?: Array<QuestionAnswer>;
   cancelled?: boolean;
 }
 
 export interface AnswerParams {
   id: string;
-  selected?: Array<string>;
-  custom?: string;
+  answers?: Array<QuestionAnswer>;
   cancelled?: boolean;
 }
 
@@ -329,6 +331,28 @@ export interface Error_ {
   code: string;
   message: string;
   data?: Record<string, unknown>;
+}
+
+/**
+ * One question within a form. `header` is its stable name and is what an
+ * answer is matched on — not the position, which would silently reattach
+ * every answer if a question were reordered.
+ */
+export interface QuestionField {
+  header: string;
+  prompt: string;
+  options: Array<QuestionOption>;
+  multiple: boolean;
+}
+
+/**
+ * What came back for one question. `chosen` holds option ids; `written`
+ * holds what was typed into the free row.
+ */
+export interface QuestionAnswer {
+  header: string;
+  chosen: Array<string>;
+  written?: string;
 }
 
 /**
