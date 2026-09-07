@@ -20,7 +20,41 @@ import test from 'node:test';
 
 import { APP_SLUG } from './app-identity.test-support.mjs';
 import { PROTOCOL_RECEIPT, PROTOCOL_RENDEZVOUS } from './config.js';
+import { ConnectionFlow } from './rendezvous.js';
 import { handle } from './routes.js';
+
+/** A Durable Object namespace, in memory. */
+function namespace() {
+  const kept = new Map();
+  const instances = new Map();
+  const storage = (name) => {
+    if (!kept.has(name)) kept.set(name, new Map());
+    const own = kept.get(name);
+    return {
+      async get(key) { return own.get(key); },
+      async put(key, value) { own.set(key, value); },
+      async delete(key) { own.delete(key); },
+      async list({ prefix = '', limit = Infinity } = {}) {
+        const found = new Map();
+        for (const [k, v] of own) {
+          if (k.startsWith(prefix) && found.size < limit) found.set(k, v);
+        }
+        return found;
+      },
+      async deleteAll() { own.clear(); },
+      async setAlarm() {},
+    };
+  };
+  return {
+    idFromName(name) { return { name: String(name) }; },
+    get(id) {
+      if (!instances.has(id.name)) {
+        instances.set(id.name, new ConnectionFlow({ storage: storage(id.name) }));
+      }
+      return instances.get(id.name);
+    },
+  };
+}
 
 const SECRET = 'a-deployment-secret-for-tests';
 const BASE = 'https://comodor.ai/api/integrations/github';
@@ -115,10 +149,17 @@ test('a new client on a deployment that can hold results gets the automatic one'
      async () => {
   const publicKey = await aPublicKey();
   const { body } = await install(
-    { ...configured, CONNECTION_FLOW: {} },
+    { ...configured, CONNECTION_FLOW: namespace() },
     { public_key: publicKey, protocol: PROTOCOL_RENDEZVOUS });
 
   assert.equal(body.protocol, PROTOCOL_RENDEZVOUS);
+  // Not GitHub's URL any more: the terminal opens a Comodor page that spends a
+  // one-time capability out of the fragment and only then redirects.
+  const url = new URL(body.url);
+  assert.equal(url.host, 'comodor.ai');
+  assert.equal(url.pathname, '/api/integrations/github/launch');
+  assert.ok(url.hash.startsWith('#k='), 'the capability must ride in the fragment');
+  assert.ok(!url.search.includes('k='), 'and never in the query string');
 });
 
 test('a new client on a deployment that cannot is told so, and still works',

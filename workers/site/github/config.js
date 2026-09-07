@@ -74,6 +74,26 @@ export const PROOF_WINDOW = 60;
 /** What a signed poll is allowed to ask for. */
 export const CLAIM_ACTION = 'claim';
 
+/**
+ * How long the browser has to start walking a flow.
+ *
+ * The gap between a terminal opening a browser and that browser reaching the
+ * launch page — a redirect, not a decision, so seconds rather than minutes.
+ * Short on purpose: this is the window in which a leaked launch link is worth
+ * something, and choosing repositories happens *after* it, under the state's
+ * own fifteen minutes.
+ */
+export const LAUNCH_LIVES_FOR = 120;
+
+/**
+ * The cookie that says this browser is the one the terminal opened.
+ *
+ * Path-scoped to the integration so it is never sent with a request for the
+ * marketing site, and named apart from the OAuth verifier cookie because the
+ * two answer different questions and expire at different times.
+ */
+export const BROWSER_COOKIE = 'comodor_flow';
+
 class ConfigurationError extends Error {
   constructor(message) {
     super(message);

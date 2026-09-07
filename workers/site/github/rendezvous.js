@@ -37,7 +37,8 @@
  * here is one in-flight handshake, for as long as the handshake takes.
  */
 
-import { RESULT_LIVES_FOR } from './config.js';
+import { LAUNCH_LIVES_FOR, RESULT_LIVES_FOR } from './config.js';
+import { sameBytes } from './browser.js';
 
 const KEY = 'result';
 const SEEN = 'seen:';
@@ -121,6 +122,40 @@ export class ConnectionFlow {
       // and only until they have what they asked for.
       await this.state.storage.delete(KEY);
       return Response.json(found);
+    }
+
+    if (action === 'arm') {
+      // The browser capability for this flow, stored as its hash. Written at
+      // `install`, before the terminal has opened anything, so there is no
+      // window in which a flow exists and cannot be started.
+      const { digest, expires, state } = await request.json();
+      // The state is kept here so the browser never has to carry it to the
+      // launch page. It is not a secret — GitHub echoes it back in a query
+      // string — but a value nobody has to hold is a value nobody can leak.
+      await this.state.storage.put('launch', { digest, expires, state });
+      await this.state.storage.setAlarm(Date.now() + RESULT_LIVES_FOR * 1000);
+      return Response.json({ armed: true });
+    }
+
+    if (action === 'spend') {
+      // One browser, once. The capability is compared against its stored
+      // hash and then deleted, so a launch link that has been followed is a
+      // link that no longer works — a refresh, a second tab, or somebody who
+      // read it over a shoulder all arrive at the same closed door.
+      const { digest } = await request.json();
+      const armed = await this.state.storage.get('launch');
+      if (!armed) return Response.json({ spent: false, why: 'gone' });
+      if (armed.expires * 1000 <= Date.now()) {
+        await this.state.storage.delete('launch');
+        return Response.json({ spent: false, why: 'expired' });
+      }
+      if (!sameBytes(armed.digest, digest)) {
+        // Deliberately not deleted. A wrong guess must not be able to burn
+        // somebody else's capability before they use it.
+        return Response.json({ spent: false, why: 'wrong' });
+      }
+      await this.state.storage.delete('launch');
+      return Response.json({ spent: true, state: armed.state || '' });
     }
 
     if (action === 'claim-setup') {
@@ -216,6 +251,26 @@ export async function take(env, nonce, requestNonce) {
 /** What is waiting, without taking it. */
 export async function peek(env, nonce) {
   return (await ask(env, nonce, 'peek')).json();
+}
+
+/** Arm a flow with the hash of its browser capability. */
+export async function arm(env, nonce, digest, state, { now = Date.now() } = {}) {
+  const answer = await ask(env, nonce, 'arm', {
+    digest, state, expires: Math.floor(now / 1000) + LAUNCH_LIVES_FOR,
+  });
+  return (await answer.json()).armed === true;
+}
+
+/**
+ * Spend it, once.
+ *
+ * `{ spent: false, why }` for gone, expired or wrong — the caller turns all
+ * three into one answer, because distinguishing them tells a prober which
+ * guess was closer.
+ */
+export async function spend(env, nonce, digest) {
+  const answer = await ask(env, nonce, 'spend', { digest });
+  return answer.json();
 }
 
 /**

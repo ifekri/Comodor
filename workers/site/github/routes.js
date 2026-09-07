@@ -84,11 +84,21 @@ import {
   sameBytes,
   verifierFrom,
 } from './oauth.js';
+import {
+  clearCookie as clearFlowCookie,
+  cookieFrom,
+  digestOf,
+  issueCookie,
+  mintCapability,
+  openCookie,
+} from './browser.js';
 import { verifyProof } from './proof.js';
 import {
+  arm,
   available as rendezvousAvailable,
   claimSetup,
   deliver,
+  spend,
   take,
 } from './rendezvous.js';
 import { issue, open, sameSecret } from './state.js';
@@ -196,6 +206,22 @@ export async function handle(request, env) {
     return receive(request, env);
   }
 
+  if (leaf === 'launch') {
+    if (request.method !== 'GET') return json({ error: 'GET only' }, 405);
+    return launchPage(url.searchParams.get('f') || '');
+  }
+
+  if (leaf === 'launch/bind') {
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    let asked = {};
+    try {
+      asked = await request.json();
+    } catch {
+      asked = {};
+    }
+    return bind(env, secret, asked);
+  }
+
   if (leaf === 'setup') {
     if (request.method !== 'GET') return json({ error: 'GET only' }, 405);
     return setup(request, env, secret, url);
@@ -219,7 +245,7 @@ export async function handle(request, env) {
 
   if (leaf === 'install') {
     try {
-      return await start(env, secret, body);
+      return await start(env, secret, body, url.origin);
     } catch (error) {
       if (error instanceof ConfigurationError) {
         // A deployment missing its app name cannot produce a working link, and
@@ -269,7 +295,7 @@ function usableKey(text) {
   return bytes.length === 65 && bytes.charCodeAt(0) === 0x04;
 }
 
-async function start(env, secret, body) {
+async function start(env, secret, body, origin) {
   // The agent's public key for this connection, raw P-256, base64url. It goes
   // into the signed state so it arrives at `setup` unaltered without anything
   // being stored: the state's own signature is what protects it.
@@ -296,13 +322,139 @@ async function start(env, secret, body) {
     publicKey,
     protocol,
   });
+
+  // Fail before handing anything back if the app is not configured, so a
+  // misconfigured deployment never mints a flow nobody can finish.
+  const github = installUrl(env, made.state);
+
+  let url = github;
+  if (protocol === PROTOCOL_RENDEZVOUS) {
+    // The browser capability. Random, one-time, short-lived, and deliberately
+    // not inside the state: the state goes to GitHub and comes back in a
+    // query string, so anything in it is known to everyone downstream. This
+    // is what says *which browser* may walk this flow.
+    //
+    // It rides in the fragment, which browsers do not send in requests and do
+    // not put in `Referer`, so it reaches the launch page without reaching a
+    // log, a proxy or GitHub.
+    const capability = mintCapability();
+    await arm(env, made.nonce, await digestOf(capability), made.state);
+    url = `${origin}${BASE}/launch?f=${encodeURIComponent(made.nonce)}`
+      + `#k=${encodeURIComponent(capability)}`;
+  }
+
   return json({
     state: made.state,
     nonce: made.nonce,
-    url: installUrl(env, made.state),
+    url,
     expires_in: made.payload.e - Math.floor(Date.now() / 1000),
     // What the agent actually got, which may be less than it asked for.
     protocol,
+  });
+}
+
+/**
+ * The page the terminal actually opens.
+ *
+ * It exists to move a secret from a URL fragment into a cookie without the
+ * secret ever being in a request. The fragment is not sent to a server, is not
+ * in `Referer`, and is not in an access log; a script reads it here, posts it
+ * once to `launch/bind`, and replaces the address bar with GitHub's.
+ *
+ * Headers matter as much as the script. `Referrer-Policy: no-referrer` so that
+ * nothing about this page reaches GitHub. `Cache-Control: no-store` because
+ * the URL that produced it is a capability. A content policy allowing only
+ * this one inline script, because the whole page is that script and anything
+ * else executing here would be executing next to a live capability.
+ *
+ * It needs JavaScript, and says so rather than failing silently. A browser
+ * that will not run a redirect script is not a browser that can complete a
+ * GitHub OAuth authorisation either.
+ */
+function launchPage(nonce) {
+  const flow = JSON.stringify(String(nonce));
+  const script =
+    `(async () => {`
+    + `const k = new URLSearchParams(location.hash.slice(1)).get('k') || '';`
+    // Out of the address bar before anything else, so a screenshot, a shared
+    // window or a shoulder never has it after this instant.
+    + `history.replaceState(null, '', location.pathname);`
+    + `const fail = (m) => { document.getElementById('s').textContent = m; };`
+    + `if (!k) return fail('This link is incomplete. Start again from your terminal.');`
+    + `let r;`
+    + `try {`
+    + `r = await fetch(${JSON.stringify(`${BASE}/launch/bind`)}, {`
+    + `method: 'POST', credentials: 'same-origin',`
+    + `headers: { 'content-type': 'application/json' },`
+    + `body: JSON.stringify({ flow: ${flow}, capability: k }) });`
+    + `} catch { return fail('Could not reach Comodor. Start again from your terminal.'); }`
+    + `const b = await r.json().catch(() => ({}));`
+    + `if (!r.ok || !b.url) return fail(b.error || 'This connection link is no longer valid.');`
+    // `replace`, not `assign`: the launch page must not be a back-button away.
+    + `location.replace(b.url);`
+    + `})();`;
+
+  return new Response(
+    `<!doctype html><meta charset="utf-8">`
+    + `<meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<meta name="referrer" content="no-referrer">`
+    + `<title>Connecting · Comodor</title>`
+    + `<style>body{background:#0d0b0a;color:#e8e0d8;`
+    + `font:16px/1.6 ui-sans-serif,system-ui,sans-serif;margin:0;`
+    + `display:grid;place-items:center;min-height:100vh;padding:24px}`
+    + `main{max-width:30rem;text-align:center}`
+    + `h1{font-size:1.2rem;color:#ff9d5c;margin:0 0 .4rem}p{color:#b8aca2}</style>`
+    + `<main><h1>Opening GitHub…</h1><p id="s">One moment.</p>`
+    + `<noscript><p>This step needs JavaScript. Enable it and open the link `
+    + `from your terminal again.</p></noscript></main>`
+    + `<script>${script}</script>`,
+    { status: 200, headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      'referrer-policy': 'no-referrer',
+      // One inline script and nothing else. `unsafe-inline` is what allows
+      // the script this page *is*; there is no other origin it may load from,
+      // no frame it may be put in, and nothing it may connect to but here.
+      'content-security-policy':
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+        + "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+      'x-frame-options': 'DENY',
+    } });
+}
+
+/**
+ * Spend the browser capability and say where to go next.
+ *
+ * The only place a capability is accepted, and it is accepted once. What comes
+ * back is a cookie naming this exact flow and GitHub's install URL — which
+ * carries the state, as it always did, because GitHub has to echo it back.
+ *
+ * Every refusal is the same sentence. Gone, expired, wrong and never-armed are
+ * four different facts and telling them apart tells a prober which guess was
+ * closer.
+ */
+async function bind(env, secret, body) {
+  const flow = String(body.flow || '');
+  const capability = String(body.capability || '');
+  const refused = json(
+    { error: 'This connection link is no longer valid.' }, 403);
+
+  if (!flow || !capability || !rendezvousAvailable(env)) return refused;
+
+  const spent = await spend(env, flow, await digestOf(capability));
+  if (!spent.spent) return refused;
+
+  // The state comes back from the flow rather than from the browser, so the
+  // launch link never carried it and nothing had to be trusted to hand it
+  // over. The cookie is what makes this browser different from any other.
+  if (!spent.state) return refused;
+  return new Response(JSON.stringify({ url: installUrl(env, spent.state) }), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'set-cookie': await issueCookie(secret, flow),
+    },
   });
 }
 
@@ -353,16 +505,35 @@ async function setup(request, env, secret, url) {
       + '<code>comodor github connect</code>.</p>');
   }
 
-  // One browser leg per flow, where there is somewhere to record that. A
-  // state is not a secret, so somebody else holding one could otherwise walk
-  // it through here with an installation of their own and have the result
-  // delivered to a terminal that chose neither. Taking the leg first is what
-  // the browser this terminal just opened does.
-  if (Number(opened.p) === PROTOCOL_RENDEZVOUS && rendezvousAvailable(env)
-      && !(await claimSetup(env, opened.n))) {
-    return page('This connection link has already been used',
-      '<p>Each link works once. Start again from your terminal with '
-      + '<code>comodor github connect</code>.</p>');
+  // Two credentials, and both are required.
+  //
+  // The state says which flow this is and is not secret — it goes to GitHub
+  // and comes back in a query string, where an address bar, a history and a
+  // referrer all see it. The cookie says this is the browser the terminal
+  // opened, and it can only have been issued by spending a one-time
+  // capability that travelled in a URL fragment and was never in a request.
+  //
+  // Without the second, holding a state was enough to walk this leg with an
+  // installation of one's own and have the result delivered to a terminal
+  // that chose neither.
+  if (Number(opened.p) === PROTOCOL_RENDEZVOUS && rendezvousAvailable(env)) {
+    const carried = await openCookie(secret, cookieFrom(request));
+    if (!carried || !sameSecret(carried.n, opened.n)) {
+      // Missing, expired, forged, or belonging to another flow — one answer
+      // for all four, because distinguishing them tells a prober which guess
+      // was closer.
+      return page('This connection link is no longer valid',
+        '<p>Start it from your terminal with '
+        + '<code>comodor github connect</code>, and follow the link it '
+        + 'opens.</p>', { 'set-cookie': clearFlowCookie() });
+    }
+    if (!(await claimSetup(env, opened.n))) {
+      // A second trip through setup on one flow: a refresh, a back button, or
+      // a second attempt. The first owns it.
+      return page('This connection link has already been used',
+        '<p>Each link works once. Start again from your terminal with '
+        + '<code>comodor github connect</code>.</p>');
+    }
   }
 
   // Deliberately no `readInstallation` here. It would tell an unauthenticated

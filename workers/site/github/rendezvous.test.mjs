@@ -473,19 +473,20 @@ test('taking the browser leg of one flow does not take another\'s', async () => 
   assert.equal(await claimSetup(on, theirs.nonce), true);
 });
 
-test('the setup route refuses a flow whose leg is already taken', async () => {
-  const { claimSetup } = await import('./rendezvous.js');
+test('the setup route refuses a browser with no binding at all', async () => {
+  // The browser leg needs two credentials now — the state and a cookie
+  // earned by spending a one-time capability — so a request carrying only
+  // the state does not reach the "already used" check. It does not reach
+  // anything. `launch-binding.test.mjs` covers the rest of that door.
   const on = env();
   const agent = await anAgent();
   const flow = await begin(on, agent);
-
-  await claimSetup(on, flow.nonce);
 
   const answer = await handle(new Request(
     `${BASE}/setup?installation_id=42&state=${encodeURIComponent(flow.state)}`,
   ), on);
   const text = await answer.text();
 
-  assert.match(text, /already been used/);
+  assert.match(text, /no longer valid/);
   assert.ok(!text.includes('installations/new'), 'and does not re-offer the app');
 });
