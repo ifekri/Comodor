@@ -11,9 +11,9 @@ works with nothing connected, and disconnecting takes nothing away from it.
 comodor github connect
 ```
 
-That opens a browser, GitHub asks which account and which repositories, and a
-line comes back to paste into the terminal. There is no personal access token
-to make, store, or remember to rotate.
+That opens a browser, GitHub asks which account and which repositories, and
+the terminal notices when you are done. Nothing to copy, nothing to paste, and
+no personal access token to make, store, or remember to rotate.
 
 ---
 
@@ -28,7 +28,7 @@ comodor github connect
         ├─ comodor.ai issues a short-lived signed state
         │  carrying your public key
         │
-        ├─ browser opens github.com/apps/comodor/installations/new
+        ├─ browser opens github.com/apps/comodor-agent/installations/new
         │
         ├─ you choose an account, then repositories
         │
@@ -38,9 +38,20 @@ comodor github connect
         ├─ you approve once more — this is the step that proves
         │  the installation is yours and not somebody else's
         │
-        └─ the page shows a signed line; you paste it back
-           it carries a grant naming your public key
+        ├─ comodor.ai holds the result for a few minutes, and the
+        │  terminal collects it — signing the request with the key
+        │  it made at the start, because a link seen in a browser
+        │  must not be enough to collect somebody's connection
+        │
+        └─ connected. The grant names your public key
 ```
+
+The browser says it is finished and you close it. The terminal has already
+noticed.
+
+**If the terminal was talking to an older `comodor.ai`**, the page shows a
+signed line to paste instead — that is the previous protocol, and it still
+works. The server says which one it can do; the agent does not guess.
 
 ### Why GitHub asks you twice
 
@@ -83,20 +94,31 @@ is not stored, not logged, not shown, and never sent to Comodor on your
 machine — the agent never learns that step happened. Everything after it uses
 an installation token, which is the app acting on the repositories you chose.
 
-The line you paste is a **receipt**: it says which installation GitHub
-confirmed, signed so it cannot be altered, and it expires in fifteen minutes.
-It is not a password and it grants nothing on its own.
+What crosses back to your terminal says which installation GitHub confirmed,
+signed so it cannot be altered, and it expires in a few minutes. It is not a
+password and it grants nothing on its own.
 
-Why you copy it rather than the browser doing it silently: `comodor.ai` is a
-static site with no database, and there is nowhere for it to leave a message
-for your terminal. You are the one party present at both ends.
+How it crosses: `comodor.ai` keeps it for one flow, for a few minutes, and your
+terminal asks for it — signing that request with the key it generated before
+the flow started. That signature is the point. A connection link travels
+through an address bar, a browser history and a referrer header, so seeing one
+must not be enough to collect the connection it belongs to. Holding the private
+half is.
+
+Nothing about your connection is stored on the server beyond that handshake.
+There is no account, no installation database, and the record that matters is
+the config file and key on your own machine.
+
+**The older way still works.** A `comodor.ai` that cannot hold a result shows
+the signed line for you to paste, which is how this worked before. The server
+says which it can do, and the agent follows rather than assuming.
 
 ### Why the id from the URL is not enough
 
 GitHub sends `installation_id` to `comodor.ai` as a query parameter, and a
 query parameter is something anybody can type. Before anything is signed,
 `comodor.ai` authenticates as the app and asks GitHub what that installation
-is. What you paste is that verified answer, not the number from the URL.
+is. What reaches your terminal is that verified answer, not the number from the URL.
 
 ### Why knowing an installation id gets you nothing
 

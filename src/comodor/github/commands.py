@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 
+from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -68,6 +69,103 @@ def run(config: Config, args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 
 
+def _link(url: str, label: str) -> Text:
+    """A word that is the URL, rather than the URL printed as a word.
+
+    An installation link is about two hundred and seventy characters of signed
+    state. Printed, it wraps across four lines of an eighty-column terminal,
+    pushes everything around it out of shape, and cannot be clicked anyway.
+    OSC 8 — which Rich emits for a `link` style — makes the terminal treat a
+    short label as the link, so it stays one line at every width and is still
+    one click.
+
+    Terminals that do not understand OSC 8 show the label and ignore the
+    escape. That is why the URL is also copied to the clipboard, and why the
+    fallback prints it in full when neither works: nobody may be left with a
+    link they cannot reach.
+    """
+    return Text(label, style=f"bold link {url}")
+
+
+def _offer_the_link(console, url: str, opened: bool) -> None:
+    """Show the way to the page without printing the page's address at it.
+
+    Three routes, best first, and the full URL appears at most once — never
+    twice, which is what a "here it is, and here it is again in case" layout
+    becomes on a narrow terminal.
+    """
+    from ..ui import clipboard
+
+    lines: list[Text] = [
+        Text("Browser opened." if opened else "No browser could be opened."),
+        Text(""),
+        _link(url, "Open GitHub installation page"),
+    ]
+
+    copied = ""
+    if not opened or clipboard.available():
+        try:
+            copied = clipboard.copy(url)
+        except Exception:
+            # `copy` raises with advice about installing a tool, and that
+            # advice is beside the point here: the link is already open, or
+            # about to be printed in full below. A clipboard that cannot be
+            # reached must not be the thing that ends a connection.
+            copied = ""
+
+    if copied:
+        lines += [Text(""),
+                  Text("Installation link copied to clipboard.", style="dim")]
+    elif not opened:
+        # Nothing opened it and nothing can copy it, so the only way left is
+        # to read it. Once, in its own block, where wrapping pushes nothing
+        # else out of shape.
+        lines += [Text(""),
+                  Text("Copy this into a browser:", style="dim"),
+                  Text(url, style="dim", overflow="fold")]
+
+    lines += [Text(""),
+              Text("Choose the account, then the repositories it may see. "
+                   "GitHub then asks you to sign in once more — that step is "
+                   "what proves the installation is yours.", style="dim")]
+
+    # A Group rather than one joined Text. Joining flattens each piece into a
+    # single Text with a single overflow policy, and the URL's `fold` is lost
+    # with it — so the one line that must be readable in full gets cropped
+    # instead, which is the opposite of what the fallback is for.
+    console.print(Panel(Group(*lines), title=" Connect GitHub ",
+                        title_align="left", border_style="accent"))
+
+
+def _wait(console, connector, pending):
+    """Wait for the browser to finish, and collect the result.
+
+    The normal path. Nothing is pasted, nothing is read from the terminal, and
+    the person does not run a second command — the browser finishes and this
+    notices.
+    """
+    with console.status("Waiting for GitHub authorization…", spinner="dots"):
+        return connector.wait_for(pending)
+
+
+def _paste(console, connector, pending):
+    """The older flow, for a Worker that cannot hold a result.
+
+    Kept because a deployment can be behind this client, and being handed a
+    receipt with nowhere to put it is worse than being asked for one.
+    """
+    console.print()
+    console.print("That page will show one line. Paste it here — it says "
+                  "which installation was confirmed, signed so it cannot be "
+                  "altered.", style="dim")
+    console.print()
+    try:
+        receipt = input("Paste the line from that page: ").strip()
+    except EOFError:
+        raise KeyboardInterrupt from None
+    return connector.collect(pending, receipt)
+
+
 def _connect(console, config: Config) -> int:
     from .connect import ConnectError, Connector
 
@@ -84,29 +182,18 @@ def _connect(console, config: Config) -> int:
 
     opened = connector.open(pending)
     console.print()
-    console.print(Panel(
-        Text.from_markup(
-            ("A browser is open at:\n" if opened else
-             "Open this in a browser:\n")
-            + f"[bold]{pending.url}[/bold]\n\n"
-            "Choose the account, then the repositories it may see.\n\n"
-            "GitHub then asks you to sign in once more. That step is what proves "
-            "the installation is yours: an installation id alone is just a "
-            "number in a URL, and anybody could type one.\n\n"
-            "After it, a page shows one line. Paste it here — "
-            "it says which installation was confirmed, signed so it cannot be "
-            "altered, and nothing is saved until it checks out."),
-        title=" Connect GitHub ", title_align="left", border_style="accent"))
+    _offer_the_link(console, pending.url, opened)
 
-    console.print()
     try:
-        receipt = input("Paste the line from that page: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        console.print("\nNothing was connected.")
+        installation = (_wait(console, connector, pending) if pending.automatic
+                        else _paste(console, connector, pending))
+    except KeyboardInterrupt:
+        # Nothing was written, because nothing is written until a result has
+        # been checked. The browser may still finish; the result expires
+        # unclaimed, and a result nobody claimed grants nobody anything.
+        console.print()
+        console.print("Nothing was connected.")
         return 1
-
-    try:
-        installation = connector.collect(pending, receipt)
     except ConnectError as problem:
         console.print()
         console.print(Panel(Text(str(problem)), title=" Not connected ",
