@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="350" height="40" viewBox="0 0 350 40" role="img" aria-label="Animated text graphic">
+  <defs>
+        
+        <clipPath id="typingClip0" clipPathUnits="userSpaceOnUse">
+            <rect x="17.320" y="5.300" width="0" height="27.900">
+              <animate attributeName="width" values="0;12.960;23.760;34.560;45.360;56.160;66.960;77.760;88.560;99.360;110.160;120.960;131.760;142.560;153.360;164.160;174.960;185.760;196.560;207.360;218.160;228.960;239.760;250.560;261.360;272.160;282.960;293.760;304.560;315.360" keyTimes="0.000000;0.034483;0.068966;0.103448;0.137931;0.172414;0.206897;0.241379;0.275862;0.310345;0.344828;0.379310;0.413793;0.448276;0.482759;0.517241;0.551724;0.586207;0.620690;0.655172;0.689655;0.724138;0.758621;0.793103;0.827586;0.862069;0.896552;0.931034;0.965517;1.000000" calcMode="discrete" begin="0.3500s" dur="2.4000s" fill="freeze" />
+            </rect>
+          </clipPath>
+        <linearGradient id="boxLinearGradient"
+          gradientUnits="userSpaceOnUse"
+          color-interpolation="sRGB"
+          x1="224.613"
+          y1="-69.503"
+          x2="125.387"
+          y2="109.503">
+          <stop offset="0%" stop-color="#09150f" />
+<stop offset="30.000%" stop-color="#09150f" />
+<stop offset="32.917%" stop-color="#09150f" />
+<stop offset="35.833%" stop-color="#09150f" />
+<stop offset="38.750%" stop-color="#09150f" />
+<stop offset="41.667%" stop-color="#09150f" />
+<stop offset="44.583%" stop-color="#09140f" />
+<stop offset="47.500%" stop-color="#09140f" />
+<stop offset="50.417%" stop-color="#09140f" />
+<stop offset="53.333%" stop-color="#09130e" />
+<stop offset="56.250%" stop-color="#09130e" />
+<stop offset="59.167%" stop-color="#09130e" />
+<stop offset="62.083%" stop-color="#09120e" />
+<stop offset="65.000%" stop-color="#0a120e" />
+<stop offset="67.917%" stop-color="#0a120e" />
+<stop offset="70.833%" stop-color="#0a110e" />
+<stop offset="73.750%" stop-color="#0a110e" />
+<stop offset="76.667%" stop-color="#0a110e" />
+<stop offset="79.583%" stop-color="#0a100d" />
+<stop offset="82.500%" stop-color="#0a100d" />
+<stop offset="85.417%" stop-color="#0a100d" />
+<stop offset="88.333%" stop-color="#0a0f0d" />
+<stop offset="91.250%" stop-color="#0a0f0d" />
+<stop offset="94.167%" stop-color="#0a0f0d" />
+<stop offset="97.083%" stop-color="#0a0f0d" />
+<stop offset="100.000%" stop-color="#0a0f0d" />
+<stop offset="100%" stop-color="#0a0f0d" />
+        </linearGradient>
+        <radialGradient id="boxRadialGradient"
+          gradientUnits="objectBoundingBox"
+          color-interpolation="sRGB"
+          cx="50%"
+          cy="50%"
+          r="72%">
+          <stop offset="0%" stop-color="#09150f" />
+<stop offset="30.000%" stop-color="#09150f" />
+<stop offset="32.917%" stop-color="#09150f" />
+<stop offset="35.833%" stop-color="#09150f" />
+<stop offset="38.750%" stop-color="#09150f" />
+<stop offset="41.667%" stop-color="#09150f" />
+<stop offset="44.583%" stop-color="#09140f" />
+<stop offset="47.500%" stop-color="#09140f" />
+<stop offset="50.417%" stop-color="#09140f" />
+<stop offset="53.333%" stop-color="#09130e" />
+<stop offset="56.250%" stop-color="#09130e" />
+<stop offset="59.167%" stop-color="#09130e" />
+<stop offset="62.083%" stop-color="#09120e" />
+<stop offset="65.000%" stop-color="#0a120e" />
+<stop offset="67.917%" stop-color="#0a120e" />
+<stop offset="70.833%" stop-color="#0a110e" />
+<stop offset="73.750%" stop-color="#0a110e" />
+<stop offset="76.667%" stop-color="#0a110e" />
+<stop offset="79.583%" stop-color="#0a100d" />
+<stop offset="82.500%" stop-color="#0a100d" />
+<stop offset="85.417%" stop-color="#0a100d" />
+<stop offset="88.333%" stop-color="#0a0f0d" />
+<stop offset="91.250%" stop-color="#0a0f0d" />
+<stop offset="94.167%" stop-color="#0a0f0d" />
+<stop offset="97.083%" stop-color="#0a0f0d" />
+<stop offset="100.000%" stop-color="#0a0f0d" />
+<stop offset="100%" stop-color="#0a0f0d" />
+        </radialGradient>
+        <filter id="gradientDitherFilter" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="1" seed="7" stitchTiles="stitch" result="noise" />
+          <feColorMatrix in="noise" type="saturate" values="0" result="monoNoise" />
+          <feComponentTransfer in="monoNoise" result="softNoise">
+            <feFuncR type="linear" slope="0.18" intercept="0.41" />
+            <feFuncG type="linear" slope="0.18" intercept="0.41" />
+            <feFuncB type="linear" slope="0.18" intercept="0.41" />
+            <feFuncA type="table" tableValues="0 0.0070" />
+          </feComponentTransfer>
+        </filter>
+        <filter id="boxShadowOnly" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+          <feGaussianBlur in="SourceAlpha" stdDeviation="9" result="blur" />
+          <feOffset in="blur" dx="0" dy="0" result="offsetBlur" />
+          <feFlood flood-color="#000000" flood-opacity="0" result="shadowColor" />
+          <feComposite in="shadowColor" in2="offsetBlur" operator="in" result="shadow" />
+        </filter>
+        <linearGradient id="shineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#469eb4" stop-opacity="0" />
+          <stop offset="45%" stop-color="#469eb4" stop-opacity="0.087" />
+          <stop offset="50%" stop-color="#469eb4" stop-opacity="0.250" />
+          <stop offset="55%" stop-color="#469eb4" stop-opacity="0.087" />
+          <stop offset="100%" stop-color="#469eb4" stop-opacity="0" />
+        </linearGradient>
+        <clipPath id="boxClip">
+          <rect x="0" y="0" width="350" height="40" rx="12" ry="12" />
+        </clipPath></defs>
+  <rect x="0" y="0" width="350" height="40" rx="12" ry="12" fill="#0c1418" fill-opacity="1" /><rect x="0" y="0" width="350" height="40" rx="12" ry="12" fill="none" stroke="#11758d" stroke-width="1" />
+  <g clip-path="url(#boxClip)">
+    <text x="175" y="26" text-anchor="middle" xml:space="preserve" font-family="'Maple Mono'" font-size="18" font-weight="300" font-style="normal" fill="#80eaff" letter-spacing="0px" clip-path="url(#typingClip0)">curl -sSL get.comodor.ai | sh</text>
+    <rect x="18.400" y="11.240" width="2.5" height="17.100" rx="1.25" fill="#e8e8e8">
+        <animate attributeName="opacity" values="1;0;1" dur="0.7s" repeatCount="indefinite" />
+        <animate attributeName="x" values="18.400;29.200;40.000;50.800;61.600;72.400;83.200;94.000;104.800;115.600;126.400;137.200;148.000;158.800;169.600;180.400;191.200;202.000;212.800;223.600;234.400;245.200;256.000;266.800;277.600;288.400;299.200;310.000;320.800;331.600" keyTimes="0.000000;0.034483;0.068966;0.103448;0.137931;0.172414;0.206897;0.241379;0.275862;0.310345;0.344828;0.379310;0.413793;0.448276;0.482759;0.517241;0.551724;0.586207;0.620690;0.655172;0.689655;0.724138;0.758621;0.793103;0.827586;0.862069;0.896552;0.931034;0.965517;1.000000" calcMode="discrete" begin="0.35s" dur="2.4s" fill="freeze" />
+        <animate attributeName="y" values="11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240;11.240" keyTimes="0.000000;0.034483;0.068966;0.103448;0.137931;0.172414;0.206897;0.241379;0.275862;0.310345;0.344828;0.379310;0.413793;0.448276;0.482759;0.517241;0.551724;0.586207;0.620690;0.655172;0.689655;0.724138;0.758621;0.793103;0.827586;0.862069;0.896552;0.931034;0.965517;1.000000" calcMode="discrete" begin="0.35s" dur="2.4s" fill="freeze" />
+        <set attributeName="visibility" to="hidden" begin="2.7500s" fill="freeze" />
+      </rect>
+  </g>
+  <g clip-path="url(#boxClip)" pointer-events="none">
+        <g transform="skewX(-2)">
+          <rect x="-128.39683077966993" y="-40" width="117" height="120" fill="url(#shineGradient)" opacity="1">
+            <animate attributeName="x" from="-128.39683077966993" to="478.3968307796699" begin="3.0500s" dur="1.3s" repeatCount="1" fill="remove" />
+          </rect>
+        </g>
+      </g>
+</svg>
