@@ -53,12 +53,30 @@ Settings → Build → Connect**:
 | Build command | `npm run build:cloudflare` | *(none)* |
 | Deploy command | `npx wrangler deploy` | `npx wrangler deploy` |
 | Branch control | `site` | `site` |
-| Build watch paths | `app/*`, `components/*`, `lib/*`, `public/*`, `wrangler.jsonc`, `package.json`, `next.config.mjs` | `workers/get/*` |
+| Build watch paths | `app/*`, `components/*`, `lib/*`, `public/*`, `workers/site/*`, `wrangler.jsonc`, `package.json`, `next.config.mjs` | `workers/get/*` |
 
 Both are connected and both have deployed from a push: `comodor-site` went
 from `git push` to live on the real domain in twenty seconds.
 
-Three things that make the difference between this working and failing:
+**`workers/site/*` has to be in the site's watch paths, and was not.** The
+GitHub App's endpoints live there. Without the path, a commit that changes only
+`workers/site/github/routes.js` matches nothing, no build runs, and the branch
+moves while the deployed Worker does not — the shape of failure where every
+test is green and production is a version old.
+
+It has happened. The app first deployed because its pull request also touched
+`wrangler.jsonc` and `package.json`, which *are* watched; a later fix needed
+the empty commit `b537226`, titled "Trigger Cloudflare deployment", to make
+Cloudflare notice at all. The table above now includes the path.
+
+**Changing this table does not change Cloudflare.** Build watch paths live in
+the dashboard, not in this repository — nothing here is read by Workers Builds.
+Editing the row is documentation catching up with what the setting must be;
+somebody has to open **Workers & Pages → comodor-site → Settings → Build →
+Build watch paths** and add `workers/site/*` by hand. Until then, a change
+confined to the Worker still will not deploy.
+
+Three more things that make the difference between this working and failing:
 
 **The Worker name has to match.** Cloudflare's rule is that the name in the
 dashboard must equal the `name` in the Wrangler config *in the root directory
@@ -375,7 +393,7 @@ Set the secrets once:
 npx wrangler secret put GITHUB_APP_ID
 npx wrangler secret put GITHUB_APP_PRIVATE_KEY     # PKCS#8 — see below
 npx wrangler secret put GITHUB_APP_WEBHOOK_SECRET
-npx wrangler secret put GITHUB_APP_SLUG            # the app's URL name
+npx wrangler secret put GITHUB_APP_SLUG            # the app's URL name: comodor-agent
 npx wrangler secret put GITHUB_APP_CLIENT_ID       # user verification
 npx wrangler secret put GITHUB_APP_CLIENT_SECRET   # user verification
 ```

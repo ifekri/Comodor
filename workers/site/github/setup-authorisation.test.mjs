@@ -25,6 +25,7 @@
 
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
+import { APP_SLUG } from './app-identity.test-support.mjs';
 
 import { handle } from './routes.js';
 import { openGrant } from './grant.js';
@@ -39,7 +40,7 @@ const ENV = {
   GITHUB_APP_WEBHOOK_SECRET: SECRET,
   GITHUB_APP_CLIENT_ID: 'Iv1.notarealclientid',
   GITHUB_APP_CLIENT_SECRET: 'not-a-real-client-secret',
-  GITHUB_APP_SLUG: 'comodor',
+  GITHUB_APP_SLUG: APP_SLUG,
 };
 
 /**
@@ -329,6 +330,42 @@ test('an invalid OAuth code is refused', async () => {
   assert.ok(!body.includes('g1.'));
 });
 
+/**
+ * What every unusable state is answered with.
+ *
+ * One string for four causes — forged, expired, wrong secret, edited — because
+ * telling them apart tells a prober which guess was closer. It used to say
+ * "That link has expired", which is a cause the Worker cannot be sure of: a
+ * bad signature is not a timeout, and somebody sent looking for one wastes
+ * their time. The wording now says only what is certainly true.
+ */
+const NO_LONGER_VALID = 'no longer valid';
+
+test('every unusable state gets the same answer, and it does not guess a cause',
+     async () => {
+  const pages = [];
+  stubFetch({});
+
+  const forged = `u1.${btoa(JSON.stringify({
+    v: 1, i: VICTIM_INSTALLATION, k: ATTACKER_KEY, n: 'n',
+    c: 'whatever', e: Math.floor(Date.now() / 1000) + 600,
+  })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}.deadbeef`;
+  pages.push(await (await getRequest(
+    `${BASE}/callback?code=a-code&state=${encodeURIComponent(forged)}`,
+    { cookie: `${COOKIE}=a-verifier` })).text());
+
+  pages.push(await (await aCallback({ now: Date.now() - 601_000 })).text());
+
+  const [first, second] = pages;
+  assert.ok(first.includes(NO_LONGER_VALID));
+  assert.equal(first, second,
+    'a forged state and an expired one must be indistinguishable');
+  assert.ok(!first.toLowerCase().includes('signature'),
+    'the page must not name the mechanism that failed');
+  assert.ok(!/expired/.test(first),
+    'and must not assert a cause it cannot be sure of');
+});
+
 test('a forged state is refused', async () => {
   stubFetch({});
   const forged = `u1.${btoa(JSON.stringify({
@@ -340,7 +377,7 @@ test('a forged state is refused', async () => {
     `${BASE}/callback?code=a-code&state=${encodeURIComponent(forged)}`,
     { cookie: `${COOKIE}=a-verifier` });
 
-  assert.ok((await answer.text()).includes('expired'));
+  assert.ok((await answer.text()).includes(NO_LONGER_VALID));
   assert.equal(seen.length, 0, 'no code may be exchanged for a state we did not sign');
 });
 
@@ -348,7 +385,7 @@ test('an expired state is refused', async () => {
   stubFetch({});
   const answer = await aCallback({ now: Date.now() - 601_000 });
 
-  assert.ok((await answer.text()).includes('expired'));
+  assert.ok((await answer.text()).includes(NO_LONGER_VALID));
   assert.equal(seen.length, 0);
 });
 
@@ -363,7 +400,7 @@ test('a state signed with a different secret is refused', async () => {
     `${BASE}/callback?code=a-code&state=${encodeURIComponent(state)}`,
     { cookie: `${COOKIE}=v` });
 
-  assert.ok((await answer.text()).includes('expired'));
+  assert.ok((await answer.text()).includes(NO_LONGER_VALID));
   assert.equal(seen.length, 0);
 });
 
@@ -386,7 +423,7 @@ test('an edited state is refused', async () => {
     + `&state=${encodeURIComponent(`${prefix}.${edited}.${signature}`)}`,
     { cookie: `${COOKIE}=v` });
 
-  assert.ok((await answer.text()).includes('expired'));
+  assert.ok((await answer.text()).includes(NO_LONGER_VALID));
   assert.equal(seen.length, 0);
 });
 

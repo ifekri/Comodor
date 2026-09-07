@@ -23,6 +23,7 @@
 
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
+import { APP_SLUG } from './app-identity.test-support.mjs';
 
 import { handle } from './routes.js';
 import { CHECKING_PERMISSIONS, RUNTIME_PERMISSIONS } from './entitlement.js';
@@ -36,7 +37,7 @@ const ENV = {
   GITHUB_APP_ID: '12345',
   GITHUB_APP_CLIENT_ID: 'Iv1.notarealclientid',
   GITHUB_APP_CLIENT_SECRET: 'not-a-real-client-secret',
-  GITHUB_APP_SLUG: 'comodor',
+  GITHUB_APP_SLUG: APP_SLUG,
   // Filled in by the first test that needs one; `jwt.js` is stubbed out below
   // in every test here, because what is under test is the order of calls, not
   // RSA (which `github.test.mjs` covers against a real generated key).

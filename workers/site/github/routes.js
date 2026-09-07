@@ -62,6 +62,15 @@
  */
 
 import { mintToken, readInstallation } from './api.js';
+import {
+  BASE_PATH,
+  CLAIM_ACTION,
+  PROTOCOL_RECEIPT,
+  PROTOCOL_RENDEZVOUS,
+  ConfigurationError,
+  installUrl,
+  protocolFrom,
+} from './config.js';
 import { RUNTIME_PERMISSIONS, stillEntitled } from './entitlement.js';
 import { authorise, issueGrant } from './grant.js';
 import {
@@ -75,17 +84,12 @@ import {
   sameBytes,
   verifierFrom,
 } from './oauth.js';
+import { verifyProof } from './proof.js';
+import { available as rendezvousAvailable, deliver, take } from './rendezvous.js';
 import { issue, open, sameSecret } from './state.js';
 import { receive } from './webhook.js';
 
-const BASE = '/api/integrations/github';
-
-/** Where a browser goes to install the app. Derived, never configured twice. */
-function installUrl(env, state) {
-  const slug = String(env.GITHUB_APP_SLUG || 'comodor');
-  return `https://github.com/apps/${slug}/installations/new`
-    + `?state=${encodeURIComponent(state)}`;
-}
+const BASE = BASE_PATH;
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -208,8 +212,20 @@ export async function handle(request, env) {
     body = {};
   }
 
-  if (leaf === 'install') return start(env, secret, body);
-  if (leaf === 'claim') return claim(secret, body);
+  if (leaf === 'install') {
+    try {
+      return await start(env, secret, body);
+    } catch (error) {
+      if (error instanceof ConfigurationError) {
+        // A deployment missing its app name cannot produce a working link, and
+        // a link to nothing is worse than an error: the person follows it,
+        // gets a 404 from GitHub, and has no reason to suspect this end.
+        return json({ error: 'the GitHub integration is not configured' }, 503);
+      }
+      throw error;
+    }
+  }
+  if (leaf === 'claim') return claim(env, secret, body);
   if (leaf === 'token') return token(env, secret, body);
   if (leaf === 'verify') return verify(env, secret, body);
   // Nothing to forget: there is no server-side record of a connection. The
@@ -260,15 +276,28 @@ async function start(env, secret, body) {
     return json({ error: 'a connection needs a client public key' }, 400);
   }
 
+  // Which protocol this agent speaks, remembered inside the signed state so
+  // `callback` knows which page to render without being told again by a query
+  // parameter anybody could edit. An agent that asks for the automatic flow on
+  // a deployment that cannot hold a result is answered with the receipt one
+  // rather than with a failure — every released client can still finish.
+  let protocol = protocolFrom(body.protocol);
+  if (protocol === PROTOCOL_RENDEZVOUS && !rendezvousAvailable(env)) {
+    protocol = PROTOCOL_RECEIPT;
+  }
+
   const made = await issue(secret, {
     client: String(body.client || ''),
     publicKey,
+    protocol,
   });
   return json({
     state: made.state,
     nonce: made.nonce,
     url: installUrl(env, made.state),
     expires_in: made.payload.e - Math.floor(Date.now() / 1000),
+    // What the agent actually got, which may be less than it asked for.
+    protocol,
   });
 }
 
@@ -295,13 +324,21 @@ async function setup(request, env, secret, url) {
 
   const opened = await open(secret, state);
   if (!opened) {
-    return page('That link has expired', '<p>Start again from your terminal '
-      + 'with <code>comodor github connect</code>.</p>');
+    // Malformed, edited, invented or expired — deliberately one answer, so a
+    // prober cannot learn which guess was closer. The wording says only what
+    // is certainly true: it does not work. Claiming "expired" for what may be
+    // a bad signature is a guess presented as a fact, and it sends somebody
+    // looking for a timeout that never happened.
+    return page('This connection link is no longer valid',
+      '<p>Start again from your terminal with '
+      + '<code>comodor github connect</code>.</p>');
   }
 
   if (action === 'cancel' || !installationId) {
-    const receipt = await sign(secret, { n: opened.n, status: 'cancelled' });
-    return page('Cancelled', cameBack(receipt));
+    return finish(env, secret, opened, { status: 'cancelled' }, {
+      title: 'Cancelled',
+      body: '<p>Nothing was connected. You can close this window.</p>',
+    });
   }
 
   const id = Number(installationId);
@@ -321,6 +358,7 @@ async function setup(request, env, secret, url) {
       installationId: id,
       publicKey: opened.k,
       nonce: opened.n,
+      protocol: Number(opened.p) || PROTOCOL_RECEIPT,
       redirectUri: callbackUrl(url),
     });
   } catch (error) {
@@ -383,8 +421,10 @@ async function callback(request, env, secret, url) {
   const claims = await openState(secret, url.searchParams.get('state') || '');
   if (!claims) {
     // Expired, edited, invented, or an install state presented here. All the
-    // same answer: telling them apart tells a prober which guess was closer.
-    return page('That link has expired',
+    // same answer: telling them apart tells a prober which guess was closer —
+    // and for the same reason the answer does not name a cause it cannot be
+    // sure of.
+    return page('This connection link is no longer valid',
       '<p>Start again from your terminal with '
       + '<code>comodor github connect</code>.</p>', clear);
   }
@@ -458,20 +498,59 @@ async function callback(request, env, secret, url) {
       clear);
   }
 
+  return finish(env, secret, claims,
+    { status: 'connected', installation: user, grant },
+    {
+      title: 'GitHub connected successfully',
+      // The account, because it is the one fact worth confirming — somebody
+      // with two GitHub logins needs to know which one this went to. Nothing
+      // else: an installation id, a grant or a state printed here would be
+      // debug output shown to a person who has just finished a task.
+      body: `<p>Comodor now has access to the repositories you selected on `
+        + `<strong>${escapeHtml(user.account.login)}</strong>.</p>`,
+      extra: clear,
+    });
+}
+
+/**
+ * How a flow ends, in the one place that knows which protocol it is.
+ *
+ * Protocol 2 leaves the result in the flow's Durable Object and shows a page
+ * that says so. Protocol 1 signs a receipt and shows it to be copied, exactly
+ * as before, because every released agent is waiting for that.
+ *
+ * The result is delivered *before* the page is returned, and a failure to
+ * deliver falls back to the receipt rather than to an error. A person who has
+ * just chosen repositories should not be told to start again because a
+ * storage write did not land — the older path still works and they are
+ * already standing in front of it.
+ */
+async function finish(env, secret, claims, result, look) {
+  const protocol = Number(claims.p) || PROTOCOL_RECEIPT;
+
+  if (protocol === PROTOCOL_RENDEZVOUS && rendezvousAvailable(env)) {
+    try {
+      await deliver(env, claims.n, result);
+      return page(look.title, `${look.body}${returnToTerminal()}`, look.extra || {});
+    } catch {
+      // Fall through to the receipt. Nothing is lost: the receipt is the same
+      // signed statement, carried by hand instead.
+    }
+  }
+
   const receipt = await sign(secret, {
+    ...result,
     n: claims.n,
-    status: 'connected',
-    installation: user,
-    grant,
     // Bounded independently of the state: the installation is verified now,
     // and the receipt should not outlive the terminal that is waiting.
     e: Math.floor(Date.now() / 1000) + 900,
   });
+  return page(look.title, `${look.body}${cameBack(receipt)}`, look.extra || {});
+}
 
-  return page(
-    `Connected to ${escapeHtml(user.account.login)}`,
-    `<p>Paste this line into the terminal that is waiting:</p>`
-    + cameBack(receipt), clear);
+/** What the page says when the terminal is going to notice by itself. */
+function returnToTerminal() {
+  return '<p>You can close this window and return to Comodor.</p>';
 }
 
 /**
@@ -484,7 +563,8 @@ async function callback(request, env, secret, url) {
  * they are the one party guaranteed to be at both ends.
  */
 function cameBack(receipt) {
-  return `<p><code style="word-break:break-all;display:block;padding:.8em">`
+  return `<p>Paste this line into the terminal that is waiting:</p>`
+    + `<p><code style="word-break:break-all;display:block;padding:.8em">`
     + `${escapeHtml(receipt)}</code></p>`
     + `<p style="font-size:.9em">It is not a password — it says which `
     + `installation was confirmed, signed so it cannot be altered. It expires `
@@ -500,13 +580,24 @@ function escapeHtml(text) {
 /**
  * The agent collecting its result.
  *
- * Two shapes, because the browser and the agent both reach this: the browser
- * posts the receipt it was given, and the agent polls with the state it
- * started. Without shared storage those cannot meet, so the agent's poll
- * answers `pending` until the person pastes the receipt — which the page's
- * own script does for them.
+ * Two shapes, one endpoint, because they are the same question asked by two
+ * generations of client and a second endpoint would mean two things to keep
+ * in step.
+ *
+ *   legacy   { receipt }                      — the line from the page
+ *   current  { state, timestamp, nonce, signature }
+ *
+ * The current shape is a poll. It answers `pending` until the browser has
+ * finished, then hands over the result once and forgets it.
+ *
+ * **Why it is signed.** A state is in the address bar, the history and the
+ * referrer, and its nonce is plain base64 inside it — so knowing the flow is
+ * not knowing anything private. What is private is the key the agent made
+ * before the flow started, whose public half is inside the signed state and is
+ * the key the grant names. A poll signed by it proves the caller is the
+ * machine the grant is *for*. See `proof.js`.
  */
-async function claim(secret, body) {
+async function claim(env, secret, body) {
   const receipt = String(body.receipt || '');
   if (receipt) {
     const found = await unsign(secret, receipt);
@@ -524,7 +615,42 @@ async function claim(secret, body) {
       : { status: found.status || 'cancelled', nonce: found.n });
   }
 
-  return json({ error: 'no receipt' }, 400);
+  const state = String(body.state || '');
+  if (!state) {
+    return json({ error: 'no receipt and no flow to poll' }, 400);
+  }
+
+  // The state first, because it is what says which key to check the signature
+  // with — the same ordering `grant.js` uses, and for the same reason.
+  const claims = await open(secret, state);
+  if (!claims) {
+    // Expired, edited or invented. One answer, and an honest one: the flow
+    // cannot be polled, and naming which of those it was would tell a prober
+    // which guess was closer.
+    return json({ status: 'expired' });
+  }
+
+  if (!rendezvousAvailable(env)) {
+    // A deployment that cannot hold a result. `install` would have answered
+    // protocol 1 to this agent, so reaching here means a client polling a
+    // flow it was told to finish by hand.
+    return json({ error: 'this deployment does not hold results' }, 409);
+  }
+
+  try {
+    await verifyProof(claims, { ...body, state }, { action: CLAIM_ACTION });
+  } catch (error) {
+    return json({ error: error.message }, error.status || 401);
+  }
+
+  const found = await take(env, claims.n);
+  if (!found || found.status === 'pending') {
+    return json({ status: 'pending' });
+  }
+  return json(found.status === 'connected'
+    ? { status: 'connected', nonce: claims.n,
+       installation: found.installation, grant: found.grant }
+    : { status: found.status || 'cancelled', nonce: claims.n });
 }
 
 /**

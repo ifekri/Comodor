@@ -181,7 +181,8 @@ export function oauthCredentials(env) {
  * other.
  */
 export async function issueState(secret, { installationId, publicKey, nonce,
-                                           challenge, now = Date.now() }) {
+                                           challenge, protocol = 1,
+                                           now = Date.now() }) {
   const id = Number(installationId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new Error('a user check needs an installation id');
@@ -195,6 +196,9 @@ export async function issueState(secret, { installationId, publicKey, nonce,
     k: String(publicKey),
     n: String(nonce || ''),
     c: String(challenge),
+    // Carried through from the install state so the callback knows whether the
+    // terminal is waiting to be handed the result or waiting to be shown one.
+    p: Number(protocol) || 1,
     e: Math.floor(now / 1000) + LIVES_FOR,
   };
   const encoded = base64url(new TextEncoder().encode(JSON.stringify(claims)));
@@ -278,13 +282,14 @@ export function verifierFrom(request) {
  * in a referrer header, a proxy log, or the address bar.
  */
 export async function begin(env, secret, { installationId, publicKey, nonce,
-                                           redirectUri, now = Date.now() }) {
+                                           redirectUri, protocol = 1,
+                                           now = Date.now() }) {
   const { clientId } = oauthCredentials(env);
 
   const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
   const challenge = await challengeFor(verifier);
   const state = await issueState(secret, {
-    installationId, publicKey, nonce, challenge, now,
+    installationId, publicKey, nonce, challenge, protocol, now,
   });
 
   const url = new URL(AUTHORISE);

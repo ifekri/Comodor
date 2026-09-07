@@ -112,7 +112,7 @@ export function sameSecret(left, right) {
  * anybody holding the state, and nothing here treats it as a secret.
  */
 export async function issue(secret, { now = Date.now(), client = '',
-                                      publicKey = '' } = {}) {
+                                      publicKey = '', protocol = 1 } = {}) {
   const nonce = base64url(crypto.getRandomValues(new Uint8Array(24)));
   const payload = {
     n: nonce,
@@ -123,6 +123,12 @@ export async function issue(secret, { now = Date.now(), client = '',
     // `setup` unaltered with nothing stored — the signature over this payload
     // is what makes that safe — and it is the key the grant will name.
     k: String(publicKey || ''),
+    // Which protocol the agent that started this speaks. In here rather than
+    // in a query parameter for the same reason the key is: the callback has
+    // to know, and a query parameter is something the browser can edit. It
+    // decides whether the last page shows a receipt to copy or says the
+    // terminal already has it.
+    p: Number(protocol) || 1,
   };
   const encoded = base64url(new TextEncoder().encode(JSON.stringify(payload)));
   const signature = base64url(await hmac(secret, encoded));

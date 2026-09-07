@@ -15,6 +15,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { APP_SLUG } from './app-identity.test-support.mjs';
 
 import {
   FRESH_FOR,
@@ -422,12 +423,12 @@ test('a connection with a key returns a state carrying it', async () => {
       body: JSON.stringify({ client: 'comodor-agent',
                              public_key: client.publicKey }),
     }),
-    { GITHUB_APP_WEBHOOK_SECRET: SECRET, GITHUB_APP_SLUG: 'comodor' });
+    { GITHUB_APP_WEBHOOK_SECRET: SECRET, GITHUB_APP_SLUG: APP_SLUG });
 
   assert.equal(answer.status, 200);
   const body = await answer.json();
   assert.ok(body.state && body.nonce);
-  assert.ok(body.url.startsWith('https://github.com/apps/comodor/'));
+  assert.ok(body.url.startsWith(`https://github.com/apps/${APP_SLUG}/`));
 
   const { open } = await import('./state.js');
   const opened = await open(SECRET, body.state);

@@ -69,6 +69,31 @@
     { "pattern": "www.comodor.ai/*", "zone_name": "comodor.ai" }
   ],
 
+  // Where a finished connection waits for the terminal that started it.
+  //
+  // One object per flow, addressed by the nonce inside the flow's signed
+  // state, holding one small result for ten minutes and then deleting itself.
+  // It is not a database of installations: the authoritative record of a
+  // connection is the config file and the private key on the machine that
+  // made it, and nothing here outlives its own alarm.
+  //
+  // A Durable Object rather than KV because the read has to see the write.
+  // The browser finishes in one colo and the terminal polls from another,
+  // seconds later; KV is eventually consistent and the poll would miss it,
+  // which looks exactly like the flow hanging.
+  "durable_objects": {
+    "bindings": [
+      { "name": "CONNECTION_FLOW", "class_name": "ConnectionFlow" }
+    ]
+  },
+
+  // Durable Objects need a migration to come into existence. `new_sqlite_classes`
+  // rather than `new_classes`: SQLite-backed objects are the current default
+  // for new namespaces and are what the free plan offers.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ConnectionFlow"] }
+  ],
+
   "observability": {
     "enabled": true
   }
