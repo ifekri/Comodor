@@ -85,7 +85,12 @@ import {
   verifierFrom,
 } from './oauth.js';
 import { verifyProof } from './proof.js';
-import { available as rendezvousAvailable, deliver, take } from './rendezvous.js';
+import {
+  available as rendezvousAvailable,
+  claimSetup,
+  deliver,
+  take,
+} from './rendezvous.js';
 import { issue, open, sameSecret } from './state.js';
 import { receive } from './webhook.js';
 
@@ -348,6 +353,18 @@ async function setup(request, env, secret, url) {
       + '<code>comodor github connect</code>.</p>');
   }
 
+  // One browser leg per flow, where there is somewhere to record that. A
+  // state is not a secret, so somebody else holding one could otherwise walk
+  // it through here with an installation of their own and have the result
+  // delivered to a terminal that chose neither. Taking the leg first is what
+  // the browser this terminal just opened does.
+  if (Number(opened.p) === PROTOCOL_RENDEZVOUS && rendezvousAvailable(env)
+      && !(await claimSetup(env, opened.n))) {
+    return page('This connection link has already been used',
+      '<p>Each link works once. Start again from your terminal with '
+      + '<code>comodor github connect</code>.</p>');
+  }
+
   // Deliberately no `readInstallation` here. It would tell an unauthenticated
   // caller whether an installation id exists and who owns it, which is a
   // lookup service for other people's accounts. Everything this needs to know
@@ -418,6 +435,33 @@ function callbackUrl(url) {
 async function callback(request, env, secret, url) {
   const clear = { 'set-cookie': clearCookie() };
 
+  /**
+   * A browser end that is not a connection.
+   *
+   * Delivered as well as shown. Only the successful path used to call
+   * `finish`, so an authorisation that was denied, an installation that was
+   * not the person's, or an entitlement refusal left the flow object empty —
+   * and an agent polling it kept hearing `pending` until the state expired,
+   * fifteen minutes after the browser had definitively finished. The terminal
+   * now hears what the browser heard.
+   */
+  const ended = async (claims, status, title, body, reason) => {
+    if (Number(claims.p) === PROTOCOL_RENDEZVOUS && rendezvousAvailable(env)) {
+      try {
+        await deliver(env, claims.n, { status, reason });
+      } catch {
+        // The page still says what happened. A terminal that hears nothing
+        // stops at its deadline, which is worse than immediate but is not a
+        // wrong answer.
+      }
+    }
+    // No receipt on a refusal, on either protocol. A signed blob handed to
+    // somebody who has just been told no is an invitation to paste it
+    // somewhere, and it grants nothing — the older client reads a refusal
+    // from the page it is looking at, as it always did.
+    return page(title, body, clear);
+  };
+
   const claims = await openState(secret, url.searchParams.get('state') || '');
   if (!claims) {
     // Expired, edited, invented, or an install state presented here. All the
@@ -441,9 +485,9 @@ async function callback(request, env, secret, url) {
 
   const code = url.searchParams.get('code') || '';
   if (!code) {
-    return page('That authorisation was not completed',
-      '<p>Nothing has been granted. Run '
-      + '<code>comodor github connect</code> again.</p>', clear);
+    return ended(claims, 'failed', 'That authorisation was not completed',
+      '<p>Nothing has been granted. You can close this window and try again '
+      + 'from your terminal.</p>', 'authorisation was not completed');
   }
 
   let user;
@@ -466,19 +510,19 @@ async function callback(request, env, secret, url) {
   if (!user) {
     // The installation exists — it is how we got here — but it is not one this
     // person can reach. The answer says nothing about whose it is instead.
-    return page('That installation is not yours',
+    return ended(claims, 'not_permitted', 'That installation is not yours',
       '<p>You are signed in to GitHub as somebody who cannot reach the '
       + 'installation this link is for, so nothing has been granted.</p>',
-      clear);
+      'the installation is not reachable by the signed-in account');
   }
 
   if (!entitled || !entitled.ok) {
     // Reachable, but not theirs to hand over. A grant covers the installation
     // entire, so this is the difference between a member of an organisation
     // and an owner of it.
-    return page('That is not yours to connect',
+    return ended(claims, 'not_permitted', 'That is not yours to connect',
       `<p>${escapeHtml(entitled ? entitled.why : 'That could not be confirmed.')}</p>`,
-      clear);
+      'not entitled to connect this installation');
   }
 
   let grant;
@@ -643,14 +687,24 @@ async function claim(env, secret, body) {
     return json({ error: error.message }, error.status || 401);
   }
 
-  const found = await take(env, claims.n);
+  const taken = await take(env, claims.n, body.nonce);
+  if (taken.status !== 200) {
+    // The flow refused the request itself — a spent nonce, or far too many
+    // polls. Passed through rather than flattened into `pending`, which would
+    // make a replay look like a browser that had not finished.
+    return json(taken.body, taken.status);
+  }
+
+  const found = taken.body;
   if (!found || found.status === 'pending') {
     return json({ status: 'pending' });
   }
-  return json(found.status === 'connected'
-    ? { status: 'connected', nonce: claims.n,
-       installation: found.installation, grant: found.grant }
-    : { status: found.status || 'cancelled', nonce: claims.n });
+  if (found.status === 'connected') {
+    return json({ status: 'connected', nonce: claims.n,
+                  installation: found.installation, grant: found.grant });
+  }
+  return json({ status: found.status || 'cancelled', nonce: claims.n,
+                reason: found.reason || '' });
 }
 
 /**

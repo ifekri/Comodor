@@ -40,6 +40,18 @@
 import { RESULT_LIVES_FOR } from './config.js';
 
 const KEY = 'result';
+const SEEN = 'seen:';
+
+/**
+ * How many spent request nonces one flow remembers.
+ *
+ * A poll every two seconds across a fifteen-minute state is at most four
+ * hundred and fifty, and the object is deleted when the flow ends — so this
+ * is a ceiling against a caller that polls far faster than the agent does,
+ * not a working limit. Reaching it refuses the poll rather than forgetting an
+ * old nonce, because forgetting one is what re-opens the replay.
+ */
+const MOST_NONCES = 512;
 
 /**
  * One connection flow.
@@ -77,6 +89,30 @@ export class ConnectionFlow {
     }
 
     if (action === 'take') {
+      // A signature is checked before this is reached, and a valid signature
+      // stays valid for as long as its timestamp is fresh — so a captured
+      // poll can be sent again inside that window. The one-time result is not
+      // the answer to that: it makes the flow have one winner without making
+      // the winner be whoever sent the original request. A replay arriving
+      // first would take the result and delete it, and the agent that started
+      // the flow would poll a flow that no longer has anything in it.
+      //
+      // So the request nonce is spent here, in the one place that is
+      // single-threaded per flow. Second use is refused, and refused before
+      // the result is read.
+      const { nonce } = await request.json();
+      const spent = `${SEEN}${nonce}`;
+      if (await this.state.storage.get(spent)) {
+        return Response.json({ error: 'that request has already been used' },
+          { status: 401 });
+      }
+      const seen = await this.state.storage.list({ prefix: SEEN, limit: MOST_NONCES });
+      if (seen.size >= MOST_NONCES) {
+        return Response.json({ error: 'too many requests for this flow' },
+          { status: 429 });
+      }
+      await this.state.storage.put(spent, 1);
+
       const found = await this.state.storage.get(KEY);
       if (!found) return Response.json({ status: 'pending' });
       // Read once and gone. The terminal saves what it collects, and leaving
@@ -85,6 +121,29 @@ export class ConnectionFlow {
       // and only until they have what they asked for.
       await this.state.storage.delete(KEY);
       return Response.json(found);
+    }
+
+    if (action === 'claim-setup') {
+      // The browser leg, taken once.
+      //
+      // A state is not a secret — it is in an address bar, a history and a
+      // referrer — and the browser proves nothing else about itself. So
+      // somebody holding a victim's state can walk it through `setup` with an
+      // installation of their own, authorise as themselves, and have the
+      // result delivered to the victim's terminal, which would connect to an
+      // installation nobody there chose.
+      //
+      // This does not make the state secret; nothing can. What it does is
+      // stop the flow being walked twice: whoever reaches `setup` first owns
+      // the browser leg, and the second attempt is refused rather than
+      // silently replacing the first. In the ordinary case the first is the
+      // browser the terminal just opened, seconds earlier, which narrows the
+      // opportunity from the state's whole lifetime to that gap.
+      const already = await this.state.storage.get('setup');
+      if (already) return Response.json({ claimed: false });
+      await this.state.storage.put('setup', 1);
+      await this.state.storage.setAlarm(Date.now() + RESULT_LIVES_FOR * 1000);
+      return Response.json({ claimed: true });
     }
 
     if (action === 'peek') {
@@ -142,12 +201,30 @@ export async function deliver(env, nonce, result) {
   return (await ask(env, nonce, 'deliver', result)).json();
 }
 
-/** Collect it, once. `{ status: 'pending' }` while the browser is still out. */
-export async function take(env, nonce) {
-  return (await ask(env, nonce, 'take')).json();
+/**
+ * Collect it, once, for one request nonce.
+ *
+ * `requestNonce` is the one from the signed poll. Spending it here is what
+ * stops a captured poll being replayed to take the result before the agent
+ * that asked for it does.
+ */
+export async function take(env, nonce, requestNonce) {
+  const answer = await ask(env, nonce, 'take', { nonce: String(requestNonce) });
+  return { status: answer.status, body: await answer.json() };
 }
 
 /** What is waiting, without taking it. */
 export async function peek(env, nonce) {
   return (await ask(env, nonce, 'peek')).json();
+}
+
+/**
+ * Take the browser leg of a flow, if nobody has.
+ *
+ * False when somebody already has. See `claim-setup` above for why a flow may
+ * only be walked through the browser once.
+ */
+export async function claimSetup(env, nonce) {
+  const answer = await ask(env, nonce, 'claim-setup', {});
+  return Boolean((await answer.json()).claimed);
 }

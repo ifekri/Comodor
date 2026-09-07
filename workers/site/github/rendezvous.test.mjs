@@ -40,6 +40,13 @@ function storage() {
     async get(key) { return kept.get(key); },
     async put(key, value) { kept.set(key, value); },
     async delete(key) { kept.delete(key); },
+    async list({ prefix = '', limit = Infinity } = {}) {
+      const found = new Map();
+      for (const [key, value] of kept) {
+        if (key.startsWith(prefix) && found.size < limit) found.set(key, value);
+      }
+      return found;
+    },
     async deleteAll() { kept.clear(); },
     async setAlarm(when) { alarm = when; },
     alarmAt() { return alarm; },
@@ -96,10 +103,18 @@ async function anAgent() {
   };
 }
 
-/** A poll, signed the way the agent signs one. */
+let counter = 0;
+
+/**
+ * A poll, signed the way the agent signs one.
+ *
+ * A fresh nonce each time unless the caller asks for one, because the real
+ * agent generates one per request and reusing one is now refused — which is
+ * the point of the replay test below.
+ */
 async function aPoll(agent, state, {
   action = CLAIM_ACTION, timestamp = Math.floor(Date.now() / 1000),
-  nonce = 'a-request-nonce-long-enough',
+  nonce = `a-request-nonce-long-enough-${counter += 1}`,
 } = {}) {
   const signature = await agent.sign(
     signedPayload({ state, timestamp, nonce, action }));
@@ -244,6 +259,47 @@ test('a poll signed for a different action is refused', async () => {
   assert.equal(refused.status, 401);
 });
 
+test('a captured poll cannot be sent again to take the result first', async () => {
+  // The signature stays valid for as long as its timestamp is fresh, so a
+  // replay arriving before the agent's next poll would take the result and
+  // delete it — leaving the machine that started the flow polling a flow with
+  // nothing in it. The request nonce is spent on use.
+  const on = env();
+  const agent = await anAgent();
+  const flow = await begin(on, agent);
+  const poll = await aPoll(agent, flow.state);
+
+  const first = await post('claim', poll, on);
+  assert.equal(first.body.status, 'pending');
+
+  const replayed = await post('claim', poll, on);
+  assert.equal(replayed.status, 401, 'a spent request nonce was accepted again');
+
+  // And the agent's own next poll, with a fresh nonce, still works.
+  await browserFinishes(on, flow.nonce, CONNECTED);
+  const got = await post('claim', await aPoll(agent, flow.state), on);
+  assert.equal(got.body.status, 'connected');
+});
+
+test('a replay cannot take a result the agent has not collected yet', async () => {
+  const on = env();
+  const agent = await anAgent();
+  const flow = await begin(on, agent);
+
+  // Captured while the browser was still out, then the browser finishes.
+  const captured = await aPoll(agent, flow.state);
+  await post('claim', captured, on);
+  await browserFinishes(on, flow.nonce, CONNECTED);
+
+  const replayed = await post('claim', captured, on);
+  assert.equal(replayed.status, 401);
+  assert.ok(!replayed.body.grant, 'a replay must not be handed the grant');
+
+  const got = await post('claim', await aPoll(agent, flow.state), on);
+  assert.equal(got.body.status, 'connected',
+    'and the result is still there for the machine that asked for it');
+});
+
 test('a stale poll is refused, and so is one from the future', async () => {
   const on = env();
   const agent = await anAgent();
@@ -350,4 +406,86 @@ test('the legacy receipt shape still works', async () => {
   const nothing = await post('claim', {}, on);
 
   assert.equal(nothing.status, 400);
+});
+
+
+// --------------------------------------------------------------------------- //
+// a browser that ends without connecting still ends the wait
+// --------------------------------------------------------------------------- //
+
+test('a refusal reaches the terminal instead of leaving it waiting', async () => {
+  // Only the successful callback used to deliver, so an authorisation that
+  // was denied, an installation that was not the person's, or an entitlement
+  // refusal left the flow empty — and the agent kept hearing `pending` until
+  // the state expired, fifteen minutes after the browser had finished.
+  const on = env();
+  const agent = await anAgent();
+  const flow = await begin(on, agent);
+
+  await browserFinishes(on, flow.nonce,
+    { status: 'not_permitted', reason: 'not entitled to connect this installation' });
+
+  const got = await post('claim', await aPoll(agent, flow.state), on);
+
+  assert.equal(got.body.status, 'not_permitted');
+  assert.match(got.body.reason, /not entitled/);
+});
+
+test('a refusal carries no grant and no installation', async () => {
+  const on = env();
+  const agent = await anAgent();
+  const flow = await begin(on, agent);
+  await browserFinishes(on, flow.nonce, { status: 'failed', reason: 'x' });
+
+  const got = await post('claim', await aPoll(agent, flow.state), on);
+
+  assert.ok(!got.body.grant);
+  assert.ok(!got.body.installation);
+});
+
+// --------------------------------------------------------------------------- //
+// one browser leg per flow
+// --------------------------------------------------------------------------- //
+
+test('a flow can only be walked through the browser once', async () => {
+  // A state is not a secret — it is in an address bar, a history and a
+  // referrer — and the browser proves nothing else about itself. Without
+  // this, somebody holding a victim's state could walk it through `setup`
+  // with an installation of their own and have the result delivered to a
+  // terminal that chose neither.
+  const { claimSetup } = await import('./rendezvous.js');
+  const on = env();
+  const agent = await anAgent();
+  const flow = await begin(on, agent);
+
+  assert.equal(await claimSetup(on, flow.nonce), true);
+  assert.equal(await claimSetup(on, flow.nonce), false,
+    'a second browser leg on one flow was allowed');
+});
+
+test('taking the browser leg of one flow does not take another\'s', async () => {
+  const { claimSetup } = await import('./rendezvous.js');
+  const on = env();
+  const mine = await begin(on, await anAgent());
+  const theirs = await begin(on, await anAgent());
+
+  assert.equal(await claimSetup(on, mine.nonce), true);
+  assert.equal(await claimSetup(on, theirs.nonce), true);
+});
+
+test('the setup route refuses a flow whose leg is already taken', async () => {
+  const { claimSetup } = await import('./rendezvous.js');
+  const on = env();
+  const agent = await anAgent();
+  const flow = await begin(on, agent);
+
+  await claimSetup(on, flow.nonce);
+
+  const answer = await handle(new Request(
+    `${BASE}/setup?installation_id=42&state=${encodeURIComponent(flow.state)}`,
+  ), on);
+  const text = await answer.text();
+
+  assert.match(text, /already been used/);
+  assert.ok(!text.includes('installations/new'), 'and does not re-offer the app');
 });
