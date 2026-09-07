@@ -180,14 +180,16 @@ changed.
 
 ### The GitHub App
 
-Six endpoints on `comodor.ai`, all behind that one prefix:
+Eight endpoints on `comodor.ai`, all behind that one prefix:
 
 | | |
 |---|---|
 | `POST /api/integrations/github/install` | start a flow; takes the agent's public key, returns a signed state and the URL to open |
+| `GET /api/integrations/github/launch` | the page the terminal opens; moves the browser capability out of the URL fragment |
+| `POST /api/integrations/github/launch/bind` | spend that capability once, in exchange for the cookie `setup` requires |
 | `GET /api/integrations/github/setup` | where GitHub sends the browser after installing; starts the user check |
 | `GET /api/integrations/github/callback` | where the user check returns; **the only place a grant is issued** |
-| `POST /api/integrations/github/claim` | exchange the receipt for the verified installation **and a grant** |
+| `POST /api/integrations/github/claim` | collect the verified installation **and a grant** — a signed poll, or a receipt from an older agent |
 | `POST /api/integrations/github/token` | an installation access token, one hour — **signed request** |
 | `POST /api/integrations/github/verify` | what an installation is now — **signed request** |
 | `POST /api/integrations/github/webhook` | what GitHub has to say |
@@ -197,6 +199,58 @@ signing a JWT with a private key; that key cannot live in a static file or on
 each user's machine, so it is a Cloudflare secret this Worker reads and nothing
 else does. What crosses to an agent is an installation token that lasts an
 hour.
+
+#### Who may *walk* a flow
+
+Before any of that, there is a smaller question with its own answer: which
+browser is allowed to reach `setup` at all.
+
+The state cannot answer it. A state travels to GitHub and returns in a query
+string, so it is visible in an address bar, a browser history and a referrer —
+it says *which flow*, and something visible to everyone downstream cannot also
+authorise one. While it was the only thing `setup` required, this worked:
+
+```
+attacker → reads a victim's state from wherever it is visible
+attacker → /setup?installation_id=ATTACKERS&state=VICTIMS
+Worker   → the browser leg is walked with an installation nobody at the
+           victim's terminal chose, and the result is delivered there
+```
+
+The attacker gains nothing of the victim's — the grant names the victim's
+public key — but the victim's agent ends up operating on the attacker's
+repositories.
+
+So there is a second credential, and it is secret. `install` mints a **browser
+capability**: thirty-two random bytes, one-time, two minutes, stored only as
+its SHA-256, and deliberately *not* inside the state. It is carried in the URL
+fragment — which browsers do not send in requests and do not put in `Referer` —
+so it reaches the launch page without reaching an access log, a proxy, or
+GitHub:
+
+```
+comodor.ai/api/integrations/github/launch?f=<flow>#k=<capability>
+```
+
+The launch page takes the fragment out of the address bar, spends the
+capability once at `launch/bind`, is given a signed cookie naming that exact
+flow, and only then replaces itself with GitHub's install URL. `setup` requires
+**both** a valid signed state and that cookie. A copied state has no cookie; a
+cookie from another flow does not open this one; a spent capability is gone.
+
+The state never rides in the launch link at all — it is held in the flow and
+returned when the capability is spent, so nothing had to be trusted to carry
+it.
+
+The cookie is a signed payload rather than a stored handle, so checking it
+costs no read. It is `SameSite=Lax` and **not** `Strict`: GitHub returns the
+browser by top-level cross-site navigation, and `Strict` would withhold the
+cookie on exactly that request and break the flow for everyone. `HttpOnly`,
+`Secure`, and `Path=/api/integrations/github` so it is never sent with a
+request for the marketing site.
+
+Protocol 1 does not have this and does not need it: an older agent's browser
+goes straight to GitHub, and a person still carries the receipt back by hand.
 
 #### Who may be *given* a grant
 
