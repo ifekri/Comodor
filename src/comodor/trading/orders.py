@@ -5,14 +5,28 @@ chosen to keep it honest:
 
 * `OrderIntent` is a **request**. A strategy produces it. It is not an order.
 * `ApprovedOrder` is an intent that risk has passed, and it is the only thing
-  an `ExecutionGateway` accepts. A strategy cannot make one accidentally,
-  because making one means writing down which policy approved it and when.
+  an `ExecutionGateway` accepts.
 * `Fill` is what actually happened, reported back.
 
-That is the boundary from `docs/trading.md` expressed as types rather than as a
-comment: `submit(order: ApprovedOrder)` cannot be handed an `OrderIntent`, so
-the shortest path from a strategy to an exchange runs through risk whether the
+`submit(order: ApprovedOrder)` cannot be handed an `OrderIntent`, so the
+shortest path from a strategy to an exchange runs through risk whether the
 author remembers to route it there or not.
+
+**That stops the accident, not a determined caller.** Python has no unforgeable
+capability: `ApprovedOrder` is a public dataclass and anything able to import it
+can construct one with an `approved_by` of its choosing. Pretending otherwise
+would be worse than the gap, because the next phase would build on a guarantee
+that does not exist. So the boundary here is a strong convention with an audit
+trail — every approval records which policy issued it and when — and the
+obligation it creates is written down rather than assumed:
+
+    An ExecutionGateway implementation must revalidate an ApprovedOrder against
+    the risk policy before sending it. The type says where the order came from;
+    it does not prove it.
+
+That obligation belongs to the phase that writes the first gateway. There is no
+gateway in this package, so there is nothing here to bypass yet — which is the
+right time to have decided.
 
 Identity is split for the same reason. `client_order_id` is ours, assigned
 before the order leaves; `venue_order_id` is the exchange's, and does not exist
@@ -122,14 +136,23 @@ class OrderIntent:
         self._check_limit_price()
         self._check_trigger_price()
 
-        if self.post_only and self.time_in_force is not TimeInForce.GTC:
-            # An order that must not take liquidity, and must fill immediately
-            # or die, is a contradiction: the only way it fills immediately is
-            # by taking. Venues reject it; saying so here is cheaper.
-            raise TradingValidationError(
-                f"post_only cannot be combined with {self.time_in_force.value}: "
-                "an order that must not take liquidity cannot also demand an "
-                "immediate fill")
+        if self.post_only:
+            # Post-only says "rest on the book, and cancel me rather than
+            # cross it". Both halves of that need a book to rest on and a
+            # price to rest at, and two kinds of order have neither.
+            if self.order_type not in PRICED_TYPES:
+                raise TradingValidationError(
+                    f"post_only requires a limit price to rest at, which a "
+                    f"{self.order_type.value} order does not have")
+            if self.time_in_force is not TimeInForce.GTC:
+                # An order that must not take liquidity, and must fill
+                # immediately or die, is a contradiction: the only way it
+                # fills immediately is by taking. Venues reject it; saying so
+                # here is cheaper.
+                raise TradingValidationError(
+                    f"post_only cannot be combined with {self.time_in_force.value}: "
+                    "an order that must not take liquidity cannot also demand an "
+                    "immediate fill")
 
     def _check_limit_price(self) -> None:
         needs_price = self.order_type in PRICED_TYPES
@@ -176,17 +199,21 @@ class OrderIntent:
             reference = self.limit_price
         else:
             reference = positive(price, "price")
-        return self.quantity * reference * self.instrument.contract_multiplier
+        return self.instrument.notional(reference, self.quantity)
 
 
 @dataclass(frozen=True, slots=True)
 class ApprovedOrder:
     """An intent that risk has passed, and the only thing execution accepts.
 
-    It exists so that the boundary is a type rather than a convention. A
-    strategy holding an `OrderIntent` cannot call `ExecutionGateway.submit`
-    with it; producing one of these means recording which policy approved it,
-    which is also the audit trail that reconciliation and post-mortems need.
+    A strategy holding an `OrderIntent` cannot call `ExecutionGateway.submit`
+    with it, and producing one of these means recording which policy approved
+    it — which is the audit trail reconciliation and post-mortems need.
+
+    It is not a security boundary. Anything that can import this class can
+    construct one; see the module docstring for what a gateway therefore owes.
+    What is enforced is that an approval cannot claim to predate the request it
+    approves, which is the one lie about ordering the type can catch.
 
     The risk engine that will produce these is a later phase. This is the
     contract it has to satisfy.
@@ -205,6 +232,11 @@ class ApprovedOrder:
                 f"intent must be an OrderIntent, got {type(self.intent).__name__}")
         object.__setattr__(self, "approved_by", identifier(self.approved_by, "approved_by"))
         object.__setattr__(self, "approved_at", utc_of(self.approved_at, "approved_at"))
+        if self.approved_at < self.intent.created_at:
+            raise TradingValidationError(
+                f"approved_at {self.approved_at.isoformat()} is before the intent "
+                f"was created at {self.intent.created_at.isoformat()}: an approval "
+                "cannot predate what it approves")
 
     @property
     def client_order_id(self) -> str:
@@ -232,6 +264,10 @@ class RejectedOrder:
         object.__setattr__(self, "reason", identifier(self.reason, "reason", limit=512))
         object.__setattr__(self, "rejected_by", identifier(self.rejected_by, "rejected_by"))
         object.__setattr__(self, "rejected_at", utc_of(self.rejected_at, "rejected_at"))
+        if self.rejected_at < self.intent.created_at:
+            raise TradingValidationError(
+                f"rejected_at {self.rejected_at.isoformat()} is before the intent "
+                f"was created at {self.intent.created_at.isoformat()}")
 
     @property
     def client_order_id(self) -> str:
@@ -285,7 +321,7 @@ class Fill:
 
     @property
     def notional(self) -> Decimal:
-        return self.price * self.quantity * self.instrument.contract_multiplier
+        return self.instrument.notional(self.price, self.quantity)
 
 
 @dataclass(frozen=True, slots=True)

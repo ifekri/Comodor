@@ -63,6 +63,32 @@ class MarketType(str, Enum):
     FUTURES = "FUTURES"
 
 
+class ContractType(str, Enum):
+    """Which way round a futures contract is denominated.
+
+    The distinction changes the arithmetic, not just the labelling, which is
+    why it is a field rather than a note.
+
+    * `LINEAR` — one contract is `contract_multiplier` units of the **base**
+      asset, and its value is `quantity x price x multiplier`. A USDT-margined
+      perpetual is linear.
+    * `INVERSE` — one contract is `contract_multiplier` units of the **quote**
+      asset, and its value in quote terms is `quantity x multiplier`: it does
+      not depend on the price at all. What varies with price is how much of
+      the settlement asset that is worth. A coin-margined contract of $1 is
+      inverse.
+
+    Applying the linear formula to an inverse contract overstates a hundred
+    $1 contracts at 50 000 by a factor of fifty thousand, which would pass
+    every minimum-notional check and every exposure limit ever written.
+
+    Spot is always `LINEAR`: one unit is one unit.
+    """
+
+    LINEAR = "LINEAR"
+    INVERSE = "INVERSE"
+
+
 class Side(str, Enum):
     """Which way an order goes."""
 

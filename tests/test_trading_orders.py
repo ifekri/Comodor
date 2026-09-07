@@ -16,6 +16,7 @@ import pytest
 
 from comodor.trading import (
     ApprovedOrder,
+    ContractType,
     Fee,
     Fill,
     Instrument,
@@ -405,3 +406,142 @@ def test_reconciliation_has_somewhere_to_put_an_unknown_answer():
     state = OrderState(client_order_id="c-1", status=OrderStatus.UNKNOWN)
 
     assert state.status is OrderStatus.UNKNOWN
+
+
+# --------------------------------------------------------------------------- #
+# inverse contracts, whose arithmetic is not the linear one
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def inverse() -> Instrument:
+    """A coin-margined contract worth $1, settled in Bitcoin."""
+    return Instrument(venue="v", symbol="XBTUSD", base_asset="BTC",
+                      quote_asset="USD", market_type=MarketType.FUTURES,
+                      settlement_asset="BTC", contract_multiplier=Decimal(1),
+                      contract_type=ContractType.INVERSE)
+
+
+def test_an_inverse_notional_does_not_multiply_by_the_price(inverse):
+    """A hundred $1 contracts are worth $100 whether Bitcoin is at 20 000 or
+    80 000. The linear formula overstates that by the price — here fifty
+    thousand times — and the answer would pass every notional check and every
+    exposure limit written against it."""
+    order = an_intent(inverse, quantity=Decimal(100), limit_price=Decimal(50000))
+
+    assert order.notional() == Decimal(100)
+
+
+def test_the_same_size_is_linear_when_the_contract_is(spot):
+    order = an_intent(spot, quantity=Decimal(100), limit_price=Decimal(50000))
+
+    assert order.notional() == Decimal(5000000)
+
+
+def test_an_inverse_notional_is_the_same_at_any_price(inverse):
+    order = an_intent(inverse, quantity=Decimal(100), limit_price=Decimal(50000))
+
+    assert order.notional(Decimal(20000)) == order.notional(Decimal(80000))
+
+
+def test_fills_and_positions_use_the_same_formula(inverse):
+    """One place, asked by everything. Four copies is four places for the
+    inverse case to be forgotten, and it was, in all four."""
+    from comodor.trading import FuturesPosition, PositionSide
+
+    fill = a_fill(inverse, quantity=Decimal(100), price=Decimal(50000))
+    position = FuturesPosition(instrument=inverse, side=PositionSide.LONG,
+                               quantity=Decimal(100),
+                               average_entry_price=Decimal(50000))
+
+    assert fill.notional == Decimal(100)
+    assert position.notional(Decimal(50000)) == Decimal(100)
+
+
+def test_a_minimum_notional_check_uses_it_too(inverse):
+    """Otherwise a hundred $1 contracts would clear a $1 000 000 minimum."""
+    spec = InstrumentSpec(instrument=inverse, tick_size=Decimal("0.5"),
+                          step_size=Decimal(1), minimum_notional=Decimal(1000))
+
+    with pytest.raises(TradingValidationError, match="minimum_notional"):
+        spec.check(Decimal(50000), Decimal(100))
+
+
+def test_spot_cannot_be_inverse():
+    """One unit of the base asset is one unit."""
+    with pytest.raises(TradingValidationError, match="LINEAR"):
+        Instrument(venue="v", symbol="S", base_asset="B", quote_asset="Q",
+                   contract_type=ContractType.INVERSE)
+
+
+def test_a_contract_is_linear_unless_it_says_otherwise(spot, perpetual):
+    assert spot.contract_type is ContractType.LINEAR
+    assert perpetual.contract_type is ContractType.LINEAR
+    assert not spot.is_inverse
+
+
+# --------------------------------------------------------------------------- #
+# what the price checks accept
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("price", [Decimal(0), Decimal("-5.00")])
+def test_a_price_of_zero_or_less_is_refused_by_the_spec(spot, price):
+    """Zero sits exactly on every grid there is — `0 % 0.01` is `0` — so with
+    no minimum notional configured it passed every check below."""
+    spec = InstrumentSpec(instrument=spot, tick_size=Decimal("0.01"),
+                          step_size=Decimal("0.1"))
+
+    with pytest.raises(TradingValidationError, match="price"):
+        spec.check(price, Decimal("1.0"))
+
+
+# --------------------------------------------------------------------------- #
+# post-only needs somewhere to rest
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("order_type,extra", [
+    (OrderType.MARKET, {"limit_price": None}),
+    (OrderType.STOP, {"limit_price": None, "trigger_price": Decimal(40000)}),
+])
+def test_post_only_needs_a_limit_price_to_rest_at(spot, order_type, extra):
+    """It says "rest on the book, and cancel me rather than cross it". Both
+    halves need a price to rest at, which these order types do not have."""
+    with pytest.raises(TradingValidationError, match="post_only requires a limit price"):
+        an_intent(spot, order_type=order_type, post_only=True, **extra)
+
+
+def test_post_only_is_fine_on_a_limit_order(spot):
+    assert an_intent(spot, post_only=True).post_only is True
+
+
+# --------------------------------------------------------------------------- #
+# an approval is not a security boundary, and says so
+# --------------------------------------------------------------------------- #
+
+
+def test_an_approval_cannot_predate_the_request_it_approves(spot):
+    """The one lie about ordering the type can catch. It cannot stop a caller
+    minting an approval — Python has no unforgeable capability — which is why
+    the gateway contract requires revalidation instead of pretending."""
+    earlier = datetime(2020, 1, 1, tzinfo=UTC)
+
+    with pytest.raises(TradingValidationError, match="cannot predate"):
+        ApprovedOrder(intent=an_intent(spot), approved_by="policy",
+                      approved_at=earlier)
+
+
+def test_a_rejection_cannot_predate_it_either(spot):
+    with pytest.raises(TradingValidationError, match="before the intent"):
+        RejectedOrder(intent=an_intent(spot), reason="too large",
+                      rejected_by="policy",
+                      rejected_at=datetime(2020, 1, 1, tzinfo=UTC))
+
+
+def test_the_gateway_contract_requires_revalidation():
+    """Written down rather than assumed, because the next phase will build on
+    whichever answer this gives."""
+    from comodor.trading import ExecutionGateway
+
+    assert "revalidate" in ExecutionGateway.__doc__

@@ -97,6 +97,21 @@ balance is liquidated. So there are two types — `SpotHolding`, keyed by asset,
 and `FuturesPosition`, keyed by instrument — and constructing the wrong one
 raises rather than compiling.
 
+## Linear and inverse contracts
+
+A futures contract is denominated one of two ways, and the difference is
+arithmetic rather than labelling. A **linear** contract is `contract_multiplier`
+units of the base asset, worth `quantity x price x multiplier`. An **inverse**
+contract is `contract_multiplier` units of the *quote* asset, worth
+`quantity x multiplier` — its quote value does not depend on the price at all.
+
+Applying the linear formula to a hundred $1 inverse contracts at 50 000
+overstates them by a factor of fifty thousand, and that number would pass every
+minimum-notional check and every exposure limit written against it. So
+`ContractType` is a field, and the formula lives in exactly one place —
+`Instrument.notional` — which orders, fills, positions and specification checks
+all call rather than each multiplying it out.
+
 ## Identity and specification
 
 An instrument's **identity** — venue, symbol, base and quote asset, market type
@@ -133,11 +148,25 @@ ApprovedOrder  |  RejectedOrder
 Execution           the only thing that talks to a venue
 ```
 
-**A strategy never calls an execution gateway.** That is enforced by the types
-rather than by convention: `ExecutionGateway.submit` accepts an `ApprovedOrder`,
-which records which policy approved it and when, and a strategy is handed
-nothing capable of producing one. The shortest path from a signal to an exchange
-runs through risk whether or not the author remembers to route it there.
+**A strategy never calls an execution gateway.** `ExecutionGateway.submit`
+accepts an `ApprovedOrder`, which records which policy approved it and when, and
+a strategy is handed nothing that produces one. The shortest path from a signal
+to an exchange runs through risk whether or not the author remembers to route it
+there.
+
+This stops the accident, which is the common case, and it is not a security
+boundary. Python has no unforgeable capability: `ApprovedOrder` is a public type
+and anything able to import it can construct one. Claiming otherwise would be
+worse than the gap, because later phases would build on a guarantee that is not
+there. The obligation that follows is therefore written down rather than
+assumed:
+
+> An `ExecutionGateway` implementation must revalidate an `ApprovedOrder`
+> against the risk policy before sending it. The type records where an order
+> came from; it does not prove it.
+
+That obligation belongs to T7, the phase that writes the first gateway. Until
+then there is nothing to bypass.
 
 Risk decisions are deterministic by contract. A policy that consults a model, an
 un-injected clock or a random number cannot be replayed, and a risk rule that

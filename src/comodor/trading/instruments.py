@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from .enums import MarketType, Rounding
+from .enums import ContractType, MarketType, Rounding
 from .errors import TradingValidationError
 from .validation import DecimalLike, identifier, non_negative, positive, quantize
 
@@ -44,9 +44,11 @@ class Instrument:
     #: an inverse contract, where the two differ and confusing them inverts
     #: the sign of the profit.
     settlement_asset: str = ""
-    #: How much of the base asset one contract represents. One, for spot and
-    #: for linear contracts quoted directly in the base asset.
+    #: How much one contract represents — of the base asset when linear, of
+    #: the quote asset when inverse. One, for spot.
     contract_multiplier: Decimal = Decimal(1)
+    #: Which way round the contract is denominated. Spot is always linear.
+    contract_type: ContractType = ContractType.LINEAR
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "venue", identifier(self.venue, "venue"))
@@ -60,10 +62,18 @@ class Instrument:
         multiplier = positive(self.contract_multiplier, "contract_multiplier")
         object.__setattr__(self, "contract_multiplier", multiplier)
 
+        if not isinstance(self.contract_type, ContractType):
+            raise TradingValidationError(
+                f"contract_type must be a ContractType, "
+                f"got {type(self.contract_type).__name__}")
+
         if self.market_type is MarketType.SPOT:
             if self.settlement_asset:
                 raise TradingValidationError(
                     "settlement_asset applies to futures; spot settles in its own assets")
+            if self.contract_type is not ContractType.LINEAR:
+                raise TradingValidationError(
+                    "spot is always LINEAR: one unit of the base asset is one unit")
             return
 
         # A futures contract has to say what it pays out in. Defaulting to the
@@ -79,6 +89,27 @@ class Instrument:
     @property
     def is_futures(self) -> bool:
         return self.market_type is MarketType.FUTURES
+
+    @property
+    def is_inverse(self) -> bool:
+        return self.contract_type is ContractType.INVERSE
+
+    def notional(self, price: Decimal, quantity: Decimal) -> Decimal:
+        """What `quantity` at `price` is worth, in the quote asset.
+
+        The one place this arithmetic lives. An order, a fill, a position and
+        a minimum-notional check all ask the instrument rather than each
+        multiplying it out, because four copies of a formula is four places
+        for the inverse case to be forgotten — and it was, in all four, until
+        `ContractType` existed to make the difference sayable.
+
+        Inverse contracts are denominated in the quote asset, so their quote
+        notional is independent of price: a hundred $1 contracts are worth
+        $100 whether Bitcoin is at 20 000 or 80 000.
+        """
+        if self.is_inverse:
+            return quantity * self.contract_multiplier
+        return quantity * price * self.contract_multiplier
 
     def __str__(self) -> str:
         return f"{self.venue}:{self.symbol}"
@@ -170,10 +201,14 @@ class InstrumentSpec:
 
         if price is None:
             return
+        # Before the grid, because zero sits exactly on every grid there is:
+        # `0 % 0.01` is `0`, and with no minimum notional configured a price
+        # of zero — or a negative one — would pass every check below.
+        price = positive(price, "price")
         if price % self.tick_size != 0:
             raise TradingValidationError(
                 f"price {price} is not a multiple of tick_size {self.tick_size}")
-        notional = price * quantity * self.instrument.contract_multiplier
+        notional = self.instrument.notional(price, quantity)
         if self.minimum_notional and notional < self.minimum_notional:
             raise TradingValidationError(
                 f"notional {notional} is below minimum_notional {self.minimum_notional}")

@@ -73,6 +73,11 @@ class ExecutionGateway(Protocol):
     It accepts `ApprovedOrder` and not `OrderIntent`. That is the risk boundary
     written as a signature: a strategy holding an intent cannot reach an
     exchange without something having approved it first.
+
+    A signature is not a security boundary, and an implementation must not
+    treat it as one. `ApprovedOrder` is constructible by anything that can
+    import it, so a gateway **must revalidate against the risk policy** before
+    sending. The type says where an order came from; it does not prove it.
     """
 
     def submit(self, order: ApprovedOrder) -> OrderState:

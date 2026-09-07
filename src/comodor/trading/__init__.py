@@ -25,6 +25,7 @@ from .enums import (
     SIMULATED_MODES,
     TERMINAL_STATUSES,
     TRIGGERED_TYPES,
+    ContractType,
     MarketType,
     OrderStatus,
     OrderType,
@@ -59,7 +60,8 @@ __all__ = [
     # modes and the live gate
     "TradingMode", "DEFAULT_TRADING_MODE", "SIMULATED_MODES", "require_simulated",
     # vocabulary
-    "MarketType", "Side", "PositionSide", "OrderType", "TimeInForce",
+    "MarketType", "ContractType", "Side", "PositionSide", "OrderType",
+    "TimeInForce",
     "OrderStatus", "Rounding",
     "PRICED_TYPES", "TRIGGERED_TYPES", "TERMINAL_STATUSES",
     # what is traded

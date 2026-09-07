@@ -152,7 +152,7 @@ class FuturesPosition:
     def notional(self, price: Decimal) -> Decimal:
         """What the exposure is worth at `price`."""
         mark = positive(price, "price")
-        return self.quantity * mark * self.instrument.contract_multiplier
+        return self.instrument.notional(mark, self.quantity)
 
 
 @dataclass(frozen=True, slots=True)
