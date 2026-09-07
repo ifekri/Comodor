@@ -1,0 +1,41 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/react",
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
+    "types": [
+      "node",
+      "react"
+    ]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "references": [
+    {
+      "path": "../../packages/protocol"
+    },
+    {
+      "path": "../../packages/client"
+    },
+    {
+      "path": "../../packages/commands"
+    },
+    {
+      "path": "../../packages/modes"
+    },
+    {
+      "path": "../../packages/questions"
+    },
+    {
+      "path": "../../packages/design-tokens"
+    }
+  ]
+}
