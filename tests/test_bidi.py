@@ -186,7 +186,9 @@ def test_a_right_to_left_exchange_is_set_to_the_right_margin():
 
     assert persian and english
     assert persian[0].startswith("  " + " " * 20), "the question was left-aligned"
-    assert english[0].lstrip().startswith("›"), "English was moved"
+    # The name leads the line in both directions — it is the interface
+    # speaking, not the person, so it stays where the interface reads.
+    assert english[0].lstrip().startswith("You"), "English was moved"
 
     reply = [row for row in rows if "می‌توانم" in row][0]
     assert reply.startswith(" " * 20), "the answer was left-aligned"

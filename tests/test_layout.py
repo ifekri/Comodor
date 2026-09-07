@@ -11,12 +11,13 @@ import io
 from itertools import pairwise
 
 import pytest
+from rich.cells import cell_len
 from rich.console import Console
 
 from comodor.ui import layout as layout_module
 from comodor.ui import theme as theme_module
 from comodor.ui.screen import Screen, ScreenState
-from comodor.ui.widgets.chat import Entry
+from comodor.ui.widgets.chat import Entry, is_new_session
 from comodor.ui.widgets.history import HistoryModel
 from comodor.ui.widgets.statusbar import StatusModel
 
@@ -68,14 +69,24 @@ def make_state(populated: bool = True) -> ScreenState:
 
 def render(width: int, height: int, state: ScreenState | None = None,
            theme_name: str = "ember", ascii_borders: bool = False) -> list[str]:
+    """One frame, at the stage the state itself implies.
+
+    The stage is derived rather than passed, because that is what the
+    application does: it asks the transcript whether anybody has spoken. A test
+    that chose the stage by hand could draw an opening screen for a session
+    that has one, which is a frame the product never renders.
+    """
     theme = theme_module.load(theme_name, ascii_borders=ascii_borders)
+    state = state if state is not None else make_state()
     buffer = io.StringIO()
     console = Console(file=buffer, width=width, height=height,
                       theme=theme.rich_theme(), force_terminal=True,
                       color_system="truecolor", legacy_windows=False,
                       highlight=False, soft_wrap=False)
-    geometry = layout_module.compute(width, height)
-    console.print(Screen(console, theme).render(state or make_state(), geometry))
+    stage = (layout_module.NEW if is_new_session(state.entries)
+             else layout_module.ACTIVE)
+    geometry = layout_module.compute(width, height, stage=stage)
+    console.print(Screen(console, theme).render(state, geometry))
     return strip_ansi(buffer.getvalue()).splitlines()
 
 
@@ -403,6 +414,94 @@ def test_welcome_state_shows_wordmark():
 
 
 # --------------------------------------------------------------------------- #
+# which of the two screens this is
+# --------------------------------------------------------------------------- #
+
+
+def test_a_fresh_session_opens_on_the_new_screen():
+    assert is_new_session([])
+
+
+def test_a_warning_before_anybody_typed_is_not_a_conversation():
+    """A server that would not connect arrives before the first message. If
+    the opening screen tested the transcript for emptiness, that one warning
+    would replace it with a conversation containing nothing else."""
+    entries = [Entry("notice", "config: max_cost_usd cannot be enforced"),
+               Entry("error", "mcp: filesystem did not start")]
+    assert is_new_session(entries)
+
+
+@pytest.mark.parametrize("kind", ["user", "assistant"])
+def test_somebody_speaking_ends_it(kind):
+    assert not is_new_session([Entry(kind, "hello")])
+
+
+def test_a_restored_conversation_opens_active_not_new():
+    """Resuming fills the transcript before the first frame is drawn, so the
+    opening screen must never appear for a session that already has one."""
+    from comodor.ui.widgets.chat import entries_from
+
+    class Message:
+        def __init__(self, role, content, name="", is_error=False):
+            self.role, self.content = role, content
+            self.name, self.is_error = name, is_error
+
+    restored = entries_from([Message("user", "add a health endpoint"),
+                             Message("assistant", "I'll add the route.")])
+    assert restored, "the fixture restored nothing"
+    assert not is_new_session(restored)
+
+
+def test_the_new_screen_keeps_a_startup_warning_visible():
+    """Not shown as a conversation is not the same as thrown away."""
+    state = make_state(populated=False)
+    state.entries = [Entry("notice", "config: max_cost_usd cannot be enforced")]
+    text = "\n".join(render(128, 36, state=state))
+    assert "max_cost_usd" in text
+    assert "█" in text, "and the screen is still the opening one"
+
+
+@pytest.mark.parametrize("width,height", SIZES)
+def test_the_new_screen_has_no_sidebar_at_any_size(width, height):
+    """Room is not a reason to draw something empty. Every section of a
+    sidebar would read zero before a conversation exists, and on a 240-column
+    terminal that is thirty columns of zeros beside a wordmark."""
+    geometry = layout_module.compute(width, height, stage=layout_module.NEW)
+    assert geometry.sidebar is None
+
+
+def test_the_new_screen_has_no_sidebar_even_when_one_is_asked_for():
+    geometry = layout_module.compute(240, 60, sidebar=True,
+                                     stage=layout_module.NEW)
+    assert geometry.sidebar is None
+    assert geometry.composer is not None, "but it does have a composer"
+
+
+@pytest.mark.parametrize("width,expected", [
+    (160, layout_module.TASKS_WIDE),     # full
+    (140, layout_module.TASKS_WIDE),
+    (139, layout_module.TASKS_NARROW),   # compact
+    (100, layout_module.TASKS_NARROW),
+    (99, 0),                             # hidden
+    (80, 0),
+])
+def test_the_active_sidebar_follows_the_width(width, expected):
+    geometry = layout_module.compute(width, 40, stage=layout_module.ACTIVE)
+    assert (geometry.sidebar.width if geometry.sidebar else 0) == expected
+
+
+def test_a_click_anywhere_in_the_composer_box_reaches_the_editor():
+    """Including the border. A frame you can see, aim at and miss is worse
+    than no frame."""
+    geometry = layout_module.compute(120, 36, stage=layout_module.NEW)
+    box = geometry.composer
+    assert box is not None
+    for x, y in ((box.x, box.y), (box.right - 1, box.bottom - 1),
+                 (box.x + box.width // 2, box.y + box.height // 2)):
+        assert geometry.hit(x, y) == "prompt", f"({x}, {y}) missed the editor"
+
+
+# --------------------------------------------------------------------------- #
 # status bar with token counts
 # --------------------------------------------------------------------------- #
 
@@ -447,3 +546,134 @@ def test_sidebar_shows_mcp_servers():
     state.history.mcp_servers = [("my-server", "connected")]
     text = "\n".join(render(128, 36, state))
     assert "my-server" in text.lower()
+
+
+# --------------------------------------------------------------------------- #
+# resizing, in every state the interface has
+# --------------------------------------------------------------------------- #
+
+#: The sizes a terminal is actually dragged through, widest first.
+RESIZE = [(160, 45), (140, 40), (120, 36), (100, 32), (80, 24)]
+
+PERSIAN = "یک endpoint سلامت اضافه کن"
+
+
+def a_state(kind: str) -> ScreenState:
+    """One `ScreenState` per thing the interface can be doing."""
+    from comodor.ui.widgets.overlay import info_overlay
+
+    if kind == "new":
+        return make_state(populated=False)
+
+    state = make_state()
+    if kind == "streaming":
+        state.entries.append(Entry("assistant", "Adding the route", streaming=True))
+        state.status.busy = True
+        state.status.activity = "writing src/app.py"
+    elif kind == "tool":
+        state.entries.append(Entry("tool", "run_shell", meta={
+            "summary": "run pytest -q", "running": True}))
+        state.status.busy = True
+    elif kind == "composer":
+        state.focus = "prompt"
+        state.editor.text = "a much longer draft that has to wrap somewhere " * 3
+        state.editor.cursor = len(state.editor.text)
+    elif kind == "overlay":
+        state.overlay = info_overlay("Settings", "theme  cyan\nmode   act")
+    elif kind == "rtl":
+        state.entries = [Entry("user", PERSIAN),
+                         Entry("assistant", "می‌توانم انجام دهم.")]
+    return state
+
+
+@pytest.mark.parametrize("kind", ["new", "active", "streaming", "tool",
+                                  "composer", "overlay", "rtl"])
+@pytest.mark.parametrize("width,height", RESIZE)
+def test_resizing_never_overflows_whatever_it_is_doing(kind, width, height):
+    """A resize is not a special case — the layout is recomputed from the
+    console size on every frame, so every size is just another frame. What
+    that has to hold is this: the picture is never taller or wider than the
+    terminal it was drawn for, in any state the interface can be in."""
+    state = a_state("active" if kind == "active" else kind)
+    lines = render(width, height, state=state)
+
+    assert lines, "nothing was drawn"
+    assert len(lines) <= height, f"{len(lines)} rows in a {height}-row terminal"
+    for line in lines:
+        # Cells, not code points. A right-to-left turn carries bidi isolate
+        # marks, which occupy no columns and would otherwise be counted as an
+        # overflow that no terminal can see.
+        assert cell_len(line) <= width, (
+            f"a row is {cell_len(line)} cells in {width} columns")
+
+
+@pytest.mark.parametrize("width,height", RESIZE)
+def test_the_new_screen_stays_the_new_screen_through_a_resize(width, height):
+    """Dragging a window wider must not summon a sidebar onto a screen that
+    has nothing to put in one."""
+    lines = render(width, height, state=a_state("new"))
+
+    assert "█" in "\n".join(lines), "the opening screen was lost"
+    geometry = layout_module.compute(width, height, stage=layout_module.NEW)
+    assert geometry.sidebar is None
+
+
+def test_the_opening_composer_takes_right_to_left_text():
+    """Persian typed into the first box has to arrive intact, and the box has
+    to stay the size the geometry gave it."""
+    state = a_state("new")
+    state.editor.text = PERSIAN
+    state.editor.cursor = len(state.editor.text)
+
+    lines = render(120, 36, state=state)
+
+    assert any(PERSIAN in line for line in lines), "the draft did not survive"
+    for line in lines:
+        assert cell_len(line) <= 120
+
+
+# --------------------------------------------------------------------------- #
+# what a frame is allowed to cost
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("kind", ["new", "active", "streaming", "tool"])
+def test_a_frame_reads_nothing_and_runs_nothing(kind, monkeypatch):
+    """Drawing is state in, picture out.
+
+    A frame is drawn up to twenty times a second while an answer streams. A
+    single `git` call, directory scan or provider request on that path is not a
+    slow interface — it is one that stops responding to the keyboard, and it is
+    the kind of cost that is invisible until somebody opens a large repository.
+
+    Asserted rather than timed. A stopwatch on a machine running fifteen other
+    test workers measures the machine; this measures the thing that would make
+    it slow.
+    """
+    import socket
+    import subprocess
+
+    state = a_state("active" if kind == "active" else kind)
+    render(128, 36, state=state)          # warm any lazy import the first draw does
+
+    def refuse(name):
+        def called(*args, **kwargs):
+            raise AssertionError(f"a frame called {name}")
+        return called
+
+    monkeypatch.setattr(subprocess, "Popen", refuse("subprocess.Popen"))
+    monkeypatch.setattr(subprocess, "run", refuse("subprocess.run"))
+    monkeypatch.setattr(socket, "socket", refuse("socket.socket"))
+    monkeypatch.setattr(socket, "create_connection", refuse("create_connection"))
+
+    real_open = io.open
+    seen: list[str] = []
+
+    def watched(file, *args, **kwargs):
+        seen.append(str(file))
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(io, "open", watched)
+    render(128, 36, state=state)
+
+    assert not seen, f"a frame opened {seen}"

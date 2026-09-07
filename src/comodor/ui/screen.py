@@ -24,10 +24,11 @@ from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
 
+from . import layout as layout_module
 from .layout import Geometry, Rect
 from .theme import Theme
 from .widgets.buttons import hint_line, keyboard_hints
-from .widgets.chat import Entry, render_transcript
+from .widgets.chat import Entry, render_entry, render_transcript
 from .widgets.history import HistoryModel, render_history
 from .widgets.overlay import Overlay, render_overlay
 from .widgets.panel import rule, too_small_notice
@@ -40,6 +41,15 @@ from .widgets.prompt import (
 )
 from .widgets.statusbar import StatusModel, activity_line, footer_line
 from .widgets.toast import ToastQueue
+from .widgets.welcome import WelcomeInfo, render_opening
+
+#: How many startup notices the opening screen shows before it stops.
+#:
+#: There is room for more, and showing more would be wrong: this screen exists
+#: to be typed into, and a page of warnings above the box is a page nobody
+#: reads and a box nobody finds. The rest are still in the transcript, which is
+#: where they are once the session starts.
+NOTICES_SHOWN = 3
 
 
 @dataclass
@@ -81,6 +91,8 @@ class Screen:
         if state.overlay is not None:
             return render_overlay(state.overlay, geometry.width, geometry.height,
                                   self.theme)
+        if geometry.stage == layout_module.NEW:
+            return self._opening(state, geometry)
 
         inner = geometry.width - 2 * geometry.margin
         rows: list[RenderableType] = [
@@ -93,6 +105,46 @@ class Screen:
         ]
 
         frame: RenderableType = Group(*rows)
+        if geometry.margin:
+            frame = Padding(frame, (0, geometry.margin))
+        return self._painted(frame)
+
+    # -- the opening screen ------------------------------------------------ #
+
+    def _opening(self, state: ScreenState, geometry: Geometry) -> RenderableType:
+        """The screen before the first message.
+
+        Built from the same `ScreenState` as everything else — the same editor,
+        the same status model — so there is nothing to hand over when the first
+        message is sent. The frame after that one is simply an active session,
+        drawn from state that never moved.
+        """
+        status = state.status
+        info = WelcomeInfo(
+            version=status.version, model=status.model, provider=status.provider,
+            project=status.project, skills=status.skills, mode=status.mode,
+            agents=len(state.history.agents),
+        )
+        # Whatever the program found out before anybody typed: a server that
+        # would not start, a provider that answered with an error. Kept, and
+        # kept in the transcript's own order — but measured first, and only
+        # taken while the logo block can spare the rows, so a long warning
+        # cannot push the composer off the bottom of the screen.
+        inner = geometry.width - 2 * geometry.margin
+        budget = geometry.chat.height
+        notices: list[RenderableType] = []
+        for entry in state.entries[-NOTICES_SHOWN:]:
+            block = render_entry(entry, self.theme, geometry.chat.width)
+            rows = self._measure(block, inner)
+            if rows >= budget:
+                break
+            notices.append(block)
+            budget -= rows
+
+        frame: RenderableType = render_opening(
+            info, state.editor, geometry, self.theme,
+            focused=state.focus == "prompt", notices=notices,
+            logo_rows=budget)
         if geometry.margin:
             frame = Padding(frame, (0, geometry.margin))
         return self._painted(frame)
@@ -147,8 +199,7 @@ class Screen:
 
     def _chat(self, state: ScreenState, rect: Rect) -> RenderableType:
         body, total = render_transcript(state.entries, rect, self.theme,
-                                        self.console, state.scroll,
-                                        status=state.status)
+                                        self.console, state.scroll)
         state.transcript_rows = total
         return body
 

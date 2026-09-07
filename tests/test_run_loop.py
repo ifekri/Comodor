@@ -120,11 +120,17 @@ def test_a_click_on_send_works_through_the_loop(loop_app, monkeypatch):
     loop_app.state.editor.cursor = len(loop_app.state.editor.text)
 
     # The geometry is computed on the first frame, so aim at where SEND lands
-    # for the console size the stub reports.
+    # for the console size the stub reports — and at the stage the app will
+    # actually be in. A fresh session opens on the screen that has a composer
+    # box and no key hints, so aiming at the active session's footer would be
+    # aiming at a row that is not drawn.
     from comodor.ui import layout as layout_module
+    from comodor.ui.widgets.chat import is_new_session
 
-    geometry = layout_module.compute(loop_app.console.size.width,
-                                     loop_app.console.size.height)
+    geometry = layout_module.compute(
+        loop_app.console.size.width, loop_app.console.size.height,
+        stage=(layout_module.NEW if is_new_session(loop_app.state.entries)
+               else layout_module.ACTIVE))
     events = []
     if geometry.hints:
         send = geometry.hints["send"]

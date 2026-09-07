@@ -899,8 +899,14 @@ def run_preview(config: Config, args: argparse.Namespace) -> int:
                 ("github", "connecting"), ("n8n", "failed"),
             ]
 
-    geometry = layout_module.compute(console.width, console.height or size[1],
-                                     sidebar=bool(state.entries))
+    # The same question the application asks, so a preview is a picture of
+    # what runs rather than of a third layout that exists only here.
+    from .ui.widgets.chat import is_new_session
+
+    geometry = layout_module.compute(
+        console.width, console.height or size[1],
+        stage=(layout_module.NEW if is_new_session(state.entries)
+               else layout_module.ACTIVE))
     console.print(Screen(console, theme).render(state, geometry))
     if args.svg:
         # The one place this program picks a typeface. Everywhere else it is

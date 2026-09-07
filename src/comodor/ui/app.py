@@ -47,7 +47,7 @@ from . import console as console_module
 from . import layout as layout_module
 from .input import KeyEvent, MouseEvent, PasteEvent, TerminalInput
 from .screen import Screen, ScreenState
-from .widgets.chat import Entry, entries_from
+from .widgets.chat import Entry, entries_from, is_new_session
 from .widgets.history import SessionRef
 from .widgets.overlay import (
     info_overlay,
@@ -390,15 +390,18 @@ class App:
         self.bus.close()
 
     def _frame(self) -> Any:
-        # No sidebar until there is a conversation. On an empty screen every
-        # section of it is either zero or unknown, and a column of zeros beside
-        # a wordmark is furniture rather than information — it also takes a
-        # quarter of the width away from the one thing that screen exists to
-        # show.
+        # Which of the two screens this is, decided in one place and from the
+        # transcript itself. A warning that arrived before anybody typed does
+        # not count as a conversation, and a restored session already has one
+        # by the time the first frame is drawn — so both cases fall out of the
+        # same question rather than needing a flag somebody has to remember to
+        # set.
+        stage = (layout_module.NEW if is_new_session(self.state.entries)
+                 else layout_module.ACTIVE)
         wanted = self.state.sidebar_visible and self.config.ui.sidebar
         geometry = layout_module.compute(
             self.console.size.width, self.console.size.height,
-            sidebar=wanted and bool(self.state.entries),
+            sidebar=wanted, stage=stage,
         )
         self.geometry = geometry
         return self.screen.render(self.state, geometry)

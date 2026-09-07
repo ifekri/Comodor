@@ -707,3 +707,134 @@ def test_a_second_request_waits_its_turn(app, asked):
     app._on_key(key("escape"))
     assert app.state.overlay is not None
     assert app.state.overlay.request is second
+
+
+# --------------------------------------------------------------------------- #
+# the two screens, and moving between them
+# --------------------------------------------------------------------------- #
+
+
+def stage_of(app: App) -> str:
+    """The stage the next frame would be drawn at.
+
+    Read by drawing one. Asking the predicate directly would test the
+    predicate; this tests the thing the application does with it.
+    """
+    app._frame()
+    return app.geometry.stage
+
+
+def test_a_fresh_session_starts_on_the_opening_screen(app):
+    assert stage_of(app) == layout_module.NEW
+    assert app.geometry.sidebar is None
+    assert app.geometry.composer is not None
+
+
+def test_a_startup_warning_does_not_start_the_session(app):
+    """`_complain_about_the_config` and a failed MCP server both speak before
+    the user does. Neither is a conversation."""
+    app.bus.emit(Kind.NOTICE, text="config: max_cost_usd cannot be enforced")
+    app.bus.emit(Kind.ERROR, text="mcp: filesystem did not start")
+    app._pump_events()
+
+    assert app.state.entries, "the warnings were dropped"
+    assert stage_of(app) == layout_module.NEW
+
+
+def test_the_first_message_moves_to_the_active_session(app, monkeypatch):
+    monkeypatch.setattr(app, "_start_agent", lambda text: None)
+    assert stage_of(app) == layout_module.NEW
+
+    type_text(app, "add a health endpoint")
+    app._on_key(key("enter"))
+
+    assert stage_of(app) == layout_module.ACTIVE
+
+
+def test_the_first_message_survives_the_move(app, monkeypatch):
+    """The composer on the opening screen is the same editor the active
+    session uses. If it were a second widget, the text typed into it would be
+    lost at exactly the moment it stopped being drawn."""
+    monkeypatch.setattr(app, "_start_agent", lambda text: None)
+
+    type_text(app, "add a health endpoint")
+    app._on_key(key("enter"))
+
+    said = [entry for entry in app.state.entries if entry.kind == "user"]
+    assert [entry.text for entry in said] == ["add a health endpoint"]
+
+
+def test_the_first_message_is_not_delivered_twice(app):
+    """One entry, and one run. A transition that re-submits looks identical on
+    screen to one that does not, until the bill arrives."""
+    started: list[str] = []
+    app._start_agent = lambda text: started.append(text)
+
+    type_text(app, "hello")
+    app._on_key(key("enter"))
+    app._frame()                      # the frame that changes screens
+    app._frame()                      # and the one after it
+
+    assert started == ["hello"]
+    assert [entry.text for entry in app.state.entries
+            if entry.kind == "user"] == ["hello"]
+
+
+def test_the_move_happens_once_and_stays(app, monkeypatch):
+    """No flicker back to the opening screen while the answer streams in."""
+    monkeypatch.setattr(app, "_start_agent", lambda text: None)
+    type_text(app, "hello")
+    app._on_key(key("enter"))
+
+    stages = [stage_of(app)]
+    app.bus.emit(Kind.ASSISTANT_START)
+    app._pump_events()
+    stages.append(stage_of(app))
+    app.bus.emit(Kind.ASSISTANT_DELTA, text="wor")
+    app._pump_events()
+    stages.append(stage_of(app))
+    app.bus.emit(Kind.ASSISTANT_END)
+    app._pump_events()
+    stages.append(stage_of(app))
+
+    assert stages == [layout_module.ACTIVE] * 4
+
+
+def test_keystrokes_during_the_move_are_not_lost(app, monkeypatch):
+    """Typing the next question while the first is still running goes into the
+    same buffer. Nothing is re-created between the screens, so there is
+    nowhere for it to fall."""
+    monkeypatch.setattr(app, "_start_agent", lambda text: None)
+    type_text(app, "first")
+    app._on_key(key("enter"))
+    app._frame()
+    type_text(app, "second")
+
+    assert app.state.editor.text == "second"
+
+
+def test_clearing_a_conversation_returns_to_the_opening_screen(app, monkeypatch):
+    monkeypatch.setattr(app, "_start_agent", lambda text: None)
+    type_text(app, "hello")
+    app._on_key(key("enter"))
+    assert stage_of(app) == layout_module.ACTIVE
+
+    app.cmd_clear("")
+
+    assert stage_of(app) == layout_module.NEW
+
+
+def test_a_resumed_session_never_shows_the_opening_screen(app):
+    """Restoring fills the transcript in the constructor, before the first
+    frame. A session with history must not flash a welcome at somebody who
+    asked to carry on."""
+    from comodor.providers.base import Message, Role
+
+    for message in (Message(role=Role.USER, content="add a health endpoint"),
+                    Message(role=Role.ASSISTANT, content="I'll add the route.")):
+        app.sessions.append("resumed-session", message)
+
+    app._resume("resumed-session")
+
+    assert stage_of(app) == layout_module.ACTIVE
+    assert any(entry.kind == "user" for entry in app.state.entries)

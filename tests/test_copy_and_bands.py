@@ -166,6 +166,115 @@ def test_the_bands_cost_no_vertical_space():
     assert len([row for row in plain if row.strip()]) == 1
 
 
+# --------------------------------------------------------------------------- #
+# the names
+# --------------------------------------------------------------------------- #
+
+
+def test_both_speakers_are_named():
+    assert "You" in painted(Entry("user", "why?"))
+    assert "Comodor" in painted(Entry("assistant", "because."))
+
+
+def test_the_names_work_without_any_colour():
+    """The band is the fast answer and the name is the reliable one. A theme
+    with no colour has no bands at all, so without the names a `--no-color`
+    transcript is a wall with no speaker in it anywhere."""
+    user = painted(Entry("user", "why?"), name="mono")
+    assistant = painted(Entry("assistant", "because."), name="mono")
+
+    assert "48;2;" not in user and "48;2;" not in assistant
+    assert "You" in user and "Comodor" not in user
+    assert "Comodor" in assistant and "You" not in assistant
+
+
+def test_naming_the_question_costs_it_no_row():
+    """A one-line question with a label over it is two rows to say one thing,
+    and a conversation is mostly one-line questions."""
+    plain = [row for row in rows(painted(Entry("user", "why?"))) if row.strip()]
+
+    assert len(plain) == 1
+    assert "You" in plain[0] and "why?" in plain[0]
+
+
+def test_the_answer_is_named_above_its_own_prose():
+    """An answer opens with a heading or a list as often as with a sentence.
+    Prefixing its first line would put the label inside the Markdown and lose
+    it the moment it does."""
+    drawn = [row for row in rows(painted(Entry("assistant", "# Title\n\nbody")))
+             if row.strip()]
+
+    assert drawn[0].strip() == "Comodor"
+
+
+def test_the_surfaces_are_asked_for_by_role_not_by_colour():
+    """`surface_user` and `surface_assistant` are what a widget names. Which
+    field of which palette answers is the theme's business, and swapping a
+    palette must not need an edit here."""
+    theme = theme_module.load("cyan")
+
+    assert theme.palette_colour("surface_user") == theme.palette.user_bg
+    assert theme.palette_colour("surface_assistant") == theme.palette.assistant_bg
+    assert _rgb(theme.palette_colour("surface_user")) in painted(
+        Entry("user", "why?"), name="cyan")
+
+
+def test_one_surface_per_message_not_per_paragraph():
+    """Three paragraphs in one answer is one block with one background, and
+    the blank rows between them are painted too — otherwise a long answer
+    comes out looking like three separate ones."""
+    out = painted(Entry("assistant", "one\n\ntwo\n\nthree"), name="cyan", width=60)
+    theme = theme_module.load("cyan")
+    coloured = [row for row in out.splitlines()
+                if _rgb(theme.palette.assistant_bg) in row]
+
+    assert len(coloured) >= 6, "the gaps inside the answer were left bare"
+    assert _rgb(theme.palette.user_bg) not in out
+
+
+# --------------------------------------------------------------------------- #
+# what a tool call did
+# --------------------------------------------------------------------------- #
+
+
+def a_tool(ok=True, running=False, name="ember"):
+    return painted(Entry("tool", "edit_file", meta={
+        "summary": "edit src/app.py", "ok": ok, "running": running,
+        "elapsed": 0.0 if running else 0.2,
+    }), name=name)
+
+
+def test_a_tool_call_says_what_it_did_without_colour():
+    """Colour said this already, and said it to nobody running `--no-color`,
+    nobody colour-blind on the red/green axis, and nobody reading a copied
+    transcript."""
+    assert "✓" in a_tool(ok=True)
+    assert "×" in a_tool(ok=False)
+    assert "●" in a_tool(running=True)
+
+
+def test_the_marks_have_an_ascii_form():
+    """`--ascii` is for terminals that render these as boxes. A state nobody
+    can read is not a state."""
+    theme = theme_module.load("ember", ascii_borders=True)
+    glyphs = theme.glyphs
+
+    assert (glyphs.ok, glyphs.running, glyphs.queued, glyphs.failed) == (
+        "[OK]", "[..]", "[--]", "[!!]")
+    for glyph in (glyphs.ok, glyphs.running, glyphs.queued, glyphs.failed):
+        assert glyph.isascii()
+
+
+def test_the_mark_is_not_a_font_that_has_to_be_installed():
+    """Nerd-Font glyphs sit in a private use area. A terminal without the font
+    draws a box, which is worse than the plain character it replaced."""
+    theme = theme_module.load("ember")
+    for glyph in (theme.glyphs.ok, theme.glyphs.running,
+                  theme.glyphs.queued, theme.glyphs.failed):
+        assert len(glyph) == 1
+        assert not (0xE000 <= ord(glyph) <= 0xF8FF), f"{glyph!r} needs a font"
+
+
 def test_right_to_left_text_stays_at_the_right_margin():
     lines = rows(painted(Entry("user", PERSIAN)))
     body = [line for line in lines if PERSIAN in line][0]

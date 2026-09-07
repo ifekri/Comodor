@@ -9,37 +9,88 @@ comodor --demo   # the whole interface, offline, no key
 
 ---
 
-## The layout
+## The two screens
+
+Comodor has two, and only two. Before anything has been said there is nothing
+to read, so that screen is arranged around the one thing you can act on:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  Comodor                              Anthropic · claude-sonnet-5      │
-│  ────────────────────────────────────────────────────────────────────  │
 │                                                                        │
-│  TASKS                    > fix the failing parser test                │
-│  ● read the test          ▸ read_file  tests/test_parser.py     0.1s   │
-│  ◐ find the cause         ▸ run_shell  pytest tests/test_pa…    2.3s   │
-│  ○ fix it                                                              │
-│                           The test expects `parse("")` to raise, but…  │
+│                    ░█▀▀░█▀█░█▄█░█▀█░█▀▄░█▀█░█▀▄                        │
+│                    ░█░░░█░█░█░█░█░█░█░█░█░█░█▀▄                        │
+│                    ░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀░░▀▀▀░▀░▀                        │
 │                                                                        │
-│  ────────────────────────────────────────────────────────────────────  │
-│  ▌Type a task, or / for commands                                       │
+│                   it learns the way you correct it                     │
+│                     Xiaomi MiMo / mimo-v2.5-pro                        │
 │                                                                        │
-│  act · loop on · 12% of 1M · $0.03      ⏎ send  ^O attach  F3 mode     │
+│      ┌──────────────────────────────────────────────────────────┐      │
+│      │ ▌ask for anything, or press / for a command              │      │
+│      │                                                          │      │
+│      └──────────────────────────────────────────────────────────┘      │
+│                                                                        │
+│  Mode: ACT [TAB]  ● Command /  ● Sub-agent off [ctrl+s]  MODEL mimo…   │
+│                                                                        │
+│  Workspace: …/my-project         Skill: 4            version: 1.1.2    │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-**The sidebar** is the plan, when there is one. `F2` hides it — worth doing on a
-narrow terminal.
+It has **no sidebar at any width**. Every section of one would read zero before
+a conversation exists, and a 240-column terminal has the room for a column of
+zeros without having anything to put in it.
+
+The three facts along the bottom are the ones worth checking before typing
+anything: which folder it is pointed at, whether your skills loaded, what you
+are running. The badge on the right names the model that is going to answer —
+the single fact people most often get wrong about a session, settled before the
+first question rather than after it. Nothing here is a placeholder: a value that
+is not known is left out rather than filled in.
+
+The box is the real editor, not a picture of one. What you type into it is what
+arrives, and pressing enter moves straight into the conversation — there is no
+second widget for the first message to be lost between.
+
+Once somebody has spoken, that is the other screen:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│  You › fix the failing parser test                    add a health…    │
+│                                                       ──────────────   │
+│      Comodor                                          › Context        │
+│      The test expects `parse("")` to raise, but…        143,000 used   │
+│                                                         Limit : 1M     │
+│      ✓ read    tests/test_parser.py            0.1s     Sub-agent: 1   │
+│      ● run     pytest tests/test_pa…      running…                     │
+│                                                       › Workspace      │
+│                                                         …/my-project   │
+│                                                                        │
+│  ────────────────────────────────────────────────────────────────────  │
+│  ▌now add a /version endpoint too                                      │
+│                                                                        │
+│  Mode : Act [TAB]  ● openrouter/…  12% of 1M  loop  $0.03  Command : / │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+**The sidebar sits on the right**, because what your eye should land on first is
+the conversation, not a column of counters. It is reference material — how much
+context is left, which folder, which servers are up, which sub-agents are
+running — and it shows only what is real: a section with nothing in it is not
+drawn rather than drawn empty. `F2` hides it.
+
+It appears at 140 columns and wider at full width, narrows between 100 and 139,
+and folds away below 100 so the conversation keeps the room. The whole interface
+works from about 60 columns upward, and `comodor preview 80x24` renders it at
+any size without starting a session.
 
 **The status line** shows the mode, whether it is iterating, how full the
 context is, and what this session has cost. The context figure is real: it
 follows the model, so switching from a million-token model to a 128k one changes
 it immediately.
 
-It works from about 60 columns upward. Below that the sidebar folds away by
-itself. `comodor preview 80x24` renders it at any size without starting a
-session.
+A warning that arrives before you have typed anything — a server that would not
+start, a setting the config asked for and did not get — is shown on the opening
+screen rather than replacing it. It is not a conversation, so it does not start
+one.
 
 ---
 
@@ -212,25 +263,44 @@ mouse tracking without turning it off.
 
 ## Who is speaking
 
-Each turn sits on a quiet band — one shade behind what you typed, another
-behind the answer:
+Three things say it, and each works where the others do not — a name, a quiet
+band, and the indent:
 
 ```
-▌ › why does the parser drop the last field?              ← warm
+▌ You › why does the parser drop the last field?          ← warm
 
-▌   Because split is called with a maxsplit of 2 …        ← neutral
+▌     Comodor                                             ← neutral
+▌     Because split is called with a maxsplit of 2 …
 ▌
-▌   ┌─ python ────────────────────────┐
-▌   │ return text.split(',', 2)       │
-▌   └─────────────────────────────────┘
+▌     ┌─ python ────────────────────────┐
+▌     │ return text.split(',', 2)       │
+▌     └─────────────────────────────────┘
 ```
 
-Deliberately muted. This is behind body text you read for minutes at a time,
-and a background with any presence of its own competes with the words. Each
-theme has its own pair, a few percent from its background; `mono` has none,
-because a theme whose premise is no colour does not want two.
+The bands are deliberately muted. This is behind body text you read for minutes
+at a time, and a background with any presence of its own competes with the
+words. Each theme has its own pair, a few percent from its background; one band
+per message rather than per paragraph, so a long answer stays one block.
 
-They cost no vertical space — the change of colour is the boundary.
+`mono` has no bands, and neither does `--no-color` — which is exactly why the
+names are there. A colour is the fast answer and a word is the reliable one.
+
+The name costs the question no row: it sits on the same line as the words,
+because a conversation is mostly one-line questions and a label above each would
+be half an exchange off the top of a short terminal. An answer gets its own row,
+which it can afford, and which survives the answer opening with a heading.
+
+Tool calls carry a mark saying what they did:
+
+```
+✓ edit    src/app.py       0.2s      done
+● run     pytest -q     running…     working
+○ read    tests/…                    waiting
+× run     pytest -q       1.4s       failed
+```
+
+Under `--ascii` these become `[OK]`, `[..]`, `[--]` and `[!!]`. They are plain
+characters, not icons from a font you have to install first.
 
 ---
 
