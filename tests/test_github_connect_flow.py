@@ -183,7 +183,10 @@ def test_two_polls_are_not_the_same_request(config):
 @pytest.mark.parametrize("status,said", [
     ("cancelled", "cancelled"),
     ("expired", "expired"),
-    ("failed", "failed"),
+    # The message says what happened rather than repeating the wire status:
+    # "the endpoint said failed" is a word from a protocol, not an answer.
+    ("failed", "not completed"),
+    ("not_permitted", "yours to connect"),
 ])
 def test_a_flow_that_did_not_connect_says_which(config, status, said):
     worker = Worker(answers=[{"status": status}])
@@ -506,3 +509,111 @@ def test_the_flow_scheme_is_not_the_grant_scheme():
     assert FLOW_SCHEME != "comodor-github-v1"
     assert not FLOW_SCHEME.startswith("comodor-github-v1\n")
     assert connect.SEPARATOR == "\n"
+
+
+# --------------------------------------------------------------------------- #
+# a flow is not thrown away by one bad request
+# --------------------------------------------------------------------------- #
+
+
+class Flaky:
+    """A Worker that fails a few times and then answers."""
+
+    def __init__(self, failures: list[Exception], then: dict[str, Any]) -> None:
+        self.failures = list(failures)
+        self.then = then
+        self.polls = 0
+
+    def __call__(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        if path == "install":
+            return {"state": "comodor.a-state", "nonce": "a-nonce",
+                    "url": URL, "expires_in": 900, "protocol": PROTOCOL}
+        self.polls += 1
+        if self.failures:
+            raise self.failures.pop(0)
+        return self.then
+
+
+@pytest.mark.parametrize("problem", [
+    ConnectError("could not reach comodor.ai: timed out"),          # no answer
+    ConnectError("comodor.ai refused: 502", status=502),
+    ConnectError("comodor.ai refused: 429", status=429),
+    ConnectError("comodor.ai refused: 503", status=503),
+])
+def test_a_transient_failure_does_not_throw_the_flow_away(config, problem):
+    """Hundreds of polls over fifteen minutes; one dropped connection or one
+    edge returning 502 must not discard an authorisation the browser may
+    already have completed."""
+    worker = Flaky([problem], connected())
+    made = Connector(config)
+    made._post = worker            # type: ignore[method-assign]
+    pending = made.begin()
+
+    installation = made.wait_for(pending, sleep=lambda _: None)
+
+    assert installation.account_login == "ifekri"
+    assert worker.polls == 2, "it tried again"
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 409])
+def test_a_refusal_stops_rather_than_being_retried(config, status):
+    """Asking again would be refused again."""
+    worker = Flaky([ConnectError(f"refused: {status}", status=status)],
+                   connected())
+    made = Connector(config)
+    made._post = worker            # type: ignore[method-assign]
+    pending = made.begin()
+
+    with pytest.raises(ConnectError, match="refused"):
+        made.wait_for(pending, sleep=lambda _: None)
+
+    assert worker.polls == 1, "a refusal must not be retried"
+
+
+def test_giving_up_after_repeated_trouble_says_what_the_trouble_was(config):
+    """Rather than reporting a timeout when every attempt was refused by the
+    network."""
+    worker = Flaky([ConnectError("could not reach comodor.ai: timed out")] * 10,
+                   connected())
+    made = Connector(config)
+    made._post = worker            # type: ignore[method-assign]
+    pending = made.begin()
+
+    ticks = iter([0.0, 100.0, 500.0, 901.0, 902.0, 903.0])
+    with pytest.raises(ConnectError, match="gave up waiting.*timed out"):
+        made.wait_for(pending, sleep=lambda _: None, now=lambda: next(ticks))
+
+
+def test_an_error_knows_whether_asking_again_could_help():
+    assert ConnectError("no answer").transient
+    assert ConnectError("busy", status=429).transient
+    assert ConnectError("bad gateway", status=502).transient
+    assert not ConnectError("nope", status=401).transient
+    assert not ConnectError("gone", status=404).transient
+
+
+# --------------------------------------------------------------------------- #
+# a browser that ends without connecting ends the wait
+# --------------------------------------------------------------------------- #
+
+
+def test_a_refusal_in_the_browser_stops_the_terminal_waiting(config):
+    """It used to hear `pending` until the state expired, fifteen minutes
+    after the browser had definitively finished."""
+    worker = Worker(answers=[{"status": "not_permitted",
+                              "reason": "not entitled to connect this installation"}])
+    made = connector(config, worker)
+    pending = made.begin()
+
+    with pytest.raises(ConnectError, match="not yours to connect|not entitled"):
+        made.wait_for(pending, sleep=lambda _: None)
+
+
+def test_an_abandoned_authorisation_stops_the_terminal_waiting(config):
+    worker = Worker(answers=[{"status": "failed",
+                              "reason": "authorisation was not completed"}])
+    made = connector(config, worker)
+    pending = made.begin()
+
+    with pytest.raises(ConnectError, match="not completed"):
+        made.wait_for(pending, sleep=lambda _: None)

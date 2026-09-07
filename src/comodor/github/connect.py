@@ -84,7 +84,23 @@ SEPARATOR = "\n"
 
 
 class ConnectError(RuntimeError):
-    """The connection could not be completed. Safe to show."""
+    """The connection could not be completed. Safe to show.
+
+    `status` is the HTTP code when there was one, and `None` when the request
+    never got an answer at all. A poller needs the difference: a timeout or a
+    503 is worth trying again, and a 401 is the server saying no.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def transient(self) -> bool:
+        """Whether asking again could plausibly get a different answer."""
+        if self.status is None:
+            return True                      # never reached the server
+        return self.status == 429 or 500 <= self.status < 600
 
 
 @dataclass(frozen=True)
@@ -167,12 +183,14 @@ class Connector:
         except ValueError:
             raise ConnectError(
                 f"{self.base} answered {answer.status_code} with "
-                f"something that is not JSON") from None
+                f"something that is not JSON",
+                status=answer.status_code) from None
 
         if not (200 <= answer.status_code < 300):
             said = str(found.get("error") or found.get("message") or "")
             raise ConnectError(
-                f"{self.base} refused: {redact(said) or answer.status_code}")
+                f"{self.base} refused: {redact(said) or answer.status_code}",
+                status=answer.status_code)
         return found if isinstance(found, dict) else {}
 
     # -- starting ---------------------------------------------------------- #
@@ -282,8 +300,25 @@ class Connector:
                 "this connection is not one the terminal can finish by itself")
 
         deadline = now() + pending.seconds_left
+        # Kept so that giving up can say what kept going wrong, rather than
+        # reporting a timeout when every attempt was refused.
+        last_trouble: ConnectError | None = None
+
         while True:
-            found = self._poll_once(pending)
+            try:
+                found = self._poll_once(pending)
+                last_trouble = None
+            except ConnectError as problem:
+                # A poll every couple of seconds for up to fifteen minutes is
+                # hundreds of requests, and one dropped connection, one 502
+                # from an edge, or one rate limit must not throw away a flow
+                # the browser may already have completed. A refusal is
+                # different: asking again would be refused again.
+                if not problem.transient:
+                    raise
+                last_trouble = problem
+                found = {"status": "pending"}
+
             status = str(found.get("status") or "")
 
             if status == "connected":
@@ -294,12 +329,25 @@ class Connector:
                 raise ConnectError(
                     "that connection link expired before it was used. Run "
                     "`comodor github connect` again.")
+            if status == "not_permitted":
+                raise ConnectError(
+                    "GitHub would not confirm that installation is yours to "
+                    "connect, so nothing has been granted."
+                    + (f" ({found['reason']})" if found.get("reason") else ""))
+            if status == "failed":
+                raise ConnectError(
+                    "the authorisation was not completed"
+                    + (f": {found['reason']}" if found.get("reason") else "")
+                    + ". Nothing has been connected.")
             if status and status != "pending":
                 raise ConnectError(f"the endpoint said {status}")
 
             if on_tick is not None:
                 on_tick()
             if now() >= deadline:
+                if last_trouble is not None:
+                    raise ConnectError(
+                        f"gave up waiting: {last_trouble}") from None
                 raise ConnectError(
                     "nobody finished the authorisation in time. Nothing has "
                     "been connected.")
