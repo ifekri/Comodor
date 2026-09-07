@@ -144,7 +144,8 @@ class Screen:
         frame: RenderableType = render_opening(
             info, state.editor, geometry, self.theme,
             focused=state.focus == "prompt", notices=notices,
-            logo_rows=budget)
+            logo_rows=budget, commands=state.slash_commands,
+            selected=state.completion_index, top=state.completion_top)
         if geometry.margin:
             frame = Padding(frame, (0, geometry.margin))
         return self._painted(frame)

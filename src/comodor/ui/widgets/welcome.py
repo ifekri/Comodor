@@ -34,7 +34,13 @@ from rich.text import Text
 from ..banner import TAGLINE, short, wordmark_for
 from ..layout import Geometry
 from ..theme import Theme
-from .prompt import Editor, render_editor
+from .prompt import (
+    Editor,
+    completions,
+    menu_budget,
+    render_completions,
+    render_editor,
+)
 
 #: What the composer says before anything is typed into it, longest first.
 #:
@@ -42,12 +48,25 @@ from .prompt import Editor, render_editor
 #: placeholder that wraps is two rows where the geometry allowed one, which
 #: pushes the box a line taller than the screen was measured for — so this is
 #: chosen against the width rather than trimmed with an ellipsis afterwards.
+#:
+#: Two of these are the same sentence twice, once with a middle dot and once
+#: with a hyphen. `--ascii` is a promise about every glyph on the screen, and a
+#: placeholder chosen purely by width breaks it on exactly the terminals that
+#: are narrow enough to need the shorter form.
 INVITATIONS = (
     "ask for anything, or press / for a command",
     "ask for anything  ·  / for a command",
+    "ask for anything  -  / for a command",
     "ask for anything",
-    "ask…",
+    "ask...",
 )
+
+
+def invitation(room: int, ascii_only: bool = False) -> str:
+    """The widest invitation that fits, and that this terminal can draw."""
+    choices = [text for text in INVITATIONS
+               if not ascii_only or text.isascii()]
+    return next((text for text in choices if len(text) <= room), choices[-1])
 
 
 @dataclass
@@ -163,7 +182,11 @@ def status_line(info: WelcomeInfo, theme: Theme, width: int) -> Text:
     left.append("Sub-agent ", style=theme.style("secondary_text"))
     left.append(str(info.agents) if running else "off",
                 style=theme.style("success" if running else "muted"))
-    left.append(" [ctrl+s]", style=dim)
+    # The command that actually reaches them. A key hint is a promise, and the
+    # only thing bound to ctrl+s anywhere in this program submits an open
+    # question form — so naming it here would advertise a control that does
+    # not exist for a feature it has nothing to do with.
+    left.append(" /delegates", style=dim)
 
     if not info.model:
         return _clipped(left, width)
@@ -192,8 +215,9 @@ def _clipped(text: Text, width: int) -> Text:
     return text
 
 
-def _composer(editor: Editor, geometry: Geometry, theme: Theme,
-              focused: bool) -> RenderableType:
+def _composer(editor: Editor, geometry: Geometry, theme: Theme, focused: bool,
+              commands: list[tuple[str, str]] | None = None,
+              selected: int = 0, top: int = 0) -> RenderableType:
     """The real editor, in a box, in the middle of the page.
 
     A box here and a bare rule in the active session, which looks like an
@@ -202,15 +226,31 @@ def _composer(editor: Editor, geometry: Geometry, theme: Theme,
     transcript; on this screen it is the subject, and the frame is what says
     where to type. It is drawn with the theme's own box, so `--ascii` gets an
     ASCII frame rather than a row of question marks.
+
+    The command menu is drawn *inside* the box, over the editor's own rows, the
+    same way the active session draws it over the composer strip. The box
+    cannot grow: the whole screen is measured against a geometry that gave it
+    a fixed height, and a menu that pushed it taller would push the two rows
+    beneath it off the bottom of the terminal.
     """
     rect = geometry.prompt
     box = geometry.composer
+    rows = max(1, rect.height)
+
+    matches = completions(editor.text, commands or [])
+    # Rows for the menu including its overflow indicator, leaving the editor
+    # at least one row to type on.
+    listed = menu_budget(len(matches), rows - 1) if rows > 1 else 0
+
     # One cell for the cursor block that is drawn in front of it.
-    room = max(1, rect.width - 1)
-    invitation = next((text for text in INVITATIONS if len(text) <= room),
-                      INVITATIONS[-1])
-    body = render_editor(editor, rect, theme, placeholder=invitation,
-                         focused=focused, rows=max(1, rect.height))
+    body: RenderableType = render_editor(
+        editor, rect, theme,
+        placeholder=invitation(max(1, rect.width - 1), theme.ascii),
+        focused=focused, rows=max(1, rows - listed))
+    if listed:
+        body = Group(body, render_completions(matches, theme, selected,
+                                              limit=listed, top=top,
+                                              width=rect.width))
 
     surface = theme.palette_colour("surface_user")
     panel = Panel(
@@ -274,7 +314,9 @@ def render_welcome(info: WelcomeInfo, width: int, height: int,
 def render_opening(info: WelcomeInfo, editor: Editor, geometry: Geometry,
                    theme: Theme, focused: bool = True,
                    notices: list[RenderableType] | None = None,
-                   logo_rows: int | None = None) -> RenderableType:
+                   logo_rows: int | None = None,
+                   commands: list[tuple[str, str]] | None = None,
+                   selected: int = 0, top: int = 0) -> RenderableType:
     """The whole screen, in the order it is read.
 
     ``notices`` are anything that happened before the first message — a server
@@ -287,6 +329,11 @@ def render_opening(info: WelcomeInfo, editor: Editor, geometry: Geometry,
     those have taken their share. The caller measures them, because measuring
     needs the console that will draw them; passing the remainder in is what
     keeps a long warning from pushing the box off the bottom of the screen.
+
+    ``commands`` is the slash-command table, so that typing `/` here shows the
+    same menu it shows in a conversation. The invitation says to press it; a
+    screen that then showed nothing would be advertising a key that appears not
+    to work, and the selection the arrow keys were moving would be invisible.
     """
     inner = geometry.width - 2 * geometry.margin
     if logo_rows is None:
@@ -297,7 +344,8 @@ def render_opening(info: WelcomeInfo, editor: Editor, geometry: Geometry,
     if notices:
         blocks.extend(notices)
 
-    blocks.append(_composer(editor, geometry, theme, focused))
+    blocks.append(_composer(editor, geometry, theme, focused,
+                            commands=commands, selected=selected, top=top))
     blocks.append(Text(""))
     blocks.append(status_line(info, theme, inner))
 

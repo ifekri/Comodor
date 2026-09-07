@@ -18,6 +18,7 @@ from comodor.ui.widgets.prompt import Editor
 from comodor.ui.widgets.welcome import (
     INVITATIONS,
     WelcomeInfo,
+    invitation,
     render_opening,
     render_welcome,
 )
@@ -145,7 +146,10 @@ def test_the_status_row_shows_the_mode_and_its_key(theme):
     out = drawn(an_info(mode="plan"), 120, 32, theme)
     row = next(line for line in out.splitlines() if "Mode:" in line)
     assert "PLAN" in row and "[TAB]" in row
-    assert "Command" in row and "Sub-agent" in row and "[ctrl+s]" in row
+    assert "Command" in row and "Sub-agent" in row
+    # Each of these names a control that exists: TAB cycles the mode, `/`
+    # opens the command menu, `/delegates` reaches the sub-agents.
+    assert "/delegates" in row
 
 
 def test_no_sub_agents_reads_off_rather_than_zero(theme):
@@ -284,3 +288,84 @@ def test_ascii_mode_still_frames_the_composer():
     invitation floating in the middle of an otherwise empty page."""
     out = drawn(an_info(), 100, 30, theme_module.load("cyan", ascii_borders=True))
     assert "+--" in out or "|" in out
+
+
+# --------------------------------------------------------------------------- #
+# what the opening screen promises, it has to do
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("width", list(range(40, 90)) + [100, 140, 240])
+def test_the_invitation_is_ascii_in_ascii_mode(width):
+    """`--ascii` is a promise about every glyph on the screen, and the
+    placeholder was chosen purely by width. The middle-dot form fits exactly
+    the terminals narrow enough to need it, so the promise broke on the sizes
+    most likely to have been picked for a terminal that cannot draw it."""
+    theme = theme_module.load("cyan", ascii_borders=True)
+    out = drawn(an_info(), width, 24, theme)
+
+    for row in out.splitlines():
+        assert row.isascii(), f"non-ASCII at width {width}: {row!r}"
+
+
+@pytest.mark.parametrize("width", [40, 46, 60, 80, 120, 240])
+def test_the_invitation_still_fits_in_ascii_mode(width):
+    """Falling back to ASCII must not fall back to something that wraps."""
+    geometry = layout_module.compute(width, 24, stage=layout_module.NEW)
+    room = geometry.prompt.width - 1
+    chosen = invitation(room, ascii_only=True)
+
+    assert chosen.isascii()
+    assert len(chosen) <= room or chosen == "ask..."
+
+
+def test_slash_shows_the_command_menu_on_the_opening_screen(theme):
+    """The invitation says to press `/`. Before this, pressing it on a fresh
+    session drew nothing — the menu lives in the active session's composer,
+    which the opening screen does not use — so the key looked broken and the
+    selection the arrow keys were moving was invisible."""
+    editor = Editor(text="/mo")
+    editor.cursor = len(editor.text)
+    geometry = layout_module.compute(120, 36, stage=layout_module.NEW)
+    console = Console(width=120, height=36, force_terminal=False,
+                      legacy_windows=False)
+    with console.capture() as caught:
+        console.print(render_opening(
+            an_info(), editor, geometry, theme,
+            commands=[("/mode", "act, plan or chat"),
+                      ("/model", "pick a model"),
+                      ("/memory", "what it has learned")]))
+    out = caught.get()
+
+    assert "/mode" in out and "/model" in out
+    assert "/memory" not in out, "it should be filtered, not listed whole"
+
+
+def test_the_menu_never_makes_the_box_taller(theme):
+    """The screen is measured against a geometry that fixed the box height. A
+    menu that pushed it down would push the two rows under it off the bottom
+    of the terminal."""
+    commands = [(f"/command{index}", "does a thing") for index in range(20)]
+    for width, height in [(80, 24), (100, 32), (120, 36), (160, 45)]:
+        editor = Editor(text="/co")
+        editor.cursor = len(editor.text)
+        geometry = layout_module.compute(width, height, stage=layout_module.NEW)
+        console = Console(width=width, height=height, force_terminal=False,
+                          legacy_windows=False)
+        with console.capture() as caught:
+            console.print(render_opening(an_info(), editor, geometry, theme,
+                                         commands=commands))
+        rows = caught.get().splitlines()
+
+        assert len(rows) <= height, f"{len(rows)} rows in {height} at {width}"
+
+
+def test_no_key_is_advertised_that_does_nothing(theme):
+    """`ctrl+s` is bound in exactly one place in this program — submitting an
+    open question form — and has nothing to do with sub-agents. A hint is a
+    promise; this one names the command that actually reaches them."""
+    out = drawn(an_info(), 120, 32, theme)
+    row = next(line for line in out.splitlines() if "Sub-agent" in line)
+
+    assert "ctrl+s" not in row
+    assert "/delegates" in row
