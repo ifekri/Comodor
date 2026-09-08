@@ -8,10 +8,17 @@
  * That check is here because the previous interface shipped a footer
  * advertising `ctrl+s` and `esc` for things that did nothing. Nobody had lied;
  * the label and the binding were simply written in different files.
+ *
+ * The mode commands changed shape in F2. They used to compute the next mode
+ * from the last one the core had confirmed and call `session.set_mode`
+ * directly, which lost every press that arrived inside a round trip. They now
+ * record *intent*; one coordinator decides what to ask the core for and when.
+ * The command is still the single way in — four surfaces, one action — but
+ * what it does is say where the person wants to end up.
  */
 
 import { CommandRegistry, type Command } from "@comodor/commands";
-import { next as nextMode, type Mode } from "@comodor/modes";
+import type { Mode } from "@comodor/modes";
 
 export interface Screen {
   /** The core, for anything that has to be asked rather than decided here. */
@@ -19,9 +26,19 @@ export interface Screen {
   sessionId(): string | undefined;
   mode(): Mode;
   busy(): boolean;
+  /** Aim one step around the cycle. Repeats accumulate; see `@comodor/session`. */
+  stepMode(back: boolean): void;
+  /** Aim at a named mode outright — a click, or a palette entry. */
+  wantMode(mode: Mode): void;
   openPalette(): void;
   closePalette(): void;
   paletteOpen(): boolean;
+  /** Back to the newest line, and follow it again. */
+  toTail(): void;
+  /** Whether a prompt is sitting unsent because the core refused it. */
+  hasUnsent(): boolean;
+  /** Send it again. */
+  retry(): void;
   quit(): void;
   note(text: string): void;
 }
@@ -34,12 +51,8 @@ export function build(): CommandRegistry<Screen> {
     title: `Mode: ${mode.toUpperCase()}`,
     group: "Mode",
     keywords: [mode, "mode"],
-    run: async (screen) => {
-      const id = screen.sessionId();
-      if (!id) return;
-      // Asked, not assumed. The label moves when `mode.changed` arrives.
-      await screen.call("session.set_mode", { session_id: id, mode });
-    },
+    // Intent, not an assertion. The label moves when `mode.changed` arrives.
+    run: (screen) => screen.wantMode(mode),
   });
 
   registry.add(
@@ -48,24 +61,14 @@ export function build(): CommandRegistry<Screen> {
       title: "Next mode",
       group: "Mode",
       keywords: ["tab", "act", "plan", "ask"],
-      run: async (screen) => {
-        const id = screen.sessionId();
-        if (!id) return;
-        await screen.call("session.set_mode",
-          { session_id: id, mode: nextMode(screen.mode()) });
-      },
+      run: (screen) => screen.stepMode(false),
     },
     {
       id: "mode.previous",
       title: "Previous mode",
       group: "Mode",
       keywords: ["shift+tab"],
-      run: async (screen) => {
-        const id = screen.sessionId();
-        if (!id) return;
-        await screen.call("session.set_mode",
-          { session_id: id, mode: nextMode(screen.mode(), true) });
-      },
+      run: (screen) => screen.stepMode(true),
     },
     setMode("act"),
     setMode("plan"),
@@ -80,6 +83,25 @@ export function build(): CommandRegistry<Screen> {
         const id = screen.sessionId();
         if (id) await screen.call("session.cancel", { session_id: id });
       },
+    },
+    {
+      id: "session.retry",
+      title: "Send the unsent message again",
+      group: "Session",
+      keywords: ["retry", "again", "failed"],
+      enabled: (screen) => screen.hasUnsent(),
+      // Explicitly, and only for a send the core never accepted. A turn that
+      // was accepted and then failed is not resent: the tools it already ran
+      // would run again, and "retry everything" is how one refusal becomes
+      // two edits.
+      run: (screen) => screen.retry(),
+    },
+    {
+      id: "view.tail",
+      title: "Jump to the newest output",
+      group: "View",
+      keywords: ["bottom", "end", "follow", "latest"],
+      run: (screen) => screen.toTail(),
     },
     {
       id: "palette.open",
@@ -99,11 +121,17 @@ export function build(): CommandRegistry<Screen> {
 
   // Only what a person is actually told about gets a hint. `escape` is real
   // and unadvertised, which is allowed; what is not allowed is the reverse.
+  //
+  // `end` and `ctrl+r` are bound and deliberately hintless: the footer has
+  // room for four things, and both are announced where they matter — `end`
+  // beside the new-output marker, `ctrl+r` beside the message that failed.
   registry.bind(
     { key: "tab", command: "mode.next", hint: "Mode" },
     { key: "shift+tab", command: "mode.previous" },
     { key: "ctrl+k", command: "palette.open", hint: "Commands" },
     { key: "ctrl+d", command: "app.quit", hint: "Quit" },
+    { key: "end", command: "view.tail" },
+    { key: "ctrl+r", command: "session.retry" },
   );
 
   return registry;
