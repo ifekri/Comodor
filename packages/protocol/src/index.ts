@@ -68,14 +68,14 @@ export function errorEnvelope(
 }
 
 export function event(
-  name: EventName, params: Record<string, unknown> = {},
+  name: EventName, params: Record<string, unknown> = {}, seq = 0,
 ): EventEnvelope {
   if (!(EVENTS as readonly string[]).includes(name)) {
     // A typo in an event name is otherwise invisible: nothing is delivered
     // and the sender looks like it stopped.
     throw new ProtocolError("invalid_envelope", `unknown event ${name}`);
   }
-  return { version: PROTOCOL_VERSION, type: "event", event: name, params };
+  return { version: PROTOCOL_VERSION, type: "event", event: name, seq, params };
 }
 
 /**
@@ -125,6 +125,7 @@ export function decode(line: string): Envelope {
     }
     case "event":
       requireString(body, "event");
+      requireNumber(body, "seq");
       requireObject(body, "params");
       return body as unknown as EventEnvelope;
     default:
@@ -137,6 +138,13 @@ function requireString(body: Record<string, unknown>, key: string): void {
   if (typeof body[key] !== "string" || body[key] === "") {
     throw new ProtocolError("invalid_envelope",
       `${key} must be a non-empty string`);
+  }
+}
+
+function requireNumber(body: Record<string, unknown>, key: string): void {
+  const value = body[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new ProtocolError("invalid_envelope", `${key} must be a number`);
   }
 }
 

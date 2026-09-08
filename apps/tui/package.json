@@ -17,6 +17,7 @@
     "@comodor/modes": "*",
     "@comodor/protocol": "*",
     "@comodor/questions": "*",
+    "@comodor/session": "*",
     "@opentui/core": "0.5.11",
     "@opentui/react": "0.5.11",
     "react": "^19.2.0"

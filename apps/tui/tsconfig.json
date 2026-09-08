@@ -36,6 +36,9 @@
     },
     {
       "path": "../../packages/design-tokens"
+    },
+    {
+      "path": "../../packages/session"
     }
   ]
 }
