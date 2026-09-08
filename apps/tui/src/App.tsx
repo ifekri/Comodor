@@ -127,12 +127,27 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
    * number it includes up to, and the projection drops anything at or below
    * it. Whichever of the snapshot and the next delta arrives first, the
    * result is the same.
+   *
+   * `fresh` says which of the two this is, because the mode intent has to be
+   * treated differently in each:
+   *
+   * - A **fresh** mount has no intent of its own. It starts from the session's
+   *   confirmed mode, so resuming a session that is in Plan does not leave a
+   *   stale Act intent behind that the first Tab then "advances" to Plan.
+   * - A **gap** resync belongs to a client that is already mounted and may be
+   *   holding a press the core has not answered yet. Confirmed mode is taken
+   *   from the snapshot — the core is the authority — but the aim is kept, so
+   *   repairing a hole in the stream cannot throw away what the person asked
+   *   for a moment ago.
    */
-  const resync = useCallback(async (id: string) => {
+  const resync = useCallback(async (id: string, fresh: boolean) => {
     dispatch({ type: "resynchronising" });
     try {
       const answer = await client.call("session.snapshot", { session_id: id });
-      dispatch({ type: "snapshot", snapshot: answer["snapshot"] as Snapshot });
+      const snapshot = answer["snapshot"] as Snapshot;
+      dispatch({ type: "snapshot", snapshot });
+      const mode = (snapshot.session?.mode ?? "act") as Mode;
+      setIntent((was) => (fresh ? beginIntent(mode) : intentConfirmed(was, mode)));
     } catch (problem) {
       dispatch({ type: "lost", reason: (problem as Error).message });
     }
@@ -143,11 +158,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     const stop = client.on((name: EventName, params, seq) => {
       if (!alive) return;
       dispatch({ type: "event", name, params, seq });
-      if (name === "question.requested") {
-        setQuestion(begin(params as never));
-      } else if (name === "question.resolved") {
-        setQuestion(undefined);
-      } else if (name === "mode.changed") {
+      if (name === "mode.changed") {
         // The core is the authority, and this is it speaking — whoever asked.
         setIntent((was) => intentConfirmed(was, params["mode"] as Mode));
       }
@@ -156,7 +167,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     void (async () => {
       try {
         if (sessionId) {
-          await resync(sessionId);
+          await resync(sessionId, true);
         } else {
           const made = await client.call("session.create");
           if (!alive) return;
@@ -174,11 +185,22 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     return () => { alive = false; stop(); };
   }, [client, resync, sessionId]);
 
+  // The pending question, in one place.
+  //
+  // The projection is the only source of truth about whether one is waiting;
+  // the interactive form is a cache of it, rebuilt here and nowhere else. Both
+  // the live event and a snapshot restored one arrive as the same projection
+  // field, which is what makes a remount able to answer a question that was
+  // asked before it existed — the event that raised it is never replayed.
+  useEffect(() => {
+    setQuestion(state.question ? begin(state.question as never) : undefined);
+  }, [state.question]);
+
   // A hole in the sequence means an event never arrived, and no amount of
   // later events repairs that. Asking the core is the only honest answer.
   useEffect(() => {
     const id = state.session?.id;
-    if (state.gap && id) void resync(id);
+    if (state.gap && id) void resync(id, false);
   }, [state.gap, state.session?.id, resync]);
 
   // -- mode intent -------------------------------------------------------- //

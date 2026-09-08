@@ -403,6 +403,179 @@ test("a snapshot that shortened output says so", () => {
 });
 
 // --------------------------------------------------------------------------- //
+// the order a rebuilt session draws in
+// --------------------------------------------------------------------------- //
+
+/** A turn of answer, tool, answer, tool, answer — as the core numbers it. */
+const INTERLEAVED: Snapshot = {
+  session: SESSION,
+  revision: 11,
+  messages: [
+    { message_id: "A", turn_id: "t1", role: "assistant", text: "Looking.",
+      status: "completed", started_seq: 1 },
+    { message_id: "B", turn_id: "t1", role: "assistant", text: "Found it.",
+      status: "completed", started_seq: 6 },
+    { message_id: "C", turn_id: "t1", role: "assistant", text: "",
+      status: "streaming", started_seq: 9 },
+  ],
+  tools: [
+    { call_id: "X", turn_id: "t1", name: "read_file", state: "completed",
+      started_seq: 3 },
+    { call_id: "Y", turn_id: "t1", name: "edit_file", state: "running",
+      started_seq: 8 },
+  ],
+};
+
+test("a snapshot keeps a turn interleaved rather than messages then tools", () => {
+  const state = reduce(fresh(), { type: "snapshot", snapshot: INTERLEAVED });
+
+  same(timeline(state).map((entry) => entry.kind === "line"
+    ? `message:${entry.line.id}` : `tool:${entry.tool.id}`),
+       ["message:A", "tool:X", "message:B", "tool:Y", "message:C"]);
+});
+
+test("a rebuilt session draws in the same order as one that watched it", () => {
+  // The same turn, arrived at by watching the events instead of by snapshot.
+  const watched = run([
+    ev("message.started", { turn_id: "t1", message_id: "A" }),
+    ev("message.completed", { turn_id: "t1", message_id: "A",
+                              text: "Looking.", status: "completed" }),
+    ev("tool.started", { turn_id: "t1", call_id: "X", name: "read_file" }),
+    ev("tool.completed", { turn_id: "t1", call_id: "X" }),
+    ev("message.started", { turn_id: "t1", message_id: "B" }),
+    ev("message.completed", { turn_id: "t1", message_id: "B",
+                              text: "Found it.", status: "completed" }),
+    ev("tool.started", { turn_id: "t1", call_id: "Y", name: "edit_file" }),
+    ev("message.started", { turn_id: "t1", message_id: "C" }),
+  ], fresh());
+  const rebuilt = reduce(fresh(), { type: "snapshot", snapshot: INTERLEAVED });
+
+  const order = (state: State) => timeline(state).map((entry) =>
+    entry.kind === "line" ? `message:${entry.line.id}` : `tool:${entry.tool.id}`);
+  same(order(rebuilt), order(watched));
+});
+
+test("an open message in a snapshot is still streaming", () => {
+  const state = reduce(fresh(), { type: "snapshot", snapshot: INTERLEAVED });
+  const open = state.lines.find((line) => line.id === "C");
+
+  is(open?.state, "streaming");
+  is(streaming(state), true, "so a client keeps listening for its deltas");
+});
+
+test("deltas after a snapshot continue the message it called streaming", () => {
+  let state = reduce(fresh(), { type: "snapshot", snapshot: INTERLEAVED });
+  state = reduce(state, ev("message.delta",
+    { turn_id: "t1", message_id: "C", text: "Done." }, 12));
+  state = reduce(state, ev("message.completed",
+    { turn_id: "t1", message_id: "C", text: "Done.", status: "completed" }, 13));
+
+  is(state.lines.length, 3, "continued, not duplicated");
+  const finished = state.lines.find((line) => line.id === "C");
+  is(finished?.text, "Done.");
+  is(finished?.state, "completed");
+  is(streaming(state), false);
+});
+
+test("several turns keep their history in order after a rebuild", () => {
+  const state = reduce(fresh(), {
+    type: "snapshot",
+    snapshot: {
+      session: SESSION,
+      revision: 8,
+      // Deliberately listed turn by turn rather than in sequence, to prove the
+      // ordering comes from the numbers and not from the array's own order.
+      messages: [
+        { message_id: "b1", turn_id: "t2", role: "assistant", text: "second",
+          status: "completed", started_seq: 6 },
+        { message_id: "a1", turn_id: "t1", role: "assistant", text: "first",
+          status: "completed", started_seq: 2 },
+      ],
+      tools: [
+        { call_id: "y", turn_id: "t2", name: "edit_file", state: "completed",
+          started_seq: 7 },
+        { call_id: "x", turn_id: "t1", name: "read_file", state: "completed",
+          started_seq: 4 },
+      ],
+    },
+  });
+
+  same(timeline(state).map((entry) => entry.kind === "line"
+    ? entry.line.id : entry.tool.id), ["a1", "x", "b1", "y"]);
+});
+
+test("the prompt stays ahead of the answer when they share a number", () => {
+  // The core records the person's own message against the number the session
+  // is about to use. Should the two ever tie, the stable merge must not put
+  // the answer above the question it answers.
+  const state = reduce(fresh(), {
+    type: "snapshot",
+    snapshot: {
+      session: SESSION, revision: 2,
+      messages: [
+        { message_id: "user-t1", turn_id: "t1", role: "user",
+          text: "have a look", status: "completed", started_seq: 1 },
+        { message_id: "A", turn_id: "t1", role: "assistant", text: "",
+          status: "streaming", started_seq: 1 },
+      ],
+      tools: [],
+    },
+  });
+
+  same(state.lines.map((line) => line.id), ["user-t1", "A"]);
+});
+
+// --------------------------------------------------------------------------- //
+// what a snapshot restores besides the transcript
+// --------------------------------------------------------------------------- //
+
+test("a pending question survives a rebuild", () => {
+  const form = { id: "ask-1", session_id: "s1", title: "before I start",
+                 questions: [] };
+  const state = reduce(fresh(), {
+    type: "snapshot",
+    snapshot: { ...INTERLEAVED, question: form },
+  });
+
+  same(state.question, form, "so the client can answer what is still waiting");
+});
+
+test("a snapshot with nothing waiting leaves no stale question", () => {
+  let state = reduce(fresh(), {
+    type: "snapshot",
+    snapshot: { ...INTERLEAVED, question: { id: "ask-1", questions: [] } },
+  });
+  ok(state.question);
+
+  // The question was answered elsewhere, and the rebuild says so.
+  state = reduce(state, { type: "snapshot", snapshot: { ...INTERLEAVED,
+                                                        revision: 12 } });
+  is(state.question, undefined);
+});
+
+test("a pending permission survives a rebuild", () => {
+  const asked = { id: "perm-1", session_id: "s1", title: "run this?",
+                  options: ["allow", "deny"] };
+  const state = reduce(fresh(), {
+    type: "snapshot",
+    snapshot: { ...INTERLEAVED, permission: asked },
+  });
+
+  same(state.permission, asked, "carried, not silently dropped");
+});
+
+test("a rebuild reports the session as busy when the core says it is", () => {
+  const state = reduce(fresh(), {
+    type: "snapshot",
+    snapshot: { ...INTERLEAVED, session: { ...SESSION, mode: "plan",
+                                           busy: true } },
+  });
+
+  is(state.session?.busy, true);
+  is(state.session?.mode, "plan");
+});
+
+// --------------------------------------------------------------------------- //
 // connection and mode
 // --------------------------------------------------------------------------- //
 

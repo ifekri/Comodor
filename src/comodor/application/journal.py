@@ -52,10 +52,25 @@ class JournalMessage:
     reasoning: str = ""
     #: Empty while streaming. Otherwise completed | cancelled | failed.
     status: str = ""
+    #: The session sequence at which this message entered the timeline. Shared
+    #: with tools, so a rebuilt session interleaves the two the way the live
+    #: stream did instead of drawing every message before every tool.
+    started_seq: int = 0
 
     @property
     def open(self) -> bool:
         return not self.status
+
+    @property
+    def wire_status(self) -> str:
+        """The status as the protocol spells it.
+
+        Internally "open" is an empty status, because nothing has yet said how
+        the message ended. On the wire an open message is `streaming`:
+        reporting `completed` for one that has not completed tells a client to
+        stop listening to an answer that is still arriving.
+        """
+        return self.status or "streaming"
 
     def shape(self) -> dict[str, Any]:
         body: dict[str, Any] = {
@@ -63,7 +78,8 @@ class JournalMessage:
             "turn_id": self.turn_id,
             "role": self.role,
             "text": self.text,
-            "status": self.status or "completed",
+            "status": self.wire_status,
+            "started_seq": self.started_seq,
         }
         if self.reasoning:
             body["reasoning"] = self.reasoning
@@ -83,6 +99,9 @@ class JournalTool:
     output_truncated: bool = False
     error: str = ""
     elapsed_ms: int | None = None
+    #: The session sequence of the `tool.started` that created this. Ordered
+    #: against messages in one domain; see `JournalMessage.started_seq`.
+    started_seq: int = 0
 
     def add_output(self, text: str) -> None:
         self.output += text
@@ -99,6 +118,7 @@ class JournalTool:
             "turn_id": self.turn_id,
             "name": self.name,
             "state": self.state,
+            "started_seq": self.started_seq,
         }
         if self.summary:
             body["summary"] = self.summary
@@ -153,21 +173,29 @@ class Journal:
     def record(self, name: str, params: dict[str, Any]) -> int:
         """Fold one event in, and give it its number.
 
-        The number is the event's own; a client that has applied it is at that
-        revision. Returned rather than stored on the event so nothing has to
-        mutate the params a client is about to receive.
+        The number is worked out *before* the fold, and handed to it. An item
+        this event creates stores the sequence it arrived on, which is the next
+        number this session will emit — not the one before it. Getting that
+        backwards would date every item one event early and leave a message and
+        the tool that follows it sharing a position, which is exactly the
+        ambiguity `started_seq` exists to remove.
+
+        The number is returned rather than stored on the event so nothing has
+        to mutate the params a client is about to receive.
         """
         with self._lock:
-            self._apply(name, params)
-            self._revision += 1
-            return self._revision
+            seq = self._revision + 1
+            self._apply(name, params, seq)
+            self._revision = seq
+            return seq
 
-    def _apply(self, name: str, params: dict[str, Any]) -> None:
+    def _apply(self, name: str, params: dict[str, Any], seq: int) -> None:
         if name == "message.started":
             message = JournalMessage(
                 message_id=str(params.get("message_id", "")),
                 turn_id=str(params.get("turn_id", "")),
-                role=str(params.get("role", "assistant")))
+                role=str(params.get("role", "assistant")),
+                started_seq=seq)
             # A repeated id would otherwise leave two entries a client cannot
             # tell apart. The core does not currently produce one; a bug that
             # made it would show up as a replaced message rather than a pair.
@@ -200,7 +228,8 @@ class Journal:
                 call_id=str(params.get("call_id", "")),
                 turn_id=str(params.get("turn_id", "")),
                 name=str(params.get("name", "")),
-                summary=str(params.get("summary", "")))
+                summary=str(params.get("summary", "")),
+                started_seq=seq)
             if tool.call_id in self._tool_by_id:
                 held = self._tool_by_id[tool.call_id]
                 held.state = "running"
@@ -252,11 +281,19 @@ class Journal:
         The core is told about it as a method call rather than an event, so
         without this a rebuilt client would recover every answer and none of
         the questions.
+
+        It takes the sequence the session is about to use, rather than spending
+        one of its own: spending a number without emitting an event would leave
+        a hole a client reads as a gap and resynchronises over. No other item
+        lands on that number, because the events that create items
+        (`message.started`, `tool.started`) are all emitted after this, and each
+        takes the next number in turn.
         """
         with self._lock:
             message = JournalMessage(message_id=f"user-{turn_id}",
                                      turn_id=turn_id, role="user",
-                                     text=text, status="completed")
+                                     text=text, status="completed",
+                                     started_seq=self._revision + 1)
             self._messages.append(message)
             self._by_id[message.message_id] = message
 

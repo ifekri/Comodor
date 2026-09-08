@@ -117,12 +117,12 @@ export interface Snapshot {
   revision: number;
   messages: Array<{
     message_id: string; turn_id: string; role: string; text: string;
-    reasoning?: string; status: string;
+    reasoning?: string; status: string; started_seq?: number;
   }>;
   tools: Array<{
     call_id: string; turn_id: string; name: string; summary?: string;
     state: string; output?: string; output_truncated?: boolean;
-    error?: string; elapsed_ms?: number;
+    error?: string; elapsed_ms?: number; started_seq?: number;
   }>;
   question?: Record<string, unknown>;
   permission?: Record<string, unknown>;
@@ -203,34 +203,55 @@ export function reduce(state: State, action: Action): State {
 function applySnapshot(state: State, snapshot: Snapshot): State {
   if (snapshot.revision < state.revision) return state;
 
-  // A snapshot arrives as two lists, and the order within each is the order
-  // things happened. Interleaving them exactly would need the core to number
-  // them across both; what it guarantees is that a turn's messages and that
-  // turn's tools are each in order, which is enough to draw them grouped by
-  // turn without inventing an order the core never stated.
-  let at = 0;
-  const lines: Line[] = snapshot.messages.map((message) => ({
-    id: message.message_id,
-    turnId: message.turn_id,
-    at: (at += 1),
-    speaker: message.role === "user" ? "you" : "comodor",
-    text: message.text,
-    reasoning: message.reasoning ?? "",
-    state: messageState(message.status),
-  }));
+  // One ordering domain, owned by the core.
+  //
+  // Every item carries the session sequence at which it entered the timeline,
+  // so messages and tools merge into the order the live stream had. Mapping
+  // the two arrays in turn — every message, then every tool — looks fine on a
+  // snapshot of one short turn and rebuilds every longer session wrong: an
+  // answer, the tool it called, and the summary of that tool would come back
+  // as both answers followed by the tool between them.
+  const placed: Array<{ startedSeq: number; line?: Line; tool?: ToolRun }> = [
+    ...snapshot.messages.map((message) => ({
+      startedSeq: message.started_seq ?? 0,
+      line: {
+        id: message.message_id,
+        turnId: message.turn_id,
+        at: 0,
+        speaker: message.role === "user" ? "you" as const : "comodor" as const,
+        text: message.text,
+        reasoning: message.reasoning ?? "",
+        state: messageState(message.status),
+      },
+    })),
+    ...snapshot.tools.map((tool) => ({
+      startedSeq: tool.started_seq ?? 0,
+      tool: {
+        id: tool.call_id,
+        turnId: tool.turn_id,
+        at: 0,
+        name: tool.name,
+        summary: tool.summary ?? "",
+        state: toolState(tool.state),
+        output: tool.output ?? "",
+        outputTruncated: Boolean(tool.output_truncated),
+        error: tool.error,
+        elapsedMs: tool.elapsed_ms,
+      },
+    })),
+  ];
+  // Stable, so an equal sequence keeps the person's prompt ahead of the answer
+  // to it and a message ahead of a tool that started on the same number.
+  placed.sort((left, right) => left.startedSeq - right.startedSeq);
 
-  const tools: ToolRun[] = snapshot.tools.map((tool) => ({
-    id: tool.call_id,
-    turnId: tool.turn_id,
-    at: (at += 1),
-    name: tool.name,
-    summary: tool.summary ?? "",
-    state: toolState(tool.state),
-    output: tool.output ?? "",
-    outputTruncated: Boolean(tool.output_truncated),
-    error: tool.error,
-    elapsedMs: tool.elapsed_ms,
-  }));
+  const lines: Line[] = [];
+  const tools: ToolRun[] = [];
+  let at = 0;
+  for (const entry of placed) {
+    at += 1;
+    if (entry.line) lines.push({ ...entry.line, at });
+    else if (entry.tool) tools.push({ ...entry.tool, at });
+  }
 
   return {
     ...state,
@@ -247,6 +268,10 @@ function applySnapshot(state: State, snapshot: Snapshot): State {
 }
 
 function messageState(status: string): MessageState {
+  // `streaming` is what the core says about a message it has started and not
+  // finished. Treating it as anything else stops a client listening to an
+  // answer that is still arriving.
+  if (status === "streaming") return "streaming";
   return status === "cancelled" || status === "failed" || status === "completed"
     ? status
     : "streaming";

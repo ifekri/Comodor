@@ -486,8 +486,76 @@ def test_a_snapshot_never_lands_between_an_event_and_its_number(config):
     for snapshot in taken:
         held = "".join(tool.get("output", "") for tool in snapshot["tools"])
         # Whatever output the snapshot holds must be a prefix of the whole:
-        # a snapshot that had skipped a chunk and kept a later one would not be.
+        # a snapshot that had skipped a chunk and kept a later one would not.
         assert "".join(lines).startswith(held), "a snapshot skipped a chunk"
+    service.close()
+
+def test_a_snapshot_keeps_a_turn_interleaved(config):
+    """Answer, tool, answer, tool, answer — in that order, after a rebuild.
+
+    A snapshot arrives as two lists. Numbering them in one domain is what lets
+    a client merge them back into the turn that happened; without it every
+    rebuilt session draws both answers and then both tools, which puts the
+    closing summary above the work it summarises.
+    """
+    quiet = Streamer("quiet", ["one line"])
+    scripts = [
+        Script(text="Looking.", tool_calls=[
+            ToolCall(id="c1", name="quiet", arguments={})]),
+        Script(text="Editing.", tool_calls=[
+            ToolCall(id="c2", name="quiet", arguments={})]),
+        Script(text="Done."),
+    ]
+    service, _ = service_for(config, scripts, extra_tools=[quiet])
+    session = service.create_session()
+    run_turn(service, session["id"], "have a look")
+
+    snapshot = service.snapshot(session["id"])
+    items = sorted(
+        [(message["started_seq"], f"message:{message['text'] or message['role']}")
+         for message in snapshot["messages"]]
+        + [(tool["started_seq"], f"tool:{tool['call_id']}")
+           for tool in snapshot["tools"]],
+        key=lambda item: item[0])
+
+    assert [name for _, name in items] == [
+        "message:have a look", "message:Looking.", "tool:c1",
+        "message:Editing.", "tool:c2", "message:Done.",
+    ]
+    service.close()
+
+def test_a_snapshot_numbers_items_with_the_events_that_started_them(config):
+    """The number in a snapshot is the number that event was given on the wire.
+
+    Checked end to end rather than only inside the journal, because the relay
+    is what emits both: an item that stored the previous revision would look
+    correct in isolation and put every message one event behind its own start.
+    """
+    quiet = Streamer("quiet", ["a line"])
+    scripts = [
+        Script(text="Looking.", tool_calls=[
+            ToolCall(id="c1", name="quiet", arguments={})]),
+        Script(text="Done."),
+    ]
+    service, seen = service_for(config, scripts, extra_tools=[quiet])
+    session = service.create_session()
+    run_turn(service, session["id"], "have a look")
+
+    starts = {(name, str(params.get("message_id") or params.get("call_id"))): seq
+              for seq, name, params in seen.events
+              if name in ("message.started", "tool.started")}
+    assert starts, "the turn produced no start events to check against"
+
+    snapshot = service.snapshot(session["id"])
+    for message in snapshot["messages"]:
+        if message["role"] == "user":
+            continue        # the prompt is a method call, not an event
+        assert message["started_seq"] \
+            == starts[("message.started", message["message_id"])]
+    for tool in snapshot["tools"]:
+        assert tool["started_seq"] == starts[("tool.started", tool["call_id"])]
+    assert all(message["status"] == "completed"
+               for message in snapshot["messages"]), "the turn had finished"
     service.close()
 
 

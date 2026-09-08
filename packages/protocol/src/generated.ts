@@ -84,8 +84,8 @@ export const MODES = [
 /** What the agent is allowed to do. Enforced by the core, not by the client. */
 export type Mode = "act" | "plan" | "ask" | "chat";
 
-/** How a message ended. `cancelled` and `failed` are not decoration: a client that cannot tell them from `completed` has to leave a stopped answer looking like one still arriving. */
-export type MessageStatus = "completed" | "cancelled" | "failed";
+/** How a message stands. `streaming` means it is still open and more deltas can arrive: a snapshot taken mid-answer must say so, because a client that read an unfinished message as `completed` would stop listening to it. `cancelled` and `failed` are not decoration: a client that cannot tell them from `completed` has to leave a stopped answer looking like one still arriving. */
+export type MessageStatus = "streaming" | "completed" | "cancelled" | "failed";
 
 /** Where one tool invocation has got to. */
 export type ToolState = "running" | "completed" | "failed";
@@ -157,6 +157,7 @@ export interface SnapshotMessage {
   text: string;
   reasoning?: string;
   status: MessageStatus;
+  started_seq: number;
 }
 
 /**
@@ -170,6 +171,7 @@ export interface SnapshotTool {
   name: string;
   summary?: string;
   state: ToolState;
+  started_seq: number;
   output?: string;
   output_truncated?: boolean;
   error?: string;
@@ -180,7 +182,10 @@ export interface SnapshotTool {
  * Everything a client needs to draw a session it did not watch happen.
  * `revision` is the sequence number this state includes up to: the client
  * drops any event at or below it and applies the rest, which is what makes
- * rebuilding safe while the session is still streaming.
+ * rebuilding safe while the session is still streaming. Every message and
+ * tool carries `started_seq`, the sequence at which it entered the
+ * timeline, so the two lists merge into the one order the live stream had
+ * rather than being drawn messages-then-tools.
  */
 export interface SessionSnapshot {
   session: Session;

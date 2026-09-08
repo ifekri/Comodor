@@ -7,7 +7,7 @@
  * after what is confirmed — and not a duration.
  */
 
-import { ok, strictEqual as is } from "node:assert/strict";
+import { deepStrictEqual as same, ok, strictEqual as is } from "node:assert/strict";
 import { test } from "node:test";
 
 import {
@@ -168,4 +168,34 @@ test("a mode change the core reports on its own is adopted", () => {
   // programmatic `session.set_mode`. Confirmation is confirmation.
   const intent = intentConfirmed(beginIntent("act"), "plan");
   is(intent.confirmed, "plan");
+});
+
+test("resuming a session starts from the mode it is actually in", () => {
+  // A remount has no intent of its own. Beginning from anything other than the
+  // resumed mode leaves a stale aim behind: a session already in Plan would
+  // answer the first Tab by asking for Plan again.
+  const resumed = beginIntent("plan");
+  is(resumed.confirmed, "plan");
+  is(resumed.desired, "plan");
+  is(intentDue(resumed), undefined, "nothing to ask before anybody presses");
+
+  const { intent, asked } = settle(stepIntent(resumed));
+  same(asked, ["ask"], "one Tab from Plan goes to Ask");
+  is(intent.confirmed, "ask");
+});
+
+test("a resync adopts the core's mode without dropping an outstanding aim", () => {
+  // A gap forces a snapshot mid-intent. The core is authoritative about where
+  // the mode is, but repairing a hole in the stream is not a reason to forget
+  // what the person asked for a moment ago.
+  let intent = beginIntent("act");
+  intent = stepIntent(intent);                     // desired plan
+  intent = intentSending(intent, "plan");          // asked, not yet answered
+
+  intent = intentConfirmed(intent, "act");         // the snapshot says: still act
+
+  is(intent.confirmed, "act");
+  is(intent.desired, "plan");
+  is(intentDue(intent), "plan", "and it is asked for again");
+  is(settle(intent).intent.confirmed, "plan");
 });

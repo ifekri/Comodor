@@ -162,9 +162,10 @@
       ]
     },
     "MessageStatus": {
-      "description": "How a message ended. `cancelled` and `failed` are not decoration: a client that cannot tell them from `completed` has to leave a stopped answer looking like one still arriving.",
+      "description": "How a message stands. `streaming` means it is still open and more deltas can arrive: a snapshot taken mid-answer must say so, because a client that read an unfinished message as `completed` would stop listening to it. `cancelled` and `failed` are not decoration: a client that cannot tell them from `completed` has to leave a stopped answer looking like one still arriving.",
       "type": "string",
       "enum": [
+        "streaming",
         "completed",
         "cancelled",
         "failed"
@@ -327,7 +328,8 @@
         "turn_id",
         "role",
         "text",
-        "status"
+        "status",
+        "started_seq"
       ],
       "properties": {
         "message_id": {
@@ -347,6 +349,10 @@
         },
         "status": {
           "$ref": "#/$defs/MessageStatus"
+        },
+        "started_seq": {
+          "description": "The session sequence number of the event that put this message into the timeline. Messages and tools are ordered by this one shared domain rather than by their position in two separate arrays, which is what makes a rebuilt session interleave them the way the live stream did.",
+          "type": "integer"
         }
       }
     },
@@ -357,7 +363,8 @@
         "call_id",
         "turn_id",
         "name",
-        "state"
+        "state",
+        "started_seq"
       ],
       "properties": {
         "call_id": {
@@ -375,6 +382,10 @@
         "state": {
           "$ref": "#/$defs/ToolState"
         },
+        "started_seq": {
+          "description": "The session sequence number of the `tool.started` event. Ordered against messages in the same domain, so a rebuilt turn reads message, tool, message rather than every message followed by every tool.",
+          "type": "integer"
+        },
         "output": {
           "type": "string"
         },
@@ -390,7 +401,7 @@
       }
     },
     "SessionSnapshot": {
-      "description": "Everything a client needs to draw a session it did not watch happen. `revision` is the sequence number this state includes up to: the client drops any event at or below it and applies the rest, which is what makes rebuilding safe while the session is still streaming.",
+      "description": "Everything a client needs to draw a session it did not watch happen. `revision` is the sequence number this state includes up to: the client drops any event at or below it and applies the rest, which is what makes rebuilding safe while the session is still streaming. Every message and tool carries `started_seq`, the sequence at which it entered the timeline, so the two lists merge into the one order the live stream had rather than being drawn messages-then-tools.",
       "type": "object",
       "required": [
         "session",

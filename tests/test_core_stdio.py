@@ -463,6 +463,21 @@ def test_a_snapshot_describes_a_session_that_has_run_a_turn(core):
     assert snapshot["revision"] >= max(
         event["seq"] for event in seen if event.get("type") == "event")
 
+    # Every item is placed in the one ordering domain a client merges on, and
+    # a finished message says it is finished rather than still arriving.
+    assert all(isinstance(message["started_seq"], int)
+               for message in snapshot["messages"])
+    assert all(message["status"] in ("streaming", "completed",
+                                     "cancelled", "failed")
+               for message in snapshot["messages"])
+    assert snapshot["messages"][-1]["status"] == "completed"
+
+    # A snapshot describes a conversation, not the machine running it. None of
+    # this may cross the protocol, however the session was configured.
+    body = json.dumps(snapshot)
+    for forbidden in ("api_key", "providers", "token", "secret", "ANTHROPIC"):
+        assert forbidden not in body, f"{forbidden} reached a client"
+
 
 def test_every_event_carries_its_place_in_the_sequence(core):
     core.hello()

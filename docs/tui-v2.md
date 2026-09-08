@@ -204,9 +204,26 @@ it already ran would run twice.
   produced it, and a client that remounts rebuilds itself from
   `session.snapshot` — the same session, not a second one — and continues
   from the sequence the snapshot names.
+- **A remount restores what was waiting, not just the transcript.** A
+  question the core asked before this client existed is drawn as a form and
+  can be answered — navigation, a written answer and all. A message caught
+  mid-answer comes back as still streaming and keeps taking its deltas. The
+  order of a rebuilt turn is the order it happened in, because both lists are
+  numbered in one domain rather than merged messages-then-tools.
+- **A remount also restores the mode it is aiming from.** Intent starts at
+  the resumed session's confirmed mode, so the first Tab advances from Plan
+  rather than from a default Act. A resync caused by a gap is different and
+  is treated differently: the core's mode is adopted, but an aim the person
+  already had is kept rather than thrown away with the hole in the stream.
 - Rapid mode switching no longer collapses: presses accumulate as *intent*
   and one coordinator asks the core for the current aim, so a key repeat that
   outruns the round trip still lands where the last press pointed.
+- **Permission prompts are carried but not drawn.** The protocol delivers
+  them, the projection holds a pending one across a snapshot, and nothing
+  here renders a card for it yet — so a permission request waits for the
+  core's timeout. This client still announces the `permissions` capability;
+  drawing the card is the next piece of work, and until then the honest
+  description is that the request is not lost, only unanswered.
 - Sessions are resumed when the client starts with a session id; automatic
   reconnection after a lost core is not built yet.
 - No sidebar, no scroll-back search, no file attachment, no slash commands.

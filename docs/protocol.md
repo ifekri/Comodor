@@ -75,6 +75,30 @@ happened: whichever arrives first, the result is the same. A detected gap is
 repaired by asking for another snapshot, never by carrying on with a hole in
 the conversation.
 
+Three properties a snapshot has to have for that to mean anything:
+
+**It carries one ordering, not two lists.** Every message and every tool has
+`started_seq`: the session sequence of the event that put it in the timeline.
+Merging on that number reproduces the interleaving the live stream had —
+answer, the tool it called, the answer that follows. A client left to merge two
+arrays in turn draws every message before every tool, which reads as a summary
+above the work it summarises. Where two items share a number, the tie is
+broken by kind and then by recording order, so the person's prompt stays above
+the answer to it.
+
+**It says when a message is unfinished.** A message that has started and not
+ended is `streaming`. Reporting it as `completed` — which is what an empty
+internal status serialised to — tells a rebuilt client to stop listening to an
+answer that is still arriving, and the rest of that answer is then dropped on
+the floor.
+
+**It carries what is waiting.** A pending `question` or `permission` is part
+of the snapshot, so a client that mounts into a session mid-question can
+answer it. Without that, the agent waits out its timeout on a form the person
+has no way to reach, and the rebuilt client shows a composer for a session
+that is blocked on an answer.
+
+
 ---
 
 ## The handshake

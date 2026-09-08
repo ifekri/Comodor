@@ -146,6 +146,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "text": ("str", True),
         "reasoning": ("str", False),
         "status": ("MessageStatus", True),
+        "started_seq": ("int", True),
     },
     "SnapshotTool": {
         "call_id": ("str", True),
@@ -153,6 +154,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "name": ("str", True),
         "summary": ("str", False),
         "state": ("ToolState", True),
+        "started_seq": ("int", True),
         "output": ("str", False),
         "output_truncated": ("bool", False),
         "error": ("str", False),
@@ -390,6 +392,7 @@ class _SnapshotMessageRequired(TypedDict):
     role: str
     text: str
     status: str
+    started_seq: int
 
 
 class SnapshotMessage(_SnapshotMessageRequired, total=False):
@@ -405,6 +408,7 @@ class _SnapshotToolRequired(TypedDict):
     turn_id: str
     name: str
     state: str
+    started_seq: int
 
 
 class SnapshotTool(_SnapshotToolRequired, total=False):
@@ -431,7 +435,10 @@ class SessionSnapshot(_SessionSnapshotRequired, total=False):
     """Everything a client needs to draw a session it did not watch happen.
     `revision` is the sequence number this state includes up to: the
     client drops any event at or below it and applies the rest, which is
-    what makes rebuilding safe while the session is still streaming.
+    what makes rebuilding safe while the session is still streaming. Every
+    message and tool carries `started_seq`, the sequence at which it
+    entered the timeline, so the two lists merge into the one order the
+    live stream had rather than being drawn messages-then-tools.
     """
 
     question: QuestionRequest
