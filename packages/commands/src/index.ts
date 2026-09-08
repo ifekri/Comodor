@@ -155,7 +155,11 @@ function rank<Context>(command: Command<Context>, needle: string): number {
  * alphabetical order — so the command actually named "mode" comes second.
  */
 function place(text: string, needle: string, at: number): number {
-  const boundary = /[\s.\-_]/;
+  // Anything that is not a letter or a digit ends a word. Listing separators
+  // instead — `[\s.\-_]` — missed the colon in "Mode: ACT", so searching
+  // "mode" scored it the same as the "mode" inside "Change model" and the tie
+  // was broken alphabetically. The command actually called Mode came second.
+  const boundary = /[^\p{L}\p{N}]/u;
   const opens = at === 0 || boundary.test(text[at - 1] ?? "");
   const end = at + needle.length;
   const closes = end === text.length || boundary.test(text[end] ?? "");
