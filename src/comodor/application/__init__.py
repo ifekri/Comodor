@@ -582,7 +582,19 @@ class CoreService:
             if needed == "questions":
                 self.answer_question(request_id, cancelled=True)
             else:
-                self.reply_permission(request_id, "deny")
+                # The request's own last option, not a hardcoded "deny".
+                #
+                # Every request this core raises puts its safe answer last, and
+                # for a permission that is `deny` — but a mode proposal offers
+                # mode names, with the current mode last so declining is one
+                # press. Answering that with "deny" is not one of its options,
+                # so the reply was refused, the exception swallowed, and the
+                # tool left to wait out its full timeout for a client that had
+                # already said it could not answer. The fallback is the same
+                # answer a timeout gives, arrived at immediately.
+                held = handle._pending.get(request_id)
+                self.reply_permission(
+                    request_id, held.fallback if held is not None else "deny")
         except Exception:  # pragma: no cover - defensive
             # Nothing to answer, or it was answered already. Suppressing the
             # event is still right; the alternative is a form nobody can fill.

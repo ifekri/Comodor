@@ -353,6 +353,34 @@ def test_cancelling_unblocks_a_worker_parked_in_a_prompt(config):
 # two at once
 # --------------------------------------------------------------------------- #
 
+def test_a_client_that_cannot_draw_one_is_answered_with_its_own_fallback(config):
+    """Every kind of request, not just the ones whose last option is `deny`.
+
+    A mode proposal offers mode names with the current mode last, so answering
+    it with a hardcoded "deny" was not one of its options: the reply was
+    refused, the refusal swallowed, and the tool waited out its full timeout
+    for a client that had already said it could not answer.
+    """
+    service = CoreService(config)
+    service.client_capabilities = ()          # announces neither capability
+    seen: list[tuple[str, dict]] = []
+    service.on_event = lambda _s, name, params, _q: seen.append((name, params))
+    try:
+        session = service.create_session()["id"]
+        request = Request(id="mode-1", prompt="Switch to plan mode?",
+                          options=["plan", "ask", "act"], kind="mode",
+                          meta={"current": "act", "target": "plan"})
+        service.session(session).assembly.bus.emit(Kind.REQUEST, request=request)
+
+        assert request.answered, "the tool was left waiting on a client that cannot answer"
+        assert request.choice == "act", "the last option is the safe one"
+        assert not [name for name, _ in seen if name == "permission.requested"], \
+            "a prompt was sent to a client that said it could not draw one"
+        assert service.session(session)._pending == {}
+    finally:
+        service.close()
+
+
 def test_two_interactions_waiting_at_once_are_both_carried(service):
     """Neither is written over the other.
 
