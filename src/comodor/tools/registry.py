@@ -18,7 +18,7 @@ from typing import Any, Iterable
 
 from ..providers.base import ToolSpec
 from ..safety import Risk
-from ..safety.modes import policy_for
+from ..safety.modes import enforced as mode_policy
 from . import overflow
 from .ask import Ask
 from .base import Tool, ToolContext, ToolResult
@@ -253,7 +253,7 @@ class ToolRegistry:
         cannot mean one thing to the list the model is shown and another to
         the check that runs before a call.
         """
-        policy = policy_for(mode)
+        policy = mode_policy(mode)
         if not policy.may_use_any_tool:
             return []
         if not policy.may_use_mutating_tools:

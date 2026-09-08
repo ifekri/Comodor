@@ -50,7 +50,7 @@ export const MODES: Readonly<Record<Mode, ModeInfo>> = {
   ask: {
     id: "ask",
     label: "ASK",
-    summary: "Talks it through. Read-only, and it can still ask you questions.",
+    summary: "Talks it through. No tools at all — Plan is the one that looks.",
     token: "mode.ask",
   },
   chat: {

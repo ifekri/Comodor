@@ -28,7 +28,7 @@ from typing import Any, Callable
 
 from ..config import Config
 from ..events import EventBus, Request
-from .modes import policy_for
+from .modes import enforced as mode_policy
 
 
 class Risk(IntEnum):
@@ -88,7 +88,7 @@ class PermissionEngine:
         and the other left, with the disagreement showing up as a tool that is
         offered to the model and then refused when called.
         """
-        policy = policy_for(self.config.agent.mode)
+        policy = mode_policy(self.config.agent.mode)
         if not policy.may_use_any_tool:
             return False, policy.refusal
         if risk > Risk.SAFE and not policy.may_use_mutating_tools:
