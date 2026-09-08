@@ -53,6 +53,7 @@ class Kind(str, Enum):
     NOTICE = "notice"                            # transient toast
     ERROR = "error"
     REQUEST = "request"                          # needs an answer from the user
+    REQUEST_EXPIRED = "request_expired"          # nobody answered in time
     DELEGATE = "delegate"                        # background delegate state changed
 
 
@@ -77,6 +78,13 @@ class Request:
     Used for permission prompts. The worker calls :meth:`wait`; the UI renders
     the dialog and calls :meth:`answer`. A timeout means "denied", so a
     forgotten prompt can never wedge the agent forever.
+
+    Resolution is a **claim**, not an assignment. Exactly one of "the person
+    answered" and "the wait gave up" can win, and the loser is told: a request
+    that timed out has already been acted on, so accepting a late answer would
+    tell a client its decision landed when the worker had moved on. Both paths
+    run on different threads and can arrive in the same instant, which is why
+    this is a lock and not a flag read.
     """
 
     id: str
@@ -87,15 +95,51 @@ class Request:
     meta: dict[str, Any] = field(default_factory=dict)
     _done: threading.Event = field(default_factory=threading.Event, repr=False)
     _answer: str | None = field(default=None, repr=False)
+    _claim: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
-    def answer(self, choice: str) -> None:
-        self._answer = choice
-        self._done.set()
+    #: What the waiter falls back to when nobody answers. The last option,
+    #: which for every request this program raises is the safe one: `deny` for
+    #: a permission, and a value the question decoder reads as cancelled.
+    @property
+    def fallback(self) -> str:
+        return self.options[-1] if self.options else "no"
+
+    @property
+    def choice(self) -> str:
+        """The answer taken, or the fallback if none was."""
+        return self._answer or self.fallback
+
+    def answer(self, choice: str) -> bool:
+        """Take this answer, unless the request is already resolved.
+
+        Returns whether it was taken. A caller that gets `False` must not tell
+        anybody their decision was accepted.
+        """
+        with self._claim:
+            if self._done.is_set():
+                return False
+            self._answer = choice
+            self._done.set()
+            return True
+
+    def expire(self) -> bool:
+        """Claim this request as unanswered, unless somebody answered first.
+
+        Returns whether the claim was made, which is the only safe way to know
+        a timeout is the reason the wait ended rather than a reply that landed
+        in the same instant.
+        """
+        with self._claim:
+            if self._done.is_set():
+                return False
+            self._answer = self.fallback
+            self._done.set()
+            return True
 
     def wait(self, timeout: float | None = None) -> str:
         if self._done.wait(timeout):
-            return self._answer or (self.options[-1] if self.options else "no")
-        return self.options[-1] if self.options else "no"
+            return self._answer or self.fallback
+        return self.fallback
 
     @property
     def answered(self) -> bool:
@@ -160,6 +204,33 @@ class EventBus:
         """Emit a question and hand the caller the object to wait on."""
         self.publish(Event(kind=Kind.REQUEST, payload={"request": request}))
         return request
+
+    def resolve(self, request: Request,
+                timeout: float | None = None) -> tuple[str, bool]:
+        """Ask, wait, and say out loud if nobody came.
+
+        Returns ``(choice, expired)``.
+
+        Every blocking interaction in Comodor used to be ``ask(...).wait(t)``
+        at the call site, which is correct for the worker and silent for
+        everybody else: when the wait gave up, the request stayed open as far
+        as any client knew. A card on screen stayed actionable for a decision
+        the core had already taken, and answering it produced a resolution
+        event for a choice nothing acted on.
+
+        Publishing the expiry is what makes the timeout observable, and doing
+        it here rather than at four call sites is what makes it impossible to
+        forget. The claim inside :meth:`Request.expire` decides who won, so a
+        reply landing in the same instant is not reported twice.
+        """
+        self.ask(request)
+        request.wait(timeout)
+        if request.expire():
+            self.publish(Event(kind=Kind.REQUEST_EXPIRED,
+                               payload={"request": request,
+                                        "choice": request.choice}))
+            return request.choice, True
+        return request.choice, False
 
     def close(self) -> None:
         with self._lock:

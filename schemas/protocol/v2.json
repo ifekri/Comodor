@@ -180,6 +180,23 @@
         "failed"
       ]
     },
+    "RiskLevel": {
+      "description": "The tier a tool declares, and the reason it is asking. `safe` reads, `write` changes files, `dangerous` runs commands or reaches the network. A client shows it so the person can see what kind of thing they are approving; it is the core's own classification, not a guess the client makes from the tool's name.",
+      "type": "string",
+      "enum": [
+        "safe",
+        "write",
+        "dangerous"
+      ]
+    },
+    "InteractionKind": {
+      "description": "Which sort of blocking interaction is waiting on a person. A question wants information; a permission wants authorization.",
+      "type": "string",
+      "enum": [
+        "question",
+        "permission"
+      ]
+    },
     "Empty": {
       "description": "A method that takes nothing. Still an object, so a parameter can be added later without a new shape.",
       "type": "object",
@@ -429,6 +446,33 @@
           }
         },
         "question": {
+          "description": "The first question waiting, for a client that presents one interaction at a time. `interactions` is the complete list and is what a client should prefer.",
+          "$ref": "#/$defs/QuestionRequest"
+        },
+        "permission": {
+          "description": "The first permission waiting, for a client that presents one interaction at a time. `interactions` is the complete list and is what a client should prefer.",
+          "$ref": "#/$defs/PermissionRequest"
+        },
+        "interactions": {
+          "description": "Everything waiting on a person, oldest first. Two can be live at once: a batch of read-only tools may run in parallel and each ask a question, and a delegate shares its parent's event bus. Carrying only one would silently strand the other, which is why this list exists alongside the singular fields.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PendingInteraction"
+          }
+        }
+      }
+    },
+    "PendingInteraction": {
+      "description": "One blocking interaction a snapshot is carrying. Exactly one of `question` or `permission` is present, and `kind` says which, so a client can narrow without inspecting both.",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/InteractionKind"
+        },
+        "question": {
           "$ref": "#/$defs/QuestionRequest"
         },
         "permission": {
@@ -646,7 +690,7 @@
       }
     },
     "PermissionRequest": {
-      "description": "A tool call waiting on a person. `detail` is what the core already renders for a human; it is not a command to run.",
+      "description": "A tool call waiting on a person. `detail` is what the core already renders for a human; it is not a command to run. `tool` and `risk` are the context an informed decision needs — which capability is asking, and which tier it belongs to — and are optional so a core that has nothing truthful to say omits them rather than inventing a value.",
       "type": "object",
       "required": [
         "id",
@@ -672,6 +716,13 @@
           "items": {
             "type": "string"
           }
+        },
+        "tool": {
+          "description": "The tool that asked, by the name the core knows it as.",
+          "type": "string"
+        },
+        "risk": {
+          "$ref": "#/$defs/RiskLevel"
         }
       }
     },

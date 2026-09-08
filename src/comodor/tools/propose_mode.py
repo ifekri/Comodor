@@ -115,7 +115,7 @@ class ProposeMode(Tool):
             kind="mode",
             meta={"current": current, "target": target},
         )
-        answered = ctx.bus.ask(request).wait(WAIT_FOR)
+        answered, _timed_out = ctx.bus.resolve(request, WAIT_FOR)
 
         if answered in PROPOSABLE:
             ctx.config.agent.mode = answered

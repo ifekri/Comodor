@@ -221,11 +221,11 @@ class Computer(Tool):
             kind="permission",
             meta={"tool": self.name, "risk": int(self.risk)},
         )
-        asked = ctx.bus.ask(request)
         # The same patience the permission engine has. A hardcoded two minutes
         # here meant a headless run reported a single action as having taken
         # two minutes before refusing it.
-        answer = asked.wait(getattr(ctx.permissions, "prompt_timeout", 600.0))
+        answer, unanswered = ctx.bus.resolve(
+            request, getattr(ctx.permissions, "prompt_timeout", 600.0))
 
         for label, seconds, this_app in GRANTS:
             if answer == label and seconds:
@@ -243,8 +243,10 @@ class Computer(Tool):
 
         # A timeout returns the last option, which is "no" - the right decision
         # and the wrong description. Somebody who never saw the question should
-        # not be told they refused it.
-        if not asked.answered:
+        # not be told they refused it. Read from the claim the bus made rather
+        # than from the request, which a reply landing in the same instant
+        # would have already flipped.
+        if unanswered:
             raise PermissionError(
                 "Nobody answered the request to use the screen, so nothing was "
                 "touched. Ask again when someone is at the keyboard.")
