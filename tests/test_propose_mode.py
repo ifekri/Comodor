@@ -29,13 +29,28 @@ def make_agent(config, bus, scripts):
 # --------------------------------------------------------------------------- #
 
 
-def test_ask_mode_offers_only_safe_tools():
-    registry = ToolRegistry()
-    offered = {tool.name for tool in registry.for_mode("ask")}
-    assert "read_file" in offered
-    assert "ask" in offered
-    assert "write_file" not in offered
-    assert "run_shell" not in offered
+def test_ask_mode_offers_no_tools_at_all():
+    """Ask is conversation. Not a read-only mode — that is Plan.
+
+    This changed: Ask used to be offered the safe tools, which made it and
+    Plan the same mode with two labels. The line between them is which one may
+    go and look, so Ask gets nothing.
+    """
+    assert ToolRegistry().for_mode("ask") == []
+
+
+def test_ask_mode_cannot_propose_its_own_way_out():
+    """A consequence worth pinning rather than discovering.
+
+    `propose_mode` is how a restricted mode says "this has become a request
+    for changes" and offers the switch in one press. Ask having no tools means
+    it has no way to offer that either — leaving Ask by keyboard, palette,
+    mouse or `session.set_mode` is the person's move, not the model's.
+
+    Plan keeps it, which is where the tool is most used.
+    """
+    assert "propose_mode" not in {t.name for t in ToolRegistry().for_mode("ask")}
+    assert "propose_mode" in {t.name for t in ToolRegistry().for_mode("plan")}
 
 
 def test_ask_mode_refuses_a_write_even_if_the_model_asks(config, bus):

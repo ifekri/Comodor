@@ -132,6 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
     from .skills.commands import register as register_skills
     from .slack.commands import register as register_slack
     from .telegram.commands import register as register_telegram
+    from .transport.commands import register as register_core
     from .web.commands import register as register_web
     from .webhook.commands import register as register_webhook
     from .whatsapp.commands import register as register_whatsapp
@@ -149,6 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_web(sub)
     register_webhook(sub)
     register_acp(sub)
+    register_core(sub)
     register_memory_provider(sub)
     register_journey(sub)
     register_plugins(sub)
@@ -271,16 +273,10 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     force_utf8()
 
     from . import questions as forms
-    from .agent import AgentLoop, Conversation
-    from .agent.spawn import spawner
+    from .application import assemble
     from .context_refs import Refusal, expand
     from .events import EventBus, Kind
-    from .learning import LearningEngine
-    from .mcp import MCPManager
-    from .providers.gateway import Gateway
-    from .safety import CheckpointStore, PermissionEngine, Redactor, make_assessor
-    from .skills import load_for as load_skills
-    from .tools import ToolRegistry
+    from .safety import Redactor
 
     if args.yes:
         config.safety.auto_approve_writes = True
@@ -288,35 +284,16 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     if args.max_steps:
         config.agent.max_steps = args.max_steps
 
+    # One wiring, shared. This block used to live here in full and be mirrored
+    # in `ui/app.py`, `web/session.py`, `acp/agent.py` and `cron/runner.py` —
+    # the same objects in the same order, five times, so that adding a front
+    # end meant a sixth copy and changing how a session is built meant finding
+    # all of them. `application.assemble` is that block, moved rather than
+    # rewritten. Headless runs still learn from corrections, because the
+    # learning engine is still wired in there.
     bus = EventBus()
-    gateway = Gateway(config)
-    # Headless runs learn from corrections too: a scripted run whose output the
-    # user later fixes by hand should teach the same lesson an interactive one
-    # would, or the brain would depend on how the agent happened to be invoked.
-    memory = LearningEngine(
-        config, bus, gateway,
-        checkpoints=CheckpointStore(config.paths.checkpoints),
-        redact=Redactor([entry.api_key for entry in config.providers.values()
-                         if entry.api_key]),
-    )
-    permissions = PermissionEngine(config, bus)
-    permissions.assess = make_assessor(config, gateway)
-    permissions.on_denied = memory.on_denied
-    skills = load_skills(config)
-    mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
-    plugins = _load_plugins(config, bus)
-    cron_store = None
-    if config.cron.enabled:
-        from .cron.jobs import JobStore
-
-        cron_store = JobStore(config.paths.user / "cron")
-    tools = ToolRegistry(skills=skills, mcp=mcp, config=config,
-                         spawn=spawner(config, gateway, bus, skills=skills, mcp=mcp),
-                         cron_store=cron_store,
-                         memory=getattr(memory, "facts", None),
-                         plugins=plugins)
-    agent = AgentLoop(config, gateway, tools, bus,
-                      permissions, Conversation(), memory, skills=skills)
+    built = assemble(config, bus=bus, plugins=_load_plugins(config, bus))
+    memory, skills, agent = built.memory, built.skills, built.agent
 
     # Two things every headless run needs, whatever it prints.
     #
@@ -401,11 +378,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
         if result.error:
             print(f"\nerror: {result.error}", file=sys.stderr)
 
-    tools.close()
-    memory.close()
-    gateway.close()
-    if mcp is not None:
-        mcp.close()
+    built.close()
     return 0 if result.ok else 1
 
 
@@ -1091,6 +1064,14 @@ def main(argv: list[str] | None = None) -> int:
         from .acp.commands import run as run_acp
 
         return run_acp(config, args)
+    if args.command == "core":
+        from .transport.commands import run as run_core
+
+        return run_core(config, args)
+    if args.command == "tui-v2":
+        from .transport.commands import run_tui
+
+        return run_tui(config, args)
     if args.command == "memory-provider":
         from .learning.providers.commands import run as run_memory_provider
 

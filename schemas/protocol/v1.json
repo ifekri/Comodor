@@ -1,0 +1,839 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://comodor.ai/schemas/protocol/v1.json",
+  "title": "Comodor application protocol",
+  "description": "The one definition of what Comodor Core and a Comodor client say to each other. Python types and TypeScript types are both generated from this file by tools/protocol-codegen.py; neither is edited by hand, and a test regenerates both and fails on any difference. That is the whole mechanism by which the two sides cannot silently disagree.",
+  "x-protocol-version": 1,
+  "x-envelope": {
+    "description": "One JSON object per line, UTF-8, no embedded newlines. Four shapes, distinguished by `type`.",
+    "request": [
+      "version",
+      "type",
+      "id",
+      "method",
+      "params"
+    ],
+    "response": [
+      "version",
+      "type",
+      "id",
+      "result"
+    ],
+    "error": [
+      "version",
+      "type",
+      "id",
+      "error"
+    ],
+    "event": [
+      "version",
+      "type",
+      "event",
+      "params"
+    ]
+  },
+  "x-errors": {
+    "parse_error": "The line was not JSON, or not an object.",
+    "invalid_envelope": "JSON, but not one of the four shapes.",
+    "unsupported_version": "The client asked for a protocol version this core does not speak.",
+    "not_initialized": "A method other than client.hello arrived before the handshake.",
+    "already_initialized": "client.hello arrived twice.",
+    "unknown_method": "No such method.",
+    "invalid_params": "The method exists; the parameters do not fit it.",
+    "unknown_session": "No session with that id.",
+    "unknown_request": "No pending question or permission with that id.",
+    "not_allowed": "The mode or permission policy refused it.",
+    "internal_error": "A fault in the core. The message is safe to show; details go to stderr."
+  },
+  "x-capabilities": {
+    "description": "What each side can do, exchanged at the handshake. A name absent from the list means not supported; a name present that the other side does not know is ignored. Neither side may assume a capability it did not see.",
+    "core": [
+      "streaming",
+      "questions",
+      "permissions",
+      "modes",
+      "tool_events"
+    ],
+    "client": [
+      "questions",
+      "permissions"
+    ]
+  },
+  "x-methods": {
+    "client.hello": {
+      "summary": "The handshake. Must be first; every other method is refused until it succeeds.",
+      "params": "HelloParams",
+      "result": "HelloResult"
+    },
+    "session.create": {
+      "summary": "Open a session. The workspace defaults to the core's working directory.",
+      "params": "SessionCreateParams",
+      "result": "SessionResult"
+    },
+    "session.get": {
+      "summary": "The authoritative state of one session, for a client that has just connected or reconnected.",
+      "params": "SessionRef",
+      "result": "SessionResult"
+    },
+    "session.list": {
+      "summary": "Every session this core holds.",
+      "params": "Empty",
+      "result": "SessionListResult"
+    },
+    "session.send": {
+      "summary": "Send a message. Returns as soon as the turn is accepted; the answer arrives as events.",
+      "params": "SessionSendParams",
+      "result": "AcceptedResult"
+    },
+    "session.cancel": {
+      "summary": "Stop whatever the session is doing. Answers whether there was anything to stop.",
+      "params": "SessionRef",
+      "result": "CancelResult"
+    },
+    "session.set_mode": {
+      "summary": "Change what the agent is allowed to do. The core is the authority; the client renders what comes back.",
+      "params": "SetModeParams",
+      "result": "SessionResult"
+    },
+    "model.get": {
+      "summary": "Which provider and model this session answers with. Never includes a credential.",
+      "params": "Empty",
+      "result": "ModelResult"
+    },
+    "model.set": {
+      "summary": "Choose a model.",
+      "params": "SetModelParams",
+      "result": "ModelResult"
+    },
+    "workspace.get": {
+      "summary": "The directory the agent is pointed at.",
+      "params": "Empty",
+      "result": "WorkspaceResult"
+    },
+    "question.answer": {
+      "summary": "Answer a structured question the agent asked.",
+      "params": "AnswerParams",
+      "result": "AckResult"
+    },
+    "permission.reply": {
+      "summary": "Allow or refuse a tool call the agent is waiting on.",
+      "params": "PermissionReplyParams",
+      "result": "AckResult"
+    },
+    "shutdown": {
+      "summary": "Close every session and stop. The core answers, then exits.",
+      "params": "Empty",
+      "result": "AckResult"
+    }
+  },
+  "x-events": {
+    "session.created": "SessionEvent",
+    "session.updated": "SessionEvent",
+    "message.started": "MessageStarted",
+    "message.delta": "MessageDelta",
+    "message.completed": "MessageCompleted",
+    "tool.started": "ToolStarted",
+    "tool.output": "ToolOutput",
+    "tool.completed": "ToolCompleted",
+    "tool.failed": "ToolFailed",
+    "question.requested": "QuestionRequest",
+    "question.resolved": "QuestionResolved",
+    "permission.requested": "PermissionRequest",
+    "permission.resolved": "PermissionResolved",
+    "mode.changed": "ModeChanged",
+    "model.changed": "ModelResult",
+    "notification.created": "Notification"
+  },
+  "$defs": {
+    "Mode": {
+      "description": "What the agent is allowed to do. Enforced by the core, not by the client.",
+      "type": "string",
+      "enum": [
+        "act",
+        "plan",
+        "ask",
+        "chat"
+      ]
+    },
+    "Empty": {
+      "description": "A method that takes nothing. Still an object, so a parameter can be added later without a new shape.",
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "PeerInfo": {
+      "description": "Who is on the other end. Reported, never trusted for authorisation.",
+      "type": "object",
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "HelloParams": {
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "client"
+      ],
+      "properties": {
+        "protocol_version": {
+          "type": "integer"
+        },
+        "client": {
+          "$ref": "#/$defs/PeerInfo"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "HelloResult": {
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "core",
+        "capabilities"
+      ],
+      "properties": {
+        "protocol_version": {
+          "type": "integer"
+        },
+        "core": {
+          "$ref": "#/$defs/PeerInfo"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Session": {
+      "description": "A session as the core knows it. This is the authoritative shape a client resynchronises against.",
+      "type": "object",
+      "required": [
+        "id",
+        "mode",
+        "workspace",
+        "busy"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "workspace": {
+          "type": "string"
+        },
+        "busy": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "SessionRef": {
+      "type": "object",
+      "required": [
+        "session_id"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      }
+    },
+    "SessionCreateParams": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        }
+      }
+    },
+    "SessionResult": {
+      "type": "object",
+      "required": [
+        "session"
+      ],
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Session"
+        }
+      }
+    },
+    "SessionListResult": {
+      "type": "object",
+      "required": [
+        "sessions"
+      ],
+      "properties": {
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Session"
+          }
+        }
+      }
+    },
+    "SessionSendParams": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "text"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "AcceptedResult": {
+      "description": "The turn was accepted. `message_id` correlates every message.* event that follows.",
+      "type": "object",
+      "required": [
+        "accepted",
+        "message_id"
+      ],
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "message_id": {
+          "type": "string"
+        }
+      }
+    },
+    "CancelResult": {
+      "type": "object",
+      "required": [
+        "cancelled"
+      ],
+      "properties": {
+        "cancelled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "SetModeParams": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "mode"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        }
+      }
+    },
+    "ModelResult": {
+      "description": "Never carries a key. `configured` is how a client shows that a provider needs setting up without being told the secret.",
+      "type": "object",
+      "required": [
+        "provider",
+        "model",
+        "configured"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "configured": {
+          "type": "boolean"
+        }
+      }
+    },
+    "SetModelParams": {
+      "type": "object",
+      "required": [
+        "model"
+      ],
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      }
+    },
+    "WorkspaceResult": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "QuestionOption": {
+      "type": "object",
+      "required": [
+        "id",
+        "label"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "free": {
+          "type": "boolean"
+        }
+      },
+      "description": "One row a person can pick. `id` is what travels back in `chosen`. `free` marks the write-your-own row, which carries typed text instead of a fixed label and is rendered differently."
+    },
+    "QuestionRequest": {
+      "type": "object",
+      "required": [
+        "id",
+        "session_id",
+        "title",
+        "questions"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QuestionField"
+          }
+        }
+      },
+      "description": "A form the agent is waiting on, as a protocol primitive rather than a numbered list in prose. It carries *several* questions because the agent asks several at once — one round trip rather than four — so a client renders a form, not a prompt."
+    },
+    "QuestionResolved": {
+      "type": "object",
+      "required": [
+        "id",
+        "session_id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "answers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QuestionAnswer"
+          }
+        },
+        "cancelled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "AnswerParams": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "answers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QuestionAnswer"
+          }
+        },
+        "cancelled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "PermissionRequest": {
+      "description": "A tool call waiting on a person. `detail` is what the core already renders for a human; it is not a command to run.",
+      "type": "object",
+      "required": [
+        "id",
+        "session_id",
+        "title",
+        "options"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "PermissionResolved": {
+      "type": "object",
+      "required": [
+        "id",
+        "session_id",
+        "choice"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "choice": {
+          "type": "string"
+        }
+      }
+    },
+    "PermissionReplyParams": {
+      "type": "object",
+      "required": [
+        "id",
+        "choice"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "choice": {
+          "type": "string"
+        }
+      }
+    },
+    "AckResult": {
+      "type": "object",
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        }
+      }
+    },
+    "SessionEvent": {
+      "type": "object",
+      "required": [
+        "session"
+      ],
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Session"
+        }
+      }
+    },
+    "MessageStarted": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "message_id",
+        "role"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        }
+      }
+    },
+    "MessageDelta": {
+      "description": "One piece of a streamed answer. `channel` separates the answer from extended thinking, so a client can show or hide reasoning without guessing from the text.",
+      "type": "object",
+      "required": [
+        "session_id",
+        "message_id",
+        "text"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "channel": {
+          "type": "string"
+        }
+      }
+    },
+    "MessageCompleted": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "message_id"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ToolStarted": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "call_id",
+        "name"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    },
+    "ToolOutput": {
+      "description": "Incremental output from a running tool, such as a shell command's lines as they arrive. `call_id` is optional because the core does not tag streamed output with the call it came from, and two tools can run at once — attributing it to the most recently started call would be right most of the time and quietly wrong under parallel execution. A client shows it against the session unless a call is named.",
+      "type": "object",
+      "required": [
+        "session_id",
+        "text"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "ToolCompleted": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "call_id"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "type": "integer"
+        }
+      }
+    },
+    "ToolFailed": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "call_id",
+        "error"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    },
+    "ModeChanged": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "mode"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        }
+      }
+    },
+    "Notification": {
+      "description": "Something worth saying that is not part of an answer. `level` is advisory; a client may style it.",
+      "type": "object",
+      "required": [
+        "level",
+        "text"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    },
+    "QuestionField": {
+      "type": "object",
+      "required": [
+        "header",
+        "prompt",
+        "options",
+        "multiple"
+      ],
+      "properties": {
+        "header": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QuestionOption"
+          }
+        },
+        "multiple": {
+          "type": "boolean"
+        }
+      },
+      "description": "One question within a form. `header` is its stable name and is what an answer is matched on — not the position, which would silently reattach every answer if a question were reordered."
+    },
+    "QuestionAnswer": {
+      "type": "object",
+      "required": [
+        "header",
+        "chosen"
+      ],
+      "properties": {
+        "header": {
+          "type": "string"
+        },
+        "chosen": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "written": {
+          "type": "string"
+        }
+      },
+      "description": "What came back for one question. `chosen` holds option ids; `written` holds what was typed into the free row."
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "comodor-frontend",
+  "private": true,
+  "description": "The TypeScript side of Comodor: the protocol client and the clients built on it.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --build --force",
+    "test": "node --test \"packages/**/*.test.ts\" \"apps/tui/test/*.test.ts\"",
+    "lint": "node tools/lint-frontend.mjs",
+    "build": "tsc --build --force",
+    "check": "npm run lint && npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  }
+}

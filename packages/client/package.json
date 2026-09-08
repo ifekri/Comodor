@@ -1,0 +1,14 @@
+{
+  "name": "@comodor/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./spawn": "./src/spawn.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@comodor/protocol": "*"
+  }
+}

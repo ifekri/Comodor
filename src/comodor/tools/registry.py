@@ -1,10 +1,15 @@
 """The set of tools the agent may use.
 
-Mode filtering happens here as well as in the permission engine, and that
-duplication is deliberate: in Plan mode the write tools are not merely blocked,
+Mode filtering happens here as well as in the permission engine, and the two
+*layers* are deliberate: in Plan mode the write tools are not merely blocked,
 they are never *advertised* to the model. A model that cannot see a tool does
 not plan around it, so a plan produced in Plan mode reads like a plan rather
 than like a thwarted attempt to edit files.
+
+What is not duplicated is the rule. Both layers read `safety.modes`, so a mode
+cannot come to mean one thing to the list the model is shown and another to
+the check that runs before a call — which is the failure two hand-written
+copies of a policy eventually produce, in whichever copy nobody reads.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from typing import Any, Iterable
 
 from ..providers.base import ToolSpec
 from ..safety import Risk
+from ..safety.modes import enforced as mode_policy
 from . import overflow
 from .ask import Ask
 from .base import Tool, ToolContext, ToolResult
@@ -239,10 +245,18 @@ class ToolRegistry:
     # -- mode-aware views -------------------------------------------------- #
 
     def for_mode(self, mode: str) -> list[Tool]:
-        mode = (mode or "act").lower()
-        if mode == "chat":
+        """The tools a mode may use, from the one policy table.
+
+        This used to restate the rule — `chat` gives none, `plan`/`ask` give
+        the safe ones — which was correct and was also a second copy of what
+        `PermissionEngine` said. Both read `safety.modes` now, so a mode
+        cannot mean one thing to the list the model is shown and another to
+        the check that runs before a call.
+        """
+        policy = mode_policy(mode)
+        if not policy.may_use_any_tool:
             return []
-        if mode in ("plan", "ask"):
+        if not policy.may_use_mutating_tools:
             return [tool for tool in self._tools.values() if tool.risk is Risk.SAFE]
         return list(self._tools.values())
 

@@ -1,0 +1,31 @@
+{
+  "name": "@comodor/tui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Comodor TUI v2 \u2014 an OpenTUI client for the Comodor protocol.",
+  "bin": {
+    "comodor-tui": "./src/main.tsx"
+  },
+  "scripts": {
+    "start": "bun run src/main.tsx"
+  },
+  "dependencies": {
+    "@comodor/client": "*",
+    "@comodor/commands": "*",
+    "@comodor/design-tokens": "*",
+    "@comodor/modes": "*",
+    "@comodor/protocol": "*",
+    "@comodor/questions": "*",
+    "@opentui/core": "0.5.11",
+    "@opentui/react": "0.5.11",
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0"
+  },
+  "engines": {
+    "//": "OpenTUI's renderer binds native code through bun:ffi. Node has no equivalent yet, so Bun is the runtime for this app specifically; every other package here runs anywhere.",
+    "bun": ">=1.3.0"
+  }
+}

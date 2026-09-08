@@ -1,0 +1,26 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/protocol"
+    },
+    {
+      "path": "packages/design-tokens"
+    },
+    {
+      "path": "packages/modes"
+    },
+    {
+      "path": "packages/commands"
+    },
+    {
+      "path": "packages/questions"
+    },
+    {
+      "path": "packages/client"
+    },
+    {
+      "path": "apps/tui"
+    }
+  ]
+}

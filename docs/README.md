@@ -54,6 +54,15 @@ ends with the agent doing something useful.
 | [Architecture](architecture.md) | Shared ownership, dependency direction, and product surfaces |
 | [Surface parity contract](surface-parity.md) | Required PR impact assessment and verification evidence |
 
+### Build a client for it
+
+| | |
+|---|---|
+| [The application architecture](app-architecture.md) | Where the boundary between the core and an interface is drawn, and why |
+| [The protocol](protocol.md) | What a core and a client say to each other, in one versioned contract |
+| [TUI v2](tui-v2.md) | The new terminal interface: OpenTUI, React, and what it needs to run |
+| [The desktop application](desktop-architecture.md) | Planned, not built — and what the core must already be true for |
+
 ### When something is wrong
 
 | | |

@@ -1779,6 +1779,21 @@ def load(cwd: Path | str | None = None, overrides: dict[str, Any] | None = None,
 
     _choose_active(config)
 
+    # A mode nobody recognises is left exactly as it was written, and said so.
+    #
+    # Not corrected to a default, because "act" is the default and correcting
+    # a typo *into* full write and shell access is the one outcome an
+    # authorization setting must never have. The value stays wrong, the
+    # policy denies everything for it, and the complaint names it — so the
+    # session is visibly useless rather than invisibly permissive.
+    from .safety.modes import ALL as _MODES
+    from .safety.modes import known as _known_mode
+
+    if config.agent.mode and not _known_mode(config.agent.mode):
+        config.complaints.append(
+            f"agent.mode is {config.agent.mode!r}, which is not a mode; "
+            f"nothing will run until it is one of {', '.join(_MODES)}")
+
     # Everything the merged configuration says that their own file did not.
     # `save` uses this to tell a setting they chose from one a repository, the
     # environment or a flag happened to supply.
