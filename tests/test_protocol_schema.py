@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-SCHEMA = ROOT / "schemas" / "protocol" / "v1.json"
+SCHEMA = ROOT / "schemas" / "protocol" / "v2.json"
 GENERATOR = ROOT / "tools" / "protocol-codegen.py"
 PYTHON_OUT = ROOT / "src" / "comodor" / "protocol" / "_generated.py"
 TS_OUT = ROOT / "packages" / "protocol" / "src" / "generated.ts"

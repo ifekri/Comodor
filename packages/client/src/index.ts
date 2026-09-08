@@ -47,8 +47,15 @@ export interface Handshake {
   capabilities: string[];
 }
 
+/**
+ * One event, and where it sits in its session's sequence.
+ *
+ * `seq` is passed on rather than swallowed because reconciling a snapshot
+ * with a live stream is the client's job, not the transport's: only the thing
+ * holding the projection knows which events it has already applied.
+ */
 export type EventListener = (
-  name: EventName, params: Record<string, unknown>,
+  name: EventName, params: Record<string, unknown>, seq: number,
 ) => void;
 
 export interface CoreClientOptions {
@@ -191,7 +198,7 @@ export class CoreClient {
     if (message.type === "event") {
       for (const listener of this.listeners) {
         try {
-          listener(message.event, message.params);
+          listener(message.event, message.params, message.seq);
         } catch (problem) {
           // One broken listener must not stop the others, or take the
           // reader down with it.

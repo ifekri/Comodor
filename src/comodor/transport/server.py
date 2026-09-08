@@ -167,6 +167,11 @@ class Server:
         offered = params.get("capabilities") or []
         self.client_capabilities = tuple(
             name for name in offered if name in P.CLIENT_CAPABILITIES)
+        # The service decides what to do about a capability the client lacks —
+        # it is the one that can answer a question on the client's behalf, and
+        # doing it there keeps the session's event numbering free of holes for
+        # events that were never sent.
+        self.service.client_capabilities = self.client_capabilities
         self.initialized = True
         return {
             "protocol_version": P.PROTOCOL_VERSION,
@@ -192,9 +197,19 @@ class Server:
             "model.set": lambda p: service.set_model(
                 p["model"], str(p.get("provider", ""))),
             "workspace.get": lambda p: service.workspace(),
+            "session.snapshot": lambda p: {
+                "snapshot": service.snapshot(p["session_id"])},
+            # `answers` and `cancelled`, which is what `AnswerParams` says.
+            #
+            # This passed four positional arguments — the pre-form `selected`
+            # and `custom` keys — into a three-parameter method, so every real
+            # answer became a TypeError, was caught by the generic handler and
+            # came back as `internal_error` while the agent waited out its
+            # timeout. It survived because every test called the service
+            # directly and none crossed this seam.
             "question.answer": lambda p: service.answer_question(
-                p["id"], list(p.get("selected") or []),
-                str(p.get("custom", "")), bool(p.get("cancelled", False))),
+                p["id"], answers=list(p.get("answers") or []),
+                cancelled=bool(p.get("cancelled", False))),
             "permission.reply": lambda p: service.reply_permission(
                 p["id"], p["choice"]),
             "shutdown": lambda p: {"ok": True},
@@ -202,7 +217,8 @@ class Server:
 
     # -- events ------------------------------------------------------------ #
 
-    def _event(self, session_id: str, name: str, params: dict[str, Any]) -> None:
+    def _event(self, session_id: str, name: str, params: dict[str, Any],
+               seq: int) -> None:
         """One protocol event: onto the wire, or into this call's queue.
 
         Events before the handshake are dropped: a client that has not said
@@ -213,64 +229,30 @@ class Server:
         that answer. Events from a turn's worker thread find no queue and go
         straight out, which is what makes streaming arrive as it happens
         rather than in a batch at the end.
+
+        `seq` comes from the session and is passed through untouched. Deciding
+        it here would put the numbering on the wrong side of the deferral: a
+        held event would be numbered when it was released rather than when it
+        happened, which is the opposite of what a snapshot needs.
         """
         if not self.initialized or self.channel.closed:
             return
-        if self._unsupported(name, params):
-            return
         queue = getattr(self._deferred, "queue", None)
         if queue is not None:
-            queue.append((name, params))
+            queue.append((name, params, seq))
             return
-        self._send_event(name, params)
-
-    def _unsupported(self, name: str, params: dict[str, Any]) -> bool:
-        """Answer for a client that said it cannot, instead of waiting on it.
-
-        The handshake is a promise in both directions. A client that does not
-        announce `questions` is one that will never draw a form — so sending
-        it `question.requested` blocks the agent for the full timeout on
-        something nobody will ever answer, which reads to a person as the
-        agent having hung.
-
-        The fallback is the same one a headless run already uses: the form is
-        cancelled at once, and the tool tells the model to choose sensible
-        defaults and say which it chose. A refused permission is a refusal,
-        which is the safe end of that decision.
-        """
-        if name == "question.requested" and "questions" not in self.client_capabilities:
-            self._decline(params, "questions")
-            return True
-        if name == "permission.requested" and "permissions" not in self.client_capabilities:
-            self._decline(params, "permissions")
-            return True
-        return False
-
-    def _decline(self, params: dict[str, Any], capability: str) -> None:
-        request_id = str(params.get("id", ""))
-        if not request_id:
-            return
-        self.channel.warn(
-            f"the client did not announce {capability!r}; answering "
-            f"{request_id} on its behalf")
-        try:
-            if capability == "questions":
-                self.service.answer_question(request_id, cancelled=True)
-            else:
-                self.service.reply_permission(request_id, "deny")
-        except Exception as problem:  # pragma: no cover - defensive
-            self.channel.warn(f"could not answer {request_id}: {problem!r}")
+        self._send_event(name, params, seq)
 
     def _flush(self) -> None:
         """Release the events this call raised, in the order it raised them."""
         queue = getattr(self._deferred, "queue", None)
         self._deferred.queue = None
-        for name, params in queue or ():
-            self._send_event(name, params)
+        for name, params, seq in queue or ():
+            self._send_event(name, params, seq)
 
-    def _send_event(self, name: str, params: dict[str, Any]) -> None:
+    def _send_event(self, name: str, params: dict[str, Any], seq: int) -> None:
         try:
-            self.channel.send(P.event(name, params))
+            self.channel.send(P.event(name, params, seq))
         except ValueError as problem:
             # An event name the schema does not have. A bug here would
             # otherwise be invisible — the client simply never sees it.

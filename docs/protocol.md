@@ -1,10 +1,10 @@
 # The Comodor protocol
 
-What a Comodor core and a Comodor client say to each other. Version 1.
+What a Comodor core and a Comodor client say to each other. Version 2.
 
 This is the contract a client is written against. If you are adding a client —
 a terminal, a desktop window, a browser tab, something nobody has thought of —
-this document and [`schemas/protocol/v1.json`](../schemas/protocol/v1.json) are
+this document and [`schemas/protocol/v2.json`](../schemas/protocol/v2.json) are
 what you need, and nothing in `src/comodor/` should be reached into directly.
 
 ---
@@ -20,7 +20,7 @@ python tools/protocol-codegen.py --check   # fail if either is stale
 
 | Generated | From |
 |---|---|
-| `src/comodor/protocol/_generated.py` | `schemas/protocol/v1.json` |
+| `src/comodor/protocol/_generated.py` | `schemas/protocol/v2.json` |
 | `packages/protocol/src/generated.ts` | the same file, the same run |
 
 Neither is edited by hand, and `tests/test_protocol_schema.py` regenerates
@@ -39,10 +39,10 @@ One JSON object per line, UTF-8, no embedded newlines. Four shapes, told apart
 by `type`.
 
 ```json
-{"version": 1, "type": "request",  "id": "7", "method": "session.send", "params": {}}
-{"version": 1, "type": "response", "id": "7", "result": {}}
-{"version": 1, "type": "error",    "id": "7", "error": {"code": "...", "message": "..."}}
-{"version": 1, "type": "event",    "event": "message.delta", "params": {}}
+{"version": 2, "type": "request",  "id": "7", "method": "session.send", "params": {}}
+{"version": 2, "type": "response", "id": "7", "result": {}}
+{"version": 2, "type": "error",    "id": "7", "error": {"code": "...", "message": "..."}}
+{"version": 2, "type": "event",    "event": "message.delta", "seq": 41, "params": {}}
 ```
 
 `id` is the client's, echoed back. An error caused by a line that could not be
@@ -59,6 +59,46 @@ that happens to work is not one a second client can be written against.
 Events from a turn — `message.delta` and the rest — are not part of any
 request and arrive as they happen.
 
+### Sequence numbers, and rebuilding from a snapshot
+
+Every event carries `seq`, the sending session's own counter, starting at 1
+and numbered under the same lock that updates the core's projection. A client
+that has applied everything through 41 knows an event numbered 42 continues
+the story, an event numbered 41 or lower is a duplicate, and an event numbered
+43 means something never arrived.
+
+`session.snapshot` answers with the whole visible session — messages, tools,
+the pending question or permission — and the `revision` its contents reach.
+A client joins, applies the snapshot, and applies only the events above that
+revision, so a snapshot and the live stream cannot disagree about what
+happened: whichever arrives first, the result is the same. A detected gap is
+repaired by asking for another snapshot, never by carrying on with a hole in
+the conversation.
+
+Three properties a snapshot has to have for that to mean anything:
+
+**It carries one ordering, not two lists.** Every message and every tool has
+`started_seq`: the session sequence of the event that put it in the timeline.
+Merging on that number reproduces the interleaving the live stream had —
+answer, the tool it called, the answer that follows. A client left to merge two
+arrays in turn draws every message before every tool, which reads as a summary
+above the work it summarises. Where two items share a number, the tie is
+broken by kind and then by recording order, so the person's prompt stays above
+the answer to it.
+
+**It says when a message is unfinished.** A message that has started and not
+ended is `streaming`. Reporting it as `completed` — which is what an empty
+internal status serialised to — tells a rebuilt client to stop listening to an
+answer that is still arriving, and the rest of that answer is then dropped on
+the floor.
+
+**It carries what is waiting.** A pending `question` or `permission` is part
+of the snapshot, so a client that mounts into a session mid-question can
+answer it. Without that, the agent waits out its timeout on a form the person
+has no way to reach, and the rebuilt client shows a composer for a session
+that is blocked on an answer.
+
+
 ---
 
 ## The handshake
@@ -67,13 +107,13 @@ request and arrive as they happen.
 `not_initialized` until it succeeds.
 
 ```json
-→ {"version":1,"type":"request","id":"1","method":"client.hello",
-   "params":{"protocol_version":1,
+→ {"version":2,"type":"request","id":"1","method":"client.hello",
+   "params":{"protocol_version":2,
              "client":{"name":"comodor-tui","version":"0.0.0"},
              "capabilities":["questions","permissions"]}}
 
-← {"version":1,"type":"response","id":"1",
-   "result":{"protocol_version":1,
+← {"version":2,"type":"response","id":"1",
+   "result":{"protocol_version":2,
              "core":{"name":"comodor-core","version":"1.2.1"},
              "capabilities":["streaming","questions","permissions","modes","tool_events"]}}
 ```
@@ -81,6 +121,35 @@ request and arrive as they happen.
 A version the core does not speak is refused at this message, with the
 versions it does speak in `error.data.supported`. Failing here rather than at
 whatever message first does not fit is the entire reason the field exists.
+
+### Versions
+
+**Version 2 is the contract described here.** Version 1 was the first one: the
+same envelopes and methods, but events carried no `seq`, `session.send`
+answered with a `message_id` rather than a `turn_id`, tool output was not
+tagged with the call it came from, and there was no `session.snapshot`.
+
+Those are not additions an older peer can ignore — a client that cannot see
+`seq` cannot tell a duplicate from a gap, and a client that correlates tool
+output by recency mixes two parallel tools together. So the version moved
+rather than the wire quietly changing underneath it.
+
+A core speaks one version and refuses the rest, in both directions:
+
+| Peer | Result |
+|---|---|
+| v2 client, v2 core | handshake succeeds |
+| v1 client, v2 core | refused — `unsupported_version`, with `supported: [2]` |
+| v2 client, v1 core | refused by the client, before it opens a session |
+
+A line stamped with a version the reader does not speak is refused where it is
+read, which for a request is before any method is dispatched: nothing is
+created, sent or cancelled on a connection that never agreed what it is.
+
+There is no multi-version negotiation, because there is nothing to negotiate
+with. The core and its clients ship together; a mismatch means one of them was
+installed from somewhere else, and the useful answer is a refusal that names
+the version it wanted.
 
 **Capabilities are additive and forgiving.** A name the other side has never
 heard of is ignored, never refused — otherwise every core release would break
@@ -96,8 +165,9 @@ be assumed.
 | `client.hello` | the handshake |
 | `session.create` | a new session |
 | `session.get` | one session, authoritatively |
+| `session.snapshot` | the whole visible session, and the sequence number it reaches |
 | `session.list` | every session this core holds |
-| `session.send` | that the turn was accepted, and the `message_id` to correlate on |
+| `session.send` | that the turn was accepted, and the `turn_id` that names everything it causes |
 | `session.cancel` | whether there was anything to stop |
 | `session.set_mode` | the session, with its new mode |
 | `model.get` / `model.set` | provider, model, and whether it is configured |
@@ -106,7 +176,7 @@ be assumed.
 | `permission.reply` | acknowledgement |
 | `shutdown` | acknowledgement, then the core exits |
 
-There are thirteen. The list is short because a method exists when something
+There are fourteen. The list is short because a method exists when something
 calls it — the way to get a hundred speculative operations is to write them
 before anything needs them, and then to keep them working forever.
 
@@ -137,10 +207,13 @@ so a reordered form cannot silently reattach answers to the wrong questions.
 Every question carries exactly one option marked `free`: the write-your-own
 row, which the core appends and which a client should render as a text field.
 
-`tool.output` has no `call_id`, and that is deliberate: the core does not tag
-streamed output with the call it came from, and two tools can run at once.
-Attributing it to the most recently started call would be right most of the
-time and quietly wrong under parallel execution.
+`tool.output` carries the `call_id` of the invocation it belongs to, tagged
+where the output was produced — a tool is handed a view of its context that
+knows which call it is, so two tools running at once stream interleaved
+without either borrowing the other's lines. A client matching output to
+"whichever tool started most recently" would be right most of the time and
+quietly wrong under parallel execution; the id exists so it never has to
+guess.
 
 An event a client does not use should be ignored, not treated as an error.
 That is how a newer core stays usable by an older client.

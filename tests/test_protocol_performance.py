@@ -118,7 +118,7 @@ def test_a_long_stream_of_events_keeps_its_order_and_its_pace(config):
     """Ten thousand deltas, in order, with nothing dropped."""
     service = CoreService(config)
     seen: list[str] = []
-    service.on_event = lambda _s, name, params: (
+    service.on_event = lambda _s, name, params, _q: (
         seen.append(str(params.get("text", ""))) if name == "message.delta"
         else None)
     try:

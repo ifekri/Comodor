@@ -69,7 +69,7 @@ def ask_in_the_background(service, session_id, questions):
 
 def test_a_form_reaches_the_client_with_its_questions_in_it(service):
     seen: list[dict] = []
-    service.on_event = lambda _s, name, params: (
+    service.on_event = lambda _s, name, params, _q: (
         seen.append(params) if name == "question.requested" else None)
     session = service.create_session()["id"]
 
@@ -95,7 +95,7 @@ def test_a_form_reaches_the_client_with_its_questions_in_it(service):
 
 def test_the_answer_a_client_sends_is_the_answer_the_model_reads(service):
     seen: list[dict] = []
-    service.on_event = lambda _s, name, params: (
+    service.on_event = lambda _s, name, params, _q: (
         seen.append(params) if name == "question.requested" else None)
     session = service.create_session()["id"]
 
@@ -121,7 +121,7 @@ def test_the_answer_a_client_sends_is_the_answer_the_model_reads(service):
 
 def test_a_cancelled_form_is_reported_as_cancelled_not_as_an_answer(service):
     seen: list[dict] = []
-    service.on_event = lambda _s, name, params: (
+    service.on_event = lambda _s, name, params, _q: (
         seen.append(params) if name == "question.requested" else None)
     session = service.create_session()["id"]
 
@@ -144,7 +144,7 @@ def test_a_typed_answer_survives_the_round_trip(service):
          "options": [{"label": "Refactor"}, {"label": "Replace"}]},
     ]
     seen: list[dict] = []
-    service.on_event = lambda _s, name, params: (
+    service.on_event = lambda _s, name, params, _q: (
         seen.append(params) if name == "question.requested" else None)
     session = service.create_session()["id"]
 
@@ -233,7 +233,7 @@ def test_the_relay_still_carries_a_permission_prompt(config):
 
     service = CoreService(config)
     seen: list[tuple[str, dict]] = []
-    service.on_event = lambda _s, name, params: seen.append((name, params))
+    service.on_event = lambda _s, name, params, _q: seen.append((name, params))
     try:
         session = service.create_session()["id"]
         handle = service.session(session)

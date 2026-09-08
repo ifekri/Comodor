@@ -7,7 +7,7 @@ in another language and another process without any of them being special.
 
 Three properties are the whole point:
 
-**One definition.** `schemas/protocol/v1.json` is the source of truth. The
+**One definition.** `schemas/protocol/v2.json` is the source of truth. The
 Python types here and the TypeScript types in `packages/protocol` are both
 generated from it by `tools/protocol-codegen.py`, and a test regenerates both
 and fails on a difference. Nobody edits a type by hand, so the two sides
@@ -134,13 +134,21 @@ def error(id: str | None, code: str, message: str = "",
     return ProtocolError(code, message, data).envelope(id)
 
 
-def event(name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+def event(name: str, params: dict[str, Any] | None = None,
+          seq: int = 0) -> dict[str, Any]:
+    """One event, and its place in its session's sequence.
+
+    `seq` is what lets a snapshot and a live stream be reconciled: a snapshot
+    says which number it includes up to, and the client applies what is above
+    it. It is on the envelope rather than in every payload because ordering is
+    a property of the connection, not of any one message.
+    """
     if name not in EVENTS:
         # A typo in an event name is otherwise invisible: the client simply
         # never sees the event and the core looks like it hung.
         raise ValueError(f"unknown event {name!r}")
     return {"version": PROTOCOL_VERSION, "type": "event", "event": name,
-            "params": params or {}}
+            "seq": seq, "params": params or {}}
 
 
 # --------------------------------------------------------------------------- #
@@ -167,7 +175,11 @@ def decode(line: str) -> Message:
     if version != PROTOCOL_VERSION:
         raise ProtocolError(
             UNSUPPORTED_VERSION,
-            f"this core speaks protocol {PROTOCOL_VERSION}, not {version!r}")
+            f"this core speaks protocol {PROTOCOL_VERSION}, not {version!r}",
+            # The same hint the handshake refusal carries: a peer on the wrong
+            # version learns what to speak from the refusal itself, whichever
+            # of the two paths caught it.
+            {"supported": [PROTOCOL_VERSION]})
 
     kind = raw.get("type")
     if kind not in ENVELOPE_FIELDS:

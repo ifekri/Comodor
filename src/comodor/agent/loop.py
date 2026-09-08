@@ -22,6 +22,7 @@ fraction of a second rather than at the end of the current model response.
 from __future__ import annotations
 
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -107,6 +108,13 @@ class AgentLoop:
         #: step so the review can tell a human's stop from a takeover.
         self._cancel_reason = ""
         self._skills_used: list[Any] = []
+        #: The assistant message currently streaming, if one is.
+        #:
+        #: A turn is not a message. Each pass through the loop produces its own
+        #: assistant message, with the tools it called between them, so a
+        #: subscriber correlating on one id per *turn* sees a second
+        #: `message.started` for something it already believes finished.
+        self._message_id = ""
         self.tool_context: ToolContext | None = None
         self._recalled: list[Any] = []
         #: Every tool this turn reached for, in order. Read at the end of the
@@ -166,7 +174,8 @@ class AgentLoop:
             # The reason rides the event, so an interface can say why the
             # work stopped — "you pressed stop" and "a newer message took
             # over" are different sentences.
-            self.bus.emit(Kind.CANCELLED, reason=self._cancel_reason)
+            self.bus.emit(Kind.CANCELLED, reason=self._cancel_reason,
+                          id=self._message_id)
         except ProviderError as exc:
             result.stopped = "error"
             result.error = str(exc)
@@ -308,7 +317,8 @@ class AgentLoop:
         payload = self.conversation.render(system_prompt)
         agent = self.config.agent
 
-        self.bus.emit(Kind.ASSISTANT_START)
+        self._message_id = uuid.uuid4().hex[:12]
+        self.bus.emit(Kind.ASSISTANT_START, id=self._message_id)
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
         tool_calls: list[ToolCall] = []
@@ -328,17 +338,19 @@ class AgentLoop:
             self.cancel.raise_if_cancelled()
             if event.type is EventType.TEXT:
                 text_parts.append(event.text)
-                self.bus.emit(Kind.ASSISTANT_DELTA, text=event.text)
+                self.bus.emit(Kind.ASSISTANT_DELTA, text=event.text,
+                              id=self._message_id)
             elif event.type is EventType.REASONING:
                 reasoning_parts.append(event.text)
-                self.bus.emit(Kind.REASONING_DELTA, text=event.text)
+                self.bus.emit(Kind.REASONING_DELTA, text=event.text,
+                              id=self._message_id)
             elif event.type is EventType.TOOL_CALL and event.tool_call:
                 tool_calls.append(event.tool_call)
             elif event.type is EventType.USAGE and event.usage:
                 usage = usage.merge(event.usage)
 
         text = "".join(text_parts)
-        self.bus.emit(Kind.ASSISTANT_END, text=text,
+        self.bus.emit(Kind.ASSISTANT_END, text=text, id=self._message_id,
                       tool_calls=[call.name for call in tool_calls])
 
         self.conversation.record_usage(usage)
@@ -411,7 +423,11 @@ class AgentLoop:
         if self.cancel.cancelled:
             result = ToolResult.failure("cancelled before the tool ran")
         else:
-            result = self.tools.invoke(call.name, context, call.arguments)
+            # The tool is handed a view of the context that knows which call
+            # it is, so anything it streams is tagged where it is produced
+            # rather than guessed at by whoever receives it.
+            result = self.tools.invoke(call.name, context.for_call(call.id),
+                                       call.arguments)
         self.bus.emit(Kind.TOOL_END, id=call.id, name=call.name, ok=result.ok,
                       content=result.content, display=result.rendered,
                       elapsed=result.elapsed, meta=result.meta)
@@ -486,7 +502,8 @@ class AgentLoop:
                 cwd=Path(self.config.paths.project),
                 rules=list(self._rules),
                 brain_store=self.memory.store if self.memory is not None else None,
-                emit_output=lambda text: self.bus.emit(Kind.TOOL_OUTPUT, text=text),
+                emit_output=lambda text, call_id: self.bus.emit(
+                    Kind.TOOL_OUTPUT, text=text, id=call_id),
             )
         return self.tool_context
 

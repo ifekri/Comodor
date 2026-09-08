@@ -13,12 +13,38 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import type { KeyEvent } from "@opentui/core";
+import type { KeyEvent, ScrollBoxRenderable } from "@opentui/core";
 
 import { CoreClient } from "@comodor/client";
 import { terminal as theme } from "@comodor/design-tokens";
 import { MODES, type Mode } from "@comodor/modes";
 import type { EventName, Session } from "@comodor/protocol";
+import {
+  beginIntent,
+  followMarker,
+  followMoved,
+  followSent,
+  followStart,
+  followTail,
+  grew,
+  initial,
+  intentConfirmed,
+  intentDue,
+  intentSending,
+  reduce,
+  refuseIntent,
+  stepIntent,
+  timeline,
+  unsent,
+  wantMode,
+  type Follow,
+  type Line,
+  type ModeIntent,
+  type Snapshot,
+  type State,
+  type ToolRun,
+  type ToolState,
+} from "@comodor/session";
 import {
   allowsWriting,
   answer as answerOf,
@@ -46,26 +72,40 @@ import {
   window as paletteWindow,
   type PaletteState,
 } from "./palette.ts";
-import { initial, reduce, type State } from "./session.ts";
 
 export interface AppProps {
   readonly client: CoreClient;
   readonly onQuit: () => void;
+  /**
+   * A session the core already has.
+   *
+   * Given one, the client rebuilds itself from `session.snapshot` instead of
+   * creating a second session. That is what a remount is: the projection is
+   * gone, the session is not, and a client that answered by creating another
+   * one would leave the first still running with nobody attached.
+   */
+  readonly sessionId?: string | undefined;
 }
 
 /** Below this the sidebar-free single column is the only thing that fits. */
 const NARROW = 80;
 
-export function App({ client, onQuit }: AppProps): React.ReactNode {
+/** How many rows a page key moves. Less than a screen, so context carries over. */
+const PAGE = 8;
+
+export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   const [state, dispatch] = useReducer(reduce, initial);
   const [draft, setDraft] = useState("");
   const [palette, setPalette] = useState<PaletteState<Screen> | undefined>();
   const [question, setQuestion] = useState<FormState | undefined>();
+  const [intent, setIntent] = useState<ModeIntent>(() => beginIntent("act"));
+  const [follow, setFollow] = useState<Follow>(followStart);
   const { width } = useTerminalDimensions();
 
   const registry = useMemo(() => build(), []);
   const latest = useRef(state);
   latest.current = state;
+  const scroller = useRef<ScrollBoxRenderable | null>(null);
 
   // Keys can arrive faster than React re-renders — a key repeat, a paste,
   // or simply two presses in one tick — and a handler that closed over
@@ -79,24 +119,61 @@ export function App({ client, onQuit }: AppProps): React.ReactNode {
 
   // -- the connection --------------------------------------------------- //
 
+  /**
+   * Ask the core what the session actually looks like, and adopt the answer.
+   *
+   * The repair for a gap, and the way a rebuilt client catches up. Safe to
+   * call at any moment, including mid-turn: the snapshot names the sequence
+   * number it includes up to, and the projection drops anything at or below
+   * it. Whichever of the snapshot and the next delta arrives first, the
+   * result is the same.
+   *
+   * `fresh` says which of the two this is, because the mode intent has to be
+   * treated differently in each:
+   *
+   * - A **fresh** mount has no intent of its own. It starts from the session's
+   *   confirmed mode, so resuming a session that is in Plan does not leave a
+   *   stale Act intent behind that the first Tab then "advances" to Plan.
+   * - A **gap** resync belongs to a client that is already mounted and may be
+   *   holding a press the core has not answered yet. Confirmed mode is taken
+   *   from the snapshot — the core is the authority — but the aim is kept, so
+   *   repairing a hole in the stream cannot throw away what the person asked
+   *   for a moment ago.
+   */
+  const resync = useCallback(async (id: string, fresh: boolean) => {
+    dispatch({ type: "resynchronising" });
+    try {
+      const answer = await client.call("session.snapshot", { session_id: id });
+      const snapshot = answer["snapshot"] as Snapshot;
+      dispatch({ type: "snapshot", snapshot });
+      const mode = (snapshot.session?.mode ?? "act") as Mode;
+      setIntent((was) => (fresh ? beginIntent(mode) : intentConfirmed(was, mode)));
+    } catch (problem) {
+      dispatch({ type: "lost", reason: (problem as Error).message });
+    }
+  }, [client]);
+
   useEffect(() => {
     let alive = true;
-    const stop = client.on((name: EventName, params) => {
+    const stop = client.on((name: EventName, params, seq) => {
       if (!alive) return;
-      dispatch({ type: "event", name, params });
-      if (name === "question.requested") {
-        setQuestion(begin(params as never));
-      } else if (name === "question.resolved") {
-        setQuestion(undefined);
+      dispatch({ type: "event", name, params, seq });
+      if (name === "mode.changed") {
+        // The core is the authority, and this is it speaking — whoever asked.
+        setIntent((was) => intentConfirmed(was, params["mode"] as Mode));
       }
     });
 
     void (async () => {
       try {
-        const made = await client.call("session.create");
-        if (alive) {
-          dispatch({ type: "connected",
-                     session: made["session"] as Session });
+        if (sessionId) {
+          await resync(sessionId, true);
+        } else {
+          const made = await client.call("session.create");
+          if (!alive) return;
+          const session = made["session"] as Session;
+          dispatch({ type: "connected", session });
+          setIntent(beginIntent(session.mode as Mode));
         }
       } catch (problem) {
         if (alive) {
@@ -106,7 +183,129 @@ export function App({ client, onQuit }: AppProps): React.ReactNode {
     })();
 
     return () => { alive = false; stop(); };
+  }, [client, resync, sessionId]);
+
+  // The pending question, in one place.
+  //
+  // The projection is the only source of truth about whether one is waiting;
+  // the interactive form is a cache of it, rebuilt here and nowhere else. Both
+  // the live event and a snapshot restored one arrive as the same projection
+  // field, which is what makes a remount able to answer a question that was
+  // asked before it existed — the event that raised it is never replayed.
+  useEffect(() => {
+    setQuestion(state.question ? begin(state.question as never) : undefined);
+  }, [state.question]);
+
+  // A hole in the sequence means an event never arrived, and no amount of
+  // later events repairs that. Asking the core is the only honest answer.
+  useEffect(() => {
+    const id = state.session?.id;
+    if (state.gap && id) void resync(id, false);
+  }, [state.gap, state.session?.id, resync]);
+
+  // -- mode intent -------------------------------------------------------- //
+
+  /**
+   * One mutation in flight per session, and the *current* intent is what goes
+   * out next — not the intermediate modes it passed through on the way.
+   *
+   * Running as an effect rather than inside the key handler is what makes
+   * three presses in one tick collapse into at most two requests: React has
+   * already folded them into one intent by the time this reads it.
+   */
+  useEffect(() => {
+    const id = state.session?.id;
+    const next = intentDue(intent);
+    if (!id || next === undefined) return;
+    setIntent((was) => intentSending(was, next));
+    void client.call("session.set_mode", { session_id: id, mode: next })
+      .catch((problem: unknown) => {
+        // A refusal is final: intent falls back to what the core has, so this
+        // does not turn into a loop against a settled no.
+        setIntent((was) => refuseIntent(was, (problem as Error).message));
+        dispatch({ type: "event", name: "notification.created", seq: 0,
+                   params: { level: "warning",
+                             text: (problem as Error).message } });
+      });
+  }, [client, intent, state.session?.id]);
+
+  // -- following the newest line ------------------------------------------ //
+
+  /** Whether the viewport is showing the end of the conversation. */
+  const atTail = useCallback((): boolean => {
+    const box = scroller.current;
+    if (!box) return true;
+    // Exact, deliberately: a wheel notch is one row, and a tolerance that
+    // counted that as "at the tail" would let new output yank the viewport
+    // right back after the first notch of an upward scroll.
+    return box.scrollTop >= box.scrollHeight - box.viewport.height;
+  }, []);
+
+  const toTail = useCallback(() => {
+    scroller.current?.scrollTo(Number.MAX_SAFE_INTEGER);
+    setFollow(followTail());
+  }, []);
+
+  const scrollBy = useCallback((rows: number) => {
+    const box = scroller.current;
+    if (!box) return;
+    box.scrollBy(rows);
+    setFollow((was) => followMoved(was, atTail()));
+  }, [atTail]);
+
+  // Content arrived. Following: nothing to do, the box is sticky and the tail
+  // moved with it. Paused: the viewport stays put and the marker goes up.
+  useEffect(() => {
+    setFollow((was) => grew(was));
+  }, [state.arrivals, state.lines, state.tools]);
+
+  /**
+   * Put one prompt to the core, and be honest about how it went.
+   *
+   * The composer clears on the way in, because a person who pressed Enter has
+   * finished with that text — but the text is not thrown away, it moves into
+   * the conversation as a *pending* line. If the core refuses, that line says
+   * so and keeps every character. F1 cleared the composer and showed a
+   * notification, which meant a refused send ate the paragraph.
+   */
+  const deliver = useCallback(async (localId: string, text: string) => {
+    const id = latest.current.session?.id;
+    if (!id) return;
+    setFollow(followSent());
+    try {
+      const answer = await client.call("session.send",
+                                       { session_id: id, text });
+      dispatch({ type: "accepted", localId,
+                 turnId: String(answer["turn_id"] ?? "") });
+    } catch (problem) {
+      dispatch({ type: "rejected", localId,
+                 reason: (problem as Error).message });
+    }
   }, [client]);
+
+  const send = useCallback(async () => {
+    const text = draft.trim();
+    if (!text || !latest.current.session?.id) return;
+    const localId = `you-${latest.current.arrivals + 1}`;
+    setDraft("");
+    dispatch({ type: "sending", localId, text });
+    await deliver(localId, text);
+  }, [deliver, draft]);
+
+  /**
+   * Send again what the core never accepted.
+   *
+   * Only that. A turn the core *did* accept and which then failed is not
+   * resent: whatever tools it ran already ran, and resubmitting it would run
+   * them twice for a failure the person has not seen the shape of yet.
+   */
+  const retry = useCallback(async () => {
+    const waiting = unsent(latest.current);
+    const line = waiting[waiting.length - 1];
+    if (!line) return;
+    dispatch({ type: "retrying", localId: line.id });
+    await deliver(line.id, line.text);
+  }, [deliver]);
 
   // -- what a command is given ------------------------------------------- //
 
@@ -115,12 +314,17 @@ export function App({ client, onQuit }: AppProps): React.ReactNode {
     sessionId: () => latest.current.session?.id,
     mode: () => (latest.current.session?.mode ?? "act") as Mode,
     busy: () => Boolean(latest.current.session?.busy),
+    stepMode: (back: boolean) => setIntent((was) => stepIntent(was, back)),
+    wantMode: (mode: Mode) => setIntent((was) => wantMode(was, mode)),
     openPalette: () => setPalette(openPalette(registry, screenRef.current)),
     closePalette: () => setPalette(undefined),
     paletteOpen: () => Boolean(palette),
+    toTail,
+    hasUnsent: () => unsent(latest.current).length > 0,
+    retry: () => { void retry(); },
     quit: onQuit,
     note: () => {},
-  }), [client, onQuit, palette, registry]);
+  }), [client, onQuit, palette, registry, toTail, retry]);
 
   // The commands are given the screen, and opening the palette needs the
   // screen to filter by. A ref breaks that circle without a second object.
@@ -136,25 +340,13 @@ export function App({ client, onQuit }: AppProps): React.ReactNode {
   // becomes a notification instead.
   const runCommand = useCallback((id: string) => {
     void registry.run(id, screenRef.current).catch((problem: unknown) => {
-      dispatch({ type: "event", name: "notification.created",
-                 params: { level: "warning",
-                           text: (problem as Error).message } });
+      // Seq 0: raised here rather than received, so it is outside the
+       // core's sequence and must not move the revision.
+       dispatch({ type: "event", name: "notification.created", seq: 0,
+                  params: { level: "warning",
+                            text: (problem as Error).message } });
     });
   }, [registry]);
-
-  const send = useCallback(async () => {
-    const text = draft.trim();
-    const id = latest.current.session?.id;
-    if (!text || !id) return;
-    setDraft("");
-    dispatch({ type: "said", text });
-    try {
-      await client.call("session.send", { session_id: id, text });
-    } catch (problem) {
-      dispatch({ type: "event", name: "notification.created",
-                 params: { level: "error", text: (problem as Error).message } });
-    }
-  }, [client, draft]);
 
   // -- keys --------------------------------------------------------------- //
 
@@ -227,13 +419,19 @@ export function App({ client, onQuit }: AppProps): React.ReactNode {
       return;
     }
 
+    // Reading the history. Handled here rather than left to the scroll box,
+    // which only sees keys when it holds focus — and focus belongs to the
+    // composer, because typing is what the window is mostly for.
+    if (named === "pageup") { scrollBy(-PAGE); return; }
+    if (named === "pagedown") { scrollBy(PAGE); return; }
+
     const command = registry.forKey(named);
     if (command) {
       runCommand(command.id);
       return;
     }
     if (named === "return") void send();
-  }, [client, onQuit, registry, runCommand, send]));
+  }, [client, onQuit, registry, runCommand, scrollBy, send]));
 
   // -- the screen --------------------------------------------------------- //
 
@@ -244,10 +442,13 @@ export function App({ client, onQuit }: AppProps): React.ReactNode {
     <box style={{ flexDirection: "column", width: "100%", height: "100%",
                   backgroundColor: theme["surface.base"] }}>
       <Header state={state} narrow={narrow} />
-      <Conversation state={state} />
+      <Conversation state={state} scroller={scroller} follow={follow}
+                    onScrolled={() => setFollow(
+                      (was) => followMoved(was, atTail()))} />
+      {followMarker(follow) ? <NewOutput onPick={toTail} /> : null}
       {question
         ? <QuestionCard question={question} onChange={setQuestion} />
-        : <Composer value={draft} onChange={setDraft} onSubmit={send}
+        : <Composer value={draft} onChange={setDraft}
                     busy={Boolean(state.session?.busy)} />}
       <ModeBar mode={mode} narrow={narrow}
                onPick={(picked) => runCommand(`mode.${picked}`)} />
@@ -283,39 +484,52 @@ function Header({ state, narrow }: { state: State; narrow: boolean }):
   );
 }
 
-function Conversation({ state }: { state: State }): React.ReactNode {
+function Conversation({ state, scroller, follow, onScrolled }: {
+  state: State;
+  scroller: React.RefObject<ScrollBoxRenderable | null>;
+  follow: Follow;
+  onScrolled: () => void;
+}): React.ReactNode {
   if (state.connection.kind !== "ready") {
     return (
       <box style={{ flexGrow: 1, padding: 1 }}>
         <text style={{ fg: state.connection.kind === "lost"
           ? theme["semantic.danger"] : theme["text.secondary"] }}>
+          {/*
+            Three states, three sentences. "Starting the core…" while actually
+            catching up with a session the core already has would be a lie
+            about which of the two ends lost its place.
+          */}
           {state.connection.kind === "lost"
             ? `The core is not answering — ${state.connection.reason}`
-            : "Starting the core…"}
+            : state.connection.kind === "resynchronising"
+              ? "Catching up with the session…"
+              : "Starting the core…"}
         </text>
       </box>
     );
   }
 
   return (
-    <scrollbox style={{ flexGrow: 1, flexShrink: 1, padding: 1 }}>
-      {state.lines.map((line) => (
-        <box key={line.id} style={{ flexDirection: "column", marginBottom: 1 }}>
-          <text style={{ fg: line.speaker === "you"
-            ? theme["text.secondary"] : theme["border.focused"] }}>
-            {line.speaker === "you" ? "You" : "Comodor"}
-          </text>
-          <text style={{ fg: theme["text.primary"] }}>{line.text}</text>
-        </box>
-      ))}
-      {state.tools.map((tool) => (
-        <text key={tool.id} style={{ fg: tool.state === "failed"
-          ? theme["semantic.danger"]
-          : tool.state === "done" ? theme["semantic.success"]
-          : theme["text.muted"] }}>
-          {`${marker(tool.state)} ${tool.name} ${tool.summary}`.trimEnd()}
-        </text>
-      ))}
+    // `stickyScroll` is what keeps the tail in view, and turning it off is
+    // what keeps it out of view once somebody has scrolled up. The box does
+    // the scrolling; this decides whether it should be.
+    <scrollbox
+      ref={scroller}
+      stickyScroll={follow.following}
+      stickyStart="bottom"
+      // Wheel events arrive here, not through a per-renderable scroll prop:
+      // the scroll box scrolls itself in the same event, after this listener
+      // returns — so where the wheel landed is read on the next turn.
+      onMouse={(event) => {
+        if (event.type !== "scroll") return;
+        queueMicrotask(() => onScrolled());
+      }}
+      style={{ flexGrow: 1, flexShrink: 1, padding: 1 }}
+    >
+      {timeline(state).map((entry) => entry.kind === "line"
+        ? <Said key={`line:${entry.line.id}`} line={entry.line} />
+        : <Ran key={`tool:${entry.tool.id}`} tool={entry.tool} />)}
       {state.notice
         ? <text style={{ fg: level(state.notice.level) }}>
             {state.notice.text}
@@ -325,9 +539,110 @@ function Conversation({ state }: { state: State }): React.ReactNode {
   );
 }
 
-function Composer({ value, onChange, onSubmit, busy }: {
-  value: string; onChange: (text: string) => void;
-  onSubmit: () => void; busy: boolean;
+/** One message, and what became of it. */
+function Said({ line }: { line: Line }): React.ReactNode {
+  const who = line.speaker === "you" ? "You" : "Comodor";
+  return (
+    <box style={{ flexDirection: "column", marginBottom: 1 }}>
+      <box style={{ flexDirection: "row", flexShrink: 0 }}>
+        <text style={{ fg: line.speaker === "you"
+          ? theme["text.secondary"] : theme["border.focused"] }}>{who}</text>
+        {/*
+          The state is spelled out, never carried by colour alone, and only
+          when it is not the ordinary one: labelling every finished answer
+          "completed" would be noise on every line of the transcript.
+        */}
+        {said(line)
+          ? <text style={{ fg: saidColour(line) }}>{`  ${said(line)}`}</text>
+          : null}
+      </box>
+      <text style={{ fg: theme["text.primary"] }}>{line.text}</text>
+    </box>
+  );
+}
+
+function said(line: Line): string {
+  if (line.state === "pending") return "sending…";
+  if (line.state === "failed_to_send") {
+    return `not sent — ctrl+r to try again${line.error ? `: ${line.error}` : ""}`;
+  }
+  if (line.state === "cancelled") return "stopped";
+  if (line.state === "failed") return line.error ? `failed: ${line.error}` : "failed";
+  return "";
+}
+
+function saidColour(line: Line): string {
+  if (line.state === "failed" || line.state === "failed_to_send") {
+    return theme["semantic.danger"];
+  }
+  if (line.state === "cancelled") return theme["semantic.warning"];
+  return theme["text.muted"];
+}
+
+/**
+ * One tool invocation, with what it printed.
+ *
+ * Compact on purpose: a heading row and the output indented under it. An
+ * expandable inspector is a later phase, and building one now would mean
+ * building it before anything had streamed real output through it.
+ */
+function Ran({ tool }: { tool: ToolRun }): React.ReactNode {
+  const colour = tool.state === "failed" ? theme["semantic.danger"]
+    : tool.state === "completed" ? theme["semantic.success"]
+    : theme["text.muted"];
+  const lines = tool.output ? tool.output.replace(/\n+$/, "").split("\n") : [];
+  return (
+    <box style={{ flexDirection: "column", flexShrink: 0 }}>
+      <text style={{ fg: colour }}>
+        {`${marker(tool.state)} ${tool.name} ${tool.summary}`.trimEnd()}
+      </text>
+      {tool.outputTruncated
+        ? <text style={{ fg: theme["text.muted"] }}>
+            {"    … earlier output is not kept"}
+          </text>
+        : null}
+      {lines.map((line, at) => (
+        // Keyed by position within this call's own output, which only ever
+        // grows at the end — so a key never moves to different text.
+        <text key={`${tool.id}:${at}`} style={{ fg: theme["text.muted"] }}>
+          {`    ${line}`}
+        </text>
+      ))}
+      {tool.error
+        ? <text style={{ fg: theme["semantic.danger"] }}>
+            {`    ${tool.error}`}
+          </text>
+        : null}
+    </box>
+  );
+}
+
+/**
+ * There is more below, and the viewport is not going to jump there by itself.
+ *
+ * The key is named here rather than in the footer, because this is the one
+ * moment it is worth knowing — and a footer that listed every binding all the
+ * time would be a footer nobody reads.
+ */
+function NewOutput({ onPick }: { onPick: () => void }): React.ReactNode {
+  return (
+    <box style={{ height: 1, flexShrink: 0, paddingLeft: 1,
+                  backgroundColor: theme["surface.raised"] }}>
+      <text onMouseDown={onPick} style={{ fg: theme["semantic.info"] }}>
+        {"↓ new output   end Jump to it"}
+      </text>
+    </box>
+  );
+}
+
+/**
+ * The prompt box. Enter is deliberately not bound here: the key handler
+ * above is the one path that sends, and an input that also submitted would
+ * make one press two requests — each with its own pending line, each refused
+ * or accepted on its own. One press, one send, from one place.
+ */
+function Composer({ value, onChange, busy }: {
+  value: string; onChange: (text: string) => void; busy: boolean;
 }): React.ReactNode {
   return (
     <box style={{ borderStyle: "single", height: 3, flexShrink: 0,
@@ -336,7 +651,7 @@ function Composer({ value, onChange, onSubmit, busy }: {
                                     : theme["border.focused"] }}>
       <input value={value} focused={!busy}
              placeholder={busy ? "working…" : "ask for anything"}
-             onInput={onChange} onSubmit={onSubmit} />
+             onInput={onChange} />
     </box>
   );
 }
@@ -533,8 +848,8 @@ function Palette({ state, onQuery, onPick }: {
 
 // --------------------------------------------------------------------------- //
 
-function marker(state: "running" | "done" | "failed"): string {
-  return state === "done" ? "✓" : state === "failed" ? "×" : "●";
+function marker(state: ToolState): string {
+  return state === "completed" ? "✓" : state === "failed" ? "×" : "●";
 }
 
 function level(name: string): string {

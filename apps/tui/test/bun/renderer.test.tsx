@@ -35,6 +35,17 @@ import { App } from "../../src/App.tsx";
 class FakeCore implements Transport {
   readonly sent: Array<Record<string, unknown>> = [];
   mode = "act";
+  /** Turns accepted so far, so `session.send` hands back a real correlator. */
+  turns = 0;
+  turn = "";
+  /** Set by a test to make every send fail, as a busy session does. */
+  refuseSends = false;
+  /** What `session.snapshot` answers with. */
+  snapshot: Record<string, unknown> = {
+    session: { id: "s1", mode: "act", workspace: "/work/project", busy: false },
+    revision: 0, messages: [], tools: [],
+  };
+  private seq = 0;
   private waiting: Array<(line: string | null) => void> = [];
   private queued: string[] = [];
   private done = false;
@@ -76,6 +87,28 @@ class FakeCore implements Transport {
       this.push(response(id, { session: this.session() }));
       return;
     }
+    if (method === "session.send") {
+      this.turns += 1;
+      const turnId = `t${this.turns}`;
+      this.turn = turnId;
+      if (this.refuseSends) {
+        this.push({ version: PROTOCOL_VERSION, type: "error", id,
+                    error: { code: "not_allowed",
+                             message: "that session is already working" } });
+        return;
+      }
+      this.push(response(id, { accepted: true, turn_id: turnId }));
+      return;
+    }
+    if (method === "session.snapshot") {
+      // A real core keeps counting from the state it just described, so the
+      // events that follow a snapshot are above its revision rather than
+      // replaying numbers the client has already applied.
+      const at = Number(this.snapshot["revision"] ?? 0);
+      if (at > this.seq) this.seq = at;
+      this.push(response(id, { snapshot: this.snapshot }));
+      return;
+    }
     if (method === "session.set_mode") {
       // The core is the authority. The client must not move its own label;
       // it waits for the event, which is what these tests then assert on.
@@ -92,6 +125,12 @@ class FakeCore implements Transport {
   close(): void {
     this.done = true;
     for (const waiter of this.waiting.splice(0)) waiter(null);
+  }
+
+  /** One event, numbered as a real core numbers them. */
+  emit(name: string, params: Record<string, unknown>): void {
+    this.seq += 1;
+    this.push(event(name as never, params, this.seq));
   }
 
   push(message: unknown): void {
@@ -119,14 +158,17 @@ class FakeCore implements Transport {
   }
 }
 
-async function screen(width = 100, height = 30) {
+async function screen(width = 100, height = 30,
+                      sessionId?: string,
+                      snapshot?: Record<string, unknown>) {
   const core = new FakeCore();
+  if (snapshot) core.snapshot = snapshot;
   const client = new CoreClient(core, { timeoutMs: 5_000 });
   await client.start();
 
   let quit = false;
   const rendered = await testRender(
-    <App client={client} onQuit={() => { quit = true; }} />,
+    <App client={client} onQuit={() => { quit = true; }} sessionId={sessionId} />,
     { width, height });
 
   await rendered.flush();
@@ -184,6 +226,24 @@ async function pressEscape(view: { mockInput: { pressEscape: () => void };
   await view.flush();
 }
 
+/**
+ * Let React run the updates a key handler queued, then flush.
+ *
+ * React schedules its work on the macrotask queue; `flush` turns the
+ * microtask queue and paints. So a `setState` made inside a key handler is
+ * still queued when `flush` returns, and a test that only awaited frames
+ * would spin on a screen React had not been given the chance to change —
+ * which is exactly what it looks like when a key does nothing.
+ *
+ * `sleep(0)` is one turn of that queue, not a guess at a duration. It is a
+ * property of the harness, not of the interface: the real client runs a
+ * renderer loop that turns it constantly.
+ */
+async function letReactRun(view: { flush: () => Promise<void> }): Promise<void> {
+  await Bun.sleep(0);
+  await view.flush();
+}
+
 /** Where a piece of text sits on screen, so a click can be aimed at it. */
 function locate(frame: string, needle: string): { x: number; y: number } {
   const rows = frame.split("\n");
@@ -236,9 +296,7 @@ describe("modes", () => {
     // that did not change from a label that did not render.
     await view.waitForFrame(() => view.core.mode === "act");
     await view.flush();
-    console.error("MODE=" + view.core.mode);
-    const bar = view.frame().split("\n").find((row) => row.includes("PLAN"));
-    console.error("BAR=" + (bar ?? "(no bar)"));
+    expect(view.frame()).toContain("[ACT]");
     view.client.close();
   });
 
@@ -358,7 +416,12 @@ describe("the command palette", () => {
     const view = await screen();
     view.mockInput.pressKey("k", { ctrl: true });
     await view.waitForFrame((frame) => frame.includes("type a command"));
-    await view.mockInput.typeText("mode");
+    // `mode:` rather than `mode`, so every result names a mode outright and
+    // the row below the first is one the session is not already in. Picking
+    // the mode already confirmed is correctly a no-op — intent that matches
+    // the core is not a request — and the test would then be asserting
+    // against the one case that sends nothing.
+    await view.mockInput.typeText("mode:");
     await view.flush();
     await view.waitForVisualIdle();
 
@@ -370,8 +433,11 @@ describe("the command palette", () => {
     expect(second).not.toBe(chosen);
 
     view.mockInput.pressEnter();
-    await view.flush();
+    await letReactRun(view);
     await view.waitForVisualIdle();
+    // The round trip is a render cycle longer than it was: a mode command
+    // records intent, and one coordinator turns intent into the request.
+    await view.waitForFrame((frame) => frame.includes("[ASK]"), MODE_PASSES);
 
     // It closed, and it asked the core for the mode the *second* row named.
     expect(view.frame()).not.toContain("type a command");
@@ -566,6 +632,447 @@ describe("leaving", () => {
     await view.flush();
 
     expect(view.quit()).toBe(true);
+    view.client.close();
+  });
+});
+
+// --------------------------------------------------------------------------- //
+// streaming, tools and recovery — the F2 behaviours, in the real renderer
+// --------------------------------------------------------------------------- //
+
+type View = Awaited<ReturnType<typeof screen>>;
+
+/** Emit one event and let React settle, so a frame shows what it caused. */
+async function emitRun(view: View, name: string,
+                       params: Record<string, unknown>): Promise<void> {
+  view.core.emit(name, params);
+  await letReactRun(view);
+}
+
+describe("streaming and recovery", () => {
+  test("a streamed answer appears as it arrives", async () => {
+    const view = await screen();
+    await emitRun(view, "message.started",
+                  { turn_id: "t1", message_id: "m1" });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m1", text: "Parsing the " });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m1", text: "fixture now" });
+
+    expect(view.frame()).toContain("Parsing the fixture now");
+    view.client.close();
+  });
+
+  test("parallel tool output stays under the tool that produced it", async () => {
+    const view = await screen();
+    await emitRun(view, "tool.started",
+                  { turn_id: "t1", call_id: "a", name: "alpha" });
+    await emitRun(view, "tool.started",
+                  { turn_id: "t1", call_id: "b", name: "bravo" });
+    await emitRun(view, "tool.output",
+                  { turn_id: "t1", call_id: "a", text: "A1\n" });
+    await emitRun(view, "tool.output",
+                  { turn_id: "t1", call_id: "b", text: "B1\n" });
+    await emitRun(view, "tool.output",
+                  { turn_id: "t1", call_id: "a", text: "A2\n" });
+    await emitRun(view, "tool.output",
+                  { turn_id: "t1", call_id: "b", text: "B2\n" });
+
+    const frame = view.frame();
+    // Each call's block is whole, in order, and carries only its own lines:
+    // interleaved output drawn interleaved would put half of A under B.
+    const alpha = frame.indexOf("alpha");
+    const bravo = frame.indexOf("bravo");
+    expect(alpha).toBeGreaterThanOrEqual(0);
+    expect(bravo).toBeGreaterThan(alpha);
+
+    const alphaBlock = frame.slice(alpha, bravo);
+    expect(alphaBlock).toContain("A1");
+    expect(alphaBlock).toContain("A2");
+    expect(alphaBlock).not.toContain("B1");
+    expect(alphaBlock).not.toContain("B2");
+
+    const bravoBlock = frame.slice(bravo);
+    expect(bravoBlock).toContain("B1");
+    expect(bravoBlock).toContain("B2");
+    expect(bravoBlock).not.toContain("A1");
+    view.client.close();
+  });
+
+  test("a failed tool says so, and carries why", async () => {
+    const view = await screen();
+    await emitRun(view, "tool.started",
+                  { turn_id: "t1", call_id: "a", name: "run_shell" });
+    await emitRun(view, "tool.output",
+                  { turn_id: "t1", call_id: "a", text: "boom\n" });
+    await emitRun(view, "tool.failed",
+                  { turn_id: "t1", call_id: "a", error: "exit code 1" });
+
+    const frame = view.frame();
+    expect(frame).toContain("×");
+    expect(frame).toContain("exit code 1");
+    view.client.close();
+  });
+
+  test("a cancelled answer keeps its text and says it stopped", async () => {
+    const view = await screen();
+    await emitRun(view, "message.started",
+                  { turn_id: "t1", message_id: "m1" });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m1", text: "half an answer" });
+    await emitRun(view, "message.completed",
+                  { turn_id: "t1", message_id: "m1", text: "half an answer",
+                    status: "cancelled" });
+
+    const frame = view.frame();
+    expect(frame).toContain("half an answer");
+    expect(frame).toContain("stopped");
+    view.client.close();
+  });
+
+  test("scrolling up pauses follow; new output raises the marker; end returns",
+       async () => {
+    const view = await screen(100, 30);
+    const lines = Array.from({ length: 80 }, (_, at) => `history row ${at}`);
+    await emitRun(view, "message.started",
+                  { turn_id: "t1", message_id: "m1" });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m1", text: lines.join("\n") });
+    await emitRun(view, "message.completed",
+                  { turn_id: "t1", message_id: "m1",
+                    text: lines.join("\n"), status: "completed" });
+
+    // Following: no marker, wherever the box has pinned itself.
+    expect(view.frame()).not.toContain("↓ new output");
+
+    // A real PageUp — the mock types unknown names as text, so the escape
+    // sequence itself, which the input decoder names `pageup`. Half a
+    // viewport per press, so several to reach the top of a long answer.
+    for (let press = 0; press < 10; press += 1) {
+      view.mockInput.pressKey("\x1B[5~");
+      await letReactRun(view);
+    }
+
+    await emitRun(view, "message.started",
+                  { turn_id: "t1", message_id: "m2" });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m2", text: "later words" });
+    await letReactRun(view);
+
+    // The viewport must not have been dragged down to the new content —
+    // that yank is the behaviour this exists to prevent — and the marker
+    // names both the fact and the way back.
+    const paused = view.frame();
+    expect(paused).toContain("history row 0");
+    expect(paused).toContain("↓ new output");
+    view.mockInput.pressKey("END");
+    await letReactRun(view);
+    expect(view.frame()).not.toContain("↓ new output");
+    expect(view.frame()).toContain("later words");
+    view.client.close();
+  });
+
+  test("the mouse wheel pauses follow the same way the keyboard does",
+       async () => {
+    const view = await screen(100, 30);
+    const lines = Array.from({ length: 80 }, (_, at) => `history row ${at}`);
+    await emitRun(view, "message.started",
+                  { turn_id: "t1", message_id: "m1" });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m1", text: lines.join("\n") });
+    await emitRun(view, "message.completed",
+                  { turn_id: "t1", message_id: "m1",
+                    text: lines.join("\n"), status: "completed" });
+
+    await view.mockMouse.scroll(50, 12, "up");
+    await letReactRun(view);
+
+    await emitRun(view, "message.started",
+                  { turn_id: "t1", message_id: "m2" });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m2", text: "later words" });
+    await letReactRun(view);
+
+    expect(view.frame()).toContain("↓ new output");
+    view.client.close();
+  });
+
+  test("a refused send keeps the text, and ctrl+r sends it again", async () => {
+    const view = await screen();
+    view.core.refuseSends = true;
+
+    await view.mockInput.typeText("fix the parser");
+    await view.flush();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    const refused = view.frame();
+    expect(refused).toContain("fix the parser");
+    expect(refused).toContain("ctrl+r");
+
+    // A second prompt in the same state keeps both, and refuses both.
+    await view.mockInput.typeText("and the types");
+    await view.flush();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    expect(view.frame()).toContain("and the types");
+
+    view.core.refuseSends = false;
+    view.mockInput.pressKey("r", { ctrl: true });
+    await letReactRun(view);
+    // Retry resends the latest unsent prompt — one press, one resend. The
+    // earlier refusal is still on screen for the person to retry in turn.
+    const sends = view.core.sent
+      .filter((message) => message["method"] === "session.send");
+    expect(sends.length).toBe(3);
+    expect(view.frame()).toContain("not sent");
+    view.client.close();
+  });
+
+  test("enter sends once, not once per handler", async () => {
+    const view = await screen();
+    await view.mockInput.typeText("one press, one send");
+    await view.flush();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    const sends = view.core.sent
+      .filter((message) => message["method"] === "session.send");
+    expect(sends.length).toBe(1);
+    view.client.close();
+  });
+
+  test("a remount rebuilds from the snapshot instead of a second session",
+       async () => {
+    const view = await screen(100, 30, "s1", {
+      session: { id: "s1", mode: "act", workspace: "/work/project", busy: true },
+      revision: 7,
+      messages: [
+        { message_id: "user-t1", turn_id: "t1", role: "user",
+          text: "earlier question", status: "completed" },
+        { message_id: "m1", turn_id: "t1", role: "assistant",
+          text: "earlier answer", status: "completed" },
+      ],
+      tools: [
+        { call_id: "c1", turn_id: "t1", name: "run_shell", state: "running",
+          output: "line one\n" },
+      ],
+    });
+    // The rebuild went to the session the core already had.
+    expect(view.core.methods()).not.toContain("session.create");
+    expect(view.core.methods()).toContain("session.snapshot");
+
+    const frame = view.frame();
+    expect(frame).toContain("earlier question");
+    expect(frame).toContain("earlier answer");
+    expect(frame).toContain("run_shell");
+    expect(frame).toContain("line one");
+    view.client.close();
+  });
+});
+
+// --------------------------------------------------------------------------- //
+// rebuilding a session that already exists
+// --------------------------------------------------------------------------- //
+
+/** The form a remount has to be able to answer without ever seeing the event. */
+const PENDING_FORM = {
+  id: "ask-1",
+  session_id: "s1",
+  title: "2 questions before I start",
+  questions: [
+    { header: "approach", prompt: "Which approach?", multiple: false,
+      options: [
+        { id: "Refactor", label: "Refactor" },
+        { id: "Replace", label: "Replace" },
+        { id: "Something else", label: "Something else", free: true },
+      ] },
+    { header: "when", prompt: "When?", multiple: true,
+      options: [
+        { id: "Now", label: "Now" },
+        { id: "Something else", label: "Something else", free: true },
+      ] },
+  ],
+};
+
+describe("rebuilding a session", () => {
+  test("a remount can answer a question asked before it existed", async () => {
+    const view = await screen(100, 30, "s1", {
+      session: { id: "s1", mode: "act", workspace: "/work/project", busy: true },
+      revision: 5,
+      messages: [],
+      tools: [],
+      question: PENDING_FORM,
+    });
+
+    // The form is what is on screen, and the composer is not: a client that
+    // showed the composer here would leave the agent waiting out its timeout
+    // on a question the person can see but cannot reach. The session is busy,
+    // so the composer would be offering "working…" — its absence is the proof.
+    const drawn = view.frame();
+    expect(drawn).toContain("Which approach?");
+    expect(drawn).not.toContain("working");
+
+    view.mockInput.pressArrow("down");
+    view.mockInput.pressKey(" ");
+    await letReactRun(view);
+    expect(view.frame()).toContain("(*) Replace");
+
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    const sent = view.core.sent.find(
+      (message) => message["method"] === "question.answer");
+    expect(sent).toBeDefined();
+    const params = sent!["params"] as { answers: Array<Record<string, unknown>> };
+    expect(params.answers[0]?.["header"]).toBe("approach");
+    expect(params.answers[0]?.["chosen"]).toEqual(["Replace"]);
+    view.client.close();
+  });
+
+  test("a remount can write its own answer to a restored question", async () => {
+    const view = await screen(100, 30, "s1", {
+      session: { id: "s1", mode: "act", workspace: "/work/project", busy: true },
+      revision: 5, messages: [], tools: [], question: PENDING_FORM,
+    });
+
+    // Down twice reaches the write-your-own row; space opens the field.
+    view.mockInput.pressArrow("down");
+    view.mockInput.pressArrow("down");
+    view.mockInput.pressKey(" ");
+    await view.waitForFrame((frame) => frame.includes("▌"));
+
+    await view.mockInput.typeText("rewrite it");
+    await view.waitForFrame((frame) => frame.includes("rewrite it"));
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    const sent = view.core.sent.find(
+      (message) => message["method"] === "question.answer");
+    const params = sent!["params"] as { answers: Array<Record<string, unknown>> };
+    expect(params.answers[0]?.["written"]).toBe("rewrite it");
+    view.client.close();
+  });
+
+  test("a remount with nothing waiting shows the composer", async () => {
+    const view = await screen(100, 30, "s1", {
+      session: { id: "s1", mode: "act", workspace: "/work/project", busy: false },
+      revision: 3,
+      messages: [{ message_id: "m1", turn_id: "t1", role: "assistant",
+                   text: "All done.", status: "completed", started_seq: 2 }],
+      tools: [],
+    });
+
+    const frame = view.frame();
+    expect(frame).toContain("All done.");
+    expect(frame).toContain("ask for anything");
+    expect(frame).not.toContain("Which approach?");
+    view.client.close();
+  });
+
+  test("a resolved question takes the restored form away", async () => {
+    const view = await screen(100, 30, "s1", {
+      session: { id: "s1", mode: "act", workspace: "/work/project", busy: true },
+      revision: 5, messages: [], tools: [], question: PENDING_FORM,
+    });
+    expect(view.frame()).toContain("Which approach?");
+
+    // Answered elsewhere — another window, or a timeout the core settled.
+    await emitRun(view, "question.resolved", { id: "ask-1", session_id: "s1" });
+
+    // The interactive form went with it, and the composer came back.
+    const after = view.frame();
+    expect(after).not.toContain("Which approach?");
+    expect(after).toContain("working");
+    view.client.close();
+  });
+
+  test("a message the snapshot called streaming keeps streaming", async () => {
+    const view = await screen(100, 30, "s1", {
+      session: { id: "s1", mode: "act", workspace: "/work/project", busy: true },
+      revision: 5,
+      messages: [{ message_id: "m1", turn_id: "t1", role: "assistant",
+                   text: "hel", status: "streaming", started_seq: 4 }],
+      tools: [],
+    });
+    expect(view.frame()).toContain("hel");
+
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m1", text: "lo" });
+    await emitRun(view, "message.completed",
+                  { turn_id: "t1", message_id: "m1", text: "hello",
+                    status: "completed" });
+
+    const frame = view.frame();
+    expect(frame).toContain("hello");
+    // One message, continued — not a second one started below it.
+    expect(frame.indexOf("hello")).toBe(frame.lastIndexOf("hello"));
+    view.client.close();
+  });
+
+  test("a snapshot keeps a turn interleaved on screen", async () => {
+    const view = await screen(100, 30, "s1", {
+      session: { id: "s1", mode: "act", workspace: "/work/project", busy: false },
+      revision: 9,
+      messages: [
+        { message_id: "A", turn_id: "t1", role: "assistant", text: "Looking.",
+          status: "completed", started_seq: 1 },
+        { message_id: "B", turn_id: "t1", role: "assistant", text: "Found it.",
+          status: "completed", started_seq: 5 },
+      ],
+      tools: [
+        { call_id: "X", turn_id: "t1", name: "read_file", state: "completed",
+          started_seq: 3 },
+      ],
+    });
+
+    const frame = view.frame();
+    const at = (needle: string) => frame.indexOf(needle);
+    expect(at("Looking.")).toBeGreaterThanOrEqual(0);
+    // Answer, then the tool it called, then the answer that follows — the
+    // order the turn happened in, not every message before every tool.
+    expect(at("read_file")).toBeGreaterThan(at("Looking."));
+    expect(at("Found it.")).toBeGreaterThan(at("read_file"));
+    view.client.close();
+  });
+
+  test.each([["act", "plan"], ["plan", "ask"], ["ask", "act"]])(
+    "resuming a session in %s advances from there, not from a default",
+    async (resumed, expected) => {
+      const view = await screen(100, 30, "s1", {
+        session: { id: "s1", mode: resumed, workspace: "/work/project",
+                   busy: false },
+        revision: 2, messages: [], tools: [],
+      });
+      view.core.mode = resumed;
+      await letReactRun(view);
+      expect(view.frame()).toContain(`[${resumed.toUpperCase()}]`);
+
+      view.mockInput.pressTab();
+      // A mode command records intent and one coordinator turns that into the
+      // request, so React has to run before the round trip can even start.
+      await letReactRun(view);
+      await view.waitForFrame(() => view.core.mode === expected, MODE_PASSES);
+
+      // One request, for the mode after the one actually resumed.
+      expect(view.sentModes()).toEqual([expected]);
+      view.client.close();
+    });
+
+  test("shift+tab from a resumed mode walks back from there", async () => {
+    const view = await screen(100, 30, "s1", {
+      session: { id: "s1", mode: "plan", workspace: "/work/project",
+                 busy: false },
+      revision: 2, messages: [], tools: [],
+    });
+    view.core.mode = "plan";
+    await letReactRun(view);
+
+    view.mockInput.pressTab({ shift: true });
+    await letReactRun(view);
+    await view.waitForFrame(() => view.core.mode === "act", MODE_PASSES);
+
+    expect(view.sentModes()).toEqual(["act"]);
     view.client.close();
   });
 });

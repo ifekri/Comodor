@@ -127,6 +127,29 @@ test("a core answering with another version is refused", async () => {
     (problem: ProtocolError) => problem.code === "unsupported_version");
 });
 
+test("a core still on the previous protocol is refused before any session", async () => {
+  // Version 1 had no `seq` on events and answered `session.send` with a
+  // `message_id`. Starting against such a core would fail later, at the first
+  // event this decoder could not read, with a turn already running.
+  const transport = new Loopback();
+  transport.onRequest = (message) => {
+    transport.push(response(String(message["id"]), {
+      protocol_version: 1,
+      core: { name: "previous-core", version: "0" },
+      capabilities: ["streaming", "questions"],
+    }));
+  };
+  const client = new CoreClient(transport);
+
+  await assert.rejects(client.start(),
+    (problem: ProtocolError) => problem.code === "unsupported_version");
+
+  // And nothing was opened on the way: the handshake is the only line written.
+  assert.equal(transport.written.length, 1);
+  const only = JSON.parse(transport.written[0] ?? "{}") as Record<string, unknown>;
+  assert.equal(only["method"], "client.hello");
+});
+
 test("two calls in flight are answered to the right callers", async () => {
   // Correlation is the one thing a client cannot get away with almost doing.
   const transport = new Loopback();

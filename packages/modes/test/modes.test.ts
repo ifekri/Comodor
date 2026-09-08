@@ -52,7 +52,7 @@ test("these are the modes the core enforces", () => {
   // accept is a button that fails, and one the core has and the client hides
   // is a capability nobody can reach. The schema is generated from the same
   // definition the core reads.
-  const here = fileURLToPath(new URL("../../../schemas/protocol/v1.json",
+  const here = fileURLToPath(new URL("../../../schemas/protocol/v2.json",
     import.meta.url));
   const schema = JSON.parse(readFileSync(here, "utf8")) as {
     $defs: { Mode: { enum: string[] } };
