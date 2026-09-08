@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --build --force",
-    "test": "node --test \"packages/**/*.test.ts\"",
+    "test": "node --test \"packages/**/*.test.ts\" \"apps/tui/test/*.test.ts\"",
     "lint": "node tools/lint-frontend.mjs",
     "build": "tsc --build --force",
     "check": "npm run lint && npm run typecheck && npm run test"

@@ -82,3 +82,86 @@ jobs:
         run: |
           comodor --version
           comodor doctor || true
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node runs the packages a desktop client would reuse: the protocol
+      # types, the client, the command registry, the question reducer. They
+      # are plain TypeScript on purpose, and this is where that is checked.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      # Declarations only — nothing consumes emitted JavaScript, because Node
+      # and Bun both run the TypeScript sources directly. It is here because a
+      # project that cannot emit its own types is one a consumer cannot use.
+      - name: Build
+        run: npm run build
+
+  renderer:
+    name: TUI renderer on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # A terminal renderer is exactly the kind of thing that works on one
+        # platform and not another — console modes, encodings, process
+        # lifetimes — so all three are run rather than assumed.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - run: npm ci
+
+      # Bun, pinned, because OpenTUI draws through native code bound with
+      # `bun:ffi` and `node:ffi` is not a module in any released Node. This
+      # is the only job that needs it, and nobody has to install it by hand
+      # to work on the rest of the repository.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      # A real renderer, real key bytes, real clicks, and assertions against
+      # the characters on screen. Reducer tests cannot see a text that sizes
+      # itself to one column and clips everything typed into it — that bug
+      # was in this interface, and this is the suite that found it.
+      - name: Renderer
+        run: bun test apps/tui/test/bun/renderer.test.tsx
+
+      # And a real core in its own process: that the client can drive one,
+      # and that closing leaves nothing behind.
+      - name: A real core, and no orphan
+        env:
+          # Named rather than assumed: `python` on a Windows runner can
+          # resolve to the Store alias, which is not an interpreter.
+          COMODOR_PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+        run: bun test apps/tui/test/bun/orphan.test.ts
+
+      - name: What it costs
+        run: bun apps/tui/test/bun/measure.tsx

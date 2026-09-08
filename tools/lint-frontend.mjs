@@ -11,7 +11,7 @@
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -53,12 +53,40 @@ const rules = [
     test: (line) => /\b(TODO|FIXME)\b(?!\s*\()/.test(line),
   },
   {
-    name: "no-relative-import-across-packages",
+    name: "no-import-out-of-its-package",
     why: "Reaching into another package by path bypasses its public surface "
        + "and its project reference; import the package name.",
-    test: (line) => /from\s+["'](?:\.\.\/){2,}/.test(line),
+    // Not a count of `../`. A test three directories deep inside a package
+    // legitimately reaches its own `src` that way, and counting flagged it.
+    // What matters is whether the resolved path is still under the package
+    // root — the directory holding the nearest `package.json`.
+    test: (line, file) => {
+      const specifier = /from\s+["']([^"']+)["']/.exec(line)?.[1];
+      return Boolean(specifier) && escapesItsPackage(file, specifier);
+    },
   },
 ];
+
+function escapesItsPackage(file, specifier) {
+  if (!specifier.startsWith(".")) return false;
+  const root = packageRoot(dirname(file));
+  if (!root) return false;
+  const target = resolve(dirname(file), specifier);
+  return !target.startsWith(root + sep) && target !== root;
+}
+
+function packageRoot(directory) {
+  let at = directory;
+  for (;;) {
+    try {
+      statSync(join(at, "package.json"));
+      return at;
+    } catch { /* keep walking up */ }
+    const up = dirname(at);
+    if (up === at || at.length <= ROOT.length) return "";
+    at = up;
+  }
+}
 
 const fileRules = [
   {
@@ -112,7 +140,7 @@ for (const top of ROOTS) {
     for (const [index, line] of lines.entries()) {
       for (const rule of rules) {
         if (rule.skipIn?.(shown)) continue;
-        if (rule.test(line)) {
+        if (rule.test(line, path)) {
           problems.push({
             file: shown, line: index + 1, rule: rule.name, why: rule.why,
             text: line.trim(),
