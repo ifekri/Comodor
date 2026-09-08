@@ -42,7 +42,7 @@ by `type`.
 {"version": 1, "type": "request",  "id": "7", "method": "session.send", "params": {}}
 {"version": 1, "type": "response", "id": "7", "result": {}}
 {"version": 1, "type": "error",    "id": "7", "error": {"code": "...", "message": "..."}}
-{"version": 1, "type": "event",    "event": "message.delta", "params": {}}
+{"version": 1, "type": "event",    "event": "message.delta", "seq": 41, "params": {}}
 ```
 
 `id` is the client's, echoed back. An error caused by a line that could not be
@@ -58,6 +58,22 @@ that happens to work is not one a second client can be written against.
 
 Events from a turn — `message.delta` and the rest — are not part of any
 request and arrive as they happen.
+
+### Sequence numbers, and rebuilding from a snapshot
+
+Every event carries `seq`, the sending session's own counter, starting at 1
+and numbered under the same lock that updates the core's projection. A client
+that has applied everything through 41 knows an event numbered 42 continues
+the story, an event numbered 41 or lower is a duplicate, and an event numbered
+43 means something never arrived.
+
+`session.snapshot` answers with the whole visible session — messages, tools,
+the pending question or permission — and the `revision` its contents reach.
+A client joins, applies the snapshot, and applies only the events above that
+revision, so a snapshot and the live stream cannot disagree about what
+happened: whichever arrives first, the result is the same. A detected gap is
+repaired by asking for another snapshot, never by carrying on with a hole in
+the conversation.
 
 ---
 
@@ -96,8 +112,9 @@ be assumed.
 | `client.hello` | the handshake |
 | `session.create` | a new session |
 | `session.get` | one session, authoritatively |
+| `session.snapshot` | the whole visible session, and the sequence number it reaches |
 | `session.list` | every session this core holds |
-| `session.send` | that the turn was accepted, and the `message_id` to correlate on |
+| `session.send` | that the turn was accepted, and the `turn_id` that names everything it causes |
 | `session.cancel` | whether there was anything to stop |
 | `session.set_mode` | the session, with its new mode |
 | `model.get` / `model.set` | provider, model, and whether it is configured |
@@ -106,7 +123,7 @@ be assumed.
 | `permission.reply` | acknowledgement |
 | `shutdown` | acknowledgement, then the core exits |
 
-There are thirteen. The list is short because a method exists when something
+There are fourteen. The list is short because a method exists when something
 calls it — the way to get a hundred speculative operations is to write them
 before anything needs them, and then to keep them working forever.
 
@@ -137,10 +154,13 @@ so a reordered form cannot silently reattach answers to the wrong questions.
 Every question carries exactly one option marked `free`: the write-your-own
 row, which the core appends and which a client should render as a text field.
 
-`tool.output` has no `call_id`, and that is deliberate: the core does not tag
-streamed output with the call it came from, and two tools can run at once.
-Attributing it to the most recently started call would be right most of the
-time and quietly wrong under parallel execution.
+`tool.output` carries the `call_id` of the invocation it belongs to, tagged
+where the output was produced — a tool is handed a view of its context that
+knows which call it is, so two tools running at once stream interleaved
+without either borrowing the other's lines. A client matching output to
+"whichever tool started most recently" would be right most of the time and
+quietly wrong under parallel execution; the id exists so it never has to
+guess.
 
 An event a client does not use should be ignored, not treated as an error.
 That is how a newer core stays usable by an older client.

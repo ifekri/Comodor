@@ -121,6 +121,9 @@ the binding were simply written in different files.
 | `Ctrl+D` | quit |
 | `Enter` | send |
 | `Esc` | close the palette, or cancel a question |
+| `PageUp` / `PageDown` | read the history |
+| `End` | back to the newest line |
+| `Ctrl+R` | send the last unsent prompt again |
 
 `Ctrl+C` is context-sensitive on purpose. Killing the client mid-turn would
 leave a core running with nobody attached.
@@ -178,19 +181,41 @@ without the chance to tidy up.
 
 ---
 
+## Following the newest line
+
+A long answer scrolls itself while the viewport is at the bottom, and **stops**
+the moment it is not. Scrolling away — `PageUp` or the mouse wheel — pauses
+following; new output then raises a `↓ new output` bar naming `end` as the way
+back, and the viewport is not dragged down to it. Reaching the tail again,
+pressing `End`, or sending a new prompt all resume the follow. The policy is
+renderer-independent (`@comodor/session`); the scrolling is the scroll box's,
+and the pause, the marker and the return are proved against the real renderer.
+
+Prompted text is never lost. A prompt is drawn at once as *pending*; if the
+core refuses it — the session is busy, say — the line stays on screen saying
+so, with `ctrl+r` to send it again. Only prompts the core never accepted are
+retried: a turn it accepted and then failed is not resent, because the tools
+it already ran would run twice.
+
 ## What is not here yet
 
-- **The conversation does not scroll to the newest line.** A long answer runs
-  below the viewport and stays there. This is the most visible gap.
-- Sessions are not resumed; `session.get` exists and nothing calls it on
-  reconnect.
-- `tool.output` is carried and not drawn.
+- **Streaming, tools and recovery are in.** A turn's messages and tools draw
+  interleaved in arrival order, tool output lands under the call that
+  produced it, and a client that remounts rebuilds itself from
+  `session.snapshot` — the same session, not a second one — and continues
+  from the sequence the snapshot names.
+- Rapid mode switching no longer collapses: presses accumulate as *intent*
+  and one coordinator asks the core for the current aim, so a key repeat that
+  outruns the round trip still lands where the last press pointed.
+- Sessions are resumed when the client starts with a session id; automatic
+  reconnection after a lost core is not built yet.
 - No sidebar, no scroll-back search, no file attachment, no slash commands.
 - Mouse support is partial, and the three states are worth telling apart:
 
   | | |
   |---|---|
   | Mode segments | clickable, and **verified in the renderer** — each of ACT, PLAN and ASK, plus that a refused change leaves the label alone |
+  | Wheel over the conversation | scrolls, pauses follow, raises the marker — **verified in the renderer** |
   | Palette rows | clickable, **not renderer-verified** |
   | Question option rows | clickable, **not renderer-verified** |
   | Everything else | no mouse behaviour at all — a message, a tool row, the composer and the custom-answer field ignore a click |
@@ -198,6 +223,3 @@ without the chance to tidy up.
   "Wired" and "proven" are not the same claim. The two unverified handlers go
   through the same code paths their keyboard equivalents do, which is a reason
   to expect them to work and not evidence that they do.
-- Rapid mode switching collapses: the next mode is computed from the last one
-  the core confirmed, so a key repeat that outruns the round trip lands on
-  fewer switches than were pressed. Correct at human speed.

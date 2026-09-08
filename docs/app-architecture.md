@@ -92,13 +92,18 @@ answer.
 |---|---|
 | `@comodor/protocol` | generated types, envelope builders, the reader |
 | `@comodor/client` | the handshake, correlation, events, spawning a core |
+| `@comodor/session` | the session projection, snapshot reconciliation, mode intent, follow policy |
 | `@comodor/commands` | one action however it was reached |
 | `@comodor/modes` | the cycle, labels and summaries a client draws |
 | `@comodor/questions` | the selection state behind a question card |
 | `@comodor/design-tokens` | semantic names, and a mapping per renderer |
 
-Six, because six are used. There is no empty package here waiting for a
-desktop client to arrive.
+Seven, because seven are used. There is no empty package here waiting for a
+desktop client to arrive. `@comodor/session` is the newest, and exists because
+correlating a delta to its message, keeping two tools' output apart, deciding
+a snapshot is stale and sequencing mode intent are decisions a desktop client
+would otherwise reimplement slightly differently — none of it is about a
+terminal.
 
 ---
 
@@ -143,9 +148,23 @@ Stated plainly, because a migration that hides its remainder is one that never
 finishes:
 
 - **The Rich TUI still assembles its own agent.** `ui/app.py` does not use
-  `application.assemble`. It works, it is the interface people use, and
-  changing it is F2 rather than a foundation change.
-- **The web session and the ACP agent likewise.** Same reasoning.
+  `application.assemble`. It works, it is the interface people use, and its
+  wiring carries the pieces that make it that: a demo-mode gateway with
+  scripted answers, its own session store, transcript index and background
+  delegates. Folding those into one factory would grow the factory for one
+  caller; the duplication is a recorded decision, not an oversight.
+- **The web session likewise** — and it is a genuinely different lifecycle
+  owner: `change_folder` rebuilds the agent in place for a new workspace, with
+  its own conversation, checkpoints and delegates, which `assemble` does not
+  model.
+- **The cron runner and the delegate spawner deliberately differ.** A
+  scheduled run has nobody at the keyboard, so it builds no learning engine
+  and no cron-recursion; a spawned child gets no memory and pinned limits.
+  Both are policy, and both say so in their own comments.
+- **ACP no longer assembles its own.** `AcpSession` now builds on
+  `application.assemble` — its seam is the JSON-RPC surface, not the
+  construction underneath it. It keeps its own session store and transcript
+  persistence, which are lifecycle, not wiring.
 - **ACP has its own JSON-RPC stack.** `acp/jsonrpc.py` implements NDJSON
   framing and stdout capture, and `transport/jsonl.py` implements them again.
   They are not merged because ACP is somebody else's specification with its
