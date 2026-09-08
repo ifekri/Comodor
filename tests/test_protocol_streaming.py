@@ -803,3 +803,59 @@ def test_a_snapshot_plus_later_events_equals_having_watched_it_all(config):
 
     assert rebuilt_output == watched_output == "beforeafter"
     service.close()
+
+
+# --------------------------------------------------------------------------- #
+# a mode a tool changed, announced while the turn is still running
+# --------------------------------------------------------------------------- #
+
+def test_a_mode_a_tool_changed_is_announced_mid_turn(config):
+    """Accepting a proposal is not the end of the turn, and must not look like it.
+
+    `propose_mode` is a tool: the person accepts its card and the tool writes
+    the session's mode itself, which never goes through `set_mode` and so never
+    emitted `mode.changed`. A client caches the mode from events, so it kept
+    drawing the old one for the rest of the turn — PLAN on the bar while the
+    session ran under ACT and was allowed to write. Not a cosmetic lag: the bar
+    is how somebody tells what the agent may do next.
+    """
+    from comodor.events import Kind
+    from comodor.tools.propose_mode import ProposeMode
+
+    config.agent.mode = "plan"
+    scripts = [
+        Script(text="Let me switch.", tool_calls=[ToolCall(
+            id="c1", name="propose_mode",
+            arguments={"target_mode": "act", "reason": "the plan is done"})]),
+        Script(text="Now in act."),
+    ]
+    service, seen = service_for(config, scripts, extra_tools=[ProposeMode()])
+    session = service.create_session()
+
+    def accept(event) -> None:
+        if event.kind is not Kind.REQUEST:
+            return
+        request = event.get("request")
+        if request is not None and not request.answered:
+            request.answer("act")
+
+    unsubscribe = service.session(session["id"]).assembly.bus.subscribe(accept)
+    try:
+        run_turn(service, session["id"], "finish the plan")
+    finally:
+        unsubscribe()
+
+    names = seen.names()
+    assert "mode.changed" in names, \
+        "the mode moved and no event said so"
+    changed = seen.named("mode.changed")
+    assert changed[-1]["mode"] == "act"
+    assert service.get_session(session["id"])["mode"] == "act"
+
+    # Announced where it happened, not folded into the turn's final update:
+    # after the tool that changed it, and before the answer that follows.
+    at_changed = names.index("mode.changed")
+    at_tool = names.index("tool.completed")
+    at_last_message = len(names) - 1 - names[::-1].index("message.completed")
+    assert at_tool < at_changed < at_last_message, names
+    service.close()

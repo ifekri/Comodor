@@ -510,10 +510,17 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
         const request = waiting?.kind === "permission" ? waiting.request : undefined;
         const choices = request ? choicesOf(request) : [];
         if (named === "escape") {
-          // An explicit rule, and the safe direction: Escape refuses. It never
-          // allows, and it does not merely hide the card — the core is told,
-          // so the prompt stops waiting and the tool fails cleanly.
-          void decide("permission.reply", { choice: "deny" });
+          // Escape takes the request's own last option, which is the safe one
+          // by construction: `deny` for a permission, `no` for screen access,
+          // and the current mode for a proposal to change it — silence means
+          // "no change", never a switch.
+          //
+          // Hardcoding "deny" looked right and was not: it is not an option a
+          // consent or a mode proposal offers, so the reply was refused, the
+          // card went to its failed state, and the worker stayed blocked on
+          // the very prompt Escape was meant to clear.
+          const fallback = choices[choices.length - 1];
+          if (fallback) void decide("permission.reply", { choice: fallback });
           return;
         }
         if (named === "return") {
@@ -1040,7 +1047,7 @@ function PermissionCard({ interaction, draft, choices, waiting, width, onPick,
 
       <text style={{ fg: interaction.state === "failed"
         ? theme["semantic.danger"] : theme["text.secondary"] }}>
-        {permissionStatus(interaction)}
+        {permissionStatus(interaction, choices[choices.length - 1] ?? "")}
       </text>
     </box>
   );
@@ -1053,13 +1060,19 @@ function PermissionCard({ interaction, draft, choices, waiting, width, onPick,
  * line says whether a decision is on its way or was refused — because a card
  * that went quiet after a failed reply would leave somebody pressing Enter at
  * a prompt the core had already closed.
+ *
+ * Escape is named after this request's own safe option rather than printed as
+ * "deny": this card draws consents and mode proposals too, and on those a
+ * hint that said "deny" would be describing a key that does nothing.
  */
-function permissionStatus(interaction: Interaction): string {
+function permissionStatus(interaction: Interaction, fallback: string): string {
   if (interaction.state === "submitting") return "sending…";
   if (interaction.state === "failed") {
     return `not sent — ${interaction.error ?? "refused"}`;
   }
-  return "←→ choose   enter confirm   esc deny";
+  return fallback
+    ? `←→ choose   enter confirm   esc ${choiceLabel(fallback)}`
+    : "←→ choose   enter confirm";
 }
 
 function QuestionCard({ question, waiting, width, onChange }: {

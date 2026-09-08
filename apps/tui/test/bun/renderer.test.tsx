@@ -1238,6 +1238,47 @@ describe("permissions", () => {
     view.client.close();
   });
 
+  test("escape takes a consent card's own refusal, not a word it does not offer",
+       async () => {
+    // The same card draws a request for screen access, whose options are
+    // durations and "no". Sending "deny" there is not one of them: the core
+    // refuses the reply, the card shows a failure, and the worker stays
+    // blocked on the prompt Escape was supposed to clear.
+    const view = await screen();
+    await emitRun(view, "permission.requested", {
+      id: "computer_1", session_id: "s1",
+      title: "Let Comodor use your screen, mouse and keyboard?",
+      options: ["15 minutes", "15 minutes, this app only", "1 hour", "no"],
+      tool: "computer", risk: "dangerous",
+    });
+
+    expect(view.frame()).toContain("esc no");
+    await pressEscape(view);
+    await letReactRun(view);
+
+    expect(replies(view)).toEqual(["no"]);
+    expect(view.frame()).not.toContain("not sent");
+    view.client.close();
+  });
+
+  test("escape on a mode proposal keeps the current mode", async () => {
+    // A proposal offers mode names with the current one last, so silence means
+    // "no change" rather than a switch — and "deny" is not on the list at all.
+    const view = await screen();
+    await emitRun(view, "permission.requested", {
+      id: "mode-1", session_id: "s1", title: "Switch to plan mode?",
+      options: ["plan", "ask", "act"], tool: "propose_mode",
+    });
+
+    expect(view.frame()).toContain("esc act");
+    await pressEscape(view);
+    await letReactRun(view);
+
+    expect(replies(view)).toEqual(["act"]);
+    expect(view.frame()).not.toContain("not sent");
+    view.client.close();
+  });
+
   test("no ordinary key grants anything", async () => {
     const view = await screen();
     await emitRun(view, "permission.requested", PERMISSION);

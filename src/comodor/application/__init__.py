@@ -174,6 +174,17 @@ class SessionHandle:
     turn_id: str = ""
     #: What the core knows about this session, and the counter that orders it.
     journal: Journal = field(default_factory=Journal)
+    #: The mode clients were last told about.
+    #:
+    #: `set_mode` is not the only thing that can change a session's mode:
+    #: `propose_mode` is a tool, and when the person accepts its card the tool
+    #: writes the mode itself. A client caches the mode from events, so without
+    #: this the bar would keep drawing the old one for the rest of the turn —
+    #: showing PLAN, say, while the session is running under ACT and allowed to
+    #: write. Compared after each tool rather than special-cased to that one,
+    #: because "the mode moved" is a fact about the session and not about which
+    #: tool happened to move it.
+    _announced_mode: str = ""
     _worker: threading.Thread | None = None
     _pending: dict[str, Request] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -263,6 +274,7 @@ class CoreService:
             assembly=self._assemble(config),
             workspace=str(config.paths.project),
         )
+        handle._announced_mode = handle.mode
         handle.assembly.bus.subscribe(_relay(self, handle))
         with self._lock:
             self._sessions[handle.id] = handle
@@ -307,6 +319,7 @@ class CoreService:
             raise Refused(f"unknown mode {mode!r}; one of {', '.join(MODE_NAMES)}")
         handle = self.session(session_id)
         handle.assembly.config.agent.mode = mode
+        handle._announced_mode = mode
         self._emit(handle, "mode.changed", {"session_id": handle.id, "mode": mode})
         self._emit(handle, "session.updated", {"session": handle.describe()})
         return handle.describe()
@@ -703,6 +716,7 @@ def _relay(service: CoreService, handle: SessionHandle):
                 if isinstance(elapsed, (int, float)):
                     completed["elapsed_ms"] = int(elapsed * 1000)
                 service._emit(handle, "tool.completed", completed)
+            _announce_mode_if_moved(service, handle)
         elif kind is Kind.CANCELLED:
             # Two halves, because cancellation can land in two places. Mid
             # answer there is a message to end, and ending it is what stops a
@@ -744,6 +758,28 @@ def _stop_reason(event: Event) -> str:
     if reason == "interrupt":
         return "Stopped — a newer message took over."
     return "Stopped."
+
+
+def _announce_mode_if_moved(service: CoreService,
+                            handle: SessionHandle) -> None:
+    """Say so when the mode changed without anybody calling `set_mode`.
+
+    `propose_mode` is a tool: the person accepts its card and the tool writes
+    the session's mode itself, which never went through the verb that emits
+    `mode.changed`. A client caches the mode from events, so it would keep
+    drawing the old one for the rest of the turn — PLAN on the bar while the
+    session runs under ACT and is allowed to write. That is not a cosmetic
+    lag: the bar is how somebody tells what the agent may do next.
+
+    Checked after each tool rather than wired to that one tool, so a future
+    tool that changes the mode is announced too.
+    """
+    if handle._announced_mode == handle.mode:
+        return
+    handle._announced_mode = handle.mode
+    service._emit(handle, "mode.changed",
+                  {"session_id": handle.id, "mode": handle.mode})
+    service._emit(handle, "session.updated", {"session": handle.describe()})
 
 
 def _close_open_message(service: CoreService, handle: SessionHandle,

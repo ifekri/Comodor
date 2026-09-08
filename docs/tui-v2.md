@@ -116,6 +116,13 @@ a request that has not landed. A refused change says so in words —
 `refused: <the core's reason>` — and falls back to what the core has, rather
 than asking again in a loop against a settled no.
 
+The mode can also change without anybody pressing Tab: `propose_mode` is a
+tool, and accepting its card writes the session's mode. The core announces that
+as a `mode.changed` in the middle of the turn rather than leaving the bar
+showing the old mode until the turn ends — a bar that says PLAN while the
+session runs under ACT is not a stale label, it is a wrong answer to "what may
+this agent do right now".
+
 ---
 
 ## Every advertised shortcut exists
@@ -154,17 +161,21 @@ composer.
 |---|---|---|
 | `←` `→` `↑` `↓` | move between the choices | move between options and questions |
 | `Enter` | send the highlighted choice | send the form |
-| `Esc` | **deny** | leave the typed field, or cancel the form |
+| `Esc` | **take the safe option** | leave the typed field, or cancel the form |
 | `Space` | nothing | choose an option / open the write-your-own field |
 | `Ctrl+C` | stop the turn | stop the turn |
 | `Ctrl+D` | quit | quit |
 | `Tab` / `Shift+Tab` | change mode | change mode |
 | anything else | nothing | nothing |
 
-`Esc` means **deny** on a permission card, which is a deliberate rule and not a
-dismissal: the core is told, the prompt stops waiting, and the tool fails
-cleanly. A key that merely hid the card would leave the agent blocked on a
-decision nobody could see any more. It never allows.
+`Esc` takes the request's **own** safe option — the last one it offered, which
+is the same answer a timeout gives — and the card names it, so the key never
+means something the screen did not say. For a permission that is `deny`; for a
+request to use the screen it is `no`; for a proposal to change mode it is the
+current mode, because silence means "no change", never a switch. It is a
+decision and not a dismissal: the core is told, the prompt stops waiting, and
+the tool fails cleanly. A key that merely hid the card would leave the agent
+blocked on a decision nobody could reach any more. It never allows.
 
 There is no single-letter shortcut for allow. A key pressed for any other
 reason must not be able to authorise a shell command, so allowing costs one
