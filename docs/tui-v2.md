@@ -186,8 +186,18 @@ without the chance to tidy up.
   reconnect.
 - `tool.output` is carried and not drawn.
 - No sidebar, no scroll-back search, no file attachment, no slash commands.
-- Only the mode switch and the palette respond to the mouse. Clicking a
-  message, the composer or a tool row does nothing.
+- Mouse support is partial, and the three states are worth telling apart:
+
+  | | |
+  |---|---|
+  | Mode segments | clickable, and **verified in the renderer** — each of ACT, PLAN and ASK, plus that a refused change leaves the label alone |
+  | Palette rows | clickable, **not renderer-verified** |
+  | Question option rows | clickable, **not renderer-verified** |
+  | Everything else | no mouse behaviour at all — a message, a tool row, the composer and the custom-answer field ignore a click |
+
+  "Wired" and "proven" are not the same claim. The two unverified handlers go
+  through the same code paths their keyboard equivalents do, which is a reason
+  to expect them to work and not evidence that they do.
 - Rapid mode switching collapses: the next mode is computed from the last one
   the core confirmed, so a key repeat that outruns the round trip lands on
   fewer switches than were pressed. Correct at human speed.
