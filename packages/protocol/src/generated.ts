@@ -90,6 +90,12 @@ export type MessageStatus = "streaming" | "completed" | "cancelled" | "failed";
 /** Where one tool invocation has got to. */
 export type ToolState = "running" | "completed" | "failed";
 
+/** The tier a tool declares, and the reason it is asking. `safe` reads, `write` changes files, `dangerous` runs commands or reaches the network. A client shows it so the person can see what kind of thing they are approving; it is the core's own classification, not a guess the client makes from the tool's name. */
+export type RiskLevel = "safe" | "write" | "dangerous";
+
+/** Which sort of blocking interaction is waiting on a person. A question wants information; a permission wants authorization. */
+export type InteractionKind = "question" | "permission";
+
 /**
  * A method that takes nothing. Still an object, so a parameter can be added
  * later without a new shape.
@@ -194,6 +200,18 @@ export interface SessionSnapshot {
   tools: Array<SnapshotTool>;
   question?: QuestionRequest;
   permission?: PermissionRequest;
+  interactions?: Array<PendingInteraction>;
+}
+
+/**
+ * One blocking interaction a snapshot is carrying. Exactly one of
+ * `question` or `permission` is present, and `kind` says which, so a client
+ * can narrow without inspecting both.
+ */
+export interface PendingInteraction {
+  kind: InteractionKind;
+  question?: QuestionRequest;
+  permission?: PermissionRequest;
 }
 
 export interface SnapshotResult {
@@ -285,7 +303,10 @@ export interface AnswerParams {
 
 /**
  * A tool call waiting on a person. `detail` is what the core already
- * renders for a human; it is not a command to run.
+ * renders for a human; it is not a command to run. `tool` and `risk` are
+ * the context an informed decision needs — which capability is asking, and
+ * which tier it belongs to — and are optional so a core that has nothing
+ * truthful to say omits them rather than inventing a value.
  */
 export interface PermissionRequest {
   id: string;
@@ -293,6 +314,8 @@ export interface PermissionRequest {
   title: string;
   detail?: string;
   options: Array<string>;
+  tool?: string;
+  risk?: RiskLevel;
 }
 
 export interface PermissionResolved {

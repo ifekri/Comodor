@@ -219,7 +219,7 @@ class PermissionEngine:
             meta={"tool": tool, "risk": int(risk)},
         )
         self.asked += 1
-        answer = self.bus.ask(request).wait(self.prompt_timeout)
+        answer, expired = self.bus.resolve(request, self.prompt_timeout)
 
         if answer == ALLOW_ALWAYS:
             with self._lock:
@@ -231,6 +231,14 @@ class PermissionEngine:
             if tool == "run_shell":
                 self._record(command)
             return Decision(True, "approved")
+
+        if expired:
+            # Nobody answered. That is a refusal, and saying so plainly matters:
+            # "declined by the user" for a prompt nobody saw is a false record,
+            # and this sentence is what the model and the log both get.
+            self.denials.append((tool, summary))
+            return Decision(False, f"no answer within {self.prompt_timeout:.0f}s; "
+                                   "refused rather than assumed")
 
         # A refusal names one thing this user does not want done. It is the
         # clearest preference signal the interface ever collects, so it is

@@ -167,6 +167,12 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "tools": ("list", True),
         "question": ("QuestionRequest", False),
         "permission": ("PermissionRequest", False),
+        "interactions": ("list", False),
+    },
+    "PendingInteraction": {
+        "kind": ("InteractionKind", True),
+        "question": ("QuestionRequest", False),
+        "permission": ("PermissionRequest", False),
     },
     "SnapshotResult": {
         "snapshot": ("SessionSnapshot", True),
@@ -228,6 +234,8 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "title": ("str", True),
         "detail": ("str", False),
         "options": ("list", True),
+        "tool": ("str", False),
+        "risk": ("RiskLevel", False),
     },
     "PermissionResolved": {
         "id": ("str", True),
@@ -443,6 +451,21 @@ class SessionSnapshot(_SessionSnapshotRequired, total=False):
 
     question: QuestionRequest
     permission: PermissionRequest
+    interactions: list[PendingInteraction]
+
+
+class _PendingInteractionRequired(TypedDict):
+    kind: str
+
+
+class PendingInteraction(_PendingInteractionRequired, total=False):
+    """One blocking interaction a snapshot is carrying. Exactly one of
+    `question` or `permission` is present, and `kind` says which, so a
+    client can narrow without inspecting both.
+    """
+
+    question: QuestionRequest
+    permission: PermissionRequest
 
 
 class SnapshotResult(TypedDict):
@@ -557,10 +580,15 @@ class _PermissionRequestRequired(TypedDict):
 
 class PermissionRequest(_PermissionRequestRequired, total=False):
     """A tool call waiting on a person. `detail` is what the core already
-    renders for a human; it is not a command to run.
+    renders for a human; it is not a command to run. `tool` and `risk` are
+    the context an informed decision needs — which capability is asking,
+    and which tier it belongs to — and are optional so a core that has
+    nothing truthful to say omits them rather than inventing a value.
     """
 
     detail: str
+    tool: str
+    risk: str
 
 
 class PermissionResolved(TypedDict):

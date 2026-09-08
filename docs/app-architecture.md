@@ -92,7 +92,7 @@ answer.
 |---|---|
 | `@comodor/protocol` | generated types, envelope builders, the reader |
 | `@comodor/client` | the handshake, correlation, events, spawning a core |
-| `@comodor/session` | the session projection, snapshot reconciliation, mode intent, follow policy |
+| `@comodor/session` | the session projection, snapshot reconciliation, the queue of what is waiting on the person, mode intent, follow policy |
 | `@comodor/commands` | one action however it was reached |
 | `@comodor/modes` | the cycle, labels and summaries a client draws |
 | `@comodor/questions` | the selection state behind a question card |

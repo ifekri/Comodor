@@ -13,15 +13,23 @@
  */
 
 export {
+  canSubmit,
   initial,
+  presented,
+  presentedPermission,
+  presentedQuestion,
   reduce,
   streaming,
   timeline,
   toolsOfTurn,
   unsent,
+  waitingCount,
   type Action,
   type Connection,
   type Entry,
+  type Interaction,
+  type InteractionKind,
+  type InteractionState,
   type Line,
   type MessageState,
   type Snapshot,

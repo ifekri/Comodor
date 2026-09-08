@@ -92,11 +92,17 @@ internal status serialised to — tells a rebuilt client to stop listening to an
 answer that is still arriving, and the rest of that answer is then dropped on
 the floor.
 
-**It carries what is waiting.** A pending `question` or `permission` is part
-of the snapshot, so a client that mounts into a session mid-question can
-answer it. Without that, the agent waits out its timeout on a form the person
-has no way to reach, and the rebuilt client shows a composer for a session
-that is blocked on an answer.
+**It carries what is waiting.** `interactions` lists every blocking request
+the session is holding, oldest first, each tagged with its `kind`; the singular
+`question` and `permission` fields remain as the first of each kind for a
+client that presents one at a time. A client that mounts into a session
+mid-question can answer it. Without that, the agent waits out its timeout on a
+form the person has no way to reach, and the rebuilt client shows a composer
+for a session that is blocked on an answer.
+
+Two can be waiting at once — a batch of read-only tools runs in parallel and
+each may ask a question, and a delegate shares its parent's bus — so a
+snapshot with one slot would silently strand whichever arrived second.
 
 
 ---
@@ -206,6 +212,24 @@ asks. An answer names each question by its `header` rather than its position,
 so a reordered form cannot silently reattach answers to the wrong questions.
 Every question carries exactly one option marked `free`: the write-your-own
 row, which the core appends and which a client should render as a text field.
+
+`permission.requested` carries the `options` the engine will accept — today
+`allow`, `allow_always` and `deny`, where `allow_always` is a session-scoped
+grant the core remembers — plus `tool` and `risk`, the capability asking and
+the tier it declared. Both are optional and omitted rather than guessed: a
+client shows what the core knows, and a tier invented at the display layer
+would be a security label with nothing behind it. The risk arrives as a word
+(`safe`, `write`, `dangerous`) rather than the engine's integer, so no client
+has to know a Python enum's numbering to tell a write from a shell command.
+
+**A request that nobody answers is still resolved.** The core waits a bounded
+time and then takes the safe fallback — the last option, which is a denial for
+a permission and a cancellation for a form — and emits the matching
+`*.resolved` event. A client is therefore never left holding a prompt the core
+has stopped waiting on, and a reply that arrives after that point is refused
+with `unknown_request` rather than answered with a resolution nothing acted
+on. Cancelling a session resolves whatever it was holding the same way,
+because an interrupt is a flag a worker parked in a prompt never reads.
 
 `tool.output` carries the `call_id` of the invocation it belongs to, tagged
 where the output was produced — a tool is handed a view of its context that

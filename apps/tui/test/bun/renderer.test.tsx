@@ -40,6 +40,15 @@ class FakeCore implements Transport {
   turn = "";
   /** Set by a test to make every send fail, as a busy session does. */
   refuseSends = false;
+  /** Set by a test to make every permission reply fail, as a stale one does. */
+  refuseReplies = false;
+  /** Set by a test to take the reply but hold back the resolution event. */
+  holdResolutions = false;
+  /** Whether a turn is running. A prompt is only ever raised inside one. */
+  busy = false;
+  /** Set by a test to hold mode requests until it releases them. */
+  holdModes = false;
+  heldModes: Array<{ id: string; mode: string }> = [];
   /** What `session.snapshot` answers with. */
   snapshot: Record<string, unknown> = {
     session: { id: "s1", mode: "act", workspace: "/work/project", busy: false },
@@ -109,7 +118,39 @@ class FakeCore implements Transport {
       this.push(response(id, { snapshot: this.snapshot }));
       return;
     }
+    if (method === "question.answer") {
+      // A real core resolves the request when it takes the answer, and the
+      // card is supposed to go when that arrives — not when Enter is pressed.
+      // A fake that answered without resolving would let a client believe it
+      // had dismissed the form itself.
+      this.push(response(id, { ok: true }));
+      this.emit("question.resolved",
+        { id: String(params["id"]), session_id: "s1",
+          ...(params["cancelled"] ? { cancelled: true } : {}) });
+      return;
+    }
+    if (method === "permission.reply") {
+      if (this.refuseReplies) {
+        this.push({ version: PROTOCOL_VERSION, type: "error", id,
+                    error: { code: "unknown_request",
+                             message: "nothing is waiting under that id" } });
+        return;
+      }
+      this.push(response(id, { ok: true }));
+      if (!this.holdResolutions) {
+        this.emit("permission.resolved",
+          { id: String(params["id"]), session_id: "s1",
+            choice: String(params["choice"]) });
+      }
+      return;
+    }
     if (method === "session.set_mode") {
+      if (this.holdModes) {
+        // Held rather than answered, so a test can look at the screen while a
+        // request is genuinely in flight.
+        this.heldModes.push({ id, mode: String(params["mode"]) });
+        return;
+      }
       // The core is the authority. The client must not move its own label;
       // it waits for the event, which is what these tests then assert on.
       this.mode = String(params["mode"]);
@@ -127,6 +168,16 @@ class FakeCore implements Transport {
     for (const waiter of this.waiting.splice(0)) waiter(null);
   }
 
+  /** Answer every mode request held so far, as the core eventually would. */
+  releaseModes(): void {
+    for (const held of this.heldModes.splice(0)) {
+      this.mode = held.mode;
+      this.push(response(held.id, { session: this.session() }));
+      this.push(event("mode.changed", { session_id: "s1", mode: this.mode }));
+      this.push(event("session.updated", { session: this.session() }));
+    }
+  }
+
   /** One event, numbered as a real core numbers them. */
   emit(name: string, params: Record<string, unknown>): void {
     this.seq += 1;
@@ -142,7 +193,7 @@ class FakeCore implements Transport {
 
   session() {
     return { id: "s1", mode: this.mode, workspace: "/work/project",
-             busy: false };
+             busy: this.busy };
   }
 
   /** Every method name the client has sent, for asserting on the path taken. */
@@ -1073,6 +1124,762 @@ describe("rebuilding a session", () => {
     await view.waitForFrame(() => view.core.mode === "act", MODE_PASSES);
 
     expect(view.sentModes()).toEqual(["act"]);
+    view.client.close();
+  });
+});
+
+// --------------------------------------------------------------------------- //
+// permissions — the interaction F2 could carry but not present
+// --------------------------------------------------------------------------- //
+
+const PERMISSION = {
+  id: "perm-1",
+  session_id: "s1",
+  title: "run: npm test",
+  detail: "$ npm test",
+  options: ["allow", "allow_always", "deny"],
+  tool: "run_shell",
+  risk: "dangerous",
+};
+
+/** Every choice the client has sent, in order. */
+function replies(view: View): string[] {
+  return view.core.sent
+    .filter((message) => message["method"] === "permission.reply")
+    .map((message) =>
+      String((message["params"] as Record<string, unknown>)["choice"]));
+}
+
+describe("permissions", () => {
+  test("a prompt is drawn with what it is actually for", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+
+    const frame = view.frame();
+    expect(frame).toContain("Permission needed");
+    expect(frame).toContain("run_shell");
+    expect(frame).toContain("runs commands");      // the tier, in words
+    expect(frame).toContain("run: npm test");
+    expect(frame).toContain("$ npm test");
+    expect(frame).toContain("Allow");
+    expect(frame).toContain("Allow for this session");
+    // Deny is where the cursor starts, and the brackets say so without colour.
+    expect(frame).toContain("[Deny]");
+    expect(frame).not.toContain("[Allow]");
+    view.client.close();
+  });
+
+  test("the composer is not what is waiting for input", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+
+    expect(view.frame()).not.toContain("ask for anything");
+    view.client.close();
+  });
+
+  test("enter sends the highlighted choice, which starts as deny", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    expect(replies(view)).toEqual(["deny"]);
+    view.client.close();
+  });
+
+  test("allowing takes a deliberate move to it", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+
+    // From Deny, one step right wraps to Allow.
+    view.mockInput.pressArrow("right");
+    await letReactRun(view);
+    expect(view.frame()).toContain("[Allow]");
+
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    expect(replies(view)).toEqual(["allow"]);
+    view.client.close();
+  });
+
+  test("left and right walk the choices the core offered", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+
+    view.mockInput.pressArrow("left");
+    await letReactRun(view);
+    expect(view.frame()).toContain("[Allow for this session]");
+
+    view.mockInput.pressArrow("left");
+    await letReactRun(view);
+    expect(view.frame()).toContain("[Allow]");
+
+    view.mockInput.pressArrow("left");
+    await letReactRun(view);
+    expect(view.frame()).toContain("[Deny]");
+    expect(replies(view)).toEqual([]);
+    view.client.close();
+  });
+
+  test("escape denies, and never allows", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+
+    // Even with Allow highlighted: Esc has one meaning here, and it is the
+    // safe one. A key that meant "dismiss" would leave the core waiting on a
+    // prompt nobody could see any more.
+    view.mockInput.pressArrow("right");
+    await letReactRun(view);
+    await pressEscape(view);
+    await letReactRun(view);
+
+    expect(replies(view)).toEqual(["deny"]);
+    view.client.close();
+  });
+
+  test("escape takes a consent card's own refusal, not a word it does not offer",
+       async () => {
+    // The same card draws a request for screen access, whose options are
+    // durations and "no". Sending "deny" there is not one of them: the core
+    // refuses the reply, the card shows a failure, and the worker stays
+    // blocked on the prompt Escape was supposed to clear.
+    const view = await screen();
+    await emitRun(view, "permission.requested", {
+      id: "computer_1", session_id: "s1",
+      title: "Let Comodor use your screen, mouse and keyboard?",
+      options: ["15 minutes", "15 minutes, this app only", "1 hour", "no"],
+      tool: "computer", risk: "dangerous",
+    });
+
+    expect(view.frame()).toContain("esc no");
+    await pressEscape(view);
+    await letReactRun(view);
+
+    expect(replies(view)).toEqual(["no"]);
+    expect(view.frame()).not.toContain("not sent");
+    view.client.close();
+  });
+
+  test("escape on a mode proposal keeps the current mode", async () => {
+    // A proposal offers mode names with the current one last, so silence means
+    // "no change" rather than a switch — and "deny" is not on the list at all.
+    const view = await screen();
+    await emitRun(view, "permission.requested", {
+      id: "mode-1", session_id: "s1", title: "Switch to plan mode?",
+      options: ["plan", "ask", "act"], tool: "propose_mode",
+    });
+
+    expect(view.frame()).toContain("esc act");
+    await pressEscape(view);
+    await letReactRun(view);
+
+    expect(replies(view)).toEqual(["act"]);
+    expect(view.frame()).not.toContain("not sent");
+    view.client.close();
+  });
+
+  test("no ordinary key grants anything", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+
+    // The letters a person might press meaning "yes" somewhere else. None of
+    // them is a shortcut here, because a key pressed for another reason must
+    // not be able to authorise a shell command.
+    await view.mockInput.typeText("ayY allowallow1");
+    await letReactRun(view);
+
+    expect(replies(view)).toEqual([]);
+    expect(view.frame()).toContain("[Deny]");
+    view.client.close();
+  });
+
+  test("clicking a choice decides it", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+
+    const at = locate(view.frame(), "Allow for this session");
+    await view.mockMouse.click(at.x, at.y);
+    await letReactRun(view);
+
+    expect(replies(view)).toEqual(["allow_always"]);
+    view.client.close();
+  });
+
+  test("two enters send one reply", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+
+    view.mockInput.pressEnter();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await letReactRun(view);
+
+    expect(replies(view)).toEqual(["deny"],
+      "a permission granted twice is not a harmless duplicate");
+    view.client.close();
+  });
+
+  test("a click while a key is in flight still sends one reply", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+    view.core.holdResolutions = true;
+
+    view.mockInput.pressEnter();
+    const at = locate(view.frame(), "Allow");
+    await view.mockMouse.click(at.x, at.y);
+    await letReactRun(view);
+
+    expect(replies(view).length).toBe(1);
+    view.client.close();
+  });
+
+  test("the card waits for the core rather than dismissing itself", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+    view.core.holdResolutions = true;
+
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    // The reply was accepted, and the card is still up saying so: whether the
+    // request is still live is the core's to say, not the client's.
+    expect(replies(view)).toEqual(["deny"]);
+    expect(view.frame()).toContain("sending");
+
+    await emitRun(view, "permission.resolved",
+      { id: "perm-1", session_id: "s1", choice: "deny" });
+    expect(view.frame()).not.toContain("Permission needed");
+    expect(view.frame()).toContain("ask for anything");
+    view.client.close();
+  });
+
+  test("a refused reply leaves the card up with the reason", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+    view.core.refuseReplies = true;
+
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    const frame = view.frame();
+    expect(frame).toContain("Permission needed");
+    expect(frame).toContain("not sent");
+    expect(frame).toContain("nothing is waiting under that id");
+
+    // And it can be tried again, because the core may still be waiting.
+    view.core.refuseReplies = false;
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    expect(replies(view)).toEqual(["deny", "deny"]);
+    view.client.close();
+  });
+
+  test("enter on a permission does not also send a chat message", async () => {
+    const view = await screen();
+    await view.mockInput.typeText("a message that must not be sent");
+    await view.flush();
+    await emitRun(view, "permission.requested", PERMISSION);
+
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    expect(view.core.methods()).not.toContain("session.send");
+    expect(replies(view)).toEqual(["deny"]);
+    view.client.close();
+  });
+
+  test("ctrl+c cancels the turn instead of leaving with a prompt up", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+    // A prompt only exists inside a turn, and Ctrl+C is context-sensitive:
+    // with work running it stops the work, and only quits when there is none.
+    view.core.busy = true;
+    await emitRun(view, "session.updated", { session: view.core.session() });
+
+    view.mockInput.pressKey("c", { ctrl: true });
+    await letReactRun(view);
+
+    expect(view.quit()).toBe(false);
+    expect(view.core.methods()).toContain("session.cancel");
+    view.client.close();
+  });
+
+  test("tab still changes mode while a prompt is waiting", async () => {
+    // Deliberate: the core accepts a mode change with a prompt outstanding,
+    // and moving to Plan while deciding whether to let something run is a
+    // reasonable thing to want. What must not happen is the prompt losing the
+    // keyboard to the composer.
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+
+    view.mockInput.pressTab();
+    await letReactRun(view);
+    await view.waitForFrame(() => view.core.mode === "plan", MODE_PASSES);
+
+    expect(view.sentModes()).toEqual(["plan"]);
+    expect(view.frame()).toContain("Permission needed");
+    expect(replies(view)).toEqual([]);
+    view.client.close();
+  });
+
+  test("a second prompt waits behind the first and is shown in turn", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+    await emitRun(view, "permission.requested",
+      { ...PERMISSION, id: "perm-2", title: "run: rm -rf build",
+        detail: "$ rm -rf build" });
+
+    expect(view.frame()).toContain("run: npm test");
+    expect(view.frame()).toContain("+1 more waiting");
+
+    await emitRun(view, "permission.resolved",
+      { id: "perm-1", session_id: "s1", choice: "deny" });
+
+    expect(view.frame()).toContain("run: rm -rf build");
+    expect(view.frame()).not.toContain("+1 more waiting");
+    view.client.close();
+  });
+
+  test("a prompt restored from a snapshot can be answered", async () => {
+    const view = await screen(100, 30, "s1", {
+      session: { id: "s1", mode: "act", workspace: "/work/project", busy: true },
+      revision: 4,
+      messages: [],
+      tools: [{ call_id: "c1", turn_id: "t1", name: "run_shell",
+                state: "running", started_seq: 3 }],
+      permission: PERMISSION,
+      interactions: [{ kind: "permission", permission: PERMISSION }],
+    });
+
+    // Raised before this client existed, and still answerable — otherwise the
+    // tool waits out its timeout on a decision nobody was shown.
+    expect(view.frame()).toContain("Permission needed");
+    expect(view.frame()).toContain("run: npm test");
+
+    view.mockInput.pressArrow("right");
+    await letReactRun(view);
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    expect(replies(view)).toEqual(["allow"]);
+    view.client.close();
+  });
+
+  test("a snapshot with nothing waiting shows no card", async () => {
+    const view = await screen(100, 30, "s1", {
+      session: { id: "s1", mode: "act", workspace: "/work/project", busy: false },
+      revision: 6,
+      messages: [{ message_id: "m1", turn_id: "t1", role: "assistant",
+                   text: "All done.", status: "completed", started_seq: 5 }],
+      tools: [],
+    });
+
+    expect(view.frame()).not.toContain("Permission needed");
+    expect(view.frame()).toContain("ask for anything");
+    view.client.close();
+  });
+
+  test("a prompt resolved elsewhere goes away", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", PERMISSION);
+    expect(view.frame()).toContain("Permission needed");
+
+    await emitRun(view, "permission.resolved",
+      { id: "perm-1", session_id: "s1", choice: "allow" });
+
+    expect(view.frame()).not.toContain("Permission needed");
+    // And a key that arrives now cannot answer a request that has gone.
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    expect(replies(view)).toEqual([]);
+    view.client.close();
+  });
+
+  test.each([160, 120, 100, 80, 60])(
+    "the card stays usable at %i columns", async (width) => {
+      const view = await screen(width as number, 30);
+      await emitRun(view, "permission.requested", {
+        ...PERMISSION,
+        title: "run: a command long enough to have to wrap somewhere in here",
+        detail: Array.from({ length: 12 }, (_each, at) => `output line ${at}`).join("\n"),
+      });
+
+      const frame = view.frame();
+      for (const row of frame.split("\n")) {
+        expect(row.length).toBeLessThanOrEqual(width as number);
+      }
+      // The decision has to survive whatever the prose did.
+      expect(frame).toContain("[Deny]");
+      expect(frame).toContain("Permission needed");
+      expect(frame).toContain("more line");     // the clipped detail says so
+      view.client.close();
+    });
+
+  test("terminal escapes in a prompt cannot rewrite the card", async () => {
+    // The title and the detail come from a tool, which takes them from a
+    // model, which takes them from a file. They are display text and nothing
+    // in them may move the cursor, clear the screen, or invent a choice.
+    const view = await screen();
+    await emitRun(view, "permission.requested", {
+      ...PERMISSION,
+      title: "\x1b[2J\x1b[Hrun: npm test\x1b[31m",
+      detail: "\x1b]0;pwned\x07$ npm test\r\n\x1b[6;1H[Allow]",
+    });
+
+    const frame = view.frame();
+    for (const row of frame.split("\n")) {
+      expect(row.length).toBeLessThanOrEqual(100);
+    }
+    // The real choices are still the only ones on offer, and still in place.
+    expect(frame).toContain("[Deny]");
+    expect(frame).toContain("Allow for this session");
+    expect(frame).toContain("Permission needed");
+    expect(replies(view)).toEqual([]);
+    view.client.close();
+  });
+
+  test("a prompt in another script renders as it was written", async () => {
+    const view = await screen();
+    await emitRun(view, "permission.requested", {
+      ...PERMISSION,
+      title: "اجازه برای اجرای آزمون‌ها",
+      detail: "$ npm test — پوشهٔ build",
+    });
+
+    const frame = view.frame();
+    expect(frame).toContain("اجازه");
+    expect(frame).toContain("[Deny]");
+    view.client.close();
+  });
+});
+
+// --------------------------------------------------------------------------- //
+// the rest of the interaction surface, proven rather than wired
+// --------------------------------------------------------------------------- //
+
+describe("mode transitions on screen", () => {
+  test("a change in flight is shown as in flight, not as done", async () => {
+    const view = await screen();
+    view.core.holdModes = true;
+
+    view.mockInput.pressTab();
+    await letReactRun(view);
+    await letReactRun(view);
+
+    // The core has not answered, so the confirmed mode has not moved — and the
+    // screen says a request is outstanding rather than implying it succeeded.
+    const pending = view.frame();
+    expect(pending).toContain("[ACT]");
+    expect(pending).toContain("(PLAN)");
+    expect(pending).toContain("asking the core");
+
+    view.core.holdModes = false;
+    view.core.releaseModes();
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("[PLAN]"), MODE_PASSES);
+
+    const confirmed = view.frame();
+    expect(confirmed).not.toContain("asking the core");
+    expect(confirmed).not.toContain("(PLAN)");
+    view.client.close();
+  });
+
+  test("a refusal is presented, and the mode stays where the core has it",
+       async () => {
+    const view = await screen();
+    view.core.intercept = (method, _params, id) => {
+      if (method !== "session.set_mode") return false;
+      view.core.push({ version: PROTOCOL_VERSION, type: "error", id,
+                       error: { code: "not_allowed",
+                                message: "plan is not available in this session" } });
+      return true;
+    };
+
+    view.mockInput.pressTab();
+    await letReactRun(view);
+    await letReactRun(view);
+
+    const frame = view.frame();
+    expect(frame).toContain("[ACT]");
+    expect(frame).toContain("refused");
+    expect(frame).toContain("plan is not available in this session");
+    // And it does not ask again: a refusal is final until the person moves.
+    expect(view.sentModes()).toEqual(["plan"]);
+    view.client.close();
+  });
+});
+
+describe("the mouse, where it is claimed", () => {
+  test("clicking a question option chooses it", async () => {
+    const view = await screen();
+    await emitRun(view, "question.requested", {
+      id: "ask-1", session_id: "s1", title: "one question",
+      questions: [{ header: "approach", prompt: "Which approach?",
+                    multiple: false,
+                    options: [{ id: "Refactor", label: "Refactor" },
+                              { id: "Replace", label: "Replace" }] }],
+    });
+    await view.waitForFrame((frame) => frame.includes("Which approach?"));
+
+    const at = locate(view.frame(), "Replace");
+    await view.mockMouse.click(at.x, at.y);
+    await letReactRun(view);
+
+    expect(view.frame()).toContain("(*) Replace");
+    expect(view.frame()).toContain("( ) Refactor");
+    view.client.close();
+  });
+
+  test("clicking options in a multi-select question keeps both", async () => {
+    const view = await screen();
+    await emitRun(view, "question.requested", {
+      id: "ask-1", session_id: "s1", title: "one question",
+      questions: [{ header: "when", prompt: "When?", multiple: true,
+                    options: [{ id: "Now", label: "Now" },
+                              { id: "Later", label: "Later" }] }],
+    });
+    await view.waitForFrame((frame) => frame.includes("When?"));
+
+    for (const label of ["Now", "Later"]) {
+      const at = locate(view.frame(), label);
+      await view.mockMouse.click(at.x, at.y);
+      await letReactRun(view);
+    }
+
+    expect(view.frame()).toContain("[x] Now");
+    expect(view.frame()).toContain("[x] Later");
+    view.client.close();
+  });
+
+  test("clicking a palette row runs it", async () => {
+    const view = await screen();
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    // The query is matched literally, so "mode" rather than a command id.
+    await view.mockInput.typeText("mode");
+    await letReactRun(view);
+
+    const at = locate(view.frame(), "Mode: ASK");
+    await view.mockMouse.click(at.x, at.y);
+    await letReactRun(view);
+    await view.waitForFrame(() => view.core.mode === "ask", MODE_PASSES);
+
+    expect(view.frame()).not.toContain("type a command");
+    expect(view.sentModes()).toEqual(["ask"]);
+    view.client.close();
+  });
+});
+
+describe("a draft is not disturbed by the turn behind it", () => {
+  test("selections survive streaming, tool output and notices", async () => {
+    const view = await screen();
+    await emitRun(view, "question.requested", {
+      id: "ask-1", session_id: "s1", title: "two questions",
+      questions: [
+        { header: "approach", prompt: "Which approach?", multiple: false,
+          options: [{ id: "Refactor", label: "Refactor" },
+                    { id: "Replace", label: "Replace" }] },
+        { header: "when", prompt: "When?", multiple: false,
+          options: [{ id: "Now", label: "Now" }] },
+      ],
+    });
+    await view.waitForFrame((frame) => frame.includes("Which approach?"));
+
+    // Choose, then move to the second question.
+    view.mockInput.pressArrow("down");
+    view.mockInput.pressKey(" ");
+    await letReactRun(view);
+    view.mockInput.pressArrow("right");
+    await letReactRun(view);
+    expect(view.frame()).toContain("Question 2 of 2");
+
+    // A turn streams behind the form. None of it is the form's business.
+    await emitRun(view, "message.started", { turn_id: "t1", message_id: "m1" });
+    for (const chunk of ["still ", "working ", "on it"]) {
+      await emitRun(view, "message.delta",
+                    { turn_id: "t1", message_id: "m1", text: chunk });
+    }
+    await emitRun(view, "tool.started",
+      { turn_id: "t1", call_id: "c1", name: "read_file" });
+    await emitRun(view, "tool.output",
+      { turn_id: "t1", call_id: "c1", text: "some output\n" });
+    await emitRun(view, "notification.created",
+      { level: "info", text: "a note" });
+    await emitRun(view, "mode.changed", { session_id: "s1", mode: "act" });
+
+    const frame = view.frame();
+    expect(frame).toContain("Question 2 of 2");
+    expect(frame).toContain("1/2 answered");
+    // The first question's choice is still there, and still the second one
+    // being shown: nothing was reset by an unrelated event.
+    view.mockInput.pressArrow("left");
+    await letReactRun(view);
+    expect(view.frame()).toContain("(*) Replace");
+    view.client.close();
+  });
+
+  test("a resync that redelivers the same request keeps the draft", async () => {
+    const form = {
+      id: "ask-1", session_id: "s1", title: "one question",
+      questions: [{ header: "approach", prompt: "Which approach?",
+                    multiple: false,
+                    options: [{ id: "Refactor", label: "Refactor" },
+                              { id: "Replace", label: "Replace" }] }],
+    };
+    const view = await screen();
+    await emitRun(view, "question.requested", form);
+    await view.waitForFrame((frame) => frame.includes("Which approach?"));
+
+    view.mockInput.pressArrow("down");
+    await letReactRun(view);
+    view.mockInput.pressKey(" ");
+    await letReactRun(view);
+    expect(view.frame()).toContain("(*) Replace");
+
+    // A hole in the sequence forces a resync, and the snapshot the core
+    // answers with still carries the same request. Repairing the stream is no
+    // reason to throw away an answer somebody was halfway through.
+    view.core.snapshot = {
+      session: { id: "s1", mode: "act", workspace: "/work/project", busy: true },
+      revision: 60, messages: [], tools: [], question: form,
+      interactions: [{ kind: "question", question: form }],
+    };
+    view.core.push(event("message.delta",
+      { turn_id: "t1", message_id: "m1", text: "a chunk that jumped" }, 50));
+    await letReactRun(view);
+    await letReactRun(view);
+    await letReactRun(view);
+
+    expect(view.frame()).toContain("(*) Replace");
+    view.client.close();
+  });
+
+  test("a resync carrying a different request does not inherit the draft", async () => {
+    const first = {
+      id: "ask-1", session_id: "s1", title: "the first",
+      questions: [{ header: "approach", prompt: "Which approach?",
+                    multiple: false,
+                    options: [{ id: "Refactor", label: "Refactor" },
+                              { id: "Replace", label: "Replace" }] }],
+    };
+    const view = await screen();
+    await emitRun(view, "question.requested", first);
+    await view.waitForFrame((frame) => frame.includes("Which approach?"));
+
+    view.mockInput.pressArrow("down");
+    await letReactRun(view);
+    view.mockInput.pressKey(" ");
+    await letReactRun(view);
+    expect(view.frame()).toContain("(*) Replace");
+
+    // The core moved on: the first form is gone and a different one is
+    // waiting. A selection made for one question is not an answer to another.
+    const second = {
+      id: "ask-2", session_id: "s1", title: "the second",
+      questions: [{ header: "when", prompt: "When should it run?",
+                    multiple: false,
+                    options: [{ id: "Refactor", label: "Refactor" },
+                              { id: "Replace", label: "Replace" }] }],
+    };
+    view.core.snapshot = {
+      session: { id: "s1", mode: "act", workspace: "/work/project", busy: true },
+      revision: 60, messages: [], tools: [], question: second,
+      interactions: [{ kind: "question", question: second }],
+    };
+    view.core.push(event("message.delta",
+      { turn_id: "t1", message_id: "m1", text: "a chunk that jumped" }, 50));
+    await letReactRun(view);
+    await letReactRun(view);
+    await letReactRun(view);
+
+    const frame = view.frame();
+    expect(frame).toContain("When should it run?");
+    expect(frame).not.toContain("(*) Replace");
+    view.client.close();
+  });
+
+  test("a typed answer keeps what was typed", async () => {
+    const view = await screen();
+    await emitRun(view, "question.requested", {
+      id: "ask-1", session_id: "s1", title: "one question",
+      questions: [{ header: "approach", prompt: "Which approach?",
+                    multiple: false,
+                    options: [{ id: "Refactor", label: "Refactor" },
+                              { id: "Other", label: "Something else",
+                                free: true }] }],
+    });
+    await view.waitForFrame((frame) => frame.includes("Which approach?"));
+
+    view.mockInput.pressArrow("down");
+    await letReactRun(view);
+    view.mockInput.pressKey(" ");
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("▌"));
+    await view.mockInput.typeText("rewrite the parser");
+    await letReactRun(view);
+    expect(view.frame()).toContain("rewrite the parser");
+
+    await emitRun(view, "message.delta",
+      { turn_id: "t1", message_id: "m1", text: "noise behind the form" });
+    await letReactRun(view);
+
+    expect(view.frame()).toContain("rewrite the parser");
+    view.client.close();
+  });
+});
+
+describe("text that is hard to draw", () => {
+  test("persian, mixed direction and emoji survive a form and a prompt",
+       async () => {
+    const view = await screen();
+    await emitRun(view, "question.requested", {
+      id: "ask-1", session_id: "s1", title: "سؤال",
+      questions: [{ header: "approach", prompt: "کدام روش؟ Which approach?",
+                    multiple: false,
+                    options: [{ id: "بازنویسی", label: "بازنویسی ✓ rewrite" },
+                              { id: "Other", label: "چیز دیگر 🎉",
+                                free: true }] }],
+    });
+    await view.waitForFrame((frame) => frame.includes("کدام"));
+
+    const frame = view.frame();
+    expect(frame).toContain("بازنویسی");
+    expect(frame).toContain("🎉");
+    for (const row of frame.split("\n")) {
+      expect(row.length).toBeLessThanOrEqual(100);
+    }
+
+    // And a written answer in the same mix.
+    view.mockInput.pressArrow("down");
+    await letReactRun(view);
+    view.mockInput.pressKey(" ");
+    await letReactRun(view);
+    await view.waitForFrame((shown) => shown.includes("▌"));
+    await view.mockInput.typeText("سلام hello 🎉");
+    await letReactRun(view);
+    const typed = view.frame();
+    expect(typed).toContain("سلام");
+    expect(typed).toContain("hello");
+    view.client.close();
+  });
+
+  test("a very long prompt and path stay inside the card", async () => {
+    const view = await screen(80, 30);
+    const long = "a/".repeat(120) + "very-deep-file.ts";
+    await emitRun(view, "permission.requested", {
+      ...PERMISSION,
+      title: `write ${long}`,
+      detail: Array.from({ length: 40 }, (_each, at) => `+ ${long} ${at}`).join("\n"),
+    });
+
+    const frame = view.frame();
+    for (const row of frame.split("\n")) {
+      expect(row.length).toBeLessThanOrEqual(80);
+    }
+    // The decision is still reachable whatever the prose did.
+    expect(frame).toContain("[Deny]");
+    expect(frame).toContain("Permission needed");
     view.client.close();
   });
 });

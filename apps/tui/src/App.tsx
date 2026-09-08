@@ -21,6 +21,7 @@ import { MODES, type Mode } from "@comodor/modes";
 import type { EventName, Session } from "@comodor/protocol";
 import {
   beginIntent,
+  canSubmit,
   followMarker,
   followMoved,
   followSent,
@@ -31,13 +32,16 @@ import {
   intentConfirmed,
   intentDue,
   intentSending,
+  presented,
   reduce,
   refuseIntent,
   stepIntent,
   timeline,
   unsent,
+  waitingCount,
   wantMode,
   type Follow,
+  type Interaction,
   type Line,
   type ModeIntent,
   type Snapshot,
@@ -93,11 +97,50 @@ const NARROW = 80;
 /** How many rows a page key moves. Less than a screen, so context carries over. */
 const PAGE = 8;
 
+/**
+ * Which choice a permission card has highlighted, and for which request.
+ *
+ * Keyed by request id so a second prompt cannot inherit the cursor position
+ * of the first: options differ between tools, and a position carried over
+ * would highlight whatever happens to sit there.
+ */
+interface PermissionDraft {
+  readonly id: string;
+  readonly at: number;
+}
+
+/**
+ * Where the cursor starts: the refusal.
+ *
+ * A card that opened on "allow" would hand it to an Enter pressed for any
+ * other reason — a form habit, a key repeat, a person who meant to dismiss the
+ * thing. Highlighting the safe answer makes the accidental keystroke do the
+ * reversible thing, and makes allowing cost one deliberate move.
+ *
+ * Falling back to the last option matches the core, which treats that as the
+ * answer nobody gave.
+ */
+function safestChoice(request: Record<string, unknown>): number {
+  const options = Array.isArray(request["options"])
+    ? (request["options"] as readonly unknown[])
+    : [];
+  const at = options.findIndex((option) => String(option) === "deny");
+  return at >= 0 ? at : Math.max(0, options.length - 1);
+}
+
+/** The choices a permission card offers, as the core listed them. */
+function choicesOf(request: Record<string, unknown>): string[] {
+  return Array.isArray(request["options"])
+    ? (request["options"] as readonly unknown[]).map((option) => String(option))
+    : [];
+}
+
 export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   const [state, dispatch] = useReducer(reduce, initial);
   const [draft, setDraft] = useState("");
   const [palette, setPalette] = useState<PaletteState<Screen> | undefined>();
   const [question, setQuestion] = useState<FormState | undefined>();
+  const [permit, setPermit] = useState<PermissionDraft | undefined>();
   const [intent, setIntent] = useState<ModeIntent>(() => beginIntent("act"));
   const [follow, setFollow] = useState<Follow>(followStart);
   const { width } = useTerminalDimensions();
@@ -107,15 +150,26 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   latest.current = state;
   const scroller = useRef<ScrollBoxRenderable | null>(null);
 
-  // Keys can arrive faster than React re-renders — a key repeat, a paste,
-  // or simply two presses in one tick — and a handler that closed over
-  // `question` would then apply the second press to the state before the
-  // first. Every update below is functional, and these refs are what the
-  // *branching* reads, so both halves see what is actually current.
+  // Keys can arrive faster than React re-renders — a key repeat, a paste, or
+  // simply two presses in one tick — and a handler that closed over a draft
+  // would then apply the second press to the state before the first. Every
+  // update below is functional, and these refs are what the *branching* reads,
+  // so both halves see what is actually current.
   const questionRef = useRef(question);
   questionRef.current = question;
+  const permitRef = useRef(permit);
+  permitRef.current = permit;
   const paletteRef = useRef(palette);
   paletteRef.current = palette;
+  const blockedRef = useRef<Interaction | undefined>(undefined);
+  blockedRef.current = presented(state);
+  /**
+   * The interaction a decision is in flight for, latched synchronously.
+   *
+   * A ref and not only projection state because the gate has to hold between
+   * the press and the re-render that records it. See `decide`.
+   */
+  const inFlight = useRef<string | undefined>(undefined);
 
   // -- the connection --------------------------------------------------- //
 
@@ -185,16 +239,75 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     return () => { alive = false; stop(); };
   }, [client, resync, sessionId]);
 
-  // The pending question, in one place.
+  // What is waiting on the person, in one place.
   //
-  // The projection is the only source of truth about whether one is waiting;
-  // the interactive form is a cache of it, rebuilt here and nowhere else. Both
-  // the live event and a snapshot restored one arrive as the same projection
-  // field, which is what makes a remount able to answer a question that was
-  // asked before it existed — the event that raised it is never replayed.
+  // The projection is the only source of truth about whether anything is
+  // waiting. The two presentation drafts — a form's selections, a permission's
+  // highlighted choice — are caches of the request being presented, rebuilt
+  // here and nowhere else. A live event and a snapshot-restored request arrive
+  // as the same projection value, which is what lets a client that mounted
+  // *after* the question was asked still answer it.
+  //
+  // Keyed on the request's id rather than on the object, so a stream delta or
+  // a resync that redelivers the same request does not cost somebody the form
+  // they were halfway through — while a different request does start clean,
+  // because a selection made for one question is not an answer to another.
+  const blocked = presented(state);
   useEffect(() => {
-    setQuestion(state.question ? begin(state.question as never) : undefined);
-  }, [state.question]);
+    // The latch belongs to one request. Whatever it was held for is no longer
+    // being presented — resolved, or replaced — so it is released rather than
+    // left to block the next one.
+    if (blocked?.id !== inFlight.current) inFlight.current = undefined;
+    setQuestion((was) => {
+      if (blocked?.kind !== "question") return undefined;
+      const id = String(blocked.request["id"] ?? "");
+      return was && was.form.id === id ? was : begin(blocked.request as never);
+    });
+    setPermit((was) => {
+      if (blocked?.kind !== "permission") return undefined;
+      if (was && was.id === blocked.id) return was;
+      return { id: blocked.id, at: safestChoice(blocked.request) };
+    });
+  }, [blocked]);
+
+  /**
+   * Send one decision about the presented interaction, at most once.
+   *
+   * The gate is the projection's, not a local flag: a second Enter, a click
+   * while a key is in flight, and a key that arrives after the core resolved
+   * it all have to be refused by one rule rather than by each caller keeping
+   * its own idea of whether it had already sent.
+   *
+   * The card is left in place on success. It goes when `permission.resolved`
+   * or `question.resolved` arrives, because the core is the authority on
+   * whether it is still waiting — and on failure it stays with the reason
+   * shown, so the decision can be retried or refused instead of vanishing
+   * into something that looks like it worked.
+   */
+  const decide = useCallback(async (method: "permission.reply" | "question.answer",
+                                  params: Record<string, unknown>) => {
+    const waiting = latest.current.interactions[0];
+    if (!waiting || !canSubmit(latest.current, waiting.id)) return;
+    // Latched here as well as in the projection, and for a concrete reason:
+    // two presses inside one tick both read the projection before React has
+    // re-rendered it, so the projection alone cannot refuse the second one. A
+    // permission sent twice is not a harmless duplicate — the core has closed
+    // the request by then and refuses the second, which reads as a broken
+    // interface rather than as the no-op it was.
+    if (inFlight.current === waiting.id) return;
+    inFlight.current = waiting.id;
+    const id = waiting.id;
+    dispatch({ type: "submitting", id });
+    try {
+      await client.call(method, { ...params, id } as never);
+    } catch (problem) {
+      // Released so the decision can be retried, or refused instead. The
+      // request stays on screen: the core never took the answer, so it is
+      // still waiting.
+      inFlight.current = undefined;
+      dispatch({ type: "submitFailed", id, reason: (problem as Error).message });
+    }
+  }, [client]);
 
   // A hole in the sequence means an event never arrived, and no amount of
   // later events repairs that. Asking the core is the only honest answer.
@@ -350,49 +463,129 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
 
   // -- keys --------------------------------------------------------------- //
 
+  /**
+   * Stop the work, and only leave when there is none to stop.
+   *
+   * One function rather than a branch repeated wherever Ctrl+C is handled,
+   * because the two cases have to agree: quitting while a turn is running
+   * leaves a core nobody is attached to, and cancelling while a prompt is up
+   * is now a real stop rather than a ten-minute wait — the core refuses what
+   * is waiting when a turn is cancelled.
+   */
+  const stopOrQuit = useCallback(() => {
+    if (latest.current.session?.busy) runCommand("session.cancel");
+    else onQuit();
+  }, [onQuit, runCommand]);
+
   useKeyboard(useCallback((key: KeyEvent) => {
     const named = describeKey(key);
     const asked = questionRef.current;
+    const permit = permitRef.current;
+    const waiting = blockedRef.current;
     const open = paletteRef.current;
 
-    if (asked) {
-      if (named === "escape") {
-        // While writing, Escape leaves the field rather than the form: losing
-        // a typed answer to a key meant for the box is not a trade anybody
-        // would choose.
-        if (asked.writing) { setQuestion((was) => was && stopWriting(was)); return; }
-        void client.call("question.answer", cancelOf(asked) as never);
-        setQuestion(undefined);
+    // A blocking interaction owns the keyboard.
+    //
+    // Checked on both the projection and the drafts, because they are a render
+    // apart: the projection knows first, and the card is drawn from the draft.
+    // Either being set means a card is on screen or about to be, and in both
+    // cases the safe reading of a key is "it belongs to the card" — the
+    // failure that matters is an Enter meant for a decision also sending a
+    // chat message.
+    //
+    // Three keys stay global, because swallowing them would make a prompt feel
+    // like a lockup rather than a question: stop the work, leave, and change
+    // mode. Mode is allowed deliberately — the core accepts a mode change
+    // while a prompt is waiting, and moving to Plan is a reasonable thing to
+    // do while deciding whether to let something run.
+    if (waiting || permit || asked) {
+      if (named === "ctrl+c") { stopOrQuit(); return; }
+      if (named === "tab" || named === "shift+tab" || named === "ctrl+d") {
+        const command = registry.forKey(named);
+        if (command) runCommand(command.id);
         return;
       }
-      if (named === "return" && answerable(asked)) {
-        void client.call("question.answer", answerOf(asked) as never);
-        setQuestion(undefined);
+
+      if (permit) {
+        const request = waiting?.kind === "permission" ? waiting.request : undefined;
+        const choices = request ? choicesOf(request) : [];
+        if (named === "escape") {
+          // Escape takes the request's own last option, which is the safe one
+          // by construction: `deny` for a permission, `no` for screen access,
+          // and the current mode for a proposal to change it — silence means
+          // "no change", never a switch.
+          //
+          // Hardcoding "deny" looked right and was not: it is not an option a
+          // consent or a mode proposal offers, so the reply was refused, the
+          // card went to its failed state, and the worker stayed blocked on
+          // the very prompt Escape was meant to clear.
+          const fallback = choices[choices.length - 1];
+          if (fallback) void decide("permission.reply", { choice: fallback });
+          return;
+        }
+        if (named === "return") {
+          const choice = choices[permit.at];
+          if (choice) void decide("permission.reply", { choice });
+          return;
+        }
+        if (named === "left" || named === "up") {
+          setPermit((was) => was && { ...was,
+                                      at: moveChoice(was.at, -1, choices.length) });
+          return;
+        }
+        if (named === "right" || named === "down") {
+          setPermit((was) => was && { ...was,
+                                      at: moveChoice(was.at, 1, choices.length) });
+          return;
+        }
+        // Nothing else does anything. In particular there is no single-letter
+        // shortcut for allow: a key pressed for any other reason must not be
+        // able to authorise a shell command.
         return;
       }
-      // While writing, the keys below belong to the text rather than to the
-      // option list, and the branch after this one has them.
-      if (asked.writing) {
-        if (named === "backspace") {
-          setQuestion((was) => was && typeInto(was, written(was).slice(0, -1)));
-        } else if (named === "space") {
-          setQuestion((was) => was && typeInto(was, `${written(was)} `));
-        } else if (isPrintable(key)) {
-          setQuestion((was) => was && typeInto(was, written(was) + key.name));
+
+      if (asked) {
+        if (named === "escape") {
+          // While writing, Escape leaves the field rather than the form: losing
+          // a typed answer to a key meant for the box is not a trade anybody
+          // would choose.
+          if (asked.writing) { setQuestion((was) => was && stopWriting(was)); return; }
+          void decide("question.answer", cancelOf(asked) as never);
+          return;
+        }
+        if (named === "return" && answerable(asked)) {
+          void decide("question.answer", answerOf(asked) as never);
+          return;
+        }
+        // While writing, the keys below belong to the text rather than to the
+        // option list, and the branch after this one has them.
+        if (asked.writing) {
+          if (named === "backspace") {
+            setQuestion((was) => was && typeInto(was, written(was).slice(0, -1)));
+          } else if (named === "space") {
+            setQuestion((was) => was && typeInto(was, `${written(was)} `));
+          } else if (isPrintable(key)) {
+            setQuestion((was) => was && typeInto(was, written(was) + key.name));
+          }
+          return;
+        }
+        if (named === "up") setQuestion((was) => was && move(was, -1));
+        else if (named === "down") setQuestion((was) => was && move(was, 1));
+        // A form has several questions; left and right walk between them.
+        else if (named === "left") setQuestion((was) => was && step(was, -1));
+        else if (named === "right") setQuestion((was) => was && step(was, 1));
+        else if (named === "space") {
+          // Choosing the write-your-own row is how a person reaches the field,
+          // which is the same gesture as choosing any other option.
+          setQuestion((was) => was && (optionAt(was)?.free
+            ? startWriting(toggle(was)) : toggle(was)));
         }
         return;
       }
-      if (named === "up") setQuestion((was) => was && move(was, -1));
-      else if (named === "down") setQuestion((was) => was && move(was, 1));
-      // A form has several questions; left and right walk between them.
-      else if (named === "left") setQuestion((was) => was && step(was, -1));
-      else if (named === "right") setQuestion((was) => was && step(was, 1));
-      else if (named === "space") {
-        // Choosing the write-your-own row is how a person reaches the field,
-        // which is the same gesture as choosing any other option.
-        setQuestion((was) => was && (optionAt(was)?.free
-          ? startWriting(toggle(was)) : toggle(was)));
-      }
+
+      // The projection says something is waiting but no draft has been built
+      // for it yet — one render's worth of time. Keys are ignored rather than
+      // passed on, for the same reason as above.
       return;
     }
 
@@ -413,11 +606,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
 
     // Ctrl+C is context-sensitive: it stops work, and only quits when there
     // is none. Killing the client mid-turn would leave a core running.
-    if (named === "ctrl+c") {
-      if (latest.current.session?.busy) runCommand("session.cancel");
-      else onQuit();
-      return;
-    }
+    if (named === "ctrl+c") { stopOrQuit(); return; }
 
     // Reading the history. Handled here rather than left to the scroll box,
     // which only sees keys when it holds focus — and focus belongs to the
@@ -431,7 +620,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       return;
     }
     if (named === "return") void send();
-  }, [client, onQuit, registry, runCommand, scrollBy, send]));
+  }, [client, decide, onQuit, registry, runCommand, scrollBy, send, stopOrQuit]));
 
   // -- the screen --------------------------------------------------------- //
 
@@ -446,11 +635,19 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
                     onScrolled={() => setFollow(
                       (was) => followMoved(was, atTail()))} />
       {followMarker(follow) ? <NewOutput onPick={toTail} /> : null}
-      {question
-        ? <QuestionCard question={question} onChange={setQuestion} />
-        : <Composer value={draft} onChange={setDraft}
-                    busy={Boolean(state.session?.busy)} />}
-      <ModeBar mode={mode} narrow={narrow}
+      {blocked?.kind === "permission" && permit
+        ? <PermissionCard interaction={blocked} draft={permit}
+                          choices={choicesOf(blocked.request)}
+                          waiting={waitingCount(state)} width={width}
+                          onPick={(at) => setPermit((was) => was && { ...was, at })}
+                          onChoose={(choice) => void decide("permission.reply",
+                                                            { choice })} />
+        : blocked?.kind === "question" && question
+          ? <QuestionCard question={question} waiting={waitingCount(state)}
+                          width={width} onChange={setQuestion} />
+          : <Composer value={draft} onChange={setDraft}
+                      busy={Boolean(state.session?.busy)} />}
+      <ModeBar mode={mode} intent={intent} narrow={narrow}
                onPick={(picked) => runCommand(`mode.${picked}`)} />
       <Footer registry={registry} narrow={narrow} state={state} />
       {palette
@@ -656,16 +853,23 @@ function Composer({ value, onChange, busy }: {
   );
 }
 
-function ModeBar({ mode, narrow, onPick }: {
-  mode: Mode; narrow: boolean; onPick: (mode: Mode) => void;
+function ModeBar({ mode, intent, narrow, onPick }: {
+  mode: Mode; intent: ModeIntent; narrow: boolean;
+  onPick: (mode: Mode) => void;
 }): React.ReactNode {
   // A segmented control, and never colour alone: the mode is spelled out, so
   // it reads the same to somebody who cannot tell the colours apart.
   //
   // Each segment is clickable and calls the same command the keyboard and the
-  // palette call — `mode.act` / `mode.plan` / `mode.ask`, which send
-  // `session.set_mode` and wait for `mode.changed`. Nothing here moves the
-  // label itself; four ways in, one action, one authority.
+  // palette call — `mode.act` / `mode.plan` / `mode.ask`, which record an
+  // intent and wait for `mode.changed`. Nothing here moves the label itself;
+  // four ways in, one action, one authority.
+  //
+  // Brackets are what the core has confirmed. Parentheses are what has been
+  // asked for and not yet granted, which is a different thing and has to look
+  // different: a bar that showed PLAN the moment Tab was pressed would be
+  // claiming a mode the core might refuse, and would keep claiming it.
+  const wanted = intent.confirmed === intent.desired ? undefined : intent.desired;
   return (
     <box style={{ flexDirection: "row", height: 1, flexShrink: 0,
                   paddingLeft: 1 }}>
@@ -674,11 +878,21 @@ function ModeBar({ mode, narrow, onPick }: {
               onMouseDown={() => onPick(each)}
               style={{ fg: each === mode ? theme[MODES[each].token]
                                          : theme["text.muted"] }}>
-          {each === mode ? ` [${MODES[each].label}] ` : `  ${MODES[each].label}  `}
+          {each === mode ? ` [${MODES[each].label}] `
+            : each === wanted ? ` (${MODES[each].label}) `
+            : `  ${MODES[each].label}  `}
         </text>
       ))}
-      {narrow ? null
-        : <text style={{ fg: theme["text.muted"] }}>{`  ${MODES[mode].summary}`}</text>}
+      {intent.refused
+        ? <text style={{ fg: theme["semantic.danger"] }}>
+            {`  refused: ${intent.refused}`}
+          </text>
+        : wanted
+          ? <text style={{ fg: theme["text.secondary"] }}>
+              {`  asking the core for ${MODES[wanted].label}…`}
+            </text>
+          : narrow ? null
+          : <text style={{ fg: theme["text.muted"] }}>{`  ${MODES[mode].summary}`}</text>}
     </box>
   );
 }
@@ -701,8 +915,171 @@ function Footer({ registry, narrow, state }: {
   );
 }
 
-function QuestionCard({ question, onChange }: {
+/** How many lines of a request's detail are worth showing inline. */
+const DETAIL_LINES = 6;
+
+/**
+ * Keep one line of display text inside the space there is for it.
+ *
+ * A path or a command with no spaces in it cannot be wrapped, and a line the
+ * renderer cannot wrap is a card that keeps growing until it pushes the
+ * choices off the bottom of the screen — which for a permission card means a
+ * decision nobody can reach. Clipping costs nothing true: the core still holds
+ * the whole string, and the ellipsis says the line was cut rather than
+ * pretending this was all of it.
+ */
+function clip(text: string, width: number): string {
+  if (width <= 1 || text.length <= width) return text;
+  return `${text.slice(0, width - 1)}…`;
+}
+
+/** The decision names the core uses, as a person reads them. */
+const CHOICE_LABELS: Record<string, string> = {
+  allow: "Allow",
+  allow_always: "Allow for this session",
+  deny: "Deny",
+};
+
+function choiceLabel(choice: string): string {
+  // A choice this client has not seen is shown as the core named it. Inventing
+  // a friendlier word for an unknown option would be describing a decision the
+  // engine does not implement.
+  return CHOICE_LABELS[choice] ?? choice;
+}
+
+function riskLabel(risk: string): string {
+  return risk === "dangerous" ? "runs commands"
+    : risk === "write" ? "changes files"
+    : risk === "safe" ? "reads only"
+    : risk;
+}
+
+function riskColour(risk: string): string {
+  return risk === "dangerous" ? theme["semantic.danger"]
+    : risk === "write" ? theme["semantic.warning"]
+    : theme["text.muted"];
+}
+
+/**
+ * One permission the core is waiting on, and the decisions it will accept.
+ *
+ * Built only from what the core actually said: which tool asked, the tier it
+ * declared, the action, and what it would touch. The choices are the core's
+ * list in the core's order — a card that reordered them would put Deny
+ * somewhere nobody expects, and one that added "remember this" would promise a
+ * grant the engine does not keep.
+ *
+ * The cursor is not a decision and nothing here is authoritative: the card
+ * leaves when the core says the request is resolved, not when a key is
+ * pressed. Every state is spelled out in words as well as colour, because a
+ * highlighted choice that only differs by hue is a choice nobody can see.
+ */
+function PermissionCard({ interaction, draft, choices, waiting, width, onPick,
+                          onChoose }: {
+  interaction: Interaction;
+  draft: PermissionDraft;
+  choices: string[];
+  waiting: number;
+  /** Columns the card has, so nothing in it can overflow them. */
+  width: number;
+  onPick: (at: number) => void;
+  onChoose: (choice: string) => void;
+}): React.ReactNode {
+  const request = interaction.request;
+  const tool = String(request["tool"] ?? "");
+  const risk = String(request["risk"] ?? "");
+  const title = String(request["title"] ?? "");
+  const detail = String(request["detail"] ?? "");
+  // Two for the border, two for the padding: what is actually left for text.
+  const inner = Math.max(8, width - 4);
+  const lines = detail ? detail.replace(/\s+$/, "").split("\n") : [];
+  const shown = lines.slice(0, DETAIL_LINES);
+  const hidden = lines.length - shown.length;
+  const at = Math.min(draft.at, Math.max(0, choices.length - 1));
+
+  return (
+    <box style={{ borderStyle: "single", flexShrink: 0, flexDirection: "column",
+                  paddingLeft: 1, paddingRight: 1,
+                  borderColor: interaction.state === "failed"
+                    ? theme["semantic.danger"] : theme["border.focused"] }}>
+      <box style={{ flexDirection: "row", flexShrink: 0 }}>
+        <text style={{ fg: theme["semantic.warning"] }}>Permission needed</text>
+        {tool
+          ? <text style={{ fg: theme["text.secondary"] }}>{`  ${tool}`}</text>
+          : null}
+        {risk
+          ? <text style={{ fg: riskColour(risk) }}>{`  ${riskLabel(risk)}`}</text>
+          : null}
+        {waiting > 1
+          ? <text style={{ fg: theme["text.muted"] }}>
+              {`  +${waiting - 1} more waiting`}
+            </text>
+          : null}
+      </box>
+
+      {title
+        ? <text style={{ fg: theme["text.primary"] }}>{clip(title, inner)}</text>
+        : null}
+      {shown.map((line, index) => (
+        <text key={index} style={{ fg: theme["text.muted"] }}>
+          {clip(line, inner)}
+        </text>
+      ))}
+      {hidden > 0
+        ? <text style={{ fg: theme["text.muted"] }}>
+            {`… ${hidden} more line${hidden === 1 ? "" : "s"} not shown`}
+          </text>
+        : null}
+
+      <box style={{ flexDirection: "row", flexShrink: 0 }}>
+        {choices.map((choice, index) => (
+          <text key={choice}
+                onMouseDown={() => { onPick(index); onChoose(choice); }}
+                style={{ marginRight: 2,
+                         fg: index === at ? theme["text.primary"]
+                                          : theme["text.muted"] }}>
+            {/* Brackets rather than colour alone: the highlighted choice has
+                to be identifiable in a monochrome terminal. */}
+            {index === at ? `[${choiceLabel(choice)}]` : ` ${choiceLabel(choice)} `}
+          </text>
+        ))}
+      </box>
+
+      <text style={{ fg: interaction.state === "failed"
+        ? theme["semantic.danger"] : theme["text.secondary"] }}>
+        {permissionStatus(interaction, choices[choices.length - 1] ?? "")}
+      </text>
+    </box>
+  );
+}
+
+/**
+ * What the card says about itself, in words.
+ *
+ * The hint line names the keys that actually do something here, and the state
+ * line says whether a decision is on its way or was refused — because a card
+ * that went quiet after a failed reply would leave somebody pressing Enter at
+ * a prompt the core had already closed.
+ *
+ * Escape is named after this request's own safe option rather than printed as
+ * "deny": this card draws consents and mode proposals too, and on those a
+ * hint that said "deny" would be describing a key that does nothing.
+ */
+function permissionStatus(interaction: Interaction, fallback: string): string {
+  if (interaction.state === "submitting") return "sending…";
+  if (interaction.state === "failed") {
+    return `not sent — ${interaction.error ?? "refused"}`;
+  }
+  return fallback
+    ? `←→ choose   enter confirm   esc ${choiceLabel(fallback)}`
+    : "←→ choose   enter confirm";
+}
+
+function QuestionCard({ question, waiting, width, onChange }: {
   question: FormState;
+  waiting: number;
+  /** Columns the card has, so a long prompt cannot push the options off. */
+  width: number;
   onChange: (next: FormState) => void;
 }): React.ReactNode {
   const asked = currentQuestion(question);
@@ -721,10 +1098,17 @@ function QuestionCard({ question, onChange }: {
                   backgroundColor: theme["surface.overlay"] }}>
       {total > 1
         ? <text style={{ fg: theme["text.muted"] }}>
-            {`${question.at + 1} of ${total}`}
+            {`Question ${question.at + 1} of ${total}   ${progress(question)}`}
           </text>
         : null}
-      <text style={{ fg: theme["text.primary"] }}>{asked.prompt}</text>
+      {waiting > 1
+        ? <text style={{ fg: theme["text.muted"] }}>
+            {`+${waiting - 1} more waiting behind this one`}
+          </text>
+        : null}
+      <text style={{ fg: theme["text.primary"] }}>
+        {clip(asked.prompt, Math.max(8, width - 4))}
+      </text>
       {asked.options.map((option, index) => {
         const here = index === question.cursor;
         const chosen = isSelected(question, option.id);
@@ -744,7 +1128,7 @@ function QuestionCard({ question, onChange }: {
                   onChange(option.free
                     ? startWriting(toggle(picked)) : toggle(picked));
                 }}>
-            {`${mark} ${option.label}`}
+            {clip(`${mark} ${option.label}`, Math.max(8, width - 6))}
           </text>
         );
       })}
@@ -790,6 +1174,34 @@ function QuestionCard({ question, onChange }: {
       </text>
     </box>
   );
+}
+
+/**
+ * Which questions in a form still need an answer.
+ *
+ * One marker per question, so a form of six is glanceable rather than
+ * something to page through to find out where you are: a bracket on the one
+ * being answered, a check on the ones already answered. A count alone does not
+ * say *which*, and "3 of 4" says nothing about whether the one you skipped is
+ * the one you meant to.
+ */
+function progress(state: FormState): string {
+  const answeredAt = (index: number): boolean =>
+    (state.chosen[index] ?? []).length > 0
+    || (state.written[index] ?? "").trim().length > 0;
+  const marks = state.form.questions.map((_question, index) => {
+    const done = answeredAt(index);
+    if (index === state.at) return done ? "[✓]" : "[·]";
+    return done ? "✓" : "·";
+  }).join(" ");
+  const done = state.form.questions.filter((_question, index) => answeredAt(index)).length;
+  return `${marks}   ${done}/${state.form.questions.length} answered`;
+}
+
+/** Move around a permission's choices. Wraps, so the ends are not dead ends. */
+function moveChoice(at: number, by: number, count: number): number {
+  if (count <= 0) return 0;
+  return (at + by + count) % count;
 }
 
 /** What the card says the keys do, matching what they actually do. */

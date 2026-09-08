@@ -41,6 +41,7 @@ from ..config import Config
 from ..events import Event, EventBus, Kind, Request
 from ..safety.modes import ALL as MODE_NAMES
 from ..safety.modes import known as known_mode
+from ..safety.permissions import Risk
 from .journal import Journal
 
 __all__ = ["Assembly", "assemble", "CoreService", "Journal", "SessionHandle"]
@@ -48,6 +49,15 @@ __all__ = ["Assembly", "assemble", "CoreService", "Journal", "SessionHandle"]
 #: What a client may say it can do. A capability it does not claim is one the
 #: core answers on its behalf rather than waiting on.
 CLIENT_CAPABILITIES = ("questions", "permissions")
+
+#: The risk tiers by the names a client shows. The engine stores them as an
+#: ordered integer; the wire carries the word, so no client has to know the
+#: numbering to tell a write from a shell command.
+RISK_NAMES: dict[int, str] = {
+    Risk.SAFE: "safe",
+    Risk.WRITE: "write",
+    Risk.DANGEROUS: "dangerous",
+}
 
 
 @dataclass
@@ -164,6 +174,17 @@ class SessionHandle:
     turn_id: str = ""
     #: What the core knows about this session, and the counter that orders it.
     journal: Journal = field(default_factory=Journal)
+    #: The mode clients were last told about.
+    #:
+    #: `set_mode` is not the only thing that can change a session's mode:
+    #: `propose_mode` is a tool, and when the person accepts its card the tool
+    #: writes the mode itself. A client caches the mode from events, so without
+    #: this the bar would keep drawing the old one for the rest of the turn —
+    #: showing PLAN, say, while the session is running under ACT and allowed to
+    #: write. Compared after each tool rather than special-cased to that one,
+    #: because "the mode moved" is a fact about the session and not about which
+    #: tool happened to move it.
+    _announced_mode: str = ""
     _worker: threading.Thread | None = None
     _pending: dict[str, Request] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -253,6 +274,7 @@ class CoreService:
             assembly=self._assemble(config),
             workspace=str(config.paths.project),
         )
+        handle._announced_mode = handle.mode
         handle.assembly.bus.subscribe(_relay(self, handle))
         with self._lock:
             self._sessions[handle.id] = handle
@@ -297,6 +319,7 @@ class CoreService:
             raise Refused(f"unknown mode {mode!r}; one of {', '.join(MODE_NAMES)}")
         handle = self.session(session_id)
         handle.assembly.config.agent.mode = mode
+        handle._announced_mode = mode
         self._emit(handle, "mode.changed", {"session_id": handle.id, "mode": mode})
         self._emit(handle, "session.updated", {"session": handle.describe()})
         return handle.describe()
@@ -369,7 +392,33 @@ class CoreService:
         if not handle.busy:
             return {"cancelled": False}
         handle.assembly.agent.interrupt("cancelled by the client")
+        # An interrupt is a flag the loop checks between steps. A worker parked
+        # in a permission prompt is not between steps — it is inside a wait
+        # that only an answer ends. Without this the turn stays busy for the
+        # whole prompt timeout after the person asked it to stop, and the card
+        # on screen still looks like it is waiting on them.
+        self._refuse_pending(handle)
         return {"cancelled": True}
+
+    def _refuse_pending(self, handle: SessionHandle) -> None:
+        """Answer everything waiting, so no worker stays parked on a person.
+
+        Each request goes through the same path a real reply takes, so every
+        one of them emits its resolution and a client watching sees the prompts
+        it is displaying close rather than hang. The fallback is the request's
+        own last option — `deny` for a permission, a cancelled form for a
+        question — which is the same answer a timeout gives.
+        """
+        for request_id, request in list(handle._pending.items()):
+            try:
+                if request.kind == "questions":
+                    self.answer_question(request_id, cancelled=True)
+                else:
+                    self.reply_permission(request_id, request.fallback)
+            except Exception:
+                # Already resolved by its own timeout, or answered in the
+                # instant this ran. Either way nothing is waiting on it now.
+                pass
 
     # -- what it answers with ---------------------------------------------- #
 
@@ -425,10 +474,14 @@ class CoreService:
         handle, request = self._pending(request_id)
         from .. import questions as forms
 
-        if cancelled:
-            request.answer(forms.CANCELLED)
-        else:
-            request.answer(_encode_answer(answers or []))
+        # Claimed rather than assigned: a form that timed out, or was cancelled
+        # by a `session.cancel` a moment ago, has already been acted on. Saying
+        # "ok" to a second answer would tell a client its reply landed when the
+        # agent moved on without it.
+        if not request.answer(forms.CANCELLED if cancelled
+                              else _encode_answer(answers or [])):
+            handle._pending.pop(request_id, None)
+            raise UnknownRequest(request_id)
         handle._pending.pop(request_id, None)
         resolved: dict[str, Any] = {"id": request_id, "session_id": handle.id}
         if cancelled:
@@ -442,7 +495,12 @@ class CoreService:
         handle, request = self._pending(request_id)
         if request.options and choice not in request.options:
             raise Refused(f"{choice!r} is not one of: {', '.join(request.options)}")
-        request.answer(choice)
+        if not request.answer(choice):
+            # Already resolved — timed out, cancelled, or answered by another
+            # client. The prompt this reply was aimed at is not waiting any
+            # more, which is exactly what `unknown_request` means.
+            handle._pending.pop(request_id, None)
+            raise UnknownRequest(request_id)
         handle._pending.pop(request_id, None)
         self._emit(handle, "permission.resolved", {
             "id": request_id, "session_id": handle.id, "choice": choice})
@@ -471,6 +529,10 @@ class CoreService:
             try:
                 if handle.busy:
                     handle.assembly.agent.interrupt("shutting down")
+                # Same reason as `cancel`: a worker parked in a prompt does not
+                # see a flag, and the join below would otherwise sit out the
+                # whole prompt timeout on the way out of the process.
+                self._refuse_pending(handle)
             except Exception:
                 pass
             # Let the worker notice the interrupt rather than closing the bus
@@ -533,7 +595,19 @@ class CoreService:
             if needed == "questions":
                 self.answer_question(request_id, cancelled=True)
             else:
-                self.reply_permission(request_id, "deny")
+                # The request's own last option, not a hardcoded "deny".
+                #
+                # Every request this core raises puts its safe answer last, and
+                # for a permission that is `deny` — but a mode proposal offers
+                # mode names, with the current mode last so declining is one
+                # press. Answering that with "deny" is not one of its options,
+                # so the reply was refused, the exception swallowed, and the
+                # tool left to wait out its full timeout for a client that had
+                # already said it could not answer. The fallback is the same
+                # answer a timeout gives, arrived at immediately.
+                held = handle._pending.get(request_id)
+                self.reply_permission(
+                    request_id, held.fallback if held is not None else "deny")
         except Exception:  # pragma: no cover - defensive
             # Nothing to answer, or it was answered already. Suppressing the
             # event is still right; the alternative is a form nobody can fill.
@@ -642,6 +716,7 @@ def _relay(service: CoreService, handle: SessionHandle):
                 if isinstance(elapsed, (int, float)):
                     completed["elapsed_ms"] = int(elapsed * 1000)
                 service._emit(handle, "tool.completed", completed)
+            _announce_mode_if_moved(service, handle)
         elif kind is Kind.CANCELLED:
             # Two halves, because cancellation can land in two places. Mid
             # answer there is a message to end, and ending it is what stops a
@@ -655,6 +730,8 @@ def _relay(service: CoreService, handle: SessionHandle):
                 "text": _stop_reason(event)})
         elif kind is Kind.REQUEST:
             _relay_request(service, handle, event)
+        elif kind is Kind.REQUEST_EXPIRED:
+            _relay_expired(service, handle, event)
         elif kind is Kind.ERROR:
             # A provider that fails mid-answer raises before the loop can end
             # the message, so nothing else would ever complete it: the client
@@ -683,6 +760,28 @@ def _stop_reason(event: Event) -> str:
     return "Stopped."
 
 
+def _announce_mode_if_moved(service: CoreService,
+                            handle: SessionHandle) -> None:
+    """Say so when the mode changed without anybody calling `set_mode`.
+
+    `propose_mode` is a tool: the person accepts its card and the tool writes
+    the session's mode itself, which never went through the verb that emits
+    `mode.changed`. A client caches the mode from events, so it would keep
+    drawing the old one for the rest of the turn — PLAN on the bar while the
+    session runs under ACT and is allowed to write. That is not a cosmetic
+    lag: the bar is how somebody tells what the agent may do next.
+
+    Checked after each tool rather than wired to that one tool, so a future
+    tool that changes the mode is announced too.
+    """
+    if handle._announced_mode == handle.mode:
+        return
+    handle._announced_mode = handle.mode
+    service._emit(handle, "mode.changed",
+                  {"session_id": handle.id, "mode": handle.mode})
+    service._emit(handle, "session.updated", {"session": handle.describe()})
+
+
 def _close_open_message(service: CoreService, handle: SessionHandle,
                         status: str, error: str = "") -> None:
     """End whichever message is still streaming, if one is.
@@ -709,6 +808,37 @@ def _close_open_message(service: CoreService, handle: SessionHandle,
     service._emit(handle, "message.completed", params)
 
 
+def _relay_expired(service: CoreService, handle: SessionHandle,
+                   event: Event) -> None:
+    """A prompt nobody answered in time, told to the client as the resolution it is.
+
+    The worker has already acted on the fallback and moved on, so a card left
+    on screen is a card offering a decision nothing will honour — the exact
+    thing that reads as "the agent hung" while in fact it is running again.
+    This is the event that lets a client stop offering it.
+
+    It is also what makes the answer to a late reply honest: the request is
+    dropped here, so a `permission.reply` arriving afterwards is refused as
+    unknown rather than answered with a resolution the core ignored.
+    """
+    request = event.get("request")
+    if request is None:
+        return
+    request_id = str(getattr(request, "id", "") or "")
+    handle._pending.pop(request_id, None)
+    resolved: dict[str, Any] = {"id": request_id, "session_id": handle.id}
+
+    if getattr(request, "kind", "") == "questions":
+        # A form nobody filled in is a cancelled form: the tool carries on with
+        # its own defaults, which is what it already does on an explicit Esc.
+        resolved["cancelled"] = True
+        service._emit(handle, "question.resolved", resolved)
+        return
+
+    resolved["choice"] = str(event.get("choice") or request.fallback)
+    service._emit(handle, "permission.resolved", resolved)
+
+
 def _relay_request(service: CoreService, handle: SessionHandle,
                    event: Event) -> None:
     """A permission prompt or a structured question, as a protocol primitive.
@@ -727,13 +857,41 @@ def _relay_request(service: CoreService, handle: SessionHandle,
                       _question_shape(handle.id, request))
         return
 
-    service._emit(handle, "permission.requested", {
+    service._emit(handle, "permission.requested",
+                  _permission_shape(handle.id, request))
+
+
+def _permission_shape(session_id: str, request: Request) -> dict[str, Any]:
+    """A permission prompt, with the context an informed decision needs.
+
+    The engine already knows which tool is asking and which risk tier it
+    declared; not forwarding it left a client able to show only a sentence, so
+    the person had to infer from prose whether they were approving a read, a
+    write or a shell command. Both fields are sent as names rather than the
+    engine's integers, because the numbering is a Python implementation detail
+    and a client that guessed at it would guess silently.
+
+    Nothing here is invented: an absent tool or an unrecognised tier is left
+    out rather than filled in, because a made-up `dangerous` on a prompt that
+    was really a write trains somebody to stop reading.
+    """
+    body: dict[str, Any] = {
         "id": request.id,
-        "session_id": handle.id,
+        "session_id": session_id,
         "title": request.prompt,
         "detail": request.detail,
         "options": list(request.options),
-    })
+    }
+    meta = request.meta or {}
+    tool = str(meta.get("tool") or "")
+    if tool:
+        body["tool"] = tool
+    risk = meta.get("risk")
+    if not isinstance(risk, bool) and isinstance(risk, int):
+        name = RISK_NAMES.get(risk, "")
+        if name:
+            body["risk"] = name
+    return body
 
 
 def _question_shape(session_id: str, request: Request) -> dict[str, Any]:

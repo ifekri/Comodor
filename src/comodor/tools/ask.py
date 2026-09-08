@@ -167,8 +167,8 @@ class Ask(Tool):
             meta={"questions": forms.encode(questions)},
         )
 
-        asked = ctx.bus.ask(request)
-        answers = forms.decode_answers(asked.wait(WAIT_FOR))
+        choice, _timed_out = ctx.bus.resolve(request, WAIT_FOR)
+        answers = forms.decode_answers(choice)
 
         if answers is None:
             # Cancelled, or nobody was there. Either way the model should get

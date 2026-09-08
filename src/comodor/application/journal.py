@@ -150,8 +150,16 @@ class Journal:
         self._by_id: dict[str, JournalMessage] = {}
         self._tools: list[JournalTool] = []
         self._tool_by_id: dict[str, JournalTool] = {}
-        self._question: dict[str, Any] | None = None
-        self._permission: dict[str, Any] | None = None
+        #: Blocking interactions waiting on a person, oldest first, keyed by
+        #: request id.
+        #:
+        #: A dict rather than one slot per kind, because two can be live at
+        #: once: a batch of read-only tools runs in parallel and each may ask a
+        #: question, and a delegate shares its parent's event bus, so a
+        #: delegate's question can arrive while the parent is waiting on a
+        #: permission. One slot would silently strand whichever came second,
+        #: and a stranded prompt is a tool that looks hung.
+        self._waiting: dict[str, tuple[str, dict[str, Any]]] = {}
 
     @property
     def lock(self) -> threading.RLock:
@@ -260,14 +268,19 @@ class Journal:
                 tool.state = "failed"
                 tool.error = str(params.get("error", ""))
 
-        elif name == "question.requested":
-            self._question = dict(params)
-        elif name == "question.resolved":
-            self._question = None
-        elif name == "permission.requested":
-            self._permission = dict(params)
-        elif name == "permission.resolved":
-            self._permission = None
+        elif name in ("question.requested", "permission.requested"):
+            kind = "question" if name.startswith("question") else "permission"
+            request_id = str(params.get("id", ""))
+            # Keyed by id, so a second live interaction is added rather than
+            # written over the first.
+            if request_id:
+                self._waiting[request_id] = (kind, dict(params))
+
+        elif name in ("question.resolved", "permission.resolved"):
+            # Removing exactly the one that resolved. Clearing "the question"
+            # or "the permission" would drop a second request that is still
+            # waiting on somebody.
+            self._waiting.pop(str(params.get("id", "")), None)
 
     def _replace(self, message: JournalMessage) -> None:
         held = self._by_id[message.message_id]
@@ -320,8 +333,18 @@ class Journal:
                 "messages": [message.shape() for message in self._messages],
                 "tools": [tool.shape() for tool in self._tools],
             }
-            if self._question is not None:
-                body["question"] = dict(self._question)
-            if self._permission is not None:
-                body["permission"] = dict(self._permission)
+            waiting = list(self._waiting.values())
+            if waiting:
+                body["interactions"] = [
+                    {"kind": kind, kind: dict(request)}
+                    for kind, request in waiting
+                ]
+                # The singular fields stay for a client that presents one
+                # interaction at a time. Each is the oldest of its kind, which
+                # is the one a person has been kept waiting on longest.
+                for kind in ("question", "permission"):
+                    oldest = next((request for other, request in waiting
+                                   if other == kind), None)
+                    if oldest is not None:
+                        body[kind] = dict(oldest)
             return body

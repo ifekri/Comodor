@@ -140,9 +140,90 @@ async function main(): Promise<void> {
   console.log(`  ${deltas} deltas to painted    ${ms(streaming / 1000)}`
     + `  (${(streaming / deltas).toFixed(3)} ms each)`);
 
+  // Blocking interactions: what it costs to put a card on the screen, to move
+  // within it, and to get a decision away. Printed rather than asserted — a
+  // threshold in CI would measure whichever runner it landed on, and the
+  // renderer suite is what proves the behaviour.
+  //
+  // `settle` is the same yield the renderer suite uses: React schedules its
+  // work on the macrotask queue, and `flush` alone turns only the microtask
+  // queue, so a state update made from an arriving event is still pending when
+  // a frame is captured. Without it the wait below spins on a screen React has
+  // not been given the chance to change.
+  // One real millisecond rather than `sleep(0)`: under load a single turn of
+  // the macrotask queue is not always enough for React to commit, and a wait
+  // that times out measures nothing. The millisecond is inside the measured
+  // window, so every interaction figure below carries about 1 ms of harness.
+  const settle = async () => { await Bun.sleep(1); await rendered.flush(); };
+  const PATIENT = { maxPasses: 400 } as const;
+  const prompt = {
+    id: "perm-m1", session_id: "s1", title: "run: npm test",
+    detail: "$ npm test", options: ["allow", "allow_always", "deny"],
+    tool: "run_shell", risk: "dangerous",
+  };
+
+  let marked = performance.now();
+  core.push(event("permission.requested", prompt));
+  await settle();
+  await rendered.waitForFrame((frame) => frame.includes("Permission needed"),
+                              PATIENT);
+  await rendered.flush();
+  console.log(`  permission card open      ${ms((performance.now() - marked) / 1000)}`);
+
+  marked = performance.now();
+  rendered.mockInput.pressArrow("left");
+  await settle();
+  await rendered.waitForFrame(
+    (frame) => frame.includes("[Allow for this session]"), PATIENT);
+  await rendered.flush();
+  console.log(`  key to selection moved    ${ms((performance.now() - marked) / 1000)}`);
+
+  marked = performance.now();
+  rendered.mockInput.pressEnter();
+  await settle();
+  await rendered.waitForFrame((frame) => frame.includes("sending"), PATIENT);
+  await rendered.flush();
+  console.log(`  decision to submitted     ${ms((performance.now() - marked) / 1000)}`);
+
+  core.push(event("permission.resolved",
+    { id: "perm-m1", session_id: "s1", choice: "deny" }));
+  await settle();
+  await rendered.waitForFrame((frame) => !frame.includes("Permission needed"),
+                              PATIENT);
+  await rendered.flush();
+
+  const form = {
+    id: "ask-m1", session_id: "s1", title: "one question",
+    questions: [{ header: "approach", prompt: "Which approach?",
+                  multiple: false,
+                  options: [{ id: "Refactor", label: "Refactor" },
+                            { id: "Replace", label: "Replace" }] }],
+  };
+  marked = performance.now();
+  core.push(event("question.requested", form));
+  await settle();
+  await rendered.waitForFrame((frame) => frame.includes("Which approach?"),
+                              PATIENT);
+  await rendered.flush();
+  console.log(`  question form open        ${ms((performance.now() - marked) / 1000)}`);
+
+  core.push(event("question.resolved", { id: "ask-m1", session_id: "s1" }));
+  await settle();
+  await rendered.waitForFrame((frame) => !frame.includes("Which approach?"),
+                              PATIENT);
+  await rendered.flush();
+
+  // One mode transition, key to repainted confirmation and back. A single
+  // press rather than a repeat: see the note above about Tab in this harness.
+  marked = performance.now();
+  rendered.mockInput.pressTab();
+  await settle();
+  await rendered.waitForFrame((frame) => frame.includes("[PLAN]"), PATIENT);
+  await rendered.flush();
+  console.log(`  mode key to confirmed     ${ms((performance.now() - marked) / 1000)}`);
+
   const rss = process.memoryUsage().rss;
   console.log(`  resident after all of it  ${mib(rss)}`);
-
   const before = process.cpuUsage();
   await Bun.sleep(3_000);
   const after = process.cpuUsage(before);

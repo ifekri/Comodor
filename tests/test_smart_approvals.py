@@ -132,11 +132,11 @@ def test_layer_order_smart_deny_refuses(shell_config, bus):
 
 def test_layer_order_smart_ask_prompts_the_human(shell_config, bus):
     class AnsweringBus:
-        def ask(self, request):
-            class Reply:
-                def wait(self, timeout):
-                    return "allow"
-            return Reply()
+        """Stands in for the bus, answering the way a person at the keyboard would."""
+
+        def resolve(self, request, timeout=None):
+            request.answer("allow")
+            return "allow", False
 
     decision = engine(shell_config, AnsweringBus(), assess=Scripted("ask")) \
         .check("run_shell", Risk.DANGEROUS, "run: odd-thing", detail="$ odd-thing")
