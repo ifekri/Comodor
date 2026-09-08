@@ -194,6 +194,90 @@ def test_the_model_is_named_and_the_key_never_travels(core):
 
 
 # --------------------------------------------------------------------------- #
+# the protocol version
+# --------------------------------------------------------------------------- #
+
+def write_raw(core, body: dict) -> None:
+    """A line as a peer on another protocol would actually write it.
+
+    `core.send` stamps the current version on everything, which is exactly
+    what a client from the previous contract would not do.
+    """
+    core.process.stdin.write(json.dumps(body) + "\n")
+    core.process.stdin.flush()
+
+
+def test_a_peer_on_the_previous_protocol_is_refused_at_the_handshake(core):
+    """Version 1 and version 2 do not describe the same wire.
+
+    Events gained a required `seq`, `session.send` started answering with a
+    `turn_id` rather than a `message_id`, and `session.snapshot` arrived with
+    sequencing semantics version 1 never had. A core that kept calling itself
+    version 1 would let an old client through the handshake and fail it later,
+    at whatever message first did not fit — mid-session, with a turn running.
+    """
+    write_raw(core, {
+        "version": 1, "type": "request", "id": "old-1",
+        "method": "client.hello",
+        "params": {"protocol_version": 1,
+                   "client": {"name": "previous-client", "version": "0"},
+                   "capabilities": ["questions"]}})
+
+    # Read rather than correlated: a line refused this early is answered with
+    # `id: null`, because there is no request the core was willing to accept.
+    answer = core.read()
+    assert answer["type"] == "error"
+    assert answer["id"] is None
+    assert answer["error"]["code"] == P.UNSUPPORTED_VERSION
+    assert answer["error"]["data"]["supported"] == [P.PROTOCOL_VERSION]
+
+
+def test_a_handshake_asking_for_the_previous_version_is_refused(core):
+    """The other shape the same mistake takes: our envelope, their version.
+
+    Caught by the handshake itself rather than by the reader, and answered
+    against the request id because this line was readable.
+    """
+    id = core.send("client.hello", {
+        "protocol_version": 1,
+        "client": {"name": "previous-client", "version": "0"},
+        "capabilities": ["questions"]})
+
+    answer = core.answer_to(id)
+    assert answer["type"] == "error"
+    assert answer["error"]["code"] == P.UNSUPPORTED_VERSION
+    assert answer["error"]["data"]["supported"] == [P.PROTOCOL_VERSION]
+
+
+def test_no_session_operation_follows_a_version_refusal(core):
+    """Refused at the handshake means nothing after it is served either."""
+    write_raw(core, {
+        "version": 1, "type": "request", "id": "old-1",
+        "method": "client.hello",
+        "params": {"protocol_version": 1,
+                   "client": {"name": "previous-client", "version": "0"}}})
+    assert core.read()["error"]["code"] == P.UNSUPPORTED_VERSION
+
+    answer = core.answer_to(core.send("session.create"))
+    assert answer["error"]["code"] == P.NOT_INITIALIZED
+
+    listed = core.answer_to(core.send("session.list"))
+    assert listed["error"]["code"] == P.NOT_INITIALIZED
+
+
+def test_the_version_this_core_speaks_is_the_one_the_schema_declares(core):
+    """Pinned, because bumping it has to be a deliberate act.
+
+    The schema is the source of truth and both generated files come from it;
+    this asserts the number a peer is actually offered at the handshake is the
+    one the F2 wire contract is versioned as.
+    """
+    handshake = core.hello()
+    assert handshake["result"]["protocol_version"] == 2
+    assert P.PROTOCOL_VERSION == 2
+
+
+# --------------------------------------------------------------------------- #
 # stdout belongs to the protocol
 # --------------------------------------------------------------------------- #
 

@@ -2,7 +2,7 @@
  * The Comodor protocol, in TypeScript.
  *
  * `generated.ts` beside this file is written by `tools/protocol-codegen.py`
- * from `schemas/protocol/v1.json` — the same run that writes the Python types.
+ * from `schemas/protocol/v2.json` — the same run that writes the Python types.
  * Nothing in it is edited by hand, and a test regenerates both and fails on a
  * difference. That is the whole of the claim that the two sides cannot drift.
  *

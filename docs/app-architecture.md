@@ -15,7 +15,7 @@ see [tui-v2.md](tui-v2.md). For the future desktop application see
 ```text
                       Python Comodor Core
                               │
-                    Versioned protocol  (schemas/protocol/v1.json)
+                    Versioned protocol  (schemas/protocol/v2.json)
                               │
               ┌───────────────┴───────────────┐
               │                               │

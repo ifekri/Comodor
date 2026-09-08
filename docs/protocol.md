@@ -1,10 +1,10 @@
 # The Comodor protocol
 
-What a Comodor core and a Comodor client say to each other. Version 1.
+What a Comodor core and a Comodor client say to each other. Version 2.
 
 This is the contract a client is written against. If you are adding a client —
 a terminal, a desktop window, a browser tab, something nobody has thought of —
-this document and [`schemas/protocol/v1.json`](../schemas/protocol/v1.json) are
+this document and [`schemas/protocol/v2.json`](../schemas/protocol/v2.json) are
 what you need, and nothing in `src/comodor/` should be reached into directly.
 
 ---
@@ -20,7 +20,7 @@ python tools/protocol-codegen.py --check   # fail if either is stale
 
 | Generated | From |
 |---|---|
-| `src/comodor/protocol/_generated.py` | `schemas/protocol/v1.json` |
+| `src/comodor/protocol/_generated.py` | `schemas/protocol/v2.json` |
 | `packages/protocol/src/generated.ts` | the same file, the same run |
 
 Neither is edited by hand, and `tests/test_protocol_schema.py` regenerates
@@ -39,10 +39,10 @@ One JSON object per line, UTF-8, no embedded newlines. Four shapes, told apart
 by `type`.
 
 ```json
-{"version": 1, "type": "request",  "id": "7", "method": "session.send", "params": {}}
-{"version": 1, "type": "response", "id": "7", "result": {}}
-{"version": 1, "type": "error",    "id": "7", "error": {"code": "...", "message": "..."}}
-{"version": 1, "type": "event",    "event": "message.delta", "seq": 41, "params": {}}
+{"version": 2, "type": "request",  "id": "7", "method": "session.send", "params": {}}
+{"version": 2, "type": "response", "id": "7", "result": {}}
+{"version": 2, "type": "error",    "id": "7", "error": {"code": "...", "message": "..."}}
+{"version": 2, "type": "event",    "event": "message.delta", "seq": 41, "params": {}}
 ```
 
 `id` is the client's, echoed back. An error caused by a line that could not be
@@ -83,13 +83,13 @@ the conversation.
 `not_initialized` until it succeeds.
 
 ```json
-→ {"version":1,"type":"request","id":"1","method":"client.hello",
-   "params":{"protocol_version":1,
+→ {"version":2,"type":"request","id":"1","method":"client.hello",
+   "params":{"protocol_version":2,
              "client":{"name":"comodor-tui","version":"0.0.0"},
              "capabilities":["questions","permissions"]}}
 
-← {"version":1,"type":"response","id":"1",
-   "result":{"protocol_version":1,
+← {"version":2,"type":"response","id":"1",
+   "result":{"protocol_version":2,
              "core":{"name":"comodor-core","version":"1.2.1"},
              "capabilities":["streaming","questions","permissions","modes","tool_events"]}}
 ```
@@ -97,6 +97,35 @@ the conversation.
 A version the core does not speak is refused at this message, with the
 versions it does speak in `error.data.supported`. Failing here rather than at
 whatever message first does not fit is the entire reason the field exists.
+
+### Versions
+
+**Version 2 is the contract described here.** Version 1 was the first one: the
+same envelopes and methods, but events carried no `seq`, `session.send`
+answered with a `message_id` rather than a `turn_id`, tool output was not
+tagged with the call it came from, and there was no `session.snapshot`.
+
+Those are not additions an older peer can ignore — a client that cannot see
+`seq` cannot tell a duplicate from a gap, and a client that correlates tool
+output by recency mixes two parallel tools together. So the version moved
+rather than the wire quietly changing underneath it.
+
+A core speaks one version and refuses the rest, in both directions:
+
+| Peer | Result |
+|---|---|
+| v2 client, v2 core | handshake succeeds |
+| v1 client, v2 core | refused — `unsupported_version`, with `supported: [2]` |
+| v2 client, v1 core | refused by the client, before it opens a session |
+
+A line stamped with a version the reader does not speak is refused where it is
+read, which for a request is before any method is dispatched: nothing is
+created, sent or cancelled on a connection that never agreed what it is.
+
+There is no multi-version negotiation, because there is nothing to negotiate
+with. The core and its clients ship together; a mismatch means one of them was
+installed from somewhere else, and the useful answer is a refusal that names
+the version it wanted.
 
 **Capabilities are additive and forgiving.** A name the other side has never
 heard of is ignored, never refused — otherwise every core release would break

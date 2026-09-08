@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://comodor.ai/schemas/protocol/v1.json",
+  "$id": "https://comodor.ai/schemas/protocol/v2.json",
   "title": "Comodor application protocol",
   "description": "The one definition of what Comodor Core and a Comodor client say to each other. Python types and TypeScript types are both generated from this file by tools/protocol-codegen.py; neither is edited by hand, and a test regenerates both and fails on any difference. That is the whole mechanism by which the two sides cannot silently disagree.",
-  "x-protocol-version": 1,
+  "x-protocol-version": 2,
   "x-envelope": {
     "description": "One JSON object per line, UTF-8, no embedded newlines. Four shapes, distinguished by `type`. An event also carries `seq`: the session's own monotonic counter, starting at 1, which is what makes a snapshot and a live stream reconcilable rather than merely usually consistent.",
     "request": [

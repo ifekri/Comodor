@@ -7,7 +7,7 @@ in another language and another process without any of them being special.
 
 Three properties are the whole point:
 
-**One definition.** `schemas/protocol/v1.json` is the source of truth. The
+**One definition.** `schemas/protocol/v2.json` is the source of truth. The
 Python types here and the TypeScript types in `packages/protocol` are both
 generated from it by `tools/protocol-codegen.py`, and a test regenerates both
 and fails on a difference. Nobody edits a type by hand, so the two sides
@@ -175,7 +175,11 @@ def decode(line: str) -> Message:
     if version != PROTOCOL_VERSION:
         raise ProtocolError(
             UNSUPPORTED_VERSION,
-            f"this core speaks protocol {PROTOCOL_VERSION}, not {version!r}")
+            f"this core speaks protocol {PROTOCOL_VERSION}, not {version!r}",
+            # The same hint the handshake refusal carries: a peer on the wrong
+            # version learns what to speak from the refusal itself, whichever
+            # of the two paths caught it.
+            {"supported": [PROTOCOL_VERSION]})
 
     kind = raw.get("type")
     if kind not in ENVELOPE_FIELDS:
