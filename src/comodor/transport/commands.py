@@ -1,8 +1,8 @@
 """`comodor core` — the agent with no interface at all.
 
-A client spawns this, speaks protocol v1 over the pipe, and renders whatever
-it likes. It prints nothing a person is meant to read: the first line on
-stdout is a protocol message, and the greeting goes to stderr where a client
+A client spawns this, speaks the versioned protocol over the pipe, and renders
+whatever it likes. It prints nothing a person is meant to read: the first line
+on stdout is a protocol message, and the greeting goes to stderr where a client
 can log it or ignore it.
 
     comodor core --stdio
@@ -20,13 +20,14 @@ import sys
 from pathlib import Path
 
 from ..config import Config
+from ..protocol import PROTOCOL_LABEL
 
 
 def register(sub) -> None:
     core = sub.add_parser(
         "core", help="run the agent as a protocol server for a client to drive")
     core.add_argument("--stdio", action="store_true",
-                      help="speak protocol v1 on stdin and stdout")
+                      help=f"speak {PROTOCOL_LABEL} on stdin and stdout")
 
     # The new client lives here rather than in its own module because it is
     # the other half of one story — a core to drive, and the thing that
@@ -81,7 +82,7 @@ def run_tui(config: Config, args: argparse.Namespace) -> int:
 def run(config: Config, args: argparse.Namespace) -> int:
     if not getattr(args, "stdio", False):
         print("comodor core: choose a transport.\n\n"
-              "  comodor core --stdio    protocol v1 on stdin and stdout\n\n"
+              f"  comodor core --stdio    {PROTOCOL_LABEL} on stdin and stdout\n\n"
               "A client spawns this and drives the agent over the pipe; "
               "there is nothing to read here by hand.", file=sys.stderr)
         return 2

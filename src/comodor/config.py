@@ -25,6 +25,7 @@ import json
 import os
 import re
 import stat
+import tempfile
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -1335,18 +1336,41 @@ class Config:
         return document
 
     def save(self, path: Path | None = None) -> Path:
-        """Write the user configuration, readable only by its owner."""
+        """Write the user configuration, readable only by its owner.
+
+        Atomic *and* durable. The bytes go to a temporary file of their own,
+        are pushed to the device, and only then rename over the target.
+
+        The rename alone protects against this process dying mid-write, which
+        is what the old version guaranteed. The flush before it is what
+        protects against the machine losing power: a rename can reach the disk
+        ahead of the data it names, and the result is a config file that exists
+        and is empty — losing the API key exactly as the comment below the old
+        one said it would not.
+
+        The temporary name is unique rather than a fixed `config.json.tmp`, so
+        two Comodor processes on one profile saving at the same moment cannot
+        write over each other's half-finished file and rename it into place.
+        """
         target = Path(path) if path else self.paths.config_file
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(self.mine_only(), indent=2, ensure_ascii=False) + "\n"
 
-        # Written via a temporary file so an interrupted save cannot leave a
-        # truncated config behind — losing the API key to a crash mid-write
-        # would mean running setup again for no reason.
-        temporary = target.with_suffix(".json.tmp")
-        temporary.write_text(payload, encoding="utf-8")
-        _restrict(temporary)
-        temporary.replace(target)
+        handle, name = tempfile.mkstemp(prefix=".config-", suffix=".tmp",
+                                        dir=str(target.parent))
+        temporary = Path(name)
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                stream.write(payload)
+                stream.flush()
+                _durably(stream)
+            _restrict(temporary)
+            temporary.replace(target)
+        except BaseException:
+            # Including a KeyboardInterrupt on the way out: a temporary file
+            # holding an API key is not something to leave in a home directory.
+            _discard(temporary)
+            raise
         _restrict(target)
         return target
 
@@ -1433,6 +1457,26 @@ def _restrict(path: Path) -> None:
         return
     try:
         path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
+
+
+def _durably(stream: Any) -> None:
+    """Push the bytes to the device, where the platform lets us ask.
+
+    Best-effort by design: a filesystem that refuses `fsync` — some network
+    mounts, some containers — should cost durability and not the save.
+    """
+    try:
+        os.fsync(stream.fileno())
+    except (OSError, AttributeError, ValueError):
+        pass
+
+
+def _discard(path: Path | str) -> None:
+    """Remove a temporary file, and do not make a fuss if it is gone."""
+    try:
+        os.unlink(path)
     except OSError:
         pass
 

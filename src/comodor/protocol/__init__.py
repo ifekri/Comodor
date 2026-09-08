@@ -56,7 +56,7 @@ from ._generated import (
 )
 
 __all__ = [
-    "PROTOCOL_VERSION", "METHODS", "EVENTS", "MODES", "ERRORS",
+    "PROTOCOL_VERSION", "PROTOCOL_LABEL", "METHODS", "EVENTS", "MODES", "ERRORS",
     "CORE_CAPABILITIES", "CLIENT_CAPABILITIES",
     "ProtocolError", "Message",
     "request", "response", "error", "event",
@@ -65,6 +65,15 @@ __all__ = [
     "ALREADY_INITIALIZED", "UNKNOWN_METHOD", "INVALID_PARAMS", "UNKNOWN_SESSION",
     "UNKNOWN_REQUEST", "NOT_ALLOWED", "INTERNAL_ERROR",
 ]
+
+#: How the protocol is named in a sentence, for the places a person reads.
+#:
+#: Next to the number it is derived from, because every copy of this phrase
+#: written out by hand is a copy that can go stale — and one did: the core's
+#: own greeting and its `--stdio` help both advertised version 1 for as long as
+#: the core spoke version 2, which is the first thing somebody reads when a
+#: client and a core refuse each other.
+PROTOCOL_LABEL = f"protocol v{PROTOCOL_VERSION}"
 
 
 class ProtocolError(Exception):
