@@ -104,7 +104,22 @@ desktop client to arrive.
 
 ## Modes are core policy
 
-`act`, `plan`, `ask`, `chat` — with the rule in one table,
+`act`, `plan`, `ask`, `chat`. **Plan is the mode that may look; Ask is the
+mode that talks.** Ask gets no tools at all — giving it the read-only set made
+it and Plan the same mode with two labels, which is the failure a mode exists
+to prevent. One consequence worth knowing: `propose_mode`, the tool a
+restricted mode uses to offer the switch when a conversation turns into a
+request for changes, is a tool — so Ask cannot offer it, and leaving Ask is
+the person's move.
+
+**An unrecognised mode denies everything.** `policy_for` raises on an explicit
+unknown so it is caught where the value enters; the two enforcement points use
+`enforced`, which cannot raise and falls to a deny-all policy. A config file
+saying `"paln"` keeps that value, is complained about at load, and grants
+nothing — rather than being corrected into `act`, which is the default and
+therefore the one correction an authorization setting must never make.
+
+The rule is in one table,
 [`safety/modes.py`](../src/comodor/safety/modes.py), read by both places that
 enforce it:
 

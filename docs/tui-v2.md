@@ -42,6 +42,16 @@ Install Bun from <https://bun.sh>, then:
 bun run apps/tui/src/main.tsx
 ```
 
+**CI installs it, so contributors do not have to.** The `renderer` job pins
+Bun 1.4.2 through `oven-sh/setup-bun` and runs the real renderer suite and a
+real core process; every other job runs on Node and Python alone.
+
+```sh
+bun test apps/tui/test/bun/renderer.test.tsx   # a real renderer, keys and clicks
+bun test apps/tui/test/bun/orphan.test.ts      # a real core, and no orphan
+bun apps/tui/test/bun/measure.tsx              # what it costs
+```
+
 ---
 
 ## What is on the screen
@@ -79,6 +89,10 @@ and building it now would mean building it against a protocol nobody had used.
 `Tab` forward, `Shift+Tab` back, through **ACT → PLAN → ASK**. `chat` exists
 and is reachable by name; landing on it by pressing Tab would surprise
 somebody who only knows the three.
+
+The segments are clickable. Keyboard, mouse, palette and a programmatic
+`session.set_mode` all reach the same command, so there is one path into the
+core and one place a mode change can go wrong.
 
 The switcher is a segmented control and the mode is **spelled out**, never
 signalled by colour alone.
@@ -166,12 +180,14 @@ without the chance to tidy up.
 
 ## What is not here yet
 
+- **The conversation does not scroll to the newest line.** A long answer runs
+  below the viewport and stays there. This is the most visible gap.
 - Sessions are not resumed; `session.get` exists and nothing calls it on
   reconnect.
 - `tool.output` is carried and not drawn.
 - No sidebar, no scroll-back search, no file attachment, no slash commands.
-- Mouse support is not wired, though OpenTUI offers it.
-- The renderer is not exercised by an automated test on this machine, because
-  Bun is not installed here. The state reducer, the command registry, the
-  question logic and the client are all tested under Node; what is untested is
-  the drawing.
+- Only the mode switch and the palette respond to the mouse. Clicking a
+  message, the composer or a tool row does nothing.
+- Rapid mode switching collapses: the next mode is computed from the last one
+  the core confirmed, so a key repeat that outruns the round trip lands on
+  fewer switches than were pressed. Correct at human speed.
