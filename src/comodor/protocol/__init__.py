@@ -134,13 +134,21 @@ def error(id: str | None, code: str, message: str = "",
     return ProtocolError(code, message, data).envelope(id)
 
 
-def event(name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+def event(name: str, params: dict[str, Any] | None = None,
+          seq: int = 0) -> dict[str, Any]:
+    """One event, and its place in its session's sequence.
+
+    `seq` is what lets a snapshot and a live stream be reconciled: a snapshot
+    says which number it includes up to, and the client applies what is above
+    it. It is on the envelope rather than in every payload because ordering is
+    a property of the connection, not of any one message.
+    """
     if name not in EVENTS:
         # A typo in an event name is otherwise invisible: the client simply
         # never sees the event and the core looks like it hung.
         raise ValueError(f"unknown event {name!r}")
     return {"version": PROTOCOL_VERSION, "type": "event", "event": name,
-            "params": params or {}}
+            "seq": seq, "params": params or {}}
 
 
 # --------------------------------------------------------------------------- #

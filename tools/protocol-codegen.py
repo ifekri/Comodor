@@ -404,6 +404,13 @@ def ts_source(schema: dict[str, Any]) -> str:
     add("  version: typeof PROTOCOL_VERSION;")
     add('  type: "event";')
     add("  event: EventName;")
+    # The one envelope field the schema decides rather than this generator.
+    # It is here because sequencing is a property of the protocol and not of
+    # any one message, and a client that could not see it in the type would
+    # have to reach into `params` for something that is not there.
+    if "seq" in envelope["event"]:
+        add("  /** This session's monotonic counter. See `x-envelope`. */")
+        add("  seq: number;")
     add("  params: Record<string, unknown>;")
     add("}")
     add("")

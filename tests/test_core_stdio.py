@@ -262,31 +262,42 @@ def test_a_turn_streams_deltas_and_finishes(core):
     accepted = core.answer_to(core.send("session.send",
                                         {"session_id": session["id"],
                                          "text": "say something"}))
-    message_id = accepted["result"]["message_id"]
+    turn_id = accepted["result"]["turn_id"]
     assert accepted["result"]["accepted"] is True
 
     started = deltas = completed = 0
     deadline = time.monotonic() + PATIENCE
     text: list[str] = []
+    message_ids: set[str] = set()
+    sequence: list[int] = []
     while time.monotonic() < deadline and not completed:
         message = core.read()
         if message.get("type") != "event":
             continue
         name = message["event"]
+        sequence.append(message["seq"])
+        if name in ("message.started", "message.delta", "message.completed"):
+            # Every event of a turn names the turn; each message names itself.
+            assert message["params"]["turn_id"] == turn_id
+            message_ids.add(message["params"]["message_id"])
         if name == "message.started":
             started += 1
-            assert message["params"]["message_id"] == message_id
         elif name == "message.delta":
             deltas += 1
             text.append(message["params"]["text"])
         elif name == "message.completed":
             completed += 1
+            assert message["params"]["status"] == "completed"
 
     assert started == 1, "the answer never began"
     assert deltas > 0, "nothing streamed; the client would show a frozen turn"
     assert completed == 1
+    assert len(message_ids) == 1, "one message, one id"
     # Ordering preserved, nothing lost between the pieces and the whole.
     assert "".join(text)
+    # Gapless and increasing, which is what a client's resync check relies on.
+    assert sequence == sorted(sequence)
+    assert sequence == list(range(sequence[0], sequence[0] + len(sequence)))
 
 
 # --------------------------------------------------------------------------- #
@@ -307,3 +318,75 @@ def test_a_client_that_never_says_hello_gets_a_refusal_not_a_hang(core):
     answer = core.answer_to(id)
 
     assert answer["error"]["code"] == P.NOT_INITIALIZED
+
+
+# --------------------------------------------------------------------------- #
+# the seams a test in memory does not cross
+# --------------------------------------------------------------------------- #
+
+def test_answering_a_form_reaches_the_core_over_the_wire(core):
+    """The dispatch that nothing exercised, and that did not work.
+
+    `question.answer` passed four positional arguments into a three-parameter
+    method using the pre-form `selected`/`custom` keys, so every real answer
+    came back as `internal_error` while the agent waited out its timeout. Both
+    halves had tests; neither crossed this seam.
+
+    Answering a request that does not exist proves the dispatch, not the
+    plumbing behind it: an unknown id must be *refused by name*, which only
+    happens if the call reached the service at all.
+    """
+    core.hello()
+    answer = core.answer_to(core.send("question.answer", {
+        "id": "no-such-request",
+        "answers": [{"header": "Colour", "chosen": ["red"]}],
+    }))
+
+    assert answer["type"] == "error"
+    assert answer["error"]["code"] == P.UNKNOWN_REQUEST, answer["error"]
+    assert "no-such-request" in answer["error"]["message"]
+
+
+def test_cancelling_a_form_reaches_the_core_over_the_wire(core):
+    core.hello()
+    answer = core.answer_to(core.send("question.answer", {
+        "id": "no-such-request", "cancelled": True}))
+
+    assert answer["type"] == "error"
+    assert answer["error"]["code"] == P.UNKNOWN_REQUEST
+
+
+def test_a_snapshot_describes_a_session_that_has_run_a_turn(core):
+    """What a client rebuilding its own state actually receives."""
+    core.hello()
+    session = core.answer_to(core.send("session.create"))["result"]["session"]
+
+    seen: list[dict] = []
+    core.answer_to(core.send("session.send",
+                             {"session_id": session["id"],
+                              "text": "say something"}), collect=seen)
+    core.events_until("message.completed", collect=seen)
+
+    snapshot = core.answer_to(core.send(
+        "session.snapshot", {"session_id": session["id"]}))["result"]["snapshot"]
+
+    assert snapshot["session"]["id"] == session["id"]
+    roles = [message["role"] for message in snapshot["messages"]]
+    assert roles[0] == "user", "the person's own message is part of the session"
+    assert snapshot["messages"][0]["text"] == "say something"
+    assert "assistant" in roles
+    # The revision is a real number a client can filter events against.
+    assert snapshot["revision"] >= max(
+        event["seq"] for event in seen if event.get("type") == "event")
+
+
+def test_every_event_carries_its_place_in_the_sequence(core):
+    core.hello()
+    seen: list[dict] = []
+    core.answer_to(core.send("session.create"), collect=seen)
+    core.events_until("session.created", collect=seen)
+
+    numbers = [event["seq"] for event in seen if event.get("type") == "event"]
+    assert numbers, "no events arrived"
+    assert all(isinstance(number, int) and number > 0 for number in numbers)
+    assert numbers == sorted(numbers)

@@ -13,6 +13,7 @@ richer — a coloured diff, a table, syntax-highlighted source.
 
 from __future__ import annotations
 
+import copy
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,7 +51,17 @@ class ToolContext:
     cancel: Cancellation
     cwd: Path
     todos: list[TodoItem] = field(default_factory=list)
-    emit_output: Callable[[str], None] | None = None   # incremental tool output
+    #: Incremental tool output, as `(text, call_id)`.
+    #:
+    #: The call id travels with the context rather than being looked up when
+    #: the output arrives, because the thread producing it is often not the
+    #: thread running the tool — `run_shell` reads its child on a collector
+    #: thread — and anything thread-scoped would come up empty for exactly the
+    #: tool that streams most.
+    emit_output: Callable[[str, str], None] | None = None
+    #: Which invocation this view of the context belongs to. Empty on the
+    #: shared context; set on the per-call view `for_call` returns.
+    call_id: str = ""
     #: What the user said not to do, in their own words, for this turn.
     #:
     #: Shown again on the result of a write, because that is the last thing the
@@ -107,7 +118,23 @@ class ToolContext:
 
     def progress(self, text: str) -> None:
         if self.emit_output is not None:
-            self.emit_output(text)
+            self.emit_output(text, self.call_id)
+
+    def for_call(self, call_id: str) -> "ToolContext":
+        """This context, as the tool invocation `call_id` sees it.
+
+        A shallow copy: every mutable thing a tool touches — the read set, the
+        todo list, the checkpoint store, the cancellation flag — is shared by
+        reference, so two tools running in parallel still see one session. The
+        only field that differs is which call they are, which is what lets
+        their streamed output be told apart.
+
+        Copying the whole context per call would be the other way to do this
+        and would quietly give each tool its own `seen` set.
+        """
+        view = copy.copy(self)
+        view.call_id = call_id
+        return view
 
 
 # --------------------------------------------------------------------------- #

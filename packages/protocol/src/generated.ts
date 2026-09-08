@@ -11,6 +11,7 @@ export const METHODS = [
   "client.hello",
   "session.create",
   "session.get",
+  "session.snapshot",
   "session.list",
   "session.send",
   "session.cancel",
@@ -83,6 +84,12 @@ export const MODES = [
 /** What the agent is allowed to do. Enforced by the core, not by the client. */
 export type Mode = "act" | "plan" | "ask" | "chat";
 
+/** How a message ended. `cancelled` and `failed` are not decoration: a client that cannot tell them from `completed` has to leave a stopped answer looking like one still arriving. */
+export type MessageStatus = "completed" | "cancelled" | "failed";
+
+/** Where one tool invocation has got to. */
+export type ToolState = "running" | "completed" | "failed";
+
 /**
  * A method that takes nothing. Still an object, so a parameter can be added
  * later without a new shape.
@@ -139,18 +146,69 @@ export interface SessionListResult {
   sessions: Array<Session>;
 }
 
+/**
+ * One message as the core has it. `text` is the whole message, not a delta:
+ * a snapshot replaces a projection rather than adding to one.
+ */
+export interface SnapshotMessage {
+  message_id: string;
+  turn_id: string;
+  role: string;
+  text: string;
+  reasoning?: string;
+  status: MessageStatus;
+}
+
+/**
+ * One tool invocation as the core has it. `output` is what the core still
+ * holds, which is capped; `output_truncated` says so rather than letting a
+ * client present a shortened transcript as the whole one.
+ */
+export interface SnapshotTool {
+  call_id: string;
+  turn_id: string;
+  name: string;
+  summary?: string;
+  state: ToolState;
+  output?: string;
+  output_truncated?: boolean;
+  error?: string;
+  elapsed_ms?: number;
+}
+
+/**
+ * Everything a client needs to draw a session it did not watch happen.
+ * `revision` is the sequence number this state includes up to: the client
+ * drops any event at or below it and applies the rest, which is what makes
+ * rebuilding safe while the session is still streaming.
+ */
+export interface SessionSnapshot {
+  session: Session;
+  revision: number;
+  messages: Array<SnapshotMessage>;
+  tools: Array<SnapshotTool>;
+  question?: QuestionRequest;
+  permission?: PermissionRequest;
+}
+
+export interface SnapshotResult {
+  snapshot: SessionSnapshot;
+}
+
 export interface SessionSendParams {
   session_id: string;
   text: string;
 }
 
 /**
- * The turn was accepted. `message_id` correlates every message.* event that
- * follows.
+ * The turn was accepted. `turn_id` correlates every message.* and tool.*
+ * event it produces. It is a turn and not a message because one turn
+ * interleaves several assistant messages with the tools between them, and
+ * naming it after the first would make the rest look like repeats of it.
  */
 export interface AcceptedResult {
   accepted: boolean;
-  message_id: string;
+  turn_id: string;
 }
 
 export interface CancelResult {
@@ -251,33 +309,48 @@ export interface SessionEvent {
   session: Session;
 }
 
+/**
+ * A new assistant message within a turn. Each one has its own `message_id`;
+ * `turn_id` is shared by every event the same `session.send` caused.
+ */
 export interface MessageStarted {
   session_id: string;
+  turn_id: string;
   message_id: string;
   role: string;
 }
 
 /**
- * One piece of a streamed answer. `channel` separates the answer from
- * extended thinking, so a client can show or hide reasoning without
- * guessing from the text.
+ * One piece of a streamed answer, routed by `message_id` alone. `channel`
+ * separates the answer from extended thinking, so a client can show or hide
+ * reasoning without guessing from the text.
  */
 export interface MessageDelta {
   session_id: string;
+  turn_id: string;
   message_id: string;
   text: string;
   channel?: string;
 }
 
+/**
+ * The message is finished, one way or another. `text` is the whole answer
+ * where there is one, so a client that lost a delta is corrected rather
+ * than left with a gap. `error` accompanies `status: failed` and is written
+ * to be shown.
+ */
 export interface MessageCompleted {
   session_id: string;
+  turn_id: string;
   message_id: string;
   text?: string;
-  cancelled?: boolean;
+  status: MessageStatus;
+  error?: string;
 }
 
 export interface ToolStarted {
   session_id: string;
+  turn_id: string;
   call_id: string;
   name: string;
   summary?: string;
@@ -285,20 +358,20 @@ export interface ToolStarted {
 
 /**
  * Incremental output from a running tool, such as a shell command's lines
- * as they arrive. `call_id` is optional because the core does not tag
- * streamed output with the call it came from, and two tools can run at once
- * — attributing it to the most recently started call would be right most of
- * the time and quietly wrong under parallel execution. A client shows it
- * against the session unless a call is named.
+ * as they arrive. `call_id` is required: the core binds the running call to
+ * the thread producing the output, so output from tools running in parallel
+ * cannot be attributed to whichever started last.
  */
 export interface ToolOutput {
   session_id: string;
-  call_id?: string;
+  turn_id: string;
+  call_id: string;
   text: string;
 }
 
 export interface ToolCompleted {
   session_id: string;
+  turn_id: string;
   call_id: string;
   name?: string;
   summary?: string;
@@ -307,6 +380,7 @@ export interface ToolCompleted {
 
 export interface ToolFailed {
   session_id: string;
+  turn_id: string;
   call_id: string;
   name?: string;
   error: string;
@@ -357,7 +431,9 @@ export interface QuestionAnswer {
 
 /**
  * One JSON object per line, UTF-8, no embedded newlines. Four shapes,
- * distinguished by `type`.
+ * distinguished by `type`. An event also carries `seq`: the session's own
+ * monotonic counter, starting at 1, which is what makes a snapshot and a
+ * live stream reconcilable rather than merely usually consistent.
  */
 export interface RequestEnvelope {
   version: typeof PROTOCOL_VERSION;
@@ -385,6 +461,8 @@ export interface EventEnvelope {
   version: typeof PROTOCOL_VERSION;
   type: "event";
   event: EventName;
+  /** This session's monotonic counter. See `x-envelope`. */
+  seq: number;
   params: Record<string, unknown>;
 }
 

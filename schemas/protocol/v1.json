@@ -5,7 +5,7 @@
   "description": "The one definition of what Comodor Core and a Comodor client say to each other. Python types and TypeScript types are both generated from this file by tools/protocol-codegen.py; neither is edited by hand, and a test regenerates both and fails on any difference. That is the whole mechanism by which the two sides cannot silently disagree.",
   "x-protocol-version": 1,
   "x-envelope": {
-    "description": "One JSON object per line, UTF-8, no embedded newlines. Four shapes, distinguished by `type`.",
+    "description": "One JSON object per line, UTF-8, no embedded newlines. Four shapes, distinguished by `type`. An event also carries `seq`: the session's own monotonic counter, starting at 1, which is what makes a snapshot and a live stream reconcilable rather than merely usually consistent.",
     "request": [
       "version",
       "type",
@@ -29,6 +29,7 @@
       "version",
       "type",
       "event",
+      "seq",
       "params"
     ]
   },
@@ -74,6 +75,11 @@
       "summary": "The authoritative state of one session, for a client that has just connected or reconnected.",
       "params": "SessionRef",
       "result": "SessionResult"
+    },
+    "session.snapshot": {
+      "summary": "The whole visible session, including its conversation, tools and any pending question — for a client rebuilding its own state while the core keeps the session.",
+      "params": "SessionRef",
+      "result": "SnapshotResult"
     },
     "session.list": {
       "summary": "Every session this core holds.",
@@ -153,6 +159,24 @@
         "plan",
         "ask",
         "chat"
+      ]
+    },
+    "MessageStatus": {
+      "description": "How a message ended. `cancelled` and `failed` are not decoration: a client that cannot tell them from `completed` has to leave a stopped answer looking like one still arriving.",
+      "type": "string",
+      "enum": [
+        "completed",
+        "cancelled",
+        "failed"
+      ]
+    },
+    "ToolState": {
+      "description": "Where one tool invocation has got to.",
+      "type": "string",
+      "enum": [
+        "running",
+        "completed",
+        "failed"
       ]
     },
     "Empty": {
@@ -295,6 +319,123 @@
         }
       }
     },
+    "SnapshotMessage": {
+      "description": "One message as the core has it. `text` is the whole message, not a delta: a snapshot replaces a projection rather than adding to one.",
+      "type": "object",
+      "required": [
+        "message_id",
+        "turn_id",
+        "role",
+        "text",
+        "status"
+      ],
+      "properties": {
+        "message_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "reasoning": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/MessageStatus"
+        }
+      }
+    },
+    "SnapshotTool": {
+      "description": "One tool invocation as the core has it. `output` is what the core still holds, which is capped; `output_truncated` says so rather than letting a client present a shortened transcript as the whole one.",
+      "type": "object",
+      "required": [
+        "call_id",
+        "turn_id",
+        "name",
+        "state"
+      ],
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ToolState"
+        },
+        "output": {
+          "type": "string"
+        },
+        "output_truncated": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "type": "integer"
+        }
+      }
+    },
+    "SessionSnapshot": {
+      "description": "Everything a client needs to draw a session it did not watch happen. `revision` is the sequence number this state includes up to: the client drops any event at or below it and applies the rest, which is what makes rebuilding safe while the session is still streaming.",
+      "type": "object",
+      "required": [
+        "session",
+        "revision",
+        "messages",
+        "tools"
+      ],
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Session"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SnapshotMessage"
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SnapshotTool"
+          }
+        },
+        "question": {
+          "$ref": "#/$defs/QuestionRequest"
+        },
+        "permission": {
+          "$ref": "#/$defs/PermissionRequest"
+        }
+      }
+    },
+    "SnapshotResult": {
+      "type": "object",
+      "required": [
+        "snapshot"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/$defs/SessionSnapshot"
+        }
+      }
+    },
     "SessionSendParams": {
       "type": "object",
       "required": [
@@ -311,17 +452,17 @@
       }
     },
     "AcceptedResult": {
-      "description": "The turn was accepted. `message_id` correlates every message.* event that follows.",
+      "description": "The turn was accepted. `turn_id` correlates every message.* and tool.* event it produces. It is a turn and not a message because one turn interleaves several assistant messages with the tools between them, and naming it after the first would make the rest look like repeats of it.",
       "type": "object",
       "required": [
         "accepted",
-        "message_id"
+        "turn_id"
       ],
       "properties": {
         "accepted": {
           "type": "boolean"
         },
-        "message_id": {
+        "turn_id": {
           "type": "string"
         }
       }
@@ -580,14 +721,19 @@
       }
     },
     "MessageStarted": {
+      "description": "A new assistant message within a turn. Each one has its own `message_id`; `turn_id` is shared by every event the same `session.send` caused.",
       "type": "object",
       "required": [
         "session_id",
+        "turn_id",
         "message_id",
         "role"
       ],
       "properties": {
         "session_id": {
+          "type": "string"
+        },
+        "turn_id": {
           "type": "string"
         },
         "message_id": {
@@ -599,15 +745,19 @@
       }
     },
     "MessageDelta": {
-      "description": "One piece of a streamed answer. `channel` separates the answer from extended thinking, so a client can show or hide reasoning without guessing from the text.",
+      "description": "One piece of a streamed answer, routed by `message_id` alone. `channel` separates the answer from extended thinking, so a client can show or hide reasoning without guessing from the text.",
       "type": "object",
       "required": [
         "session_id",
+        "turn_id",
         "message_id",
         "text"
       ],
       "properties": {
         "session_id": {
+          "type": "string"
+        },
+        "turn_id": {
           "type": "string"
         },
         "message_id": {
@@ -622,13 +772,19 @@
       }
     },
     "MessageCompleted": {
+      "description": "The message is finished, one way or another. `text` is the whole answer where there is one, so a client that lost a delta is corrected rather than left with a gap. `error` accompanies `status: failed` and is written to be shown.",
       "type": "object",
       "required": [
         "session_id",
-        "message_id"
+        "turn_id",
+        "message_id",
+        "status"
       ],
       "properties": {
         "session_id": {
+          "type": "string"
+        },
+        "turn_id": {
           "type": "string"
         },
         "message_id": {
@@ -637,8 +793,11 @@
         "text": {
           "type": "string"
         },
-        "cancelled": {
-          "type": "boolean"
+        "status": {
+          "$ref": "#/$defs/MessageStatus"
+        },
+        "error": {
+          "type": "string"
         }
       }
     },
@@ -646,11 +805,15 @@
       "type": "object",
       "required": [
         "session_id",
+        "turn_id",
         "call_id",
         "name"
       ],
       "properties": {
         "session_id": {
+          "type": "string"
+        },
+        "turn_id": {
           "type": "string"
         },
         "call_id": {
@@ -665,14 +828,19 @@
       }
     },
     "ToolOutput": {
-      "description": "Incremental output from a running tool, such as a shell command's lines as they arrive. `call_id` is optional because the core does not tag streamed output with the call it came from, and two tools can run at once — attributing it to the most recently started call would be right most of the time and quietly wrong under parallel execution. A client shows it against the session unless a call is named.",
+      "description": "Incremental output from a running tool, such as a shell command's lines as they arrive. `call_id` is required: the core binds the running call to the thread producing the output, so output from tools running in parallel cannot be attributed to whichever started last.",
       "type": "object",
       "required": [
         "session_id",
+        "turn_id",
+        "call_id",
         "text"
       ],
       "properties": {
         "session_id": {
+          "type": "string"
+        },
+        "turn_id": {
           "type": "string"
         },
         "call_id": {
@@ -687,10 +855,14 @@
       "type": "object",
       "required": [
         "session_id",
+        "turn_id",
         "call_id"
       ],
       "properties": {
         "session_id": {
+          "type": "string"
+        },
+        "turn_id": {
           "type": "string"
         },
         "call_id": {
@@ -711,11 +883,15 @@
       "type": "object",
       "required": [
         "session_id",
+        "turn_id",
         "call_id",
         "error"
       ],
       "properties": {
         "session_id": {
+          "type": "string"
+        },
+        "turn_id": {
           "type": "string"
         },
         "call_id": {

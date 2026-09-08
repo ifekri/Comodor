@@ -41,8 +41,13 @@ from ..config import Config
 from ..events import Event, EventBus, Kind, Request
 from ..safety.modes import ALL as MODE_NAMES
 from ..safety.modes import known as known_mode
+from .journal import Journal
 
-__all__ = ["Assembly", "assemble", "CoreService", "SessionHandle"]
+__all__ = ["Assembly", "assemble", "CoreService", "Journal", "SessionHandle"]
+
+#: What a client may say it can do. A capability it does not claim is one the
+#: core answers on its behalf rather than waiting on.
+CLIENT_CAPABILITIES = ("questions", "permissions")
 
 
 @dataclass
@@ -145,9 +150,15 @@ class SessionHandle:
     workspace: str
     title: str = ""
     busy: bool = False
-    #: The turn currently streaming, so every `message.*` event for it carries
-    #: one id a client can correlate on.
-    message_id: str = ""
+    #: The turn currently running. Every `message.*` and `tool.*` event it
+    #: causes carries this, which is what `session.send` returns.
+    #:
+    #: A turn, not a message: one turn is several assistant messages with the
+    #: tools it called between them, and F1's single id per turn made the
+    #: second message look like a repeat of the first.
+    turn_id: str = ""
+    #: What the core knows about this session, and the counter that orders it.
+    journal: Journal = field(default_factory=Journal)
     _worker: threading.Thread | None = None
     _pending: dict[str, Request] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -199,15 +210,20 @@ class CoreService:
     """
 
     def __init__(self, config: Config, *,
-                 on_event: Callable[[str, str, dict[str, Any]], None] | None = None,
+                 on_event: Callable[[str, str, dict[str, Any], int], None] | None = None,
                  assemble_with: Callable[..., Assembly] = assemble) -> None:
         self._config = config
         self._sessions: dict[str, SessionHandle] = {}
         self._lock = threading.RLock()
         self._assemble = assemble_with
-        #: Called as (session_id, event_name, params) for every protocol event.
-        #: Set by whatever is transporting; unset in a test that only calls verbs.
+        #: Called as (session_id, event_name, params, seq) for every protocol
+        #: event. Set by whatever is transporting; unset in a test that only
+        #: calls verbs.
         self.on_event = on_event
+        #: What the connected client said it can draw. Everything, until a
+        #: handshake narrows it — an embedder calling the verbs directly is
+        #: not a client that has declined anything.
+        self.client_capabilities: tuple[str, ...] = CLIENT_CAPABILITIES
 
     # -- sessions ---------------------------------------------------------- #
 
@@ -248,6 +264,17 @@ class CoreService:
     def get_session(self, session_id: str) -> dict[str, Any]:
         return self.session(session_id).describe()
 
+    def snapshot(self, session_id: str) -> dict[str, Any]:
+        """Everything a client needs to draw a session it did not watch happen.
+
+        Built under the journal's lock, so what comes back is a state that
+        actually existed rather than one assembled across a streaming turn.
+        The `revision` it carries is exactly the last event folded into it: a
+        client applies what is above that number and drops what is not.
+        """
+        handle = self.session(session_id)
+        return handle.journal.snapshot(handle.describe())
+
     def list_sessions(self) -> list[dict[str, Any]]:
         with self._lock:
             return [handle.describe() for handle in self._sessions.values()]
@@ -277,9 +304,13 @@ class CoreService:
             if handle.busy:
                 raise Refused("that session is already working; cancel it first")
             handle.busy = True
-        message_id = uuid.uuid4().hex[:12]
-        handle.message_id = message_id
+        turn_id = uuid.uuid4().hex[:12]
+        handle.turn_id = turn_id
         handle._released.clear()
+        # The person's own message, which no event announces: `session.send`
+        # is a method call, so without recording it here a client rebuilt from
+        # a snapshot would recover every answer and none of the questions.
+        handle.journal.said(turn_id, text)
 
         def work() -> None:
             # The turn waits for its own acceptance to be on the wire.
@@ -316,7 +347,7 @@ class CoreService:
         if self.on_event is None:
             # Nobody is transporting, so nobody will call `release`.
             handle._released.set()
-        return {"accepted": True, "message_id": message_id}
+        return {"accepted": True, "turn_id": turn_id}
 
     def release(self) -> None:
         """Let any waiting turn begin.
@@ -454,8 +485,55 @@ class CoreService:
 
     def _emit(self, handle: SessionHandle, name: str,
               params: dict[str, Any]) -> None:
-        if self.on_event is not None:
-            self.on_event(handle.id, name, params)
+        """Record one event, number it, and hand it on — in that order.
+
+        The lock spans all three. It has to: the number and the send are two
+        halves of one promise, and taking them separately lets a second thread
+        be numbered 6 and reach the wire before 5. A client that is told
+        "everything through 41" would then have applied 42 already.
+
+        Re-entrant because answering on a client's behalf emits from inside
+        this call: a question the client cannot draw is resolved here, and the
+        resolution is an event of its own.
+        """
+        if self._declined(handle, name, params):
+            return
+        with handle.journal.lock:
+            seq = handle.journal.record(name, params)
+            if self.on_event is not None:
+                self.on_event(handle.id, name, params, seq)
+
+    def _declined(self, handle: SessionHandle, name: str,
+                  params: dict[str, Any]) -> bool:
+        """Answer for a client that said it cannot, instead of waiting on it.
+
+        The handshake is a promise in both directions. A client that does not
+        announce `questions` will never draw a form, so sending it one blocks
+        the agent for the full timeout on something nobody will answer — which
+        reads to a person as the agent having hung.
+
+        This is application policy rather than framing, which is why it lives
+        here and not in the transport. Keeping it there had a second cost: an
+        event suppressed after being numbered leaves a hole in the sequence,
+        and a client watching for holes would resynchronise over nothing.
+        """
+        needed = {"question.requested": "questions",
+                  "permission.requested": "permissions"}.get(name)
+        if needed is None or needed in self.client_capabilities:
+            return False
+        request_id = str(params.get("id", ""))
+        if not request_id:
+            return False
+        try:
+            if needed == "questions":
+                self.answer_question(request_id, cancelled=True)
+            else:
+                self.reply_permission(request_id, "deny")
+        except Exception:  # pragma: no cover - defensive
+            # Nothing to answer, or it was answered already. Suppressing the
+            # event is still right; the alternative is a form nobody can fill.
+            pass
+        return True
 
 
 def _encode_answer(answers: list[dict[str, Any]]) -> str:
@@ -496,50 +574,62 @@ def _relay(service: CoreService, handle: SessionHandle):
     def relay(event: Event) -> None:
         kind = event.kind
         session_id = handle.id
-        message_id = handle.message_id or session_id
+        turn_id = handle.turn_id or session_id
+        # The message this event belongs to, named by the loop. A turn has
+        # several, so taking it from the handle — as F1 did — labelled every
+        # message of a turn with the same id and made the second look like a
+        # repeat of the first.
+        message_id = str(event.get("id", "") or "")
 
         if kind is Kind.ASSISTANT_START:
             service._emit(handle, "message.started", {
-                "session_id": session_id, "message_id": message_id,
-                "role": "assistant"})
+                "session_id": session_id, "turn_id": turn_id,
+                "message_id": message_id, "role": "assistant"})
         elif kind is Kind.ASSISTANT_DELTA:
             service._emit(handle, "message.delta", {
-                "session_id": session_id, "message_id": message_id,
-                "text": event.text})
+                "session_id": session_id, "turn_id": turn_id,
+                "message_id": message_id, "text": event.text})
         elif kind is Kind.REASONING_DELTA:
             # Same stream, named channel. A client that does not show
             # reasoning drops it on the name rather than guessing from prose.
             service._emit(handle, "message.delta", {
-                "session_id": session_id, "message_id": message_id,
-                "text": event.text, "channel": "reasoning"})
+                "session_id": session_id, "turn_id": turn_id,
+                "message_id": message_id, "text": event.text,
+                "channel": "reasoning"})
         elif kind is Kind.ASSISTANT_END:
             service._emit(handle, "message.completed", {
-                "session_id": session_id, "message_id": message_id,
-                "text": event.text})
+                "session_id": session_id, "turn_id": turn_id,
+                "message_id": message_id, "text": event.text,
+                "status": "completed"})
         elif kind is Kind.TOOL_START:
             service._emit(handle, "tool.started", {
-                "session_id": session_id,
+                "session_id": session_id, "turn_id": turn_id,
                 "call_id": str(event.get("id", "") or event.get("name", "")),
                 "name": str(event.get("name", "")),
                 "summary": str(event.get("summary", ""))})
         elif kind is Kind.TOOL_OUTPUT:
-            # No call id: the core does not tag streamed output with the call
-            # it came from, and tools can run in parallel. Inventing one from
-            # "the most recent start" would be right until it was not.
+            # Tagged where it was produced. The tool is handed a view of the
+            # context that knows which call it is, so output from tools
+            # running in parallel arrives already told apart rather than
+            # attributed to whichever started most recently.
             service._emit(handle, "tool.output", {
-                "session_id": session_id, "text": event.text})
+                "session_id": session_id, "turn_id": turn_id,
+                "call_id": str(event.get("id", "") or ""),
+                "text": event.text})
         elif kind is Kind.TOOL_END:
             call_id = str(event.get("id", "") or event.get("name", ""))
             if event.get("ok") is False:
                 # The reason is in `content` — a failed `ToolResult` carries
                 # its message there. There is no separate `error` key to read.
                 service._emit(handle, "tool.failed", {
-                    "session_id": session_id, "call_id": call_id,
+                    "session_id": session_id, "turn_id": turn_id,
+                    "call_id": call_id,
                     "name": str(event.get("name", "")),
                     "error": str(event.get("content", "") or "the tool failed")})
             else:
                 completed: dict[str, Any] = {
-                    "session_id": session_id, "call_id": call_id,
+                    "session_id": session_id, "turn_id": turn_id,
+                    "call_id": call_id,
                     "name": str(event.get("name", "")),
                     "summary": str(event.get("display", "") or ""),
                 }
@@ -548,12 +638,25 @@ def _relay(service: CoreService, handle: SessionHandle):
                     completed["elapsed_ms"] = int(elapsed * 1000)
                 service._emit(handle, "tool.completed", completed)
         elif kind is Kind.CANCELLED:
-            service._emit(handle, "message.completed", {
-                "session_id": session_id, "message_id": message_id,
-                "cancelled": True})
+            # Two halves, because cancellation can land in two places. Mid
+            # answer there is a message to end, and ending it is what stops a
+            # client rendering a spinner for ever. Between messages — during a
+            # tool, which is when people actually press stop — there is
+            # nothing to end, and without the notice the turn would simply go
+            # quiet and leave the person wondering whether the model hung.
+            _close_open_message(service, handle, "cancelled")
+            service._emit(handle, "notification.created", {
+                "session_id": session_id, "level": "warning",
+                "text": _stop_reason(event)})
         elif kind is Kind.REQUEST:
             _relay_request(service, handle, event)
         elif kind is Kind.ERROR:
+            # A provider that fails mid-answer raises before the loop can end
+            # the message, so nothing else would ever complete it: the client
+            # is left with a message that streams for the rest of the session.
+            # The notification says what went wrong; this says the message is
+            # over, and that it did not succeed.
+            _close_open_message(service, handle, "failed", event.text)
             service._emit(handle, "notification.created", {
                 "session_id": session_id, "level": "error", "text": event.text})
         elif kind is Kind.NOTICE:
@@ -561,6 +664,44 @@ def _relay(service: CoreService, handle: SessionHandle):
                 "session_id": session_id, "level": "info", "text": event.text})
 
     return relay
+
+
+def _stop_reason(event: Event) -> str:
+    """Why the work stopped, in words a person reads.
+
+    "You stopped it" and "a newer message took over" are different sentences,
+    and the loop already distinguishes them.
+    """
+    reason = str(event.get("reason", "") or "")
+    if reason == "interrupt":
+        return "Stopped — a newer message took over."
+    return "Stopped."
+
+
+def _close_open_message(service: CoreService, handle: SessionHandle,
+                        status: str, error: str = "") -> None:
+    """End whichever message is still streaming, if one is.
+
+    Asked of the journal rather than assumed, because both reasons for calling
+    this can arrive when no message is open — a turn cancelled between steps,
+    an error raised before the first token — and completing a message that
+    already completed would tell a client its finished answer had been
+    cancelled.
+    """
+    message = handle.journal.open_message()
+    if message is None:
+        return
+    params: dict[str, Any] = {
+        "session_id": handle.id,
+        "turn_id": message.turn_id or handle.turn_id or handle.id,
+        "message_id": message.message_id,
+        "status": status,
+    }
+    if message.text:
+        params["text"] = message.text
+    if error:
+        params["error"] = error
+    service._emit(handle, "message.completed", params)
 
 
 def _relay_request(service: CoreService, handle: SessionHandle,

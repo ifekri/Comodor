@@ -14,7 +14,7 @@ ENVELOPE_FIELDS: dict[str, tuple[str, ...]] = {
     "request": ("version", "type", "id", "method", "params",),
     "response": ("version", "type", "id", "result",),
     "error": ("version", "type", "id", "error",),
-    "event": ("version", "type", "event", "params",),
+    "event": ("version", "type", "event", "seq", "params",),
 }
 
 #: Every method a client may call, and the shapes on either side of it.
@@ -22,6 +22,7 @@ METHOD_SHAPES: dict[str, tuple[str, str]] = {
     "client.hello": ("HelloParams", "HelloResult"),
     "session.create": ("SessionCreateParams", "SessionResult"),
     "session.get": ("SessionRef", "SessionResult"),
+    "session.snapshot": ("SessionRef", "SnapshotResult"),
     "session.list": ("Empty", "SessionListResult"),
     "session.send": ("SessionSendParams", "AcceptedResult"),
     "session.cancel": ("SessionRef", "CancelResult"),
@@ -138,13 +139,43 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
     "SessionListResult": {
         "sessions": ("list", True),
     },
+    "SnapshotMessage": {
+        "message_id": ("str", True),
+        "turn_id": ("str", True),
+        "role": ("str", True),
+        "text": ("str", True),
+        "reasoning": ("str", False),
+        "status": ("MessageStatus", True),
+    },
+    "SnapshotTool": {
+        "call_id": ("str", True),
+        "turn_id": ("str", True),
+        "name": ("str", True),
+        "summary": ("str", False),
+        "state": ("ToolState", True),
+        "output": ("str", False),
+        "output_truncated": ("bool", False),
+        "error": ("str", False),
+        "elapsed_ms": ("int", False),
+    },
+    "SessionSnapshot": {
+        "session": ("Session", True),
+        "revision": ("int", True),
+        "messages": ("list", True),
+        "tools": ("list", True),
+        "question": ("QuestionRequest", False),
+        "permission": ("PermissionRequest", False),
+    },
+    "SnapshotResult": {
+        "snapshot": ("SessionSnapshot", True),
+    },
     "SessionSendParams": {
         "session_id": ("str", True),
         "text": ("str", True),
     },
     "AcceptedResult": {
         "accepted": ("bool", True),
-        "message_id": ("str", True),
+        "turn_id": ("str", True),
     },
     "CancelResult": {
         "cancelled": ("bool", True),
@@ -213,34 +244,41 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
     },
     "MessageStarted": {
         "session_id": ("str", True),
+        "turn_id": ("str", True),
         "message_id": ("str", True),
         "role": ("str", True),
     },
     "MessageDelta": {
         "session_id": ("str", True),
+        "turn_id": ("str", True),
         "message_id": ("str", True),
         "text": ("str", True),
         "channel": ("str", False),
     },
     "MessageCompleted": {
         "session_id": ("str", True),
+        "turn_id": ("str", True),
         "message_id": ("str", True),
         "text": ("str", False),
-        "cancelled": ("bool", False),
+        "status": ("MessageStatus", True),
+        "error": ("str", False),
     },
     "ToolStarted": {
         "session_id": ("str", True),
+        "turn_id": ("str", True),
         "call_id": ("str", True),
         "name": ("str", True),
         "summary": ("str", False),
     },
     "ToolOutput": {
         "session_id": ("str", True),
-        "call_id": ("str", False),
+        "turn_id": ("str", True),
+        "call_id": ("str", True),
         "text": ("str", True),
     },
     "ToolCompleted": {
         "session_id": ("str", True),
+        "turn_id": ("str", True),
         "call_id": ("str", True),
         "name": ("str", False),
         "summary": ("str", False),
@@ -248,6 +286,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
     },
     "ToolFailed": {
         "session_id": ("str", True),
+        "turn_id": ("str", True),
         "call_id": ("str", True),
         "name": ("str", False),
         "error": ("str", True),
@@ -345,18 +384,79 @@ class SessionListResult(TypedDict):
     sessions: list[Session]
 
 
+class _SnapshotMessageRequired(TypedDict):
+    message_id: str
+    turn_id: str
+    role: str
+    text: str
+    status: str
+
+
+class SnapshotMessage(_SnapshotMessageRequired, total=False):
+    """One message as the core has it. `text` is the whole message, not a
+    delta: a snapshot replaces a projection rather than adding to one.
+    """
+
+    reasoning: str
+
+
+class _SnapshotToolRequired(TypedDict):
+    call_id: str
+    turn_id: str
+    name: str
+    state: str
+
+
+class SnapshotTool(_SnapshotToolRequired, total=False):
+    """One tool invocation as the core has it. `output` is what the core
+    still holds, which is capped; `output_truncated` says so rather than
+    letting a client present a shortened transcript as the whole one.
+    """
+
+    summary: str
+    output: str
+    output_truncated: bool
+    error: str
+    elapsed_ms: int
+
+
+class _SessionSnapshotRequired(TypedDict):
+    session: Session
+    revision: int
+    messages: list[SnapshotMessage]
+    tools: list[SnapshotTool]
+
+
+class SessionSnapshot(_SessionSnapshotRequired, total=False):
+    """Everything a client needs to draw a session it did not watch happen.
+    `revision` is the sequence number this state includes up to: the
+    client drops any event at or below it and applies the rest, which is
+    what makes rebuilding safe while the session is still streaming.
+    """
+
+    question: QuestionRequest
+    permission: PermissionRequest
+
+
+class SnapshotResult(TypedDict):
+    snapshot: SessionSnapshot
+
+
 class SessionSendParams(TypedDict):
     session_id: str
     text: str
 
 
 class AcceptedResult(TypedDict):
-    """The turn was accepted. `message_id` correlates every message.* event
-    that follows.
+    """The turn was accepted. `turn_id` correlates every message.* and tool.*
+    event it produces. It is a turn and not a message because one turn
+    interleaves several assistant messages with the tools between them,
+    and naming it after the first would make the rest look like repeats of
+    it.
     """
 
     accepted: bool
-    message_id: str
+    turn_id: str
 
 
 class CancelResult(TypedDict):
@@ -476,21 +576,28 @@ class SessionEvent(TypedDict):
 
 
 class MessageStarted(TypedDict):
+    """A new assistant message within a turn. Each one has its own
+    `message_id`; `turn_id` is shared by every event the same
+    `session.send` caused.
+    """
+
     session_id: str
+    turn_id: str
     message_id: str
     role: str
 
 
 class _MessageDeltaRequired(TypedDict):
     session_id: str
+    turn_id: str
     message_id: str
     text: str
 
 
 class MessageDelta(_MessageDeltaRequired, total=False):
-    """One piece of a streamed answer. `channel` separates the answer from
-    extended thinking, so a client can show or hide reasoning without
-    guessing from the text.
+    """One piece of a streamed answer, routed by `message_id` alone.
+    `channel` separates the answer from extended thinking, so a client can
+    show or hide reasoning without guessing from the text.
     """
 
     channel: str
@@ -498,16 +605,25 @@ class MessageDelta(_MessageDeltaRequired, total=False):
 
 class _MessageCompletedRequired(TypedDict):
     session_id: str
+    turn_id: str
     message_id: str
+    status: str
 
 
 class MessageCompleted(_MessageCompletedRequired, total=False):
+    """The message is finished, one way or another. `text` is the whole
+    answer where there is one, so a client that lost a delta is corrected
+    rather than left with a gap. `error` accompanies `status: failed` and
+    is written to be shown.
+    """
+
     text: str
-    cancelled: bool
+    error: str
 
 
 class _ToolStartedRequired(TypedDict):
     session_id: str
+    turn_id: str
     call_id: str
     name: str
 
@@ -516,25 +632,22 @@ class ToolStarted(_ToolStartedRequired, total=False):
     summary: str
 
 
-class _ToolOutputRequired(TypedDict):
-    session_id: str
-    text: str
-
-
-class ToolOutput(_ToolOutputRequired, total=False):
+class ToolOutput(TypedDict):
     """Incremental output from a running tool, such as a shell command's
-    lines as they arrive. `call_id` is optional because the core does not
-    tag streamed output with the call it came from, and two tools can run
-    at once — attributing it to the most recently started call would be
-    right most of the time and quietly wrong under parallel execution. A
-    client shows it against the session unless a call is named.
+    lines as they arrive. `call_id` is required: the core binds the
+    running call to the thread producing the output, so output from tools
+    running in parallel cannot be attributed to whichever started last.
     """
 
+    session_id: str
+    turn_id: str
     call_id: str
+    text: str
 
 
 class _ToolCompletedRequired(TypedDict):
     session_id: str
+    turn_id: str
     call_id: str
 
 
@@ -546,6 +659,7 @@ class ToolCompleted(_ToolCompletedRequired, total=False):
 
 class _ToolFailedRequired(TypedDict):
     session_id: str
+    turn_id: str
     call_id: str
     error: str
 
