@@ -68,6 +68,10 @@ class Assembly:
     mcp: Any
     tools: Any
     agent: Any
+    #: The turn's transcript. Held on the assembly because a session surface
+    #: reads it — for titles, costs, persistence — and building a second one
+    #: would split the transcript from the loop that writes it.
+    conversation: Any = None
 
     def close(self) -> None:
         """Shut the assembly down, in the order the pieces expect.
@@ -134,11 +138,12 @@ def assemble(config: Config, *, bus: EventBus | None = None,
                          cron_store=cron_store,
                          memory=getattr(memory, "facts", None),
                          plugins=plugins)
-    agent = AgentLoop(config, gateway, tools, bus, permissions, Conversation(),
+    conversation = Conversation()
+    agent = AgentLoop(config, gateway, tools, bus, permissions, conversation,
                       memory, skills=skills)
     return Assembly(config=config, bus=bus, gateway=gateway, memory=memory,
                     permissions=permissions, skills=skills, mcp=mcp,
-                    tools=tools, agent=agent)
+                    tools=tools, agent=agent, conversation=conversation)
 
 
 @dataclass

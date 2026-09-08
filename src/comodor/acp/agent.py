@@ -35,18 +35,11 @@ from pathlib import Path
 from typing import Any
 
 from .._version import __version__
-from ..agent import AgentLoop, Conversation
-from ..agent.spawn import spawner
+from ..application import assemble
 from ..config import Config
-from ..events import Event, EventBus, Kind, Request
-from ..learning import LearningEngine
-from ..mcp import MCPManager
+from ..events import Event, Kind, Request
 from ..paths import Paths
-from ..providers.gateway import Gateway
-from ..safety import CheckpointStore, PermissionEngine, Redactor, make_assessor
 from ..session import SessionMeta, SessionStore, derive_title, new_session_id
-from ..skills import load_for as load_skills
-from ..tools import ToolRegistry
 from .jsonrpc import AUTH_REQUIRED, INVALID_PARAMS, Connection, RpcError
 
 #: The version of ACP this speaks.
@@ -92,30 +85,20 @@ class AcpSession:
         self.agent = agent
         self.cwd = cwd
         self.config = config
-        self.bus = EventBus()
-        self.gateway = Gateway(config)
-        self.checkpoints = CheckpointStore(config.paths.checkpoints)
-        self.memory = LearningEngine(
-            config, self.bus, self.gateway, checkpoints=self.checkpoints,
-            redact=Redactor([entry.api_key for entry in config.providers.values()
-                             if entry.api_key]),
-        )
-        self.permissions = PermissionEngine(config, self.bus)
-        self.permissions.assess = make_assessor(config, self.gateway)
-        self.permissions.on_denied = self.memory.on_denied
-        self.skills = load_skills(config)
-        self.mcp = MCPManager(config.mcp.servers) if config.mcp.enabled else None
-        self.conversation = Conversation()
-        self.loop = AgentLoop(
-            config, self.gateway,
-            ToolRegistry(skills=self.skills, mcp=self.mcp, config=config,
-                         spawn=spawner(config, self.gateway, self.bus,
-                                       skills=self.skills, mcp=self.mcp),
-                         cron_store=self._cron_store(config),
-                         memory=getattr(self.memory, "facts", None)),
-            self.bus, self.permissions, self.conversation, self.memory,
-            skills=self.skills,
-        )
+        # The session's agent is the one assembly the whole program shares:
+        # gateway, learning engine, permissions, skills, MCP, tools and loop,
+        # built once in `application.assemble` rather than re-written here.
+        # ACP adds nothing to the wiring — its seam is the JSON-RPC surface,
+        # not the construction underneath it.
+        built = assemble(config)
+        self.bus = built.bus
+        self.gateway = built.gateway
+        self.memory = built.memory
+        self.permissions = built.permissions
+        self.skills = built.skills
+        self.mcp = built.mcp
+        self.conversation = built.conversation
+        self.loop = built.agent
 
         self.store = SessionStore(config.paths.user / "sessions")
         self.meta = SessionMeta(id=session_id, cwd=str(cwd),
@@ -385,7 +368,6 @@ class AcpSession:
                 shut()
             except Exception:
                 pass
-
 
 # --------------------------------------------------------------------------- #
 # the agent
