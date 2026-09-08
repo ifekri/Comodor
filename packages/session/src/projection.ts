@@ -75,6 +75,34 @@ export type Connection =
   | { readonly kind: "resynchronising" }
   | { readonly kind: "lost"; readonly reason: string };
 
+/** Which sort of thing is waiting on the person. */
+export type InteractionKind = "question" | "permission";
+
+/**
+ * Where an interaction has got to, on the client's side of it.
+ *
+ * `waiting` is the core's: something is asking and nothing has been said yet.
+ * The other two are the client's own, and exist so a decision cannot be sent
+ * twice — `submitting` while a reply is in flight, `failed` when the core
+ * refused it. A failure leaves the interaction in place rather than removing
+ * it, because the core is still waiting and a card that vanished on an error
+ * is a card nobody can retry.
+ */
+export type InteractionState = "waiting" | "submitting" | "failed";
+
+export interface Interaction {
+  readonly kind: InteractionKind;
+  /** The core's request id, which is what a reply is keyed on. */
+  readonly id: string;
+  /** Arrival order, so two waiting at once present in a stable order. */
+  readonly at: number;
+  /** The request as the core sent it. Never interpreted here. */
+  readonly request: Record<string, unknown>;
+  readonly state: InteractionState;
+  /** Why a reply was refused. Present only with `failed`. */
+  readonly error?: string | undefined;
+}
+
 export interface State {
   readonly connection: Connection;
   readonly session?: Session | undefined;
@@ -82,8 +110,15 @@ export interface State {
   readonly tools: readonly ToolRun[];
   /** The most recent notification, shown until the next one replaces it. */
   readonly notice?: { level: string; text: string } | undefined;
-  readonly question?: Record<string, unknown> | undefined;
-  readonly permission?: Record<string, unknown> | undefined;
+  /**
+   * Everything waiting on the person, oldest first.
+   *
+   * A list rather than one slot per kind, because two can be live at once: a
+   * batch of read-only tools runs in parallel and each may ask a question, and
+   * a delegate shares its parent's bus. One slot would strand whichever
+   * arrived second, and a stranded prompt is a tool that looks hung.
+   */
+  readonly interactions: readonly Interaction[];
   /**
    * The highest sequence number applied. Everything at or below it is already
    * in this state; a snapshot taken at or below it is stale and is dropped.
@@ -106,6 +141,7 @@ export const initial: State = {
   connection: { kind: "starting" },
   lines: [],
   tools: [],
+  interactions: [],
   revision: 0,
   arrivals: 0,
   gap: false,
@@ -124,8 +160,15 @@ export interface Snapshot {
     state: string; output?: string; output_truncated?: boolean;
     error?: string; elapsed_ms?: number; started_seq?: number;
   }>;
+  /** The first of each kind, for a snapshot from a core that carries one. */
   question?: Record<string, unknown>;
   permission?: Record<string, unknown>;
+  /** Everything waiting, oldest first. Preferred over the two above. */
+  interactions?: Array<{
+    kind: InteractionKind;
+    question?: Record<string, unknown>;
+    permission?: Record<string, unknown>;
+  }>;
 }
 
 export type Action =
@@ -137,6 +180,10 @@ export type Action =
   | { type: "accepted"; localId: string; turnId: string }
   | { type: "rejected"; localId: string; reason: string }
   | { type: "retrying"; localId: string }
+  /** A decision is on its way to the core. At most one per interaction. */
+  | { type: "submitting"; id: string }
+  /** The core refused it. The interaction stays, and stays answerable. */
+  | { type: "submitFailed"; id: string; reason: string }
   | { type: "snapshot"; snapshot: Snapshot }
   | { type: "event"; name: EventName; params: Record<string, unknown>;
       seq: number };
@@ -181,6 +228,25 @@ export function reduce(state: State, action: Action): State {
       return editLine(state, action.localId, (line) => ({
         ...line, state: "pending", error: undefined,
       }));
+
+    case "submitting":
+      // Marked before the reply is sent, not after. Two presses inside one
+      // round trip are otherwise two replies, and a permission granted twice
+      // is not a harmless duplicate — the second arrives for a request the
+      // core has already closed and is refused, which reads as a broken
+      // interface rather than as the no-op it was.
+      return editInteraction(state, action.id, (interaction) =>
+        interaction.state === "submitting"
+          ? interaction
+          : { ...interaction, state: "submitting", error: undefined });
+
+    case "submitFailed":
+      // Still waiting, still answerable. The core did not take the decision,
+      // so removing the card would strand the request it is still holding.
+      return editInteraction(state, action.id, (interaction) =>
+        interaction.state === "submitting"
+          ? { ...interaction, state: "failed", error: action.reason }
+          : interaction);
 
     case "snapshot":
       return applySnapshot(state, action.snapshot);
@@ -259,12 +325,49 @@ function applySnapshot(state: State, snapshot: Snapshot): State {
     session: snapshot.session,
     lines,
     tools,
-    question: snapshot.question,
-    permission: snapshot.permission,
+    interactions: restoredInteractions(snapshot, at),
     revision: snapshot.revision,
     arrivals: at,
     gap: false,
   };
+}
+
+/**
+ * What a snapshot says is waiting, as the list this projection keeps.
+ *
+ * A core that carries the list is read from it. One that carries only the two
+ * singular fields — the shape before the list existed — still restores what it
+ * can, permission first, because that is the one blocking a tool that is
+ * already running.
+ *
+ * Restored as `waiting` rather than as whatever the client was doing before:
+ * a snapshot is the core's account, and a reply that was in flight when the
+ * connection was repaired is not in flight any more.
+ */
+function restoredInteractions(snapshot: Snapshot, after: number): Interaction[] {
+  const found: Array<{ kind: InteractionKind;
+                       request: Record<string, unknown> | undefined }> = [];
+  if (snapshot.interactions) {
+    for (const entry of snapshot.interactions) {
+      found.push({ kind: entry.kind,
+                   request: entry.kind === "question" ? entry.question
+                                                      : entry.permission });
+    }
+  } else {
+    found.push({ kind: "permission", request: snapshot.permission });
+    found.push({ kind: "question", request: snapshot.question });
+  }
+
+  const built: Interaction[] = [];
+  for (const entry of found) {
+    const request = entry.request;
+    if (!request) continue;
+    const id = String(request["id"] ?? "");
+    if (!id) continue;
+    built.push({ kind: entry.kind, id, at: (after += 1), request,
+                 state: "waiting" });
+  }
+  return built;
 }
 
 function messageState(status: string): MessageState {
@@ -414,16 +517,16 @@ function apply(state: State, name: EventName,
       }));
 
     case "question.requested":
-      return { ...state, question: params };
+      return raise(state, "question", params);
 
     case "question.resolved":
-      return { ...state, question: undefined };
+      return settle(state, params);
 
     case "permission.requested":
-      return { ...state, permission: params };
+      return raise(state, "permission", params);
 
     case "permission.resolved":
-      return { ...state, permission: undefined };
+      return settle(state, params);
 
     case "notification.created":
       return {
@@ -458,6 +561,58 @@ function editTool(state: State, id: string,
   return { ...state, tools };
 }
 
+/**
+ * Something is now waiting on the person.
+ *
+ * Keyed by the core's request id, so a redelivery of the same request — a
+ * resync, an event that arrived twice — replaces the entry rather than adding
+ * a second card nobody can tell apart. A *different* request is added
+ * alongside: two can genuinely be live at once, and dropping the first to make
+ * room for the second would strand a prompt the core is still blocked on.
+ */
+function raise(state: State, kind: InteractionKind,
+               request: Record<string, unknown>): State {
+  const id = String(request["id"] ?? "");
+  if (!id) return state;
+  const held = state.interactions.find((each) => each.id === id);
+  if (held) {
+    return {
+      ...state,
+      interactions: state.interactions.map((each) => each.id === id
+        // The request the core now reports, and a clean slate for answering
+        // it: whatever was in flight before belongs to a state that is gone.
+        ? { ...each, kind, request, state: "waiting", error: undefined }
+        : each),
+    };
+  }
+  return {
+    ...state,
+    interactions: [...state.interactions, {
+      kind, id, at: state.arrivals + 1, request, state: "waiting",
+    }],
+  };
+}
+
+/** Something stopped waiting. Removed by id, so a second request survives. */
+function settle(state: State, params: Record<string, unknown>): State {
+  const id = String(params["id"] ?? "");
+  if (!id) return state;
+  const left = state.interactions.filter((each) => each.id !== id);
+  return left.length === state.interactions.length
+    ? state
+    : { ...state, interactions: left };
+}
+
+function editInteraction(state: State, id: string,
+                         change: (each: Interaction) => Interaction): State {
+  if (!id) return state;
+  const at = state.interactions.findIndex((each) => each.id === id);
+  if (at < 0) return state;
+  const interactions = [...state.interactions];
+  interactions[at] = change(interactions[at] as Interaction);
+  return { ...state, interactions };
+}
+
 // --------------------------------------------------------------------------- //
 // reading the projection
 // --------------------------------------------------------------------------- //
@@ -475,6 +630,53 @@ export function streaming(state: State): boolean {
 /** Prompts the person typed that the core never accepted. */
 export function unsent(state: State): readonly Line[] {
   return state.lines.filter((line) => line.state === "failed_to_send");
+}
+
+// --------------------------------------------------------------------------- //
+// what is waiting on the person
+// --------------------------------------------------------------------------- //
+
+/**
+ * The interaction to present, or nothing.
+ *
+ * Oldest first, which is the order the core lists them in and the one a person
+ * expects: what has been waiting longest is what is shown. Presenting the
+ * newest instead would let a second request hide the first for as long as both
+ * were live, and the hidden one is the one that times out.
+ */
+export function presented(state: State): Interaction | undefined {
+  return state.interactions[0];
+}
+
+/** The question being presented, if the thing waiting is a question. */
+export function presentedQuestion(state: State): Record<string, unknown> | undefined {
+  const head = presented(state);
+  return head && head.kind === "question" ? head.request : undefined;
+}
+
+/** The permission being presented, if the thing waiting is a permission. */
+export function presentedPermission(state: State): Record<string, unknown> | undefined {
+  const head = presented(state);
+  return head && head.kind === "permission" ? head.request : undefined;
+}
+
+/** How many things are waiting, for a hint that says "and one more". */
+export function waitingCount(state: State): number {
+  return state.interactions.length;
+}
+
+/**
+ * Whether a decision may be sent for this interaction right now.
+ *
+ * The gate against a double reply, and the reason the state is in the
+ * projection rather than in a component: a second Enter, a click while a key
+ * is in flight, and a key that arrives after the core resolved it all have to
+ * be refused by the same rule rather than by three components each keeping
+ * their own idea of whether they had already sent.
+ */
+export function canSubmit(state: State, id: string): boolean {
+  const found = state.interactions.find((each) => each.id === id);
+  return found !== undefined && found.state !== "submitting";
 }
 
 /**

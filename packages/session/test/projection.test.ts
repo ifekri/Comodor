@@ -8,12 +8,17 @@ import { deepStrictEqual as same, ok, strictEqual as is } from "node:assert/stri
 import { test } from "node:test";
 
 import {
+  canSubmit,
   initial,
+  presented,
+  presentedPermission,
+  presentedQuestion,
   reduce,
   streaming,
   timeline,
   toolsOfTurn,
   unsent,
+  waitingCount,
   type Action,
   type Snapshot,
   type State,
@@ -26,7 +31,16 @@ const SESSION: Session = {
 
 let clock = 0;
 
-/** An event, with the next sequence number, so tests read as sequences. */
+/**
+ * An event, with the next sequence number, so tests read as sequences.
+ *
+ * The counter is monotonic across a test on purpose. `run([ev(...), ev(...)],
+ * fresh())` evaluates its argument list left to right, so the events are
+ * numbered *before* `fresh()` runs; a `fresh()` that reset the counter would
+ * leave the next `ev()` in the same test numbering from one again, and the
+ * projection would drop it as a duplicate of a sequence it had already
+ * applied. That reads as a passing test which never exercised the event.
+ */
 function ev(name: string, params: Record<string, unknown>, seq?: number): Action {
   clock = seq ?? clock + 1;
   return { type: "event", name: name as never, params, seq: clock };
@@ -37,7 +51,7 @@ function run(actions: Action[], from: State = initial): State {
 }
 
 function fresh(): State {
-  clock = 0;
+  // The sequence counter is deliberately left where it is; see `ev`.
   return reduce(initial, { type: "connected", session: SESSION });
 }
 
@@ -537,7 +551,8 @@ test("a pending question survives a rebuild", () => {
     snapshot: { ...INTERLEAVED, question: form },
   });
 
-  same(state.question, form, "so the client can answer what is still waiting");
+  same(presentedQuestion(state), form,
+       "so the client can answer what is still waiting");
 });
 
 test("a snapshot with nothing waiting leaves no stale question", () => {
@@ -545,12 +560,13 @@ test("a snapshot with nothing waiting leaves no stale question", () => {
     type: "snapshot",
     snapshot: { ...INTERLEAVED, question: { id: "ask-1", questions: [] } },
   });
-  ok(state.question);
+  ok(presentedQuestion(state));
 
   // The question was answered elsewhere, and the rebuild says so.
   state = reduce(state, { type: "snapshot", snapshot: { ...INTERLEAVED,
                                                         revision: 12 } });
-  is(state.question, undefined);
+  is(presentedQuestion(state), undefined);
+  is(state.interactions.length, 0);
 });
 
 test("a pending permission survives a rebuild", () => {
@@ -561,7 +577,29 @@ test("a pending permission survives a rebuild", () => {
     snapshot: { ...INTERLEAVED, permission: asked },
   });
 
-  same(state.permission, asked, "carried, not silently dropped");
+  same(presentedPermission(state), asked, "carried, not silently dropped");
+});
+
+test("a snapshot carrying the whole list restores all of it", () => {
+  const permission = { id: "perm-1", title: "run this?",
+                       options: ["allow", "deny"] };
+  const question = { id: "ask-1", title: "which?", questions: [] };
+  const state = reduce(fresh(), {
+    type: "snapshot",
+    snapshot: {
+      ...INTERLEAVED,
+      permission, question,
+      interactions: [
+        { kind: "permission", permission },
+        { kind: "question", question },
+      ],
+    },
+  });
+
+  same(state.interactions.map((each) => [each.kind, each.id]),
+       [["permission", "perm-1"], ["question", "ask-1"]]);
+  same(presentedPermission(state), permission);
+  is(waitingCount(state), 2);
 });
 
 test("a rebuild reports the session as busy when the core says it is", () => {
@@ -641,4 +679,170 @@ test("a snapshot's timeline keeps a turn's messages and tools together", () => {
   const at = timeline(state).map((entry) => entry.at);
   same(at, [...at].sort((left, right) => left - right));
   is(new Set(at).size, at.length, "two entries must never share a position");
+});
+
+// --------------------------------------------------------------------------- //
+// what is waiting on the person
+// --------------------------------------------------------------------------- //
+
+const PERMISSION = { id: "perm-1", session_id: "s1", title: "run: npm test",
+                     options: ["allow", "allow_always", "deny"],
+                     tool: "run_shell", risk: "dangerous" };
+const QUESTION = { id: "ask-1", session_id: "s1", title: "which approach?",
+                   questions: [{ header: "approach", prompt: "Which?",
+                                 multiple: false, options: [] }] };
+
+function withPermission(state: State = fresh()): State {
+  return reduce(state, ev("permission.requested", PERMISSION));
+}
+
+test("two questions live at once are both kept", () => {
+  // A batch of read-only tools runs in parallel, and each may ask. One slot
+  // would strand the second, and a stranded prompt is a tool that looks hung.
+  const state = run([
+    ev("question.requested", QUESTION),
+    ev("question.requested", { ...QUESTION, id: "ask-2" }),
+  ], fresh());
+
+  same(state.interactions.map((each) => each.id), ["ask-1", "ask-2"]);
+  is(waitingCount(state), 2);
+  is(presented(state)?.id, "ask-1", "what has waited longest is shown");
+});
+
+test("a question and a permission can both be waiting", () => {
+  const state = run([
+    ev("permission.requested", PERMISSION),
+    ev("question.requested", QUESTION),
+  ], fresh());
+
+  same(state.interactions.map((each) => each.kind), ["permission", "question"]);
+  same(presentedPermission(state)?.["id"], "perm-1");
+  is(presentedQuestion(state), undefined,
+     "the permission is what is being presented, so it is the only question asked of the person");
+});
+
+test("resolving one leaves the other waiting", () => {
+  let state = run([
+    ev("permission.requested", PERMISSION),
+    ev("question.requested", QUESTION),
+  ], fresh());
+
+  state = reduce(state, ev("permission.resolved",
+                           { id: "perm-1", choice: "deny" }));
+
+  same(state.interactions.map((each) => each.id), ["ask-1"]);
+  same(presentedQuestion(state)?.["id"], "ask-1");
+});
+
+test("a redelivered request replaces itself rather than doubling", () => {
+  const state = run([
+    ev("permission.requested", PERMISSION),
+    ev("permission.requested", PERMISSION),
+  ], fresh());
+
+  is(state.interactions.length, 1, "two cards for one request is unusable");
+  is(canSubmit(state, "perm-1"), true);
+});
+
+test("a resolution for an unknown request changes nothing", () => {
+  const state = withPermission();
+  const after = reduce(state, ev("permission.resolved",
+                                 { id: "perm-ghost", choice: "deny" }));
+
+  same(after.interactions, state.interactions);
+});
+
+// --------------------------------------------------------------------------- //
+// one decision per request
+// --------------------------------------------------------------------------- //
+
+test("a decision in flight cannot be sent twice", () => {
+  // Two presses inside one round trip are otherwise two replies, and the
+  // second is refused by a core that has already closed the request — which
+  // reads as a broken interface rather than as the no-op it was.
+  let state = reduce(withPermission(), { type: "submitting", id: "perm-1" });
+
+  is(state.interactions[0]?.state, "submitting");
+  is(canSubmit(state, "perm-1"), false);
+
+  const again = reduce(state, { type: "submitting", id: "perm-1" });
+  is(again.interactions[0]?.state, "submitting");
+  same(again.interactions, state.interactions, "and nothing was rebuilt");
+});
+
+test("a refused decision leaves the request answerable", () => {
+  // The core did not take it, so it is still waiting. A card that vanished on
+  // an error would strand the prompt it was showing.
+  let state = reduce(withPermission(), { type: "submitting", id: "perm-1" });
+  state = reduce(state, { type: "submitFailed", id: "perm-1",
+                          reason: "nothing is waiting under that id" });
+
+  is(state.interactions[0]?.state, "failed");
+  is(state.interactions[0]?.error, "nothing is waiting under that id");
+  is(canSubmit(state, "perm-1"), true, "so it can be tried again, or denied");
+});
+
+test("a failure reported for something not in flight is ignored", () => {
+  const state = withPermission();
+  const after = reduce(state, { type: "submitFailed", id: "perm-1",
+                                reason: "stale" });
+
+  is(after.interactions[0]?.state, "waiting");
+  is(after.interactions[0]?.error, undefined);
+});
+
+test("the core resolving it wins over a reply still in flight", () => {
+  // Answered elsewhere, or timed out. Either way the card goes, and a late
+  // failure for it must not put it back.
+  let state = reduce(withPermission(), { type: "submitting", id: "perm-1" });
+  state = reduce(state, ev("permission.resolved",
+                           { id: "perm-1", choice: "deny" }));
+  is(state.interactions.length, 0);
+
+  state = reduce(state, { type: "submitFailed", id: "perm-1", reason: "late" });
+  is(state.interactions.length, 0, "no resurrected card");
+});
+
+test("a rebuild clears a decision that was in flight", () => {
+  // The snapshot is the core's account. Whatever was in flight when the
+  // connection was repaired is not in flight any more.
+  let state = reduce(withPermission(), { type: "submitting", id: "perm-1" });
+  state = reduce(state, {
+    type: "snapshot",
+    // Above whatever has been applied, or the snapshot is the stale one and
+    // the projection correctly refuses it.
+    snapshot: { ...INTERLEAVED, revision: state.revision + 1,
+                permission: PERMISSION,
+                interactions: [{ kind: "permission", permission: PERMISSION }] },
+  });
+
+  is(state.interactions[0]?.state, "waiting");
+  is(state.interactions[0]?.error, undefined);
+  is(canSubmit(state, "perm-1"), true);
+});
+
+// --------------------------------------------------------------------------- //
+// a draft is not disturbed by the stream behind it
+// --------------------------------------------------------------------------- //
+
+test("unrelated events leave a waiting request alone", () => {
+  // Somebody halfway through a form must not lose their place because the
+  // turn behind it streamed a token. The identity of the request is what the
+  // presentation keys its draft on, so it has to survive untouched.
+  const state = run([
+    ev("permission.requested", PERMISSION),
+    ev("question.requested", QUESTION),
+  ], fresh());
+  const before = presented(state);
+
+  const after = run([
+    ev("message.delta", { turn_id: "t1", message_id: "m1", text: "still going" }),
+    ev("tool.output", { turn_id: "t1", call_id: "c1", text: "noise\n" }),
+    ev("notification.created", { level: "info", text: "a note" }),
+    ev("mode.changed", { session_id: "s1", mode: "plan" }),
+    ev("session.updated", { session: { ...SESSION, busy: true } }),
+  ], state);
+
+  is(presented(after), before, "the same object, so a draft keyed on it survives");
+  is(after.interactions.length, 2);
 });
