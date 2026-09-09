@@ -2199,6 +2199,64 @@ describe("the agents panel", () => {
     expect(view.frame()).toContain("🔍");
     view.client.close();
   });
+
+  test("a running delegate is never hidden behind settled rows", async () => {
+    // Terminal records stay in the list for the whole session, so a fixed
+    // head slice would show the oldest four for ever — and every delegate
+    // launched after them would exist only as a count. The window must give
+    // the live rows the space first: work happening now is what the panel is
+    // for.
+    const view = await screen();
+    const settled: Array<[string, string]> = [
+      ["d1", "done"], ["d2", "failed"], ["d3", "stopped"], ["d4", "done"],
+    ];
+    for (const [id, state] of settled) {
+      await emitRun(view, "delegate.updated",
+                    { session_id: "s1", delegate: wireAgent(id, state) });
+    }
+
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d5", "running") });
+
+    const frame = view.frame();
+    expect(frame).toContain("d5 running");
+    expect(frame).toContain("1 live");
+    // Five rows, four drawn: the oldest settled record is the one counted.
+    expect(frame).toContain("+1 more");
+    expect(frame).not.toContain("d1 done");
+    view.client.close();
+  });
+
+  test("the row under the cursor is always drawn", async () => {
+    // The keyboard cursor ranges over every delegate, not only the visible
+    // window — so the window must follow it. A cursor that could move onto an
+    // invisible row would let Enter stop work whose label and state nobody
+    // can see.
+    const view = await screen();
+    for (const id of ["d1", "d2", "d3", "d4", "d5"]) {
+      await emitRun(view, "delegate.updated",
+                    { session_id: "s1", delegate: wireAgent(id, "done") });
+    }
+    // Five settled rows, four drawn: unfocused, the newest are shown and the
+    // oldest one is not.
+    expect(view.frame()).toContain("d5 done");
+    expect(view.frame()).not.toContain("d1 done");
+
+    view.mockInput.pressKey("b", { ctrl: true });
+    await letReactRun(view);
+    // The cursor opened on the first row, which the window now draws.
+    expect(view.frame().split("\n").find((row) => row.includes("›")))
+      .toContain("d1 done");
+
+    for (let at = 0; at < 4; at++) {
+      view.mockInput.pressArrow("down");
+      await letReactRun(view);
+    }
+    // The cursor reached d5, and the window moved with it.
+    const cursor = view.frame().split("\n").find((row) => row.includes("›"));
+    expect(cursor).toContain("d5 done");
+    view.client.close();
+  });
 });
 
 describe("stopping a background agent", () => {

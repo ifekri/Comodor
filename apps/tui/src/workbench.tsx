@@ -51,6 +51,39 @@ const AGENT_ROWS = 4;
 /** How many task rows the panel draws before it starts counting instead. */
 const TASK_ROWS = 6;
 
+/**
+ * Which delegates the bounded panel draws, as indexes into `delegates`.
+ *
+ * A fixed head slice shows the *oldest* rows — and terminal records never
+ * leave, so after a long job every newly launched delegate would hide behind
+ * "+N more" while the keyboard cursor still ranges over the full array:
+ * Enter could stop work nobody can see. The window therefore keeps what is
+ * current visible: live rows first, then the row the cursor is on, then the
+ * most recent activity. The drawn order stays the core's own — the window is
+ * a selection of rows, never a reordering of the truth.
+ */
+export function visibleWindow(delegates: readonly Delegate[],
+                              selected: number,
+                              rows: number): number[] {
+  if (delegates.length <= rows) {
+    return delegates.map((_, at) => at);
+  }
+  const picked = new Set<number>();
+  delegates.forEach((delegate, at) => {
+    if (picked.size < rows
+        && (delegate.state === "running" || delegate.state === "stopping")) {
+      picked.add(at);
+    }
+  });
+  if (picked.size < rows && selected >= 0 && selected < delegates.length) {
+    picked.add(selected);
+  }
+  for (let at = delegates.length - 1; at >= 0 && picked.size < rows; at--) {
+    picked.add(at);
+  }
+  return [...picked].sort((left, right) => left - right);
+}
+
 /** The panel's width, by the terminal's: wider screens afford a wider panel. */
 export function panelWidth(width: number): number {
   return width >= 140 ? 30 : 24;
@@ -202,6 +235,9 @@ function AgentsSection({ delegates, inner, now, focused, selected,
 }): React.ReactNode {
   const live = delegates.filter((delegate) =>
     delegate.state === "running" || delegate.state === "stopping").length;
+  // The cursor claims a row only while it is live: an unfocused panel shows
+  // the newest work rather than wherever a stale selection once rested.
+  const window = visibleWindow(delegates, focused ? selected : -1, AGENT_ROWS);
   return (
     <box style={{ flexDirection: "column", flexShrink: 0 }}>
       <text style={{ fg: theme["text.secondary"] }}>
@@ -212,14 +248,20 @@ function AgentsSection({ delegates, inner, now, focused, selected,
             {fit("No background work.", inner)}
           </text>
         : null}
-      {delegates.slice(0, AGENT_ROWS).map((delegate, at) => (
-        <AgentRow key={delegate.id} delegate={delegate} inner={inner} now={now}
-                  here={focused && at === selected}
-                  onSelect={() => onSelect(at)} />
-      ))}
-      {delegates.length > AGENT_ROWS
+      {window.map((at) => {
+        const delegate = delegates[at];
+        // The window only ever carries real indexes; the guard is for the
+        // type system, not for a case that can happen.
+        if (!delegate) return null;
+        return (
+          <AgentRow key={delegate.id} delegate={delegate} inner={inner}
+                    now={now} here={focused && at === selected}
+                    onSelect={() => onSelect(at)} />
+        );
+      })}
+      {delegates.length > window.length
         ? <text style={{ fg: theme["text.muted"] }}>
-            {fit(`+${delegates.length - AGENT_ROWS} more`, inner)}
+            {fit(`+${delegates.length - window.length} more`, inner)}
           </text>
         : null}
     </box>

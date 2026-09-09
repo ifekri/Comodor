@@ -50,6 +50,11 @@ class DelegateRun:
     answer: str = ""
     error: str = ""
     delivered: bool = False
+    #: Which session launched it, when the store is shared. Only the owner
+    #: drains or stops it; a run nobody owns — one reloaded from a dead
+    #: process's record — belongs to whichever session asks next, which is
+    #: exactly what "the crash record is honest" needs.
+    owner: str = ""
 
     def as_dict(self, brief_chars: int = 120) -> dict[str, Any]:
         return {
@@ -109,17 +114,32 @@ class DelegateCancellation(Cancellation):
 class BackgroundDelegates:
     """The slots, the threads, and the finished answers waiting to be read.
 
-    One instance per session. The tool adds work; the loop drains completions
-    at the turn boundary; the interface lists and stops what is running.
+    One instance owns the persisted document per process — two managers
+    pointing at the same file read each other's live runs as crashed and
+    rewrite each other's records, so a second session is handed a
+    :class:`SessionDelegates` view of this store rather than a store of its
+    own. The tool adds work; the loop drains completions at the turn
+    boundary; the interface lists and stops what is running.
+
+    `bus` and `spawner` are the launch context for callers that launch
+    directly (the terminal, the web session). A shared store is constructed
+    without them and every launch carries its own, because the child's events
+    belong on the launching session's bus, not on whichever session happened
+    to build the store.
     """
 
-    def __init__(self, config: Any, bus: EventBus, spawner: Callable[..., Any],
+    def __init__(self, config: Any, bus: EventBus | None = None,
+                 spawner: Callable[..., Any] | None = None,
                  persist_path: Path | None = None) -> None:
         self.config = config
         self.bus = bus
         self.spawner = spawner
         self.persist_path = persist_path
         self._runs: dict[str, DelegateRun] = {}
+        #: The bus and spawner one launch runs on, by run id. A run's events
+        #: are emitted on its own bus, so a shared store never puts one
+        #: session's delegate lifecycle into another session's stream.
+        self._contexts: dict[str, tuple[Any, Any]] = {}
         #: Guards the lifecycle state below, and nothing else. It is never
         #: held across a filesystem write: `stop_all()` and `wait()` take it
         #: during shutdown, and a user directory on a network mount would
@@ -137,6 +157,9 @@ class BackgroundDelegates:
         #: `stop_all()`, which is also what `/stop` calls: stopping everything
         #: is something a session recovers from, and closing is not.
         self._closing = False
+        #: Owners whose sessions have closed, when the store is shared. A
+        #: closed session launches nothing new; another session still can.
+        self._closed_owners: set[str] = set()
         #: Which snapshot is which. Assigned under `_lock`, so the numbers run
         #: in the order the state actually changed.
         self._revision = 0
@@ -184,10 +207,23 @@ class BackgroundDelegates:
         Completions only become conversation at a turn boundary, and only an
         interface that polls between turns does that.
         """
-        return self.bus.listening
+        return self.bus.listening if self.bus is not None else False
+
+    def bind(self, owner: str) -> "SessionDelegates":
+        """One session's view of this store.
+
+        The store owns the slots, the threads and the file; the view scopes
+        everything one session can do to the runs that session launched. The
+        view is attached to the session's bus and spawner by whoever
+        assembles them — they do not exist until the session's wiring is
+        built, which is after the view had to be handed in.
+        """
+        return SessionDelegates(self, owner)
 
     def start(self, brief: str, label: str = "", write: bool = False,
-              cwd: Any = None) -> tuple[bool, str, str]:
+              cwd: Any = None, *, owner: str = "", bus: Any = None,
+              spawner: Callable[..., Any] | None = None
+              ) -> tuple[bool, str, str]:
         """Launch one delegate. Returns (accepted, id, why-not).
 
         Refused rather than queued when every slot is busy: the error says
@@ -196,8 +232,14 @@ class BackgroundDelegates:
         """
         limit = self.config.delegation.max_background
         cancel = DelegateCancellation()
+        launch_bus = bus if bus is not None else self.bus
+        launch_spawner = spawner if spawner is not None else self.spawner
+        if launch_spawner is None:
+            return False, "", (
+                "this session has no way to build a delegate — nothing was "
+                "started.")
         with self._lock:
-            if self._closing:
+            if self._closing or (owner and owner in self._closed_owners):
                 return False, "", (
                     "Comodor is shutting down, so a background delegate would "
                     "outlive the tools it needs. Nothing was started.")
@@ -211,12 +253,17 @@ class BackgroundDelegates:
                                        if run.state == "running"))
                     + " to finish, or run this task synchronously.")
             identifier = f"d{next(self._counter)}"
-            run = DelegateRun(id=identifier, brief=brief, label=label)
+            run = DelegateRun(id=identifier, brief=brief, label=label,
+                              owner=owner)
             self._runs[identifier] = run
             # The handle goes in with the run it belongs to. Set outside the
             # lock, there was a moment where `stop_all()` could see a delegate
             # as running and find nothing to cancel it with.
             self._cancels[identifier] = cancel
+            # The same for the bus and spawner the launch runs on: present
+            # from the moment the run is, so no path can emit or spawn with
+            # the context of some other session.
+            self._contexts[identifier] = (launch_bus, launch_spawner)
             # A launch is now in flight. The record is written to disk before
             # the thread starts, and that write is deliberately not under this
             # lock — so this counter is what tells `wait()` that something is
@@ -281,6 +328,8 @@ class BackgroundDelegates:
                         run.state = "stopped"
                         run.ended_at = time.time()
                     self._cancels.pop(identifier, None)
+                    # The context stays: the `stopped` announcement below
+                    # still has to reach this run's bus.
                     undo = self._stage()
                 elif not started:
                     # Nothing is going to move this run out of `running`, so it
@@ -289,6 +338,7 @@ class BackgroundDelegates:
                     # record and report a task that never ran as lost.
                     self._runs.pop(identifier, None)
                     self._cancels.pop(identifier, None)
+                    self._contexts.pop(identifier, None)
                     self._announced.pop(identifier, None)
                     undo = self._stage()
                 self._launching -= 1
@@ -337,8 +387,13 @@ class BackgroundDelegates:
             return
 
         try:
-            loop = self.spawner(cwd=cwd, mode="act" if write else "plan",
-                                max_steps=12, max_seconds=600.0, cancel=cancel)
+            with self._lock:
+                context = self._contexts.get(identifier)
+            spawner = context[1] if context is not None else self.spawner
+            if spawner is None:
+                raise RuntimeError("the delegate's session went away")
+            loop = spawner(cwd=cwd, mode="act" if write else "plan",
+                           max_steps=12, max_seconds=600.0, cancel=cancel)
             result = loop.run(brief)
             with self._lock:
                 run = self._runs.get(identifier)
@@ -391,18 +446,24 @@ class BackgroundDelegates:
 
     # -- draining ---------------------------------------------------------- #
 
-    def take_pending(self) -> list[dict[str, Any]]:
+    def take_pending(self, owner: str | None = None) -> list[dict[str, Any]]:
         """Finished answers not yet delivered, oldest first, marked delivered.
 
         Read at a turn boundary and turned into turns there — the boundary is
         the only place a new message can join the conversation without
         breaking the alternation the provider caches against.
+
+        With `owner`, only that session's runs — plus the ones nobody owns,
+        which are a dead process's crash records and belong to whichever
+        session asks next. One session must never be handed another's answer:
+        the conversation it would land in has none of the brief behind it.
         """
         with self._lock:
             done = [run for run in sorted(self._runs.values(),
                                           key=lambda item: item.ended_at)
                     if run.state in ("done", "failed", "stopped", "lost")
-                    and not run.delivered]
+                    and not run.delivered
+                    and (owner is None or run.owner in (owner, ""))]
             for run in done:
                 run.delivered = True
         return [run.as_dict() | {"answer": run.answer, "brief": run.brief}
@@ -422,10 +483,14 @@ class BackgroundDelegates:
 
     # -- control ----------------------------------------------------------- #
 
-    def stop(self, identifier: str) -> bool:
+    def stop(self, identifier: str, owner: str | None = None) -> bool:
         with self._lock:
             run = self._runs.get(identifier)
             if run is None or run.state != "running":
+                return False
+            if owner is not None and run.owner and run.owner != owner:
+                # One session does not stop another's delegate: the record is
+                # shared, the work is not.
                 return False
             self._cancelled.add(identifier)
             cancel = self._cancels.get(identifier)
@@ -434,7 +499,7 @@ class BackgroundDelegates:
         self._emit(identifier, "stopping")
         return True
 
-    def closing(self) -> None:
+    def closing(self, owner: str | None = None) -> None:
         """No more delegates. Called once, when the process is shutting down.
 
         Without it there is a launch nobody accounts for: a turn reaching a
@@ -446,14 +511,21 @@ class BackgroundDelegates:
         Separate from `stop_all()` deliberately. That is also the `/stop`
         command, and a session that stops its delegates must still be able to
         start another one.
+
+        With `owner`, only that session is closed to new launches — a shared
+        store outlives any one session in it.
         """
         with self._settled:
-            self._closing = True
+            if owner is None:
+                self._closing = True
+            else:
+                self._closed_owners.add(owner)
 
-    def stop_all(self) -> int:
+    def stop_all(self, owner: str | None = None) -> int:
         with self._lock:
             running = [run.id for run in self._runs.values()
-                       if run.state == "running"]
+                       if run.state == "running"
+                       and (owner is None or run.owner in (owner, ""))]
             cancels = [self._cancels[identifier] for identifier in running
                        if identifier in self._cancels]
             self._cancelled.update(running)
@@ -463,10 +535,11 @@ class BackgroundDelegates:
             self._emit(identifier, "stopping")
         return len(running)
 
-    def listing(self) -> list[dict[str, Any]]:
+    def listing(self, owner: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             return [run.as_dict() for run in
-                    sorted(self._runs.values(), key=lambda item: item.id)]
+                    sorted(self._runs.values(), key=lambda item: item.id)
+                    if owner is None or run.owner in (owner, "")]
 
     def running_ids(self) -> list[str]:
         with self._lock:
@@ -627,8 +700,14 @@ class BackgroundDelegates:
                     state = told
                 else:
                     self._announced[identifier] = state
+                context = self._contexts.get(identifier)
             payload["state"] = state
-            self.bus.emit(Kind.DELEGATE, **payload)
+            # The run's own bus, not the store's: with a shared store the
+            # store's bus belongs to nobody, and emitting there would put one
+            # session's delegate lifecycle into another session's stream.
+            bus = context[0] if context is not None else self.bus
+            if bus is not None:
+                bus.emit(Kind.DELEGATE, **payload)
         except Exception:
             pass
 
@@ -806,6 +885,71 @@ class BackgroundDelegates:
             # work. Refused, the file still says those runs are `running`, and
             # the session after this one repeats the same guess.
             self._flush_or_catch_up(staged)
+
+
+class SessionDelegates:
+    """One session's view of a shared BackgroundDelegates store.
+
+    The store owns the persisted document and the slots; this scopes what one
+    session can see and do to the runs it launched. Two sessions with two
+    stores pointed at one file read each other's live work as crashed and
+    rewrote each other's records — the view is what makes the sharing honest:
+    one writer, one account of what is running, and a completion that can
+    only drain into the conversation that launched it.
+
+    The bus and spawner do not exist when the view is handed to the wiring —
+    they are built *by* the wiring — so they arrive at `attach`. A launch
+    before then is refused plainly rather than sent nowhere.
+    """
+
+    def __init__(self, store: BackgroundDelegates, owner: str) -> None:
+        self._store = store
+        self._owner = owner
+        self._bus: EventBus | None = None
+        self._spawner: Callable[..., Any] | None = None
+
+    def attach(self, bus: EventBus, spawner: Callable[..., Any]) -> None:
+        """Bind the session's bus and spawner, once they exist."""
+        self._bus = bus
+        self._spawner = spawner
+
+    @property
+    def owner(self) -> str:
+        return self._owner
+
+    @property
+    def listening(self) -> bool:
+        return self._bus.listening if self._bus is not None else False
+
+    def start(self, brief: str, label: str = "", write: bool = False,
+              cwd: Any = None) -> tuple[bool, str, str]:
+        return self._store.start(brief, label=label, write=write, cwd=cwd,
+                                 owner=self._owner, bus=self._bus,
+                                 spawner=self._spawner)
+
+    def take_pending(self) -> list[dict[str, Any]]:
+        return self._store.take_pending(owner=self._owner)
+
+    def restore(self, identifiers: list[str]) -> None:
+        self._store.restore(identifiers)
+
+    def listing(self) -> list[dict[str, Any]]:
+        return self._store.listing(owner=self._owner)
+
+    def stop(self, identifier: str) -> bool:
+        return self._store.stop(identifier, owner=self._owner)
+
+    def closing(self) -> None:
+        self._store.closing(owner=self._owner)
+
+    def stop_all(self) -> int:
+        return self._store.stop_all(owner=self._owner)
+
+    def wait(self, timeout: float = 30.0) -> None:
+        # The store's wait joins every delegate thread, not only this
+        # session's. It is called from teardown, when every session is on its
+        # way out — and a bound on the whole exit is what it is for.
+        self._store.wait(timeout)
 
 
 def _id_number(identifier: str) -> int:

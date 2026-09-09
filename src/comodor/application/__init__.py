@@ -125,7 +125,7 @@ class Assembly:
 
 
 def assemble(config: Config, *, bus: EventBus | None = None,
-             plugins: Any = None, delegates: bool = False) -> Assembly:
+             plugins: Any = None, delegates: Any = False) -> Assembly:
     """Build the agent for one session.
 
     Lifted out of `cli.py` rather than written afresh: this is the wiring the
@@ -138,6 +138,11 @@ def assemble(config: Config, *, bus: EventBus | None = None,
     headless run says nothing and keeps the refusal: background work whose
     completion nobody drains is work whose answer is dropped, and the tool
     already refuses to start it.
+
+    `delegates` may also be a `SessionDelegates` view of a store the caller
+    owns, which is how one process serves several sessions without several
+    managers pointing at the one persisted file. The view arrives unbound and
+    is attached to this session's bus and spawner here.
     """
     from ..agent import AgentLoop, Conversation
     from ..agent.spawn import spawner
@@ -172,7 +177,13 @@ def assemble(config: Config, *, bus: EventBus | None = None,
     spawn = spawner(config, gateway, bus, skills=skills, mcp=mcp)
 
     manager = None
-    if delegates:
+    attach = getattr(delegates, "attach", None)
+    if attach is not None:
+        # A session's view of the shared delegate store. It arrives unbound:
+        # the bus and spawner it launches on only exist from here down.
+        attach(bus, spawn)
+        manager = delegates
+    elif delegates:
         from ..agent.background import BackgroundDelegates
 
         # The same file the terminal and the web session keep their crash
@@ -289,6 +300,13 @@ class CoreService:
         self._sessions: dict[str, SessionHandle] = {}
         self._lock = threading.RLock()
         self._assemble = assemble_with
+        #: The one delegate store this process serves. Every session launches
+        #: through a view of it, because two managers pointed at the same
+        #: `delegates.json` read each other's live runs as crashed and rewrite
+        #: each other's records — one owner per document, or no document.
+        #: Built on first use: a service that never creates a session never
+        #: rewrites the crash record some other process left.
+        self._delegate_store: Any = None
         #: Called as (session_id, event_name, params, seq) for every protocol
         #: event. Set by whatever is transporting; unset in a test that only
         #: calls verbs.
@@ -297,6 +315,20 @@ class CoreService:
         #: handshake narrows it — an embedder calling the verbs directly is
         #: not a client that has declined anything.
         self.client_capabilities: tuple[str, ...] = CLIENT_CAPABILITIES
+
+    def _shared_delegates(self) -> Any:
+        """The process's delegate store, created the first time a session needs it."""
+        from ..agent.background import BackgroundDelegates
+
+        with self._lock:
+            if self._delegate_store is None:
+                # The same file the terminal and the web session keep their
+                # crash record in: one honest account per machine of what was
+                # running when the process died, whichever surface asks next.
+                self._delegate_store = BackgroundDelegates(
+                    self._config,
+                    persist_path=self._config.paths.user / "delegates.json")
+            return self._delegate_store
 
     # -- sessions ---------------------------------------------------------- #
 
@@ -316,11 +348,15 @@ class CoreService:
                 raise Refused(f"unknown mode {mode!r}; one of {', '.join(MODE_NAMES)}")
             config.agent.mode = mode
 
+        session_id = uuid.uuid4().hex[:12]
         handle = SessionHandle(
-            id=uuid.uuid4().hex[:12],
+            id=session_id,
             # A served session can deliver a finished background answer at a
-            # turn boundary, so it gets the delegate manager. See `assemble`.
-            assembly=self._assemble(config, delegates=True),
+            # turn boundary, so it gets a view of the delegate store — the
+            # store itself is shared, because the file it persists is. See
+            # `assemble` and `CoreService._shared_delegates`.
+            assembly=self._assemble(
+                config, delegates=self._shared_delegates().bind(session_id)),
             workspace=str(config.paths.project),
         )
         handle._announced_mode = handle.mode
@@ -811,6 +847,16 @@ def _relay(service: CoreService, handle: SessionHandle):
 
     def relay(event: Event) -> None:
         kind = event.kind
+        if (event.get("origin")
+                and kind not in (Kind.REQUEST, Kind.REQUEST_EXPIRED)):
+            # Said by work this session launched, not by the session's turn.
+            # A delegate's own messages, tools and plan belong to its record —
+            # streamed here they would land in the parent transcript as the
+            # parent's words, and its `todo_write` would replace the parent's
+            # plan. The exceptions are requests: a permission or question the
+            # child raises is the person's to answer, and the reply travels on
+            # the Request object, so nothing else about it needs the relay.
+            return
         session_id = handle.id
         turn_id = handle.turn_id or session_id
         # The message this event belongs to, named by the loop. A turn has
