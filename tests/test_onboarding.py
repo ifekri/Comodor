@@ -456,11 +456,151 @@ def test_an_invalid_credential_blocks_the_commit(blank):
     effect = plan.submit_credential(FAKE_KEY)
     plan.report_discovery(effect.attempt,
                           Discovery(check=Check.INVALID, reason="refused"))
-    plan.choose_model("gpt-4o", typed=True)
 
     assert "refused that credential" in plan.blocking_problem()
     with pytest.raises(SetupError):
         plan.commit()
+
+
+def test_a_refused_credential_returns_to_the_credential_not_the_model_list(
+        blank):
+    """The P1 defect, pinned from the plan side.
+
+    An INVALID probe used to leave the conversation on the model question,
+    where a catalogue list could be chosen and GitHub answered, and the whole
+    run then died at `commit` — a dead end at the bottom of the flow instead
+    of a correction at the point of the refusal. Now the refused credential
+    is where the conversation stands, and nothing downstream can be reached.
+    """
+    plan = plan_for(blank)
+    plan.start()
+    plan.choose_provider("openai")
+    effect = plan.submit_credential(FAKE_KEY)
+    plan.report_discovery(effect.attempt,
+                          Discovery(check=Check.INVALID, reason="refused"))
+
+    assert plan.step is Step.CREDENTIAL
+    assert "refused" in plan.error
+    with pytest.raises(SetupError):
+        plan.choose_model("gpt-4o", typed=True)
+    with pytest.raises(SetupError):
+        plan.use_unverified()
+
+
+def test_a_replacement_credential_is_proved_and_setup_continues(blank):
+    """Corrected in place: no restart, and the earlier answers survive."""
+    plan = plan_for(blank)
+    plan.start()
+    plan.choose_provider("openai")
+    first = plan.submit_credential("sk-test-wrong")
+    plan.report_discovery(first.attempt,
+                          Discovery(check=Check.INVALID, reason="refused"))
+
+    second = plan.submit_credential(FAKE_KEY)
+    assert second.kind is EffectKind.DISCOVER
+    discover(plan, second)
+
+    assert plan.step is Step.MODEL
+    assert plan.validation.check is Check.VALID
+    assert plan.draft.model == "model-a", "the discovery answered the model"
+    plan.choose_model("model-a")
+    plan.skip_github()
+    assert plan.blocking_problem() == ""
+    saved = plan.commit()
+    assert saved.providers["openai"].api_key == FAKE_KEY
+
+
+def test_a_second_refusal_stays_recoverable(blank):
+    plan = plan_for(blank)
+    plan.start()
+    plan.choose_provider("openai")
+    effect = plan.submit_credential("sk-test-wrong-once")
+    plan.report_discovery(effect.attempt, Discovery(check=Check.INVALID))
+
+    effect = plan.submit_credential("sk-test-wrong-twice")
+    plan.report_discovery(effect.attempt, Discovery(check=Check.INVALID))
+    assert plan.step is Step.CREDENTIAL
+
+    effect = plan.submit_credential(FAKE_KEY)
+    discover(plan, effect)
+    assert plan.validation.check is Check.VALID
+    assert plan.step is Step.MODEL
+
+
+def test_retrying_a_refused_credential_proves_the_same_key_again(blank):
+    """A refusal can be the provider's bad minute. Retrying must not cost
+    the key: the plan still holds it, and the probe still carries it."""
+    plan = plan_for(blank)
+    plan.start()
+    plan.choose_provider("openai")
+    effect = plan.submit_credential(FAKE_KEY)
+    plan.report_discovery(effect.attempt, Discovery(check=Check.INVALID))
+
+    again = plan.retry_validation()
+    assert again.kind is EffectKind.DISCOVER
+    assert plan.probe_entry().api_key == FAKE_KEY
+    discover(plan, again)
+
+    assert plan.validation.check is Check.VALID
+    assert plan.step is Step.MODEL
+
+
+def test_back_from_a_refused_credential_returns_to_the_provider(blank):
+    plan = plan_for(blank)
+    plan.start()
+    plan.choose_provider("openai")
+    effect = plan.submit_credential(FAKE_KEY)
+    plan.report_discovery(effect.attempt, Discovery(check=Check.INVALID))
+
+    plan.back()
+
+    assert plan.step is Step.PROVIDER
+    effect = plan.choose_provider("ollama")
+    assert plan.validation.check is not Check.INVALID
+    discover(plan, effect)
+    plan.choose_model("qwen2.5-coder")
+    plan.skip_github()
+    assert plan.blocking_problem() == ""
+
+
+def test_cancelling_during_credential_correction_leaves_the_config_untouched(
+        blank):
+    blank.use("ollama", model="already-working")
+    blank.save()
+    good = blank.paths.config_file.read_text(encoding="utf-8")
+
+    plan = plan_for(blank)
+    plan.start()
+    plan.choose_provider("openai")
+    effect = plan.submit_credential(FAKE_KEY)
+    plan.report_discovery(effect.attempt, Discovery(check=Check.INVALID))
+
+    plan.cancel()
+
+    assert plan.step is Step.CANCELLED
+    assert blank.paths.config_file.read_text(encoding="utf-8") == good
+    assert FAKE_KEY not in blank.paths.config_file.read_text(encoding="utf-8")
+
+
+def test_an_unreachable_provider_is_not_sent_back_to_the_credential(blank):
+    """The distinction the recovery must not blur: a timeout is not a bad
+    key, and treating it as one sends somebody to rotate a working
+    credential. UNREACHABLE stays on the model question and can proceed."""
+    plan = plan_for(blank)
+    plan.start()
+    plan.choose_provider("openai")
+    effect = plan.submit_credential(FAKE_KEY)
+    plan.report_discovery(effect.attempt,
+                          Discovery(check=Check.UNREACHABLE, reason="timeout"))
+
+    assert plan.step is Step.MODEL, "a timeout was treated as a bad credential"
+    assert plan.error == ""
+    assert "refused" not in plan.blocking_problem()
+    # And unlike INVALID, it is not a dead end: a model can still be chosen
+    # and the run completed, unverified rather than blocked.
+    plan.choose_model("gpt-4o", typed=True)
+    plan.skip_github()
+    assert plan.blocking_problem() == ""
 
 
 def test_unreachable_can_be_retried_without_losing_the_answers(blank):
@@ -834,6 +974,10 @@ def test_a_resumed_run_asks_for_a_typed_key_again(blank):
     assert resumed.draft.provider == "openai"
     assert resumed._secret == ""
     assert resumed.draft.model == "", "a model chosen with an unsaved key"
+    # And the run stands where the key can be asked: resuming onto the model
+    # question with no secret would probe an empty credential and manufacture
+    # a refusal nobody caused.
+    assert resumed.step is Step.CREDENTIAL
     assert FAKE_KEY not in checkpoint_path(blank).read_text(encoding="utf-8")
 
 
@@ -851,6 +995,113 @@ def test_starting_over_drops_the_saved_progress(blank):
 
     assert again.draft == Draft()
     assert again.step is Step.PROVIDER
+
+
+def test_starting_over_leaves_the_configuration_alone(blank):
+    """The checkpoint and the config are different states. Discarding setup
+    progress must never cost a working machine its setup."""
+    blank.use("ollama", model="already-working")
+    blank.save()
+    good = blank.paths.config_file.read_text(encoding="utf-8")
+
+    plan = plan_for(blank)
+    plan.start()
+    plan.choose_provider("openai")
+    plan.submit_credential(FAKE_KEY)
+    assert json.loads(checkpoint_path(blank).read_text(
+        encoding="utf-8"))["provider"] == "openai"
+
+    again = plan_for(blank)
+    again.start()
+    again.start_over()
+
+    # The discarded run is gone from the progress file. What may be there
+    # afterwards is the fresh run's own position — never the old answers.
+    body = json.loads(checkpoint_path(blank).read_text(encoding="utf-8")) \
+        if checkpoint_path(blank).exists() else {}
+    assert body.get("provider") != "openai"
+    assert body.get("credential") != "entered"
+    assert FAKE_KEY not in json.dumps(body)
+    assert blank.paths.config_file.read_text(encoding="utf-8") == good
+
+
+def test_a_checkpoint_for_a_provider_no_longer_offered_starts_fresh(blank):
+    """A removed provider is not something to resume onto: every later
+    question depends on a choice that cannot be honoured. The saved progress
+    goes; the configuration stays."""
+    blank.use("ollama", model="already-working")
+    blank.save()
+    good = blank.paths.config_file.read_text(encoding="utf-8")
+    path = checkpoint_path(blank)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "version": CHECKPOINT_VERSION, "step": "model",
+        "provider": "a-provider-that-was-removed", "credential": "existing",
+        "model": "m", "github": "ask",
+    }), encoding="utf-8")
+
+    plan = plan_for(blank)
+    plan.start()
+    assert plan.resumed is not None
+    plan.continue_from_checkpoint()
+
+    assert plan.resumed is None, "unusable progress was kept as resumable"
+    assert plan.draft.provider != "a-provider-that-was-removed"
+    # The fresh run stands where this machine's configuration puts it, and
+    # its own progress file — if it writes one — names no removed provider.
+    assert plan.step in (Step.PROVIDER, Step.MODEL, Step.GITHUB)
+    body = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    assert body.get("provider") != "a-provider-that-was-removed"
+    assert blank.paths.config_file.read_text(encoding="utf-8") == good
+
+
+def test_a_resumed_ready_with_an_uncommitted_github_answer_asks_again(blank):
+    """A connection made but never committed died with the process: the
+    verified installation is not in the checkpoint and cannot be. Ready would
+    present a GitHub answer that did not survive, so the question returns."""
+    plan = plan_for(blank)
+    plan.start()
+    effect = plan.choose_provider("ollama")
+    discover(plan, effect)
+    plan.choose_model("m")
+    began = plan.connect_github()
+    waiting = plan.report_github_started(began.attempt, url="https://x",
+                                         opened=True, seconds_left=900.0,
+                                         automatic=True)
+    plan.report_github(waiting.attempt,
+                       GitHubOutcome(step=GitHubStep.CONNECTED,
+                                     account="someone",
+                                     installation=an_installation()))
+    assert plan.step is Step.READY
+
+    resumed = plan_for(blank)
+    resumed.start()
+    resumed.continue_from_checkpoint()
+
+    assert resumed.step is Step.GITHUB
+    assert not resumed.connected, "an uncommitted installation is not one"
+    # And skipping from here is still a complete setup.
+    resumed.skip_github()
+    assert resumed.blocking_problem() == ""
+
+
+def test_a_resumed_skip_of_github_is_honoured_at_ready(blank):
+    plan = plan_for(blank)
+    plan.start()
+    effect = plan.choose_provider("ollama")
+    discover(plan, effect)
+    plan.choose_model("m")
+    plan.skip_github()
+
+    resumed = plan_for(blank)
+    resumed.start()
+    resumed.continue_from_checkpoint()
+
+    assert resumed.step is Step.READY
+    assert resumed.draft.github is GitHubIntent.SKIP
+    assert resumed.blocking_problem() == ""
+    saved = resumed.commit()
+    assert saved.needs_setup is False
 
 
 def test_a_successful_setup_leaves_no_progress_file_behind(blank):

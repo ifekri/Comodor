@@ -37,14 +37,20 @@ from . import catalogue, migrate
 from .config import Config
 from .onboarding import (
     Check,
+    Checkpoint,
     CredentialSource,
     Discovery,
     Effect,
     EffectKind,
+    GitHubIntent,
     GitHubOutcome,
     GitHubStep,
+    SetupError,
     SetupPlan,
+    Step,
     classify_probe,
+    clear_checkpoint,
+    read_checkpoint,
 )
 from .ui import chooser
 from .ui import console as console_module
@@ -480,15 +486,31 @@ class SetupWizard:
         worth offering; they are simply not worth standing between somebody and
         their first task, and each has its own command for later. Nothing here
         was deleted, only moved off the critical path.
+
+        An interrupted run left its non-secret progress in a checkpoint, and
+        the offer to continue it comes before anything is asked: a resume is
+        not a question that fits between the others, and quietly restarting
+        would throw away answers the person already gave.
         """
         if minimal is None:
             minimal = bool(self.config.needs_setup or self.config.first_run)
         self._banner()
 
+        # Offered ahead of the import, because a run that got far enough to
+        # save a checkpoint already answered that question: re-asking it
+        # before "continue where you left off" would be a fresh question
+        # standing in front of an old decision.
+        saved = read_checkpoint(self.config)
+        resuming = saved is not None and self._offer_resume(saved)
+        if saved is not None and not resuming:
+            # Starting over discards the progress file and nothing else. The
+            # configuration is a different state, and is not touched here.
+            clear_checkpoint(self.config)
+
         # Asked before anything else, because everything after it depends on
         # the answer: an imported key is a key not to ask for, and an imported
         # model is the default for the model question.
-        elsewhere = self._look_for_another_agent()
+        elsewhere = [] if resuming else self._look_for_another_agent()
         asked = 4 if minimal else 7
         total = asked + (1 if elsewhere else 0)
         step = 1
@@ -507,25 +529,166 @@ class SetupWizard:
         self.plan.start(running=self._running_here())
 
         answers = Answers()
-        answers.provider = self._ask_provider(step, total)
-        spec = catalogue.get(answers.provider)
-        step += 1
+        if resuming:
+            self._effect = self.plan.continue_from_checkpoint()
+            if self.plan.resumed is None:
+                # The plan could not use the saved progress — a provider that
+                # is no longer offered, a step no run can stand on. It
+                # discarded the file; this says so rather than quietly
+                # pretending the offer to continue was kept.
+                resuming = False
+                self.console.print(Text(
+                    "  That saved progress could not be used, so the "
+                    "questions start again.",
+                    style=self.theme.style("dim")))
+            else:
+                step = 1
+                total = self._questions_left(minimal)
 
-        if answers.provider == "custom":
-            answers.base_url = self._ask_endpoint()
-        answers.api_key = self._ask_key(step, total, spec)
-        step += 1
+        while True:
+            if resuming:
+                spec = catalogue.get(self.plan.draft.provider)
+                answers.provider = self.plan.draft.provider
+                answers.base_url = self.plan.draft.base_url
+                self._recap_restored(spec)
+                if self.plan.step is Step.CREDENTIAL:
+                    answers.api_key = self._ask_key(step, total, spec)
+                    step += 1
+                if self.plan.step is Step.MODEL:
+                    answers.model = self._ask_model(step, total, spec, answers)
+                    step += 1
+                    if answers.model is None:
+                        # "Choose a different provider" out of a refused
+                        # credential. The resumed path has ended and the
+                        # ordinary one begins, with its own counting.
+                        resuming = False
+                        step, total = 1, asked
+                        continue
+                if self.plan.step is Step.GITHUB:
+                    self._ask_github(step, total)
+                    step += 1
+                break
 
-        answers.model = self._ask_model(step, total, spec, answers)
-        step += 1
+            first = step
+            answers.provider = self._ask_provider(step, total)
+            spec = catalogue.get(answers.provider)
+            step += 1
 
-        self._ask_github(step, total)
+            if answers.provider == "custom":
+                answers.base_url = self._ask_endpoint()
+            answers.api_key = self._ask_key(step, total, spec)
+            step += 1
+
+            answers.model = self._ask_model(step, total, spec, answers)
+            step += 1
+            if answers.model is None:
+                step = first
+                continue
+
+            self._ask_github(step, total)
+            step += 1
+            break
 
         if not minimal:
-            answers.approvals = self._ask_approvals(step + 1, total)
-            answers.skills = self._ask_skills(step + 2, total)
-            self._ask_telegram(step + 3, total, answers)
+            answers.approvals = self._ask_approvals(step, total)
+            answers.skills = self._ask_skills(step + 1, total)
+            self._ask_telegram(step + 2, total, answers)
         return answers
+
+    # ---------------------------------------------------------------- resume #
+
+    def _offer_resume(self, saved: Checkpoint) -> bool:
+        """An interrupted run was found. Continue it, start over, or leave.
+
+        Offered rather than applied in either direction: silently continuing
+        would surprise somebody who had forgotten they started, and silently
+        restarting would destroy answers they gave. The progress file holds no
+        secrets — a typed key is asked again rather than written down — and
+        saying so on the screen is what makes "continue" mean something.
+        """
+        self._rule("Continue where you left off?", 0, 0)
+        spec = catalogue.get(saved.provider)
+        where = spec.label if spec else (saved.provider or "the first question")
+        reached = {
+            "credential": "the API key",
+            "model": "choosing a model",
+            "github": "the GitHub question",
+            "ready": "the last screen",
+        }.get(saved.step, "the provider list")
+        self.console.print(Text.assemble(
+            ("  A previous setup reached ", self.theme.style("dim")),
+            (reached, self.theme.style("value")),
+            (f" with {where}.", self.theme.style("dim")),
+        ))
+        if saved.model:
+            self.console.print(Text.assemble(
+                ("  Model ", self.theme.style("dim")),
+                (saved.model, self.theme.style("value")),
+            ))
+        if saved.base_url:
+            self.console.print(Text.assemble(
+                ("  Endpoint ", self.theme.style("dim")),
+                (saved.base_url, self.theme.style("value")),
+            ))
+        self.console.print(Text(
+            "  Saved progress holds no keys; one you typed is asked again.\n",
+            style=self.theme.style("dim")))
+
+        choice = self._choose([
+            ("continue", "Continue previous setup", f"pick up at {reached}"),
+            ("fresh", "Start over",
+             "ask everything again; the saved progress is discarded"),
+            ("cancel", "Cancel", "leave everything exactly as it is"),
+        ], default=1, title="Setup")
+        if choice == "cancel":
+            # The configuration was never touched — the transaction sees to
+            # that — and the progress file stays, so a later run can still
+            # offer the same choice. Callers already handle this the way they
+            # handle Ctrl-C, which is what it means.
+            raise KeyboardInterrupt
+        return choice == "continue"
+
+    def _questions_left(self, minimal: bool) -> int:
+        """How many questions a resumed run will still ask.
+
+        Counted from the plan's own position rather than assumed: a resume
+        that lands on the GitHub question has one left, and labelling it
+        "3 of 4" would be the counter disagreeing with the screen.
+        """
+        left = {Step.CREDENTIAL: 3, Step.MODEL: 2, Step.GITHUB: 1}.get(
+            self.plan.step, 0)
+        return left + (0 if minimal else 3)
+
+    def _recap_restored(self, spec) -> None:
+        """The answers a resume brought back, one quiet line each.
+
+        Restored answers are shown the way freshly given ones are, because a
+        question that is not asked again still deserves to be seen — a wrong
+        restoration is only catchable if it is visible. Nothing here can name
+        a key: the checkpoint has nowhere to put one.
+        """
+        draft = self.plan.draft
+        if draft.provider:
+            label = spec.label if spec else draft.provider
+            self._answered("provider", label)
+        if draft.base_url:
+            self._answered("endpoint", draft.base_url)
+        words = {
+            CredentialSource.ENVIRONMENT:
+                f"from ${draft.env_variable}" if draft.env_variable
+                else "from the environment",
+            CredentialSource.EXISTING: "already stored here",
+            CredentialSource.IMPORTED: "imported",
+            CredentialSource.ENTERED: "to enter again",
+        }.get(draft.credential)
+        if words:
+            self._answered("api key", words)
+        if draft.model:
+            self._answered("model", draft.model)
+        if draft.github is GitHubIntent.SKIP:
+            self._answered("github", "skipped")
+        elif draft.github is GitHubIntent.KEEP:
+            self._answered("github", "kept")
 
     # ---------------------------------------------------------------- import #
 
@@ -1108,15 +1271,30 @@ class SetupWizard:
         return "already in your config file", ""
 
     def _ask_model(self, step: int, total: int,
-                   spec: catalogue.ProviderSpec | None, answers: Answers) -> str:
-        # Discovery first, and the question afterwards, because asking the
-        # provider what it has takes a second or two over the network. During
-        # that second the terminal is still in its ordinary mode, so anything
-        # impatient fingers press is echoed — an arrow key arrives on screen as
-        # `^[[B` and sits there. Clearing for the question is what wipes it, so
-        # the clearing has to come second. The keystrokes themselves are
-        # discarded when the reader takes the terminal.
+                   spec: catalogue.ProviderSpec | None,
+                   answers: Answers) -> str | None:
+        """The model question. None means "back to the provider list".
+
+        Discovery first, and the question afterwards, because asking the
+        provider what it has takes a second or two over the network. During
+        that second the terminal is still in its ordinary mode, so anything
+        impatient fingers press is echoed — an arrow key arrives on screen as
+        `^[[B` and sits there. Clearing for the question is what wipes it, so
+        the clearing has to come second. The keystrokes themselves are
+        discarded when the reader takes the terminal.
+
+        A credential the provider refused is corrected before any list is
+        drawn. Choosing a model against a key that does not work ends at a
+        Ready screen that cannot be committed — a dead end dressed up as
+        progress — so the refusal is handled where it happens, with every
+        earlier answer kept.
+        """
         models = self._discover_models(spec, answers)
+        while self.plan.validation.check is Check.INVALID:
+            if self._offer_credential_fix(step, total, answers) == "back":
+                return None
+            models = self._discover_models(spec, answers)
+
         check = self.plan.validation.check
         reason = self.plan.validation.reason
 
@@ -1188,6 +1366,60 @@ class SetupWizard:
                 "confirmed, and setup will say so rather than claim it works.",
                 style=self.theme.style("dim")))
 
+    def _offer_credential_fix(self, step: int, total: int,
+                               answers: Answers) -> str:
+        """The provider refused the credential. Fix that, and nothing else.
+
+        Retry, replace, go back or cancel — the plan stays where it is, the
+        staged configuration is still unwritten, and every earlier answer
+        survives the correction. What must not happen is the wizard walking
+        on: the plan refuses to commit an INVALID validation, so continuing
+        would only move the failure to the end of the whole flow instead of
+        fixing it where the problem is.
+        """
+        self._rule("That credential was refused", step, total)
+        reason = self.plan.validation.reason or self.plan.error
+        if reason:
+            self.console.print(Text(f"  {reason}",
+                                    style=self.theme.style("bad")))
+        self.console.print(Text("  Everything else you answered is kept.\n",
+                                style=self.theme.style("dim")))
+
+        fact = next((each for each in self.plan.facts
+                     if each.id == self.plan.draft.provider), None)
+        options: list[tuple[str, str, str]] = []
+        if fact is not None and fact.needs_key:
+            options.append(("replace", "Enter a different key",
+                            "the provider is asked again straight away"))
+        options.append(("retry", "Try this credential again",
+                        "a refusal can be the provider having a bad minute"))
+        options.append(("back", "Choose a different provider",
+                        "back to the provider list"))
+        options.append(("cancel", "Cancel setup",
+                        "nothing is written; your configuration stays as "
+                        "it is"))
+        choice = self._choose(options, default=1, title="API key")
+
+        if choice == "cancel":
+            self.plan.cancel()
+            raise KeyboardInterrupt
+        if choice == "back":
+            self.plan.back()
+            return "back"
+        if choice == "retry":
+            self._effect = self.plan.retry_validation()
+            return "retry"
+        while True:
+            # Masked, exactly like the first asking: keys get pasted in
+            # shared terminals and shoulder-surfed off screen recordings.
+            key = self._secret("  key (input hidden): ").strip()
+            if key:
+                answers.api_key = key
+                self._effect = self.plan.submit_credential(key)
+                return "replace"
+            self.console.print(Text("  a key is required for this provider",
+                                    style=self.theme.style("bad")))
+
     def _discover_models(self, spec: catalogue.ProviderSpec | None,
                          answers: Answers) -> list[str]:
         """Run the probe the plan asked for, and tell it what happened.
@@ -1235,8 +1467,12 @@ class SetupWizard:
             except Exception as problem:      # noqa: BLE001 - classified below
                 check, reason = classify_probe(problem)
 
-        if check is not Check.VALID and spec is not None:
+        if (check is not Check.VALID and check is not Check.INVALID
+                and spec is not None):
             # Offered, and labelled as not confirmed by `_say_what_the_probe_found`.
+            # A refused credential is excluded: a list drawn under it would be
+            # presented as though the key were fine and only the network were
+            # slow, when what is owed is a correction.
             models = list(spec.models)
 
         known = list(spec.models) if spec is not None else []
@@ -1718,10 +1954,25 @@ def run_setup(config: Config, console: Console | None = None,
 
     What was chosen is left on the config as `start_after_setup`, so the caller
     can act on the half it owns without this function reaching into it.
+
+    A plan that refuses to commit returns the configuration it was given,
+    unchanged, with the refusal said on screen. The questions above are
+    supposed to make that unreachable — an invalid credential is corrected
+    where it was refused — and if one ever does reach this point, a first run
+    ends with an explanation rather than a traceback and a caller that can
+    still see `needs_setup` is a caller that can still exit honestly.
     """
     wizard = SetupWizard(config, console=console)
     answers = wizard.run()
-    saved = wizard.apply(answers)
+    try:
+        saved = wizard.apply(answers)
+    except SetupError as problem:
+        wizard.console.print()
+        wizard.console.print(Text(f"  Setup stopped: {problem}",
+                                  style=wizard.theme.style("bad")))
+        wizard.console.print(Text("  Nothing was changed.",
+                                  style=wizard.theme.style("dim")))
+        return config
     wizard.install_skills(saved, answers)
     wizard.finish(saved, closing=not offer)
 

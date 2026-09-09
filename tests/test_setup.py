@@ -252,6 +252,308 @@ def test_model_discovery_falls_back_when_the_provider_cannot_be_reached(
 
 
 # --------------------------------------------------------------------------- #
+# a refused credential, corrected in place
+#
+# The P1 defect: an authentication failure used to fall through to the
+# catalogue model list, so the wizard walked on to GitHub and Ready and only
+# then died at `commit` — a dead end at the bottom of the flow instead of a
+# correction at the point of the refusal. These drive the real wizard with a
+# scripted probe (no network, no timing) and answer by plan state, because the
+# correction screen inserts a `_choose` between the key and the model and a
+# positional reply stream would drift onto it.
+# --------------------------------------------------------------------------- #
+
+FAKE_KEY = "sk-test-DO-NOT-WRITE-THIS-ANYWHERE-0123456789"
+
+
+class ScriptedProbe:
+    """A provider probe whose `list_models` replays scripted outcomes.
+
+    Each call pops the next outcome: an exception to raise (classified by the
+    real `classify_probe`, so INVALID is proved against the exception type the
+    providers actually raise) or a list of models to return. INVALID-then-VALID
+    is driven by order, with no network and no sleeps.
+    """
+
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.probes = 0
+
+    def list_models(self):
+        self.probes += 1
+        outcome = self.outcomes.pop(0) if self.outcomes else []
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return list(outcome)
+
+    def close(self):
+        pass
+
+
+def refused():
+    from comodor.providers.base import AuthError
+
+    return AuthError("invalid_api_key")
+
+
+def credential_wizard(config, *, secrets, outcomes, corrections, providers,
+                      model_reply="1", github_reply="2"):
+    """A wizard driven by plan state through a credential correction.
+
+    `secrets` answers the masked key prompts in order, `corrections` answers
+    the correction screen (replace/retry/back/cancel by number), and
+    `providers` names the provider to pick each time the provider question is
+    asked — "back" re-asks it, so it is a queue rather than a single value.
+    """
+    probe = ScriptedProbe(outcomes)
+    secret_replies = iter(secrets)
+    correction_replies = iter(corrections)
+    provider_replies = iter(providers)
+    holder: dict = {}
+
+    def prompt(message: str) -> str:
+        plan = holder.get("plan")
+        step = plan.step if plan is not None else None
+        if step is Step.PROVIDER:
+            wanted = next(provider_replies, providers[-1])
+            return str([fact.id for fact in plan.facts].index(wanted) + 1)
+        if step is Step.CREDENTIAL and plan.validation.check is Check.INVALID:
+            return next(correction_replies, "")
+        if step is Step.MODEL:
+            return model_reply
+        if step is Step.GITHUB:
+            return github_reply
+        return ""
+
+    made = SetupWizard(
+        config,
+        console=Console(file=io.StringIO(), width=90, force_terminal=False),
+        prompt=prompt,
+        secret=lambda message: next(secret_replies, ""),
+    )
+    holder["plan"] = made.plan
+    made._probe = probe                     # so a test can assert on it
+    return made, probe
+
+
+def test_a_refused_credential_is_corrected_in_place(blank, monkeypatch):
+    made, probe = credential_wizard(
+        blank, secrets=["sk-bad", FAKE_KEY],
+        outcomes=[refused(), ["gpt-4o", "gpt-4o-mini"]],
+        corrections=["1"], providers=["openai"])          # 1 = replace
+    monkeypatch.setattr("comodor.providers.gateway.build_provider",
+                        lambda entry, *a, **k: probe)
+
+    answers = made.run()
+    saved = made.apply(answers)
+
+    drawn = made.console.file.getvalue()
+    assert "That credential was refused" in drawn
+    assert saved.provider == "openai"
+    assert saved.active_model() == "gpt-4o"
+    assert saved.providers["openai"].api_key == FAKE_KEY
+    assert probe.probes == 2, "the replacement key was proved before advancing"
+
+
+def test_a_replacement_that_is_refused_again_stays_recoverable(blank, monkeypatch):
+    made, probe = credential_wizard(
+        blank, secrets=["sk-bad-1", "sk-bad-2", FAKE_KEY],
+        outcomes=[refused(), refused(), ["gpt-4o"]],
+        corrections=["1", "1"], providers=["openai"])
+    monkeypatch.setattr("comodor.providers.gateway.build_provider",
+                        lambda entry, *a, **k: probe)
+
+    saved = made.apply(made.run())
+
+    assert saved.active_model() == "gpt-4o"
+    assert saved.providers["openai"].api_key == FAKE_KEY
+    assert probe.probes == 3
+
+
+def test_retrying_a_refused_credential_proves_the_same_key(blank, monkeypatch):
+    """A refusal can be the provider's bad minute. Retry must not cost the
+    key: it is asked again with the credential the plan already holds."""
+    made, probe = credential_wizard(
+        blank, secrets=[FAKE_KEY], outcomes=[refused(), ["gpt-4o"]],
+        corrections=["2"], providers=["openai"])          # 2 = retry
+    monkeypatch.setattr("comodor.providers.gateway.build_provider",
+                        lambda entry, *a, **k: probe)
+
+    saved = made.apply(made.run())
+
+    assert saved.active_model() == "gpt-4o"
+    assert saved.providers["openai"].api_key == FAKE_KEY
+    assert probe.probes == 2
+
+
+def test_back_from_a_refused_credential_returns_to_the_provider(blank, monkeypatch):
+    made, probe = credential_wizard(
+        blank, secrets=["sk-bad"], outcomes=[refused(), ["qwen2.5-coder"]],
+        corrections=["3"], providers=["openai", "ollama"])  # 3 = back
+    monkeypatch.setattr("comodor.providers.gateway.build_provider",
+                        lambda entry, *a, **k: probe)
+
+    saved = made.apply(made.run())
+
+    assert saved.provider == "ollama", "back reached the provider list"
+    assert saved.active_model() == "qwen2.5-coder"
+
+
+def test_cancel_during_correction_leaves_the_working_config_untouched(
+        blank, monkeypatch):
+    """Reconfiguring a working machine, then cancelling at the refusal, must
+    leave the configuration that was already usable exactly as it was."""
+    blank.use("ollama", model="already-working")
+    blank.save()
+    good = blank.paths.config_file.read_text(encoding="utf-8")
+
+    made, probe = credential_wizard(
+        blank, secrets=["sk-bad"], outcomes=[refused()],
+        corrections=["4"], providers=["openai"])          # 4 = cancel
+    monkeypatch.setattr("comodor.providers.gateway.build_provider",
+                        lambda entry, *a, **k: probe)
+
+    with pytest.raises(KeyboardInterrupt):
+        made.run()
+
+    assert blank.paths.config_file.read_text(encoding="utf-8") == good
+    assert "sk-bad" not in blank.paths.config_file.read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# resuming an interrupted setup, in the real wizard
+#
+# A checkpoint is only a recovery if the terminal setup path actually consumes
+# it. These drive a real SetupWizard: make progress, interrupt, then prove a
+# fresh wizard offers to continue and picks up mid-flow rather than from
+# provider zero. The resume offer happens before `plan.start()`, so it is the
+# one moment `plan.step is PROVIDER` with `plan.facts` still empty — which is
+# how the harness tells it apart from the real provider question.
+# --------------------------------------------------------------------------- #
+
+OLLAMA_MODELS = ["qwen2.5-coder:14b"]
+
+
+def resume_wizard(config, outcomes, *, resume_reply, provider,
+                  model_reply="1", github_reply="2",
+                  interrupt_at_github=False):
+    probe = ScriptedProbe(outcomes)
+    asked: list[str] = []
+    holder: dict = {}
+
+    def prompt(message: str) -> str:
+        plan = holder.get("plan")
+        step = plan.step if plan is not None else None
+        if step is Step.PROVIDER and not plan.facts:
+            asked.append("resume")
+            return resume_reply
+        if step is Step.PROVIDER:
+            asked.append("provider")
+            return str([fact.id for fact in plan.facts].index(provider) + 1)
+        if step is Step.MODEL:
+            asked.append("model")
+            return model_reply
+        if step is Step.GITHUB:
+            asked.append("github")
+            if interrupt_at_github:
+                raise KeyboardInterrupt
+            return github_reply
+        asked.append(str(step))
+        return ""
+
+    made = SetupWizard(
+        config,
+        console=Console(file=io.StringIO(), width=90, force_terminal=False),
+        prompt=prompt,
+        secret=lambda message: "",
+    )
+    holder["plan"] = made.plan
+    return made, probe, asked
+
+
+def _interrupt_a_run(blank, monkeypatch, provider="ollama",
+                     outcomes=(OLLAMA_MODELS, OLLAMA_MODELS)):
+    """Make non-secret progress, then stop at the GitHub question."""
+    from comodor.onboarding import checkpoint_path
+
+    made, probe, _ = resume_wizard(blank, list(outcomes), resume_reply="1",
+                                   provider=provider, interrupt_at_github=True)
+    monkeypatch.setattr("comodor.providers.gateway.build_provider",
+                        lambda entry, *a, **k: probe)
+    with pytest.raises(KeyboardInterrupt):
+        made.run()
+    assert checkpoint_path(blank).exists(), "progress was not saved"
+    return probe
+
+
+def test_an_interrupted_setup_resumes_in_the_real_wizard(blank, monkeypatch):
+    from comodor.onboarding import checkpoint_path
+
+    _interrupt_a_run(blank, monkeypatch)
+    body = json.loads(checkpoint_path(blank).read_text(encoding="utf-8"))
+    assert body["provider"] == "ollama"
+    assert body["model"] == "qwen2.5-coder:14b"
+
+    made2, probe2, asked2 = resume_wizard(blank, [OLLAMA_MODELS],
+                                          resume_reply="1", provider="ollama")
+    monkeypatch.setattr("comodor.providers.gateway.build_provider",
+                        lambda entry, *a, **k: probe2)
+    saved = made2.apply(made2.run())
+
+    assert "resume" in asked2, "the resume offer was not made"
+    assert "provider" not in asked2, "it restarted from the provider question"
+    assert "model" not in asked2, "it re-asked a model already chosen"
+    assert probe2.probes == 0, "it re-discovered models on resume"
+    assert saved.provider == "ollama"
+    assert saved.active_model() == "qwen2.5-coder:14b"
+    assert not checkpoint_path(blank).exists(), "the checkpoint was not cleared"
+
+
+def test_starting_over_from_a_checkpoint_begins_fresh(blank, monkeypatch):
+    from comodor.onboarding import checkpoint_path
+
+    _interrupt_a_run(blank, monkeypatch)
+    assert checkpoint_path(blank).exists()
+
+    made2, probe2, asked2 = resume_wizard(blank, [OLLAMA_MODELS, OLLAMA_MODELS],
+                                          resume_reply="2", provider="ollama")
+    monkeypatch.setattr("comodor.providers.gateway.build_provider",
+                        lambda entry, *a, **k: probe2)
+    saved = made2.apply(made2.run())
+
+    assert "resume" in asked2
+    assert "provider" in asked2, "start over must ask the provider again"
+    assert probe2.probes == 1, "start over rediscovers rather than restoring"
+    assert saved.provider == "ollama"
+    assert not checkpoint_path(blank).exists()
+
+
+def test_cancelling_at_the_resume_offer_leaves_the_config_untouched(
+        blank, monkeypatch):
+    """A working machine, an interrupted reconfiguration, then Cancel at the
+    resume offer: the configuration that was already usable stays exactly as it
+    was, and the staged reconfiguration is never written."""
+    blank.use("ollama", model="already-working")
+    blank.save()
+    good = blank.paths.config_file.read_text(encoding="utf-8")
+
+    # Reconfigure toward LM Studio, interrupted at GitHub. LM Studio needs no
+    # key, so the interruption is about the flow, not a credential.
+    _interrupt_a_run(blank, monkeypatch, provider="lmstudio",
+                     outcomes=(["llama3.3"], ["llama3.3"]))
+    assert blank.paths.config_file.read_text(encoding="utf-8") == good, \
+        "the interrupted run wrote to the configuration"
+
+    made2, _, asked2 = resume_wizard(blank, [["llama3.3"]], resume_reply="3",
+                                     provider="lmstudio")   # 3 = cancel
+    with pytest.raises(KeyboardInterrupt):
+        made2.run()
+
+    assert "resume" in asked2
+    assert blank.paths.config_file.read_text(encoding="utf-8") == good
+
+
+# --------------------------------------------------------------------------- #
 # the config file
 # --------------------------------------------------------------------------- #
 

@@ -399,6 +399,12 @@ def run_setup_command(config: Config, args: Any = None) -> int:
         print("\nSetup cancelled; nothing was changed.", file=sys.stderr)
         return 130
 
+    if config.needs_setup:
+        # The wizard stopped short of a usable configuration — it says why
+        # itself, and the transaction left the machine exactly as it was.
+        # Offering to start an interface with nothing to talk to would be
+        # offering something that cannot work.
+        return 1
     if config.start_after_setup in ("interface", "both"):
         return start_interface(config, args)
     return 0

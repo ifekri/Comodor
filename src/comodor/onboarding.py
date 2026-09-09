@@ -690,10 +690,26 @@ class SetupPlan:
         interrupted needed one, the person types it again — trading one
         re-entry against never writing a secret into a file is not a close
         call.
+
+        Progress that cannot be honoured is not resumed. A checkpoint naming
+        a provider this machine no longer offers is discarded rather than
+        guessed at, and the run starts over — the progress file, never the
+        configuration.
         """
         saved = self.resumed
         if saved is None:
             return self.start()
+        step = _step(saved.step)
+        if (not saved.provider or self._fact(saved.provider) is None
+                or step not in (Step.CREDENTIAL, Step.MODEL, Step.GITHUB,
+                                Step.READY)):
+            # Nothing to resume onto. Either the provider no longer exists —
+            # every later question depends on a choice that cannot be
+            # honoured — or the saved step is not one a run can stand on.
+            # `start_over` discards the progress file and leaves the real
+            # configuration exactly as it is.
+            self.resumed = None
+            return self.start_over()
         draft = Draft(
             provider=saved.provider,
             credential=_credential(saved.credential),
@@ -704,21 +720,37 @@ class SetupPlan:
             github=_intent(saved.github),
         )
         # A stored credential is still there; a typed one is not, so a step
-        # that depended on it goes back to being asked.
+        # that depended on it goes back to being asked. Probing without the
+        # key would manufacture a refusal nobody caused, and a model chosen
+        # with an unsaved key was chosen by a run that no longer exists.
         if draft.credential is CredentialSource.ENTERED:
-            draft = replace(draft, credential=CredentialSource.ENTERED, model="")
+            draft = replace(draft, credential=CredentialSource.ENTERED,
+                            model="")
+            step = Step.CREDENTIAL
+        elif step is Step.READY and draft.github is GitHubIntent.ASK:
+            # A connection that was made but never committed is not a
+            # connection: the verified installation died with the process.
+            # Ready would present a GitHub answer that did not survive, so
+            # the question is asked again instead.
+            step = Step.GITHUB
         self.draft = draft
-        self.step = _step(saved.step) or Step.PROVIDER
+        self.step = step
         return self._settle()
 
     def start_over(self) -> Effect:
-        """Throw the saved progress away and begin again."""
+        """Throw the saved progress away and begin again.
+
+        The checkpoint and the configuration are different states: this
+        discards the first and does not touch the second. A run that is
+        thrown away must not take a working setup with it.
+        """
         clear_checkpoint(self.config)
         self.resumed = None
         self.draft = Draft()
         self.validation = Validation()
         self.github = GitHub()
         self._installation = None
+        self._secret = ""
         self.error = ""
         self.step = Step.PROVIDER
         return self._advance_to_first_step()
@@ -1071,6 +1103,22 @@ class SetupPlan:
         models = tuple(result.models)
         self.validation = Validation(check=result.check, reason=result.reason,
                                      models=models, attempt=attempt)
+        if result.check is Check.INVALID:
+            # A refused credential is not a model question, and must not
+            # become one. The conversation goes back to the credential, so
+            # nothing downstream of it — a model, GitHub, Ready — can even be
+            # reached until a corrected key has been proved. The commit guard
+            # would refuse an INVALID validation anyway, but a guard that
+            # fires is a dead end for whoever is mid-first-run; this is the
+            # way back. UNREACHABLE and friends deliberately stay put: a
+            # network blip is not a wrong key, and sending somebody to
+            # rotate a credential that was fine is its own kind of failure.
+            self.error = result.reason or \
+                "The provider rejected that credential."
+            self.step = Step.CREDENTIAL
+            self._save_progress()
+            return True
+        self.error = ""
         # A discovered list with one entry is not a choice, it is an answer.
         if result.check is Check.VALID and models and not self.draft.model:
             self.draft = replace(self.draft, model=models[0])
@@ -1152,14 +1200,17 @@ class SetupPlan:
             return "No provider has been chosen."
         if self.draft.provider == "custom" and not self.draft.base_url:
             return "A custom endpoint needs its URL."
+        if self.validation.check is Check.INVALID:
+            # Ahead of the gaps it causes: a refused credential is why there
+            # is no model yet, and naming the symptom instead of the cause
+            # would send somebody to the wrong question.
+            return "The provider refused that credential. Fix it or choose " \
+                   "another provider."
         if not self.draft.model:
             return "No model has been chosen."
         if self._needs_credential() and self.draft.credential is CredentialSource.ENTERED \
                 and not self._secret:
             return "A credential is still needed."
-        if self.validation.check is Check.INVALID:
-            return "The provider refused that credential. Fix it or choose " \
-                   "another provider."
         return ""
 
     # -- the host's side of the secret ------------------------------------ #
