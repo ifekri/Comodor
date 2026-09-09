@@ -44,6 +44,17 @@ def run_tui(config: Config, args: argparse.Namespace) -> int:
     not replaced until this one has been proven at parity — a migration that
     swaps the default first is one where every gap is discovered by a person
     trying to work.
+
+    Setup-aware, because the renderer spawns a core over the protocol, and a
+    core with no configured provider renders a conversation that cannot be
+    answered. A first run of `comodor tui-v2` therefore asks the same questions
+    `comodor` asks — through the same canonical setup path, in the same
+    invocation — and starts only if they were answered. This is not a second
+    setup wizard: it reuses `SetupPlan`, the terminal adapter and the trusted
+    secret boundary, so there is nothing to keep in step and no second shell
+    command to run. The launcher's own requirements (a source checkout, Bun)
+    are checked first, so nobody answers setup only to be told the renderer
+    cannot start.
     """
     import os
     import shutil
@@ -69,6 +80,22 @@ def run_tui(config: Config, args: argparse.Namespace) -> int:
             "Then, from the repository root:  bun run apps/tui/src/main.tsx",
             file=sys.stderr)
         return 2
+
+    if config.needs_setup:
+        from ..setup import run_setup
+
+        try:
+            config = run_setup(config)
+        except (KeyboardInterrupt, EOFError):
+            print("\nSetup cancelled; TUI v2 was not started.", file=sys.stderr)
+            return 130
+        if config.needs_setup:
+            # run_setup stopped short of a usable configuration — it says why
+            # itself. Starting now would spawn a core with nothing to talk to.
+            print("Setup did not finish, so there is no configured provider "
+                  "for TUI v2 to drive. Run `comodor setup` when you are "
+                  "ready.", file=sys.stderr)
+            return 1
 
     environment = dict(os.environ)
     # The child spawns its own core, and it must be this one rather than

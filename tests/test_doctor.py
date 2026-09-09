@@ -510,3 +510,137 @@ def test_no_model_means_nothing_to_say(home):
     config.providers["anthropic"].model = ""
 
     assert _check_context_window(config) is None
+
+
+# --------------------------------------------------------------------------- #
+# setup state, and resumable progress
+# --------------------------------------------------------------------------- #
+
+
+def test_setup_complete_is_quiet(home):
+    from comodor.doctor import _check_setup
+
+    assert _check_setup(configured(home)).status is Status.OK
+
+
+def test_an_interrupted_setup_on_an_unusable_machine_is_a_failure(home):
+    """The truth a first-run doctor should tell: setup stopped part-way, and
+    the checkpoint that survives says where, so `comodor setup` can resume."""
+    from comodor.doctor import _check_setup
+    from comodor.onboarding import Checkpoint, write_checkpoint
+
+    config = load(cwd=home / "project", use_environment=False)
+    assert config.needs_setup
+    write_checkpoint(config, Checkpoint(step="model", provider="openai",
+                                        credential="entered", model="gpt-4o"))
+
+    found = _check_setup(config)
+    assert found.status is Status.FAIL
+    assert "openai" in found.detail
+    assert "continue" in found.remedy
+
+
+def test_saved_progress_on_a_working_machine_is_a_warning(home):
+    """An interrupted reconfiguration is waiting; the next setup will offer to
+    resume it, which is worth a word but not a failure."""
+    from comodor.doctor import _check_setup
+    from comodor.onboarding import Checkpoint, write_checkpoint
+
+    config = configured(home)
+    assert not config.needs_setup
+    write_checkpoint(config, Checkpoint(step="github", provider="anthropic"))
+
+    found = _check_setup(config)
+    assert found.status is Status.WARN
+    assert "already configured" in found.detail
+
+
+def test_the_setup_check_names_no_secret(home):
+    """The checkpoint holds no secret by construction; doctor must not invent
+    one. A key typed during the interrupted run is gone, and the finding says
+    which provider was reached, never a credential."""
+    from comodor.doctor import _check_setup
+    from comodor.onboarding import Checkpoint, write_checkpoint
+
+    config = load(cwd=home / "project", use_environment=False)
+    write_checkpoint(config, Checkpoint(step="credential", provider="openai",
+                                        credential="entered"))
+
+    found = _check_setup(config)
+    assert "sk-" not in found.detail
+    assert "entered" not in found.detail
+
+
+# --------------------------------------------------------------------------- #
+# the GitHub connection, checked offline
+# --------------------------------------------------------------------------- #
+
+
+def test_github_absent_and_optional_says_nothing(home):
+    from comodor.doctor import _check_github
+
+    config = configured(home)
+    assert config.github.installations == []
+    assert _check_github(config) is None
+
+
+def test_github_enabled_with_no_installation_is_a_warning(home):
+    from comodor.doctor import _check_github
+
+    config = configured(home)
+    config.github.enabled = True
+
+    assert _check_github(config).status is Status.WARN
+
+
+def test_a_connected_installation_with_its_key_is_ok(home):
+    from comodor.config import GitHubInstallation
+    from comodor.doctor import _check_github
+    from comodor.github import identity
+
+    config = configured(home)
+    config.github.remember(GitHubInstallation(
+        installation_id=7, account_id=1, account_login="ifekri",
+        account_type="User", repository_selection="all",
+        grant="g2.signed-statement"))
+    identity.save(config.paths.user, 7, identity.generate())
+
+    found = _check_github(config)
+    assert found.status is Status.OK
+    assert "ifekri" in found.detail
+
+
+def test_an_installation_whose_local_key_is_missing_cannot_be_used(home):
+    """The grant is in the config; the private half lives outside it and can go
+    missing on its own. That reads as connected and fails at the first request,
+    so doctor names it — without reaching GitHub."""
+    from comodor.config import GitHubInstallation
+    from comodor.doctor import _check_github
+
+    config = configured(home)
+    config.github.remember(GitHubInstallation(
+        installation_id=7, account_id=1, account_login="ifekri",
+        account_type="User", repository_selection="all",
+        grant="g2.signed-statement"))
+
+    found = _check_github(config)
+    assert found.status is Status.WARN
+    assert "ifekri" in found.detail
+    assert "key missing" in found.detail
+
+
+def test_a_pre_security_fix_grant_needs_reconnecting(home):
+    from comodor.config import GitHubInstallation
+    from comodor.doctor import _check_github
+    from comodor.github import identity
+
+    config = configured(home)
+    config.github.remember(GitHubInstallation(
+        installation_id=7, account_id=1, account_login="ifekri",
+        account_type="User", repository_selection="all",
+        grant="g1.old-grant"))
+    identity.save(config.paths.user, 7, identity.generate())
+
+    found = _check_github(config)
+    assert found.status is Status.WARN
+    assert "needs reconnecting" in found.detail

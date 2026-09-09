@@ -103,3 +103,142 @@ def test_the_greeting_a_spawned_core_prints_names_the_protocol(tmp_path):
 
     assert PROTOCOL_LABEL in process.stderr
     assert "protocol v1" not in process.stderr
+
+
+# --------------------------------------------------------------------------- #
+# `comodor tui-v2` is setup-aware
+#
+# The renderer spawns a core over the protocol, and a core with no configured
+# provider renders a conversation that cannot be answered. So the launcher runs
+# the canonical setup first and starts only if it produced a usable
+# configuration — in the same invocation. Bun and the process spawn are faked;
+# no physical terminal, no real renderer, no network.
+# --------------------------------------------------------------------------- #
+
+import pytest  # noqa: E402
+
+from comodor.config import load  # noqa: E402
+
+ENTRY = (Path(commands.__file__).resolve().parents[3]
+         / "apps" / "tui" / "src" / "main.tsx")
+
+
+@pytest.fixture
+def checkout_with_tui(monkeypatch):
+    """The launcher needs apps/tui present and Bun on the path. Both faked."""
+    if not ENTRY.exists():
+        pytest.skip("tui-v2 launcher tests run from a source checkout")
+    monkeypatch.setattr("shutil.which", lambda name: "/fake/bun")
+
+
+def a_fresh_config(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("COMODOR_HOME", str(tmp_path / "home"))
+    return load(cwd=project, use_environment=False)
+
+
+def test_tui_v2_runs_setup_before_spawning_a_core_on_a_fresh_machine(
+        tmp_path, monkeypatch, checkout_with_tui):
+    config = a_fresh_config(tmp_path, monkeypatch)
+    assert config.needs_setup
+
+    events: list[str] = []
+
+    def fake_setup(cfg):
+        events.append("setup")
+        cfg.use("ollama", model="qwen2.5-coder:14b")
+        cfg.save()
+        return cfg
+
+    def fake_call(argv, cwd=None, env=None):
+        events.append("spawn")
+        # At the moment of the spawn the configuration must already be usable:
+        # this is the "no unconfigured core" guarantee, checked at the seam.
+        assert not load(cwd=cwd, use_environment=False).needs_setup
+        return 0
+
+    monkeypatch.setattr("comodor.setup.run_setup", fake_setup)
+    monkeypatch.setattr("subprocess.call", fake_call)
+
+    rc = commands.run_tui(config, argparse.Namespace())
+
+    assert rc == 0
+    assert events == ["setup", "spawn"], \
+        "setup must complete before the core is spawned, in one invocation"
+
+
+def test_tui_v2_launches_directly_when_already_configured(
+        tmp_path, monkeypatch, checkout_with_tui):
+    config = a_fresh_config(tmp_path, monkeypatch)
+    config.use("ollama", model="qwen2.5-coder:14b")
+    config.save()
+    config = load(cwd=config.paths.project, use_environment=False)
+    assert not config.needs_setup
+
+    def forbidden(cfg):
+        raise AssertionError("setup ran on an already-configured machine")
+
+    events: list[str] = []
+    monkeypatch.setattr("comodor.setup.run_setup", forbidden)
+    monkeypatch.setattr("subprocess.call",
+                        lambda *a, **k: events.append("spawn") or 0)
+
+    rc = commands.run_tui(config, argparse.Namespace())
+
+    assert rc == 0
+    assert events == ["spawn"]
+
+
+def test_tui_v2_does_not_spawn_when_setup_is_cancelled(
+        tmp_path, monkeypatch, checkout_with_tui):
+    config = a_fresh_config(tmp_path, monkeypatch)
+
+    def cancelling(cfg):
+        raise KeyboardInterrupt
+
+    spawned: list[int] = []
+    monkeypatch.setattr("comodor.setup.run_setup", cancelling)
+    monkeypatch.setattr("subprocess.call",
+                        lambda *a, **k: spawned.append(1) or 0)
+
+    rc = commands.run_tui(config, argparse.Namespace())
+
+    assert rc == 130
+    assert spawned == [], "a cancelled setup must not spawn an unusable core"
+    assert not config.paths.config_file.exists(), \
+        "a cancelled setup wrote a configuration"
+
+
+def test_tui_v2_does_not_spawn_when_setup_stops_short(
+        tmp_path, monkeypatch, checkout_with_tui):
+    """run_setup returning an still-unusable configuration (it stopped on a
+    refusal and said why) must not reach the spawn either."""
+    config = a_fresh_config(tmp_path, monkeypatch)
+
+    stalled = lambda cfg: cfg                    # noqa: E731 - unchanged
+    spawned: list[int] = []
+    monkeypatch.setattr("comodor.setup.run_setup", stalled)
+    monkeypatch.setattr("subprocess.call",
+                        lambda *a, **k: spawned.append(1) or 0)
+
+    rc = commands.run_tui(config, argparse.Namespace())
+
+    assert rc == 1
+    assert spawned == [], "an unfinished setup must not spawn a core"
+
+
+def test_tui_v2_still_refuses_without_bun(tmp_path, monkeypatch):
+    """The launcher's own requirements are checked before setup is offered, so
+    nobody answers the questions only to be told the renderer cannot start."""
+    if not ENTRY.exists():
+        pytest.skip("tui-v2 launcher tests run from a source checkout")
+    config = a_fresh_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    def forbidden(cfg):
+        raise AssertionError("setup was offered though Bun is missing")
+
+    monkeypatch.setattr("comodor.setup.run_setup", forbidden)
+
+    assert commands.run_tui(config, argparse.Namespace()) == 2

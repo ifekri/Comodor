@@ -100,7 +100,8 @@ def run_checks(config: Config, online: bool = True) -> Report:
     that must not touch the network — a test, or a diagnostic being gathered
     from somewhere with no route out — turns it off and gets the rest.
     """
-    checks = [_check_config, _check_config_permissions, _check_provider,
+    checks = [_check_config, _check_config_permissions, _check_setup,
+              _check_provider,
               _check_saved_provider, _check_model, _check_context_window,
               _check_spend_limit,
               _check_brain,
@@ -109,6 +110,7 @@ def run_checks(config: Config, online: bool = True) -> Report:
               _check_api,
               _check_memory_provider,
               _check_desktop,
+              _check_github,
               _check_telegram, _check_whatsapp, _check_slack]
     if online:
         checks.append(_check_version)
@@ -169,6 +171,45 @@ def _check_config_permissions(config: Config) -> Finding | None:
         "config permissions", Status.WARN,
         f"{path} is readable by other users ({oct(mode)})",
         remedy="restrict it to your account", repair=repair)
+
+
+def _check_setup(config: Config) -> Finding | None:
+    """Whether setup finished, and whether an interrupted run is resumable.
+
+    The checkpoint is the non-secret progress a half-finished wizard left
+    behind. Doctor says it exists — and names the provider it reached, which
+    is not a secret — so "why does setup keep offering to resume" has an answer
+    here rather than being a mystery. It never quotes anything else from the
+    file, and never reaches the network: this reads the local machine only.
+
+    A configured machine with no checkpoint left is the ordinary healthy state
+    and says so quietly. A configured machine that *also* has a checkpoint has
+    an interrupted reconfiguration waiting, which is worth a word because the
+    next `comodor setup` will offer to resume it.
+    """
+    from .onboarding import read_checkpoint
+
+    saved = read_checkpoint(config)
+    if config.needs_setup:
+        if saved is not None:
+            where = saved.provider or "an early question"
+            return Finding(
+                "setup", Status.FAIL,
+                f"interrupted part-way (it reached {where}); nothing usable "
+                f"is configured yet",
+                remedy="run `comodor setup` — it will offer to continue where "
+                       "the interrupted run left off, or to start over")
+        return None                       # the provider check already says so
+    if saved is not None:
+        where = saved.provider or "an early question"
+        return Finding(
+            "setup", Status.WARN,
+            f"an interrupted setup is saved (it reached {where}) though this "
+            f"machine is already configured",
+            remedy="`comodor setup` offers to continue it or start over; "
+                   "starting over discards the saved progress, not the "
+                   "configuration")
+    return Finding("setup", Status.OK, "complete; no saved progress waiting")
 
 
 def _check_provider(config: Config) -> Finding:
@@ -642,6 +683,58 @@ def _check_desktop(config: Config) -> Finding | None:
                        "restart it")
 
     return Finding("computer use", Status.OK, "a backend is present")
+
+
+def _check_github(config: Config) -> Finding | None:
+    """The GitHub connection setup offers, checked without asking GitHub.
+
+    A grant in the config is a public statement; the half that proves this
+    machine owns the connection is a private key held *outside* the config, so
+    it can go missing on its own — a careless copy, a cleaned home directory.
+    An installation recorded without its key reads as connected and then fails
+    at the first request, so it is named here instead. None of this reaches the
+    network: doctor must not cost a call to say what is already on disk, and
+    must not turn into a second setup wizard.
+
+    Not connected at all is a correct state — GitHub is optional and a local
+    repository works without it — so that says nothing.
+    """
+    from .github import identity
+
+    settings = config.github
+    if not settings.installations:
+        if settings.enabled:
+            return Finding(
+                "github", Status.WARN,
+                "enabled, but no installation is recorded",
+                remedy="`comodor github connect` establishes one, or set "
+                       "`github.enabled = false`")
+        return None
+
+    unusable: list[str] = []
+    for one in settings.installations:
+        login = one.account_login or str(one.installation_id)
+        if not one.usable:
+            unusable.append(f"{login} (needs reconnecting)")
+            continue
+        try:
+            identity.load(config.paths.user, one.installation_id)
+        except identity.IdentityError:
+            unusable.append(f"{login} (local key missing)")
+            continue
+        if not identity.is_private(config.paths.user, one.installation_id):
+            unusable.append(f"{login} (key readable by other users)")
+
+    if unusable:
+        return Finding(
+            "github", Status.WARN,
+            f"{len(unusable)} of {len(settings.installations)} connection(s) "
+            f"cannot be used: {', '.join(unusable)}",
+            remedy="`comodor github connect` establishes a new one; nothing "
+                   "local depends on GitHub in the meantime")
+    accounts = ", ".join(one.account_login or str(one.installation_id)
+                         for one in settings.installations)
+    return Finding("github", Status.OK, f"connected as {accounts}")
 
 
 def _check_telegram(config: Config) -> Finding | None:
