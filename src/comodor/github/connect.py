@@ -83,17 +83,38 @@ FLOW_SCHEME = "comodor-github-flow-v1"
 SEPARATOR = "\n"
 
 
+#: Why a connection failed, in terms a caller can branch on.
+#:
+#: `ConnectError` already carried a sentence and an HTTP status, which is
+#: enough for a poller deciding whether to ask again and not enough for
+#: anything deciding what to *show*. "The link expired", "GitHub refused it"
+#: and "somebody closed the tab" want three different next steps, and telling
+#: them apart by matching words inside a message is a comparison that breaks
+#: the first time somebody improves the wording.
+EXPIRED = "expired"
+CANCELLED = "cancelled"
+REFUSED = "refused"
+UNREACHABLE = "unreachable"
+INVALID = "invalid"
+
+
 class ConnectError(RuntimeError):
     """The connection could not be completed. Safe to show.
 
     `status` is the HTTP code when there was one, and `None` when the request
     never got an answer at all. A poller needs the difference: a timeout or a
     503 is worth trying again, and a 401 is the server saying no.
+
+    `kind` is the same distinction for whoever has to present it, and defaults
+    to what the status implies so that a raise site which does not know better
+    is still honest about retrying.
     """
 
-    def __init__(self, message: str, status: int | None = None) -> None:
+    def __init__(self, message: str, status: int | None = None,
+                 kind: str = "") -> None:
         super().__init__(message)
         self.status = status
+        self.kind = kind or (UNREACHABLE if self.transient else INVALID)
 
     @property
     def transient(self) -> bool:
@@ -324,33 +345,36 @@ class Connector:
             if status == "connected":
                 return self._accept(pending, found)
             if status == "cancelled":
-                raise ConnectError("the installation was cancelled on GitHub")
+                raise ConnectError("the installation was cancelled on GitHub",
+                                   kind=CANCELLED)
             if status == "expired":
                 raise ConnectError(
                     "that connection link expired before it was used. Run "
-                    "`comodor github connect` again.")
+                    "`comodor github connect` again.", kind=EXPIRED)
             if status == "not_permitted":
                 raise ConnectError(
                     "GitHub would not confirm that installation is yours to "
                     "connect, so nothing has been granted."
-                    + (f" ({found['reason']})" if found.get("reason") else ""))
+                    + (f" ({found['reason']})" if found.get("reason") else ""),
+                    kind=REFUSED)
             if status == "failed":
                 raise ConnectError(
                     "the authorisation was not completed"
                     + (f": {found['reason']}" if found.get("reason") else "")
-                    + ". Nothing has been connected.")
+                    + ". Nothing has been connected.", kind=CANCELLED)
             if status and status != "pending":
-                raise ConnectError(f"the endpoint said {status}")
+                raise ConnectError(f"the endpoint said {status}", kind=INVALID)
 
             if on_tick is not None:
                 on_tick()
             if now() >= deadline:
                 if last_trouble is not None:
                     raise ConnectError(
-                        f"gave up waiting: {last_trouble}") from None
+                        f"gave up waiting: {last_trouble}",
+                        kind=UNREACHABLE) from None
                 raise ConnectError(
                     "nobody finished the authorisation in time. Nothing has "
-                    "been connected.")
+                    "been connected.", kind=EXPIRED)
             # Never past the deadline: a sleep that overshoots turns a clean
             # timeout into one extra pointless request.
             sleep(min(interval, max(0.0, deadline - now())))
@@ -384,15 +408,17 @@ class Connector:
         """
         text = (receipt or "").strip()
         if not text:
-            raise ConnectError("nothing was pasted")
+            raise ConnectError("nothing was pasted", kind=INVALID)
 
         found = self._post("claim", {"receipt": text})
         status = str(found.get("status") or "")
 
         if status == "cancelled":
-            raise ConnectError("the installation was cancelled on GitHub")
+            raise ConnectError("the installation was cancelled on GitHub",
+                               kind=CANCELLED)
         if status != "connected":
-            raise ConnectError(f"the endpoint said {status or 'nothing'}")
+            raise ConnectError(f"the endpoint said {status or 'nothing'}",
+                               kind=INVALID)
 
         return self._accept(pending, found)
 
@@ -415,16 +441,17 @@ class Connector:
         if str(found.get("nonce") or "") != pending.nonce:
             raise ConnectError(
                 "that result belongs to a different connection attempt. "
-                "Run `comodor github connect` again.")
+                "Run `comodor github connect` again.", kind=REFUSED)
 
         grant = str(found.get("grant") or "")
         if not grant:
             raise ConnectError(
                 "the endpoint completed the installation but issued no grant, "
                 "so this machine could not prove the connection is its own. "
-                "Nothing has been saved.")
+                "Nothing has been saved.", kind=REFUSED)
         if pending.key is None:
-            raise ConnectError("this attempt has no client key to save")
+            raise ConnectError("this attempt has no client key to save",
+                               kind=INVALID)
 
         installation = _installation_from(found.get("installation") or {})
         installation.grant = grant

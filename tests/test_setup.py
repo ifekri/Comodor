@@ -19,8 +19,35 @@ from rich.console import Console
 
 from comodor import catalogue
 from comodor.config import Config, load
+from comodor.onboarding import Check, Step
 from comodor.paths import Paths
 from comodor.setup import Answers, SetupWizard
+
+
+@pytest.fixture(autouse=True)
+def offline(monkeypatch):
+    """Nothing in this suite may reach the internet.
+
+    Two different guards, on purpose. Constructing a GitHub connector is an
+    isolation bug and fails the test on the spot — a deterministic test that
+    wanders into the browser flow used to discover it only after a
+    five-minute network timeout. The provider probe, by contrast, is a
+    legitimate thing for the wizard to attempt and a legitimate thing to fail:
+    it is made to fail offline here, which is the outcome every fallback test
+    in this file was always relying on, without depending on what the network
+    happens to be doing.
+    """
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError(
+            "this test reached the network by constructing a GitHub connector")
+
+    monkeypatch.setattr("comodor.github.connect.Connector", forbidden)
+
+    def unreachable(*_args, **_kwargs):
+        raise OSError("offline: model discovery is refused in this suite")
+
+    monkeypatch.setattr("comodor.providers.gateway.build_provider", unreachable)
+    return None
 
 
 @pytest.fixture
@@ -34,15 +61,34 @@ def blank(tmp_path):
     return config
 
 
-def wizard(config, answers: list[str], key: str = "test-key-0123456789"):
-    """A wizard whose questions are answered from a list."""
+def wizard(config, answers: list[str], key: str = "test-key-0123456789",
+           github: str | None = None):
+    """A wizard whose questions are answered from a list.
+
+    The GitHub question is deliberately not one of that list's positions. It is
+    answered by what it is — skip, unless the test says otherwise — because a
+    reply stream is positional and the flow is not: inserting a step must not
+    be able to turn a leftover "1" into "connect to GitHub", which is a real
+    browser, a real worker and a real network, from a test about something
+    else entirely.
+    """
     replies = iter(answers)
-    return SetupWizard(
+    holder: dict = {}
+
+    def prompt(message: str) -> str:
+        plan = holder.get("plan")
+        if plan is not None and plan.step is Step.GITHUB:
+            return github if github is not None else ""
+        return next(replies, "")
+
+    made = SetupWizard(
         config,
         console=Console(file=io.StringIO(), width=90, force_terminal=False),
-        prompt=lambda message: next(replies),
+        prompt=prompt,
         secret=lambda message: key,
     )
+    holder["plan"] = made.plan
+    return made
 
 
 # --------------------------------------------------------------------------- #
@@ -142,7 +188,7 @@ def test_the_answers_are_applied_and_saved(blank, monkeypatch):
     monkeypatch.setattr(SetupWizard, "_discover_models",
                         lambda self, spec, answers: ["gpt-4o"])
     setup = wizard(blank, ["3", "1", "2", ""])   # openai, gpt-4o, writes-allowed
-    saved = setup.apply(setup.run())
+    saved = setup.apply(setup.run(minimal=False))
 
     assert saved.provider == "openai"
     assert saved.active_model() == "gpt-4o"
@@ -158,7 +204,7 @@ def test_approval_choices_map_to_the_safety_settings(blank, monkeypatch):
     for choice, writes, shell in (("1", False, False), ("2", True, False),
                                   ("3", True, True)):
         setup = wizard(blank, ["3", "1", choice, ""])
-        saved = setup.apply(setup.run())
+        saved = setup.apply(setup.run(minimal=False))
         assert (saved.safety.auto_approve_writes,
                 saved.safety.auto_approve_shell) == (writes, shell)
 
@@ -175,14 +221,34 @@ def test_a_custom_endpoint_can_be_supplied(blank, monkeypatch):
     assert saved.active_model() == "my-model"
 
 
-def test_model_discovery_falls_back_when_the_provider_cannot_be_reached(blank):
-    """A wizard that hangs or crashes on a bad key would be unusable."""
-    setup = wizard(blank, ["3", "1", "1", ""])
+def test_model_discovery_falls_back_when_the_provider_cannot_be_reached(
+        blank, monkeypatch):
+    """A wizard that hangs or crashes on a bad key would be unusable.
+
+    The provider is never reached: `build_provider` is replaced, because a test
+    that discovered models by calling a real API would fail on a machine with
+    no network and pass on one with a warm cache — and would spend somebody's
+    quota proving that a list came back.
+    """
+    def unreachable(*_args, **_kwargs):
+        raise OSError("the network is not there")
+
+    monkeypatch.setattr("comodor.providers.gateway.build_provider", unreachable)
+
+    setup = wizard(blank, [])
+    setup.plan.start()
+    setup.plan.choose_provider("openai")
+
     spec = catalogue.get("openai")
-    models = setup._discover_models(spec, Answers(provider="openai", api_key="bad"))
+    models = setup._discover_models(spec, Answers(provider="openai"))
 
     assert models, "the known list should stand in when the API says nothing"
-    assert set(models) <= set(spec.models) or models
+    assert set(models) <= set(spec.models)
+    # And the plan is told the difference between "these are its models" and
+    # "we could not ask", which is what stops an unverified list being
+    # presented as a working provider.
+    assert setup.plan.validation.check is Check.UNREACHABLE
+    assert "reach" in setup.plan.validation.reason.lower()
 
 
 # --------------------------------------------------------------------------- #
@@ -417,18 +483,18 @@ def test_the_wizard_asks_about_telegram(blank, monkeypatch):
     monkeypatch.setattr(SetupWizard, "_discover_models",
                         lambda self, spec, answers: ["a-model"])
     setup = wizard(blank, ["", "", "", ""])
-    setup.run()
+    setup.run(minimal=False)
 
     printed = setup.console.file.getvalue()
     assert "Run it from your phone?" in printed
-    assert "/6" in printed, "it is one of the six steps, not an afterthought"
+    assert "/7" in printed, "it is one of the steps, not an afterthought"
 
 
 def test_declining_leaves_telegram_untouched(blank, monkeypatch):
     monkeypatch.setattr(SetupWizard, "_discover_models",
                         lambda self, spec, answers: ["a-model"])
     setup = wizard(blank, ["", "", "", "1"])
-    answers = setup.run()
+    answers = setup.run(minimal=False)
     config = setup.apply(answers)
 
     assert answers.telegram_token == ""
@@ -446,7 +512,7 @@ def test_a_token_is_checked_before_it_is_believed(blank, monkeypatch):
                         lambda self: (_ for _ in ()).throw(Unauthorised("no")))
 
     setup = wizard(blank, ["", "", "", "2", "42:wrong"])
-    answers = setup.run()
+    answers = setup.run(minimal=False)
 
     assert answers.telegram_token == ""
     assert "refused that token" in setup.console.file.getvalue()
@@ -462,7 +528,7 @@ def test_a_good_token_is_kept_and_the_bot_is_named(blank, monkeypatch):
                         lambda self, token, username, answers: None)
 
     setup = wizard(blank, ["", "", "", "2", "42:right"])
-    answers = setup.run()
+    answers = setup.run(minimal=False)
     config = setup.apply(answers)
 
     assert answers.telegram_token == "42:right"
@@ -486,7 +552,7 @@ def test_pairing_switches_it_on(blank, monkeypatch):
     monkeypatch.setattr(SetupWizard, "_pair_now", paired)
 
     setup = wizard(blank, ["", "", "", "2", "42:right"])
-    config = setup.apply(setup.run())
+    config = setup.apply(setup.run(minimal=False))
 
     assert config.telegram.allowed == [4242]
     assert config.telegram.enabled is True
@@ -536,14 +602,31 @@ class Screen(Console):
 
 
 def a_whole_run(blank, width: int, height: int, replies: list[str]) -> Screen:
+    """A full run for the screen tests: every question, offline.
+
+    `minimal=False` because these tests are about the screens the full path
+    draws — approvals, skills, telegram — which the first-run path skips. The
+    GitHub question is answered by what it is rather than by its position in
+    the stream, so a reply that used to mean "approvals: ask" cannot silently
+    become "open a browser".
+    """
     console = Screen(width=width, height=height, file=io.StringIO(),
                      no_color=True, legacy_windows=False)
     answers = iter(replies)
+    holder: dict = {}
+
+    def prompt(message: str) -> str:
+        plan = holder.get("plan")
+        if plan is not None and plan.step is Step.GITHUB:
+            return "2"
+        return next(answers, "")
+
     setup = SetupWizard(blank, console=console,
-                        prompt=lambda message: next(answers, ""),
+                        prompt=prompt,
                         secret=lambda message: "unused")
+    holder["plan"] = setup.plan
     setup._discover_models = lambda spec, ans: [f"model-{n}" for n in range(40)]
-    result = setup.run()
+    result = setup.run(minimal=False)
     setup.finish(setup.apply(result))
     return console
 

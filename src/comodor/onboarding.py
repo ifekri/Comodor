@@ -175,6 +175,11 @@ class ProviderFact:
     blurb: str
     needs_key: bool
     local: bool
+    #: Whether a local runtime for this provider is actually up. Probed by the
+    #: host, not guessed: "needs no key" is not the same as "can answer", and
+    #: ranking an Ollama that is not running above a provider whose key is
+    #: already in the environment would put the dead one first.
+    local_running: bool
     #: The environment variable that supplies a key, if there is one.
     env_variable: str
     has_env_key: bool
@@ -186,6 +191,21 @@ class ProviderFact:
     @property
     def usable_here(self) -> bool:
         """Could answer right now without the person supplying anything."""
+        if self.has_env_key or self.has_stored_key:
+            return True
+        return self.local and not self.needs_key and self.local_running
+
+    @property
+    def configured_here(self) -> bool:
+        """Whether the configuration already has what this provider needs.
+
+        Deliberately not the same question as `usable_here`. A local runtime
+        that is not running this minute is still configured, and re-asking
+        somebody to choose the provider they chose last time — because a daemon
+        happened to be down — is re-asking a question that was already
+        answered. Whether it can actually answer is what validation is for,
+        and validation says so truthfully rather than the ordering pretending.
+        """
         if self.has_env_key or self.has_stored_key:
             return True
         return self.local and not self.needs_key
@@ -208,19 +228,28 @@ class ProviderFact:
             return f"using the key in ${self.env_variable}"
         if self.has_stored_key:
             return "already configured here"
+        if self.local_running:
+            return "running here — no key, no account"
         if self.local:
             return "runs on this machine, no key"
         return "needs an API key"
 
 
-def detect_providers(config: Config, *,
-                     environment: Any = None) -> tuple[ProviderFact, ...]:
+def detect_providers(config: Config, *, environment: Any = None,
+                     running: Any = ()) -> tuple[ProviderFact, ...]:
     """What is available on this machine, ordered by how little work it needs.
 
     Reuses the one catalogue rather than keeping a second list: a provider this
     function did not know about would be a provider setup could not offer.
+
+    `running` names the local runtimes the host found actually up. It is a
+    parameter rather than a probe because reaching a port is the host's kind of
+    work — a terminal can block on it, a window may not want to — and because a
+    test that had to start Ollama to check an ordering would not be a test
+    anybody could run.
     """
     env = os.environ if environment is None else environment
+    up = frozenset(running)
     facts: list[ProviderFact] = []
     for spec in catalogue.offered():
         entry = config.providers.get(spec.id)
@@ -233,6 +262,7 @@ def detect_providers(config: Config, *,
             blurb=spec.blurb,
             needs_key=spec.needs_key,
             local=spec.local,
+            local_running=spec.id in up,
             env_variable=env_variable,
             has_env_key=has_env,
             has_stored_key=bool(stored),
@@ -516,6 +546,18 @@ class SetupPlan:
     # -- reading ---------------------------------------------------------- #
 
     @property
+    def staged(self) -> Config:
+        """The configuration being built, which nothing has written yet.
+
+        Exposed so a host can put the settings setup does not own — an approval
+        policy, a theme, a phone channel it asked about — onto the same copy,
+        and have all of it land in one atomic write at commit. Reaching past
+        this to the real configuration is what the transaction exists to
+        prevent.
+        """
+        return self._staged
+
+    @property
     def position(self) -> tuple[int, int]:
         """(which step, of how many), for "2 of 5"."""
         try:
@@ -616,13 +658,23 @@ class SetupPlan:
 
     # -- starting --------------------------------------------------------- #
 
-    def start(self) -> Effect:
+    def start(self, running: Any = ()) -> Effect:
         """Detect what is here and stand on the first real question.
 
-        Offered progress is restored if there is any; the host decides whether
-        to ask about it, and `continue_from` applies the answer.
+        `running` is the host's answer to "which local runtimes are actually
+        up", which is a probe and therefore the host's job. Offered progress is
+        restored if there is any; the host decides whether to ask about it, and
+        `continue_from_checkpoint` applies the answer.
+
+        The staging copy is taken here rather than at construction, because
+        what happens between the two can matter: an import that ran before the
+        first question has already put a key on the config, and detection that
+        read a copy from before the import would rank that provider as needing
+        work — the wizard announcing a key it then asked for.
         """
-        self.facts = detect_providers(self._staged, environment=self._env())
+        self._staged = copy.deepcopy(self.config)
+        self.facts = detect_providers(self._staged, environment=self._env(),
+                                      running=running)
         if self._checkpointed:
             self.resumed = read_checkpoint(self.config)
         self._advance_to_first_step()
@@ -679,7 +731,9 @@ class SetupPlan:
         anyway is what makes re-running setup feel like a fresh install.
         """
         active = self._fact(self._staged.provider)
-        if active is not None and active.usable_here and self._staged.active_model():
+        if (active is not None
+                and active.configured_here
+                and self._staged.active_model()):
             self.draft = Draft(
                 provider=active.id,
                 credential=active.credential,
@@ -691,7 +745,7 @@ class SetupPlan:
             )
             self.step = Step.GITHUB
             return self._enter_github()
-        if active is not None and active.usable_here:
+        if active is not None and active.configured_here:
             self.draft = Draft(
                 provider=active.id,
                 credential=active.credential,

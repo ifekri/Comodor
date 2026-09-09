@@ -17,7 +17,38 @@ import re
 
 import pytest
 
+from comodor.onboarding import Step
 from comodor.setup import SetupWizard
+
+
+@pytest.fixture(autouse=True)
+def offline(monkeypatch):
+    """Deterministic and offline, by construction rather than by luck.
+
+    Two guards, with different severities on purpose. Constructing a GitHub
+    connector is a test-isolation bug and fails the test on the spot: a reply
+    stream is positional and the flow is not, so before the harness below
+    understood setup semantics, a leftover "1" could mean "connect to GitHub" —
+    a real browser, a real worker and a real network, from a test about
+    importing a key. It used to be discovered after a five-minute timeout.
+
+    The provider probe is the other case: asking a provider for its models is
+    something the wizard legitimately does, and legitimately survives failing.
+    It is made to fail offline here, which is the outcome these tests were
+    always relying on (a bogus imported key cannot list anything) — without
+    the result depending on whether the machine happens to have network.
+    """
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError(
+            "this test reached the network by constructing a GitHub connector")
+
+    monkeypatch.setattr("comodor.github.connect.Connector", forbidden)
+
+    def unreachable(*_args, **_kwargs):
+        raise OSError("offline: model discovery is refused in this suite")
+
+    monkeypatch.setattr("comodor.providers.gateway.build_provider", unreachable)
+    return None
 
 
 @pytest.fixture(autouse=True)
@@ -64,15 +95,30 @@ def openclaw(home, key="sk-ant-brought-over", model="claude-sonnet-5"):
 
 
 class Script:
-    """A scripted person at the keyboard, who also records what they saw."""
+    """A scripted person at the keyboard, who also records what they saw.
 
-    def __init__(self, *replies: str) -> None:
+    The GitHub question is answered by what it is, not by where it falls in
+    the reply stream. A positional stream cannot survive a step being inserted
+    — and one was, when onboarding began offering GitHub — because every reply
+    after the insertion quietly changes meaning. The plan already knows which
+    step is asking; the harness asks it, so a leftover "1" means whatever it
+    meant before, and never "open a browser".
+    """
+
+    def __init__(self, *replies: str, github: str | None = None) -> None:
         self.replies = list(replies)
+        #: The answer for the GitHub step, if it is reached. None means the
+        #: safe default: skip.
+        self.github = github
         self.asked: list[str] = []
         self.secrets: list[str] = []
+        self.plan = None
 
     def prompt(self, message: str) -> str:
         self.asked.append(message)
+        plan = self.plan
+        if plan is not None and plan.step is Step.GITHUB:
+            return self.github if self.github is not None else ""
         return self.replies.pop(0) if self.replies else ""
 
     def secret(self, message: str) -> str:
@@ -80,10 +126,11 @@ class Script:
         return "sk-typed-by-hand"
 
 
-def drive(config, home, *replies: str) -> tuple[SetupWizard, Script, object]:
-    script = Script(*replies)
+def drive(config, home, *replies: str, github: str | None = None):
+    script = Script(*replies, github=github)
     wizard = SetupWizard(config, prompt=script.prompt, secret=script.secret,
                          home=home)
+    script.plan = wizard.plan
     answers = wizard.run()
     return wizard, script, answers
 
@@ -94,12 +141,16 @@ def drive(config, home, *replies: str) -> tuple[SetupWizard, Script, object]:
 
 
 def test_no_other_agent_means_no_extra_question(config, tmp_path, capsys):
-    """Six questions, not seven. Offering to import nothing is a question
-    that wastes somebody's time on the screen where their patience is thinnest."""
+    """Seven questions, not eight. Offering to import nothing is a question
+    that wastes somebody's time on the screen where their patience is thinnest.
+
+    The count moved from six when onboarding began offering GitHub — an
+    optional step, but a real one, shown between the model and the approvals
+    questions."""
     drive(config, tmp_path, "1", "1", "1", "1", "1", "1")
 
     out = capsys.readouterr().out
-    assert "1/6" in out
+    assert "1/7" in out
 
     # Stripped of colour first. This used to read the raw stream, so it was
     # really asserting that no escape sequence on that line contained the
@@ -107,8 +158,8 @@ def test_no_other_agent_means_no_extra_question(config, tmp_path, capsys):
     # a border. The step number is the thing being checked, not the ink.
     plain = re.sub(r"\x1b\[[0-9;:?]*[a-zA-Z]", "", out)
     before = plain.split("Which model provider?")[0].splitlines()
-    assert not any("7/" in line for line in before[-3:]), \
-        "a seventh step was offered"
+    assert not any("8/" in line for line in before[-3:]), \
+        "an eighth step was offered"
 
 
 def test_an_installation_is_offered_as_the_first_step(config, tmp_path, capsys):
@@ -118,7 +169,7 @@ def test_an_installation_is_offered_as_the_first_step(config, tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "You already use OpenClaw" in out
-    assert "1/7" in out, "the import is the first of seven, not an aside"
+    assert "1/8" in out, "the import is the first of eight, not an aside"
 
 
 def test_the_key_arrives(config, tmp_path):

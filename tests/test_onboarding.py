@@ -151,7 +151,23 @@ def test_a_local_runtime_needs_no_key(blank):
     assert ollama.local
     assert not ollama.needs_key
     assert ollama.credential is CredentialSource.NONE
-    assert ollama.usable_here
+
+
+def test_a_local_runtime_counts_as_usable_only_when_it_is_up(blank):
+    """Needs no key is not the same as can answer.
+
+    Ranking an Ollama that is not running above a provider whose key is
+    already exported would put the dead one first, and the first row is the one
+    pressing Enter accepts.
+    """
+    down = next(fact for fact in detect_providers(blank) if fact.id == "ollama")
+    assert not down.usable_here
+    assert down.configured_here, "it is still what the config chose"
+
+    up = next(fact for fact in detect_providers(blank, running={"ollama"})
+              if fact.id == "ollama")
+    assert up.usable_here
+    assert "running here" in up.note
 
 
 def test_a_provider_needing_a_key_is_not_claimed_to_be_usable(blank):
