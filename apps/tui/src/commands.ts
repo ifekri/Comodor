@@ -41,6 +41,20 @@ export interface Screen {
   retry(): void;
   quit(): void;
   note(text: string): void;
+  /** Whether the core advertised workbench state to draw at all. */
+  workbenchAvailable(): boolean;
+  /** Whether the workbench currently owns the cursor keys. */
+  workbenchOpen(): boolean;
+  openWorkbench(): void;
+  closeWorkbench(): void;
+  /**
+   * The delegate the cursor is on, when its lifecycle says it may be stopped.
+   * `undefined` otherwise — which is what makes the stop command's
+   * availability the projection's answer rather than the panel's opinion.
+   */
+  stoppableDelegateId(): string | undefined;
+  /** Ask the core to stop one delegate. The core's events say what became of it. */
+  stopDelegate(id: string): void;
 }
 
 export function build(): CommandRegistry<Screen> {
@@ -104,6 +118,41 @@ export function build(): CommandRegistry<Screen> {
       run: (screen) => screen.toTail(),
     },
     {
+      id: "workbench.show",
+      title: "Show the workbench",
+      group: "View",
+      keywords: ["agents", "tasks", "delegates", "background", "workbench",
+                 "ctrl+b"],
+      // Offered only where the core advertised something to show: a client
+      // pointed at an older core must not offer a panel that would be empty
+      // forever, and must otherwise behave exactly as it does today.
+      enabled: (screen) => screen.workbenchAvailable(),
+      run: (screen) => screen.openWorkbench(),
+    },
+    {
+      id: "workbench.close",
+      title: "Close the workbench",
+      group: "View",
+      keywords: ["agents", "tasks", "workbench"],
+      enabled: (screen) => screen.workbenchOpen(),
+      run: (screen) => screen.closeWorkbench(),
+    },
+    {
+      id: "agents.stop",
+      title: "Stop the selected background agent",
+      group: "Agents",
+      keywords: ["delegate", "stop", "background", "kill"],
+      // The availability is the lifecycle's answer: a delegate may be asked
+      // to stop while it is running, and at no other time. The request goes
+      // to the core, and what the delegate becomes is what the core's next
+      // `delegate.updated` says — never a state this client painted.
+      enabled: (screen) => screen.stoppableDelegateId() !== undefined,
+      run: (screen) => {
+        const id = screen.stoppableDelegateId();
+        if (id) screen.stopDelegate(id);
+      },
+    },
+    {
       id: "palette.open",
       title: "Commands",
       group: "Session",
@@ -125,9 +174,14 @@ export function build(): CommandRegistry<Screen> {
   // `end` and `ctrl+r` are bound and deliberately hintless: the footer has
   // room for four things, and both are announced where they matter — `end`
   // beside the new-output marker, `ctrl+r` beside the message that failed.
+  //
+  // The workbench sits ahead of the palette on purpose: on a narrow terminal
+  // the footer keeps only its first two hints, and the key that reaches the
+  // agents and tasks is the one that must survive that cut.
   registry.bind(
     { key: "tab", command: "mode.next", hint: "Mode" },
     { key: "shift+tab", command: "mode.previous" },
+    { key: "ctrl+b", command: "workbench.show", hint: "Work" },
     { key: "ctrl+k", command: "palette.open", hint: "Commands" },
     { key: "ctrl+d", command: "app.quit", hint: "Quit" },
     { key: "end", command: "view.tail" },
