@@ -71,7 +71,12 @@ def service_for(config, scripts, extra_tools: list[Tool] | None = None,
     """
     recorder = recorder or Recorder()
 
-    def build(built_config, *, bus=None, plugins=None) -> Assembly:
+    def build(built_config, *, bus=None, plugins=None,
+              delegates=False) -> Assembly:
+        # `delegates` is accepted and ignored: this assembly is a scripted
+        # minimum, with no spawner a delegate manager could run on. A session
+        # built here therefore has no background delegates, which is the same
+        # "nowhere to deliver" wiring the real assemble produces by default.
         bus = bus or EventBus()
         tools = ToolRegistry(config=built_config)
         for tool in extra_tools or ():

@@ -245,3 +245,133 @@ def test_an_equal_number_keeps_the_prompt_ahead_of_the_answer():
     numbers = [message["started_seq"] for message in snapshot["messages"]]
     assert numbers[0] == numbers[1], "the case under test is a genuine tie"
     assert merged(journal)[0] == "message:user-t1"
+
+# --------------------------------------------------------------------------- #
+# the workbench state: tasks and delegates
+# --------------------------------------------------------------------------- #
+
+def tasks_of(journal: Journal) -> list[tuple[str, str]]:
+    return [(task["text"], task["state"])
+            for task in journal.snapshot(SESSION)["tasks"]]
+
+
+def delegates_of(journal: Journal) -> list[dict]:
+    return journal.snapshot(SESSION)["delegates"]
+
+
+def a_delegate(identifier: str, state: str, **extra) -> dict:
+    body = {"id": identifier, "label": f"work {identifier}", "state": state,
+            "steps": 0, "tool_calls": 0, "tokens": 0,
+            "elapsed": 0.0, "started_at": 100.0}
+    body.update(extra)
+    return body
+
+
+def test_a_snapshot_always_carries_the_workbench_lists():
+    """Empty, not absent: a client must not have to guess whether a missing
+    field means "no tasks" or "a core too old to know about tasks"."""
+    snapshot = Journal().snapshot(SESSION)
+
+    assert snapshot["tasks"] == []
+    assert snapshot["delegates"] == []
+
+
+def test_tasks_are_replaced_not_appended():
+    """The tool's own semantics: the whole list, every time. A task the new
+    list does not carry is gone, and the order is the order written."""
+    journal = Journal()
+    journal.record("tasks.updated", {"tasks": [
+        {"text": "read the code", "state": "done"},
+        {"text": "write the tests", "state": "active"},
+        {"text": "a task that will be dropped", "state": "pending"},
+    ]})
+
+    journal.record("tasks.updated", {"tasks": [
+        {"text": "write the tests", "state": "active"},
+        {"text": "read the code", "state": "done"},
+    ]})
+
+    assert tasks_of(journal) == [("write the tests", "active"),
+                                 ("read the code", "done")]
+
+
+def test_an_unknown_task_state_is_folded_as_pending():
+    """The wire vocabulary is four words. A fifth — from a core newer than
+    this journal could never be, but from a corrupt event it could — is
+    folded as the tool itself folds it rather than passed through."""
+    journal = Journal()
+    journal.record("tasks.updated",
+                   {"tasks": [{"text": "odd", "state": "exploded"}]})
+
+    assert tasks_of(journal) == [("odd", "pending")]
+
+
+def test_a_delegate_record_is_replaced_whole_by_id():
+    """No field-merging: a half-merged record could pair a new state with an
+    old error, which is a sentence the core never said."""
+    journal = Journal()
+    journal.record("delegate.updated",
+                   {"delegate": a_delegate("d1", "running", error="stale")})
+    journal.record("delegate.updated",
+                   {"delegate": a_delegate("d1", "done", steps=4, tokens=99)})
+
+    folded = delegates_of(journal)
+    assert len(folded) == 1
+    assert folded[0]["state"] == "done"
+    assert folded[0]["steps"] == 4
+    assert folded[0]["tokens"] == 99
+    assert "error" not in folded[0] or folded[0]["error"] == ""
+
+
+def test_a_late_delegate_state_cannot_move_backwards():
+    """The manager announces monotonically; the journal keeps the same rule
+    where the reconnect truth is built. A late `running` behind a `stopping`
+    would re-describe a delegate as alive that the core had been told to
+    stop."""
+    journal = Journal()
+    journal.record("delegate.updated", {"delegate": a_delegate("d1", "running")})
+    journal.record("delegate.updated", {"delegate": a_delegate("d1", "stopping")})
+
+    journal.record("delegate.updated", {"delegate": a_delegate("d1", "running")})
+
+    assert delegates_of(journal)[0]["state"] == "stopping"
+
+
+def test_a_terminal_delegate_state_is_final():
+    journal = Journal()
+    journal.record("delegate.updated", {"delegate": a_delegate("d1", "stopped")})
+
+    for late in ("running", "stopping", "done", "lost"):
+        journal.record("delegate.updated", {"delegate": a_delegate("d1", late)})
+
+    assert delegates_of(journal)[0]["state"] == "stopped"
+
+
+def test_seeded_delegates_do_not_spend_a_sequence_number():
+    """The crash record predates the stream: folding it must not cost the
+    first real event its number, or every client would see a gap where
+    nothing was missed."""
+    journal = Journal()
+    journal.seed_delegates([a_delegate("d1", "lost",
+                                       error="the session ended while this "
+                                             "was running")])
+
+    assert journal.revision == 0
+    first = journal.record("message.started",
+                           {"message_id": "m1", "turn_id": "t1",
+                            "role": "assistant"})
+    assert first == 1
+    assert delegates_of(journal)[0]["state"] == "lost"
+
+
+def test_two_delegates_are_kept_apart():
+    journal = Journal()
+    journal.record("delegate.updated", {"delegate": a_delegate("d1", "running")})
+    journal.record("delegate.updated", {"delegate": a_delegate("d2", "done")})
+    journal.record("delegate.updated",
+                   {"delegate": a_delegate("d1", "failed", error="child broke")})
+
+    by_id = {record["id"]: record for record in delegates_of(journal)}
+    assert by_id["d1"]["state"] == "failed"
+    assert by_id["d1"]["error"] == "child broke"
+    assert by_id["d2"]["state"] == "done"

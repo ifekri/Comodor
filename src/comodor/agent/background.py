@@ -57,6 +57,11 @@ class DelegateRun:
             "state": self.state, "steps": self.steps,
             "tool_calls": self.tool_calls, "tokens": self.tokens,
             "elapsed": round((self.ended_at or time.time()) - self.started_at, 1),
+            # The epoch the elapsed was measured from. A surface showing a
+            # running delegate computes its own live number from this rather
+            # than freezing the one this record was built with — and a terminal
+            # record's `elapsed` stays the authority, because the clock stopped.
+            "started_at": round(self.started_at, 3),
             "error": self.error[:200],
         }
 

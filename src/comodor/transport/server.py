@@ -193,6 +193,8 @@ class Server:
             "session.cancel": lambda p: service.cancel(p["session_id"]),
             "session.set_mode": lambda p: {
                 "session": service.set_mode(p["session_id"], p["mode"])},
+            "delegate.stop": lambda p: service.stop_delegate(
+                p["session_id"], p["delegate_id"]),
             "model.get": lambda p: service.model(),
             "model.set": lambda p: service.set_model(
                 p["model"], str(p.get("provider", ""))),

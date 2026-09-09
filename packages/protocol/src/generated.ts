@@ -21,6 +21,7 @@ export const METHODS = [
   "workspace.get",
   "question.answer",
   "permission.reply",
+  "delegate.stop",
   "shutdown",
 ] as const;
 export type Method = (typeof METHODS)[number];
@@ -36,6 +37,8 @@ export const EVENTS = [
   "tool.output",
   "tool.completed",
   "tool.failed",
+  "tasks.updated",
+  "delegate.updated",
   "question.requested",
   "question.resolved",
   "permission.requested",
@@ -68,6 +71,8 @@ export const CORE_CAPABILITIES = [
   "permissions",
   "modes",
   "tool_events",
+  "tasks",
+  "delegates",
 ] as const;
 export const CLIENT_CAPABILITIES = [
   "questions",
@@ -184,6 +189,87 @@ export interface SnapshotTool {
   elapsed_ms?: number;
 }
 
+/** Where one item of the agent's own plan stands. The vocabulary is the `todo_write` tool's, not the interface's: a client renders these four and invents no others — a frontend-only state such as `queued` would be a claim the core never made. */
+export type TaskState = "pending" | "active" | "done" | "blocked";
+
+/**
+ * One item of the agent's task list. Tasks carry no id: the list is small,
+ * the tool replaces it whole on every update, and an index is not an
+ * identity across a replacement. A client that renders the list in order
+ * needs nothing more; a future operation on one task would need a real
+ * core-owned id, which this deliberately does not fake.
+ */
+export interface TaskItem {
+  text: string;
+  state: TaskState;
+}
+
+/**
+ * The agent's whole task list, as `todo_write` recorded it. Replacement,
+ * never addition: a task the new list does not carry is gone, and the order
+ * is the order the model wrote. Arrives on the session's sequence like
+ * every other event, so a snapshot and a live stream converge on the same
+ * list.
+ */
+export interface TasksUpdated {
+  session_id: string;
+  tasks: Array<TaskItem>;
+}
+
+/** Where one background delegate has got to. `running` and `stopping` are the live states; the other four are terminal and a delegate never comes back from one. `lost` is the honest state of a delegate that was running when the process died: it is reported after a reload rather than pretended to be alive. A state only ever moves forward through this vocabulary — a late announcement cannot walk one backwards. */
+export type DelegateState = "running" | "stopping" | "done" | "failed" | "stopped" | "lost";
+
+/**
+ * One background delegate, as the core's manager knows it. Every field is a
+ * fact the core already keeps: no progress percentage is invented, and
+ * `steps`, `tool_calls` and `tokens` are what the worker recorded — zero
+ * until it settles, because a running delegate has not reported anything
+ * yet. `elapsed` is seconds as of this record; `started_at` is the core's
+ * epoch seconds, which lets a client tick a running delegate's clock
+ * without asking. `label` is the model's own short name for the work (or
+ * the head of its brief) — display text, not a promise.
+ */
+export interface Delegate {
+  id: string;
+  label: string;
+  state: DelegateState;
+  steps: number;
+  tool_calls: number;
+  tokens: number;
+  elapsed: number;
+  started_at: number;
+  error?: string;
+}
+
+/**
+ * One background delegate moved. The whole record rides along, so a client
+ * replaces what it holds for that id rather than merging fields — and
+ * applies the state vocabulary's forward-only rule: an event cannot move a
+ * delegate back from `stopping` to `running` or out of a terminal state.
+ */
+export interface DelegateUpdated {
+  session_id: string;
+  delegate: Delegate;
+}
+
+export interface DelegateStopParams {
+  session_id: string;
+  delegate_id: string;
+}
+
+/**
+ * Whether there was a running delegate to stop. `false` is an honest
+ * answer, not an error: the delegate may have finished in the instant the
+ * request arrived, or never existed. What it actually became arrives as
+ * `delegate.updated` — `stopping` when the stop took, then the terminal
+ * state the worker settles on. Stopping every delegate at once is
+ * deliberately not a protocol operation: one deliberate stop is the surface
+ * F5 promises.
+ */
+export interface DelegateStopResult {
+  stopped: boolean;
+}
+
 /**
  * Everything a client needs to draw a session it did not watch happen.
  * `revision` is the sequence number this state includes up to: the client
@@ -191,13 +277,18 @@ export interface SnapshotTool {
  * rebuilding safe while the session is still streaming. Every message and
  * tool carries `started_seq`, the sequence at which it entered the
  * timeline, so the two lists merge into the one order the live stream had
- * rather than being drawn messages-then-tools.
+ * rather than being drawn messages-then-tools. `tasks` and `delegates`
+ * carry the workbench state the same way: a client that mounts mid-job sees
+ * the plan and the delegated work without replaying history, and a client
+ * too old to know them ignores them.
  */
 export interface SessionSnapshot {
   session: Session;
   revision: number;
   messages: Array<SnapshotMessage>;
   tools: Array<SnapshotTool>;
+  tasks?: Array<TaskItem>;
+  delegates?: Array<Delegate>;
   question?: QuestionRequest;
   permission?: PermissionRequest;
   interactions?: Array<PendingInteraction>;

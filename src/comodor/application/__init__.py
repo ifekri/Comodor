@@ -82,6 +82,12 @@ class Assembly:
     #: reads it — for titles, costs, persistence — and building a second one
     #: would split the transcript from the loop that writes it.
     conversation: Any = None
+    #: The background-delegate manager, when this session can deliver a
+    #: finished answer at a turn boundary. `None` for a wiring that has
+    #: nowhere to deliver to — a headless run, a scheduled job — where the
+    #: delegate tool refuses `background=true` outright rather than starting
+    #: work whose answer would be dropped.
+    delegates: Any = None
 
     def close(self) -> None:
         """Shut the assembly down, in the order the pieces expect.
@@ -92,6 +98,20 @@ class Assembly:
         that may already be failing, and a teardown that raises hides whatever
         went wrong first.
         """
+        if self.delegates is not None:
+            # Delegates first: a child still running uses the tools and the
+            # gateway the loop below is about to take away. `closing` stops new
+            # launches, `stop_all` asks the running ones to settle, and the wait
+            # is the shared bounded one — a worker that will not stop delays
+            # nobody's exit past it.
+            try:
+                from ..agent.background import SHUTDOWN_SECONDS
+
+                self.delegates.closing()
+                self.delegates.stop_all()
+                self.delegates.wait(SHUTDOWN_SECONDS)
+            except Exception:
+                pass
         for piece in (self.tools, self.memory, self.gateway, self.mcp):
             if piece is None:
                 continue
@@ -105,12 +125,19 @@ class Assembly:
 
 
 def assemble(config: Config, *, bus: EventBus | None = None,
-             plugins: Any = None) -> Assembly:
+             plugins: Any = None, delegates: bool = False) -> Assembly:
     """Build the agent for one session.
 
     Lifted out of `cli.py` rather than written afresh: this is the wiring the
     headless path already used and the interactive path mirrors, so the two
     cannot drift while both call it.
+
+    `delegates` is opt-in and means "somebody will deliver a finished
+    background answer at a turn boundary". A served session — one a transport
+    drives — says yes and gets the manager the delegate tool launches on. A
+    headless run says nothing and keeps the refusal: background work whose
+    completion nobody drains is work whose answer is dropped, and the tool
+    already refuses to start it.
     """
     from ..agent import AgentLoop, Conversation
     from ..agent.spawn import spawner
@@ -142,18 +169,33 @@ def assemble(config: Config, *, bus: EventBus | None = None,
 
         cron_store = JobStore(config.paths.user / "cron")
 
+    spawn = spawner(config, gateway, bus, skills=skills, mcp=mcp)
+
+    manager = None
+    if delegates:
+        from ..agent.background import BackgroundDelegates
+
+        # The same file the terminal and the web session keep their crash
+        # record in: one honest account per machine of what was running when
+        # the process died, whichever surface asks next.
+        manager = BackgroundDelegates(
+            config, bus, spawn,
+            persist_path=config.paths.user / "delegates.json")
+
     tools = ToolRegistry(skills=skills, mcp=mcp, config=config,
-                         spawn=spawner(config, gateway, bus, skills=skills,
-                                       mcp=mcp),
+                         spawn=spawn,
                          cron_store=cron_store,
                          memory=getattr(memory, "facts", None),
+                         delegates=manager,
                          plugins=plugins)
     conversation = Conversation()
     agent = AgentLoop(config, gateway, tools, bus, permissions, conversation,
                       memory, skills=skills)
+    agent.delegates = manager
     return Assembly(config=config, bus=bus, gateway=gateway, memory=memory,
                     permissions=permissions, skills=skills, mcp=mcp,
-                    tools=tools, agent=agent, conversation=conversation)
+                    tools=tools, agent=agent, conversation=conversation,
+                    delegates=manager)
 
 
 @dataclass
@@ -191,6 +233,11 @@ class SessionHandle:
     #: Held closed until the acceptance for this turn has been written. See
     #: `CoreService.send`.
     _released: threading.Event = field(default_factory=threading.Event)
+    #: Set when the service is closing this session. A turn worker between
+    #: turns checks it before delivering a background completion: starting a
+    #: fresh agent turn on the way out of the process would run it against
+    #: tools the teardown is already taking away.
+    _closing: bool = False
 
     @property
     def mode(self) -> str:
@@ -271,11 +318,24 @@ class CoreService:
 
         handle = SessionHandle(
             id=uuid.uuid4().hex[:12],
-            assembly=self._assemble(config),
+            # A served session can deliver a finished background answer at a
+            # turn boundary, so it gets the delegate manager. See `assemble`.
+            assembly=self._assemble(config, delegates=True),
             workspace=str(config.paths.project),
         )
         handle._announced_mode = handle.mode
         handle.assembly.bus.subscribe(_relay(self, handle))
+        if handle.assembly.delegates is not None:
+            # The manager loaded its crash record before anything was
+            # subscribed: a delegate that was running when the process died is
+            # already `lost`, and no event will ever announce it. Seeded into
+            # the journal without spending a sequence number, so the first
+            # snapshot a client can ask for tells the truth about the last
+            # process's work.
+            try:
+                handle.journal.seed_delegates(handle.assembly.delegates.listing())
+            except Exception:  # pragma: no cover - defensive
+                pass
         with self._lock:
             self._sessions[handle.id] = handle
         self._emit(handle, "session.created", {"session": handle.describe()})
@@ -366,6 +426,13 @@ class CoreService:
                     handle.busy = False
                 self._emit(handle, "session.updated",
                            {"session": handle.describe()})
+            # One turn past its end is the turn boundary: a background
+            # delegate that finished while this turn ran is delivered here,
+            # as turns of its own, never spliced into the one just ended.
+            try:
+                self._deliver_completions(handle)
+            except Exception:  # pragma: no cover - delivery must not kill the worker
+                pass
 
         worker = threading.Thread(target=work, name=f"turn-{handle.id}",
                                   daemon=True)
@@ -419,6 +486,87 @@ class CoreService:
                 # Already resolved by its own timeout, or answered in the
                 # instant this ran. Either way nothing is waiting on it now.
                 pass
+
+    # -- background delegates ------------------------------------------------ #
+
+    def stop_delegate(self, session_id: str, delegate_id: str) -> dict[str, Any]:
+        """Ask one background delegate to stop. The core decides.
+
+        The answer is whether there was a running delegate to stop — `false`
+        is honest, not an error: it may have settled in the instant the
+        request arrived, or never have existed. What the delegate actually
+        becomes arrives as the manager's own announcements, relayed like
+        everything else: `stopping` when the stop took, then the terminal
+        state the worker settles on. Nothing here fabricates a final state
+        ahead of the worker, and a client must not either.
+        """
+        handle = self.session(session_id)
+        manager = getattr(handle.assembly, "delegates", None)
+        if manager is None:
+            raise Refused("this session has no background delegates")
+        return {"stopped": bool(manager.stop(str(delegate_id)))}
+
+    def _deliver_completions(self, handle: SessionHandle) -> None:
+        """Finished background delegates become turns of their own.
+
+        The same boundary rule the terminal and the web session follow: one
+        turn past its end is the turn boundary, and a completion joins the
+        conversation there as a user turn the agent answers with the full
+        turn machinery — never spliced into the middle of the turn that just
+        ended. Each delivered turn drains again, so several children that
+        finished together arrive in order rather than all at once.
+
+        A message the person sent in the meantime took `busy` first, and then
+        the records go back to pending for the boundary after that one rather
+        than being dropped. A session on its way out takes nothing: a turn
+        started during teardown would run against tools already being closed,
+        and the manager's persistence describes the outcome honestly to
+        whichever process asks next.
+        """
+        manager = getattr(handle.assembly, "delegates", None)
+        if manager is None:
+            return
+        from ..agent.background import completion_turn
+
+        summary_max = handle.assembly.config.delegation.completion_summary_max
+        while not handle._closing:
+            records = manager.take_pending()
+            if not records:
+                return
+            with handle._lock:
+                if handle.busy or handle._closing:
+                    manager.restore([str(record.get("id", ""))
+                                     for record in records])
+                    return
+                handle.busy = True
+            text = "\n\n".join(
+                completion_turn(record, summary_max) for record in records)
+            turn_id = uuid.uuid4().hex[:12]
+            handle.turn_id = turn_id
+            # The completion text is this turn's user message: recorded so a
+            # client rebuilt from a snapshot sees what the agent is answering.
+            # Live clients get one short notice per delegate — the full text
+            # can be twenty-four thousand characters, which is a conversation
+            # message and not a notification.
+            handle.journal.said(turn_id, text)
+            for record in records:
+                self._emit(handle, "notification.created", {
+                    "session_id": handle.id, "level": "info",
+                    "text": f"background task {record.get('id')} — "
+                            f"{record.get('state', 'done')}"})
+            self._emit(handle, "session.updated",
+                       {"session": handle.describe()})
+            try:
+                handle.assembly.agent.run(text)
+            except Exception as problem:  # pragma: no cover - defensive
+                self._emit(handle, "notification.created", {
+                    "session_id": handle.id, "level": "error",
+                    "text": f"the turn stopped: {problem}"})
+            finally:
+                with handle._lock:
+                    handle.busy = False
+                self._emit(handle, "session.updated",
+                           {"session": handle.describe()})
 
     # -- what it answers with ---------------------------------------------- #
 
@@ -527,6 +675,17 @@ class CoreService:
         """
         for handle in self.list_handles():
             try:
+                # Before the interrupt: a worker between turns would otherwise
+                # be free to start delivering a background completion while
+                # this teardown is halfway through taking its tools away.
+                handle._closing = True
+                manager = getattr(handle.assembly, "delegates", None)
+                if manager is not None:
+                    # Ask the children to settle now, so the join below waits
+                    # on a turn that is ending rather than one that is waiting
+                    # for a delegate nobody is going to stop.
+                    manager.closing()
+                    manager.stop_all()
                 if handle.busy:
                     handle.assembly.agent.interrupt("shutting down")
                 # Same reason as `cancel`: a worker parked in a prompt does not
@@ -719,8 +878,8 @@ def _relay(service: CoreService, handle: SessionHandle):
             _announce_mode_if_moved(service, handle)
         elif kind is Kind.CANCELLED:
             # Two halves, because cancellation can land in two places. Mid
-            # answer there is a message to end, and ending it is what stops a
-            # client rendering a spinner for ever. Between messages — during a
+            # answer there is a message to end, and ending it is what stops
+            # a client rendering a spinner for ever. Between messages — during a
             # tool, which is when people actually press stop — there is
             # nothing to end, and without the notice the turn would simply go
             # quiet and leave the person wondering whether the model hung.
@@ -728,6 +887,26 @@ def _relay(service: CoreService, handle: SessionHandle):
             service._emit(handle, "notification.created", {
                 "session_id": session_id, "level": "warning",
                 "text": _stop_reason(event)})
+        elif kind is Kind.TODO:
+            # The model's own plan, in the tool's own vocabulary. The whole
+            # list rides on every event because that is what `todo_write`
+            # records: a client replaces what it holds rather than merging, so
+            # a task the model removed stays removed. An entry with no text is
+            # dropped, which is how the tool itself parses — the wire carries
+            # the list the tool kept, not the raw one.
+            tasks = [
+                {"text": str(item.get("text", "")),
+                 "state": _task_state(item.get("state"))}
+                for item in (event.get("items") or [])
+                if isinstance(item, dict) and str(item.get("text", ""))
+            ]
+            service._emit(handle, "tasks.updated", {
+                "session_id": session_id, "tasks": tasks})
+        elif kind is Kind.DELEGATE:
+            record = _delegate_record(event.payload)
+            if record is not None:
+                service._emit(handle, "delegate.updated", {
+                    "session_id": session_id, "delegate": record})
         elif kind is Kind.REQUEST:
             _relay_request(service, handle, event)
         elif kind is Kind.REQUEST_EXPIRED:
@@ -758,6 +937,58 @@ def _stop_reason(event: Event) -> str:
     if reason == "interrupt":
         return "Stopped — a newer message took over."
     return "Stopped."
+
+
+#: The task states the `todo_write` tool owns. A state the core has never
+#: heard of is relayed as `pending` rather than passed through: a word outside
+#: the schema's enum is a word a validating client trips on, and the tool
+#: itself coerces exactly the same way.
+_TASK_STATES = ("pending", "active", "done", "blocked")
+
+
+def _task_state(value: Any) -> str:
+    state = str(value or "pending").lower()
+    return state if state in _TASK_STATES else "pending"
+
+
+#: The lifecycle words the delegate manager announces, mapped onto the
+#: protocol's state vocabulary. The manager says `started` where its own
+#: record says `running`; everything else is already a protocol word.
+_DELEGATE_STATES = {"started": "running", "running": "running",
+                    "stopping": "stopping", "done": "done",
+                    "failed": "failed", "stopped": "stopped", "lost": "lost"}
+
+
+def _delegate_record(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """One bus payload as the protocol's delegate record, or None.
+
+    An allow-list rather than a pass-through. The manager's own record is
+    already careful, but the wire contract is this function: a field added to
+    the internal record later does not ride along to every client by accident
+    — including a field that one day holds something private. An unknown
+    state word drops the announcement rather than inventing one; the journal
+    keeps the last state it was told.
+    """
+    identifier = str(payload.get("id", ""))
+    if not identifier:
+        return None
+    state = _DELEGATE_STATES.get(str(payload.get("state", "")), "")
+    if not state:
+        return None
+    record: dict[str, Any] = {
+        "id": identifier,
+        "label": str(payload.get("label", "")),
+        "state": state,
+        "steps": int(payload.get("steps") or 0),
+        "tool_calls": int(payload.get("tool_calls") or 0),
+        "tokens": int(payload.get("tokens") or 0),
+        "elapsed": float(payload.get("elapsed") or 0.0),
+        "started_at": float(payload.get("started_at") or 0.0),
+    }
+    error = str(payload.get("error", ""))
+    if error:
+        record["error"] = error
+    return record
 
 
 def _announce_mode_if_moved(service: CoreService,

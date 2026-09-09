@@ -40,6 +40,23 @@ __all__ = ["Journal", "JournalMessage", "JournalTool", "OUTPUT_CAP"]
 #: was. Live output is never capped; this is only what can still be recovered.
 OUTPUT_CAP = 64_000
 
+#: How far along a delegate a state word says it is. The manager guarantees its
+#: announcements never move backwards; this is the same rule kept where the
+#: snapshot is built, because a journal that folded a late `running` over a
+#: `stopped` would re-describe a delegate as alive that the core had already
+#: told everybody was finished — and the snapshot is what a reconnecting client
+#: believes.
+DELEGATE_PROGRESS = {"running": 0, "stopping": 1,
+                     "done": 2, "failed": 2, "stopped": 2, "lost": 2}
+
+#: States a delegate does not come back from.
+DELEGATE_TERMINAL = ("done", "failed", "stopped", "lost")
+
+#: The task states the `todo_write` tool owns. A state the core has never heard
+#: of is folded as `pending` rather than passed through: the snapshot repeats
+#: the tool's own coercion instead of shipping a word no client knows.
+TASK_STATES = ("pending", "active", "done", "blocked")
+
 
 @dataclass
 class JournalMessage:
@@ -150,6 +167,16 @@ class Journal:
         self._by_id: dict[str, JournalMessage] = {}
         self._tools: list[JournalTool] = []
         self._tool_by_id: dict[str, JournalTool] = {}
+        #: The agent's task list, whole. `todo_write` replaces it on every
+        #: update and so does this: a task the newest list does not carry is
+        #: gone, which is the only way a removed or reordered plan survives a
+        #: reconnect honestly.
+        self._tasks: list[dict[str, Any]] = []
+        #: Background delegates by id, insertion-ordered. Terminal records stay:
+        #: a panel that forgot a finished delegate could not answer "what
+        #: happened to those three background tasks?", and a `lost` one that
+        #: vanished would look like a delegate that never existed.
+        self._delegates: dict[str, dict[str, Any]] = {}
         #: Blocking interactions waiting on a person, oldest first, keyed by
         #: request id.
         #:
@@ -268,6 +295,28 @@ class Journal:
                 tool.state = "failed"
                 tool.error = str(params.get("error", ""))
 
+        elif name == "tasks.updated":
+            # Replacement, not addition — the tool's own semantics. The list is
+            # rebuilt from the event rather than patched, so a task the model
+            # removed stays removed and a reorder is the reorder it wrote.
+            tasks = params.get("tasks")
+            folded: list[dict[str, Any]] = []
+            if isinstance(tasks, list):
+                for entry in tasks:
+                    if not isinstance(entry, dict):
+                        continue
+                    state = str(entry.get("state", "pending"))
+                    folded.append({
+                        "text": str(entry.get("text", "")),
+                        "state": state if state in TASK_STATES else "pending",
+                    })
+            self._tasks = folded
+
+        elif name == "delegate.updated":
+            delegate = params.get("delegate")
+            if isinstance(delegate, dict):
+                self._fold_delegate(dict(delegate))
+
         elif name in ("question.requested", "permission.requested"):
             kind = "question" if name.startswith("question") else "permission"
             request_id = str(params.get("id", ""))
@@ -287,6 +336,47 @@ class Journal:
         at = self._messages.index(held)
         self._messages[at] = message
         self._by_id[message.message_id] = message
+
+    def _fold_delegate(self, record: dict[str, Any]) -> None:
+        """One delegate record, folded forward-only. Caller holds the lock.
+
+        Replaced whole rather than merged field by field: the record is the
+        manager's own description of the run, and half-merging two of them
+        could pair a new state with an old error. Ignored entirely when it
+        would move the delegate backwards — a late `running` behind a
+        `stopped`, a `started` creeping in behind a terminal state. The
+        manager already announces monotonically; this is the same rule kept
+        where the reconnect truth is built, because a snapshot that
+        re-described a finished delegate as alive would be the exact lie the
+        lifecycle exists to prevent.
+        """
+        identifier = str(record.get("id", ""))
+        if not identifier:
+            return
+        held = self._delegates.get(identifier)
+        if held is not None:
+            was = str(held.get("state", ""))
+            now = str(record.get("state", ""))
+            if was in DELEGATE_TERMINAL:
+                return                  # nothing comes back from a terminal
+            if DELEGATE_PROGRESS.get(now, 0) < DELEGATE_PROGRESS.get(was, -1):
+                return                  # this record knows less than we do
+        self._delegates[identifier] = record
+
+    def seed_delegates(self, records: list[dict[str, Any]]) -> None:
+        """Adopt the delegates that predate this journal's first event.
+
+        The manager reads its crash record when the session is built — a run
+        that was going when the process died is already `lost` — but none of
+        that was announced as an event, so none of it arrives through the
+        stream. Folded without spending a sequence number: the next event
+        keeps the number it would have had, and a snapshot describes the
+        machine as it actually is from the first moment a client can ask.
+        """
+        with self._lock:
+            for record in records:
+                if isinstance(record, dict):
+                    self._fold_delegate(dict(record))
 
     def said(self, turn_id: str, text: str) -> None:
         """Record the person's own message, which no event announces.
@@ -332,6 +422,14 @@ class Journal:
                 "revision": self._revision,
                 "messages": [message.shape() for message in self._messages],
                 "tools": [tool.shape() for tool in self._tools],
+                # Always present, empty or not: a client that has to guess
+                # whether an absent field means "no tasks" or "a core too old
+                # to know about tasks" guesses wrong in one of the two cases.
+                # The handshake's capability list answers the age question;
+                # this answers the state one.
+                "tasks": [dict(task) for task in self._tasks],
+                "delegates": [dict(record)
+                              for record in self._delegates.values()],
             }
             waiting = list(self._waiting.values())
             if waiting:

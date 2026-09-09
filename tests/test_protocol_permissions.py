@@ -138,7 +138,10 @@ def build_wire(config, capabilities: tuple[str, ...] = ("questions",
     ]
     built: dict[str, Any] = {}
 
-    def assemble(built_config, *, bus=None, plugins=None) -> Assembly:
+    def assemble(built_config, *, bus=None, plugins=None,
+                 delegates=False) -> Assembly:
+        # `delegates` is accepted and ignored: this assembly is a scripted
+        # minimum, with no spawner a delegate manager could run on.
         bus = bus or EventBus()
         permissions = PermissionEngine(built_config, bus)
         agent = AgentLoop(built_config, Gateway(built_config, scripts=scripts),

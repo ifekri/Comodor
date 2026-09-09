@@ -53,7 +53,9 @@
       "questions",
       "permissions",
       "modes",
-      "tool_events"
+      "tool_events",
+      "tasks",
+      "delegates"
     ],
     "client": [
       "questions",
@@ -126,6 +128,11 @@
       "params": "PermissionReplyParams",
       "result": "AckResult"
     },
+    "delegate.stop": {
+      "summary": "Ask the core to stop one running background delegate. The core is the authority: it answers whether there was anything to stop, and the delegate's actual state arrives as `delegate.updated` events — `stopping` first, then the terminal state the worker settles on. A client must not paint a final state this method returned.",
+      "params": "DelegateStopParams",
+      "result": "DelegateStopResult"
+    },
     "shutdown": {
       "summary": "Close every session and stop. The core answers, then exits.",
       "params": "Empty",
@@ -142,6 +149,8 @@
     "tool.output": "ToolOutput",
     "tool.completed": "ToolCompleted",
     "tool.failed": "ToolFailed",
+    "tasks.updated": "TasksUpdated",
+    "delegate.updated": "DelegateUpdated",
     "question.requested": "QuestionRequest",
     "question.resolved": "QuestionResolved",
     "permission.requested": "PermissionRequest",
@@ -417,8 +426,151 @@
         }
       }
     },
+    "TaskState": {
+      "description": "Where one item of the agent's own plan stands. The vocabulary is the `todo_write` tool's, not the interface's: a client renders these four and invents no others — a frontend-only state such as `queued` would be a claim the core never made.",
+      "type": "string",
+      "enum": [
+        "pending",
+        "active",
+        "done",
+        "blocked"
+      ]
+    },
+    "TaskItem": {
+      "description": "One item of the agent's task list. Tasks carry no id: the list is small, the tool replaces it whole on every update, and an index is not an identity across a replacement. A client that renders the list in order needs nothing more; a future operation on one task would need a real core-owned id, which this deliberately does not fake.",
+      "type": "object",
+      "required": [
+        "text",
+        "state"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskState"
+        }
+      }
+    },
+    "TasksUpdated": {
+      "description": "The agent's whole task list, as `todo_write` recorded it. Replacement, never addition: a task the new list does not carry is gone, and the order is the order the model wrote. Arrives on the session's sequence like every other event, so a snapshot and a live stream converge on the same list.",
+      "type": "object",
+      "required": [
+        "session_id",
+        "tasks"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskItem"
+          }
+        }
+      }
+    },
+    "DelegateState": {
+      "description": "Where one background delegate has got to. `running` and `stopping` are the live states; the other four are terminal and a delegate never comes back from one. `lost` is the honest state of a delegate that was running when the process died: it is reported after a reload rather than pretended to be alive. A state only ever moves forward through this vocabulary — a late announcement cannot walk one backwards.",
+      "type": "string",
+      "enum": [
+        "running",
+        "stopping",
+        "done",
+        "failed",
+        "stopped",
+        "lost"
+      ]
+    },
+    "Delegate": {
+      "description": "One background delegate, as the core's manager knows it. Every field is a fact the core already keeps: no progress percentage is invented, and `steps`, `tool_calls` and `tokens` are what the worker recorded — zero until it settles, because a running delegate has not reported anything yet. `elapsed` is seconds as of this record; `started_at` is the core's epoch seconds, which lets a client tick a running delegate's clock without asking. `label` is the model's own short name for the work (or the head of its brief) — display text, not a promise.",
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "state",
+        "steps",
+        "tool_calls",
+        "tokens",
+        "elapsed",
+        "started_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/DelegateState"
+        },
+        "steps": {
+          "type": "integer"
+        },
+        "tool_calls": {
+          "type": "integer"
+        },
+        "tokens": {
+          "type": "integer"
+        },
+        "elapsed": {
+          "type": "number"
+        },
+        "started_at": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    },
+    "DelegateUpdated": {
+      "description": "One background delegate moved. The whole record rides along, so a client replaces what it holds for that id rather than merging fields — and applies the state vocabulary's forward-only rule: an event cannot move a delegate back from `stopping` to `running` or out of a terminal state.",
+      "type": "object",
+      "required": [
+        "session_id",
+        "delegate"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "delegate": {
+          "$ref": "#/$defs/Delegate"
+        }
+      }
+    },
+    "DelegateStopParams": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "delegate_id"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "delegate_id": {
+          "type": "string"
+        }
+      }
+    },
+    "DelegateStopResult": {
+      "description": "Whether there was a running delegate to stop. `false` is an honest answer, not an error: the delegate may have finished in the instant the request arrived, or never existed. What it actually became arrives as `delegate.updated` — `stopping` when the stop took, then the terminal state the worker settles on. Stopping every delegate at once is deliberately not a protocol operation: one deliberate stop is the surface F5 promises.",
+      "type": "object",
+      "required": [
+        "stopped"
+      ],
+      "properties": {
+        "stopped": {
+          "type": "boolean"
+        }
+      }
+    },
     "SessionSnapshot": {
-      "description": "Everything a client needs to draw a session it did not watch happen. `revision` is the sequence number this state includes up to: the client drops any event at or below it and applies the rest, which is what makes rebuilding safe while the session is still streaming. Every message and tool carries `started_seq`, the sequence at which it entered the timeline, so the two lists merge into the one order the live stream had rather than being drawn messages-then-tools.",
+      "description": "Everything a client needs to draw a session it did not watch happen. `revision` is the sequence number this state includes up to: the client drops any event at or below it and applies the rest, which is what makes rebuilding safe while the session is still streaming. Every message and tool carries `started_seq`, the sequence at which it entered the timeline, so the two lists merge into the one order the live stream had rather than being drawn messages-then-tools. `tasks` and `delegates` carry the workbench state the same way: a client that mounts mid-job sees the plan and the delegated work without replaying history, and a client too old to know them ignores them.",
       "type": "object",
       "required": [
         "session",
@@ -443,6 +595,20 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/SnapshotTool"
+          }
+        },
+        "tasks": {
+          "description": "The agent's current task list, whole. The `todo_write` tool replaces the entire list on every update, and so does this: a snapshot's tasks are the list, not an addition to whatever a client already held.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskItem"
+          }
+        },
+        "delegates": {
+          "description": "Every background delegate this session knows, terminal ones included, so a client rebuilding after a crash sees the honest `lost` rather than an empty panel. A delegate that was running when the process died is here as `lost`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Delegate"
           }
         },
         "question": {
