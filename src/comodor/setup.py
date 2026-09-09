@@ -35,6 +35,23 @@ from rich.text import Text
 
 from . import catalogue, migrate
 from .config import Config
+from .onboarding import (
+    Check,
+    Checkpoint,
+    CredentialSource,
+    Discovery,
+    Effect,
+    EffectKind,
+    GitHubIntent,
+    GitHubOutcome,
+    GitHubStep,
+    SetupError,
+    SetupPlan,
+    Step,
+    classify_probe,
+    clear_checkpoint,
+    read_checkpoint,
+)
 from .ui import chooser
 from .ui import console as console_module
 from .ui.theme import Theme
@@ -46,10 +63,16 @@ Secret = Callable[[str], str]
 
 @dataclass
 class Answers:
-    """What the wizard collected, before anything is written."""
+    """What the wizard collected, before anything is written.
+
+    The two credentials are excluded from the repr. A dataclass prints every
+    field by default, so one unhandled exception anywhere in the wizard would
+    put a working API key and a bot token into a traceback — and tracebacks get
+    pasted into issues, screenshots and terminal scrollback.
+    """
 
     provider: str = ""
-    api_key: str = ""
+    api_key: str = field(default="", repr=False)
     model: str = ""
     base_url: str = ""
     mode: str = "act"
@@ -59,7 +82,7 @@ class Answers:
     skills: list[str] = field(default_factory=list)
     #: A bot token, if one was given. Empty means the question was declined,
     #: which is the default — nothing about Telegram is switched on quietly.
-    telegram_token: str = ""
+    telegram_token: str = field(default="", repr=False)
     #: Accounts paired during setup. Kept here rather than written straight to
     #: the config so that abandoning the wizard leaves nothing behind.
     telegram_allowed: list[int] = field(default_factory=list)
@@ -70,7 +93,8 @@ class SetupWizard:
 
     def __init__(self, config: Config, console: Console | None = None,
                  theme: Theme | None = None, prompt: Prompt | None = None,
-                 secret: Secret | None = None, home: Path | None = None) -> None:
+                 secret: Secret | None = None, home: Path | None = None,
+                 github: Callable[[Config, Console], Any] | None = None) -> None:
         self.config = config
         #: Where to look for another agent. An argument rather than
         #: `Path.home()` reached for directly, so that a test can point it at a
@@ -97,6 +121,38 @@ class SetupWizard:
         #: header after clearing.
         self._step: tuple[str, int, int] = ("", 0, 0)
         self.imported = migrate.Outcome()
+        #: Where the decisions live.
+        #:
+        #: This class draws screens and collects keystrokes; it does not decide
+        #: which provider is usable here, whether a probe proved anything, what
+        #: a GitHub flow is waiting on, or when the configuration may be
+        #: written. Those are the plan's, which is what lets a second
+        #: presentation — a desktop window, say — ask the same questions in the
+        #: same order and reach the same answer without this file being copied.
+        #:
+        #: One instance for the whole run rather than one per question, because
+        #: the attempt numbers that stop a slow provider response from
+        #: repopulating a screen about a different provider live on it.
+        self.plan = SetupPlan(config)
+        #: How the browser flow is reached. A factory rather than an instance
+        #: because each attempt wants a fresh connection, and a parameter
+        #: rather than an import at the call site because everything that
+        #: leaves this process — the worker, the browser, the clipboard, the
+        #: polling loop — belongs behind one seam. Setup's orchestration is
+        #: testable without any of it; a test substitutes the factory.
+        self._make_github = github or GitHubHost
+        #: The effect the last transition asked for, waiting to be run.
+        #:
+        #: Kept rather than acted on immediately, because the plan decides what
+        #: is needed and the screen decides when it is polite to go and do it —
+        #: a probe started before the question it answers is drawn would print
+        #: its result underneath a header nobody had read yet.
+        self._effect: Effect | None = None
+        #: What one probe of this machine found: a note per provider, and which
+        #: local runtimes are actually up. See `_detect`.
+        self._notes: dict[str, str] = {}
+        self._running: set[str] = set()
+        self._detected = False
 
     # -- presentation ----------------------------------------------------- #
 
@@ -417,41 +473,222 @@ class SetupWizard:
 
     # -- the questions ---------------------------------------------------- #
 
-    def run(self) -> Answers:
+    def run(self, minimal: bool | None = None) -> Answers:
+        """Ask what it takes to reach a working agent, and only that.
+
+        `minimal` defaults to "this is a first run". A new install gets the
+        shortest honest path — provider, key if one is needed, model, and
+        GitHub if wanted — because the point of the first minute is a working
+        agent, not a tour of the settings.
+
+        An explicit ``comodor setup`` asks the optional questions as well.
+        Approval policy, the skills library and a phone channel are all still
+        worth offering; they are simply not worth standing between somebody and
+        their first task, and each has its own command for later. Nothing here
+        was deleted, only moved off the critical path.
+
+        An interrupted run left its non-secret progress in a checkpoint, and
+        the offer to continue it comes before anything is asked: a resume is
+        not a question that fits between the others, and quietly restarting
+        would throw away answers the person already gave.
+        """
+        if minimal is None:
+            minimal = bool(self.config.needs_setup or self.config.first_run)
         self._banner()
+
+        # Offered ahead of the import, because a run that got far enough to
+        # save a checkpoint already answered that question: re-asking it
+        # before "continue where you left off" would be a fresh question
+        # standing in front of an old decision.
+        saved = read_checkpoint(self.config)
+        resuming = saved is not None and self._offer_resume(saved)
+        if saved is not None and not resuming:
+            # Starting over discards the progress file and nothing else. The
+            # configuration is a different state, and is not touched here.
+            clear_checkpoint(self.config)
 
         # Asked before anything else, because everything after it depends on
         # the answer: an imported key is a key not to ask for, and an imported
         # model is the default for the model question.
-        elsewhere = self._look_for_another_agent()
-        total = 6 + (1 if elsewhere else 0)
+        elsewhere = [] if resuming else self._look_for_another_agent()
+        asked = 4 if minimal else 7
+        total = asked + (1 if elsewhere else 0)
         step = 1
         if elsewhere:
             self._offer_import(elsewhere, step, total)
             step += 1
 
+        # Detection runs after the import, not before: what is already
+        # available just changed, and a provider list drawn from before the
+        # import would offer a key that is already in the config as though
+        # somebody still had to find one.
+        #
+        # Which local runtimes are up is passed in rather than probed by the
+        # plan, because reaching a port is this host's kind of work and a test
+        # that had to start Ollama to check an ordering would not be runnable.
+        self.plan.start(running=self._running_here())
+
         answers = Answers()
-        answers.provider = self._ask_provider(step, total)
-        spec = catalogue.get(answers.provider)
+        if resuming:
+            self._effect = self.plan.continue_from_checkpoint()
+            if self.plan.resumed is None:
+                # The plan could not use the saved progress — a provider that
+                # is no longer offered, a step no run can stand on. It
+                # discarded the file; this says so rather than quietly
+                # pretending the offer to continue was kept.
+                resuming = False
+                self.console.print(Text(
+                    "  That saved progress could not be used, so the "
+                    "questions start again.",
+                    style=self.theme.style("dim")))
+            else:
+                step = 1
+                total = self._questions_left(minimal)
 
-        step += 1
+        while True:
+            if resuming:
+                spec = catalogue.get(self.plan.draft.provider)
+                answers.provider = self.plan.draft.provider
+                answers.base_url = self.plan.draft.base_url
+                self._recap_restored(spec)
+                if self.plan.step is Step.CREDENTIAL:
+                    answers.api_key = self._ask_key(step, total, spec)
+                    step += 1
+                if self.plan.step is Step.MODEL:
+                    answers.model = self._ask_model(step, total, spec, answers)
+                    step += 1
+                    if answers.model is None:
+                        # "Choose a different provider" out of a refused
+                        # credential. The resumed path has ended and the
+                        # ordinary one begins, with its own counting.
+                        resuming = False
+                        step, total = 1, asked
+                        continue
+                if self.plan.step is Step.GITHUB:
+                    self._ask_github(step, total)
+                    step += 1
+                break
 
-        if answers.provider == "custom":
-            answers.base_url = self._ask_endpoint()
-        if spec is not None and spec.needs_key or answers.provider == "custom":
+            first = step
+            answers.provider = self._ask_provider(step, total)
+            spec = catalogue.get(answers.provider)
+            step += 1
+
+            if answers.provider == "custom":
+                answers.base_url = self._ask_endpoint()
             answers.api_key = self._ask_key(step, total, spec)
-        else:
-            self._rule("API key", step, total)
-            self.console.print(
-                Text("  Not needed — this one runs on your machine.",
-                     style=self.theme.style("dim")))
-            self._answered("api key", "not needed")
+            step += 1
 
-        answers.model = self._ask_model(step + 1, total, spec, answers)
-        answers.approvals = self._ask_approvals(step + 2, total)
-        answers.skills = self._ask_skills(step + 3, total)
-        self._ask_telegram(step + 4, total, answers)
+            answers.model = self._ask_model(step, total, spec, answers)
+            step += 1
+            if answers.model is None:
+                step = first
+                continue
+
+            self._ask_github(step, total)
+            step += 1
+            break
+
+        if not minimal:
+            answers.approvals = self._ask_approvals(step, total)
+            answers.skills = self._ask_skills(step + 1, total)
+            self._ask_telegram(step + 2, total, answers)
         return answers
+
+    # ---------------------------------------------------------------- resume #
+
+    def _offer_resume(self, saved: Checkpoint) -> bool:
+        """An interrupted run was found. Continue it, start over, or leave.
+
+        Offered rather than applied in either direction: silently continuing
+        would surprise somebody who had forgotten they started, and silently
+        restarting would destroy answers they gave. The progress file holds no
+        secrets — a typed key is asked again rather than written down — and
+        saying so on the screen is what makes "continue" mean something.
+        """
+        self._rule("Continue where you left off?", 0, 0)
+        spec = catalogue.get(saved.provider)
+        where = spec.label if spec else (saved.provider or "the first question")
+        reached = {
+            "credential": "the API key",
+            "model": "choosing a model",
+            "github": "the GitHub question",
+            "ready": "the last screen",
+        }.get(saved.step, "the provider list")
+        self.console.print(Text.assemble(
+            ("  A previous setup reached ", self.theme.style("dim")),
+            (reached, self.theme.style("value")),
+            (f" with {where}.", self.theme.style("dim")),
+        ))
+        if saved.model:
+            self.console.print(Text.assemble(
+                ("  Model ", self.theme.style("dim")),
+                (saved.model, self.theme.style("value")),
+            ))
+        if saved.base_url:
+            self.console.print(Text.assemble(
+                ("  Endpoint ", self.theme.style("dim")),
+                (saved.base_url, self.theme.style("value")),
+            ))
+        self.console.print(Text(
+            "  Saved progress holds no keys; one you typed is asked again.\n",
+            style=self.theme.style("dim")))
+
+        choice = self._choose([
+            ("continue", "Continue previous setup", f"pick up at {reached}"),
+            ("fresh", "Start over",
+             "ask everything again; the saved progress is discarded"),
+            ("cancel", "Cancel", "leave everything exactly as it is"),
+        ], default=1, title="Setup")
+        if choice == "cancel":
+            # The configuration was never touched — the transaction sees to
+            # that — and the progress file stays, so a later run can still
+            # offer the same choice. Callers already handle this the way they
+            # handle Ctrl-C, which is what it means.
+            raise KeyboardInterrupt
+        return choice == "continue"
+
+    def _questions_left(self, minimal: bool) -> int:
+        """How many questions a resumed run will still ask.
+
+        Counted from the plan's own position rather than assumed: a resume
+        that lands on the GitHub question has one left, and labelling it
+        "3 of 4" would be the counter disagreeing with the screen.
+        """
+        left = {Step.CREDENTIAL: 3, Step.MODEL: 2, Step.GITHUB: 1}.get(
+            self.plan.step, 0)
+        return left + (0 if minimal else 3)
+
+    def _recap_restored(self, spec) -> None:
+        """The answers a resume brought back, one quiet line each.
+
+        Restored answers are shown the way freshly given ones are, because a
+        question that is not asked again still deserves to be seen — a wrong
+        restoration is only catchable if it is visible. Nothing here can name
+        a key: the checkpoint has nowhere to put one.
+        """
+        draft = self.plan.draft
+        if draft.provider:
+            label = spec.label if spec else draft.provider
+            self._answered("provider", label)
+        if draft.base_url:
+            self._answered("endpoint", draft.base_url)
+        words = {
+            CredentialSource.ENVIRONMENT:
+                f"from ${draft.env_variable}" if draft.env_variable
+                else "from the environment",
+            CredentialSource.EXISTING: "already stored here",
+            CredentialSource.IMPORTED: "imported",
+            CredentialSource.ENTERED: "to enter again",
+        }.get(draft.credential)
+        if words:
+            self._answered("api key", words)
+        if draft.model:
+            self._answered("model", draft.model)
+        if draft.github is GitHubIntent.SKIP:
+            self._answered("github", "skipped")
+        elif draft.github is GitHubIntent.KEEP:
+            self._answered("github", "kept")
 
     # ---------------------------------------------------------------- import #
 
@@ -570,26 +807,45 @@ class SetupWizard:
         Returns a note per provider, for the list to show beside it. Never
         raises: this is on the path that draws the first screen anybody sees.
         """
+        self._detect()
+        return self._notes
+
+    def _running_here(self) -> set[str]:
+        """The local runtimes that are actually up, by provider id."""
+        self._detect()
+        return self._running
+
+    def _detect(self) -> None:
+        """One probe, two answers.
+
+        Cached, because both the ordering of the provider list and the notes
+        beside it come from the same look — and that look touches ports, so
+        doing it twice would be doing it twice.
+        """
+        if self._detected:
+            return
+        self._detected = True
         try:
             from .providers import discover
 
             running = discover.running_here()
             exported = discover.keys_in_the_environment()
         except Exception:
-            return {}
+            return
 
-        notes: dict[str, str] = {}
         for item in running:
-            notes[item.provider] = (f"running here — {item.summary}"
-                                    if item.usable else
-                                    "running here, but no models installed yet")
+            if item.usable:
+                self._running.add(item.provider)
+            self._notes[item.provider] = (
+                f"running here — {item.summary}" if item.usable
+                else "running here, but no models installed yet")
         for item in exported:
-            notes.setdefault(item.provider, f"key already in ${item.variable}")
+            self._notes.setdefault(item.provider,
+                                   f"key already in ${item.variable}")
 
         # Returned rather than announced. The list leads with these and names
         # their models, so a sentence above it saying the same thing is the
         # same fact twice — and the second telling is the one nobody reads.
-        return notes
 
     def _ask_skills(self, step: int, total: int) -> list[str]:
         """Offer the library, once, at the only moment it is not an interruption.
@@ -892,84 +1148,97 @@ class SetupWizard:
             Text("  You can add more later; this is just the one to start with.\n",
                  style=self.theme.style("dim")))
         here = self._already_here()
-        # A provider that already has a key — imported a moment ago, or found
-        # in the environment — leads. The key is the expensive part of setting
-        # this up, and offering a default that needs a new one, immediately
-        # after announcing that a key was imported, is the wizard contradicting
-        # itself. Order within each group stays the catalogue's own.
-        def keyed(spec: catalogue.ProviderSpec) -> bool:
-            entry = self.config.providers.get(spec.id)
-            return bool(entry is not None and entry.api_key)
-
-        def usable_now(spec: catalogue.ProviderSpec) -> bool:
-            """Nothing left to find before this one can answer.
-
-            A runtime already up on this machine is the same argument as a key
-            already set, taken further: it needs no key at all.
-            """
-            return keyed(spec) or spec.id in here
-
-        offered = list(catalogue.offered())
-        ready = [spec for spec in offered if usable_now(spec)]
-        rest = [spec for spec in offered if not usable_now(spec)]
-
-        def blurb(spec: catalogue.ProviderSpec) -> str:
-            # What was found about this one outranks what the catalogue says
-            # about it: "running here, three models" is the answer, and the
-            # sales line is what you read when there is no answer yet.
-            if spec.id in here:
-                return here[spec.id]
-            if not keyed(spec):
-                return spec.blurb
-            why = "key imported" if spec.label in self.imported.keys \
-                else "key already set"
-            return f"{why} — {spec.blurb}"
-
-        options = [(spec.id, spec.label, blurb(spec)) for spec in ready + rest]
+        # The order is the plan's, and so is the reasoning behind it: it knows
+        # which providers are usable on this machine without anybody typing
+        # anything. A second copy of that rule here — which is what this method
+        # used to carry — is a second place for it to be wrong, and the two
+        # disagreed about a local runtime that was running but had no key.
+        # What this adds is wording, not decisions.
+        options = [(fact.id, fact.label, self._provider_note(fact, here))
+                   for fact in self.plan.facts]
         chosen = self._choose(options, default=1, title="Providers")
         labels = {value: label for value, label, _ in options}
         self._answered("provider", labels.get(chosen, chosen))
+        self._effect = self.plan.choose_provider(chosen)
         return chosen
+
+    def _provider_note(self, fact: Any, here: dict[str, str]) -> str:
+        """What is known about this one, ahead of what the catalogue says.
+
+        "Running here, three models" is an answer; the sales line is what you
+        read when there is no answer yet.
+        """
+        if fact.id in here:
+            return here[fact.id]
+        if fact.has_stored_key:
+            why = ("key imported" if fact.label in self.imported.keys
+                   else "key already set")
+            return f"{why} — {fact.blurb}"
+        if fact.has_env_key:
+            return f"key in ${fact.env_variable} — {fact.blurb}"
+        return fact.blurb
 
     def _ask_endpoint(self) -> str:
         self.console.print()
-        return self._ask("OpenAI-compatible base URL", "https://")
+        while True:
+            url = self._ask("OpenAI-compatible base URL", "https://").strip()
+            self._effect = self.plan.set_endpoint(url)
+            if not self.plan.error:
+                return url
+            # Refused here rather than after a probe has been sent somewhere:
+            # a URL with a key in its query string would otherwise be written
+            # into a config file, echoed onto a recap screen, and handed to a
+            # process that logs its arguments.
+            self.console.print(Text(f"  {self.plan.error}",
+                                    style=self.theme.style("bad")))
 
     def _ask_key(self, step: int, total: int,
                  spec: catalogue.ProviderSpec | None) -> str:
         self._rule("API key", step, total)
 
-        entry = self.config.providers.get(spec.id) if spec else None
         if spec and spec.keys_url:
             self.console.print(Text.assemble(
                 ("  Get one at ", self.theme.style("dim")),
                 (spec.keys_url, self.theme.style("accent")),
             ))
-        # Only when there is nothing already, because it is not true of a key
-        # that lives in the environment - that one is deliberately not copied
-        # to disk, and the offer below says so instead.
-        if entry is None or not entry.api_key:
-            self.console.print(
-                Text("  It is stored in your config file and never sent "
-                     "anywhere but the provider.", style=self.theme.style("dim")))
-        self.console.print()
 
-        # A key that arrived from another agent, or from the environment, is
-        # already a working answer to this question. Asking for it again is how
-        # an import announces itself and then makes no difference.
-        if entry is not None and entry.api_key:
+        # Which of the four situations this is — no key needed, one already in
+        # the environment, one already stored, or nothing yet — is the plan's
+        # answer rather than a re-read of the config, because the plan is what
+        # decides afterwards whether anything is written to disk.
+        fact = next((each for each in self.plan.facts
+                     if each.id == self.plan.draft.provider), None)
+        source = fact.credential if fact else CredentialSource.ENTERED
+
+        if source is CredentialSource.NONE:
+            self.console.print(
+                Text("  Not needed — this one runs on your machine.",
+                     style=self.theme.style("dim")))
+            self.console.print()
+            self._answered("api key", "not needed")
+            return ""
+
+        if source in (CredentialSource.ENVIRONMENT, CredentialSource.EXISTING):
+            self.console.print()
             where, note = self._where_the_key_is(spec)
             self.console.print(Text(f"  A key for this provider is {where}.",
                                     style=self.theme.style("good")))
             if note:
-                self.console.print(Text(f"  {note}", style=self.theme.style("dim")))
+                self.console.print(
+                    Text(f"  {note}", style=self.theme.style("dim")))
             keep = self._choose([
                 ("keep", f"use the key {where}", "nothing to type"),
                 ("replace", "enter a different one", "saved to your config file"),
             ], default=1, title="API key")
             if keep == "keep":
                 self._answered("api key", f"{where}, kept")
+                self._effect = self.plan.choose_credential(source)
                 return ""
+        else:
+            self.console.print(
+                Text("  It is stored in your config file and never sent "
+                     "anywhere but the provider.", style=self.theme.style("dim")))
+            self.console.print()
 
         while True:
             # Masked: keys get pasted in shared terminals and shoulder-surfed
@@ -977,6 +1246,9 @@ class SetupWizard:
             key = self._secret("  key (input hidden): ").strip()
             if key:
                 self._answered("api key", "set, and never shown again")
+                # Handed to the plan, which is the only place it is held. What
+                # comes back is the probe the plan now wants run.
+                self._effect = self.plan.submit_credential(key)
                 return key
             self.console.print(Text("  a key is required for this provider",
                                     style=self.theme.style("bad")))
@@ -999,19 +1271,42 @@ class SetupWizard:
         return "already in your config file", ""
 
     def _ask_model(self, step: int, total: int,
-                   spec: catalogue.ProviderSpec | None, answers: Answers) -> str:
-        # Discovery first, and the question afterwards, because asking the
-        # provider what it has takes a second or two over the network. During
-        # that second the terminal is still in its ordinary mode, so anything
-        # impatient fingers press is echoed — an arrow key arrives on screen as
-        # `^[[B` and sits there. Clearing for the question is what wipes it, so
-        # the clearing has to come second. The keystrokes themselves are
-        # discarded when the reader takes the terminal.
+                   spec: catalogue.ProviderSpec | None,
+                   answers: Answers) -> str | None:
+        """The model question. None means "back to the provider list".
+
+        Discovery first, and the question afterwards, because asking the
+        provider what it has takes a second or two over the network. During
+        that second the terminal is still in its ordinary mode, so anything
+        impatient fingers press is echoed — an arrow key arrives on screen as
+        `^[[B` and sits there. Clearing for the question is what wipes it, so
+        the clearing has to come second. The keystrokes themselves are
+        discarded when the reader takes the terminal.
+
+        A credential the provider refused is corrected before any list is
+        drawn. Choosing a model against a key that does not work ends at a
+        Ready screen that cannot be committed — a dead end dressed up as
+        progress — so the refusal is handled where it happens, with every
+        earlier answer kept.
+        """
         models = self._discover_models(spec, answers)
+        while self.plan.validation.check is Check.INVALID:
+            if self._offer_credential_fix(step, total, answers) == "back":
+                return None
+            models = self._discover_models(spec, answers)
+
+        check = self.plan.validation.check
+        reason = self.plan.validation.reason
 
         self._rule("Which model?", step, total)
+        self._say_what_the_probe_found(check, reason)
+
         if not models:
-            return self._ask("model id", spec.default_model if spec else "")
+            typed_model = self._ask("model id",
+                                    spec.default_model if spec else "")
+            self.plan.choose_model(typed_model, typed=True)
+            self._effect = None
+            return typed_model
 
         # A model that came over from another agent is the one this person was
         # already using. It leads the list rather than sitting somewhere in it.
@@ -1025,44 +1320,322 @@ class SetupWizard:
                    for index, model in enumerate(models)]
         options.append(("__other__", "something else", "type the model id"))
         chosen = self._choose(options, default=1, title="Models")
-        if chosen == "__other__":
+        typed = chosen == "__other__"
+        if typed:
             chosen = self._ask("model id", models[0])
         self._answered("model", chosen)
+        self.plan.choose_model(chosen, typed=typed)
+        self._effect = None
         return chosen
+
+    def _say_what_the_probe_found(self, check: Any, reason: str) -> None:
+        """Say what checking proved, including when it proved nothing.
+
+        "Configured" and "working" are different facts. A wizard that showed a
+        model list and said nothing about where it came from left somebody
+        unable to tell a provider that answered from one that was guessed at —
+        and unable to tell a wrong key from an outage, which is the difference
+        between rotating a credential and waiting a minute.
+        """
+        if check is Check.VALID:
+            self.console.print(Text("  That credential works, and these are "
+                                    "the models it offers.",
+                                    style=self.theme.style("good")))
+            return
+        if check in (Check.IDLE, Check.CHECKING):
+            # Nothing to say: either no probe was possible, or one is still
+            # running and this screen is not where its result lands.
+            return
+        style = ("bad" if check is Check.INVALID else
+                 "warn" if check in (Check.UNREACHABLE, Check.NO_MODELS)
+                 else "dim")
+        headline = {
+            Check.INVALID: "That credential was refused.",
+            Check.UNREACHABLE: "The provider could not be reached.",
+            Check.NO_MODELS: "The provider answered but offered no models.",
+            Check.UNVERIFIED: "Nothing could be checked against this provider.",
+            Check.CHECKING: "Checking…",
+        }.get(check, "")
+        self.console.print(Text(f"  {headline}", style=self.theme.style(style)))
+        if reason:
+            self.console.print(Text(f"  {reason}", style=self.theme.style("dim")))
+        if check in (Check.UNREACHABLE, Check.NO_MODELS, Check.UNVERIFIED):
+            self.console.print(Text(
+                "  These are the models this provider is known to have. "
+                "Pick one, or type the id you were given — nothing here was "
+                "confirmed, and setup will say so rather than claim it works.",
+                style=self.theme.style("dim")))
+
+    def _offer_credential_fix(self, step: int, total: int,
+                               answers: Answers) -> str:
+        """The provider refused the credential. Fix that, and nothing else.
+
+        Retry, replace, go back or cancel — the plan stays where it is, the
+        staged configuration is still unwritten, and every earlier answer
+        survives the correction. What must not happen is the wizard walking
+        on: the plan refuses to commit an INVALID validation, so continuing
+        would only move the failure to the end of the whole flow instead of
+        fixing it where the problem is.
+        """
+        self._rule("That credential was refused", step, total)
+        reason = self.plan.validation.reason or self.plan.error
+        if reason:
+            self.console.print(Text(f"  {reason}",
+                                    style=self.theme.style("bad")))
+        self.console.print(Text("  Everything else you answered is kept.\n",
+                                style=self.theme.style("dim")))
+
+        fact = next((each for each in self.plan.facts
+                     if each.id == self.plan.draft.provider), None)
+        options: list[tuple[str, str, str]] = []
+        if fact is not None and fact.needs_key:
+            options.append(("replace", "Enter a different key",
+                            "the provider is asked again straight away"))
+        options.append(("retry", "Try this credential again",
+                        "a refusal can be the provider having a bad minute"))
+        options.append(("back", "Choose a different provider",
+                        "back to the provider list"))
+        options.append(("cancel", "Cancel setup",
+                        "nothing is written; your configuration stays as "
+                        "it is"))
+        choice = self._choose(options, default=1, title="API key")
+
+        if choice == "cancel":
+            self.plan.cancel()
+            raise KeyboardInterrupt
+        if choice == "back":
+            self.plan.back()
+            return "back"
+        if choice == "retry":
+            self._effect = self.plan.retry_validation()
+            return "retry"
+        while True:
+            # Masked, exactly like the first asking: keys get pasted in
+            # shared terminals and shoulder-surfed off screen recordings.
+            key = self._secret("  key (input hidden): ").strip()
+            if key:
+                answers.api_key = key
+                self._effect = self.plan.submit_credential(key)
+                return "replace"
+            self.console.print(Text("  a key is required for this provider",
+                                    style=self.theme.style("bad")))
 
     def _discover_models(self, spec: catalogue.ProviderSpec | None,
                          answers: Answers) -> list[str]:
-        """Ask the provider what it has, and fall back to the known list.
+        """Run the probe the plan asked for, and tell it what happened.
 
         Live discovery is worth a couple of seconds here: a stale hard-coded
-        list is how a setup wizard ends up recommending a model that was retired
-        six months ago.
+        list is how a setup wizard ends up recommending a model that was
+        retired six months ago. It is also the cheapest way to prove a
+        credential — an authenticated model list costs nothing, where a
+        generation would spend money to learn something already learned.
+
+        A provider that cannot be asked still gets a list, from the catalogue,
+        because a dead end is worse than an unverified choice — but the
+        validation state says which of the two happened, and the screen says so
+        out loud rather than presenting a guess as an answer.
         """
-        if spec is None:
-            return []
+        effect = self._effect
+        self._effect = None
+        if effect is None or effect.kind is not EffectKind.DISCOVER:
+            effect = self.plan.retry_validation()
+        if effect.kind is not EffectKind.DISCOVER:
+            return list(self.plan.validation.models)
+
         self.console.print(Text("  checking what this provider offers…",
                                 style=self.theme.style("dim")))
-        try:
-            from .providers.gateway import build_provider
+        entry = self.plan.probe_entry()
+        models: list[str] = []
+        check = Check.UNVERIFIED
+        reason = ""
+        if entry is None:
+            reason = "There is nothing to check yet."
+        else:
+            try:
+                from .providers.gateway import build_provider
 
-            entry = self.config.providers.get(spec.id)
-            if entry is None:
-                return list(spec.models)
-            probe = build_provider(_with(entry, answers))
-            live = probe.list_models()
-            close = getattr(probe, "close", None)
-            if close:
-                close()
-        except Exception:
-            live = []
+                probe = build_provider(entry)
+                try:
+                    models = list(probe.list_models())
+                finally:
+                    close = getattr(probe, "close", None)
+                    if close:
+                        close()
+                check = Check.VALID if models else Check.NO_MODELS
+                if not models:
+                    reason = "It answered, but listed nothing to run."
+            except Exception as problem:      # noqa: BLE001 - classified below
+                check, reason = classify_probe(problem)
 
-        if not live:
-            return list(spec.models)
+        if (check is not Check.VALID and check is not Check.INVALID
+                and spec is not None):
+            # Offered, and labelled as not confirmed by `_say_what_the_probe_found`.
+            # A refused credential is excluded: a list drawn under it would be
+            # presented as though the key were fine and only the network were
+            # slow, when what is owed is a correction.
+            models = list(spec.models)
 
-        # Put the models we know are good first, then everything else.
-        known = [model for model in spec.models if model in live]
-        rest = [model for model in live if model not in known]
-        return (known + rest)[:12]
+        known = list(spec.models) if spec is not None else []
+        if check is Check.VALID and known:
+            # What the catalogue recommends first, then everything else: the
+            # provider's own ordering is alphabetical, which is not advice.
+            models = [m for m in known if m in models] + \
+                     [m for m in models if m not in known]
+        self.plan.report_discovery(
+            effect.attempt,
+            Discovery(check=check, reason=reason, models=tuple(models[:40])))
+        return list(self.plan.validation.models)
+
+    # ------------------------------------------------------------------ github #
+
+    def _ask_github(self, step: int, total: int) -> None:
+        """Offer the connection, and make skipping it an equal answer.
+
+        Comodor works on a local repository with no GitHub App anywhere near
+        it, so this is not a required step and must not read like one: an
+        optional thing presented as the last hurdle is a thing people abandon
+        the install over. Skipping has to finish setup, not half-finish it.
+        """
+        self._rule("GitHub", step, total)
+
+        if self.plan.github.step is GitHubStep.KEPT:
+            account = self.plan.github.account or "this machine"
+            self.console.print(Text(f"  Already connected as {account}.",
+                                    style=self.theme.style("good")))
+            self.console.print(Text(
+                "  Re-running setup is not a reason to connect it again. "
+                "`comodor github status` shows what it can see.",
+                style=self.theme.style("dim")))
+            self._answered("github", f"connected as {account}")
+            self.plan.keep_github()
+            return
+
+        self.console.print(Text(
+            "  Optional. Comodor works on a local repository without it.",
+            style=self.theme.style("dim")))
+        self.console.print(Text(
+            "  Connecting lets it read issues, pull requests and CI, and open "
+            "branches on repositories you have not checked out here.",
+            style=self.theme.style("dim")))
+        self.console.print()
+
+        choice = self._choose([
+            ("connect", "Connect GitHub",
+             "opens a browser; this terminal notices when you finish"),
+            ("skip", "Skip for now",
+             "`comodor github connect` does it any time later"),
+        ], default=2, title="GitHub")
+        if choice == "skip":
+            self.plan.skip_github()
+            self._answered("github", "skipped")
+            return
+        self._connect_github()
+
+    def _connect_github(self) -> None:
+        """Run the browser flow through the host seam.
+
+        Nothing here reimplements the protocol: the host begins the flow, opens
+        the browser, and polls the signed claim endpoint until the worker says
+        the installation is verified. What setup owns is the states around it
+        — what to show while it waits, and what to offer when it does not
+        succeed — so that a transient failure costs one retry rather than the
+        whole onboarding.
+        """
+        from .github.connect import ConnectError
+
+        for _attempt in range(3):
+            effect = self.plan.connect_github()
+            if effect.kind is not EffectKind.GITHUB_BEGIN:
+                return
+            host = self._make_github(self.config, self.console)
+            try:
+                pending = host.begin()
+            except ConnectError as problem:
+                self.plan.report_github(effect.attempt, GitHubOutcome(
+                    step=_github_step(problem), detail=str(problem)))
+            except (OSError, ValueError) as problem:
+                self.plan.report_github(effect.attempt, GitHubOutcome(
+                    step=GitHubStep.UNREACHABLE, detail=str(problem)))
+            else:
+                opened = host.open(pending)
+                waiting = self.plan.report_github_started(
+                    effect.attempt, url=pending.url, opened=opened,
+                    seconds_left=pending.seconds_left,
+                    automatic=pending.automatic)
+                if waiting.kind is EffectKind.GITHUB_WAIT:
+                    host.present(pending.url, opened)
+                    try:
+                        installation = host.wait(pending)
+                    except ConnectError as problem:
+                        self.plan.report_github(waiting.attempt, GitHubOutcome(
+                            step=_github_step(problem), detail=str(problem)))
+                    except KeyboardInterrupt:
+                        # Ctrl-C stopped the waiting, not the setup: the
+                        # person is still mid-onboarding, and leaving the plan
+                        # on the GitHub step would strand it — unable to
+                        # commit and unable to go back. The offer below is the
+                        # same one a failure gets, and its default is to skip
+                        # and finish.
+                        self.plan.cancel_github()
+                        self.console.print(Text("  Nothing was connected.",
+                                                style=self.theme.style("dim")))
+                    else:
+                        self.plan.report_github(waiting.attempt, GitHubOutcome(
+                            step=GitHubStep.CONNECTED,
+                            account=getattr(installation, "account_login", ""),
+                            installation=installation))
+                # Anything else — an older endpoint that cannot hold a result,
+                # and would need a receipt pasted back — has already put its
+                # failure on the plan. It falls through to the offer below
+                # rather than breaking out of it: the person chose Connect and
+                # owes them an explanation and a way out, not a silent skip.
+
+            if self.plan.github.step is GitHubStep.CONNECTED:
+                account = self.plan.github.account or "this machine"
+                self._answered("github", f"connected as {account}")
+                return
+            if not self._offer_github_retry():
+                return
+        if self.plan.github.step is not GitHubStep.CONNECTED:
+            # Three attempts is enough. Skipping finishes setup; the command
+            # exists for trying again later with a full screen to itself.
+            self.plan.skip_github()
+            self._answered("github", "skipped after it would not connect")
+
+    def _offer_github_retry(self) -> bool:
+        """What to do about a connection that did not happen. True to retry.
+
+        The offer depends on what went wrong, because "try again" is the right
+        answer to a 502 and the wrong one to a refusal — and neither is the
+        right answer to somebody who has decided they do not want it yet.
+        """
+        step = self.plan.github.step
+        headline = {
+            GitHubStep.EXPIRED: "That link was not used in time.",
+            GitHubStep.CANCELLED: "Nothing was connected.",
+            GitHubStep.REFUSED: "GitHub would not confirm that installation.",
+            GitHubStep.UNREACHABLE: "GitHub could not be reached.",
+            GitHubStep.FAILED: "The connection did not complete.",
+        }.get(step, "The connection did not complete.")
+        self.console.print()
+        self.console.print(Text(f"  {headline}", style=self.theme.style("bad")))
+        if self.plan.github.detail:
+            self.console.print(Text(f"  {self.plan.github.detail}",
+                                    style=self.theme.style("dim")))
+
+        options: list[tuple[str, str, str]] = []
+        if step in (GitHubStep.UNREACHABLE, GitHubStep.EXPIRED,
+                    GitHubStep.FAILED, GitHubStep.CANCELLED):
+            options.append(("retry", "Try again", "a fresh link; the old one "
+                                                  "is not reused"))
+        options.append(("skip", "Skip for now",
+                        "`comodor github connect` does it later"))
+        choice = self._choose(options, default=len(options), title="GitHub")
+        if choice == "skip":
+            self.plan.skip_github()
+            self._answered("github", "skipped")
+            return False
+        return True
 
     def _ask_approvals(self, step: int, total: int) -> str:
         self._rule("How much should it ask before acting?", step, total)
@@ -1081,30 +1654,43 @@ class SetupWizard:
     # -- applying --------------------------------------------------------- #
 
     def apply(self, answers: Answers) -> Config:
-        config = self.config
-        config.use(answers.provider, api_key=answers.api_key,
-                   model=answers.model, base_url=answers.base_url)
+        """Write everything collected, once, at the end.
 
-        config.safety.auto_approve_writes = answers.approvals in ("writes", "auto")
-        config.safety.auto_approve_shell = answers.approvals == "auto"
-        config.agent.mode = answers.mode
-        config.ui.theme = answers.theme
+        The provider, credential, model and GitHub connection belong to the
+        plan: they were staged on a copy as they were chosen, so nothing has
+        touched the real configuration yet. What this adds is the settings the
+        wizard asks about and the plan does not own — approval policy, theme,
+        context limit, a phone channel — onto that same copy, so all of it
+        lands in one atomic write.
+
+        That ordering is the transaction. A cancelled run, a refused
+        credential, an unreachable provider and an expired GitHub flow all leave
+        the working configuration exactly as it was, because none of them ever
+        reached it. It used to be that a half-finished wizard could write a
+        provider and then fail on the model, and the person would come back to
+        a configuration that named a provider with no usable model.
+        """
+        staged = self.plan.staged
+        staged.safety.auto_approve_writes = answers.approvals in ("writes", "auto")
+        staged.safety.auto_approve_shell = answers.approvals == "auto"
+        staged.agent.mode = answers.mode
+        staged.ui.theme = answers.theme
 
         model_info = _model_info(answers.model)
         if model_info is not None:
-            config.agent.context_limit = model_info
+            staged.agent.context_limit = model_info
 
         if answers.telegram_token:
-            config.telegram.token = answers.telegram_token
-            config.telegram.allowed = list(answers.telegram_allowed)
+            staged.telegram.token = answers.telegram_token
+            staged.telegram.allowed = list(answers.telegram_allowed)
             # Switched on only once somebody can actually talk to it. A bot
             # that is enabled with an empty list is a bot that runs, answers
             # nobody, and looks broken.
-            config.telegram.enabled = bool(answers.telegram_allowed)
+            staged.telegram.enabled = bool(answers.telegram_allowed)
 
-        config.save()
-        config.first_run = False
-        return config
+        saved = self.plan.commit()
+        saved.first_run = False
+        return saved
 
     def install_skills(self, config: Config, answers: Answers) -> list[str]:
         """Fetch what was chosen. Reported, never fatal.
@@ -1276,6 +1862,61 @@ def _pairing_config(config: Config, token: str) -> Config:
     return spare
 
 
+class GitHubHost:
+    """The browser flow as setup drives it, behind one seam.
+
+    The default is the real thing: the connector that signs and polls, and the
+    link presentation the standalone `comodor github connect` command already
+    uses — OSC 8 short label, clipboard fallback, raw URL only when nothing
+    else can reach it. Setup adds none of that again.
+
+    The seam exists so that a deterministic test — or a future desktop host
+    with its own browser and its own wait presentation — can replace
+    everything that leaves this process without setup's orchestration knowing
+    the difference. A test that answers "Connect" at the GitHub question
+    supplies a fake here and touches no network, no browser, no clipboard.
+    """
+
+    def __init__(self, config: Config, console: Console) -> None:
+        from .github.connect import Connector
+
+        self._connector = Connector(config)
+        self._console = console
+
+    def begin(self):
+        return self._connector.begin()
+
+    def open(self, pending) -> bool:
+        return self._connector.open(pending)
+
+    def present(self, url: str, opened: bool) -> None:
+        from .github.commands import _offer_the_link
+
+        _offer_the_link(self._console, url, opened)
+
+    def wait(self, pending):
+        from .github.commands import _wait
+
+        return _wait(self._console, self._connector, pending)
+
+
+def _github_step(problem: Any) -> Any:
+    """Which kind of failure a connection error describes.
+
+    Read from the error's own `kind` rather than from words in its message: a
+    message is written for a person and gets improved, and a caller that
+    branched on the wording would break the first time somebody improved it.
+    """
+    from .github import connect
+
+    return {
+        connect.EXPIRED: GitHubStep.EXPIRED,
+        connect.CANCELLED: GitHubStep.CANCELLED,
+        connect.REFUSED: GitHubStep.REFUSED,
+        connect.UNREACHABLE: GitHubStep.UNREACHABLE,
+    }.get(getattr(problem, "kind", ""), GitHubStep.FAILED)
+
+
 def _with(entry, answers: Answers):
     """A copy of the provider entry carrying the answers given so far."""
     # dataclasses.replace, not copy.replace: the latter is 3.13 and Comodor
@@ -1313,10 +1954,25 @@ def run_setup(config: Config, console: Console | None = None,
 
     What was chosen is left on the config as `start_after_setup`, so the caller
     can act on the half it owns without this function reaching into it.
+
+    A plan that refuses to commit returns the configuration it was given,
+    unchanged, with the refusal said on screen. The questions above are
+    supposed to make that unreachable — an invalid credential is corrected
+    where it was refused — and if one ever does reach this point, a first run
+    ends with an explanation rather than a traceback and a caller that can
+    still see `needs_setup` is a caller that can still exit honestly.
     """
     wizard = SetupWizard(config, console=console)
     answers = wizard.run()
-    saved = wizard.apply(answers)
+    try:
+        saved = wizard.apply(answers)
+    except SetupError as problem:
+        wizard.console.print()
+        wizard.console.print(Text(f"  Setup stopped: {problem}",
+                                  style=wizard.theme.style("bad")))
+        wizard.console.print(Text("  Nothing was changed.",
+                                  style=wizard.theme.style("dim")))
+        return config
     wizard.install_skills(saved, answers)
     wizard.finish(saved, closing=not offer)
 

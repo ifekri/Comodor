@@ -324,3 +324,159 @@ def test_a_provider_you_set_up_yourself_is_saved_whole(home):
     assert saved["api_key"] == "sk-typed"
     assert saved["model"] == "claude-sonnet-5"
     assert saved["configured"] is True
+
+
+# --------------------------------------------------------------------------- #
+# durability: how the bytes reach the disk
+#
+# `save` is atomic (a unique temporary, then a rename) and as durable as the
+# platform allows (the file is fsynced before the rename, and on POSIX the
+# directory is fsynced after it, so the rename itself survives a power cut).
+# These prove the ordering and the failure behaviour with controlled fakes —
+# no real power loss, no sleeps.
+# --------------------------------------------------------------------------- #
+
+
+def test_save_pushes_the_file_then_renames_then_pushes_the_directory(
+        home, monkeypatch):
+    """The order is the whole guarantee: a rename ahead of the file's bytes
+    leaves an empty config, and a directory not synced after the rename can
+    drop the rename itself on POSIX."""
+    import os
+
+    from comodor import config as config_module
+
+    events: list[str] = []
+    real_fsync, real_open, real_replace = os.fsync, os.open, os.replace
+
+    def record_durably(stream):
+        events.append("file")
+        return real_fsync(stream.fileno())
+
+    def record_durably_directory(path):
+        events.append("directory")
+        if os.name != "nt":
+            descriptor = real_open(str(path), os.O_RDONLY)
+            try:
+                real_fsync(descriptor)
+            finally:
+                os.close(descriptor)
+
+    def record_replace(src, dst, **kw):
+        events.append("rename")
+        return real_replace(src, dst, **kw)
+
+    monkeypatch.setattr(config_module, "_durably", record_durably)
+    monkeypatch.setattr(config_module, "_durably_directory",
+                        record_durably_directory)
+    monkeypatch.setattr(os, "replace", record_replace)
+
+    config = load(cwd=home / "project")
+    config.use("anthropic", api_key="sk-x", model="m")
+    config.save()
+
+    assert events == ["file", "rename", "directory"]
+
+
+def test_two_saves_use_different_temporary_files(home, monkeypatch):
+    """A fixed `config.json.tmp` would let two processes on one profile write
+    over each other's half-finished file and rename it into place."""
+    import tempfile
+
+    names: list[str] = []
+    real_mkstemp = tempfile.mkstemp
+
+    def record_mkstemp(*args, **kwargs):
+        handle, name = real_mkstemp(*args, **kwargs)
+        names.append(name)
+        return handle, name
+
+    monkeypatch.setattr(tempfile, "mkstemp", record_mkstemp)
+
+    config = load(cwd=home / "project")
+    config.use("anthropic", api_key="sk-x", model="m")
+    config.save()
+    config.model = "m-2"
+    config.save()
+
+    assert len(names) == 2
+    assert names[0] != names[1], "the temporary name was reused"
+
+
+def test_a_failed_rename_leaves_the_old_config_and_no_temporary(home, monkeypatch):
+    """If the replace fails, the previous config is still the one on disk and
+    the temporary holding the new key is cleaned up rather than left behind."""
+    import os
+
+    config = load(cwd=home / "project")
+    config.use("anthropic", api_key="sk-original", model="m")
+    config.save()
+    good = config.paths.config_file.read_text(encoding="utf-8")
+
+    def refuse_replace(src, dst, **kw):
+        raise OSError("the rename failed")
+
+    monkeypatch.setattr(os, "replace", refuse_replace)
+
+    config.model = "m-changed"
+    with pytest.raises(OSError):
+        config.save()
+
+    assert config.paths.config_file.read_text(encoding="utf-8") == good
+    assert list(config.paths.user.glob(".config-*.tmp")) == [], \
+        "a temporary holding a key was left in the home directory"
+
+
+def test_a_directory_that_refuses_to_sync_still_saves(home, monkeypatch):
+    """Directory fsync is best-effort: a filesystem that refuses it costs
+    durability, never the save. The config is already atomically in place."""
+    import os
+
+    calls = {"n": 0}
+    real_fsync = os.fsync
+
+    def flaky_fsync(fd):
+        calls["n"] += 1
+        # The file is synced first; the directory (on POSIX) is second. Refuse
+        # from the second call on, which is the directory.
+        if calls["n"] >= 2:
+            raise OSError("this filesystem will not sync a directory")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", flaky_fsync)
+
+    config = load(cwd=home / "project")
+    config.use("anthropic", api_key="sk-x", model="m")
+    target = config.save()                      # must not raise
+
+    assert target.exists()
+    assert written(home)["provider"] == "anthropic"
+
+
+def test_the_saved_file_holds_its_bytes_before_the_rename(home, monkeypatch):
+    """The rename must not run ahead of the file's contents reaching the device,
+    which is what an empty-config-after-power-loss looked like."""
+    import os
+
+    from comodor import config as config_module
+
+    order: list[str] = []
+    real_fsync, real_replace = os.fsync, os.replace
+
+    def record_durably(stream):
+        order.append("fsync")
+        return real_fsync(stream.fileno())
+
+    def record_replace(src, dst, **kw):
+        order.append("rename")
+        return real_replace(src, dst, **kw)
+
+    monkeypatch.setattr(config_module, "_durably", record_durably)
+    monkeypatch.setattr(config_module, "_durably_directory", lambda path: None)
+    monkeypatch.setattr(os, "replace", record_replace)
+
+    config = load(cwd=home / "project")
+    config.use("anthropic", api_key="sk-x", model="m")
+    config.save()
+
+    assert order.index("fsync") < order.index("rename")

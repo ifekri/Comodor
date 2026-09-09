@@ -326,33 +326,79 @@ def test_every_event_the_schema_names_has_a_shape():
 # --------------------------------------------------------------------------- #
 
 def test_a_turn_cannot_stream_before_its_own_acceptance(config):
-    """The acceptance names the message id every delta will carry.
+    """The acceptance names the message id every delta will carry, so it must
+    be on the wire before any of them.
 
-    The turn runs on its own thread, and the transport only holds events
-    raised on the thread answering a request — so without a barrier a fast
-    provider could emit `message.started` before `session.send` returned. A
-    client correlating on `message_id` would see a stream begin for a turn it
-    had not been told about; one that subscribes after the response would drop
-    the opening of every fast answer.
+    Proved with synchronization, not a stopwatch. The turn runs on its own
+    thread and parks on the session's release gate; the transport writes the
+    acceptance and only then releases it. The old version widened that window
+    with `time.sleep`, which is not a proof — on a loaded machine the worker
+    could be interrupted by `serve` closing before it streamed at all, and the
+    test reported the guarantee as held while exercising nothing.
+
+    Two facts replace the sleep:
+
+    * The acceptance is held until the worker is *demonstrably at the barrier*
+      — or, if the barrier were ever removed, until the worker has already
+      streamed. Either way the dangerous window is real by construction.
+    * The reader keeps the session open until the turn's last event reaches the
+      wire, so `serve` cannot reach EOF and close the service — interrupting a
+      worker that has not yet streamed — before the events exist.
     """
-    import time
+    import threading
 
     from comodor.providers.fake import FakeProvider, Script
 
-    class Slow(Server):
-        """Widens the window between dispatching and writing the answer.
+    #: Set when the worker reaches the release gate, or — if the gate were
+    #: removed — when a message event reaches the wire first. Both mean the
+    #: window between dispatching the turn and writing its acceptance is open.
+    at_the_barrier = threading.Event()
+    #: Set when the turn's final event reaches the wire.
+    turn_streamed = threading.Event()
 
-        The race is real and narrow: `send` returns, and the answer is written
-        a few instructions later. In an ordinary run the worker thread has not
-        been scheduled yet, so a test without this passes whether the barrier
-        is there or not — which is worse than no test, because it reports the
-        guarantee as held.
-        """
+    class Gate(threading.Event):
+        """The release gate, announcing the worker's arrival at it."""
+
+        def wait(self, timeout=None):
+            at_the_barrier.set()
+            return super().wait(timeout)
+
+    class Wire(io.StringIO):
+        """The wire, recording the two facts the test synchronises on."""
+
+        def write(self, text):
+            try:
+                name = json.loads(text.strip() or "{}").get("event", "")
+            except ValueError:
+                name = ""
+            if str(name).startswith("message."):
+                # A message event before the acceptance is the violation, and
+                # it also opens the window, so the held answer can proceed and
+                # the transcript can show the ordering.
+                at_the_barrier.set()
+                if name == "message.completed":
+                    turn_streamed.set()
+            return super().write(text)
+
+    class Reader:
+        """Yields the two requests, then holds the session open."""
+
+        def __init__(self, lines):
+            self._lines = list(lines)
+
+        def __iter__(self):
+            yield from self._lines
+            # Bounded, so a turn that never streams fails the assertion rather
+            # than hanging the suite.
+            turn_streamed.wait(timeout=10.0)
+
+    class Held(Server):
+        """Holds the acceptance until the window is demonstrably open."""
 
         def _answer(self, message):
             answer = super()._answer(message)
             if message.method == "session.send":
-                time.sleep(0.25)
+                at_the_barrier.wait(timeout=10.0)
             return answer
 
     service = CoreService(config)
@@ -364,21 +410,22 @@ def test_a_turn_cannot_stream_before_its_own_acceptance(config):
         handle = service.session(session)
         handle.assembly.gateway._instances["fake"] = FakeProvider(
             [Script(text="an answer that arrives immediately")])
+        handle._released = Gate()
 
-        out = io.StringIO()
-        lines = "\n".join(json.dumps(line) for line in [
+        out = Wire()
+        lines = [json.dumps(line) + "\n" for line in [
             hello(),
             call("2", "session.send", {"session_id": session, "text": "go"}),
-        ])
-        channel = Channel(reader=io.StringIO(lines + "\n"), writer=out,
-                          log=io.StringIO())
-        server = Slow(service, channel)
+        ]]
+        channel = Channel(reader=Reader(lines), writer=out, log=io.StringIO())
+        server = Held(service, channel)
         server.serve()
 
         transcript = [json.loads(row) for row in out.getvalue().splitlines()]
         order = [entry.get("event") or f"answer:{entry.get('id')}"
                  for entry in transcript]
 
+        assert "answer:2" in order, f"the acceptance was never written: {order}"
         accepted = order.index("answer:2")
         streamed = [index for index, name in enumerate(order)
                     if str(name).startswith("message.")]

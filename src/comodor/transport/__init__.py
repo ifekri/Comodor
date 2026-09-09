@@ -15,6 +15,7 @@ second protocol.
 
 from __future__ import annotations
 
+from ..protocol import PROTOCOL_LABEL
 from .jsonl import Channel, own_stdout
 from .server import Server
 
@@ -36,7 +37,10 @@ def serve_stdio(config, *, name: str = "comodor-core") -> int:
     channel = Channel(reader=sys.stdin, writer=channel_out, log=sys.stderr)
     service = CoreService(config)
     server = Server(service, channel, name=name)
-    channel.warn(f"comodor core — protocol v1 on stdio, pid {_pid()}")
+    # Derived, like every other place a person is told which protocol this is:
+    # a greeting that names a version the core stopped speaking is the first
+    # thing somebody reads when a client and a core disagree.
+    channel.warn(f"comodor core — {PROTOCOL_LABEL} on stdio, pid {_pid()}")
     try:
         server.serve()
     except KeyboardInterrupt:

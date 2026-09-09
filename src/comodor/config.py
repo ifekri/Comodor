@@ -25,6 +25,7 @@ import json
 import os
 import re
 import stat
+import tempfile
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -1335,18 +1336,58 @@ class Config:
         return document
 
     def save(self, path: Path | None = None) -> Path:
-        """Write the user configuration, readable only by its owner."""
+        """Write the user configuration, readable only by its owner.
+
+        Atomic *and* as durable as the platform reasonably allows. The bytes go
+        to a temporary file of their own, are pushed to the device, and only
+        then rename over the target; on POSIX the containing directory is
+        synced afterwards so the rename itself — not just the file's contents —
+        survives a power cut.
+
+        The rename alone protects against this process dying mid-write, which
+        is what the old version guaranteed. The flush and file fsync before it
+        protect the *contents* against the machine losing power: a rename can
+        reach the disk ahead of the data it names, and the result is a config
+        file that exists and is empty — losing the API key exactly as the
+        comment below the old one said it would not.
+
+        The directory fsync closes the remaining gap. On POSIX a rename is a
+        change to the directory's metadata, which the device may still be
+        holding in volatile cache after the file's own contents are safe; power
+        lost at that instant can drop the rename, and with it a first-ever
+        save. Windows has no portable directory-fsync (NTFS journals metadata
+        differently), and some POSIX filesystems and network mounts refuse it,
+        so this is best-effort: the honest claim is "atomic everywhere, durable
+        to the limit of what the platform lets us ask for", not "survives every
+        power loss on every filesystem".
+
+        The temporary name is unique rather than a fixed `config.json.tmp`, so
+        two Comodor processes on one profile saving at the same moment cannot
+        write over each other's half-finished file and rename it into place.
+        """
         target = Path(path) if path else self.paths.config_file
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(self.mine_only(), indent=2, ensure_ascii=False) + "\n"
 
-        # Written via a temporary file so an interrupted save cannot leave a
-        # truncated config behind — losing the API key to a crash mid-write
-        # would mean running setup again for no reason.
-        temporary = target.with_suffix(".json.tmp")
-        temporary.write_text(payload, encoding="utf-8")
-        _restrict(temporary)
-        temporary.replace(target)
+        handle, name = tempfile.mkstemp(prefix=".config-", suffix=".tmp",
+                                        dir=str(target.parent))
+        temporary = Path(name)
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                stream.write(payload)
+                stream.flush()
+                _durably(stream)
+            _restrict(temporary)
+            temporary.replace(target)
+        except BaseException:
+            # Including a KeyboardInterrupt on the way out: a temporary file
+            # holding an API key is not something to leave in a home directory.
+            _discard(temporary)
+            raise
+        # After the rename, and best-effort: make the directory entry durable
+        # too. A failure here costs durability, never the save — the config is
+        # already atomically in place.
+        _durably_directory(target.parent)
         _restrict(target)
         return target
 
@@ -1433,6 +1474,58 @@ def _restrict(path: Path) -> None:
         return
     try:
         path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
+
+
+def _durably(stream: Any) -> None:
+    """Push the bytes to the device, where the platform lets us ask.
+
+    Best-effort by design: a filesystem that refuses `fsync` — some network
+    mounts, some containers — should cost durability and not the save.
+    """
+    try:
+        os.fsync(stream.fileno())
+    except (OSError, AttributeError, ValueError):
+        pass
+
+
+def _durably_directory(path: Path | str) -> None:
+    """Push a rename to the device, where the platform lets us ask.
+
+    A file fsync makes the file's *contents* durable but says nothing about the
+    directory entry a rename just created: power lost after `save` can bring
+    the old directory back without the new file in it. Opening the directory
+    and syncing it is how the rename itself is made durable on POSIX.
+
+    Best-effort, exactly like the file fsync, and for the same reasons plus
+    one: Windows cannot open a directory as a file descriptor at all (NTFS
+    journals metadata differently and needs no such call), and some POSIX
+    filesystems and network mounts refuse `fsync` on a directory. A platform
+    that cannot provide this still gets an atomic replace and a synced file —
+    it just cannot be promised the rename survives a power cut, and promising
+    it anyway would be the overclaim this function exists to avoid.
+    """
+    if os.name == "nt":
+        return
+    handle = None
+    try:
+        handle = os.open(str(path), os.O_RDONLY)
+        os.fsync(handle)
+    except OSError:
+        pass
+    finally:
+        if handle is not None:
+            try:
+                os.close(handle)
+            except OSError:
+                pass
+
+
+def _discard(path: Path | str) -> None:
+    """Remove a temporary file, and do not make a fuss if it is gone."""
+    try:
+        os.unlink(path)
     except OSError:
         pass
 

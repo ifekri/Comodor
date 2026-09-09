@@ -164,17 +164,74 @@ def test_a_port_that_never_answers_does_not_hold_up_a_first_run():
 
 
 def test_the_probes_run_together_rather_than_one_after_another():
-    six = absent(1, 2, 3, 4, 5, 6)
+    """Proved by rendezvous, not by stopwatch.
 
-    started = time.monotonic()
-    discover.running_here(six)
-    many = time.monotonic() - started
+    The old version compared six probes' wall-clock against one probe's and
+    asserted six was not much slower. On a loaded machine six threads take
+    longer to schedule than the arithmetic allowed, so it measured the machine
+    rather than the code and failed on macOS CI while passing everywhere else.
 
-    started = time.monotonic()
-    discover.running_here(six[:1])
-    one = time.monotonic() - started
+    This makes every probe wait at a barrier that opens only when all of them
+    have arrived. If they run together, the barrier opens at once and every
+    probe finds a runtime. If they ran one after another, the first would wait
+    alone, the barrier would time out and break, and the overlap would be
+    disproved directly — no elapsed-time threshold to tune.
+    """
+    count = 6
+    together = threading.Barrier(count, timeout=10.0)
+    arrived: list[str] = []
 
-    assert many < max(one, 0.05) * 3, f"six took {many:.2f}s, one took {one:.2f}s"
+    class Rendezvous(ThreadingHTTPServer):
+        daemon_threads = True
+        # Six concurrent connections plus the port-knocks; the default backlog
+        # of five would make the sixth probe's arrival depend on the platform.
+        request_queue_size = 32
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            try:
+                together.wait()
+            except threading.BrokenBarrierError:
+                # The probes did not all arrive together. Say so by failing
+                # rather than answering, which is what turns a sequential run
+                # into a failed assertion below.
+                self.send_response(500)
+                self.end_headers()
+                return
+            arrived.append(self.path)
+            payload = json.dumps(
+                {"object": "list",
+                 "data": [{"id": "m", "object": "model"}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    httpd = Rendezvous(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever,
+                     kwargs={"poll_interval": 0.05}, daemon=True).start()
+    port = httpd.server_address[1]
+    specs = [catalogue.ProviderSpec(
+        id=f"probe{n}", label="", blurb="",
+        base_url=f"http://127.0.0.1:{port}/v1",
+        default_model="m", needs_key=False) for n in range(count)]
+    try:
+        # Read timeout comfortably exceeds the barrier's, so in a sequential
+        # run the handler's barrier times out and answers 500 before the client
+        # gives up — the failure is the barrier's, not a socket timeout's.
+        found = discover.running_here(specs, timeout=(2.0, 20.0))
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+    assert len(arrived) == count, \
+        f"only {len(arrived)} of {count} probes were in flight at once"
+    assert len(found) == count, \
+        f"{count} concurrent probes found {len(found)} runtimes"
 
 
 # --------------------------------------------------------------------------- #
