@@ -11,6 +11,12 @@ default first is one where every gap is found by somebody trying to work.
 comodor tui-v2          # from a source checkout
 ```
 
+A first run with no provider configured asks the same setup questions `comodor`
+asks — in the same invocation, before the renderer, through the same setup path
+— and starts only once they are answered. It will not spawn a core that has
+nothing to talk to; cancelling setup leaves nothing started. This does not make
+`comodor tui-v2` the default, which is still `comodor`.
+
 ---
 
 ## It needs Bun
