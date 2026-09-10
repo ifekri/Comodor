@@ -272,8 +272,10 @@ async function screen(width = 100, height = 30,
 
   await rendered.flush();
   // The session arrives asynchronously; wait for the workspace to appear
-  // rather than for a number of frames.
-  await rendered.waitForFrame((frame) => frame.includes("project"));
+  // rather than for a number of frames. A too-small terminal never shows it
+  // — its floor notice is the readiness sign there.
+  await rendered.waitForFrame((frame) =>
+    frame.includes("project") || frame.includes("Too small"));
 
   return {
     ...rendered,
@@ -923,6 +925,98 @@ describe("at every width", () => {
   });
 });
 
+describe("at every size", () => {
+  // Width and height together: a terminal is a box, and the narrow-and-tall
+  // versus wide-and-short corners are where chrome eats the conversation.
+  for (const [width, height] of [[160, 50], [120, 40], [100, 30], [80, 24],
+                                 [60, 20]] as const) {
+    test(`${width}×${height} draws without spilling`, async () => {
+      const view = await screen(width, height);
+      const frame = view.frame();
+
+      const rows = frame.split("\n");
+      // The captured frame carries the harness's trailing line: what matters
+      // is that no row is wider than the terminal and every row fits.
+      expect(rows.length).toBeLessThanOrEqual(height + 1);
+      for (const row of rows) {
+        expect(row.length).toBeLessThanOrEqual(width);
+      }
+      expect(frame).toContain("ask for anything");
+      expect(frame).toContain("[ACT]");
+      view.client.close();
+    });
+  }
+
+  test("a genuinely too-small terminal says so instead of colliding",
+       async () => {
+    const view = await screen(30, 8);
+    await view.flush();
+    await view.waitForVisualIdle();
+
+    const frame = view.frame();
+    expect(frame).toContain("Too small");
+    expect(frame).toContain("ctrl+d Quit");
+    // Nothing behind the notice may bleed through: no composer, no mode bar.
+    expect(frame).not.toContain("ask for anything");
+    expect(frame).not.toContain("[ACT]");
+    view.client.close();
+  });
+
+  test("a blocking decision stays reachable below the floor", async () => {
+    // The floor exists to stop collisions — but a permission the core is
+    // waiting on outranks it. A tiny terminal cannot be a reason the person
+    // cannot say no.
+    const view = await screen(30, 8);
+    await view.flush();
+    await emitRun(view, "permission.requested", { ...PERMISSION });
+
+    const frame = view.frame();
+    expect(frame).toContain("Permission needed");
+    expect(frame).toContain("[Deny]");
+
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    const answered = view.core.sent.filter(
+      (message) => message["method"] === "permission.reply");
+    expect(answered.length).toBe(1);
+    view.client.close();
+  });
+
+  test("growing past the floor brings the whole screen back", async () => {
+    const view = await screen(30, 8);
+    await view.flush();
+    await view.waitForVisualIdle();
+    expect(view.frame()).toContain("Too small");
+
+    view.resize(100, 30);
+    await view.flush();
+    await view.waitForVisualIdle();
+    const frame = view.frame();
+    expect(frame).toContain("ask for anything");
+    expect(frame).toContain("[ACT]");
+    view.client.close();
+  });
+
+  test("a short terminal still fits the chooser without spilling", async () => {
+    const view = await screen(80, 14);
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("model");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("type a model"));
+
+    const frame = view.frame();
+    // The overlay is bounded by the height, so its hint row never falls off.
+    expect(frame).toContain("esc Close");
+    expect(frame.split("\n").length).toBeLessThanOrEqual(15);
+    view.client.close();
+  });
+});
+
 describe("leaving", () => {
   test("Ctrl+D quits", async () => {
     const view = await screen();
@@ -1135,6 +1229,39 @@ describe("streaming and recovery", () => {
     await letReactRun(view);
 
     expect(view.frame()).toContain("↓ new output");
+    view.client.close();
+  });
+
+  test("clicking the marker returns to the newest output", async () => {
+    // The one mouse path the docs could not yet prove. It goes through the
+    // same `toTail` the End key calls, and this test is what makes the
+    // difference between wired and proven.
+    const view = await screen(100, 30);
+    const lines = Array.from({ length: 80 }, (_, at) => `history row ${at}`);
+    await emitRun(view, "message.started",
+                  { turn_id: "t1", message_id: "m1" });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m1", text: lines.join("\n") });
+    await emitRun(view, "message.completed",
+                  { turn_id: "t1", message_id: "m1",
+                    text: lines.join("\n"), status: "completed" });
+
+    await view.mockMouse.scroll(50, 12, "up");
+    await letReactRun(view);
+    await emitRun(view, "message.started",
+                  { turn_id: "t1", message_id: "m2" });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m2", text: "later words" });
+    await letReactRun(view);
+    expect(view.frame()).toContain("↓ new output");
+
+    const at = locate(view.frame(), "↓ new output");
+    await view.mockMouse.click(at.x, at.y);
+    await letReactRun(view);
+
+    const frame = view.frame();
+    expect(frame).not.toContain("↓ new output");
+    expect(frame).toContain("later words");
     view.client.close();
   });
 

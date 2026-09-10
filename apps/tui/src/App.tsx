@@ -105,6 +105,14 @@ export interface AppProps {
 /** Below this the sidebar-free single column is the only thing that fits. */
 const NARROW = 80;
 
+/**
+ * The smallest terminal this screen can stay honest in, the Rich layout's
+ * own floor: narrower or shorter and rows start sharing cells, which is how
+ * a permission's Deny ends up drawn over its Allow.
+ */
+const MIN_WIDTH = 40;
+const MIN_HEIGHT = 12;
+
 /** How many rows a page key moves. Less than a screen, so context carries over. */
 const PAGE = 8;
 
@@ -183,7 +191,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   /** Which finished tools are clicked open. Presentation, for the same reason. */
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set());
-  const { width } = useTerminalDimensions();
+  const { width, height } = useTerminalDimensions();
 
   const registry = useMemo(() => build(), []);
   const latest = useRef(state);
@@ -867,6 +875,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
 
   const mode = (state.session?.mode ?? "act") as Mode;
   const narrow = width < NARROW;
+  const tooSmall = width < MIN_WIDTH || height < MIN_HEIGHT;
   // The side panel takes the Rich interface's own breakpoint: below 100
   // columns two columns stop being worth what they cost the conversation, and
   // the workbench becomes an overlay a key summons and Escape dismisses. At
@@ -877,6 +886,43 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   const overlay = canWorkbench && width < WIDE && workbench.open;
   const panel = panelWidth(width);
   const conversationWidth = side ? Math.max(40, width - panel - 1) : width;
+  /** Rows an overlay list may spend, by how tall the terminal actually is. */
+  const overlayRows = Math.max(3, Math.min(8, height - 12));
+
+  if (tooSmall) {
+    // Deliberately one thing at a time at this size. A blocking decision is
+    // the one thing that may not be hidden — everything else yields to it —
+    // and with nothing blocking, the honest state is a minimum-size notice
+    // rather than columns sharing cells.
+    if (blocked?.kind === "permission" && permit) {
+      return (
+        <PermissionCard interaction={blocked} draft={permit}
+                        choices={choicesOf(blocked.request)}
+                        waiting={waitingCount(state)} width={width}
+                        onPick={(at) => setPermit((was) => was && { ...was, at })}
+                        onChoose={(choice) => void decide("permission.reply",
+                                                          { choice })} />
+      );
+    }
+    if (blocked?.kind === "question" && question) {
+      return (
+        <QuestionCard question={question} waiting={waitingCount(state)}
+                      width={width} onChange={setQuestion} />
+      );
+    }
+    return (
+      <box style={{ flexDirection: "column", width: "100%", height: "100%",
+                    padding: 1, backgroundColor: theme["surface.base"] }}>
+        <text style={{ fg: theme["semantic.warning"] }}>
+          {clip(`Too small — resize to at least ${MIN_WIDTH}×${MIN_HEIGHT}`,
+                Math.max(8, width - 2))}
+        </text>
+        <text style={{ fg: theme["text.muted"] }}>
+          {clip("ctrl+d Quit", Math.max(8, width - 2))}
+        </text>
+      </box>
+    );
+  }
 
   return (
     <box style={{ flexDirection: "column", width: "100%", height: "100%",
@@ -924,7 +970,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
                           onStop={stopDelegate} />
         : null}
       {palette
-        ? <Palette state={palette}
+        ? <Palette state={palette} rows={overlayRows}
                    onQuery={(text) =>
                      setPalette(searchPalette(registry, screen, text))}
                    onPick={(id) => {
@@ -933,7 +979,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
                    }} />
         : null}
       {models
-        ? <ModelPicker state={models}
+        ? <ModelPicker state={models} rows={overlayRows}
                        onQuery={(text) =>
                          setModels((was) => was && searchModels(
                            was.all, was.current, text))}
@@ -1383,20 +1429,41 @@ function PermissionCard({ interaction, draft, choices, waiting, width, onPick,
                   paddingLeft: 1, paddingRight: 1,
                   borderColor: interaction.state === "failed"
                     ? theme["semantic.danger"] : theme["border.focused"] }}>
-      <box style={{ flexDirection: "row", flexShrink: 0 }}>
-        <text style={{ fg: theme["semantic.warning"] }}>Permission needed</text>
-        {tool
-          ? <text style={{ fg: theme["text.secondary"] }}>{`  ${tool}`}</text>
-          : null}
-        {risk
-          ? <text style={{ fg: riskColour(risk) }}>{`  ${riskLabel(risk)}`}</text>
-          : null}
-        {waiting > 1
-          ? <text style={{ fg: theme["text.muted"] }}>
-              {`  +${waiting - 1} more waiting`}
-            </text>
-          : null}
-      </box>
+      {/*
+        Measured before it is drawn: a wrapping header at a narrow width is
+        how Deny ends up drawn under Allow. Suffixes fall off in the order
+        they matter least — the "+N waiting" count, the risk tier, the tool —
+        and the words that remain always fit the columns they have.
+      */}
+      {(() => {
+        const parts: Array<{ text: string; fg: string }> = [
+          { text: "Permission needed", fg: theme["semantic.warning"] },
+        ];
+        let used = parts[0]!.text.length;
+        const extras: Array<{ text: string; fg: string } | null> = [
+          waiting > 1
+            ? { text: `  +${waiting - 1} more waiting`, fg: theme["text.muted"] }
+            : null,
+          risk ? { text: `  ${riskLabel(risk)}`, fg: riskColour(risk) } : null,
+          tool ? { text: `  ${tool}`, fg: theme["text.secondary"] } : null,
+        ];
+        // Reversed on the way in: the most valuable suffix (the tool) is the
+        // last to fit, which is the first to survive a narrow header.
+        for (const extra of extras.reverse()) {
+          if (!extra) continue;
+          if (used + extra.text.length <= inner) {
+            parts.push(extra);
+            used += extra.text.length;
+          }
+        }
+        return (
+          <text style={{ flexShrink: 0 }}>
+            {parts.map((part) => (
+              <span key={part.text} style={{ fg: part.fg }}>{part.text}</span>
+            ))}
+          </text>
+        );
+      })()}
 
       {title
         ? <text style={{ fg: theme["text.primary"] }}>{clip(title, inner)}</text>
@@ -1412,23 +1479,36 @@ function PermissionCard({ interaction, draft, choices, waiting, width, onPick,
           </text>
         : null}
 
-      <box style={{ flexDirection: "row", flexShrink: 0 }}>
-        {choices.map((choice, index) => (
-          <text key={choice}
-                onMouseDown={() => { onPick(index); onChoose(choice); }}
-                style={{ marginRight: 2,
-                         fg: index === at ? theme["text.primary"]
-                                          : theme["text.muted"] }}>
-            {/* Brackets rather than colour alone: the highlighted choice has
-                to be identifiable in a monochrome terminal. */}
-            {index === at ? `[${choiceLabel(choice)}]` : ` ${choiceLabel(choice)} `}
-          </text>
-        ))}
-      </box>
+      {(() => {
+        // A row of choices that does not fit becomes a list of choices: the
+        // decision has to be visible whole, because a choice clipped at the
+        // edge is one nobody can be sure they are choosing.
+        const stacked = choices
+          .reduce((total, choice) => total + choiceLabel(choice).length + 4, 0)
+          > inner;
+        return (
+          <box style={{ flexDirection: stacked ? "column" : "row",
+                        flexShrink: 0 }}>
+            {choices.map((choice, index) => (
+              <text key={choice}
+                    onMouseDown={() => { onPick(index); onChoose(choice); }}
+                    style={{ marginRight: 2,
+                             fg: index === at ? theme["text.primary"]
+                                              : theme["text.muted"] }}>
+                {/* Brackets rather than colour alone: the highlighted choice has
+                    to be identifiable in a monochrome terminal. */}
+                {clip(index === at ? `[${choiceLabel(choice)}]`
+                                   : ` ${choiceLabel(choice)} `, inner)}
+              </text>
+            ))}
+          </box>
+        );
+      })()}
 
       <text style={{ fg: interaction.state === "failed"
         ? theme["semantic.danger"] : theme["text.secondary"] }}>
-        {permissionStatus(interaction, choices[choices.length - 1] ?? "")}
+        {clip(statusLine(interaction, choices[choices.length - 1] ?? "",
+                         inner), inner)}
       </text>
     </box>
   );
@@ -1454,6 +1534,22 @@ function permissionStatus(interaction: Interaction, fallback: string): string {
   return fallback
     ? `←→ choose   enter confirm   esc ${choiceLabel(fallback)}`
     : "←→ choose   enter confirm";
+}
+
+/**
+ * The hint, sized to the columns it has. The full words go first; past them
+ * the keys themselves stay — an Escape a person cannot discover is an Escape
+ * that does not exist — and only past those does the line clip.
+ */
+function statusLine(interaction: Interaction, fallback: string,
+                    columns: number): string {
+  const full = permissionStatus(interaction, fallback);
+  if (full.length <= columns) return full;
+  if (interaction.state !== "waiting") return full;
+  const short = fallback
+    ? `←→ · enter · esc ${choiceLabel(fallback)}`
+    : "←→ · enter";
+  return short.length <= columns ? short : full;
 }
 
 function QuestionCard({ question, waiting, width, onChange }: {
@@ -1596,12 +1692,13 @@ function hint(many: boolean, custom: boolean, writing: boolean): string {
   return parts.join("   ");
 }
 
-function Palette({ state, onQuery, onPick }: {
+function Palette({ state, rows, onQuery, onPick }: {
   state: PaletteState<Screen>;
+  /** How many result rows the terminal height affords. */
+  rows: number;
   onQuery: (text: string) => void;
   onPick: (id: string) => void;
 }): React.ReactNode {
-  const rows = 8;
   const { from, to } = paletteWindow(state, rows);
   const shown = state.results.slice(from, to);
 
@@ -1645,12 +1742,13 @@ function Palette({ state, onQuery, onPick }: {
  * when `model.changed` says it happened. The current model is marked, not
  * hidden: picking it again is the no-op it looks like.
  */
-function ModelPicker({ state, onQuery, onPick }: {
+function ModelPicker({ state, rows, onQuery, onPick }: {
   state: ModelPickerState;
+  /** How many result rows the terminal height affords. */
+  rows: number;
   onQuery: (text: string) => void;
   onPick: (model: string) => void;
 }): React.ReactNode {
-  const rows = 8;
   const { from, to } = modelWindow(state, rows);
   const shown = state.matches.slice(from, to);
 
