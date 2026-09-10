@@ -377,6 +377,78 @@ class Journal:
                 return                  # this record knows less than we do
         self._delegates[identifier] = record
 
+    def seed_messages(self, messages: list[Any]) -> None:
+        """Adopt a stored conversation as this journal's opening transcript.
+
+        For a session opened from the store: the transcript was real, but it
+        happened in a previous process and none of it arrives as events. Each
+        message takes the next sequence number and the revision moves with it,
+        so the first snapshot already carries the whole conversation and the
+        first live event after it numbers cleanly past it. Synthetic ids
+        (`restored-N`) because the store keeps content, not identities — and
+        one turn id for all of it, because "the turn that wrote this" ended
+        when the old process did. Tool-result messages land as finished tool
+        records, in place, so the timeline reads as it ran rather than as
+        messages followed by tools.
+        """
+        with self._lock:
+            for message in messages:
+                seq = self._revision + 1
+                role = str(getattr(message, "role", "")).split(".")[-1].lower()
+                if role == "tool":
+                    call_id = str(getattr(message, "tool_call_id", "")
+                                  or f"restored-tool-{seq}")
+                    content = str(getattr(message, "content", "") or "")
+                    entry = JournalTool(
+                        call_id=call_id, turn_id="restored",
+                        name=str(getattr(message, "name", "") or "tool"),
+                        started_seq=seq,
+                        state="failed" if getattr(message, "is_error", False)
+                        else "completed")
+                    if entry.state == "failed":
+                        entry.error = content
+                    else:
+                        entry.output = content[-OUTPUT_CAP:]
+                        entry.output_truncated = len(content) > OUTPUT_CAP
+                    self._tools.append(entry)
+                    self._tool_by_id[call_id] = entry
+                elif role in ("user", "assistant"):
+                    text = str(getattr(message, "content", "") or "")
+                    if not text:
+                        continue
+                    entry = JournalMessage(
+                        message_id=f"restored-{seq}", turn_id="restored",
+                        role=role, text=text,
+                        status="failed" if getattr(message, "is_error", False)
+                        else "completed",
+                        started_seq=seq)
+                    self._messages.append(entry)
+                    self._by_id[entry.message_id] = entry
+                self._revision = seq
+
+    def seed_tasks(self, tasks: list[dict[str, Any]]) -> None:
+        """Adopt a stored plan without spending a sequence number.
+
+        Same rule as `seed_delegates`: the list predates every event this
+        journal will see, so it lands in the snapshot a client asks for first
+        rather than arriving as a spurious update nobody sent.
+        Sanitised the way `tasks.updated` folds — the store could have been
+        written by anything that shares it.
+        """
+        with self._lock:
+            folded: list[dict[str, Any]] = []
+            for entry in tasks:
+                if not isinstance(entry, dict):
+                    continue
+                text = str(entry.get("text", ""))
+                if not text:
+                    continue
+                state = str(entry.get("state", "pending"))
+                folded.append({"text": text,
+                               "state": state if state in TASK_STATES
+                               else "pending"})
+            self._tasks = folded
+
     def seed_delegates(self, records: list[dict[str, Any]]) -> None:
         """Adopt the delegates that predate this journal's first event.
 
@@ -421,6 +493,11 @@ class Journal:
                 if message.role == "assistant" and message.open:
                     return message
         return None
+
+    def tasks(self) -> list[dict[str, Any]]:
+        """The plan as it stands, for the record a resume restores it from."""
+        with self._lock:
+            return [dict(task) for task in self._tasks]
 
     def running_tools(self) -> list[JournalTool]:
         with self._lock:

@@ -189,6 +189,8 @@ class Server:
             "session.get": lambda p: {
                 "session": service.get_session(p["session_id"])},
             "session.list": lambda p: {"sessions": service.list_sessions()},
+            "session.history": lambda p: service.history(),
+            "session.open": lambda p: service.open_session(p["session_id"]),
             "session.send": lambda p: service.send(p["session_id"], p["text"]),
             "session.cancel": lambda p: service.cancel(p["session_id"]),
             "session.set_mode": lambda p: {

@@ -24,6 +24,8 @@ METHOD_SHAPES: dict[str, tuple[str, str]] = {
     "session.get": ("SessionRef", "SessionResult"),
     "session.snapshot": ("SessionRef", "SnapshotResult"),
     "session.list": ("Empty", "SessionListResult"),
+    "session.history": ("Empty", "SessionHistoryResult"),
+    "session.open": ("SessionRef", "SessionResult"),
     "session.send": ("SessionSendParams", "AcceptedResult"),
     "session.cancel": ("SessionRef", "CancelResult"),
     "session.set_mode": ("SetModeParams", "SessionResult"),
@@ -380,6 +382,17 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "input_tokens": ("int", False),
         "output_tokens": ("int", False),
         "cost_usd": ("float", False),
+    },
+    "SessionHistoryEntry": {
+        "id": ("str", True),
+        "title": ("str", False),
+        "messages": ("int", True),
+        "updated_at": ("float", True),
+        "compactions": ("int", False),
+        "cost_usd": ("float", False),
+    },
+    "SessionHistoryResult": {
+        "sessions": ("list", True),
     },
 }
 
@@ -927,3 +940,23 @@ class Usage(_UsageRequired, total=False):
     input_tokens: int
     output_tokens: int
     cost_usd: float
+
+
+class _SessionHistoryEntryRequired(TypedDict):
+    id: str
+    messages: int
+    updated_at: float
+
+
+class SessionHistoryEntry(_SessionHistoryEntryRequired, total=False):
+    """One stored conversation as a picker lists it. No transcript in the
+    list — that is what `session.open` restores.
+    """
+
+    title: str
+    compactions: int
+    cost_usd: float
+
+
+class SessionHistoryResult(TypedDict):
+    sessions: list[SessionHistoryEntry]

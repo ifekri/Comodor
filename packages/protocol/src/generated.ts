@@ -13,6 +13,8 @@ export const METHODS = [
   "session.get",
   "session.snapshot",
   "session.list",
+  "session.history",
+  "session.open",
   "session.send",
   "session.cancel",
   "session.set_mode",
@@ -577,6 +579,23 @@ export interface Usage {
   input_tokens?: number;
   output_tokens?: number;
   cost_usd?: number;
+}
+
+/**
+ * One stored conversation as a picker lists it. No transcript in the list —
+ * that is what `session.open` restores.
+ */
+export interface SessionHistoryEntry {
+  id: string;
+  title?: string;
+  messages: number;
+  updated_at: number;
+  compactions?: number;
+  cost_usd?: number;
+}
+
+export interface SessionHistoryResult {
+  sessions: Array<SessionHistoryEntry>;
 }
 
 /**

@@ -315,6 +315,12 @@ class CoreService:
         #: handshake narrows it — an embedder calling the verbs directly is
         #: not a client that has declined anything.
         self.client_capabilities: tuple[str, ...] = CLIENT_CAPABILITIES
+        #: Sessions this process opened from the store, stored id → live id.
+        #: Opening the same stored session twice must hand back the live one:
+        #: two live sessions appending to one transcript file would interleave
+        #: their lines into a record neither of them said.
+        self._opened: dict[str, str] = {}
+        self._session_store: Any = None
 
     def _shared_delegates(self) -> Any:
         """The process's delegate store, created the first time a session needs it."""
@@ -402,6 +408,112 @@ class CoreService:
         with self._lock:
             return [handle.describe() for handle in self._sessions.values()]
 
+    def _session_store(self) -> Any:
+        """Where conversations live on disk, shared with the other surfaces.
+
+        The same store the terminal and the web session write to, on purpose:
+        a chat begun on one surface should be openable on another, and two
+        stores would have made every history a list of half the work. Built
+        on first use — a headless run that never persists never creates the
+        directory.
+        """
+        from ..session.store import SessionStore
+
+        with self._lock:
+            if self._session_store is None:
+                self._session_store = SessionStore(
+                    self._config.paths.user / "sessions")
+            return self._session_store
+
+    def _persist(self, handle: SessionHandle) -> None:
+        """Append what the turn added, and update the session's record.
+
+        Called at turn boundaries — the same moments the terminal saves.
+        Persistence failing must not fail the turn: a session that answered
+        is worth more than its record, and the next boundary tries again.
+        """
+        conversation = getattr(handle.assembly, "conversation", None)
+        if conversation is None:
+            return
+        try:
+            from ..session.store import SessionMeta, derive_title
+
+            store = self._session_store()
+            with handle._lock:
+                messages = list(conversation.messages)
+                fresh = messages[handle._saved:]
+                handle._saved = len(messages)
+            for message in fresh:
+                store.append(handle.id, message)
+            meta = store.load_meta(handle.id) or SessionMeta(
+                id=handle.id, cwd=handle.workspace,
+                provider=str(self._config.provider),
+                model=self._config.active_model() or "")
+            meta.messages = len(messages)
+            meta.updated_at = time.time()
+            if not meta.title:
+                first = next((str(getattr(m, "content", ""))
+                              for m in messages
+                              if str(getattr(getattr(m, "role", ""),
+                                             "value", "") or "") == "user"
+                              and getattr(m, "content", "")), "")
+                meta.title = derive_title(first) if first else ""
+            meta.todos = handle.journal.tasks()
+            usage = getattr(conversation, "usage", None)
+            if usage is not None and getattr(usage, "cost_usd", 0.0):
+                meta.cost_usd = float(usage.cost_usd)
+            store.save_meta(meta)
+        except Exception:  # pragma: no cover - persistence must not kill a turn
+            pass
+
+    def history(self) -> dict[str, Any]:
+        """Earlier conversations, newest first, for a session picker.
+
+        The store's own list — what survived previous processes, not the live
+        sessions this one is serving. A live session somebody is attached to
+        belongs to `session.list`, and the two deliberately do not overlap.
+        """
+        return {"sessions": [
+            {"id": meta.id, "title": meta.title, "messages": meta.messages,
+             "updated_at": meta.updated_at, "compactions": meta.compactions,
+             "cost_usd": meta.cost_usd}
+            for meta in self._session_store().list_sessions()
+        ]}
+
+    def open_session(self, stored_id: str) -> dict[str, Any]:
+        """Reopen a stored conversation as a live session.
+
+        The transcript, the plan and the title come back; the delegates do
+        not — work that was running when its process died is `lost` on its
+        own record, not revived here. Opening one already open hands back the
+        live session: two live handles appending to one transcript file would
+        interleave their lines into a record neither of them said.
+        """
+        stored_id = str(stored_id)
+        with self._lock:
+            live = self._opened.get(stored_id)
+            if live is not None and live in self._sessions:
+                return {"session": self._sessions[live].describe()}
+
+        store = self._session_store()
+        messages = store.load(stored_id)
+        if not messages:
+            raise Refused(f"no stored session named {stored_id!r}")
+        meta = store.load_meta(stored_id)
+
+        handle = self.session(self.create_session()["id"])
+        handle.assembly.conversation.extend(messages)
+        # Seeded history is already on disk — persisting starts after it.
+        handle._saved = len(handle.assembly.conversation.messages)
+        handle.journal.seed_messages(messages)
+        if meta is not None:
+            handle.title = meta.title
+            if meta.todos:
+                handle.journal.seed_tasks(list(meta.todos))
+        with self._lock:
+            self._opened[stored_id] = handle.id
+        return {"session": handle.describe()}
+
     def set_mode(self, session_id: str, mode: str) -> dict[str, Any]:
         """Change what a session may do.
 
@@ -462,9 +574,13 @@ class CoreService:
                     handle.busy = False
                 self._emit(handle, "session.updated",
                            {"session": handle.describe()})
-            # One turn past its end is the turn boundary: a background
-            # delegate that finished while this turn ran is delivered here,
-            # as turns of its own, never spliced into the one just ended.
+            # One turn past its end is the turn boundary: the same moment
+            # the terminal saves on, so a session opened from the protocol
+            # and one opened from the terminal both survive a crash with at
+            # most the last line missing.
+            self._persist(handle)
+            # And the delivery of any finished background delegates waits
+            # for exactly this boundary too.
             try:
                 self._deliver_completions(handle)
             except Exception:  # pragma: no cover - delivery must not kill the worker
@@ -603,6 +719,9 @@ class CoreService:
                     handle.busy = False
                 self._emit(handle, "session.updated",
                            {"session": handle.describe()})
+            # A completion turn is a turn: it persists at its boundary for
+            # the same reason the person's own turns do.
+            self._persist(handle)
 
     # -- what it answers with ---------------------------------------------- #
 

@@ -89,6 +89,16 @@
       "params": "Empty",
       "result": "SessionListResult"
     },
+    "session.history": {
+      "summary": "Earlier conversations from the shared store, newest first. Lives on disk, unlike `session.list`, which serves the process's live sessions.",
+      "params": "Empty",
+      "result": "SessionHistoryResult"
+    },
+    "session.open": {
+      "summary": "Reopen a stored conversation as a live session: transcript, plan and title restored; running delegates stay lost on their own record. Opening one already open hands back the live session.",
+      "params": "SessionRef",
+      "result": "SessionResult"
+    },
     "session.send": {
       "summary": "Send a message. Returns as soon as the turn is accepted; the answer arrives as events.",
       "params": "SessionSendParams",
@@ -1297,6 +1307,49 @@
         },
         "cost_usd": {
           "type": "number"
+        }
+      }
+    },
+    "SessionHistoryEntry": {
+      "description": "One stored conversation as a picker lists it. No transcript in the list — that is what `session.open` restores.",
+      "type": "object",
+      "required": [
+        "id",
+        "messages",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "messages": {
+          "type": "integer"
+        },
+        "updated_at": {
+          "type": "number"
+        },
+        "compactions": {
+          "type": "integer"
+        },
+        "cost_usd": {
+          "type": "number"
+        }
+      }
+    },
+    "SessionHistoryResult": {
+      "type": "object",
+      "required": [
+        "sessions"
+      ],
+      "properties": {
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionHistoryEntry"
+          }
         }
       }
     }
