@@ -2680,18 +2680,21 @@ describe("the agents panel", () => {
     expect(view.frame()).not.toContain("d1 done");
 
     view.mockInput.pressKey("b", { ctrl: true });
-    await letReactRun(view);
-    // The cursor opened on the first row, which the window now draws.
-    expect(view.frame().split("\n").find((row) => row.includes("›")))
-      .toContain("d1 done");
+    // The cursor opened on the first row, which the window now draws —
+    // waited for rather than flushed to, because a render that has not
+    // landed yet is not evidence the row is not drawn.
+    await view.waitForFrame((frame) =>
+      frame.split("\n").find((row) => row.includes("›"))
+        ?.includes("d1 done") ?? false);
 
     for (let at = 0; at < 4; at++) {
       view.mockInput.pressArrow("down");
       await letReactRun(view);
     }
     // The cursor reached d5, and the window moved with it.
-    const cursor = view.frame().split("\n").find((row) => row.includes("›"));
-    expect(cursor).toContain("d5 done");
+    await view.waitForFrame((frame) =>
+      frame.split("\n").find((row) => row.includes("›"))
+        ?.includes("d5 done") ?? false);
     view.client.close();
   });
 });
