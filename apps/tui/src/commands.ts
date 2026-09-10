@@ -32,6 +32,8 @@ export interface Screen {
   wantMode(mode: Mode): void;
   /** Ask the core what it can answer with, and open the chooser. */
   openModels(): void;
+  /** Ask the core what it stores, and open the session picker. */
+  openSessions(): void;
   openPalette(): void;
   closePalette(): void;
   paletteOpen(): boolean;
@@ -160,6 +162,13 @@ export function build(): CommandRegistry<Screen> {
       group: "Session",
       keywords: ["model", "provider", "switch"],
       run: (screen) => screen.openModels(),
+    },
+    {
+      id: "session.history",
+      title: "Open an earlier conversation",
+      group: "Session",
+      keywords: ["sessions", "history", "resume", "open", "earlier"],
+      run: (screen) => screen.openSessions(),
     },
     {
       id: "palette.open",

@@ -79,6 +79,16 @@ import {
   type ModelPickerState,
 } from "./models.ts";
 import {
+  move as moveSession,
+  open as openSessions,
+  search as searchSessions,
+  selected as selectedSession,
+  when as sessionWhen,
+  window as sessionWindow,
+  type SessionEntry,
+  type SessionPickerState,
+} from "./sessions.ts";
+import {
   move as movePalette,
   open as openPalette,
   search as searchPalette,
@@ -174,6 +184,8 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   const [palette, setPalette] = useState<PaletteState<Screen> | undefined>();
   /** The model chooser, while open. The list is the core's, fetched per open. */
   const [models, setModels] = useState<ModelPickerState | undefined>();
+  /** The session picker, while open. Same fetch-on-open rule as the chooser. */
+  const [sessions, setSessions] = useState<SessionPickerState | undefined>();
   const [question, setQuestion] = useState<FormState | undefined>();
   const [permit, setPermit] = useState<PermissionDraft | undefined>();
   const [intent, setIntent] = useState<ModeIntent>(() => beginIntent("act"));
@@ -220,6 +232,8 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   paletteRef.current = palette;
   const modelsRef = useRef(models);
   modelsRef.current = models;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const workbenchRef = useRef(workbench);
   workbenchRef.current = workbench;
   const blockedRef = useRef<Interaction | undefined>(undefined);
@@ -601,6 +615,67 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       });
   }, [client]);
 
+  /**
+   * Open the session picker, or say plainly why there is nothing to open.
+   *
+   * The list is the store's, asked of the core at the moment of opening: the
+   * terminal and the browser write to the same store, so a list cached from
+   * an earlier open could already be wrong.
+   */
+  const openSessionPicker = useCallback(() => {
+    void client.call("session.history")
+      .then((answer) => {
+        const raw = Array.isArray(answer["sessions"])
+          ? (answer["sessions"] as Array<Record<string, unknown>>)
+          : [];
+        if (raw.length === 0) {
+          dispatch({ type: "event", name: "notification.created", seq: 0,
+                     params: { level: "info",
+                               text: "no earlier conversations" } });
+          return;
+        }
+        const entries: SessionEntry[] = raw.map((entry) => ({
+          id: String(entry["id"] ?? ""),
+          title: String(entry["title"] ?? "") || "untitled",
+          messages: Number(entry["messages"] ?? 0),
+          updatedAt: Number(entry["updated_at"] ?? 0),
+        })).filter((entry) => entry.id);
+        setPalette(undefined);
+        setModels(undefined);
+        setSessions(openSessions(entries));
+      })
+      .catch((problem: unknown) => {
+        dispatch({ type: "event", name: "notification.created", seq: 0,
+                   params: { level: "warning",
+                             text: (problem as Error).message } });
+      });
+  }, [client]);
+
+  /**
+   * Reopen the highlighted conversation. A switch is a remount against a
+   * different session: every presentation state that belonged to the old
+   * one's view — draft, cursor, expansions, follow — starts clean, because
+   * none of it is true of the new one.
+   */
+  const openSession = useCallback((entry: SessionEntry) => {
+    setSessions(undefined);
+    void client.call("session.open", { session_id: entry.id })
+      .then((answer) => {
+        const session = answer["session"] as Session | undefined;
+        if (!session?.id) return;
+        setDraft("");
+        setWorkbench({ open: false, at: 0 });
+        setExpanded(new Set());
+        setFollow(followStart);
+        void resync(session.id, true);
+      })
+      .catch((problem: unknown) => {
+        dispatch({ type: "event", name: "notification.created", seq: 0,
+                   params: { level: "warning",
+                             text: (problem as Error).message } });
+      });
+  }, [client, resync]);
+
   const toggleTool = useCallback((id: string) => {
     setExpanded((was) => {
       const next = new Set(was);
@@ -620,10 +695,12 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     stepMode: (back: boolean) => setIntent((was) => stepIntent(was, back)),
     wantMode: (mode: Mode) => setIntent((was) => wantMode(was, mode)),
     openModels: openModelPicker,
+    openSessions: openSessionPicker,
     openPalette: () => {
       // One overlay at a time: a palette over a chooser is two owners of
       // Enter, and the second one drawn is not the one the keys reach.
       setModels(undefined);
+      setSessions(undefined);
       setPalette(openPalette(registry, screenRef.current));
     },
     closePalette: () => setPalette(undefined),
@@ -647,7 +724,8 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     },
     stopDelegate,
   }), [canWorkbench, client, closeWorkbench, onQuit, openModelPicker,
-       openWorkbench, palette, registry, retry, stopDelegate, toTail]);
+       openSessionPicker, openWorkbench, palette, registry, retry,
+       stopDelegate, toTail]);
 
   // The commands are given the screen, and opening the palette needs the
   // screen to filter by. A ref breaks that circle without a second object.
@@ -830,6 +908,20 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       return;
     }
 
+    // The session picker shares the chooser's ownership exactly.
+    const picker = sessionsRef.current;
+    if (picker) {
+      if (named === "escape") { setSessions(undefined); return; }
+      if (named === "up") { setSessions((was) => was && moveSession(was, -1)); return; }
+      if (named === "down") { setSessions((was) => was && moveSession(was, 1)); return; }
+      if (named === "return") {
+        const chosen = selectedSession(picker);
+        if (chosen) openSession(chosen);
+        return;
+      }
+      return;
+    }
+
     // The workbench owns four keys while it holds the cursor, and only those
     // four. Everything else falls through to the normal branch — which is
     // what keeps Tab cycling modes (§ the mode bar is not the workbench's)
@@ -985,6 +1077,13 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
                          setModels((was) => was && searchModels(
                            was.all, was.current, text))}
                        onPick={chooseModel} />
+        : null}
+      {sessions
+        ? <SessionPicker state={sessions} rows={overlayRows}
+                         onQuery={(text) =>
+                           setSessions((was) => was && searchSessions(
+                             was.all, text))}
+                         onPick={openSession} />
         : null}
     </box>
   );
@@ -1763,6 +1862,55 @@ function Palette({ state, rows, onQuery, onPick }: {
     </box>
   );
 }
+
+/**
+ * Earlier conversations, newest first, as the core's store describes them.
+ * Opening one is a remount against the reopened session: the transcript, the
+ * plan and the title come back from the core, and every presentation state
+ * that belonged to the old conversation starts clean.
+ */
+function SessionPicker({ state, rows, onQuery, onPick }: {
+  state: SessionPickerState;
+  /** How many rows the terminal height affords. */
+  rows: number;
+  onQuery: (text: string) => void;
+  onPick: (entry: SessionEntry) => void;
+}): React.ReactNode {
+  const { from, to } = sessionWindow(state, rows);
+  const shown = state.matches.slice(from, to);
+
+  return (
+    <box style={{ borderStyle: "single", flexDirection: "column",
+                  flexShrink: 0, padding: 1,
+                  borderColor: theme["border.focused"],
+                  backgroundColor: theme["surface.overlay"] }}>
+      <input value={state.query} focused placeholder="type a title"
+             onInput={onQuery} />
+      {shown.map((entry, offset) => {
+        const here = from + offset === state.index;
+        const style = here
+          ? { fg: theme["text.primary"], bg: theme["surface.selected"] }
+          : { fg: theme["text.secondary"] };
+        return (
+          <text key={entry.id} style={{ ...style, flexShrink: 0 }}
+                onMouseDown={() => onPick(entry)}>
+            {`${here ? "›" : " "} ${entry.title}  ·  ${entry.messages} msg  ·  ${sessionWhen(entry.updatedAt)}`}
+          </text>
+        );
+      })}
+      {state.matches.length === 0
+        ? <text style={{ fg: theme["text.muted"] }}>No session matches.</text>
+        : null}
+      <text style={{ fg: theme["text.muted"] }}>
+        {`↑↓ Move   enter Open   esc Close`
+         + (state.matches.length > rows
+            ? `   ${state.index + 1}/${state.matches.length}` : "")}
+      </text>
+    </box>
+  );
+}
+
+// --------------------------------------------------------------------------- //
 
 /**
  * The model chooser. The list is the core's answer to `model.list`, fetched

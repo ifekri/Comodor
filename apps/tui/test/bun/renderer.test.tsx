@@ -53,6 +53,12 @@ class FakeCore implements Transport {
   model = "fake-1";
   /** What `model.list` offers. A test narrows it to model a thin provider. */
   catalogue: string[] = ["fake-1", "fake-fast", "qwen3:8b"];
+  /** What `session.history` lists and `session.open` restores. */
+  stored: Array<{ id: string; title: string; messages: number;
+                  updatedAt: number;
+                  transcript: Array<{ role: string; text: string }> }> = [];
+  /** Every live session `session.open` has produced, in order. */
+  opened: Array<Record<string, unknown>> = [];
   /** What the handshake advertises. A test narrows it to model an older core. */
   capabilities: string[] = ["streaming", "questions", "permissions", "modes",
                             "tool_events", "tasks", "delegates", "usage"];
@@ -180,6 +186,40 @@ class FakeCore implements Transport {
     if (method === "model.get") {
       this.push(response(id, { provider: "fake", model: this.model,
                                configured: true }));
+      return;
+    }
+    if (method === "session.history") {
+      this.push(response(id, {
+        sessions: this.stored.map((entry) => ({
+          id: entry.id, title: entry.title, messages: entry.messages,
+          updated_at: entry.updatedAt, compactions: 0, cost_usd: 0,
+        })),
+      }));
+      return;
+    }
+    if (method === "session.open") {
+      const wanted = String(params["session_id"] ?? "");
+      const entry = this.stored.find((item) => item.id === wanted);
+      if (!entry) {
+        this.push({ version: PROTOCOL_VERSION, type: "error", id,
+                    error: { code: "not_allowed",
+                             message: `no stored session named '${wanted}'` } });
+        return;
+      }
+      // The live session is new; the transcript it opens with is the store's.
+      const live = { id: `live-${wanted}`, mode: "act",
+                     workspace: "/work/project", busy: false };
+      this.opened.push(live);
+      this.snapshot = {
+        session: live, revision: entry.transcript.length,
+        messages: entry.transcript.map((message, at) => ({
+          message_id: `restored-${at + 1}`, turn_id: "restored",
+          role: message.role, text: message.text, status: "completed",
+          started_seq: at + 1,
+        })),
+        tools: [],
+      };
+      this.push(response(id, { session: live }));
       return;
     }
     if (method === "model.list") {
@@ -3043,6 +3083,121 @@ describe("the workbench after a reconnect", () => {
     expect(frame).not.toContain("stale hole");
     expect(frame).not.toContain("first plan");
     expect(frame).toContain("d9 lost");
+    view.client.close();
+  });
+});
+
+describe("earlier conversations", () => {
+  function stock(core: { stored: Array<{ id: string; title: string;
+      messages: number; updatedAt: number;
+      transcript: Array<{ role: string; text: string }> }> }): void {
+    core.stored = [
+      { id: "old-1", title: "fix the parser", messages: 12,
+        updatedAt: Date.now() / 1000 - 3600,
+        transcript: [
+          { role: "user", text: "the parser drops braces" },
+          { role: "assistant", text: "found it — the scanner skips them" },
+        ] },
+      { id: "old-2", title: "add the tests", messages: 40,
+        updatedAt: Date.now() / 1000 - 7200,
+        transcript: [{ role: "user", text: "cover the cache" }] },
+    ];
+  }
+
+  test("the picker lists the store, and opening restores its transcript",
+       async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    stock(view.core as never as Parameters<typeof stock>[0]);
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("earlier");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("type a title"));
+
+    let frame = view.frame();
+    expect(frame).toContain("fix the parser");
+    expect(frame).toContain("12 msg");
+    expect(frame).toContain("add the tests");
+
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await view.waitForFrame((frame) =>
+      frame.includes("the scanner skips them"), MODE_PASSES);
+
+    // The transcript came back from the store, through the core — not from
+    // any client-side memory of it.
+    frame = view.frame();
+    expect(frame).toContain("the parser drops braces");
+    expect(view.core.methods()).toContain("session.open");
+    view.client.close();
+  });
+
+  test("an empty store says so instead of opening nothing", async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("earlier");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await view.waitForVisualIdle();
+
+    const frame = view.frame();
+    expect(frame).toContain("no earlier conversations");
+    expect(frame).not.toContain("type a title");
+    view.client.close();
+  });
+
+  test("Escape closes the picker without opening anything", async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    stock(view.core as never as Parameters<typeof stock>[0]);
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("earlier");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("type a title"));
+
+    await pressEscape(view);
+    await view.waitForVisualIdle();
+    expect(view.frame()).not.toContain("type a title");
+    expect(view.core.methods()).not.toContain("session.open");
+    view.client.close();
+  });
+
+  test("a draft in the composer does not travel to the opened session",
+       async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    await view.mockInput.typeText("about the old conversation");
+    await view.flush();
+    stock(view.core as never as Parameters<typeof stock>[0]);
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("earlier");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("type a title"));
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await view.waitForFrame((frame) =>
+      frame.includes("the parser drops braces"), MODE_PASSES);
+
+    // The draft belonged to the conversation it was typed for. Carrying it
+    // into another session would send it to the wrong agent.
+    const frame = view.frame();
+    expect(frame).not.toContain("about the old conversation");
     view.client.close();
   });
 });
