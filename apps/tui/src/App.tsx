@@ -1050,7 +1050,8 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
           : <Composer value={draft} onChange={setDraft}
                       busy={state.connection.kind !== "ready"
                             || Boolean(state.session?.busy)}
-                      blurred={workbench.open} />}
+                      blurred={workbench.open || Boolean(palette || models
+                                                         || sessions)} />}
       <ModeBar mode={mode} intent={intent} narrow={narrow}
                onPick={(picked) => runCommand(`mode.${picked}`)} />
       <Footer registry={registry} narrow={narrow} state={state}
