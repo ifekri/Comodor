@@ -55,7 +55,7 @@ class FakeCore implements Transport {
   catalogue: string[] = ["fake-1", "fake-fast", "qwen3:8b"];
   /** What the handshake advertises. A test narrows it to model an older core. */
   capabilities: string[] = ["streaming", "questions", "permissions", "modes",
-                            "tool_events", "tasks", "delegates"];
+                            "tool_events", "tasks", "delegates", "usage"];
   /** What `delegate.stop` answers. False models "it had already settled". */
   stopAnswer = true;
   /** What `session.snapshot` answers with. */
@@ -3043,6 +3043,65 @@ describe("the workbench after a reconnect", () => {
     expect(frame).not.toContain("stale hole");
     expect(frame).not.toContain("first plan");
     expect(frame).toContain("d9 lost");
+    view.client.close();
+  });
+});
+
+describe("what the conversation has cost", () => {
+  test("the footer shows the fill and the cost the core reported",
+       async () => {
+    const view = await screen();
+    await emitRun(view, "usage.updated", {
+      session_id: "s1", context_used: 42_000, context_limit: 100_000,
+      fill: 0.42, input_tokens: 50_000, output_tokens: 3_000,
+      cost_usd: 0.137,
+    });
+
+    const frame = view.frame();
+    expect(frame).toContain("42% ctx");
+    expect(frame).toContain("$0.14");
+    view.client.close();
+  });
+
+  test("a provider with no cost shows no cost, and never a guessed zero",
+       async () => {
+    const view = await screen();
+    await emitRun(view, "usage.updated", {
+      session_id: "s1", context_used: 8_000, context_limit: 32_000,
+      fill: 0.25,
+    });
+
+    const frame = view.frame();
+    expect(frame).toContain("25% ctx");
+    expect(frame).not.toContain("$0.00");
+    view.client.close();
+  });
+
+  test("a core too old to send usage leaves the corner empty", async () => {
+    const view = await screen(100, 30, undefined, undefined,
+                              ["streaming", "questions", "permissions",
+                               "modes", "tool_events"]);
+    await emitRun(view, "usage.updated", {
+      session_id: "s1", fill: 0.9, cost_usd: 1.5,
+    });
+    const frame = view.frame();
+    expect(frame).not.toContain("90% ctx");
+    expect(frame).not.toContain("$1.50");
+    view.client.close();
+  });
+
+  test("a rebuilt client sees the usage the snapshot carries", async () => {
+    const snapshot = {
+      session: { id: "s1", mode: "act", workspace: "/work/project",
+                 busy: false },
+      revision: 4, messages: [], tools: [],
+      usage: { context_used: 12_000, context_limit: 100_000, fill: 0.12,
+               cost_usd: 0.05 },
+    };
+    const view = await screen(100, 30, "s1", snapshot);
+    const frame = view.frame();
+    expect(frame).toContain("12% ctx");
+    expect(frame).toContain("$0.05");
     view.client.close();
   });
 });

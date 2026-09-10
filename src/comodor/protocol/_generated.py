@@ -59,6 +59,7 @@ EVENT_SHAPES: dict[str, str] = {
     "mode.changed": "ModeChanged",
     "model.changed": "ModelResult",
     "notification.created": "Notification",
+    "usage.updated": "Usage",
 }
 
 EVENTS: frozenset[str] = frozenset(EVENT_SHAPES)
@@ -98,6 +99,7 @@ CORE_CAPABILITIES: tuple[str, ...] = (
     "tool_events",
     "tasks",
     "delegates",
+    "usage",
 )
 CLIENT_CAPABILITIES: tuple[str, ...] = (
     "questions",
@@ -206,6 +208,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "question": ("QuestionRequest", False),
         "permission": ("PermissionRequest", False),
         "interactions": ("list", False),
+        "usage": ("Usage", False),
     },
     "PendingInteraction": {
         "kind": ("InteractionKind", True),
@@ -369,6 +372,14 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "model": ("str", True),
         "configured": ("bool", False),
         "models": ("list", True),
+    },
+    "Usage": {
+        "context_used": ("int", False),
+        "context_limit": ("int", False),
+        "fill": ("float", False),
+        "input_tokens": ("int", False),
+        "output_tokens": ("int", False),
+        "cost_usd": ("float", False),
     },
 }
 
@@ -580,6 +591,7 @@ class SessionSnapshot(_SessionSnapshotRequired, total=False):
     question: QuestionRequest
     permission: PermissionRequest
     interactions: list[PendingInteraction]
+    usage: Usage
 
 
 class _PendingInteractionRequired(TypedDict):
@@ -896,3 +908,22 @@ class ModelListResult(_ModelListResultRequired, total=False):
     """
 
     configured: bool
+
+
+class _UsageRequired(TypedDict):
+    pass
+
+
+class Usage(_UsageRequired, total=False):
+    """How full the context is, and what the conversation has cost so far.
+    Every field is optional because a provider that cannot measure one
+    still reports the rest — a local model has no honest cost, and a
+    client must show nothing rather than invent one.
+    """
+
+    context_used: int
+    context_limit: int
+    fill: float
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float

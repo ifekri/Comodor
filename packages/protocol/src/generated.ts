@@ -47,6 +47,7 @@ export const EVENTS = [
   "mode.changed",
   "model.changed",
   "notification.created",
+  "usage.updated",
 ] as const;
 export type EventName = (typeof EVENTS)[number];
 
@@ -74,6 +75,7 @@ export const CORE_CAPABILITIES = [
   "tool_events",
   "tasks",
   "delegates",
+  "usage",
 ] as const;
 export const CLIENT_CAPABILITIES = [
   "questions",
@@ -293,6 +295,7 @@ export interface SessionSnapshot {
   question?: QuestionRequest;
   permission?: PermissionRequest;
   interactions?: Array<PendingInteraction>;
+  usage?: Usage;
 }
 
 /**
@@ -559,6 +562,21 @@ export interface ModelListResult {
   model: string;
   configured?: boolean;
   models: Array<string>;
+}
+
+/**
+ * How full the context is, and what the conversation has cost so far. Every
+ * field is optional because a provider that cannot measure one still
+ * reports the rest — a local model has no honest cost, and a client must
+ * show nothing rather than invent one.
+ */
+export interface Usage {
+  context_used?: number;
+  context_limit?: number;
+  fill?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cost_usd?: number;
 }
 
 /**

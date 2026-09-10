@@ -33,6 +33,20 @@ import type { EventName, Mode, ModelResult, Session } from "@comodor/protocol";
 /** Which provider and model answer, as the core reports them. */
 export type ModelInfo = ModelResult;
 
+/**
+ * One usage report. Every field is optional because the core reports only
+ * what the provider measured: a local model has no honest cost, and a client
+ * shows nothing there rather than a guessed zero.
+ */
+export interface UsageInfo {
+  readonly contextUsed?: number | undefined;
+  readonly contextLimit?: number | undefined;
+  readonly fill?: number | undefined;
+  readonly inputTokens?: number | undefined;
+  readonly outputTokens?: number | undefined;
+  readonly costUsd?: number | undefined;
+}
+
 export type Speaker = "you" | "comodor";
 
 /** Where a message got to. `pending` is the client's own, before the core answers. */
@@ -184,6 +198,13 @@ export interface State {
    * look like a delegate that never existed.
    */
   readonly delegates: readonly Delegate[];
+  /**
+   * The latest usage report the core sent: how full the context is and what
+   * the conversation has cost. Whole-report replacement — the numbers
+   * describe a moment, and merging two moments would show a fill and a cost
+   * that were never true together. Absent on a core too old to send it.
+   */
+  readonly usage?: UsageInfo | undefined;
   /** The most recent notification, shown until the next one replaces it. */
   readonly notice?: { level: string; text: string } | undefined;
   /**
@@ -255,6 +276,8 @@ export interface Snapshot {
     question?: Record<string, unknown>;
     permission?: Record<string, unknown>;
   }>;
+  /** The latest usage report, when the core has sent one. */
+  usage?: Record<string, unknown> | undefined;
 }
 
 export type Action =
@@ -419,9 +442,31 @@ function applySnapshot(state: State, snapshot: Snapshot): State {
     tasks: restoredTasks(snapshot),
     delegates: restoredDelegates(snapshot),
     interactions: restoredInteractions(snapshot, at),
+    usage: restoredUsage(snapshot),
     revision: snapshot.revision,
     arrivals: at,
     gap: false,
+  };
+}
+
+/** The usage a snapshot carries, or none — mapped field by field. */
+function restoredUsage(snapshot: Snapshot): UsageInfo | undefined {
+  const raw = snapshot.usage;
+  if (!raw) return undefined;
+  return usageOf(raw);
+}
+
+/** One report's fields, converted; absent fields stay absent, not zero. */
+function usageOf(params: Record<string, unknown>): UsageInfo {
+  const number = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return {
+    contextUsed: number(params["context_used"]),
+    contextLimit: number(params["context_limit"]),
+    fill: number(params["fill"]),
+    inputTokens: number(params["input_tokens"]),
+    outputTokens: number(params["output_tokens"]),
+    costUsd: number(params["cost_usd"]),
   };
 }
 
@@ -604,6 +649,9 @@ function apply(state: State, name: EventName,
         },
       };
     }
+
+    case "usage.updated":
+      return { ...state, usage: usageOf(params) };
 
     case "message.started": {
       if (!messageId) return state;

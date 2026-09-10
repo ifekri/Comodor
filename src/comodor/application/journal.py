@@ -187,6 +187,10 @@ class Journal:
         #: permission. One slot would silently strand whichever came second,
         #: and a stranded prompt is a tool that looks hung.
         self._waiting: dict[str, tuple[str, dict[str, Any]]] = {}
+        #: The latest usage report, whole. Replacement like the task list:
+        #: context fill and cost are counters that only ever describe "now",
+        #: so keeping anything but the newest would be a lie about the past.
+        self._usage: dict[str, Any] = {}
 
     @property
     def lock(self) -> threading.RLock:
@@ -317,6 +321,16 @@ class Journal:
             if isinstance(delegate, dict):
                 self._fold_delegate(dict(delegate))
 
+        elif name == "usage.updated":
+            # Whole-report replacement: the numbers describe a moment, and a
+            # snapshot that merged two moments would show a fill and a cost
+            # that were never true together.
+            self._usage = {field: params[field]
+                           for field in ("context_used", "context_limit",
+                                         "fill", "input_tokens",
+                                         "output_tokens", "cost_usd")
+                           if params.get(field) is not None}
+
         elif name in ("question.requested", "permission.requested"):
             kind = "question" if name.startswith("question") else "permission"
             request_id = str(params.get("id", ""))
@@ -431,6 +445,10 @@ class Journal:
                 "delegates": [dict(record)
                               for record in self._delegates.values()],
             }
+            if self._usage:
+                # Present only when a report exists: an empty object would
+                # tell a client the core knows usage it does not.
+                body["usage"] = dict(self._usage)
             waiting = list(self._waiting.values())
             if waiting:
                 body["interactions"] = [

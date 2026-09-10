@@ -15,6 +15,7 @@ import pytest
 
 from comodor import protocol as P
 from comodor.application import CoreService, Refused
+from comodor.events import Kind
 from comodor.transport.jsonl import Channel
 from comodor.transport.server import Server
 
@@ -668,3 +669,45 @@ def test_workbench_events_build_valid_envelopes():
     assert delegate["event"] == "delegate.updated"
     assert P.event_shape("delegate.updated") in P._generated.SHAPES
     assert P.event_shape("tasks.updated") in P._generated.SHAPES
+
+    usage = P.event("usage.updated", {"session_id": "s", "fill": 0.4}, 9)
+    assert usage["event"] == "usage.updated"
+    assert P.event_shape("usage.updated") in P._generated.SHAPES
+    assert "usage" in P.CORE_CAPABILITIES
+
+
+def test_usage_is_relayed_and_snapshotted_without_invented_fields(service):
+    """The loop's numbers, not a client's estimate.
+
+    A provider that reports no cost must read as no cost — a $0.00 painted
+    from an absent field would claim free what was merely unmeasured.
+    """
+    session = service.create_session()["id"]
+    handle = service.session(session)
+    handle.assembly.bus.emit(Kind.USAGE, context_used=4_200,
+                             context_limit=100_000, fill=0.42)
+
+    snapshot = service.snapshot(session)
+    assert snapshot["usage"] == {"context_used": 4200,
+                                 "context_limit": 100_000, "fill": 0.42}
+    assert "cost_usd" not in snapshot["usage"], (
+        "an unmeasured cost must stay absent, not become zero")
+
+    # A second report replaces the first rather than merging with it: the two
+    # describe different moments, and merging would invent a pair that was
+    # never true together.
+    handle.assembly.bus.emit(Kind.USAGE, context_used=9_000,
+                             context_limit=100_000, fill=0.09,
+                             cost_usd=0.011)
+    snapshot = service.snapshot(session)
+    assert snapshot["usage"]["context_used"] == 9_000
+    assert snapshot["usage"]["cost_usd"] == 0.011
+
+
+def test_usage_never_names_a_secret(service, config):
+    config.providers["fake"].api_key = "sk-do-not-leak-this"
+    session = service.create_session()["id"]
+    handle = service.session(session)
+    handle.assembly.bus.emit(Kind.USAGE, context_used=1, context_limit=10,
+                             fill=0.1, cost_usd=0.01)
+    assert "sk-do-not-leak-this" not in json.dumps(service.snapshot(session))

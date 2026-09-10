@@ -961,7 +961,8 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
                       blurred={workbench.open} />}
       <ModeBar mode={mode} intent={intent} narrow={narrow}
                onPick={(picked) => runCommand(`mode.${picked}`)} />
-      <Footer registry={registry} narrow={narrow} state={state} />
+      <Footer registry={registry} narrow={narrow} state={state}
+              usage={advertised.includes("usage")} />
       {overlay
         ? <WorkbenchPanel state={state} width={width}
                           focused selected={workbench.at}
@@ -1317,8 +1318,10 @@ function ModeBar({ mode, intent, narrow, onPick }: {
   );
 }
 
-function Footer({ registry, narrow, state }: {
+function Footer({ registry, narrow, state, usage }: {
   registry: ReturnType<typeof build>; narrow: boolean; state: State;
+  /** Whether the core said it will send usage at all — never guessed. */
+  usage: boolean;
 }): React.ReactNode {
   // Printed from the bindings, so a hint cannot outlive the key it names.
   const hints = registry.hints()
@@ -1332,14 +1335,39 @@ function Footer({ registry, narrow, state }: {
   const agents = live > 0 ? `● ${live} agent${live === 1 ? "" : "s"}` : "";
   const shown = [...(busy ? [busy] : []), ...(agents ? [agents] : []),
                  ...hints];
+  // The counters the core reported, on the far side of the row from the keys.
+  // A provider that measures nothing shows nothing: a guessed zero is a lie,
+  // and an absent capability keeps the whole corner empty rather than frozen
+  // at whatever an older screen said.
+  const meter = usage ? usageText(state.usage) : "";
   return (
-    <box style={{ height: 1, flexShrink: 0, paddingLeft: 1,
+    <box style={{ height: 1, flexShrink: 0, paddingLeft: 1, paddingRight: 1,
+                  flexDirection: "row", justifyContent: "space-between",
                   backgroundColor: theme["surface.raised"] }}>
       <text style={{ fg: theme["text.muted"] }}>
         {(narrow ? shown.slice(0, 2) : shown).join("   ")}
       </text>
+      {meter && !narrow
+        ? <text style={{ fg: theme["text.muted"] }}>{meter}</text>
+        : null}
     </box>
   );
+}
+
+/** `42% ctx · $0.14` — only the parts the provider actually measured. */
+function usageText(usage: State["usage"]): string {
+  if (!usage) return "";
+  const parts: string[] = [];
+  if (usage.fill !== undefined) {
+    parts.push(`${Math.round(usage.fill * 100)}% ctx`);
+  } else if (usage.contextUsed !== undefined
+             && usage.contextLimit) {
+    parts.push(`${Math.round(usage.contextUsed / usage.contextLimit * 100)}% ctx`);
+  }
+  if (usage.costUsd !== undefined && usage.costUsd > 0) {
+    parts.push(`$${usage.costUsd.toFixed(2)}`);
+  }
+  return parts.join(" · ");
 }
 
 /** How many lines of a request's detail are worth showing inline. */

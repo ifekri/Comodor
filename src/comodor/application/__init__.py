@@ -982,6 +982,17 @@ def _relay(service: CoreService, handle: SessionHandle):
             if record is not None:
                 service._emit(handle, "delegate.updated", {
                     "session_id": session_id, "delegate": record})
+        elif kind is Kind.USAGE:
+            # The loop's own numbers, forwarded with the fields it set. A
+            # provider that never reports a cost produces no cost key at all
+            # — a client shows nothing there rather than a guessed $0.00.
+            usage = {field: event.get(field)
+                     for field in ("context_used", "context_limit", "fill",
+                                   "input_tokens", "output_tokens", "cost_usd")
+                     if event.get(field) is not None}
+            if usage:
+                service._emit(handle, "usage.updated",
+                              {"session_id": session_id, **usage})
         elif kind is Kind.REQUEST:
             _relay_request(service, handle, event)
         elif kind is Kind.REQUEST_EXPIRED:

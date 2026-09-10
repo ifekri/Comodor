@@ -55,7 +55,8 @@
       "modes",
       "tool_events",
       "tasks",
-      "delegates"
+      "delegates",
+      "usage"
     ],
     "client": [
       "questions",
@@ -162,7 +163,8 @@
     "permission.resolved": "PermissionResolved",
     "mode.changed": "ModeChanged",
     "model.changed": "ModelResult",
-    "notification.created": "Notification"
+    "notification.created": "Notification",
+    "usage.updated": "Usage"
   },
   "$defs": {
     "Mode": {
@@ -630,6 +632,9 @@
           "items": {
             "$ref": "#/$defs/PendingInteraction"
           }
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
         }
       }
     },
@@ -1267,6 +1272,31 @@
           "items": {
             "type": "string"
           }
+        }
+      }
+    },
+    "Usage": {
+      "description": "How full the context is, and what the conversation has cost so far. Every field is optional because a provider that cannot measure one still reports the rest — a local model has no honest cost, and a client must show nothing rather than invent one.",
+      "type": "object",
+      "required": [],
+      "properties": {
+        "context_used": {
+          "type": "integer"
+        },
+        "context_limit": {
+          "type": "integer"
+        },
+        "fill": {
+          "type": "number"
+        },
+        "input_tokens": {
+          "type": "integer"
+        },
+        "output_tokens": {
+          "type": "integer"
+        },
+        "cost_usd": {
+          "type": "number"
         }
       }
     }
