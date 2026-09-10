@@ -74,8 +74,9 @@ the block that used to live inside `cli.py`, lifted out rather than rewritten
 — and `cli.py` now calls it, so the two cannot drift while both exist.
 
 `CoreService` owns sessions and the operations on them: create, get, list,
-send, cancel, set mode, choose a model, answer a question, reply to a
-permission, stop a background delegate. It knows nothing about JSON.
+history, open, send, cancel, set mode, choose a model, list models, answer a
+question, reply to a permission, stop a background delegate. It knows nothing
+about JSON.
 
 Each session gets a deep copy of the config, so two sessions in one core keep
 their own modes — setting one to Plan must not quietly disarm the other's Act.
@@ -91,6 +92,16 @@ plan, delegated work, and a delegate that was running when the process died
 comes back as `lost` rather than vanishing or pretending to run. The journal
 folds delegates forward-only, the same rule the manager's own announcements
 obey, because the snapshot is what a reconnecting client believes.
+
+**Usage is core state, on the same rule.** The loop already knew how full the
+context was and what the conversation cost; the relay maps that through the
+same allow-list to `usage.updated`, and the snapshot's `usage` carries the
+latest report whole — not merged, because the numbers describe a moment and a
+fill and a cost from two moments were never true together. Sessions also
+persist: every turn boundary appends to the shared store the terminal and the
+browser already used, `session.history` lists it, and `session.open` reopens
+a stored conversation with its transcript, plan and title restored — and the
+stored delegates it had stay lost on their own record.
 
 `assemble(..., delegates=True)` is opt-in and means "somebody will deliver a
 finished background answer at a turn boundary". A served session says yes; a
@@ -115,7 +126,7 @@ answer.
 | Package | Owns |
 |---|---|
 | `@comodor/protocol` | generated types, envelope builders, the reader |
-| `@comodor/client` | the handshake, correlation, events, spawning a core |
+| `@comodor/client` | the handshake, correlation, events, closing notification, spawning a core |
 | `@comodor/session` | the session projection, snapshot reconciliation, the queue of what is waiting on the person, the task list and delegate records with their forward-only lifecycle, the tool-output bound, mode intent, follow policy |
 | `@comodor/commands` | one action however it was reached |
 | `@comodor/modes` | the cycle, labels and summaries a client draws |
