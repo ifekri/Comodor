@@ -69,6 +69,60 @@ export interface ToolRun {
   readonly elapsedMs?: number | undefined;
 }
 
+/**
+ * How much of one tool's streamed output the projection keeps.
+ *
+ * The same number the core's journal keeps, and for the same reason: a
+ * command that prints for a minute must not grow a client's memory for a
+ * minute per call. The tail is kept because the end of a command's output is
+ * the part that says how it went, and the flag says the shortened transcript
+ * is shortened rather than letting it pass for all there was. A resync then
+ * converges: both sides hold the same last 64,000 characters.
+ */
+export const OUTPUT_CAP = 64_000;
+
+/** The task states the `todo_write` tool owns. No others exist. */
+export type TaskState = "pending" | "active" | "done" | "blocked";
+
+/**
+ * One item of the agent's own plan.
+ *
+ * No id, deliberately: the tool replaces the whole list on every update, and
+ * an index is not an identity across a replacement. Tasks are read-only
+ * presentation — nothing a client can do to one needs to name it.
+ */
+export interface Task {
+  readonly text: string;
+  readonly state: TaskState;
+}
+
+/**
+ * Where one background delegate has got to.
+ *
+ * `running` and `stopping` are live; the other four are terminal and a
+ * delegate never comes back from one. `lost` is the honest state of a
+ * delegate that was running when the core's process died — after a reload it
+ * must not look like work still in flight.
+ */
+export type DelegateState =
+  | "running" | "stopping"
+  | "done" | "failed" | "stopped" | "lost";
+
+/** One background delegate, as the core last described it. */
+export interface Delegate {
+  readonly id: string;
+  readonly label: string;
+  readonly state: DelegateState;
+  readonly steps: number;
+  readonly toolCalls: number;
+  readonly tokens: number;
+  /** Seconds, as of this record. Terminal records: the final count. */
+  readonly elapsed: number;
+  /** The core's epoch seconds, so a client can tick a running one's clock. */
+  readonly startedAt: number;
+  readonly error?: string | undefined;
+}
+
 export type Connection =
   | { readonly kind: "starting" }
   | { readonly kind: "ready" }
@@ -108,6 +162,18 @@ export interface State {
   readonly session?: Session | undefined;
   readonly lines: readonly Line[];
   readonly tools: readonly ToolRun[];
+  /**
+   * The agent's task list, whole. Every `tasks.updated` replaces it — the
+   * tool's own semantics — so a task the model removed is gone here too.
+   */
+  readonly tasks: readonly Task[];
+  /**
+   * Every background delegate the core has described, in the order they were
+   * first announced. Terminal records stay: the panel answers "what happened
+   * to those three background tasks?", and a `lost` one that vanished would
+   * look like a delegate that never existed.
+   */
+  readonly delegates: readonly Delegate[];
   /** The most recent notification, shown until the next one replaces it. */
   readonly notice?: { level: string; text: string } | undefined;
   /**
@@ -141,6 +207,8 @@ export const initial: State = {
   connection: { kind: "starting" },
   lines: [],
   tools: [],
+  tasks: [],
+  delegates: [],
   interactions: [],
   revision: 0,
   arrivals: 0,
@@ -159,6 +227,14 @@ export interface Snapshot {
     call_id: string; turn_id: string; name: string; summary?: string;
     state: string; output?: string; output_truncated?: boolean;
     error?: string; elapsed_ms?: number; started_seq?: number;
+  }>;
+  /** The agent's task list, whole. Absent from a core too old to keep one. */
+  tasks?: Array<{ text: string; state: string }>;
+  /** Every background delegate, terminal ones included. */
+  delegates?: Array<{
+    id: string; label: string; state: string; steps: number;
+    tool_calls: number; tokens: number; elapsed: number;
+    started_at: number; error?: string;
   }>;
   /** The first of each kind, for a snapshot from a core that carries one. */
   question?: Record<string, unknown>;
@@ -325,11 +401,84 @@ function applySnapshot(state: State, snapshot: Snapshot): State {
     session: snapshot.session,
     lines,
     tools,
+    tasks: restoredTasks(snapshot),
+    delegates: restoredDelegates(snapshot),
     interactions: restoredInteractions(snapshot, at),
     revision: snapshot.revision,
     arrivals: at,
     gap: false,
   };
+}
+
+/**
+ * The task list a snapshot carries, sanitized the way the tool's own parsing
+ * does: a state outside the four words is `pending`, and an entry with no
+ * text is not a task.
+ */
+function restoredTasks(snapshot: Snapshot): Task[] {
+  if (!Array.isArray(snapshot.tasks)) return [];
+  const built: Task[] = [];
+  for (const entry of snapshot.tasks) {
+    if (!entry || typeof entry !== "object") continue;
+    const text = String(entry.text ?? "");
+    if (!text) continue;
+    built.push({ text, state: taskState(String(entry.state ?? "")) });
+  }
+  return built;
+}
+
+/**
+ * The delegates a snapshot carries, whole records in the order listed.
+ *
+ * No forward-only guard here, unlike the event fold: a snapshot *is* the
+ * core's current account, revision-checked as a whole, so what it says
+ * replaces what was held even where an event could not.
+ */
+function restoredDelegates(snapshot: Snapshot): Delegate[] {
+  if (!Array.isArray(snapshot.delegates)) return [];
+  const built: Delegate[] = [];
+  for (const entry of snapshot.delegates) {
+    const delegate = delegateOf(entry);
+    if (delegate) built.push(delegate);
+  }
+  return built;
+}
+
+/** One wire record as the client holds it, or nothing when it has no id. */
+function delegateOf(entry: unknown): Delegate | undefined {
+  if (!entry || typeof entry !== "object") return undefined;
+  const record = entry as Record<string, unknown>;
+  const id = String(record["id"] ?? "");
+  if (!id) return undefined;
+  const error = String(record["error"] ?? "");
+  return {
+    id,
+    label: String(record["label"] ?? ""),
+    state: delegateState(String(record["state"] ?? "")),
+    steps: Number(record["steps"] ?? 0),
+    toolCalls: Number(record["tool_calls"] ?? 0),
+    tokens: Number(record["tokens"] ?? 0),
+    elapsed: Number(record["elapsed"] ?? 0),
+    startedAt: Number(record["started_at"] ?? 0),
+    error: error || undefined,
+  };
+}
+
+function taskState(state: string): TaskState {
+  return state === "active" || state === "done" || state === "blocked"
+    ? state
+    : "pending";
+}
+
+function delegateState(state: string): DelegateState {
+  return state === "stopping" || state === "done" || state === "failed"
+    || state === "stopped" || state === "lost"
+    ? state
+    // Fail-safe the way an unknown message status maps to `streaming`: a word
+    // from a newer core is shown as work in flight rather than dropped, since
+    // hiding a delegate that exists is the worse mistake. Stopping it is
+    // harmless — the core answers honestly when there was nothing to stop.
+    : "running";
 }
 
 /**
@@ -496,9 +645,7 @@ function apply(state: State, name: EventName,
       // output at its origin: two tools running at once produce interleaved
       // events, and "whichever started most recently" would put half of each
       // under the other.
-      return editTool(state, callId, (tool) => ({
-        ...tool, output: tool.output + text,
-      }));
+      return editTool(state, callId, (tool) => appendOutput(tool, text));
 
     case "tool.completed":
       return editTool(state, callId, (tool) => ({
@@ -534,11 +681,82 @@ function apply(state: State, name: EventName,
         notice: { level: String(params["level"] ?? "info"), text },
       };
 
+    case "tasks.updated": {
+      // Replacement, never addition — the semantics the `todo_write` tool
+      // itself has: it sends the complete list every time. Merging would keep
+      // a task the model removed and reorder one the model reordered, and a
+      // plan panel that disagrees with the plan is worse than none.
+      const raw = params["tasks"];
+      if (!Array.isArray(raw)) return state;
+      const tasks: Task[] = [];
+      for (const entry of raw) {
+        if (!entry || typeof entry !== "object") continue;
+        const item = entry as Record<string, unknown>;
+        const taskText = String(item["text"] ?? "");
+        if (!taskText) continue;
+        tasks.push({ text: taskText,
+                     state: taskState(String(item["state"] ?? "")) });
+      }
+      return { ...state, tasks };
+    }
+
+    case "delegate.updated": {
+      const delegate = delegateOf(params["delegate"]);
+      return delegate ? foldDelegate(state, delegate) : state;
+    }
+
     default:
       // An event this client does not use. Ignoring it by name is how a newer
       // core stays compatible with an older client.
       return state;
   }
+}
+
+/**
+ * One delegate record, folded forward-only.
+ *
+ * Replaced whole rather than merged field by field: half-merging two records
+ * could pair a new state with an old error, a sentence the core never said.
+ * And never backwards — a late `running` behind a `stopping`, or anything
+ * behind a terminal state, is dropped. The core's manager announces
+ * monotonically; this is the same rule kept on the client, because a
+ * snapshot-and-stream race is exactly where a late event could otherwise
+ * re-describe a stopped delegate as alive.
+ */
+const DELEGATE_PROGRESS: Record<string, number> = {
+  running: 0, stopping: 1, done: 2, failed: 2, stopped: 2, lost: 2,
+};
+
+const DELEGATE_TERMINAL: readonly DelegateState[] =
+  ["done", "failed", "stopped", "lost"];
+
+function foldDelegate(state: State, delegate: Delegate): State {
+  const at = state.delegates.findIndex((each) => each.id === delegate.id);
+  if (at < 0) {
+    return { ...state, delegates: [...state.delegates, delegate] };
+  }
+  const held = state.delegates[at] as Delegate;
+  if (DELEGATE_TERMINAL.includes(held.state)) return state;
+  if ((DELEGATE_PROGRESS[delegate.state] ?? 0)
+      < (DELEGATE_PROGRESS[held.state] ?? -1)) return state;
+  const delegates = [...state.delegates];
+  delegates[at] = delegate;
+  return { ...state, delegates };
+}
+
+/**
+ * Output appended, bounded the way the core's journal bounds its own copy:
+ * the tail kept, the flag set, and a client that streamed a megabyte holds
+ * the same last 64,000 characters a resync would have given it.
+ */
+function appendOutput(tool: ToolRun, text: string): ToolRun {
+  let output = tool.output + text;
+  let truncated = tool.outputTruncated;
+  if (output.length > OUTPUT_CAP) {
+    output = output.slice(-OUTPUT_CAP);
+    truncated = true;
+  }
+  return { ...tool, output, outputTruncated: truncated };
 }
 
 function editLine(state: State, id: string,
@@ -630,6 +848,33 @@ export function streaming(state: State): boolean {
 /** Prompts the person typed that the core never accepted. */
 export function unsent(state: State): readonly Line[] {
   return state.lines.filter((line) => line.state === "failed_to_send");
+}
+
+// --------------------------------------------------------------------------- //
+// reading the workbench
+// --------------------------------------------------------------------------- //
+
+/**
+ * Whether this delegate may be asked to stop.
+ *
+ * Renderer-independent on purpose: which states a control applies to is a
+ * fact about the lifecycle, not about a terminal, and a desktop client must
+ * not work it out again slightly differently. `stopping` is not stoppable —
+ * the stop is already asked for — and neither is anything terminal.
+ */
+export function stoppable(delegate: Delegate): boolean {
+  return delegate.state === "running";
+}
+
+/** The delegates still in flight, by the core's account. */
+export function runningDelegates(state: State): readonly Delegate[] {
+  return state.delegates.filter((delegate) =>
+    delegate.state === "running" || delegate.state === "stopping");
+}
+
+/** How many tasks the agent has finished, for a "2 of 5" that cannot drift. */
+export function tasksDone(tasks: readonly Task[]): number {
+  return tasks.filter((task) => task.state === "done").length;
 }
 
 // --------------------------------------------------------------------------- //

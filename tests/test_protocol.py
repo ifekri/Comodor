@@ -541,3 +541,72 @@ def test_a_session_that_is_already_working_refuses_a_second_turn(config):
     finally:
         held.set()
         service.close()
+
+
+# --------------------------------------------------------------------------- #
+# the workbench on the wire
+# --------------------------------------------------------------------------- #
+
+def test_the_handshake_advertises_the_workbench_capabilities(service):
+    """A client decides whether to draw tasks and agents from the handshake,
+    not from the version number: an old core speaking v2 has neither."""
+    answers = Driver(service, [hello()]).run()
+
+    capabilities = answers[0]["result"]["capabilities"]
+    assert "tasks" in capabilities
+    assert "delegates" in capabilities
+
+
+def test_delegate_stop_for_a_delegate_that_is_not_there_is_an_honest_false(
+        service):
+    """`false` is an answer, not an error: the delegate may have settled in
+    the instant the request arrived, or never have existed at all."""
+    session = service.create_session()["id"]
+
+    answers = Driver(service, [
+        hello(),
+        call("1", "delegate.stop", {"session_id": session,
+                                    "delegate_id": "d404"}),
+    ]).run()
+
+    assert answers[1]["result"] == {"stopped": False}
+
+
+def test_delegate_stop_names_a_missing_delegate_id(service):
+    session = service.create_session()["id"]
+
+    answers = Driver(service, [
+        hello(),
+        call("1", "delegate.stop", {"session_id": session}),
+    ]).run()
+
+    assert answers[1]["error"]["code"] == P.INVALID_PARAMS
+    assert "delegate_id" in answers[1]["error"]["message"]
+
+
+def test_delegate_stop_for_an_unknown_session_is_unknown_session(service):
+    answers = Driver(service, [
+        hello(),
+        call("1", "delegate.stop", {"session_id": "nope",
+                                    "delegate_id": "d1"}),
+    ]).run()
+
+    assert answers[1]["error"]["code"] == P.UNKNOWN_SESSION
+
+
+def test_workbench_events_build_valid_envelopes():
+    """The names are in the schema, so the core can emit them and a client can
+    decode them — asserted at the source, because an event name the schema
+    does not have is refused by `event()` itself."""
+    tasks = P.event("tasks.updated", {"session_id": "s", "tasks": []}, 7)
+    assert tasks["event"] == "tasks.updated" and tasks["seq"] == 7
+
+    delegate = P.event("delegate.updated",
+                       {"session_id": "s",
+                        "delegate": {"id": "d1", "label": "x",
+                                     "state": "running", "steps": 0,
+                                     "tool_calls": 0, "tokens": 0,
+                                     "elapsed": 0.1, "started_at": 1.0}}, 8)
+    assert delegate["event"] == "delegate.updated"
+    assert P.event_shape("delegate.updated") in P._generated.SHAPES
+    assert P.event_shape("tasks.updated") in P._generated.SHAPES

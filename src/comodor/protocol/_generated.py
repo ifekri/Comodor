@@ -32,6 +32,7 @@ METHOD_SHAPES: dict[str, tuple[str, str]] = {
     "workspace.get": ("Empty", "WorkspaceResult"),
     "question.answer": ("AnswerParams", "AckResult"),
     "permission.reply": ("PermissionReplyParams", "AckResult"),
+    "delegate.stop": ("DelegateStopParams", "DelegateStopResult"),
     "shutdown": ("Empty", "AckResult"),
 }
 
@@ -48,6 +49,8 @@ EVENT_SHAPES: dict[str, str] = {
     "tool.output": "ToolOutput",
     "tool.completed": "ToolCompleted",
     "tool.failed": "ToolFailed",
+    "tasks.updated": "TasksUpdated",
+    "delegate.updated": "DelegateUpdated",
     "question.requested": "QuestionRequest",
     "question.resolved": "QuestionResolved",
     "permission.requested": "PermissionRequest",
@@ -92,6 +95,8 @@ CORE_CAPABILITIES: tuple[str, ...] = (
     "permissions",
     "modes",
     "tool_events",
+    "tasks",
+    "delegates",
 )
 CLIENT_CAPABILITIES: tuple[str, ...] = (
     "questions",
@@ -160,11 +165,43 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "error": ("str", False),
         "elapsed_ms": ("int", False),
     },
+    "TaskItem": {
+        "text": ("str", True),
+        "state": ("TaskState", True),
+    },
+    "TasksUpdated": {
+        "session_id": ("str", True),
+        "tasks": ("list", True),
+    },
+    "Delegate": {
+        "id": ("str", True),
+        "label": ("str", True),
+        "state": ("DelegateState", True),
+        "steps": ("int", True),
+        "tool_calls": ("int", True),
+        "tokens": ("int", True),
+        "elapsed": ("float", True),
+        "started_at": ("float", True),
+        "error": ("str", False),
+    },
+    "DelegateUpdated": {
+        "session_id": ("str", True),
+        "delegate": ("Delegate", True),
+    },
+    "DelegateStopParams": {
+        "session_id": ("str", True),
+        "delegate_id": ("str", True),
+    },
+    "DelegateStopResult": {
+        "stopped": ("bool", True),
+    },
     "SessionSnapshot": {
         "session": ("Session", True),
         "revision": ("int", True),
         "messages": ("list", True),
         "tools": ("list", True),
+        "tasks": ("list", False),
+        "delegates": ("list", False),
         "question": ("QuestionRequest", False),
         "permission": ("PermissionRequest", False),
         "interactions": ("list", False),
@@ -432,6 +469,85 @@ class SnapshotTool(_SnapshotToolRequired, total=False):
     elapsed_ms: int
 
 
+class TaskItem(TypedDict):
+    """One item of the agent's task list. Tasks carry no id: the list is
+    small, the tool replaces it whole on every update, and an index is not
+    an identity across a replacement. A client that renders the list in
+    order needs nothing more; a future operation on one task would need a
+    real core-owned id, which this deliberately does not fake.
+    """
+
+    text: str
+    state: str
+
+
+class TasksUpdated(TypedDict):
+    """The agent's whole task list, as `todo_write` recorded it. Replacement,
+    never addition: a task the new list does not carry is gone, and the
+    order is the order the model wrote. Arrives on the session's sequence
+    like every other event, so a snapshot and a live stream converge on
+    the same list.
+    """
+
+    session_id: str
+    tasks: list[TaskItem]
+
+
+class _DelegateRequired(TypedDict):
+    id: str
+    label: str
+    state: str
+    steps: int
+    tool_calls: int
+    tokens: int
+    elapsed: float
+    started_at: float
+
+
+class Delegate(_DelegateRequired, total=False):
+    """One background delegate, as the core's manager knows it. Every field
+    is a fact the core already keeps: no progress percentage is invented,
+    and `steps`, `tool_calls` and `tokens` are what the worker recorded —
+    zero until it settles, because a running delegate has not reported
+    anything yet. `elapsed` is seconds as of this record; `started_at` is
+    the core's epoch seconds, which lets a client tick a running
+    delegate's clock without asking. `label` is the model's own short name
+    for the work (or the head of its brief) — display text, not a promise.
+    """
+
+    error: str
+
+
+class DelegateUpdated(TypedDict):
+    """One background delegate moved. The whole record rides along, so a
+    client replaces what it holds for that id rather than merging fields —
+    and applies the state vocabulary's forward-only rule: an event cannot
+    move a delegate back from `stopping` to `running` or out of a terminal
+    state.
+    """
+
+    session_id: str
+    delegate: Delegate
+
+
+class DelegateStopParams(TypedDict):
+    session_id: str
+    delegate_id: str
+
+
+class DelegateStopResult(TypedDict):
+    """Whether there was a running delegate to stop. `false` is an honest
+    answer, not an error: the delegate may have finished in the instant
+    the request arrived, or never existed. What it actually became arrives
+    as `delegate.updated` — `stopping` when the stop took, then the
+    terminal state the worker settles on. Stopping every delegate at once
+    is deliberately not a protocol operation: one deliberate stop is the
+    surface F5 promises.
+    """
+
+    stopped: bool
+
+
 class _SessionSnapshotRequired(TypedDict):
     session: Session
     revision: int
@@ -446,9 +562,14 @@ class SessionSnapshot(_SessionSnapshotRequired, total=False):
     what makes rebuilding safe while the session is still streaming. Every
     message and tool carries `started_seq`, the sequence at which it
     entered the timeline, so the two lists merge into the one order the
-    live stream had rather than being drawn messages-then-tools.
+    live stream had rather than being drawn messages-then-tools. `tasks`
+    and `delegates` carry the workbench state the same way: a client that
+    mounts mid-job sees the plan and the delegated work without replaying
+    history, and a client too old to know them ignores them.
     """
 
+    tasks: list[TaskItem]
+    delegates: list[Delegate]
     question: QuestionRequest
     permission: PermissionRequest
     interactions: list[PendingInteraction]

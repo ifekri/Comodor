@@ -49,6 +49,11 @@ class FakeCore implements Transport {
   /** Set by a test to hold mode requests until it releases them. */
   holdModes = false;
   heldModes: Array<{ id: string; mode: string }> = [];
+  /** What the handshake advertises. A test narrows it to model an older core. */
+  capabilities: string[] = ["streaming", "questions", "permissions", "modes",
+                            "tool_events", "tasks", "delegates"];
+  /** What `delegate.stop` answers. False models "it had already settled". */
+  stopAnswer = true;
   /** What `session.snapshot` answers with. */
   snapshot: Record<string, unknown> = {
     session: { id: "s1", mode: "act", workspace: "/work/project", busy: false },
@@ -88,7 +93,7 @@ class FakeCore implements Transport {
       this.push(response(id, {
         protocol_version: PROTOCOL_VERSION,
         core: { name: "fake-core", version: "0" },
-        capabilities: ["streaming", "questions", "permissions", "modes"],
+        capabilities: this.capabilities,
       }));
       return;
     }
@@ -160,6 +165,14 @@ class FakeCore implements Transport {
       this.push(event("session.updated", { session: this.session() }));
       return;
     }
+    if (method === "delegate.stop") {
+      // Answered, and nothing painted: what the delegate becomes is the
+      // lifecycle event the test emits next, exactly as a real core's would
+      // arrive. A fake that emitted `stopped` here would let a client pass
+      // its tests while believing its own request was the terminal state.
+      this.push(response(id, { stopped: this.stopAnswer }));
+      return;
+    }
     this.push(response(id, {}));
   }
 
@@ -211,9 +224,11 @@ class FakeCore implements Transport {
 
 async function screen(width = 100, height = 30,
                       sessionId?: string,
-                      snapshot?: Record<string, unknown>) {
+                      snapshot?: Record<string, unknown>,
+                      capabilities?: string[]) {
   const core = new FakeCore();
   if (snapshot) core.snapshot = snapshot;
+  if (capabilities) core.capabilities = capabilities;
   const client = new CoreClient(core, { timeoutMs: 5_000 });
   await client.start();
 
@@ -238,6 +253,11 @@ async function screen(width = 100, height = 30,
       .filter((message) => message["method"] === "session.set_mode")
       .map((message) =>
         String((message["params"] as Record<string, unknown>)["mode"])),
+    /** Every delegate the client has asked the core to stop, in order. */
+    sentStops: () => core.sent
+      .filter((message) => message["method"] === "delegate.stop")
+      .map((message) =>
+        String((message["params"] as Record<string, unknown>)["delegate_id"])),
   };
 }
 
@@ -1892,3 +1912,740 @@ function markedRow(frame: string): string {
   }
   return "";
 }
+
+// --------------------------------------------------------------------------- //
+// the workbench — tools, tasks and agents, in the real renderer
+// --------------------------------------------------------------------------- //
+
+/** One delegate record as the core's relay puts it on the wire. */
+function wireAgent(id: string, state: string,
+                   extra: Record<string, unknown> = {}) {
+  return { id, label: `work ${id}`, state, steps: 0, tool_calls: 0,
+           tokens: 0, elapsed: 0,
+           started_at: Math.floor(Date.now() / 1000), ...extra };
+}
+
+function rowsWithin(frame: string, width: number): void {
+  for (const row of frame.split("\n")) {
+    expect(row.length).toBeLessThanOrEqual(width);
+  }
+}
+
+describe("the tool timeline", () => {
+  test("a running tool says it is running and shows the tail of its output",
+       async () => {
+    const view = await screen();
+    await emitRun(view, "tool.started",
+                  { turn_id: "t1", call_id: "a", name: "run_shell",
+                    summary: "run: pytest tests" });
+    for (const line of ["line1", "line2", "line3", "line4", "line5"]) {
+      await emitRun(view, "tool.output",
+                    { turn_id: "t1", call_id: "a", text: `${line}\n` });
+    }
+
+    const frame = view.frame();
+    expect(frame).toContain("run: pytest tests");
+    expect(frame).toContain("running…");
+    // The tail, bounded: the newest lines are the ones that say what is
+    // happening now, and five hundred more must not push the composer off.
+    expect(frame).toContain("line5");
+    expect(frame).toContain("line3");
+    expect(frame).not.toContain("line1");
+    rowsWithin(frame, 100);
+    view.client.close();
+  });
+
+  test("a finished tool collapses to one row, with what it cost in time",
+       async () => {
+    const view = await screen();
+    await emitRun(view, "tool.started",
+                  { turn_id: "t1", call_id: "a", name: "read_file",
+                    summary: "read src/app.py" });
+    await emitRun(view, "tool.output",
+                  { turn_id: "t1", call_id: "a", text: "the file body\n" });
+    await emitRun(view, "tool.completed",
+                  { turn_id: "t1", call_id: "a", name: "read_file",
+                    summary: "read src/app.py", elapsed_ms: 340 });
+
+    const frame = view.frame();
+    expect(frame).toContain("read src/app.py");
+    expect(frame).toContain("0.3s");
+    expect(frame).not.toContain("running…");
+    // Compact: a long run leaves dozens of these behind, and every one of
+    // them keeping its output is a wall nobody can scan.
+    expect(frame).not.toContain("the file body");
+    view.client.close();
+  });
+
+  test("clicking a finished tool opens its output, and closes it again",
+       async () => {
+    const view = await screen();
+    await emitRun(view, "tool.started",
+                  { turn_id: "t1", call_id: "a", name: "read_file",
+                    summary: "read src/app.py" });
+    await emitRun(view, "tool.output",
+                  { turn_id: "t1", call_id: "a", text: "the hidden detail\n" });
+    await emitRun(view, "tool.completed",
+                  { turn_id: "t1", call_id: "a", elapsed_ms: 120 });
+    expect(view.frame()).not.toContain("the hidden detail");
+
+    const at = locate(view.frame(), "read src/app.py");
+    view.mockMouse.click(at.x, at.y);
+    await letReactRun(view);
+    expect(view.frame()).toContain("the hidden detail");
+
+    const again = locate(view.frame(), "read src/app.py");
+    view.mockMouse.click(again.x, again.y);
+    await letReactRun(view);
+    expect(view.frame()).not.toContain("the hidden detail");
+    view.client.close();
+  });
+
+  test("a failed tool shows the head of its error, bounded", async () => {
+    const view = await screen();
+    await emitRun(view, "tool.started",
+                  { turn_id: "t1", call_id: "a", name: "run_shell",
+                    summary: "run: make" });
+    await emitRun(view, "tool.failed", {
+      turn_id: "t1", call_id: "a",
+      error: "boom line 1\nline 2\nline 3\nline 4\nline 5",
+    });
+
+    const frame = view.frame();
+    expect(frame).toContain("boom line 1");
+    expect(frame).toContain("line 3");
+    expect(frame).not.toContain("line 5");
+    view.client.close();
+  });
+
+  test("hostile tool output cannot forge the screen", async () => {
+    const view = await screen();
+    await emitRun(view, "tool.started",
+                  { turn_id: "t1", call_id: "a", name: "read_file",
+                    summary: "\x1b[2J\x1b[Hforged summary" });
+    await emitRun(view, "tool.output", {
+      turn_id: "t1", call_id: "a",
+      text: "\x1b]0;hacked\x07\x1b[2J fake [ACT] row\n"
+            + "X".repeat(500) + "\n",
+    });
+
+    const frame = view.frame();
+    rowsWithin(frame, 100);
+    // The screen survived: the header, the composer and one real mode bar.
+    // The bar is the row carrying the bracketed current mode *and* its two
+    // plain neighbours; hostile output may contain the letters "[ACT]" as
+    // data, but it cannot produce a second bar.
+    expect(frame).toContain("Comodor");
+    expect(frame).toContain("ask for anything");
+    const modeBars = frame.split("\n")
+      .filter((row) => row.includes("[ACT]") && row.includes("PLAN")
+                       && row.includes("ASK"));
+    expect(modeBars.length).toBe(1);
+    view.client.close();
+  });
+});
+
+describe("the tasks panel", () => {
+  test("the task list arrives as a panel, and an update replaces it",
+       async () => {
+    const view = await screen();
+    await emitRun(view, "tasks.updated", { session_id: "s1", tasks: [
+      { text: "read the code", state: "done" },
+      { text: "write the tests", state: "active" },
+    ] });
+
+    let frame = view.frame();
+    expect(frame).toMatch(/Tasks\s+1\/2/);
+    expect(frame).toContain("read the code");
+    expect(frame).toContain("write the tests");
+    // Active first, stable — the item being worked on is never the one a
+    // short panel drops.
+    expect(frame.indexOf("write the tests"))
+      .toBeLessThan(frame.indexOf("read the code"));
+
+    await emitRun(view, "tasks.updated", { session_id: "s1", tasks: [
+      { text: "write the tests", state: "done" },
+    ] });
+    frame = view.frame();
+    expect(frame).toMatch(/Tasks\s+1\/1/);
+    expect(frame).not.toContain("read the code");
+    view.client.close();
+  });
+
+  test("fifty tasks stay inside the panel", async () => {
+    const view = await screen();
+    const tasks = Array.from({ length: 50 }, (_each, at) => ({
+      text: at === 7 ? "the active one"
+        : at === 1 ? "blocked on review"
+        : `task-${String(at).padStart(2, "0")} a fairly long piece of text`,
+      state: at === 7 ? "active" : at === 1 ? "blocked"
+        : at % 2 === 0 ? "done" : "pending",
+    }));
+    await emitRun(view, "tasks.updated", { session_id: "s1", tasks });
+
+    const frame = view.frame();
+    expect(frame).toMatch(/Tasks\s+25\/50/);
+    expect(frame).toContain("the active one");
+    expect(frame).toContain("blocked on review");
+    expect(frame).toContain("+44 more");
+    rowsWithin(frame, 100);
+    view.client.close();
+  });
+
+  test("persian and emoji task text render as written", async () => {
+    const view = await screen();
+    await emitRun(view, "tasks.updated", { session_id: "s1", tasks: [
+      { text: "بازبینی کد 🎉", state: "active" },
+      { text: "مسیر path", state: "pending" },
+    ] });
+
+    const frame = view.frame();
+    expect(frame).toContain("بازبینی");
+    expect(frame).toContain("🎉");
+    expect(frame).toContain("مسیر");
+    rowsWithin(frame, 100);
+    view.client.close();
+  });
+});
+
+describe("the agents panel", () => {
+  test("every lifecycle state is visible, in words", async () => {
+    const view = await screen();
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1",
+                    delegate: wireAgent("d1", "running",
+                                        { label: "survey retries" }) });
+
+    let frame = view.frame();
+    expect(frame).toContain("Agents");
+    expect(frame).toContain("survey retries");
+    expect(frame).toContain("d1 running");
+
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "stopping") });
+    expect(view.frame()).toContain("d1 stopping");
+
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1",
+                    delegate: wireAgent("d2", "done",
+                                        { elapsed: 12.4, steps: 3 }) });
+    frame = view.frame();
+    expect(frame).toContain("d2 done");
+    expect(frame).toContain("12.4s");
+    expect(frame).toContain("3 steps");
+
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1",
+                    delegate: wireAgent("d3", "failed",
+                                        { error: "child exploded" }) });
+    frame = view.frame();
+    expect(frame).toContain("d3 failed");
+    expect(frame).toContain("child exploded");
+
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d4", "stopped") });
+    expect(view.frame()).toContain("d4 stopped");
+    view.client.close();
+  });
+
+  test("a delegate lost to a crash stays lost", async () => {
+    // The state that must never be dressed up: work that died with the
+    // process is not work in flight, and a panel that showed it running
+    // would have somebody waiting on an answer that does not exist.
+    const view = await screen();
+    await emitRun(view, "delegate.updated", {
+      session_id: "s1",
+      delegate: wireAgent("d7", "lost", {
+        label: "old survey",
+        error: "the session ended while this was running",
+      }),
+    });
+
+    const frame = view.frame();
+    expect(frame).toContain("d7 lost");
+    expect(frame).toContain("the session ended");
+    expect(frame).not.toContain("d7 running");
+    view.client.close();
+  });
+
+  test("a panel of six delegates stays bounded and counts what is live",
+       async () => {
+    const view = await screen();
+    for (const id of ["d1", "d2", "d3"]) {
+      await emitRun(view, "delegate.updated",
+                    { session_id: "s1", delegate: wireAgent(id, "running") });
+    }
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d4", "done") });
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d5", "failed") });
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d6", "stopped") });
+
+    const frame = view.frame();
+    expect(frame).toContain("3 live");
+    expect(frame).toContain("+2 more");
+    rowsWithin(frame, 100);
+    view.client.close();
+  });
+
+  test("an emoji label survives the panel", async () => {
+    const view = await screen();
+    await emitRun(view, "delegate.updated", {
+      session_id: "s1",
+      delegate: wireAgent("d1", "running", { label: "🔍 survey the retries" }),
+    });
+
+    expect(view.frame()).toContain("🔍");
+    view.client.close();
+  });
+
+  test("a running delegate is never hidden behind settled rows", async () => {
+    // Terminal records stay in the list for the whole session, so a fixed
+    // head slice would show the oldest four for ever — and every delegate
+    // launched after them would exist only as a count. The window must give
+    // the live rows the space first: work happening now is what the panel is
+    // for.
+    const view = await screen();
+    const settled: Array<[string, string]> = [
+      ["d1", "done"], ["d2", "failed"], ["d3", "stopped"], ["d4", "done"],
+    ];
+    for (const [id, state] of settled) {
+      await emitRun(view, "delegate.updated",
+                    { session_id: "s1", delegate: wireAgent(id, state) });
+    }
+
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d5", "running") });
+
+    const frame = view.frame();
+    expect(frame).toContain("d5 running");
+    expect(frame).toContain("1 live");
+    // Five rows, four drawn: the oldest settled record is the one counted.
+    expect(frame).toContain("+1 more");
+    expect(frame).not.toContain("d1 done");
+    view.client.close();
+  });
+
+  test("the row under the cursor is always drawn", async () => {
+    // The keyboard cursor ranges over every delegate, not only the visible
+    // window — so the window must follow it. A cursor that could move onto an
+    // invisible row would let Enter stop work whose label and state nobody
+    // can see.
+    const view = await screen();
+    for (const id of ["d1", "d2", "d3", "d4", "d5"]) {
+      await emitRun(view, "delegate.updated",
+                    { session_id: "s1", delegate: wireAgent(id, "done") });
+    }
+    // Five settled rows, four drawn: unfocused, the newest are shown and the
+    // oldest one is not.
+    expect(view.frame()).toContain("d5 done");
+    expect(view.frame()).not.toContain("d1 done");
+
+    view.mockInput.pressKey("b", { ctrl: true });
+    await letReactRun(view);
+    // The cursor opened on the first row, which the window now draws.
+    expect(view.frame().split("\n").find((row) => row.includes("›")))
+      .toContain("d1 done");
+
+    for (let at = 0; at < 4; at++) {
+      view.mockInput.pressArrow("down");
+      await letReactRun(view);
+    }
+    // The cursor reached d5, and the window moved with it.
+    const cursor = view.frame().split("\n").find((row) => row.includes("›"));
+    expect(cursor).toContain("d5 done");
+    view.client.close();
+  });
+});
+
+describe("stopping a background agent", () => {
+  test("the keyboard path asks the core, and only the core moves the row",
+       async () => {
+    const view = await screen();
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "running") });
+
+    view.mockInput.pressKey("b", { ctrl: true });
+    await letReactRun(view);
+    let frame = view.frame();
+    expect(frame).toContain("› ● d1 running");
+    expect(frame).toContain("enter Stop d1");
+
+    // Two presses inside one tick are one request: the latch refuses the
+    // second before the projection has re-rendered anything.
+    view.mockInput.pressEnter();
+    view.mockInput.pressEnter();
+    await view.waitForFrame(() => view.sentStops().length >= 1, MODE_PASSES);
+    await letReactRun(view);
+    expect(view.sentStops()).toEqual(["d1"]);
+
+    // The row still says running: the client paints nothing the core has not
+    // announced. A panel showing `stopped` here would be a lie with a key
+    // press's worth of authority behind it.
+    expect(view.frame()).toContain("d1 running");
+    expect(view.frame()).not.toContain("d1 stopped");
+
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "stopping") });
+    expect(view.frame()).toContain("d1 stopping");
+
+    // And once it is stopping, Enter has nothing left to ask for.
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    expect(view.sentStops()).toEqual(["d1"]);
+
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "stopped") });
+    expect(view.frame()).toContain("d1 stopped");
+    view.client.close();
+  });
+
+  test("a stop that found nothing running says so", async () => {
+    const view = await screen();
+    view.core.stopAnswer = false;
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "running") });
+    view.mockInput.pressKey("b", { ctrl: true });
+    await letReactRun(view);
+
+    view.mockInput.pressEnter();
+    // The round trip — request, refusal-of-nothing, the local notice it
+    // produces — needs the event loop turned, which is what letReactRun does;
+    // waitForFrame alone watches frames, and an idle renderer makes none.
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("was not running"),
+                            MODE_PASSES);
+    expect(view.sentStops()).toEqual(["d1"]);
+    view.client.close();
+  });
+
+  test("a click selects a row, and only the stop control stops", async () => {
+    const view = await screen();
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "running") });
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d2", "running") });
+
+    // Selecting is a click on the row. It must not stop anything — one
+    // accidental click on an arbitrary row is not a decision about work.
+    const row = locate(view.frame(), "d2 running");
+    view.mockMouse.click(row.x, row.y);
+    await letReactRun(view);
+    expect(view.sentStops()).toEqual([]);
+    expect(view.frame()).toContain("enter Stop d2");
+
+    // Stopping is a click on the control that says Stop.
+    const control = locate(view.frame(), "enter Stop d2");
+    view.mockMouse.click(control.x, control.y);
+    await view.waitForFrame(() => view.sentStops().length === 1, MODE_PASSES);
+    expect(view.sentStops()).toEqual(["d2"]);
+    view.client.close();
+  });
+
+  test("the palette offers the stop only where a row can be stopped",
+       async () => {
+    const view = await screen();
+
+    view.mockInput.pressKey("k", { ctrl: true });
+    await letReactRun(view);
+    await view.mockInput.typeText("stop");
+    await letReactRun(view);
+    expect(view.frame()).not.toContain("Stop the selected background agent");
+    await pressEscape(view);
+
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "running") });
+    view.mockInput.pressKey("b", { ctrl: true });
+    await letReactRun(view);
+    view.mockInput.pressKey("k", { ctrl: true });
+    await letReactRun(view);
+    await view.mockInput.typeText("stop");
+    await letReactRun(view);
+    expect(view.frame()).toContain("Stop the selected background agent");
+    view.client.close();
+  });
+
+  test("escape leaves the workbench, and never stops anything", async () => {
+    const view = await screen();
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "running") });
+    view.mockInput.pressKey("b", { ctrl: true });
+    await letReactRun(view);
+    expect(view.frame()).toContain("enter Stop d1");
+
+    await pressEscape(view);
+    expect(view.sentStops()).toEqual([]);
+    expect(view.frame()).not.toContain("enter Stop d1");
+    // The panel is still drawn at this width — the work exists — it just no
+    // longer holds the cursor.
+    expect(view.frame()).toContain("d1 running");
+    view.client.close();
+  });
+});
+
+describe("the workbench and the rest of the screen", () => {
+  test("an empty session draws no panel until one is asked for", async () => {
+    const view = await screen();
+    expect(view.frame()).not.toContain("Agents");
+
+    view.mockInput.pressKey("b", { ctrl: true });
+    await letReactRun(view);
+    expect(view.frame()).toContain("Agents");
+    expect(view.frame()).toContain("No background work.");
+
+    await pressEscape(view);
+    expect(view.frame()).not.toContain("Agents");
+    view.client.close();
+  });
+
+  test("tab still cycles the mode with the workbench focused", async () => {
+    const view = await screen();
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "running") });
+    view.mockInput.pressKey("b", { ctrl: true });
+    await letReactRun(view);
+
+    view.mockInput.pressTab();
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("[PLAN]"), MODE_PASSES);
+    expect(view.sentModes()).toEqual(["plan"]);
+    view.client.close();
+  });
+
+  test("a permission card outranks the workbench", async () => {
+    const view = await screen();
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "running") });
+    view.mockInput.pressKey("b", { ctrl: true });
+    await letReactRun(view);
+
+    await emitRun(view, "permission.requested", { ...PERMISSION });
+    expect(view.frame()).toContain("Permission needed");
+
+    // Enter belongs to the card, not to the delegate under the cursor.
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await view.waitForFrame((frame) => !frame.includes("Permission needed"),
+                            MODE_PASSES);
+    expect(view.sentStops()).toEqual([]);
+    const replies = view.core.sent
+      .filter((message) => message["method"] === "permission.reply");
+    expect(replies.length).toBe(1);
+
+    // And workbench state keeps flowing behind a card without disturbing it.
+    await emitRun(view, "permission.requested", { ...PERMISSION, id: "p2" });
+    await emitRun(view, "tasks.updated", { session_id: "s1", tasks: [
+      { text: "carry on", state: "active" }] });
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "stopping") });
+    const frame = view.frame();
+    expect(frame).toContain("Permission needed");
+    expect(frame).toContain("carry on");
+    expect(frame).toContain("d1 stopping");
+    view.client.close();
+  });
+
+  test("an older core gets the older screen", async () => {
+    const view = await screen(100, 30, undefined, undefined,
+                              ["streaming", "questions", "permissions",
+                               "modes", "tool_events"]);
+    await emitRun(view, "tasks.updated", { session_id: "s1", tasks: [
+      { text: "a task", state: "active" }] });
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "running") });
+
+    expect(view.frame()).not.toContain("Tasks");
+    expect(view.frame()).not.toContain("Agents");
+    view.mockInput.pressKey("b", { ctrl: true });
+    await letReactRun(view);
+    expect(view.frame()).not.toContain("Agents");
+
+    // Everything else still works — chat is not held hostage to a capability.
+    await emitRun(view, "message.started",
+                  { turn_id: "t1", message_id: "m1" });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m1", text: "still chatting" });
+    expect(view.frame()).toContain("still chatting");
+    view.client.close();
+  });
+
+  test("at sixty columns the conversation survives, and the workbench is a key away",
+       async () => {
+    const view = await screen(60, 24);
+    await emitRun(view, "message.started",
+                  { turn_id: "t1", message_id: "m1" });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m1", text: "reading now" });
+    await emitRun(view, "tool.started",
+                  { turn_id: "t1", call_id: "a", name: "read_file",
+                    summary: "read src/app.py" });
+    await emitRun(view, "tasks.updated", { session_id: "s1", tasks: [
+      { text: "the plan", state: "active" }] });
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "running") });
+
+    // No side panel at this width — and the count in the footer says the
+    // agent exists even while its panel does not.
+    let frame = view.frame();
+    expect(frame).not.toContain("Agents");
+    expect(frame).toContain("● 1 agent");
+    expect(frame).toContain("reading now");
+    expect(frame).toContain("ask for anything");
+    rowsWithin(frame, 60);
+
+    view.mockInput.pressKey("b", { ctrl: true });
+    await letReactRun(view);
+    frame = view.frame();
+    expect(frame).toContain("Agents");
+    expect(frame).toContain("Tasks");
+    expect(frame).toContain("the plan");
+    rowsWithin(frame, 60);
+
+    await pressEscape(view);
+    frame = view.frame();
+    expect(frame).not.toContain("Agents");
+    expect(frame).toContain("reading now");
+    rowsWithin(frame, 60);
+    view.client.close();
+  });
+
+  test("the side panel holds at every wide width", async () => {
+    for (const width of [160, 120, 100]) {
+      const view = await screen(width, 30);
+      await emitRun(view, "tasks.updated", { session_id: "s1", tasks: [
+        { text: "the plan", state: "active" }] });
+      await emitRun(view, "delegate.updated",
+                    { session_id: "s1", delegate: wireAgent("d1", "running") });
+
+      const frame = view.frame();
+      expect(frame).toContain("Agents");
+      expect(frame).toMatch(/Tasks\s+0\/1/);
+      expect(frame).toContain("ask for anything");
+      rowsWithin(frame, width);
+      view.client.close();
+    }
+  });
+
+  test("tasks, agents, tools and a message coexist in one stream",
+       async () => {
+    const view = await screen();
+    await emitRun(view, "message.started",
+                  { turn_id: "t1", message_id: "m1" });
+    await emitRun(view, "tool.started",
+                  { turn_id: "t1", call_id: "a", name: "run_shell",
+                    summary: "run: pytest" });
+    await emitRun(view, "tasks.updated", { session_id: "s1", tasks: [
+      { text: "run the suite", state: "active" }] });
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1",
+                    delegate: wireAgent("d1", "running",
+                                        { label: "survey retries" }) });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m1", text: "on it" });
+    await emitRun(view, "tool.output",
+                  { turn_id: "t1", call_id: "a", text: "collected 12\n" });
+
+    const frame = view.frame();
+    expect(frame).toContain("on it");
+    expect(frame).toContain("run: pytest");
+    expect(frame).toContain("collected 12");
+    expect(frame).toContain("run the suite");
+    expect(frame).toContain("survey retries");
+    rowsWithin(frame, 100);
+    view.client.close();
+  });
+});
+
+describe("the workbench after a reconnect", () => {
+  test("a client rebuilt from the snapshot sees the same work", async () => {
+    const snapshot = {
+      session: { id: "s1", mode: "act", workspace: "/work/project",
+                 busy: true },
+      revision: 9,
+      messages: [
+        { message_id: "user-t1", turn_id: "t1", role: "user",
+          text: "do the thing", status: "completed", started_seq: 1 },
+        { message_id: "m1", turn_id: "t1", role: "assistant",
+          text: "on it", status: "completed", started_seq: 6 },
+      ],
+      tools: [
+        { call_id: "a", turn_id: "t1", name: "read_file",
+          summary: "read src/app.py", state: "completed", started_seq: 2,
+          elapsed_ms: 340 },
+        { call_id: "b", turn_id: "t1", name: "run_shell",
+          summary: "run: pytest", state: "running", started_seq: 4,
+          output: "collecting tests\n", output_truncated: true },
+      ],
+      tasks: [
+        { text: "write the tests", state: "active" },
+        { text: "read the code", state: "done" },
+      ],
+      delegates: [
+        { id: "d1", label: "survey retries", state: "running", steps: 0,
+          tool_calls: 0, tokens: 0, elapsed: 0.2,
+          started_at: Math.floor(Date.now() / 1000) },
+        { id: "d7", label: "old survey", state: "lost", steps: 3,
+          tool_calls: 2, tokens: 50, elapsed: 40, started_at: 1,
+          error: "the session ended while this was running" },
+      ],
+    };
+    const view = await screen(100, 30, "s1", snapshot);
+
+    expect(view.core.methods()).toContain("session.snapshot");
+    expect(view.core.methods()).not.toContain("session.create");
+
+    const frame = view.frame();
+    expect(frame).toContain("read src/app.py");
+    expect(frame).toContain("0.3s");
+    expect(frame).toContain("run: pytest");
+    expect(frame).toContain("collecting tests");
+    expect(frame).toContain("earlier output is not kept");
+    expect(frame).toMatch(/Tasks\s+1\/2/);
+    expect(frame).toContain("write the tests");
+    expect(frame).toContain("survey retries");
+    expect(frame).toContain("d7 lost");
+    expect(frame).toContain("the session ended");
+
+    // And live events keep landing on the rebuilt state.
+    await emitRun(view, "delegate.updated",
+                  { session_id: "s1", delegate: wireAgent("d1", "stopping") });
+    expect(view.frame()).toContain("d1 stopping");
+    view.client.close();
+  });
+
+  test("a hole in the stream repairs the workbench too", async () => {
+    const view = await screen();
+    await emitRun(view, "tasks.updated", { session_id: "s1", tasks: [
+      { text: "first plan", state: "active" }] });
+    expect(view.frame()).toContain("first plan");
+
+    view.core.snapshot = {
+      session: { id: "s1", mode: "act", workspace: "/work/project",
+                 busy: false },
+      revision: 50, messages: [], tools: [],
+      tasks: [{ text: "the true plan", state: "done" }],
+      delegates: [{ id: "d9", label: "crashed work", state: "lost",
+                    steps: 0, tool_calls: 0, tokens: 0, elapsed: 9,
+                    started_at: 1,
+                    error: "the session ended while this was running" }],
+    };
+    // An event numbered far above the last one applied: the projection
+    // cannot know what it missed, so it says so and asks.
+    view.core.push(event("tasks.updated",
+                         { session_id: "s1",
+                           tasks: [{ text: "stale hole",
+                                     state: "pending" }] }, 50));
+    await letReactRun(view);
+
+    await view.waitForFrame((frame) => frame.includes("the true plan"),
+                            MODE_PASSES);
+    const frame = view.frame();
+    expect(view.core.methods()).toContain("session.snapshot");
+    expect(frame).toMatch(/Tasks\s+1\/1/);
+    expect(frame).not.toContain("stale hole");
+    expect(frame).not.toContain("first plan");
+    expect(frame).toContain("d9 lost");
+    view.client.close();
+  });
+});

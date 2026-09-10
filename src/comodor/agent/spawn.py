@@ -26,10 +26,17 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from ..events import Cancellation, EventBus
+from ..events import Cancellation, EventBus, ScopedBus
 from ..paths import Paths
 from ..safety import PermissionEngine, make_assessor
 from ..tools import ToolRegistry
+
+#: The origin stamped on everything a delegate's own loop emits. Subscribers
+#: that project a session's turn — the protocol relay — drop events carrying
+#: an origin, because the child's answer belongs to its own record, not to
+#: the parent's transcript. Subscribers that render raw activity — the
+#: terminal — read the tag or ignore it, as they always have.
+DELEGATE_ORIGIN = "delegate"
 
 
 def spawner(config: Any, gateway: Any, bus: EventBus, skills: Any = None,
@@ -43,8 +50,10 @@ def spawner(config: Any, gateway: Any, bus: EventBus, skills: Any = None,
         from .loop import AgentLoop
 
         settings = copy.deepcopy(config)
-        settings.paths = replace(settings.paths, project=Path(cwd)) \
-            if isinstance(settings.paths, Paths) else settings.paths
+        # A background launch carries no cwd of its own: the child inherits
+        # the session's project, which is what the deepcopy already holds.
+        if cwd is not None and isinstance(settings.paths, Paths):
+            settings.paths = replace(settings.paths, project=Path(cwd))
         settings.agent.mode = mode
         settings.agent.max_steps = max_steps
         settings.agent.max_seconds = max_seconds
@@ -54,9 +63,15 @@ def spawner(config: Any, gateway: Any, bus: EventBus, skills: Any = None,
         settings.agent.max_output_tokens = min(settings.agent.max_output_tokens, 4096)
 
         tools = ToolRegistry(skills=skills, mcp=mcp)
-        permissions = PermissionEngine(settings, bus)
+        # Not the parent's bus directly: everything the child says is tagged
+        # with where it came from, so a subscriber projecting the parent's
+        # turn never mistakes the child's answer, tools or plan for it. What
+        # still rides through is a request — a permission the child needs is
+        # the person's to answer, and the reply travels on the Request itself.
+        child_bus = ScopedBus(bus, origin=DELEGATE_ORIGIN)
+        permissions = PermissionEngine(settings, child_bus)
         permissions.assess = make_assessor(settings, gateway)
-        loop = AgentLoop(settings, gateway, tools, bus,
+        loop = AgentLoop(settings, gateway, tools, child_bus,
                          permissions, Conversation(),
                          memory=None, skills=skills)
         if cancel is not None:

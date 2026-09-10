@@ -65,28 +65,98 @@ bun apps/tui/test/bun/measure.tsx              # what it costs
 Enough to prove the architecture, and no more.
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ Comodor   ~/work/my-project                              │
-│                                                          │
-│  You                                                     │
-│  fix the failing parser test                             │
-│                                                          │
-│  Comodor                                                 │
-│  The test expects parse("") to raise, but…               │
-│  ✓ read_file  tests/test_parser.py                       │
-│  ● run_shell  pytest tests/test_parser.py                │
-│                                                          │
-├──────────────────────────────────────────────────────────┤
-│ ▌ask for anything                                        │
-├──────────────────────────────────────────────────────────┤
-│  [ACT]   PLAN    ASK    Reads, writes and runs commands… │
-│ tab Mode   ctrl+k Commands   ctrl+d Quit                 │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────┬───────────────────────┐
+│ Comodor   ~/work/my-project              │ Agents         1 live │
+│                                          │  ● d1 running    12.3s│
+│  You                                     │    survey the retries │
+│  fix the failing parser test             │ Tasks            2/5  │
+│                                          │  ◐ write the tests    │
+│  Comodor                                 │  ● read the code      │
+│  The test expects parse("") to raise, …  │  ○ run the suite      │
+│  ✓ read_file  tests/test_parser.py  0.2s │                       │
+│  ● run_shell  pytest tests/…     running…│                       │
+│      collected 12 items                  │                       │
+│                                          │                       │
+├──────────────────────────────────────────┴───────────────────────┤
+│ ▌ask for anything                                                │
+├──────────────────────────────────────────────────────────────────┤
+│  [ACT]   PLAN    ASK    Reads, writes and runs commands…         │
+│  ● 1 agent   tab Mode   ctrl+b Work   ctrl+k Commands            │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-A header, the conversation, a composer, the mode switcher, a footer, a command
-palette and a question card. Not an IDE in a terminal — that is later phases,
-and building it now would mean building it against a protocol nobody had used.
+A header, the conversation with its tool timeline, the workbench panel, a
+composer, the mode switcher, a footer, a command palette and a question card.
+Not an IDE in a terminal — that is later phases, and building it now would
+mean building it against a protocol nobody had used.
+
+---
+
+## The workbench
+
+The conversation says what Comodor is *saying*; the workbench says what it is
+*doing*. Three kinds of work, three treatments, and none of them invented by
+the interface — every fact on screen arrived as a protocol event or a
+snapshot field the core owns.
+
+**Tools live in the timeline**, interleaved with the messages exactly where
+they ran, because a tool call belongs to the sentence that caused it. Each
+card is one row: a mark (`●` running, `✓` done, `×` failed), the name, the
+core's own one-line summary, and on the right either `running…` or what it
+cost in time. A running tool shows the last few lines of its streamed output;
+a finished one collapses to its row — a long autonomous run leaves dozens of
+calls behind, and a wall of kept output is a transcript nobody can scan.
+Clicking a finished tool opens a deeper tail of what the core still holds
+(the same bounded copy a remount would restore), and clicking again closes
+it. A failure always shows the head of its error, collapsed or not: a
+failure you have to open to find is a failure half-hidden. Output that the
+core shortened says so — `… earlier output is not kept` — rather than
+presenting the tail as the whole.
+
+**Agents and Tasks live in the panel.** It is drawn beside the conversation
+from 100 columns up, and only when there is something in it or it was asked
+for — a chat that never delegates keeps every column of its transcript. Below
+100, `ctrl+b` opens it as an overlay and `Esc` closes it; the footer's
+`● N agents` count says when background work exists while the panel does not.
+The palette (`ctrl+k`) reaches both commands too, so nothing here is
+mouse-only or key-only.
+
+The **Tasks** section is the model's own plan as `todo_write` last wrote it:
+`○` pending, `◐` active, `●` done, `✗` blocked, a `done/total` count, the
+active item first, and a `+N more` when the list is longer than the panel.
+It is a reader, not a task manager — the list belongs to the model, updates
+replace it whole, and the panel has no way to edit it.
+
+The **Agents** section is the background delegates: two rows each, the state
+spelled in words (`running`, `stopping`, `done`, `failed`, `stopped`,
+`lost`) next to its mark, a live clock while one runs, the final count when
+it settles, the label — or the reason, when it failed or was lost. A
+delegate that was running when the core's process died comes back as `lost`
+from the first snapshot; nothing here can dress it as work in flight.
+
+**Stopping one is deliberate, and the core's.** `ctrl+b` gives the panel the
+cursor (the composer blurs and says so with its border), `↑↓` select a row,
+and `Enter` asks the core to stop it — but only a row the lifecycle says can
+be stopped, and the panel never paints the outcome itself. The request goes
+out as `delegate.stop`; the row moves to `stopping` when the core announces
+it and to its terminal state when the worker settles. A stop that races a
+completion shows whatever the core reports, and a press on a row that
+already settled produces at most an honest "was not running" — never a
+second stop, and never a state the client decided. Clicking a row only
+selects it; the stop is a named control (`enter Stop d1`), clickable in its
+own right. `Esc` leaves the panel and cannot stop anything.
+
+The panel takes four keys while focused — `↑ ↓ enter esc` — and nothing
+else. `Tab` still cycles the mode, `ctrl+c` still stops the turn, and a
+permission or question card still owns the whole keyboard while it is up:
+the workbench is below the blocking interactions in precedence, and
+delegate events arriving behind a card update the panel without touching
+the card.
+
+All of it is gated on the handshake: a core that does not advertise `tasks`
+or `delegates` gets the screen this client drew before them — no empty
+panel, no dead command — and chat, streaming, modes, questions and
+permissions are untouched either way.
 
 ---
 
@@ -386,7 +456,17 @@ it already ran would run twice.
   `permissions` capability this client announces is now one it can honour.
 - Sessions are resumed when the client starts with a session id; automatic
   reconnection after a lost core is not built yet.
-- No sidebar, no scroll-back search, no file attachment, no slash commands.
+- **The workbench is in.** Tools draw as bounded cards in the timeline with
+  elapsed time and click-to-expand output; the tasks list and the background
+  delegates draw in a panel that is beside the conversation when there is
+  room and an overlay when there is not; a running delegate can be stopped
+  through the core, and only through the core. A remount restores all of it
+  from the snapshot, `lost` delegates included. What is *not* here: editing
+  the task list (it belongs to the model), pausing or restarting a delegate
+  (the core has no such operation), stopping every delegate at once (one
+  deliberate stop is the surface this client promises), and any history of
+  resolved prompts.
+- No scroll-back search, no file attachment, no slash commands.
 - A resolved permission leaves no trace. The turn carries on and the tool's
   outcome is in the transcript, but there is no history of who allowed what:
   the core does not retain resolved prompts in a snapshot, and inventing a
@@ -400,8 +480,11 @@ it already ran would run twice.
   | Permission choices | clickable, and **verified in the renderer** — a click decides, and cannot decide twice |
   | Question option rows | clickable, and **verified in the renderer** — single and multiple choice |
   | Palette rows | clickable, and **verified in the renderer** — a click runs the row it landed on |
+  | A finished tool's heading | clickable, and **verified in the renderer** — opens the output the core still holds, closes it again |
+  | A delegate row | clickable, and **verified in the renderer** — selects, and *only* selects: the stop is its own control, verified separately |
+  | The workbench's stop control | clickable, and **verified in the renderer** — one click, one `delegate.stop`, and the row still waits for the core's word |
   | The new-output marker | clickable, **not renderer-verified** |
-  | Everything else | no mouse behaviour at all — a message, a tool row, the composer and the custom-answer field ignore a click |
+  | Everything else | no mouse behaviour at all — a message, the composer and the custom-answer field ignore a click |
 
   "Wired" and "proven" are not the same claim, and neither is "proven in the
   renderer" and "proven in a terminal": these run OpenTUI's real renderer

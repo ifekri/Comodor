@@ -10,11 +10,15 @@ import { test } from "node:test";
 import {
   canSubmit,
   initial,
+  OUTPUT_CAP,
   presented,
   presentedPermission,
   presentedQuestion,
   reduce,
+  runningDelegates,
+  stoppable,
   streaming,
+  tasksDone,
   timeline,
   toolsOfTurn,
   unsent,
@@ -845,4 +849,250 @@ test("unrelated events leave a waiting request alone", () => {
 
   is(presented(after), before, "the same object, so a draft keyed on it survives");
   is(after.interactions.length, 2);
+});
+
+// --------------------------------------------------------------------------- //
+// the workbench: tasks and delegates
+// --------------------------------------------------------------------------- //
+
+function wireDelegate(id: string, state: string,
+                      extra: Record<string, unknown> = {}) {
+  return { id, label: `work ${id}`, state, steps: 0, tool_calls: 0,
+           tokens: 0, elapsed: 0, started_at: 100, ...extra };
+}
+
+test("a task list is replaced whole, never merged", () => {
+  const state = run([
+    ev("tasks.updated", { session_id: "s1", tasks: [
+      { text: "read the code", state: "done" },
+      { text: "write the tests", state: "active" },
+      { text: "a task that will be dropped", state: "pending" },
+    ] }),
+    ev("tasks.updated", { session_id: "s1", tasks: [
+      { text: "write the tests", state: "active" },
+      { text: "read the code", state: "done" },
+    ] }),
+  ], fresh());
+
+  same(state.tasks.map((task) => [task.text, task.state]),
+       [["write the tests", "active"], ["read the code", "done"]],
+  );
+  is(tasksDone(state.tasks), 1);
+});
+
+test("an unknown task state is held as pending, not passed through", () => {
+  const state = run([
+    ev("tasks.updated", { session_id: "s1", tasks: [
+      { text: "kept", state: "blocked" },
+      { text: "coerced", state: "exploded" },
+      { text: "", state: "pending" },
+      "junk",
+    ] }),
+  ], fresh());
+
+  same(state.tasks.map((task) => [task.text, task.state]),
+       [["kept", "blocked"], ["coerced", "pending"]]);
+});
+
+test("two active tasks are shown as two active tasks", () => {
+  // The tool recommends one active item and tolerates more. The projection
+  // reports what the core said; "fixing" it here would be the client
+  // disagreeing with the only authority either of them has.
+  const state = run([
+    ev("tasks.updated", { session_id: "s1", tasks: [
+      { text: "one", state: "active" },
+      { text: "two", state: "active" },
+    ] }),
+  ], fresh());
+
+  is(state.tasks.filter((task) => task.state === "active").length, 2);
+});
+
+test("a delegate record is replaced whole, by id", () => {
+  const state = run([
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d1", "running",
+                                                    { error: "stale" }) }),
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d1", "done",
+                                                    { steps: 4, tokens: 99 }) }),
+  ], fresh());
+
+  is(state.delegates.length, 1);
+  is(state.delegates[0]?.state, "done");
+  is(state.delegates[0]?.steps, 4);
+  is(state.delegates[0]?.tokens, 99);
+  is(state.delegates[0]?.error, undefined,
+     "a half-merge would keep the old error beside the new state");
+});
+
+test("a late announcement cannot move a delegate backwards", () => {
+  const state = run([
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d1", "running") }),
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d1", "stopping") }),
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d1", "running") }),
+  ], fresh());
+
+  is(state.delegates[0]?.state, "stopping");
+});
+
+test("a terminal delegate state is final", () => {
+  const from = run([
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d1", "stopped") }),
+  ], fresh());
+
+  for (const late of ["running", "stopping", "done", "lost"]) {
+    const after = run([
+      ev("delegate.updated", { session_id: "s1",
+                               delegate: wireDelegate("d1", late) }),
+    ], from);
+    is(after.delegates[0]?.state, "stopped", `${late} displaced a terminal`);
+  }
+});
+
+test("a lost delegate stays lost", () => {
+  // The state that matters most after a crash: work that died with the
+  // process must never be redrawn as work in flight.
+  const state = run([
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d7", "lost", {
+                               error: "the session ended while this was running",
+                             }) }),
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d7", "running") }),
+  ], fresh());
+
+  is(state.delegates[0]?.state, "lost");
+  is(state.delegates[0]?.error, "the session ended while this was running");
+  is(stoppable(state.delegates[0]!), false);
+});
+
+test("stoppable is the lifecycle's answer, not the renderer's", () => {
+  const running = run([ev("delegate.updated", { session_id: "s1",
+    delegate: wireDelegate("d1", "running") })], fresh());
+  is(stoppable(running.delegates[0]!), true);
+  is(runningDelegates(running).length, 1);
+
+  const stopping = run([ev("delegate.updated", { session_id: "s1",
+    delegate: wireDelegate("d1", "stopping") })], running);
+  is(stoppable(stopping.delegates[0]!), false,
+     "the stop is already asked for");
+  is(runningDelegates(stopping).length, 1, "still in flight until it settles");
+
+  const done = run([ev("delegate.updated", { session_id: "s1",
+    delegate: wireDelegate("d1", "done") })], stopping);
+  is(runningDelegates(done).length, 0);
+});
+
+test("workbench events join the one sequence domain", () => {
+  // A tasks update between two message deltas is not a gap, and a jump over
+  // one is: the workbench states ride the session's counter like everything
+  // else, so one revision repairs all of them.
+  const continuous = run([
+    ev("message.started", { turn_id: "t1", message_id: "m1" }, 10),
+    ev("tasks.updated", { session_id: "s1", tasks: [] }, 11),
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d1", "running") }, 12),
+    ev("message.delta", { turn_id: "t1", message_id: "m1", text: "x" }, 13),
+  ], fresh());
+  is(continuous.gap, false);
+  is(continuous.revision, 13);
+
+  const holed = run([
+    ev("message.delta", { turn_id: "t1", message_id: "m1", text: "y" }, 20),
+  ], continuous);
+  is(holed.gap, true, "a hole around a workbench event must be detected");
+});
+
+test("a snapshot restores the tasks and the delegates", () => {
+  const snapshot: Snapshot = {
+    session: SESSION,
+    revision: 40,
+    messages: [],
+    tools: [],
+    tasks: [
+      { text: "read the code", state: "done" },
+      { text: "write the tests", state: "active" },
+    ],
+    delegates: [
+      wireDelegate("d1", "done", { steps: 3, tokens: 40, elapsed: 12.4,
+                                   started_at: 900 }) as never,
+      wireDelegate("d7", "lost") as never,
+    ],
+  };
+
+  const state = reduce(fresh(), { type: "snapshot", snapshot });
+
+  same(state.tasks.map((task) => [task.text, task.state]),
+       [["read the code", "done"], ["write the tests", "active"]]);
+  same(state.delegates.map((each) => [each.id, each.state]),
+       [["d1", "done"], ["d7", "lost"]]);
+  is(state.delegates[0]?.steps, 3);
+  is(state.delegates[0]?.startedAt, 900);
+  is(state.revision, 40);
+});
+
+test("a rebuilt projection equals one that watched the work happen", () => {
+  const watched = run([
+    ev("tasks.updated", { session_id: "s1", tasks: [
+      { text: "one", state: "active" }, { text: "two", state: "pending" }] }),
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d1", "running") }),
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d1", "stopping") }),
+  ], fresh());
+
+  const rebuilt = reduce(fresh(), { type: "snapshot", snapshot: {
+    session: SESSION,
+    revision: watched.revision,
+    messages: [],
+    tools: [],
+    tasks: [{ text: "one", state: "active" }, { text: "two", state: "pending" }],
+    delegates: [wireDelegate("d1", "stopping") as never],
+  } });
+
+  same(rebuilt.tasks, watched.tasks);
+  same(rebuilt.delegates, watched.delegates);
+});
+
+test("a stale snapshot cannot undo a newer workbench state", () => {
+  const watched = run([
+    ev("tasks.updated", { session_id: "s1", tasks: [
+      { text: "newest", state: "done" }] }),
+    ev("delegate.updated", { session_id: "s1",
+                             delegate: wireDelegate("d1", "done") }),
+  ], fresh());
+
+  const after = reduce(watched, { type: "snapshot", snapshot: {
+    session: SESSION,
+    revision: watched.revision - 1,
+    messages: [],
+    tools: [],
+    tasks: [{ text: "older", state: "pending" }],
+    delegates: [wireDelegate("d1", "running") as never],
+  } });
+
+  is(after, watched, "the whole snapshot is dropped below the revision");
+});
+
+test("tool output is bounded to the tail the core would also keep", () => {
+  let state = run([
+    ev("tool.started", { turn_id: "t1", call_id: "c1", name: "run_shell" }),
+  ], fresh());
+
+  const chunk = "x".repeat(10_000) + "\n";
+  for (let index = 0; index < 10; index += 1) {
+    state = run([ev("tool.output", { turn_id: "t1", call_id: "c1",
+                                     text: chunk })], state);
+  }
+
+  const tool = state.tools[0]!;
+  ok(tool.output.length <= OUTPUT_CAP,
+     `held ${tool.output.length} characters, cap is ${OUTPUT_CAP}`);
+  is(tool.outputTruncated, true, "the shortening is said, not silent");
+  ok(tool.output.endsWith("x\n"));
 });

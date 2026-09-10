@@ -238,6 +238,65 @@ class EventBus:
             self._subscribers.clear()
 
 
+class ScopedBus:
+    """A view of an EventBus that stamps an origin on everything it publishes.
+
+    A delegate's loop emits the same kinds the parent's does — assistant
+    messages, tool calls, a task list — and on the shared bus those are
+    indistinguishable from the parent's own turn: a session relay would stream
+    the child's raw answer as the parent's message, and the child's plan would
+    replace the parent's. Stamping an origin is what lets a subscriber tell
+    "said by this session's turn" from "said by work that turn launched"
+    without the child knowing who is listening.
+
+    Only publishing is scoped. `subscribe` is not offered: somebody who wants
+    the child's events subscribes to the parent and reads the origin, which is
+    what it is for. Requests ride to the parent unchanged apart from the tag —
+    a permission the child needs answered is still a question for the person,
+    and the reply travels on the `Request` object itself, not on the bus.
+    """
+
+    def __init__(self, parent: EventBus, origin: str) -> None:
+        self._parent = parent
+        self._origin = origin
+
+    @property
+    def origin(self) -> str:
+        return self._origin
+
+    @property
+    def listening(self) -> bool:
+        return self._parent.listening
+
+    def emit(self, kind: Kind, **payload: Any) -> Event:
+        payload.setdefault("origin", self._origin)
+        return self._parent.emit(kind, **payload)
+
+    def publish(self, event: Event) -> None:
+        event.payload.setdefault("origin", self._origin)
+        self._parent.publish(event)
+
+    def ask(self, request: Request) -> Request:
+        self.publish(Event(kind=Kind.REQUEST, payload={"request": request}))
+        return request
+
+    def resolve(self, request: Request,
+                timeout: float | None = None) -> tuple[str, bool]:
+        """The same claim-and-publish-expiry dance as the parent's `resolve`.
+
+        Mirrored rather than delegated because the events must leave through
+        *this* bus to carry the origin; the reasoning is EventBus.resolve's.
+        """
+        self.ask(request)
+        request.wait(timeout)
+        if request.expire():
+            self.publish(Event(kind=Kind.REQUEST_EXPIRED,
+                               payload={"request": request,
+                                        "choice": request.choice}))
+            return request.choice, True
+        return request.choice, False
+
+
 class EventQueue:
     """A subscriber that buffers events for a consumer to drain at its own pace.
 

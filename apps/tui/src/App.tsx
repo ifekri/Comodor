@@ -35,7 +35,9 @@ import {
   presented,
   reduce,
   refuseIntent,
+  runningDelegates,
   stepIntent,
+  stoppable,
   timeline,
   unsent,
   waitingCount,
@@ -76,6 +78,7 @@ import {
   window as paletteWindow,
   type PaletteState,
 } from "./palette.ts";
+import { panelWidth, WIDE, WorkbenchPanel } from "./workbench.tsx";
 
 export interface AppProps {
   readonly client: CoreClient;
@@ -96,6 +99,20 @@ const NARROW = 80;
 
 /** How many rows a page key moves. Less than a screen, so context carries over. */
 const PAGE = 8;
+
+/**
+ * How much of a tool's output the timeline shows, by state.
+ *
+ * A running tool's last few lines are the point of streaming output at all —
+ * what is it doing *right now*. A finished one collapses to its heading: a
+ * long autonomous run leaves dozens of calls behind, and a transcript where
+ * every one of them kept its output is a wall nobody can scan. Clicking one
+ * opens a deeper tail; the core's own capped copy is what both draw from, so
+ * the timeline never holds more than the projection already bounded.
+ */
+const RUNNING_OUTPUT_LINES = 3;
+const EXPANDED_OUTPUT_LINES = 20;
+const ERROR_LINES = 3;
 
 /**
  * Which choice a permission card has highlighted, and for which request.
@@ -143,12 +160,34 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   const [permit, setPermit] = useState<PermissionDraft | undefined>();
   const [intent, setIntent] = useState<ModeIntent>(() => beginIntent("act"));
   const [follow, setFollow] = useState<Follow>(followStart);
+  /**
+   * The workbench's own presentation state: whether it holds the cursor keys,
+   * and which delegate row the cursor is on.
+   *
+   * Deliberately here and not in the projection — which row a cursor sits on
+   * is a fact about this screen, not about the session, and a second client
+   * attached to the same core has its own. What the rows *say* is entirely
+   * the projection's.
+   */
+  const [workbench, setWorkbench] = useState({ open: false, at: 0 });
+  /** Which finished tools are clicked open. Presentation, for the same reason. */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () => new Set());
   const { width } = useTerminalDimensions();
 
   const registry = useMemo(() => build(), []);
   const latest = useRef(state);
   latest.current = state;
   const scroller = useRef<ScrollBoxRenderable | null>(null);
+
+  // What the core advertised at the handshake. The workbench surfaces exist
+  // only where the core said it would send their state: pointed at an older
+  // core, this client draws exactly the screen it drew before them, rather
+  // than panels that would sit empty forever.
+  const advertised = client.handshake?.capabilities ?? [];
+  const hasTasks = advertised.includes("tasks");
+  const hasDelegates = advertised.includes("delegates");
+  const canWorkbench = hasTasks || hasDelegates;
 
   // Keys can arrive faster than React re-renders — a key repeat, a paste, or
   // simply two presses in one tick — and a handler that closed over a draft
@@ -161,6 +200,8 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   permitRef.current = permit;
   const paletteRef = useRef(palette);
   paletteRef.current = palette;
+  const workbenchRef = useRef(workbench);
+  workbenchRef.current = workbench;
   const blockedRef = useRef<Interaction | undefined>(undefined);
   blockedRef.current = presented(state);
   /**
@@ -420,6 +461,76 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     await deliver(line.id, line.text);
   }, [deliver]);
 
+  // -- the workbench -------------------------------------------------------- //
+
+  /**
+   * Ask the core to stop one background delegate, at most once per press.
+   *
+   * Nothing here paints the outcome. The request goes out; what the delegate
+   * becomes is whatever the core's own `delegate.updated` announcements say —
+   * `stopping` first, then the terminal state the worker settles on. A panel
+   * that showed `stopped` the moment the key went down would be claiming a
+   * result the core has not reported, which is the exact lie the lifecycle's
+   * forward-only rule exists to prevent. The latch is the same shape as the
+   * interaction one: two presses inside one tick both read the state from
+   * before the first, so the second is refused here rather than sent twice.
+   */
+  const stopLatch = useRef<string | undefined>(undefined);
+  const stopDelegate = useCallback((id: string) => {
+    const session = latest.current.session?.id;
+    if (!id || !session || stopLatch.current === id) return;
+    stopLatch.current = id;
+    void client.call("delegate.stop", { session_id: session, delegate_id: id })
+      .then((answer) => {
+        if (!answer["stopped"]) {
+          // Honest feedback for a stale cursor: it settled between the panel
+          // drawing it and the key arriving. Seq 0 — raised here, so outside
+          // the core's sequence, exactly like every other local notice.
+          dispatch({ type: "event", name: "notification.created", seq: 0,
+                     params: { level: "info",
+                               text: `${id} was not running; nothing to stop` } });
+        }
+      })
+      .catch((problem: unknown) => {
+        dispatch({ type: "event", name: "notification.created", seq: 0,
+                   params: { level: "warning",
+                             text: (problem as Error).message } });
+      })
+      .finally(() => { stopLatch.current = undefined; });
+  }, [client]);
+
+  const moveWorkbench = useCallback((by: number) => {
+    const count = latest.current.delegates.length;
+    if (count === 0) return;
+    setWorkbench((was) => ({ ...was, at: (was.at + by + count) % count }));
+  }, []);
+
+  const openWorkbench = useCallback(() => {
+    setWorkbench((was) => ({
+      open: true,
+      at: Math.min(was.at,
+                   Math.max(0, latest.current.delegates.length - 1)),
+    }));
+  }, []);
+
+  const closeWorkbench = useCallback(() => {
+    setWorkbench((was) => (was.open ? { ...was, open: false } : was));
+  }, []);
+
+  /** Selecting a row also takes the cursor keys — one gesture, one focus. */
+  const selectDelegate = useCallback((at: number) => {
+    setWorkbench({ open: true, at });
+  }, []);
+
+  const toggleTool = useCallback((id: string) => {
+    setExpanded((was) => {
+      const next = new Set(was);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   // -- what a command is given ------------------------------------------- //
 
   const screen: Screen = useMemo(() => ({
@@ -437,7 +548,21 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     retry: () => { void retry(); },
     quit: onQuit,
     note: () => {},
-  }), [client, onQuit, palette, registry, toTail, retry]);
+    workbenchAvailable: () => canWorkbench,
+    workbenchOpen: () => workbenchRef.current.open,
+    openWorkbench,
+    closeWorkbench,
+    stoppableDelegateId: () => {
+      // "The selected one" means the panel is holding the cursor and the row
+      // it is on is one the lifecycle says can be asked to stop. Both halves
+      // are the projection's answer, not the panel's opinion.
+      if (!workbenchRef.current.open) return undefined;
+      const picked = latest.current.delegates[workbenchRef.current.at];
+      return picked && stoppable(picked) ? picked.id : undefined;
+    },
+    stopDelegate,
+  }), [canWorkbench, client, closeWorkbench, onQuit, openWorkbench, palette,
+       registry, retry, stopDelegate, toTail]);
 
   // The commands are given the screen, and opening the palette needs the
   // screen to filter by. A ref breaks that circle without a second object.
@@ -604,6 +729,28 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       return;
     }
 
+    // The workbench owns four keys while it holds the cursor, and only those
+    // four. Everything else falls through to the normal branch — which is
+    // what keeps Tab cycling modes (§ the mode bar is not the workbench's)
+    // and Ctrl+C stopping work even with the panel focused. Blocking
+    // interactions and the palette were both checked above, so a card can
+    // never lose a key to this panel, and Escape here means "leave the
+    // workbench" only when nothing is waiting and nothing else is open.
+    const work = workbenchRef.current;
+    if (work.open) {
+      if (named === "escape") { closeWorkbench(); return; }
+      if (named === "up") { moveWorkbench(-1); return; }
+      if (named === "down") { moveWorkbench(1); return; }
+      if (named === "return") {
+        // Enter stops the selected delegate, and only when the lifecycle
+        // says it can be stopped: pressing it on a finished row does nothing
+        // rather than asking the core about a decision already made.
+        const picked = latest.current.delegates[work.at];
+        if (picked && stoppable(picked)) stopDelegate(picked.id);
+        return;
+      }
+    }
+
     // Ctrl+C is context-sensitive: it stops work, and only quits when there
     // is none. Killing the client mid-turn would leave a core running.
     if (named === "ctrl+c") { stopOrQuit(); return; }
@@ -620,21 +767,45 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       return;
     }
     if (named === "return") void send();
-  }, [client, decide, onQuit, registry, runCommand, scrollBy, send, stopOrQuit]));
+  }, [client, closeWorkbench, decide, moveWorkbench, onQuit, registry,
+      runCommand, scrollBy, send, stopDelegate, stopOrQuit]));
 
   // -- the screen --------------------------------------------------------- //
 
   const mode = (state.session?.mode ?? "act") as Mode;
   const narrow = width < NARROW;
+  // The side panel takes the Rich interface's own breakpoint: below 100
+  // columns two columns stop being worth what they cost the conversation, and
+  // the workbench becomes an overlay a key summons and Escape dismisses. At
+  // wide widths it is drawn only when there is work to show or it was asked
+  // for — a chat that never delegates keeps every column of its transcript.
+  const side = canWorkbench && width >= WIDE
+    && (workbench.open || state.delegates.length > 0 || state.tasks.length > 0);
+  const overlay = canWorkbench && width < WIDE && workbench.open;
+  const panel = panelWidth(width);
+  const conversationWidth = side ? Math.max(40, width - panel - 1) : width;
 
   return (
     <box style={{ flexDirection: "column", width: "100%", height: "100%",
                   backgroundColor: theme["surface.base"] }}>
       <Header state={state} narrow={narrow} />
-      <Conversation state={state} scroller={scroller} follow={follow}
-                    onScrolled={() => setFollow(
-                      (was) => followMoved(was, atTail()))} />
-      {followMarker(follow) ? <NewOutput onPick={toTail} /> : null}
+      <box style={{ flexDirection: "row", flexGrow: 1, flexShrink: 1 }}>
+        <box style={{ flexDirection: "column", flexGrow: 1, flexShrink: 1 }}>
+          <Conversation state={state} scroller={scroller} follow={follow}
+                        width={conversationWidth} expanded={expanded}
+                        onToggleTool={toggleTool}
+                        onScrolled={() => setFollow(
+                          (was) => followMoved(was, atTail()))} />
+          {followMarker(follow) ? <NewOutput onPick={toTail} /> : null}
+        </box>
+        {side
+          ? <WorkbenchPanel state={state} width={panel}
+                            focused={workbench.open} selected={workbench.at}
+                            hasTasks={hasTasks} hasDelegates={hasDelegates}
+                            onSelect={selectDelegate}
+                            onStop={stopDelegate} />
+          : null}
+      </box>
       {blocked?.kind === "permission" && permit
         ? <PermissionCard interaction={blocked} draft={permit}
                           choices={choicesOf(blocked.request)}
@@ -646,10 +817,18 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
           ? <QuestionCard question={question} waiting={waitingCount(state)}
                           width={width} onChange={setQuestion} />
           : <Composer value={draft} onChange={setDraft}
-                      busy={Boolean(state.session?.busy)} />}
+                      busy={Boolean(state.session?.busy)}
+                      blurred={workbench.open} />}
       <ModeBar mode={mode} intent={intent} narrow={narrow}
                onPick={(picked) => runCommand(`mode.${picked}`)} />
       <Footer registry={registry} narrow={narrow} state={state} />
+      {overlay
+        ? <WorkbenchPanel state={state} width={width}
+                          focused selected={workbench.at}
+                          hasTasks={hasTasks} hasDelegates={hasDelegates}
+                          onSelect={selectDelegate}
+                          onStop={stopDelegate} />
+        : null}
       {palette
         ? <Palette state={palette}
                    onQuery={(text) =>
@@ -681,10 +860,15 @@ function Header({ state, narrow }: { state: State; narrow: boolean }):
   );
 }
 
-function Conversation({ state, scroller, follow, onScrolled }: {
+function Conversation({ state, scroller, follow, width, expanded,
+                        onToggleTool, onScrolled }: {
   state: State;
   scroller: React.RefObject<ScrollBoxRenderable | null>;
   follow: Follow;
+  /** Columns the conversation owns, so a tool row's right edge lands on them. */
+  width: number;
+  expanded: ReadonlySet<string>;
+  onToggleTool: (id: string) => void;
   onScrolled: () => void;
 }): React.ReactNode {
   if (state.connection.kind !== "ready") {
@@ -726,7 +910,9 @@ function Conversation({ state, scroller, follow, onScrolled }: {
     >
       {timeline(state).map((entry) => entry.kind === "line"
         ? <Said key={`line:${entry.line.id}`} line={entry.line} />
-        : <Ran key={`tool:${entry.tool.id}`} tool={entry.tool} />)}
+        : <Ran key={`tool:${entry.tool.id}`} tool={entry.tool} width={width}
+               expanded={expanded.has(entry.tool.id)}
+               onToggle={() => onToggleTool(entry.tool.id)} />)}
       {state.notice
         ? <text style={{ fg: level(state.notice.level) }}>
             {state.notice.text}
@@ -777,23 +963,55 @@ function saidColour(line: Line): string {
 }
 
 /**
- * One tool invocation, with what it printed.
+ * One tool invocation, and what it printed.
  *
- * Compact on purpose: a heading row and the output indented under it. An
- * expandable inspector is a later phase, and building one now would mean
- * building it before anything had streamed real output through it.
+ * The heading is the contract: a mark, what ran, and on the right either
+ * `running…` or how long it took — the shape the Rich transcript proved
+ * readable at a glance, elapsed included, because a finished tool that does
+ * not say what it cost in time is a tool nobody can tell from a hung one.
+ *
+ * Output underneath is bounded by state. A running tool shows its last few
+ * lines — the whole point of streamed output. A completed one collapses to
+ * its heading unless it was clicked open: a long autonomous run leaves
+ * dozens of calls behind, and a transcript where every one kept its output
+ * is a wall nobody can scan. A failed one always shows the head of its error
+ * — a failure you have to open to find is a failure half-hidden.
+ *
+ * Everything drawn came through the projection, which keeps the same capped
+ * tail the core's journal keeps, so this timeline cannot hold more than the
+ * core itself remembered.
  */
-function Ran({ tool }: { tool: ToolRun }): React.ReactNode {
+function Ran({ tool, width, expanded, onToggle }: {
+  tool: ToolRun;
+  /** Columns the conversation owns, so the right-hand column lands at the edge. */
+  width: number;
+  expanded: boolean;
+  onToggle: () => void;
+}): React.ReactNode {
   const colour = tool.state === "failed" ? theme["semantic.danger"]
     : tool.state === "completed" ? theme["semantic.success"]
     : theme["text.muted"];
-  const lines = tool.output ? tool.output.replace(/\n+$/, "").split("\n") : [];
+  const inner = Math.max(16, width - 2);
+  const right = tool.state === "running" ? "running…"
+    : tool.elapsedMs !== undefined ? seconds(tool.elapsedMs) : "";
+  const heading = spreadRow(
+    `${marker(tool.state)} ${tool.name}${tool.summary ? ` ${tool.summary}` : ""}`
+      .trimEnd(),
+    right, inner);
+  const tail = tool.state === "running" ? RUNNING_OUTPUT_LINES
+    : expanded ? EXPANDED_OUTPUT_LINES : 0;
+  const lines = tail > 0 && tool.output
+    ? tool.output.replace(/\n+$/, "").split("\n").slice(-tail) : [];
+  const errors = tool.state === "failed" && tool.error
+    ? tool.error.replace(/\n+$/, "").split("\n").slice(0, ERROR_LINES) : [];
   return (
     <box style={{ flexDirection: "column", flexShrink: 0 }}>
-      <text style={{ fg: colour }}>
-        {`${marker(tool.state)} ${tool.name} ${tool.summary}`.trimEnd()}
-      </text>
-      {tool.outputTruncated
+      {/* The heading is the click target: one row, one affordance. A click
+          anywhere on a finished tool opens its output; a click never stops,
+          deletes or reruns anything — the timeline is a reader, not a
+          control surface. */}
+      <text style={{ fg: colour }} onMouseDown={onToggle}>{heading}</text>
+      {tool.outputTruncated && lines.length > 0
         ? <text style={{ fg: theme["text.muted"] }}>
             {"    … earlier output is not kept"}
           </text>
@@ -802,16 +1020,37 @@ function Ran({ tool }: { tool: ToolRun }): React.ReactNode {
         // Keyed by position within this call's own output, which only ever
         // grows at the end — so a key never moves to different text.
         <text key={`${tool.id}:${at}`} style={{ fg: theme["text.muted"] }}>
-          {`    ${line}`}
+          {`    ${clip(line, Math.max(8, inner - 4))}`}
         </text>
       ))}
-      {tool.error
-        ? <text style={{ fg: theme["semantic.danger"] }}>
-            {`    ${tool.error}`}
-          </text>
-        : null}
+      {errors.map((line, at) => (
+        <text key={`${tool.id}:err:${at}`}
+              style={{ fg: theme["semantic.danger"] }}>
+          {`    ${clip(line, Math.max(8, inner - 4))}`}
+        </text>
+      ))}
     </box>
   );
+}
+
+/** The elapsed time in the shape the transcript has always used. */
+function seconds(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * One drawn line with a right-aligned tail, clipped to the columns it has.
+ *
+ * Spaces, not a flex row: the heading is one string the renderer cannot
+ * rewrap, which is what keeps the right-hand column on the right edge even
+ * when the summary is a path with no spaces in it.
+ */
+function spreadRow(left: string, right: string, columns: number): string {
+  if (!right) return clip(left, columns);
+  const room = columns - right.length;
+  if (room <= 1) return clip(right, columns);
+  const shown = clip(left, room - 1);
+  return `${shown}${" ".repeat(Math.max(1, room - shown.length))}${right}`;
 }
 
 /**
@@ -837,16 +1076,22 @@ function NewOutput({ onPick }: { onPick: () => void }): React.ReactNode {
  * above is the one path that sends, and an input that also submitted would
  * make one press two requests — each with its own pending line, each refused
  * or accepted on its own. One press, one send, from one place.
+ *
+ * `blurred` is the workbench holding the cursor keys. The input gives up
+ * focus and the border says so, because a panel that owns up/enter/escape
+ * while text silently kept arriving here would be typing into a box that is
+ * not listening.
  */
-function Composer({ value, onChange, busy }: {
+function Composer({ value, onChange, busy, blurred }: {
   value: string; onChange: (text: string) => void; busy: boolean;
+  blurred: boolean;
 }): React.ReactNode {
   return (
     <box style={{ borderStyle: "single", height: 3, flexShrink: 0,
                   paddingLeft: 1, paddingRight: 1,
-                  borderColor: busy ? theme["border.default"]
-                                    : theme["border.focused"] }}>
-      <input value={value} focused={!busy}
+                  borderColor: busy || blurred ? theme["border.default"]
+                                               : theme["border.focused"] }}>
+      <input value={value} focused={!busy && !blurred}
              placeholder={busy ? "working…" : "ask for anything"}
              onInput={onChange} />
     </box>
@@ -904,7 +1149,14 @@ function Footer({ registry, narrow, state }: {
   const hints = registry.hints()
     .map((binding) => `${binding.key} ${binding.hint}`);
   const busy = state.session?.busy ? "ctrl+c Stop" : "";
-  const shown = [...(busy ? [busy] : []), ...hints];
+  // Counted live, and shown at every width: at the narrow ones it is the
+  // only standing evidence that delegated work exists behind the overlay,
+  // and a delegate that is discoverable only by remembering a key is a
+  // delegate running with nobody watching.
+  const live = runningDelegates(state).length;
+  const agents = live > 0 ? `● ${live} agent${live === 1 ? "" : "s"}` : "";
+  const shown = [...(busy ? [busy] : []), ...(agents ? [agents] : []),
+                 ...hints];
   return (
     <box style={{ height: 1, flexShrink: 0, paddingLeft: 1,
                   backgroundColor: theme["surface.raised"] }}>

@@ -75,10 +75,34 @@ the block that used to live inside `cli.py`, lifted out rather than rewritten
 
 `CoreService` owns sessions and the operations on them: create, get, list,
 send, cancel, set mode, choose a model, answer a question, reply to a
-permission. It knows nothing about JSON.
+permission, stop a background delegate. It knows nothing about JSON.
 
 Each session gets a deep copy of the config, so two sessions in one core keep
 their own modes — setting one to Plan must not quietly disarm the other's Act.
+
+**The workbench state is core state.** The agent's task list (`todo_write`)
+and its background delegates (`BackgroundDelegates`) were already truths the
+core kept; the application layer is where they became transportable. The
+relay maps `Kind.TODO` to `tasks.updated` and `Kind.DELEGATE` to
+`delegate.updated` through an allow-list — a field the internal records grow
+later does not ride to every client by accident — and the session journal
+folds both, so `session.snapshot` re-describes a mid-job session completely:
+plan, delegated work, and a delegate that was running when the process died
+comes back as `lost` rather than vanishing or pretending to run. The journal
+folds delegates forward-only, the same rule the manager's own announcements
+obey, because the snapshot is what a reconnecting client believes.
+
+`assemble(..., delegates=True)` is opt-in and means "somebody will deliver a
+finished background answer at a turn boundary". A served session says yes; a
+headless run says nothing and keeps the delegate tool's refusal — background
+work whose completion nobody drains is work whose answer is dropped. Where a
+session has a manager, the turn worker drains completions after its turn ends
+and runs each as a turn of its own, which is the same boundary rule the
+terminal and the web session follow. `stop_delegate` is the only control: it
+asks the manager, answers honestly when there was nothing running to stop,
+and leaves every state transition to the manager's own announcements — a
+client that painted `stopped` from its own request would be claiming an
+outcome the core has not reported.
 
 ### `comodor/transport` — how they travel
 
@@ -92,7 +116,7 @@ answer.
 |---|---|
 | `@comodor/protocol` | generated types, envelope builders, the reader |
 | `@comodor/client` | the handshake, correlation, events, spawning a core |
-| `@comodor/session` | the session projection, snapshot reconciliation, the queue of what is waiting on the person, mode intent, follow policy |
+| `@comodor/session` | the session projection, snapshot reconciliation, the queue of what is waiting on the person, the task list and delegate records with their forward-only lifecycle, the tool-output bound, mode intent, follow policy |
 | `@comodor/commands` | one action however it was reached |
 | `@comodor/modes` | the cycle, labels and summaries a client draws |
 | `@comodor/questions` | the selection state behind a question card |
@@ -101,9 +125,14 @@ answer.
 Seven, because seven are used. There is no empty package here waiting for a
 desktop client to arrive. `@comodor/session` is the newest, and exists because
 correlating a delta to its message, keeping two tools' output apart, deciding
-a snapshot is stale and sequencing mode intent are decisions a desktop client
-would otherwise reimplement slightly differently — none of it is about a
-terminal.
+a snapshot is stale, replacing a task list whole, refusing a delegate
+announcement that would move a stopped one backwards, and sequencing mode
+intent are decisions a desktop client would otherwise reimplement slightly
+differently — none of it is about a terminal. The workbench needed no eighth
+package for exactly that reason: tasks and delegates are session state, and
+the session projection is where session state lives. What a renderer keeps for
+itself is presentation — which row the cursor is on, which finished tool was
+clicked open, whether the panel is a column or an overlay at this width.
 
 ---
 
