@@ -28,6 +28,7 @@ METHOD_SHAPES: dict[str, tuple[str, str]] = {
     "session.cancel": ("SessionRef", "CancelResult"),
     "session.set_mode": ("SetModeParams", "SessionResult"),
     "model.get": ("Empty", "ModelResult"),
+    "model.list": ("Empty", "ModelListResult"),
     "model.set": ("SetModelParams", "ModelResult"),
     "workspace.get": ("Empty", "WorkspaceResult"),
     "question.answer": ("AnswerParams", "AckResult"),
@@ -362,6 +363,12 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "header": ("str", True),
         "chosen": ("list", True),
         "written": ("str", False),
+    },
+    "ModelListResult": {
+        "provider": ("str", True),
+        "model": ("str", True),
+        "configured": ("bool", False),
+        "models": ("list", True),
     },
 }
 
@@ -874,3 +881,18 @@ class QuestionAnswer(_QuestionAnswerRequired, total=False):
     """
 
     written: str
+
+
+class _ModelListResultRequired(TypedDict):
+    provider: str
+    model: str
+    models: list[str]
+
+
+class ModelListResult(_ModelListResultRequired, total=False):
+    """A model chooser's source of truth. `models` is the provider's own list
+    with the configured model guaranteed present; it is never empty when a
+    model is configured.
+    """
+
+    configured: bool

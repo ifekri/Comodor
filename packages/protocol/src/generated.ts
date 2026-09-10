@@ -17,6 +17,7 @@ export const METHODS = [
   "session.cancel",
   "session.set_mode",
   "model.get",
+  "model.list",
   "model.set",
   "workspace.get",
   "question.answer",
@@ -546,6 +547,18 @@ export interface QuestionAnswer {
   header: string;
   chosen: Array<string>;
   written?: string;
+}
+
+/**
+ * A model chooser's source of truth. `models` is the provider's own list
+ * with the configured model guaranteed present; it is never empty when a
+ * model is configured.
+ */
+export interface ModelListResult {
+  provider: string;
+  model: string;
+  configured?: boolean;
+  models: Array<string>;
 }
 
 /**

@@ -71,6 +71,14 @@ import {
 
 import { build, type Screen } from "./commands.ts";
 import {
+  move as moveModel,
+  open as openModels,
+  search as searchModels,
+  selected as selectedModel,
+  window as modelWindow,
+  type ModelPickerState,
+} from "./models.ts";
+import {
   move as movePalette,
   open as openPalette,
   search as searchPalette,
@@ -156,6 +164,8 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   const [state, dispatch] = useReducer(reduce, initial);
   const [draft, setDraft] = useState("");
   const [palette, setPalette] = useState<PaletteState<Screen> | undefined>();
+  /** The model chooser, while open. The list is the core's, fetched per open. */
+  const [models, setModels] = useState<ModelPickerState | undefined>();
   const [question, setQuestion] = useState<FormState | undefined>();
   const [permit, setPermit] = useState<PermissionDraft | undefined>();
   const [intent, setIntent] = useState<ModeIntent>(() => beginIntent("act"));
@@ -200,6 +210,8 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   permitRef.current = permit;
   const paletteRef = useRef(palette);
   paletteRef.current = palette;
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
   const workbenchRef = useRef(workbench);
   workbenchRef.current = workbench;
   const blockedRef = useRef<Interaction | undefined>(undefined);
@@ -258,6 +270,12 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
         setIntent((was) => intentConfirmed(was, params["mode"] as Mode));
       }
     });
+    // A dead core is news, not something a send just happens to trip over:
+    // without this the screen would keep showing a state that no longer
+    // exists, accepting input that goes nowhere.
+    const unlost = client.onClose((reason) => {
+      if (alive) dispatch({ type: "lost", reason });
+    });
 
     void (async () => {
       try {
@@ -270,6 +288,14 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
           dispatch({ type: "connected", session });
           setIntent(beginIntent(session.mode as Mode));
         }
+        // What answers: asked once here, kept current by `model.changed`.
+        // Best-effort — a core that cannot answer it still has a working
+        // session; the header simply shows no model rather than a wrong one.
+        if (!alive) return;
+        const info = await client.call("model.get");
+        if (alive) {
+          dispatch({ type: "modelInfo", model: info as never });
+        }
       } catch (problem) {
         if (alive) {
           dispatch({ type: "lost", reason: (problem as Error).message });
@@ -277,7 +303,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       }
     })();
 
-    return () => { alive = false; stop(); };
+    return () => { alive = false; stop(); unlost(); };
   }, [client, resync, sessionId]);
 
   // What is waiting on the person, in one place.
@@ -522,6 +548,51 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     setWorkbench({ open: true, at });
   }, []);
 
+  /**
+   * Open the model chooser, or say plainly why there is nothing to choose.
+   *
+   * The list is asked of the core at the moment of opening — not cached,
+   * because a catalogue is the provider's to change, and a stale list would
+   * offer models that no longer exist. A core too old to answer, or a
+   * provider that cannot be reached, is told as a notice rather than a dead
+   * key.
+   */
+  const openModelPicker = useCallback(() => {
+    void client.call("model.list")
+      .then((answer) => {
+        const names = Array.isArray(answer["models"])
+          ? (answer["models"] as unknown[]).map((name) => String(name))
+          : [];
+        if (names.length === 0) {
+          dispatch({ type: "event", name: "notification.created", seq: 0,
+                     params: { level: "info",
+                               text: "no models to choose from" } });
+          return;
+        }
+        setPalette(undefined);
+        setModels(openModels(names, String(answer["model"] ?? "")));
+      })
+      .catch((problem: unknown) => {
+        dispatch({ type: "event", name: "notification.created", seq: 0,
+                   params: { level: "warning",
+                             text: (problem as Error).message } });
+      });
+  }, [client]);
+
+  /** Commit the highlighted model. The header moves on `model.changed`. */
+  const chooseModel = useCallback((name: string) => {
+    if (!name) return;
+    setModels(undefined);
+    void client.call("model.set", { model: name })
+      .catch((problem: unknown) => {
+        // A refusal is an answer too: the header keeps the model the core
+        // kept, and the reason is a notice rather than a silent no-op.
+        dispatch({ type: "event", name: "notification.created", seq: 0,
+                   params: { level: "warning",
+                             text: (problem as Error).message } });
+      });
+  }, [client]);
+
   const toggleTool = useCallback((id: string) => {
     setExpanded((was) => {
       const next = new Set(was);
@@ -540,7 +611,13 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     busy: () => Boolean(latest.current.session?.busy),
     stepMode: (back: boolean) => setIntent((was) => stepIntent(was, back)),
     wantMode: (mode: Mode) => setIntent((was) => wantMode(was, mode)),
-    openPalette: () => setPalette(openPalette(registry, screenRef.current)),
+    openModels: openModelPicker,
+    openPalette: () => {
+      // One overlay at a time: a palette over a chooser is two owners of
+      // Enter, and the second one drawn is not the one the keys reach.
+      setModels(undefined);
+      setPalette(openPalette(registry, screenRef.current));
+    },
     closePalette: () => setPalette(undefined),
     paletteOpen: () => Boolean(palette),
     toTail,
@@ -561,8 +638,8 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       return picked && stoppable(picked) ? picked.id : undefined;
     },
     stopDelegate,
-  }), [canWorkbench, client, closeWorkbench, onQuit, openWorkbench, palette,
-       registry, retry, stopDelegate, toTail]);
+  }), [canWorkbench, client, closeWorkbench, onQuit, openModelPicker,
+       openWorkbench, palette, registry, retry, stopDelegate, toTail]);
 
   // The commands are given the screen, and opening the palette needs the
   // screen to filter by. A ref breaks that circle without a second object.
@@ -729,6 +806,22 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       return;
     }
 
+    // The model chooser is the palette's sibling: same ownership, same four
+    // keys, and the same rule that it cannot swallow a blocking prompt —
+    // which was already checked above.
+    const chooser = modelsRef.current;
+    if (chooser) {
+      if (named === "escape") { setModels(undefined); return; }
+      if (named === "up") { setModels((was) => was && moveModel(was, -1)); return; }
+      if (named === "down") { setModels((was) => was && moveModel(was, 1)); return; }
+      if (named === "return") {
+        const chosen = selectedModel(chooser);
+        if (chosen) chooseModel(chosen);
+        return;
+      }
+      return;
+    }
+
     // The workbench owns four keys while it holds the cursor, and only those
     // four. Everything else falls through to the normal branch — which is
     // what keeps Tab cycling modes (§ the mode bar is not the workbench's)
@@ -767,8 +860,8 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       return;
     }
     if (named === "return") void send();
-  }, [client, closeWorkbench, decide, moveWorkbench, onQuit, registry,
-      runCommand, scrollBy, send, stopDelegate, stopOrQuit]));
+  }, [chooseModel, client, closeWorkbench, decide, moveWorkbench, onQuit,
+      registry, runCommand, scrollBy, send, stopDelegate, stopOrQuit]));
 
   // -- the screen --------------------------------------------------------- //
 
@@ -817,7 +910,8 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
           ? <QuestionCard question={question} waiting={waitingCount(state)}
                           width={width} onChange={setQuestion} />
           : <Composer value={draft} onChange={setDraft}
-                      busy={Boolean(state.session?.busy)}
+                      busy={state.connection.kind !== "ready"
+                            || Boolean(state.session?.busy)}
                       blurred={workbench.open} />}
       <ModeBar mode={mode} intent={intent} narrow={narrow}
                onPick={(picked) => runCommand(`mode.${picked}`)} />
@@ -838,6 +932,13 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
                      runCommand(id);
                    }} />
         : null}
+      {models
+        ? <ModelPicker state={models}
+                       onQuery={(text) =>
+                         setModels((was) => was && searchModels(
+                           was.all, was.current, text))}
+                       onPick={chooseModel} />
+        : null}
     </box>
   );
 }
@@ -850,12 +951,29 @@ function Header({ state, narrow }: { state: State; narrow: boolean }):
     React.ReactNode {
   const where = state.session?.workspace ?? "";
   const shown = narrow ? where.split(/[/\\]/).pop() ?? "" : where;
+  const model = state.model;
+  const engine = model
+    ? narrow ? model.model : `${model.provider} · ${model.model}`
+    : "";
   return (
     <box style={{ flexDirection: "row", height: 1, flexShrink: 0,
                   paddingLeft: 1, paddingRight: 1,
                   backgroundColor: theme["surface.raised"] }}>
       <text style={{ fg: theme["text.primary"] }}>Comodor</text>
       <text style={{ fg: theme["text.muted"] }}>{shown ? `  ${shown}` : ""}</text>
+      {/*
+        Which brain answers is part of knowing where you are. It comes from
+        the core — `model.get` at connect, `model.changed` after that — so the
+        header cannot drift from what is actually answering, including when
+        another client or the core itself made the change. A core too old to
+        answer shows nothing rather than a label it invented.
+      */}
+      {engine
+        ? <text style={{ fg: model?.configured === false
+            ? theme["semantic.warning"] : theme["text.secondary"] }}>
+            {`  ${engine}`}
+          </text>
+        : null}
     </box>
   );
 }
@@ -872,21 +990,32 @@ function Conversation({ state, scroller, follow, width, expanded,
   onScrolled: () => void;
 }): React.ReactNode {
   if (state.connection.kind !== "ready") {
+    const lost = state.connection.kind === "lost";
     return (
       <box style={{ flexGrow: 1, padding: 1 }}>
-        <text style={{ fg: state.connection.kind === "lost"
-          ? theme["semantic.danger"] : theme["text.secondary"] }}>
-          {/*
-            Three states, three sentences. "Starting the core…" while actually
-            catching up with a session the core already has would be a lie
-            about which of the two ends lost its place.
-          */}
-          {state.connection.kind === "lost"
-            ? `The core is not answering — ${state.connection.reason}`
-            : state.connection.kind === "resynchronising"
-              ? "Catching up with the session…"
-              : "Starting the core…"}
-        </text>
+        {/*
+          Three states, three sentences. "Starting the core…" while actually
+          catching up with a session the core already has would be a lie
+          about which of the two ends lost its place. And a lost core says
+          what is still true — the transcript — and what to do next, because
+          a screen that only blames the pipe leaves the person stuck.
+        */}
+        <box style={{ flexDirection: "column" }}>
+          <text style={{ fg: lost ? theme["semantic.danger"]
+                                   : theme["text.secondary"] }}>
+            {lost
+              ? `The core is not answering — ${state.connection.reason}`
+              : state.connection.kind === "resynchronising"
+                ? "Catching up with the session…"
+                : "Starting the core…"}
+          </text>
+          {lost
+            ? <text style={{ fg: theme["text.muted"] }}>
+                {"The transcript above is everything the core confirmed before it "
+                 + "stopped; work still in flight is gone.   ctrl+d Quit"}
+              </text>
+            : null}
+        </box>
       </box>
     );
   }
@@ -1505,6 +1634,55 @@ function Palette({ state, onQuery, onPick }: {
         {`↑↓ Move   enter Run   esc Close`
          + (state.results.length > rows
             ? `   ${state.index + 1}/${state.results.length}` : "")}
+      </text>
+    </box>
+  );
+}
+
+/**
+ * The model chooser. The list is the core's answer to `model.list`, fetched
+ * when the overlay opens; choosing asks the core, and the header moves only
+ * when `model.changed` says it happened. The current model is marked, not
+ * hidden: picking it again is the no-op it looks like.
+ */
+function ModelPicker({ state, onQuery, onPick }: {
+  state: ModelPickerState;
+  onQuery: (text: string) => void;
+  onPick: (model: string) => void;
+}): React.ReactNode {
+  const rows = 8;
+  const { from, to } = modelWindow(state, rows);
+  const shown = state.matches.slice(from, to);
+
+  return (
+    <box style={{ borderStyle: "single", flexDirection: "column",
+                  flexShrink: 0, padding: 1,
+                  borderColor: theme["border.focused"],
+                  backgroundColor: theme["surface.overlay"] }}>
+      <input value={state.query} focused placeholder="type a model"
+             onInput={onQuery} />
+      {shown.map((model, offset) => {
+        const here = from + offset === state.index;
+        // Highlight and word both: the row in use says so, and the row under
+        // the cursor is marked, so neither fact is carried by colour alone.
+        const style = here
+          ? { fg: theme["text.primary"], bg: theme["surface.selected"] }
+          : { fg: theme["text.secondary"] };
+        const current = model === state.current ? "  (current)" : "";
+        return (
+          <text key={model} style={{ ...style, flexShrink: 0 }}
+                onMouseDown={() => onPick(model)}>
+            {`${here ? "›" : " "} ${model}${current}`}
+          </text>
+        );
+      })}
+      {state.matches.length === 0
+        ? <text style={{ fg: theme["text.muted"] }}>No model matches.</text>
+        : null}
+      <text style={{ fg: theme["text.muted"] }}>
+        {`↑↓ Move   enter Choose   esc Close`
+         + (state.matches.length > rows
+            ? `   ${state.index + 1}/${state.matches.length}` : "")}
       </text>
     </box>
   );

@@ -30,6 +30,8 @@ export interface Screen {
   stepMode(back: boolean): void;
   /** Aim at a named mode outright — a click, or a palette entry. */
   wantMode(mode: Mode): void;
+  /** Ask the core what it can answer with, and open the chooser. */
+  openModels(): void;
   openPalette(): void;
   closePalette(): void;
   paletteOpen(): boolean;
@@ -151,6 +153,13 @@ export function build(): CommandRegistry<Screen> {
         const id = screen.stoppableDelegateId();
         if (id) screen.stopDelegate(id);
       },
+    },
+    {
+      id: "model.choose",
+      title: "Choose the model",
+      group: "Session",
+      keywords: ["model", "provider", "switch"],
+      run: (screen) => screen.openModels(),
     },
     {
       id: "palette.open",

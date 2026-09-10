@@ -642,6 +642,35 @@ class CoreService:
             self._emit(handle, "model.changed", answer)
         return answer
 
+    def list_models(self) -> dict[str, Any]:
+        """The models a chooser can offer, from the provider's own mouth.
+
+        The active provider is asked for its catalogue; a provider that
+        cannot enumerate — a local server, an offline fake, a network error —
+        yields the configured model alone, so the list is exactly what the
+        core could name and never empty when a model is set. The configured
+        model is always included: a chooser that cannot show the current
+        choice makes the current choice look unavailable.
+
+        Never a key, never a credential: the same rule as `model`.
+        """
+        from ..providers.gateway import Gateway
+
+        current = self.model()
+        names: list[str] = []
+        provider = current["provider"]
+        if provider:
+            try:
+                names = list(Gateway(self._config).provider(provider)
+                             .list_models() or [])
+            except Exception:
+                # A catalogue that cannot be reached is not an error the
+                # chooser can act on: it still gets the model in use.
+                names = []
+        if current["model"] and current["model"] not in names:
+            names = [current["model"], *names]
+        return {**current, "models": names}
+
     def workspace(self) -> dict[str, Any]:
         root = Path(self._config.paths.project)
         return {"path": str(root), "name": root.name}

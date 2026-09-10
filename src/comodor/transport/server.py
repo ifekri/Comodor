@@ -196,6 +196,7 @@ class Server:
             "delegate.stop": lambda p: service.stop_delegate(
                 p["session_id"], p["delegate_id"]),
             "model.get": lambda p: service.model(),
+            "model.list": lambda p: service.list_models(),
             "model.set": lambda p: service.set_model(
                 p["model"], str(p.get("provider", ""))),
             "workspace.get": lambda p: service.workspace(),

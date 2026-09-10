@@ -288,6 +288,64 @@ def test_choosing_a_provider_that_is_not_configured_is_refused(service):
     assert answers[1]["error"]["code"] == P.NOT_ALLOWED
 
 
+def test_the_model_list_names_models_and_never_a_key(service, config):
+    """A chooser asks the core; the answer must be the whole list and no secret."""
+    config.providers["fake"].api_key = "sk-do-not-leak-this"
+    answers = Driver(service, [hello(), call("1", "model.list")]).run()
+    result = answers[1]["result"]
+
+    assert result["provider"] == "fake"
+    assert result["model"] in result["models"]
+    assert result["models"], "a configured model must always be listable"
+    assert "sk-do-not-leak-this" not in json.dumps(answers)
+
+
+def test_the_model_list_survives_a_provider_that_cannot_enumerate(config,
+                                                                  monkeypatch):
+    """A provider whose catalogue is unreachable still yields the model in use.
+
+    A chooser built on "the list is what the provider said" would open empty
+    on exactly the providers people switch models on most — a local server
+    with no /models route. Falling back to the configured model keeps the
+    chooser honest: it can show what answers now, and nothing invented.
+    """
+    from comodor.providers.gateway import Gateway
+
+    def unreachable(self, name):
+        raise ConnectionError("no catalogue here")
+
+    monkeypatch.setattr(Gateway, "provider", unreachable)
+
+    service = CoreService(config)
+    try:
+        service.create_session()
+        answer = service.list_models()
+
+        assert answer["models"] == ["fake-1"]
+        assert answer["model"] == "fake-1"
+    finally:
+        service.close()
+
+
+def test_setting_a_model_announces_it_to_every_session(service):
+    """Two sessions, one switch: both hear `model.changed`.
+
+    A header that only moved for the client that asked would leave every
+    other attached client claiming a model that no longer answers.
+    """
+    seen: list[tuple[str, str]] = []
+    service.on_event = lambda session_id, name, params, seq: \
+        seen.append((session_id, name))
+    first = service.create_session()["id"]
+    second = service.create_session()["id"]
+
+    service.set_model("fake-1")
+
+    changed = {session for session, name in seen if name == "model.changed"}
+    assert changed == {first, second}
+    assert service.model()["model"] == "fake-1"
+
+
 # --------------------------------------------------------------------------- #
 # the module itself
 # --------------------------------------------------------------------------- #

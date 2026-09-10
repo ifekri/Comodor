@@ -108,6 +108,11 @@
       "params": "Empty",
       "result": "ModelResult"
     },
+    "model.list": {
+      "summary": "The models the active provider can name, for a chooser. Always includes the configured model; a provider that cannot enumerate yields just that one. Never includes a credential.",
+      "params": "Empty",
+      "result": "ModelListResult"
+    },
     "model.set": {
       "summary": "Choose a model.",
       "params": "SetModelParams",
@@ -1238,6 +1243,32 @@
         }
       },
       "description": "What came back for one question. `chosen` holds option ids; `written` holds what was typed into the free row."
+    },
+    "ModelListResult": {
+      "description": "A model chooser's source of truth. `models` is the provider's own list with the configured model guaranteed present; it is never empty when a model is configured.",
+      "type": "object",
+      "required": [
+        "provider",
+        "model",
+        "models"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

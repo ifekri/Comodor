@@ -49,6 +49,10 @@ class FakeCore implements Transport {
   /** Set by a test to hold mode requests until it releases them. */
   holdModes = false;
   heldModes: Array<{ id: string; mode: string }> = [];
+  /** What `model.get` reports and `model.set` changes. */
+  model = "fake-1";
+  /** What `model.list` offers. A test narrows it to model a thin provider. */
+  catalogue: string[] = ["fake-1", "fake-fast", "qwen3:8b"];
   /** What the handshake advertises. A test narrows it to model an older core. */
   capabilities: string[] = ["streaming", "questions", "permissions", "modes",
                             "tool_events", "tasks", "delegates"];
@@ -171,6 +175,35 @@ class FakeCore implements Transport {
       // arrive. A fake that emitted `stopped` here would let a client pass
       // its tests while believing its own request was the terminal state.
       this.push(response(id, { stopped: this.stopAnswer }));
+      return;
+    }
+    if (method === "model.get") {
+      this.push(response(id, { provider: "fake", model: this.model,
+                               configured: true }));
+      return;
+    }
+    if (method === "model.list") {
+      this.push(response(id, { provider: "fake", model: this.model,
+                               configured: true,
+                               models: [...this.catalogue] }));
+      return;
+    }
+    if (method === "model.set") {
+      const wanted = String(params["model"] ?? "");
+      if (!this.catalogue.includes(wanted)) {
+        this.push({ version: PROTOCOL_VERSION, type: "error", id,
+                    error: { code: "not_allowed",
+                             message: `no model named '${wanted}'` } });
+        return;
+      }
+      // The core is the authority here too: the label moves on the event,
+      // never on the request.
+      this.model = wanted;
+      this.push(response(id, { provider: "fake", model: this.model,
+                               configured: true }));
+      this.emit("model.changed",
+        { session_id: "s1", provider: "fake", model: this.model,
+          configured: true });
       return;
     }
     this.push(response(id, {}));
@@ -545,6 +578,200 @@ describe("the command palette", () => {
   });
 });
 
+describe("the model in the header", () => {
+  test("the provider and model come from the core, and move when it says",
+       async () => {
+    const view = await screen();
+    // Asked at connect: the header is not a guess from a config file.
+    await view.waitForFrame((frame) => frame.includes("fake · fake-1"));
+    expect(view.core.methods()).toContain("model.get");
+
+    // A switch anywhere — this client, another client, the core itself —
+    // announces itself the same way, and only then does the label move.
+    view.core.emit("model.changed", { session_id: "s1", provider: "fake",
+                                      model: "qwen3:8b", configured: true });
+    await view.waitForFrame((frame) => frame.includes("fake · qwen3:8b"));
+    view.client.close();
+  });
+
+  test("a narrow header keeps the model and drops the provider", async () => {
+    const view = await screen(60);
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    expect(view.frame()).not.toContain("fake · fake-1");
+    view.client.close();
+  });
+});
+
+describe("the model chooser", () => {
+  test("opens from the palette with the core's list, current model marked",
+       async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("model");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    // The chooser's list is a round trip: ask the core, then draw. An idle
+    // renderer has no frame to wait on until the answer lands, so the loop
+    // is turned first — waiting on frames alone would time out on nothing.
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("type a model"));
+
+    const frame = view.frame();
+    // Asked when opened — never cached from some earlier run of the overlay.
+    expect(view.core.methods()).toContain("model.list");
+    expect(frame).toContain("fake-1");
+    expect(frame).toContain("(current)");
+    expect(frame).toContain("qwen3:8b");
+    view.client.close();
+  });
+
+  test("Enter on a highlighted row asks the core; the header waits for it",
+       async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("model");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    // The chooser's list is a round trip: ask the core, then draw. An idle
+    // renderer has no frame to wait on until the answer lands, so the loop
+    // is turned first — waiting on frames alone would time out on nothing.
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("type a model"));
+
+    // The current model opens highlighted; Down picks the row beneath it.
+    view.mockInput.pressArrow("down");
+    await view.flush();
+    await view.waitForVisualIdle();
+    expect(markedRow(view.frame())).toContain("fake-fast");
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    // The overlay closed, the request went out, and the header moved only
+    // because the core's own event arrived — the request alone moved nothing
+    // on screen.
+    expect(view.frame()).not.toContain("type a model");
+    await view.waitForFrame((frame) => frame.includes("fake · fake-fast"));
+    expect(view.core.model).toBe("fake-fast");
+    view.client.close();
+  });
+
+  test("a refused switch leaves the header alone and says why", async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    view.core.catalogue = ["fake-1", "ghost-model"];
+    view.core.intercept = (method, _params, id) => {
+      if (method !== "model.set") return false;
+      view.core.push({ version: PROTOCOL_VERSION, type: "error", id,
+                       error: { code: "not_allowed",
+                                message: "the provider has no such model" } });
+      return true;
+    };
+
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("model");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    // The chooser's list is a round trip: ask the core, then draw. An idle
+    // renderer has no frame to wait on until the answer lands, so the loop
+    // is turned first — waiting on frames alone would time out on nothing.
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("type a model"));
+    view.mockInput.pressArrow("down");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    const frame = view.frame();
+    expect(frame).toContain("fake · fake-1");
+    expect(frame).not.toContain("ghost-model");
+    expect(frame).toContain("the provider has no such model");
+    view.client.close();
+  });
+
+  test("Escape closes it without asking for anything", async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("model");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    // The chooser's list is a round trip: ask the core, then draw. An idle
+    // renderer has no frame to wait on until the answer lands, so the loop
+    // is turned first — waiting on frames alone would time out on nothing.
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("type a model"));
+
+    await pressEscape(view);
+    await view.waitForVisualIdle();
+
+    expect(view.frame()).not.toContain("type a model");
+    expect(view.core.methods()).not.toContain("model.set");
+    view.client.close();
+  });
+
+  test("a click chooses the row it lands on", async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("model");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    // The chooser's list is a round trip: ask the core, then draw. An idle
+    // renderer has no frame to wait on until the answer lands, so the loop
+    // is turned first — waiting on frames alone would time out on nothing.
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("type a model"));
+
+    const at = locate(view.frame(), "qwen3:8b");
+    await view.mockMouse.click(at.x, at.y);
+    await view.waitForFrame((frame) => frame.includes("fake · qwen3:8b"));
+
+    expect(view.core.model).toBe("qwen3:8b");
+    view.client.close();
+  });
+
+  test("a permission card outranks the chooser", async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("model");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    // The chooser's list is a round trip: ask the core, then draw. An idle
+    // renderer has no frame to wait on until the answer lands, so the loop
+    // is turned first — waiting on frames alone would time out on nothing.
+    await letReactRun(view);
+    await view.waitForFrame((frame) => frame.includes("type a model"));
+
+    await emitRun(view, "permission.requested", { ...PERMISSION });
+    expect(view.frame()).toContain("Permission needed");
+
+    // Enter belongs to the card, not to the model under the cursor.
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    expect(view.core.methods()).not.toContain("model.set");
+    // The card took the press and resolved; the chooser is untouched by it.
+    await view.waitForFrame((frame) => !frame.includes("Permission needed"));
+    view.client.close();
+  });
+});
+
 describe("questions", () => {
   const form = {
     id: "ask-1",
@@ -703,6 +930,49 @@ describe("leaving", () => {
     await view.flush();
 
     expect(view.quit()).toBe(true);
+    view.client.close();
+  });
+});
+
+describe("the core stops answering", () => {
+  test("a dead core says so on an idle screen, and quitting stays possible",
+       async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    // Killed mid-nothing: the failure mode is a frozen *good* screen, which
+    // is worse than a frozen empty one, because it still looks alive.
+    view.core.close();
+    await view.waitForFrame((frame) =>
+      frame.includes("The core is not answering"));
+
+    const frame = view.frame();
+    expect(frame).toContain("ctrl+d Quit");
+    // Input is off the table: the composer must not pretend it listens.
+    view.mockInput.typeText("still here?");
+    await view.flush();
+    expect(view.frame()).toContain("The core is not answering");
+    view.mockInput.pressKey("d", { ctrl: true });
+    await view.flush();
+    expect(view.quit()).toBe(true);
+    view.client.close();
+  });
+
+  test("nothing claiming to be in flight survives as live", async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    // A turn mid-stream when the core dies: the in-flight message must not
+    // keep drawing its spinner on a dead pipe. The honest state is "lost".
+    await emitRun(view, "message.started", { turn_id: "t1", message_id: "m1" });
+    await emitRun(view, "message.delta",
+                  { turn_id: "t1", message_id: "m1", text: "half an answer" });
+    view.core.close();
+    // The reader loop ending is as async as any event: the loss is known on
+    // the next turn, so the loop is turned before watching for its frame.
+    await letReactRun(view);
+    await view.waitForFrame((frame) =>
+      frame.includes("The core is not answering"));
+
+    expect(view.frame()).not.toContain("streaming");
     view.client.close();
   });
 });

@@ -28,7 +28,10 @@
  * message nobody could see was missing.
  */
 
-import type { EventName, Mode, Session } from "@comodor/protocol";
+import type { EventName, Mode, ModelResult, Session } from "@comodor/protocol";
+
+/** Which provider and model answer, as the core reports them. */
+export type ModelInfo = ModelResult;
 
 export type Speaker = "you" | "comodor";
 
@@ -160,6 +163,13 @@ export interface Interaction {
 export interface State {
   readonly connection: Connection;
   readonly session?: Session | undefined;
+  /**
+   * What answers this session, as the core last said it — provider, model,
+   * and whether it could respond right now. Populated from `model.get` at
+   * connect and kept current by `model.changed`; absent only on a core too
+   * old to answer, where the header shows nothing rather than a guess.
+   */
+  readonly model?: ModelInfo | undefined;
   readonly lines: readonly Line[];
   readonly tools: readonly ToolRun[];
   /**
@@ -249,6 +259,8 @@ export interface Snapshot {
 
 export type Action =
   | { type: "connected"; session: Session }
+  /** What answers: the `model.get` answer at connect, from the core. */
+  | { type: "modelInfo"; model: ModelInfo }
   | { type: "resynchronising" }
   | { type: "lost"; reason: string }
   /** The person's prompt, before the core has accepted it. */
@@ -268,6 +280,9 @@ export function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "connected":
       return { ...state, connection: { kind: "ready" }, session: action.session };
+
+    case "modelInfo":
+      return { ...state, model: action.model };
 
     case "resynchronising":
       return { ...state, connection: { kind: "resynchronising" } };
@@ -572,6 +587,21 @@ function apply(state: State, name: EventName,
       return {
         ...state,
         session: { ...state.session, mode: params["mode"] as Mode },
+      };
+    }
+
+
+    case "model.changed": {
+      // The core's own announcement after `model.set`, whichever client asked.
+      // A header painted from local state would claim a switch a refusal left
+      // unmade; only this event moves it.
+      return {
+        ...state,
+        model: {
+          provider: String(params["provider"] ?? ""),
+          model: String(params["model"] ?? ""),
+          configured: Boolean(params["configured"]),
+        },
       };
     }
 
