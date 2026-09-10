@@ -12,38 +12,24 @@ or the next one. Not a setting you turn on. Not a file you maintain.
 [![CI](https://github.com/ifekri/Comodor/actions/workflows/ci.yml/badge.svg)](https://github.com/ifekri/Comodor/actions/workflows/ci.yml)
 [![Licence](https://img.shields.io/pypi/l/comodor?color=blue&&labelColor=darkblue)](LICENSE)
 
-<p align="center">
-  <a href="/docs/README.md">
-    <img src="https://img.shields.io/badge/Docs-EN-green?logo=github&logoColor=white&style=plastic&labelColor=darkgreen" alt="English Docs" />
-  </a>
-  <a href="/docs/FA/README.md">
-    <img src="https://img.shields.io/badge/Docs-FA-green?logo=github&logoColor=white&style=plastic&labelColor=darkgreen" alt="Persian (Farsi) Docs" />
-  </a>
-  <a href="/docs/AR/README.md">
-    <img src="https://img.shields.io/badge/Docs-AR-green?logo=github&logoColor=white&style=plastic&labelColor=darkgreen" alt="Arabic Docs">
- </a>
-  <a href="/docs/TR/README.md">
-    <img src="https://img.shields.io/badge/Docs-TR-green?logo=github&logoColor=white&style=plastic&labelColor=darkgreen" alt="Turkish Docs" />
-  </a>
-  <a href="/docs/DE/README.md">
-    <img src="https://img.shields.io/badge/Docs-DE-green?logo=github&logoColor=white&style=plastic&labelColor=darkgreen" alt="Deutsch Docs" />
-  </a>
-  <a href="/docs/ES/README.md">
-    <img src="https://img.shields.io/badge/Docs-ES-green?logo=github&logoColor=white&style=plastic&labelColor=darkgreen" alt="Spanish Docs" />
-  </a>
-  <a href="/docs/RU/README.md">
-    <img src="https://img.shields.io/badge/Docs-RU-green?logo=github&logoColor=white&style=plastic&labelColor=darkgreen" alt="Russian Docs" />
-  </a>
-  <a href="/docs/FR/README.md">
-    <img src="https://img.shields.io/badge/Docs-FR-green?logo=github&logoColor=white&style=plastic&labelColor=darkgreen" alt="French Docs" />
-  </a>
-  <a href="/docs/ZH/README.md">
-    <img src="https://img.shields.io/badge/Docs-ZH-green?logo=github&logoColor=white&style=plastic&labelColor=darkgreen" alt="Zhongwen Docs" />
-  </a>
-</p>
+[![English Documentation](./.github/badget/en.svg "English Docs")](/docs/README.md)
+[![Persian (Farsi) Documentation](./.github/badget/fa.svg "Persian (Farsi) Docs")](/docs/FA/README.md)
+[![Arabic Documentation](./.github/badget/ar.svg "Arabic Docs")](/docs/AR/README.md)
+[![Turkish Documentation](./.github/badget/tr.svg "Turkish Docs")](/docs/TR/README.md)
+[![Deutsch Documentation](./.github/badget/de.svg "Deutsch Docs")](/docs/DE/README.md)
+[![Spanish Documentation](./.github/badget/es.svg "Spanish Docs")](/docs/ES/README.md)
+[![Russian Documentation](./.github/badget/ru.svg "Russian Docs")](/docs/RU/README.md)
+[![French Documentation](./.github/badget/fr.svg "French Docs")](/docs/FR/README.md)
+[![Zhongwen Documentation](./.github/badget/zh.svg "Zhongwen Docs")](/docs/ZH/README.md)
 
+[![Comodor Website](./.github/badget/web.svg "comodor.ai")](https://comodor.ai)
 
-[**comodor.ai**](https://comodor.ai) · [Installation](#install) · [Documentation](docs/README.md 'Comodor Documentation English')
+[![Install On Windows](./.github/badget/win.svg)](#windows 'Install Comodor on Windows')
+[![Install On Mac](./.github/badget/mac.svg)](#linux--macos 'Install Comodor on Mac')
+[![Install On Linux](./.github/badget/linux.svg)](#linux--macos 'Install Comodor on Linux')
+[![Install Comodor with UV](./.github/badget/uv.svg)](#install-with-uv 'Install Comodor with UV')
+[![Install Comodor with PIP](./.github/badget/pip.svg)](#install-with-pip 'Install Comodor with PIP')
+[![Install Comodor with PIPX](./.github/badget/pipx.svg)](#install-with-pipx 'Install Comodor with PIPX')
 
 ---
 
@@ -115,17 +101,15 @@ The whole table, and how to run it against your own model, is in
 Chrome, the PNG encoder for screenshots, the Telegram client — all written here.
 Installing Comodor pulls in `rich` and nothing else.
 
-## Install
+## Install (Recommended)
 
-### Recommended installation
-
-#### Linux / MacOS
+### Linux / MacOS
 
 ```bash
 curl -fsSL get.comodor.ai | sh
 ```
 
-#### Windows (Powershell)
+### Windows
 
 ```bash
 irm get.comodor.ai | iex
