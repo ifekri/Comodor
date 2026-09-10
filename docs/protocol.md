@@ -135,7 +135,7 @@ and a client too old to know them ignores them.
    "result":{"protocol_version":2,
              "core":{"name":"comodor-core","version":"1.2.1"},
              "capabilities":["streaming","questions","permissions","modes",
-                             "tool_events","tasks","delegates"]}}
+                             "tool_events","tasks","delegates","usage"]}}
 ```
 
 A version the core does not speak is refused at this message, with the
@@ -187,17 +187,20 @@ be assumed.
 | `session.get` | one session, authoritatively |
 | `session.snapshot` | the whole visible session, and the sequence number it reaches |
 | `session.list` | every session this core holds |
+| `session.history` | earlier conversations from the shared store, newest first |
+| `session.open` | a stored conversation reopened as a live session — transcript, plan and title restored |
 | `session.send` | that the turn was accepted, and the `turn_id` that names everything it causes |
 | `session.cancel` | whether there was anything to stop |
 | `session.set_mode` | the session, with its new mode |
 | `model.get` / `model.set` | provider, model, and whether it is configured |
+| `model.list` | the models the active provider can name, for a chooser |
 | `workspace.get` | the directory the agent is pointed at |
 | `question.answer` | acknowledgement |
 | `permission.reply` | acknowledgement |
 | `delegate.stop` | whether there was a running background delegate to stop |
 | `shutdown` | acknowledgement, then the core exits |
 
-There are fifteen. The list is short because a method exists when something
+There are eighteen. The list is short because a method exists when something
 calls it — the way to get a hundred speculative operations is to write them
 before anything needs them, and then to keep them working forever.
 
@@ -230,10 +233,18 @@ delegate.updated
 question.requested   question.resolved
 permission.requested permission.resolved
 mode.changed         model.changed       notification.created
+usage.updated
 ```
 
 `message.delta` carries a `channel`, so extended thinking can be shown or
 hidden by name rather than guessed at from the prose.
+
+`usage.updated` carries only the fields the loop actually measured — context
+fill and cost, no estimates: a provider with no honest cost sends no
+`cost_usd` key at all, so a client shows nothing there rather than a guessed
+zero. The latest report also rides the snapshot as `usage`, whole-report
+replacement, because the numbers describe a moment and merging two moments
+would show a fill and a cost that were never true together.
 
 `question.requested` carries a **form** — several questions at once, each with
 its own options and its own `multiple` flag — because that is what the agent

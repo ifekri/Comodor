@@ -69,6 +69,15 @@ export interface CoreClientOptions {
   timeoutMs?: number;
 }
 
+/**
+ * A disconnect listener, registered whenever a client has one drawn.
+ *
+ * `CoreClientOptions.onClosed` exists for the constructor's owner; a UI that
+ * mounts after the client was built needs to subscribe later, or a core that
+ * dies while the screen is idle keeps the screen frozen forever.
+ */
+export type CloseListener = (reason: string) => void;
+
 interface Pending {
   resolve: (result: Record<string, unknown>) => void;
   reject: (problem: Error) => void;
@@ -83,6 +92,7 @@ export class CoreClient {
   private readonly options: CoreClientOptions;
   private readonly pending = new Map<string, Pending>();
   private readonly listeners = new Set<EventListener>();
+  private readonly closeListeners = new Set<CloseListener>();
   private next = 0;
   /** The reader loop. Awaited on close so nothing is still parsing after it. */
   private reading: Promise<void> = Promise.resolve();
@@ -122,6 +132,12 @@ export class CoreClient {
   on(listener: EventListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** The reader ended, at most once, for whoever needs to know now. */
+  onClose(listener: CloseListener): () => void {
+    this.closeListeners.add(listener);
+    return () => this.closeListeners.delete(listener);
   }
 
   /** One request, and the result it is answered with. */
@@ -244,6 +260,14 @@ export class CoreClient {
       this.settle(id).reject(new ProtocolError("internal_error", reason));
     }
     this.options.onClosed?.(reason);
+    for (const listener of this.closeListeners) {
+      try {
+        listener(reason);
+      } catch {
+        // One broken listener must not stop the others, exactly as with
+        // events: a freeze here is how a dead core looks alive.
+      }
+    }
   }
 }
 

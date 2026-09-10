@@ -13,10 +13,13 @@ export const METHODS = [
   "session.get",
   "session.snapshot",
   "session.list",
+  "session.history",
+  "session.open",
   "session.send",
   "session.cancel",
   "session.set_mode",
   "model.get",
+  "model.list",
   "model.set",
   "workspace.get",
   "question.answer",
@@ -46,6 +49,7 @@ export const EVENTS = [
   "mode.changed",
   "model.changed",
   "notification.created",
+  "usage.updated",
 ] as const;
 export type EventName = (typeof EVENTS)[number];
 
@@ -73,6 +77,7 @@ export const CORE_CAPABILITIES = [
   "tool_events",
   "tasks",
   "delegates",
+  "usage",
 ] as const;
 export const CLIENT_CAPABILITIES = [
   "questions",
@@ -292,6 +297,7 @@ export interface SessionSnapshot {
   question?: QuestionRequest;
   permission?: PermissionRequest;
   interactions?: Array<PendingInteraction>;
+  usage?: Usage;
 }
 
 /**
@@ -546,6 +552,50 @@ export interface QuestionAnswer {
   header: string;
   chosen: Array<string>;
   written?: string;
+}
+
+/**
+ * A model chooser's source of truth. `models` is the provider's own list
+ * with the configured model guaranteed present; it is never empty when a
+ * model is configured.
+ */
+export interface ModelListResult {
+  provider: string;
+  model: string;
+  configured?: boolean;
+  models: Array<string>;
+}
+
+/**
+ * How full the context is, and what the conversation has cost so far. Every
+ * field is optional because a provider that cannot measure one still
+ * reports the rest — a local model has no honest cost, and a client must
+ * show nothing rather than invent one.
+ */
+export interface Usage {
+  context_used?: number;
+  context_limit?: number;
+  fill?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cost_usd?: number;
+}
+
+/**
+ * One stored conversation as a picker lists it. No transcript in the list —
+ * that is what `session.open` restores.
+ */
+export interface SessionHistoryEntry {
+  id: string;
+  title?: string;
+  messages: number;
+  updated_at: number;
+  compactions?: number;
+  cost_usd?: number;
+}
+
+export interface SessionHistoryResult {
+  sessions: Array<SessionHistoryEntry>;
 }
 
 /**

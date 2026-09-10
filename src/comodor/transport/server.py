@@ -189,6 +189,8 @@ class Server:
             "session.get": lambda p: {
                 "session": service.get_session(p["session_id"])},
             "session.list": lambda p: {"sessions": service.list_sessions()},
+            "session.history": lambda p: service.history(),
+            "session.open": lambda p: service.open_session(p["session_id"]),
             "session.send": lambda p: service.send(p["session_id"], p["text"]),
             "session.cancel": lambda p: service.cancel(p["session_id"]),
             "session.set_mode": lambda p: {
@@ -196,6 +198,7 @@ class Server:
             "delegate.stop": lambda p: service.stop_delegate(
                 p["session_id"], p["delegate_id"]),
             "model.get": lambda p: service.model(),
+            "model.list": lambda p: service.list_models(),
             "model.set": lambda p: service.set_model(
                 p["model"], str(p.get("provider", ""))),
             "workspace.get": lambda p: service.workspace(),

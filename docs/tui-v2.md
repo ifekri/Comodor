@@ -62,11 +62,12 @@ bun apps/tui/test/bun/measure.tsx              # what it costs
 
 ## What is on the screen
 
-Enough to prove the architecture, and no more.
+The header says where you are and what answers; the footer says what it costs
+and what you can press; the middle is the work.
 
 ```
 ┌──────────────────────────────────────────┬───────────────────────┐
-│ Comodor   ~/work/my-project              │ Agents         1 live │
+│ Comodor   ~/work/my-project  fake-1      │ Agents         1 live │
 │                                          │  ● d1 running    12.3s│
 │  You                                     │    survey the retries │
 │  fix the failing parser test             │ Tasks            2/5  │
@@ -81,14 +82,67 @@ Enough to prove the architecture, and no more.
 │ ▌ask for anything                                                │
 ├──────────────────────────────────────────────────────────────────┤
 │  [ACT]   PLAN    ASK    Reads, writes and runs commands…         │
-│  ● 1 agent   tab Mode   ctrl+b Work   ctrl+k Commands            │
+│ ● 1 agent  tab Mode  ctrl+b Work  ctrl+k Commands      42% ctx  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-A header, the conversation with its tool timeline, the workbench panel, a
-composer, the mode switcher, a footer, a command palette and a question card.
-Not an IDE in a terminal — that is later phases, and building it now would
-mean building it against a protocol nobody had used.
+A header (project, and the provider and model that answer), the conversation
+with its tool timeline, the workbench panel, a composer, the mode switcher, a
+footer with the usage the core reports, a command palette, a question card and
+two pickers — the model chooser and the session picker. Not an IDE in a
+terminal — that is later phases, and building it now would mean building it
+against a protocol nobody had used.
+
+---
+
+## The header and what answers
+
+The right side of the header names the provider and the model the core is
+answering with. It is never a guess from a config file: the client asks
+`model.get` at connect and moves only on the core's own `model.changed`,
+whichever side made the change. A provider with no key is marked, not dropped
+— `(no key)` is how a chooser elsewhere says the same thing — and a core too
+old to answer simply shows nothing.
+
+**Switching is a picker, never a config write.** `ctrl+k` → "Choose the
+model" asks the core for `model.list` at the moment of opening — a catalogue
+is the provider's to change, and a cached list would offer models that no
+longer exist. The query narrows, `↑↓` moves, `Enter` asks, `Esc` closes, and
+a click chooses the row it lands on. A refusal leaves the header alone and
+says why. The model in use opens marked rather than hidden, and a blocking
+prompt outranks the chooser exactly as it outranks the palette.
+
+---
+
+## Earlier conversations
+
+Every session the core serves persists at its turn boundaries into the same
+store the terminal and the browser write to — one store, one account of
+earlier conversations. `ctrl+k` → "Open an earlier conversation" lists the
+store newest-first (title, message count, age); `Enter` reopens it through
+`session.open` with the transcript, the plan and the title restored, and a
+click opens the row it lands on. Reopening the same stored session hands back
+the live one, because two live handlers appending to one transcript file
+would interleave their lines into a record neither said.
+
+A switch is a remount against another session: the composer's draft, the
+workbench cursor, the tool expansions and the scroll position all start
+clean, because none of them is true of the conversation just opened. Work
+that was running when its process died stays `lost` on its own record — an
+open restores what was said, never what was running.
+
+---
+
+## When the core stops answering
+
+A dead core is news, not something the next send trips over: the moment the
+pipe closes, the client is told and the screen says so — what is still true
+(the transcript the core confirmed before it stopped), and what to do next
+(`ctrl+d` quits). A message caught mid-stream does not keep drawing its
+spinner against a dead pipe; the composer stops listening rather than
+accepting input that goes nowhere; and nothing that was in flight is
+preserved as live — a restarted client rebuilds only from the core's
+snapshot, which is the only truth that survives.
 
 ---
 
@@ -380,6 +434,28 @@ order the core lists them in and the one a person expects.
 
 ---
 
+## Terminals that are not generous
+
+The floor is the Rich layout's own: 40×12. Below it the screen says so —
+"Too small — resize to at least 40×12 — ctrl+d Quit" — instead of letting
+columns share cells. A blocking decision outranks the floor: a permission or
+a question the core is waiting on replaces the notice, because a tiny
+terminal cannot be a reason the person cannot answer it. Overlay lists bound
+their rows against the actual height, so a short terminal never pushes the
+hint row off the bottom, and growing past the floor brings the whole screen
+back.
+
+Resizing is not one render that fits: the side panel becomes an overlay, the
+header keeps the model and drops the provider at narrow widths, and a
+permission card measures its header and choices against the columns it has —
+suffixes fall off in the order they matter least rather than wrapping mid-word
+into each other.
+
+Renderer-verified at 160×50, 120×40, 100×30, 80×24, 60×20, at the too-small
+floor, and through a live narrow↔wide resize.
+
+---
+
 ## Colour
 
 Every colour is a semantic token — `surface.raised`, `border.focused`,
@@ -431,46 +507,21 @@ it already ran would run twice.
 
 ## What is not here yet
 
-- **Streaming, tools and recovery are in.** A turn's messages and tools draw
-  interleaved in arrival order, tool output lands under the call that
-  produced it, and a client that remounts rebuilds itself from
-  `session.snapshot` — the same session, not a second one — and continues
-  from the sequence the snapshot names.
-- **A remount restores what was waiting, not just the transcript.** A
-  question the core asked before this client existed is drawn as a form and
-  can be answered — navigation, a written answer and all. A message caught
-  mid-answer comes back as still streaming and keeps taking its deltas. The
-  order of a rebuilt turn is the order it happened in, because both lists are
-  numbered in one domain rather than merged messages-then-tools.
-- **A remount also restores the mode it is aiming from.** Intent starts at
-  the resumed session's confirmed mode, so the first Tab advances from Plan
-  rather than from a default Act. A resync caused by a gap is different and
-  is treated differently: the core's mode is adopted, but an aim the person
-  already had is kept rather than thrown away with the hole in the stream.
-- Rapid mode switching no longer collapses: presses accumulate as *intent*
-  and one coordinator asks the core for the current aim, so a key repeat that
-  outruns the round trip still lands where the last press pointed.
-- **Permission prompts are drawn and answerable.** The card, its keyboard and
-  mouse, the single-reply latch, the failure path, the restoration from a
-  snapshot and the queue behind it are all in, and all renderer-verified. The
-  `permissions` capability this client announces is now one it can honour.
-- Sessions are resumed when the client starts with a session id; automatic
-  reconnection after a lost core is not built yet.
-- **The workbench is in.** Tools draw as bounded cards in the timeline with
-  elapsed time and click-to-expand output; the tasks list and the background
-  delegates draw in a panel that is beside the conversation when there is
-  room and an overlay when there is not; a running delegate can be stopped
-  through the core, and only through the core. A remount restores all of it
-  from the snapshot, `lost` delegates included. What is *not* here: editing
-  the task list (it belongs to the model), pausing or restarting a delegate
-  (the core has no such operation), stopping every delegate at once (one
-  deliberate stop is the surface this client promises), and any history of
-  resolved prompts.
-- No scroll-back search, no file attachment, no slash commands.
+- **Sessions, models and recovery are in.** A picker reopens an earlier
+  conversation by title; a chooser switches the model by name; and a core
+  that dies while you are idle tells you plainly instead of freezing the good
+  state it was showing. A remount reopening a session still restores what was
+  waiting, not just the transcript, exactly as before.
+- No scroll-back search, no file attachment, no slash commands. Session
+  history search is through the store (`Open an earlier conversation` lists
+  every stored title), not through the scroll buffer.
 - A resolved permission leaves no trace. The turn carries on and the tool's
   outcome is in the transcript, but there is no history of who allowed what:
   the core does not retain resolved prompts in a snapshot, and inventing a
   local record would be a client claiming knowledge it does not have.
+- The usage corner shows only what the provider measured. A local model has
+  no honest cost, and showing `$0.00` for "unmeasured" would be a lie of a
+  different kind.
 - Mouse support is partial, and the three states are worth telling apart:
 
   | | |
@@ -483,12 +534,12 @@ it already ran would run twice.
   | A finished tool's heading | clickable, and **verified in the renderer** — opens the output the core still holds, closes it again |
   | A delegate row | clickable, and **verified in the renderer** — selects, and *only* selects: the stop is its own control, verified separately |
   | The workbench's stop control | clickable, and **verified in the renderer** — one click, one `delegate.stop`, and the row still waits for the core's word |
-  | The new-output marker | clickable, **not renderer-verified** |
+  | The new-output marker | clickable, and **verified in the renderer** — it returns to the newest line and follows it again |
+  | The model chooser's rows | clickable, and **verified in the renderer** — a click chooses the row it lands on |
+  | The session picker's rows | clickable, and **verified in the renderer** — a click opens the conversation it lands on |
   | Everything else | no mouse behaviour at all — a message, the composer and the custom-answer field ignore a click |
 
   "Wired" and "proven" are not the same claim, and neither is "proven in the
   renderer" and "proven in a terminal": these run OpenTUI's real renderer
   against synthetic pointer events, which is evidence about the code and not
-  about any particular terminal's mouse reporting. The one handler still
-  unverified goes through the same code path as the `End` key, which is a
-  reason to expect it to work and not evidence that it does.
+  about any particular terminal's mouse reporting.

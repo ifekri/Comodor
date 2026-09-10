@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import copy
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -244,6 +245,15 @@ class SessionHandle:
     #: Held closed until the acceptance for this turn has been written. See
     #: `CoreService.send`.
     _released: threading.Event = field(default_factory=threading.Event)
+    #: How much of the conversation is already on disk, so appending is
+    #: appending rather than writing the whole thing again every turn. A
+    #: session opened from the store starts past its seeded history, which is
+    #: already there.
+    _saved: int = 0
+    #: Which on-disk record this session's turns append to. A reopened session
+    #: keeps the original's id, so the continuation lands in the file a later
+    #: `session.history` lists — not in a new one holding only the tail.
+    store_id: str = ""
     #: Set when the service is closing this session. A turn worker between
     #: turns checks it before delivering a background completion: starting a
     #: fresh agent turn on the way out of the process would run it against
@@ -315,6 +325,12 @@ class CoreService:
         #: handshake narrows it — an embedder calling the verbs directly is
         #: not a client that has declined anything.
         self.client_capabilities: tuple[str, ...] = CLIENT_CAPABILITIES
+        #: Sessions this process opened from the store, stored id → live id.
+        #: Opening the same stored session twice must hand back the live one:
+        #: two live sessions appending to one transcript file would interleave
+        #: their lines into a record neither of them said.
+        self._opened: dict[str, str] = {}
+        self._store_cache: Any = None
 
     def _shared_delegates(self) -> Any:
         """The process's delegate store, created the first time a session needs it."""
@@ -358,6 +374,7 @@ class CoreService:
             assembly=self._assemble(
                 config, delegates=self._shared_delegates().bind(session_id)),
             workspace=str(config.paths.project),
+            store_id=session_id,
         )
         handle._announced_mode = handle.mode
         handle.assembly.bus.subscribe(_relay(self, handle))
@@ -401,6 +418,139 @@ class CoreService:
     def list_sessions(self) -> list[dict[str, Any]]:
         with self._lock:
             return [handle.describe() for handle in self._sessions.values()]
+
+    def _store(self) -> Any:
+        """Where conversations live on disk, shared with the other surfaces.
+
+        The same store the terminal and the web session write to, on purpose:
+        a chat begun on one surface should be openable on another, and two
+        stores would have made every history a list of half the work. Built
+        on first use — a headless run that never persists never creates the
+        directory.
+        """
+        from ..session.store import SessionStore
+
+        with self._lock:
+            if self._store_cache is None:
+                self._store_cache = SessionStore(
+                    self._config.paths.user / "sessions")
+            return self._store_cache
+
+    def _persist(self, handle: SessionHandle) -> None:
+        """Append what the turn added, and update the session's record.
+
+        Called at turn boundaries — the same moments the terminal saves.
+        Persistence failing must not fail the turn: a session that answered
+        is worth more than its record, and the next boundary tries again.
+        """
+        conversation = getattr(handle.assembly, "conversation", None)
+        if conversation is None:
+            return
+        try:
+            from ..session.store import SessionMeta, derive_title
+
+            store = self._store()
+            with handle._lock:
+                messages = list(conversation.messages)
+                saved = handle._saved
+            written = saved
+            for message in messages[saved:]:
+                # The cursor follows the disk, never the other way: a write
+                # that fails mid-list must not drop the remainder from the
+                # record — the next boundary retries from the last line that
+                # actually landed.
+                store.append(handle.store_id, message)
+                written += 1
+            with handle._lock:
+                handle._saved = written
+            meta = store.load_meta(handle.store_id) or SessionMeta(
+                id=handle.store_id, cwd=handle.workspace,
+                provider=str(self._config.provider),
+                model=self._config.active_model() or "")
+            if handle.title:
+                meta.title = handle.title
+            meta.messages = len(messages)
+            meta.updated_at = time.time()
+            if not meta.title:
+                first = next((str(getattr(m, "content", ""))
+                              for m in messages
+                              if str(getattr(getattr(m, "role", ""),
+                                             "value", "") or "") == "user"
+                              and getattr(m, "content", "")), "")
+                meta.title = derive_title(first) if first else ""
+            meta.todos = handle.journal.tasks()
+            usage = getattr(conversation, "usage", None)
+            if usage is not None and getattr(usage, "cost_usd", 0.0):
+                meta.cost_usd = float(usage.cost_usd)
+            store.save_meta(meta)
+        except Exception:  # pragma: no cover - persistence must not kill a turn
+            pass
+
+    def history(self) -> dict[str, Any]:
+        """Earlier conversations, newest first, for a session picker.
+
+        The store's own list — what survived previous processes, not the live
+        sessions this one is serving. A live session somebody is attached to
+        belongs to `session.list`, and the two deliberately do not overlap.
+        """
+        return {"sessions": [
+            {"id": meta.id, "title": meta.title, "messages": meta.messages,
+             "updated_at": meta.updated_at, "compactions": meta.compactions,
+             "cost_usd": meta.cost_usd}
+            for meta in self._store().list_sessions()
+        ]}
+
+    def open_session(self, stored_id: str) -> dict[str, Any]:
+        """Reopen a stored conversation as a live session.
+
+        The transcript, the plan and the title come back; the delegates do
+        not — work that was running when its process died is `lost` on its
+        own record, not revived here. Opening one already open hands back the
+        live session: two live handles appending to one transcript file would
+        interleave their lines into a record neither of them said.
+        """
+        stored_id = str(stored_id)
+        with self._lock:
+            live = self._opened.get(stored_id)
+            if live is not None and live in self._sessions:
+                return {"session": self._sessions[live].describe()}
+
+        store = self._store()
+        messages = store.load(stored_id)
+        if not messages:
+            raise Refused(f"no stored session named {stored_id!r}")
+        meta = store.load_meta(stored_id)
+
+        handle = self.session(self.create_session()["id"])
+        handle.assembly.conversation.extend(messages)
+        # Seeded history is already on disk — persisting starts after it,
+        # and it goes to the record it came from.
+        handle.store_id = stored_id
+        handle._saved = len(handle.assembly.conversation.messages)
+        handle.journal.seed_messages(messages)
+        if meta is not None:
+            handle.title = meta.title
+            if meta.todos:
+                handle.journal.seed_tasks(list(meta.todos))
+                # The person sees the plan in the panel; the model must see
+                # it too, or a resumed session displays a plan its agent
+                # knows nothing about and the next `todo_write` starts from
+                # an empty list.
+                from ..tools.base import TodoItem
+
+                try:
+                    context = handle.assembly.agent._tool_context()
+                except Exception:  # pragma: no cover - a bare assembly has none
+                    context = None
+                if context is not None:
+                    context.todos[:] = [
+                        TodoItem(text=str(item.get("text", "")),
+                                 state=str(item.get("state", "pending")))
+                        for item in meta.todos if item.get("text")
+                    ]
+        with self._lock:
+            self._opened[stored_id] = handle.id
+        return {"session": handle.describe()}
 
     def set_mode(self, session_id: str, mode: str) -> dict[str, Any]:
         """Change what a session may do.
@@ -462,9 +612,13 @@ class CoreService:
                     handle.busy = False
                 self._emit(handle, "session.updated",
                            {"session": handle.describe()})
-            # One turn past its end is the turn boundary: a background
-            # delegate that finished while this turn ran is delivered here,
-            # as turns of its own, never spliced into the one just ended.
+            # One turn past its end is the turn boundary: the same moment
+            # the terminal saves on, so a session opened from the protocol
+            # and one opened from the terminal both survive a crash with at
+            # most the last line missing.
+            self._persist(handle)
+            # And the delivery of any finished background delegates waits
+            # for exactly this boundary too.
             try:
                 self._deliver_completions(handle)
             except Exception:  # pragma: no cover - delivery must not kill the worker
@@ -603,6 +757,9 @@ class CoreService:
                     handle.busy = False
                 self._emit(handle, "session.updated",
                            {"session": handle.describe()})
+            # A completion turn is a turn: it persists at its boundary for
+            # the same reason the person's own turns do.
+            self._persist(handle)
 
     # -- what it answers with ---------------------------------------------- #
 
@@ -641,6 +798,35 @@ class CoreService:
         for handle in self.list_handles():
             self._emit(handle, "model.changed", answer)
         return answer
+
+    def list_models(self) -> dict[str, Any]:
+        """The models a chooser can offer, from the provider's own mouth.
+
+        The active provider is asked for its catalogue; a provider that
+        cannot enumerate — a local server, an offline fake, a network error —
+        yields the configured model alone, so the list is exactly what the
+        core could name and never empty when a model is set. The configured
+        model is always included: a chooser that cannot show the current
+        choice makes the current choice look unavailable.
+
+        Never a key, never a credential: the same rule as `model`.
+        """
+        from ..providers.gateway import Gateway
+
+        current = self.model()
+        names: list[str] = []
+        provider = current["provider"]
+        if provider:
+            try:
+                names = list(Gateway(self._config).provider(provider)
+                             .list_models() or [])
+            except Exception:
+                # A catalogue that cannot be reached is not an error the
+                # chooser can act on: it still gets the model in use.
+                names = []
+        if current["model"] and current["model"] not in names:
+            names = [current["model"], *names]
+        return {**current, "models": names}
 
     def workspace(self) -> dict[str, Any]:
         root = Path(self._config.paths.project)
@@ -953,6 +1139,17 @@ def _relay(service: CoreService, handle: SessionHandle):
             if record is not None:
                 service._emit(handle, "delegate.updated", {
                     "session_id": session_id, "delegate": record})
+        elif kind is Kind.USAGE:
+            # The loop's own numbers, forwarded with the fields it set. A
+            # provider that never reports a cost produces no cost key at all
+            # — a client shows nothing there rather than a guessed $0.00.
+            usage = {field: event.get(field)
+                     for field in ("context_used", "context_limit", "fill",
+                                   "input_tokens", "output_tokens", "cost_usd")
+                     if event.get(field) is not None}
+            if usage:
+                service._emit(handle, "usage.updated",
+                              {"session_id": session_id, **usage})
         elif kind is Kind.REQUEST:
             _relay_request(service, handle, event)
         elif kind is Kind.REQUEST_EXPIRED:

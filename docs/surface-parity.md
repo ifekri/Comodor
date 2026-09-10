@@ -197,3 +197,37 @@ valid findings and account for remaining limitations before requesting merge.
 Creating or updating this PR does not authorize merge.
 
 Agents must not merge or enable auto-merge unless the user separately and explicitly authorizes this exact PR.
+
+## TUI v2 parity status
+
+The question F6 had to answer: **what can the Rich interface do that TUI v2
+cannot?** As of the F6 phase the answer is — nothing required for the default
+interactive workflow.
+
+Normal conversation, modes, questions, permissions, the tool timeline, tasks,
+background agents, scrolling with a truthful new-output marker, model display
+and switching, session history and reopening (against the shared store, so a
+chat begun in the terminal opens in the browser and the reverse), usage and
+context reporting where the provider measures it, terminal floor behaviour,
+and a core that stops answering — all present and renderer-verified. The
+mouse table in [tui-v2](tui-v2.md) says every claimed mouse path is
+renderer-verified rather than merely wired.
+
+Deliberately not ported from Rich, and why:
+
+- **Learning and memory commands** (`/memory`, `/rules`, `/progress`,
+  `/teach`, `/good`, `/bad`, `/journey`, `/skills`, `/mcp`, `/prompt`,
+  `/plugins`) — presentation of Core-side subsystems the protocol does not
+  expose; interactive workflow unblocked.
+- **Progressive enrichment** (`/undo`, `/settings`, `/save`, `/approve`,
+  `/theme`, `/copy`, `/mouse`, `/computer`, `/export`, `/attach`, `/clear`,
+  `/loop`, `/gateway`) — configuration and utility commands; the protocol
+  session remains usable without them and they were judged not to block the
+  default conversation.
+- **Costs across every session** (`/cost` + `/insights`) — superseded in the
+  workflow-relevant part by the live usage corner, which the core reports
+  truthfully where the provider measures anything.
+
+Future, explicitly agreed non-blocking differences: a transcript-side scroll
+search (the store lists every session by title; scrollback itself has a
+truthful new-output marker and no browser-style find-in-page).

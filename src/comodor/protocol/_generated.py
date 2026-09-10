@@ -24,10 +24,13 @@ METHOD_SHAPES: dict[str, tuple[str, str]] = {
     "session.get": ("SessionRef", "SessionResult"),
     "session.snapshot": ("SessionRef", "SnapshotResult"),
     "session.list": ("Empty", "SessionListResult"),
+    "session.history": ("Empty", "SessionHistoryResult"),
+    "session.open": ("SessionRef", "SessionResult"),
     "session.send": ("SessionSendParams", "AcceptedResult"),
     "session.cancel": ("SessionRef", "CancelResult"),
     "session.set_mode": ("SetModeParams", "SessionResult"),
     "model.get": ("Empty", "ModelResult"),
+    "model.list": ("Empty", "ModelListResult"),
     "model.set": ("SetModelParams", "ModelResult"),
     "workspace.get": ("Empty", "WorkspaceResult"),
     "question.answer": ("AnswerParams", "AckResult"),
@@ -58,6 +61,7 @@ EVENT_SHAPES: dict[str, str] = {
     "mode.changed": "ModeChanged",
     "model.changed": "ModelResult",
     "notification.created": "Notification",
+    "usage.updated": "Usage",
 }
 
 EVENTS: frozenset[str] = frozenset(EVENT_SHAPES)
@@ -97,6 +101,7 @@ CORE_CAPABILITIES: tuple[str, ...] = (
     "tool_events",
     "tasks",
     "delegates",
+    "usage",
 )
 CLIENT_CAPABILITIES: tuple[str, ...] = (
     "questions",
@@ -205,6 +210,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "question": ("QuestionRequest", False),
         "permission": ("PermissionRequest", False),
         "interactions": ("list", False),
+        "usage": ("Usage", False),
     },
     "PendingInteraction": {
         "kind": ("InteractionKind", True),
@@ -362,6 +368,31 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "header": ("str", True),
         "chosen": ("list", True),
         "written": ("str", False),
+    },
+    "ModelListResult": {
+        "provider": ("str", True),
+        "model": ("str", True),
+        "configured": ("bool", False),
+        "models": ("list", True),
+    },
+    "Usage": {
+        "context_used": ("int", False),
+        "context_limit": ("int", False),
+        "fill": ("float", False),
+        "input_tokens": ("int", False),
+        "output_tokens": ("int", False),
+        "cost_usd": ("float", False),
+    },
+    "SessionHistoryEntry": {
+        "id": ("str", True),
+        "title": ("str", False),
+        "messages": ("int", True),
+        "updated_at": ("float", True),
+        "compactions": ("int", False),
+        "cost_usd": ("float", False),
+    },
+    "SessionHistoryResult": {
+        "sessions": ("list", True),
     },
 }
 
@@ -573,6 +604,7 @@ class SessionSnapshot(_SessionSnapshotRequired, total=False):
     question: QuestionRequest
     permission: PermissionRequest
     interactions: list[PendingInteraction]
+    usage: Usage
 
 
 class _PendingInteractionRequired(TypedDict):
@@ -874,3 +906,57 @@ class QuestionAnswer(_QuestionAnswerRequired, total=False):
     """
 
     written: str
+
+
+class _ModelListResultRequired(TypedDict):
+    provider: str
+    model: str
+    models: list[str]
+
+
+class ModelListResult(_ModelListResultRequired, total=False):
+    """A model chooser's source of truth. `models` is the provider's own list
+    with the configured model guaranteed present; it is never empty when a
+    model is configured.
+    """
+
+    configured: bool
+
+
+class _UsageRequired(TypedDict):
+    pass
+
+
+class Usage(_UsageRequired, total=False):
+    """How full the context is, and what the conversation has cost so far.
+    Every field is optional because a provider that cannot measure one
+    still reports the rest — a local model has no honest cost, and a
+    client must show nothing rather than invent one.
+    """
+
+    context_used: int
+    context_limit: int
+    fill: float
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+
+
+class _SessionHistoryEntryRequired(TypedDict):
+    id: str
+    messages: int
+    updated_at: float
+
+
+class SessionHistoryEntry(_SessionHistoryEntryRequired, total=False):
+    """One stored conversation as a picker lists it. No transcript in the
+    list — that is what `session.open` restores.
+    """
+
+    title: str
+    compactions: int
+    cost_usd: float
+
+
+class SessionHistoryResult(TypedDict):
+    sessions: list[SessionHistoryEntry]

@@ -15,6 +15,7 @@ import pytest
 
 from comodor import protocol as P
 from comodor.application import CoreService, Refused
+from comodor.events import Kind
 from comodor.transport.jsonl import Channel
 from comodor.transport.server import Server
 
@@ -286,6 +287,64 @@ def test_choosing_a_provider_that_is_not_configured_is_refused(service):
                                             {"model": "x", "provider": "ghost"})]).run()
 
     assert answers[1]["error"]["code"] == P.NOT_ALLOWED
+
+
+def test_the_model_list_names_models_and_never_a_key(service, config):
+    """A chooser asks the core; the answer must be the whole list and no secret."""
+    config.providers["fake"].api_key = "sk-do-not-leak-this"
+    answers = Driver(service, [hello(), call("1", "model.list")]).run()
+    result = answers[1]["result"]
+
+    assert result["provider"] == "fake"
+    assert result["model"] in result["models"]
+    assert result["models"], "a configured model must always be listable"
+    assert "sk-do-not-leak-this" not in json.dumps(answers)
+
+
+def test_the_model_list_survives_a_provider_that_cannot_enumerate(config,
+                                                                  monkeypatch):
+    """A provider whose catalogue is unreachable still yields the model in use.
+
+    A chooser built on "the list is what the provider said" would open empty
+    on exactly the providers people switch models on most — a local server
+    with no /models route. Falling back to the configured model keeps the
+    chooser honest: it can show what answers now, and nothing invented.
+    """
+    from comodor.providers.gateway import Gateway
+
+    def unreachable(self, name):
+        raise ConnectionError("no catalogue here")
+
+    monkeypatch.setattr(Gateway, "provider", unreachable)
+
+    service = CoreService(config)
+    try:
+        service.create_session()
+        answer = service.list_models()
+
+        assert answer["models"] == ["fake-1"]
+        assert answer["model"] == "fake-1"
+    finally:
+        service.close()
+
+
+def test_setting_a_model_announces_it_to_every_session(service):
+    """Two sessions, one switch: both hear `model.changed`.
+
+    A header that only moved for the client that asked would leave every
+    other attached client claiming a model that no longer answers.
+    """
+    seen: list[tuple[str, str]] = []
+    service.on_event = lambda session_id, name, params, seq: \
+        seen.append((session_id, name))
+    first = service.create_session()["id"]
+    second = service.create_session()["id"]
+
+    service.set_model("fake-1")
+
+    changed = {session for session, name in seen if name == "model.changed"}
+    assert changed == {first, second}
+    assert service.model()["model"] == "fake-1"
 
 
 # --------------------------------------------------------------------------- #
@@ -610,3 +669,45 @@ def test_workbench_events_build_valid_envelopes():
     assert delegate["event"] == "delegate.updated"
     assert P.event_shape("delegate.updated") in P._generated.SHAPES
     assert P.event_shape("tasks.updated") in P._generated.SHAPES
+
+    usage = P.event("usage.updated", {"session_id": "s", "fill": 0.4}, 9)
+    assert usage["event"] == "usage.updated"
+    assert P.event_shape("usage.updated") in P._generated.SHAPES
+    assert "usage" in P.CORE_CAPABILITIES
+
+
+def test_usage_is_relayed_and_snapshotted_without_invented_fields(service):
+    """The loop's numbers, not a client's estimate.
+
+    A provider that reports no cost must read as no cost — a $0.00 painted
+    from an absent field would claim free what was merely unmeasured.
+    """
+    session = service.create_session()["id"]
+    handle = service.session(session)
+    handle.assembly.bus.emit(Kind.USAGE, context_used=4_200,
+                             context_limit=100_000, fill=0.42)
+
+    snapshot = service.snapshot(session)
+    assert snapshot["usage"] == {"context_used": 4200,
+                                 "context_limit": 100_000, "fill": 0.42}
+    assert "cost_usd" not in snapshot["usage"], (
+        "an unmeasured cost must stay absent, not become zero")
+
+    # A second report replaces the first rather than merging with it: the two
+    # describe different moments, and merging would invent a pair that was
+    # never true together.
+    handle.assembly.bus.emit(Kind.USAGE, context_used=9_000,
+                             context_limit=100_000, fill=0.09,
+                             cost_usd=0.011)
+    snapshot = service.snapshot(session)
+    assert snapshot["usage"]["context_used"] == 9_000
+    assert snapshot["usage"]["cost_usd"] == 0.011
+
+
+def test_usage_never_names_a_secret(service, config):
+    config.providers["fake"].api_key = "sk-do-not-leak-this"
+    session = service.create_session()["id"]
+    handle = service.session(session)
+    handle.assembly.bus.emit(Kind.USAGE, context_used=1, context_limit=10,
+                             fill=0.1, cost_usd=0.01)
+    assert "sk-do-not-leak-this" not in json.dumps(service.snapshot(session))

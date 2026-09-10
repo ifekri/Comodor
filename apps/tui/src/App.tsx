@@ -71,6 +71,24 @@ import {
 
 import { build, type Screen } from "./commands.ts";
 import {
+  move as moveModel,
+  open as openModels,
+  search as searchModels,
+  selected as selectedModel,
+  window as modelWindow,
+  type ModelPickerState,
+} from "./models.ts";
+import {
+  move as moveSession,
+  open as openSessions,
+  search as searchSessions,
+  selected as selectedSession,
+  when as sessionWhen,
+  window as sessionWindow,
+  type SessionEntry,
+  type SessionPickerState,
+} from "./sessions.ts";
+import {
   move as movePalette,
   open as openPalette,
   search as searchPalette,
@@ -96,6 +114,14 @@ export interface AppProps {
 
 /** Below this the sidebar-free single column is the only thing that fits. */
 const NARROW = 80;
+
+/**
+ * The smallest terminal this screen can stay honest in, the Rich layout's
+ * own floor: narrower or shorter and rows start sharing cells, which is how
+ * a permission's Deny ends up drawn over its Allow.
+ */
+const MIN_WIDTH = 40;
+const MIN_HEIGHT = 12;
 
 /** How many rows a page key moves. Less than a screen, so context carries over. */
 const PAGE = 8;
@@ -156,6 +182,10 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   const [state, dispatch] = useReducer(reduce, initial);
   const [draft, setDraft] = useState("");
   const [palette, setPalette] = useState<PaletteState<Screen> | undefined>();
+  /** The model chooser, while open. The list is the core's, fetched per open. */
+  const [models, setModels] = useState<ModelPickerState | undefined>();
+  /** The session picker, while open. Same fetch-on-open rule as the chooser. */
+  const [sessions, setSessions] = useState<SessionPickerState | undefined>();
   const [question, setQuestion] = useState<FormState | undefined>();
   const [permit, setPermit] = useState<PermissionDraft | undefined>();
   const [intent, setIntent] = useState<ModeIntent>(() => beginIntent("act"));
@@ -173,7 +203,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   /** Which finished tools are clicked open. Presentation, for the same reason. */
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set());
-  const { width } = useTerminalDimensions();
+  const { width, height } = useTerminalDimensions();
 
   const registry = useMemo(() => build(), []);
   const latest = useRef(state);
@@ -200,6 +230,10 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   permitRef.current = permit;
   const paletteRef = useRef(palette);
   paletteRef.current = palette;
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const workbenchRef = useRef(workbench);
   workbenchRef.current = workbench;
   const blockedRef = useRef<Interaction | undefined>(undefined);
@@ -252,11 +286,31 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     let alive = true;
     const stop = client.on((name: EventName, params, seq) => {
       if (!alive) return;
+      // One screen, one session: an event that names another session belongs
+      // to it, and folding it in would mix two conversations on one screen —
+      // the opened session's own delegate finishing while the person reads
+      // the one they switched to is precisely how that happens. Events name
+      // their session as `session_id`, or as the nested `session.id` of a
+      // session.* announcement.
+      const owner = typeof params["session_id"] === "string"
+        ? params["session_id"] as string
+        : typeof (params["session"] as Record<string, unknown> | undefined)
+                  ?.["id"] === "string"
+          ? (params["session"] as Record<string, unknown>)["id"] as string
+          : undefined;
+      const current = latest.current.session?.id;
+      if (owner && current && owner !== current) return;
       dispatch({ type: "event", name, params, seq });
       if (name === "mode.changed") {
         // The core is the authority, and this is it speaking — whoever asked.
         setIntent((was) => intentConfirmed(was, params["mode"] as Mode));
       }
+    });
+    // A dead core is news, not something a send just happens to trip over:
+    // without this the screen would keep showing a state that no longer
+    // exists, accepting input that goes nowhere.
+    const unlost = client.onClose((reason) => {
+      if (alive) dispatch({ type: "lost", reason });
     });
 
     void (async () => {
@@ -270,6 +324,14 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
           dispatch({ type: "connected", session });
           setIntent(beginIntent(session.mode as Mode));
         }
+        // What answers: asked once here, kept current by `model.changed`.
+        // Best-effort — a core that cannot answer it still has a working
+        // session; the header simply shows no model rather than a wrong one.
+        if (!alive) return;
+        const info = await client.call("model.get");
+        if (alive) {
+          dispatch({ type: "modelInfo", model: info as never });
+        }
       } catch (problem) {
         if (alive) {
           dispatch({ type: "lost", reason: (problem as Error).message });
@@ -277,7 +339,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       }
     })();
 
-    return () => { alive = false; stop(); };
+    return () => { alive = false; stop(); unlost(); };
   }, [client, resync, sessionId]);
 
   // What is waiting on the person, in one place.
@@ -522,6 +584,121 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     setWorkbench({ open: true, at });
   }, []);
 
+  /**
+   * Open the model chooser, or say plainly why there is nothing to choose.
+   *
+   * The list is asked of the core at the moment of opening — not cached,
+   * because a catalogue is the provider's to change, and a stale list would
+   * offer models that no longer exist. A core too old to answer, or a
+   * provider that cannot be reached, is told as a notice rather than a dead
+   * key.
+   */
+  const openModelPicker = useCallback(() => {
+    void client.call("model.list")
+      .then((answer) => {
+        const names = Array.isArray(answer["models"])
+          ? (answer["models"] as unknown[]).map((name) => String(name))
+          : [];
+        if (names.length === 0) {
+          dispatch({ type: "event", name: "notification.created", seq: 0,
+                     params: { level: "info",
+                               text: "no models to choose from" } });
+          return;
+        }
+        setPalette(undefined);
+        setModels(openModels(names, String(answer["model"] ?? "")));
+      })
+      .catch((problem: unknown) => {
+        dispatch({ type: "event", name: "notification.created", seq: 0,
+                   params: { level: "warning",
+                             text: (problem as Error).message } });
+      });
+  }, [client]);
+
+  /** Commit the highlighted model. The header moves on `model.changed`. */
+  const chooseModel = useCallback((name: string) => {
+    if (!name) return;
+    setModels(undefined);
+    void client.call("model.set", { model: name })
+      .catch((problem: unknown) => {
+        // A refusal is an answer too: the header keeps the model the core
+        // kept, and the reason is a notice rather than a silent no-op.
+        dispatch({ type: "event", name: "notification.created", seq: 0,
+                   params: { level: "warning",
+                             text: (problem as Error).message } });
+      });
+  }, [client]);
+
+  /**
+   * Open the session picker, or say plainly why there is nothing to open.
+   *
+   * The list is the store's, asked of the core at the moment of opening: the
+   * terminal and the browser write to the same store, so a list cached from
+   * an earlier open could already be wrong.
+   */
+  const openSessionPicker = useCallback(() => {
+    void client.call("session.history")
+      .then((answer) => {
+        const raw = Array.isArray(answer["sessions"])
+          ? (answer["sessions"] as Array<Record<string, unknown>>)
+          : [];
+        if (raw.length === 0) {
+          dispatch({ type: "event", name: "notification.created", seq: 0,
+                     params: { level: "info",
+                               text: "no earlier conversations" } });
+          return;
+        }
+        const entries: SessionEntry[] = raw.map((entry) => ({
+          id: String(entry["id"] ?? ""),
+          title: String(entry["title"] ?? "") || "untitled",
+          messages: Number(entry["messages"] ?? 0),
+          updatedAt: Number(entry["updated_at"] ?? 0),
+        })).filter((entry) => entry.id);
+        setPalette(undefined);
+        setModels(undefined);
+        setSessions(openSessions(entries));
+      })
+      .catch((problem: unknown) => {
+        dispatch({ type: "event", name: "notification.created", seq: 0,
+                   params: { level: "warning",
+                             text: (problem as Error).message } });
+      });
+  }, [client]);
+
+  /**
+   * Reopen the highlighted conversation. A switch is a remount against a
+   * different session: every presentation state that belonged to the old
+   * one's view — draft, cursor, expansions, follow — starts clean, because
+   * none of it is true of the new one.
+   */
+  const openSession = useCallback((entry: SessionEntry) => {
+    setSessions(undefined);
+    void client.call("session.open", { session_id: entry.id })
+      .then(async (answer) => {
+        const session = answer["session"] as Session | undefined;
+        if (!session?.id) return;
+        setDraft("");
+        setWorkbench({ open: false, at: 0 });
+        setExpanded(new Set());
+        setFollow(followStart);
+        // A switch, not a resync: the snapshot belongs to a different session
+        // with its own revision domain, and the staleness guard that keeps a
+        // live session honest would discard it as "old" precisely when the
+        // earlier conversation is the shorter one.
+        dispatch({ type: "resynchronising" });
+        const snapshot = (await client.call("session.snapshot",
+                                            { session_id: session.id }))
+          ["snapshot"] as Snapshot;
+        dispatch({ type: "switched", snapshot });
+        setIntent(beginIntent(snapshot.session.mode as Mode));
+      })
+      .catch((problem: unknown) => {
+        dispatch({ type: "event", name: "notification.created", seq: 0,
+                   params: { level: "warning",
+                             text: (problem as Error).message } });
+      });
+  }, [client]);
+
   const toggleTool = useCallback((id: string) => {
     setExpanded((was) => {
       const next = new Set(was);
@@ -540,7 +717,15 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     busy: () => Boolean(latest.current.session?.busy),
     stepMode: (back: boolean) => setIntent((was) => stepIntent(was, back)),
     wantMode: (mode: Mode) => setIntent((was) => wantMode(was, mode)),
-    openPalette: () => setPalette(openPalette(registry, screenRef.current)),
+    openModels: openModelPicker,
+    openSessions: openSessionPicker,
+    openPalette: () => {
+      // One overlay at a time: a palette over a chooser is two owners of
+      // Enter, and the second one drawn is not the one the keys reach.
+      setModels(undefined);
+      setSessions(undefined);
+      setPalette(openPalette(registry, screenRef.current));
+    },
     closePalette: () => setPalette(undefined),
     paletteOpen: () => Boolean(palette),
     toTail,
@@ -561,8 +746,9 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       return picked && stoppable(picked) ? picked.id : undefined;
     },
     stopDelegate,
-  }), [canWorkbench, client, closeWorkbench, onQuit, openWorkbench, palette,
-       registry, retry, stopDelegate, toTail]);
+  }), [canWorkbench, client, closeWorkbench, onQuit, openModelPicker,
+       openSessionPicker, openWorkbench, palette, registry, retry,
+       stopDelegate, toTail]);
 
   // The commands are given the screen, and opening the palette needs the
   // screen to filter by. A ref breaks that circle without a second object.
@@ -729,6 +915,36 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       return;
     }
 
+    // The model chooser is the palette's sibling: same ownership, same four
+    // keys, and the same rule that it cannot swallow a blocking prompt —
+    // which was already checked above.
+    const chooser = modelsRef.current;
+    if (chooser) {
+      if (named === "escape") { setModels(undefined); return; }
+      if (named === "up") { setModels((was) => was && moveModel(was, -1)); return; }
+      if (named === "down") { setModels((was) => was && moveModel(was, 1)); return; }
+      if (named === "return") {
+        const chosen = selectedModel(chooser);
+        if (chosen) chooseModel(chosen);
+        return;
+      }
+      return;
+    }
+
+    // The session picker shares the chooser's ownership exactly.
+    const picker = sessionsRef.current;
+    if (picker) {
+      if (named === "escape") { setSessions(undefined); return; }
+      if (named === "up") { setSessions((was) => was && moveSession(was, -1)); return; }
+      if (named === "down") { setSessions((was) => was && moveSession(was, 1)); return; }
+      if (named === "return") {
+        const chosen = selectedSession(picker);
+        if (chosen) openSession(chosen);
+        return;
+      }
+      return;
+    }
+
     // The workbench owns four keys while it holds the cursor, and only those
     // four. Everything else falls through to the normal branch — which is
     // what keeps Tab cycling modes (§ the mode bar is not the workbench's)
@@ -767,13 +983,14 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       return;
     }
     if (named === "return") void send();
-  }, [client, closeWorkbench, decide, moveWorkbench, onQuit, registry,
-      runCommand, scrollBy, send, stopDelegate, stopOrQuit]));
+  }, [chooseModel, client, closeWorkbench, decide, moveWorkbench, onQuit,
+      registry, runCommand, scrollBy, send, stopDelegate, stopOrQuit]));
 
   // -- the screen --------------------------------------------------------- //
 
   const mode = (state.session?.mode ?? "act") as Mode;
   const narrow = width < NARROW;
+  const tooSmall = width < MIN_WIDTH || height < MIN_HEIGHT;
   // The side panel takes the Rich interface's own breakpoint: below 100
   // columns two columns stop being worth what they cost the conversation, and
   // the workbench becomes an overlay a key summons and Escape dismisses. At
@@ -784,6 +1001,43 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   const overlay = canWorkbench && width < WIDE && workbench.open;
   const panel = panelWidth(width);
   const conversationWidth = side ? Math.max(40, width - panel - 1) : width;
+  /** Rows an overlay list may spend, by how tall the terminal actually is. */
+  const overlayRows = Math.max(3, Math.min(8, height - 12));
+
+  if (tooSmall) {
+    // Deliberately one thing at a time at this size. A blocking decision is
+    // the one thing that may not be hidden — everything else yields to it —
+    // and with nothing blocking, the honest state is a minimum-size notice
+    // rather than columns sharing cells.
+    if (blocked?.kind === "permission" && permit) {
+      return (
+        <PermissionCard interaction={blocked} draft={permit}
+                        choices={choicesOf(blocked.request)}
+                        waiting={waitingCount(state)} width={width}
+                        onPick={(at) => setPermit((was) => was && { ...was, at })}
+                        onChoose={(choice) => void decide("permission.reply",
+                                                          { choice })} />
+      );
+    }
+    if (blocked?.kind === "question" && question) {
+      return (
+        <QuestionCard question={question} waiting={waitingCount(state)}
+                      width={width} onChange={setQuestion} />
+      );
+    }
+    return (
+      <box style={{ flexDirection: "column", width: "100%", height: "100%",
+                    padding: 1, backgroundColor: theme["surface.base"] }}>
+        <text style={{ fg: theme["semantic.warning"] }}>
+          {clip(`Too small — resize to at least ${MIN_WIDTH}×${MIN_HEIGHT}`,
+                Math.max(8, width - 2))}
+        </text>
+        <text style={{ fg: theme["text.muted"] }}>
+          {clip("ctrl+d Quit", Math.max(8, width - 2))}
+        </text>
+      </box>
+    );
+  }
 
   return (
     <box style={{ flexDirection: "column", width: "100%", height: "100%",
@@ -817,11 +1071,14 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
           ? <QuestionCard question={question} waiting={waitingCount(state)}
                           width={width} onChange={setQuestion} />
           : <Composer value={draft} onChange={setDraft}
-                      busy={Boolean(state.session?.busy)}
-                      blurred={workbench.open} />}
+                      busy={state.connection.kind !== "ready"
+                            || Boolean(state.session?.busy)}
+                      blurred={workbench.open || Boolean(palette || models
+                                                         || sessions)} />}
       <ModeBar mode={mode} intent={intent} narrow={narrow}
                onPick={(picked) => runCommand(`mode.${picked}`)} />
-      <Footer registry={registry} narrow={narrow} state={state} />
+      <Footer registry={registry} narrow={narrow} state={state}
+              usage={advertised.includes("usage")} />
       {overlay
         ? <WorkbenchPanel state={state} width={width}
                           focused selected={workbench.at}
@@ -830,13 +1087,27 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
                           onStop={stopDelegate} />
         : null}
       {palette
-        ? <Palette state={palette}
+        ? <Palette state={palette} rows={overlayRows}
                    onQuery={(text) =>
                      setPalette(searchPalette(registry, screen, text))}
                    onPick={(id) => {
                      setPalette(undefined);
                      runCommand(id);
                    }} />
+        : null}
+      {models
+        ? <ModelPicker state={models} rows={overlayRows}
+                       onQuery={(text) =>
+                         setModels((was) => was && searchModels(
+                           was.all, was.current, text))}
+                       onPick={chooseModel} />
+        : null}
+      {sessions
+        ? <SessionPicker state={sessions} rows={overlayRows}
+                         onQuery={(text) =>
+                           setSessions((was) => was && searchSessions(
+                             was.all, text))}
+                         onPick={openSession} />
         : null}
     </box>
   );
@@ -850,12 +1121,29 @@ function Header({ state, narrow }: { state: State; narrow: boolean }):
     React.ReactNode {
   const where = state.session?.workspace ?? "";
   const shown = narrow ? where.split(/[/\\]/).pop() ?? "" : where;
+  const model = state.model;
+  const engine = model
+    ? narrow ? model.model : `${model.provider} · ${model.model}`
+    : "";
   return (
     <box style={{ flexDirection: "row", height: 1, flexShrink: 0,
                   paddingLeft: 1, paddingRight: 1,
                   backgroundColor: theme["surface.raised"] }}>
       <text style={{ fg: theme["text.primary"] }}>Comodor</text>
       <text style={{ fg: theme["text.muted"] }}>{shown ? `  ${shown}` : ""}</text>
+      {/*
+        Which brain answers is part of knowing where you are. It comes from
+        the core — `model.get` at connect, `model.changed` after that — so the
+        header cannot drift from what is actually answering, including when
+        another client or the core itself made the change. A core too old to
+        answer shows nothing rather than a label it invented.
+      */}
+      {engine
+        ? <text style={{ fg: model?.configured === false
+            ? theme["semantic.warning"] : theme["text.secondary"] }}>
+            {`  ${engine}`}
+          </text>
+        : null}
     </box>
   );
 }
@@ -872,21 +1160,32 @@ function Conversation({ state, scroller, follow, width, expanded,
   onScrolled: () => void;
 }): React.ReactNode {
   if (state.connection.kind !== "ready") {
+    const lost = state.connection.kind === "lost";
     return (
       <box style={{ flexGrow: 1, padding: 1 }}>
-        <text style={{ fg: state.connection.kind === "lost"
-          ? theme["semantic.danger"] : theme["text.secondary"] }}>
-          {/*
-            Three states, three sentences. "Starting the core…" while actually
-            catching up with a session the core already has would be a lie
-            about which of the two ends lost its place.
-          */}
-          {state.connection.kind === "lost"
-            ? `The core is not answering — ${state.connection.reason}`
-            : state.connection.kind === "resynchronising"
-              ? "Catching up with the session…"
-              : "Starting the core…"}
-        </text>
+        {/*
+          Three states, three sentences. "Starting the core…" while actually
+          catching up with a session the core already has would be a lie
+          about which of the two ends lost its place. And a lost core says
+          what is still true — the transcript — and what to do next, because
+          a screen that only blames the pipe leaves the person stuck.
+        */}
+        <box style={{ flexDirection: "column" }}>
+          <text style={{ fg: lost ? theme["semantic.danger"]
+                                   : theme["text.secondary"] }}>
+            {lost
+              ? `The core is not answering — ${state.connection.reason}`
+              : state.connection.kind === "resynchronising"
+                ? "Catching up with the session…"
+                : "Starting the core…"}
+          </text>
+          {lost
+            ? <text style={{ fg: theme["text.muted"] }}>
+                {"The transcript above is everything the core confirmed before it "
+                 + "stopped; work still in flight is gone.   ctrl+d Quit"}
+              </text>
+            : null}
+        </box>
       </box>
     );
   }
@@ -1142,8 +1441,10 @@ function ModeBar({ mode, intent, narrow, onPick }: {
   );
 }
 
-function Footer({ registry, narrow, state }: {
+function Footer({ registry, narrow, state, usage }: {
   registry: ReturnType<typeof build>; narrow: boolean; state: State;
+  /** Whether the core said it will send usage at all — never guessed. */
+  usage: boolean;
 }): React.ReactNode {
   // Printed from the bindings, so a hint cannot outlive the key it names.
   const hints = registry.hints()
@@ -1157,14 +1458,39 @@ function Footer({ registry, narrow, state }: {
   const agents = live > 0 ? `● ${live} agent${live === 1 ? "" : "s"}` : "";
   const shown = [...(busy ? [busy] : []), ...(agents ? [agents] : []),
                  ...hints];
+  // The counters the core reported, on the far side of the row from the keys.
+  // A provider that measures nothing shows nothing: a guessed zero is a lie,
+  // and an absent capability keeps the whole corner empty rather than frozen
+  // at whatever an older screen said.
+  const meter = usage ? usageText(state.usage) : "";
   return (
-    <box style={{ height: 1, flexShrink: 0, paddingLeft: 1,
+    <box style={{ height: 1, flexShrink: 0, paddingLeft: 1, paddingRight: 1,
+                  flexDirection: "row", justifyContent: "space-between",
                   backgroundColor: theme["surface.raised"] }}>
       <text style={{ fg: theme["text.muted"] }}>
         {(narrow ? shown.slice(0, 2) : shown).join("   ")}
       </text>
+      {meter && !narrow
+        ? <text style={{ fg: theme["text.muted"] }}>{meter}</text>
+        : null}
     </box>
   );
+}
+
+/** `42% ctx · $0.14` — only the parts the provider actually measured. */
+function usageText(usage: State["usage"]): string {
+  if (!usage) return "";
+  const parts: string[] = [];
+  if (usage.fill !== undefined) {
+    parts.push(`${Math.round(usage.fill * 100)}% ctx`);
+  } else if (usage.contextUsed !== undefined
+             && usage.contextLimit) {
+    parts.push(`${Math.round(usage.contextUsed / usage.contextLimit * 100)}% ctx`);
+  }
+  if (usage.costUsd !== undefined && usage.costUsd > 0) {
+    parts.push(`$${usage.costUsd.toFixed(2)}`);
+  }
+  return parts.join(" · ");
 }
 
 /** How many lines of a request's detail are worth showing inline. */
@@ -1254,20 +1580,41 @@ function PermissionCard({ interaction, draft, choices, waiting, width, onPick,
                   paddingLeft: 1, paddingRight: 1,
                   borderColor: interaction.state === "failed"
                     ? theme["semantic.danger"] : theme["border.focused"] }}>
-      <box style={{ flexDirection: "row", flexShrink: 0 }}>
-        <text style={{ fg: theme["semantic.warning"] }}>Permission needed</text>
-        {tool
-          ? <text style={{ fg: theme["text.secondary"] }}>{`  ${tool}`}</text>
-          : null}
-        {risk
-          ? <text style={{ fg: riskColour(risk) }}>{`  ${riskLabel(risk)}`}</text>
-          : null}
-        {waiting > 1
-          ? <text style={{ fg: theme["text.muted"] }}>
-              {`  +${waiting - 1} more waiting`}
-            </text>
-          : null}
-      </box>
+      {/*
+        Measured before it is drawn: a wrapping header at a narrow width is
+        how Deny ends up drawn under Allow. Suffixes fall off in the order
+        they matter least — the "+N waiting" count, the risk tier, the tool —
+        and the words that remain always fit the columns they have.
+      */}
+      {(() => {
+        const parts: Array<{ text: string; fg: string }> = [
+          { text: "Permission needed", fg: theme["semantic.warning"] },
+        ];
+        let used = parts[0]!.text.length;
+        const extras: Array<{ text: string; fg: string } | null> = [
+          waiting > 1
+            ? { text: `  +${waiting - 1} more waiting`, fg: theme["text.muted"] }
+            : null,
+          risk ? { text: `  ${riskLabel(risk)}`, fg: riskColour(risk) } : null,
+          tool ? { text: `  ${tool}`, fg: theme["text.secondary"] } : null,
+        ];
+        // Reversed on the way in: the most valuable suffix (the tool) is the
+        // last to fit, which is the first to survive a narrow header.
+        for (const extra of extras.reverse()) {
+          if (!extra) continue;
+          if (used + extra.text.length <= inner) {
+            parts.push(extra);
+            used += extra.text.length;
+          }
+        }
+        return (
+          <text style={{ flexShrink: 0 }}>
+            {parts.map((part) => (
+              <span key={part.text} style={{ fg: part.fg }}>{part.text}</span>
+            ))}
+          </text>
+        );
+      })()}
 
       {title
         ? <text style={{ fg: theme["text.primary"] }}>{clip(title, inner)}</text>
@@ -1283,23 +1630,36 @@ function PermissionCard({ interaction, draft, choices, waiting, width, onPick,
           </text>
         : null}
 
-      <box style={{ flexDirection: "row", flexShrink: 0 }}>
-        {choices.map((choice, index) => (
-          <text key={choice}
-                onMouseDown={() => { onPick(index); onChoose(choice); }}
-                style={{ marginRight: 2,
-                         fg: index === at ? theme["text.primary"]
-                                          : theme["text.muted"] }}>
-            {/* Brackets rather than colour alone: the highlighted choice has
-                to be identifiable in a monochrome terminal. */}
-            {index === at ? `[${choiceLabel(choice)}]` : ` ${choiceLabel(choice)} `}
-          </text>
-        ))}
-      </box>
+      {(() => {
+        // A row of choices that does not fit becomes a list of choices: the
+        // decision has to be visible whole, because a choice clipped at the
+        // edge is one nobody can be sure they are choosing.
+        const stacked = choices
+          .reduce((total, choice) => total + choiceLabel(choice).length + 4, 0)
+          > inner;
+        return (
+          <box style={{ flexDirection: stacked ? "column" : "row",
+                        flexShrink: 0 }}>
+            {choices.map((choice, index) => (
+              <text key={choice}
+                    onMouseDown={() => { onPick(index); onChoose(choice); }}
+                    style={{ marginRight: 2,
+                             fg: index === at ? theme["text.primary"]
+                                              : theme["text.muted"] }}>
+                {/* Brackets rather than colour alone: the highlighted choice has
+                    to be identifiable in a monochrome terminal. */}
+                {clip(index === at ? `[${choiceLabel(choice)}]`
+                                   : ` ${choiceLabel(choice)} `, inner)}
+              </text>
+            ))}
+          </box>
+        );
+      })()}
 
       <text style={{ fg: interaction.state === "failed"
         ? theme["semantic.danger"] : theme["text.secondary"] }}>
-        {permissionStatus(interaction, choices[choices.length - 1] ?? "")}
+        {clip(statusLine(interaction, choices[choices.length - 1] ?? "",
+                         inner), inner)}
       </text>
     </box>
   );
@@ -1325,6 +1685,22 @@ function permissionStatus(interaction: Interaction, fallback: string): string {
   return fallback
     ? `←→ choose   enter confirm   esc ${choiceLabel(fallback)}`
     : "←→ choose   enter confirm";
+}
+
+/**
+ * The hint, sized to the columns it has. The full words go first; past them
+ * the keys themselves stay — an Escape a person cannot discover is an Escape
+ * that does not exist — and only past those does the line clip.
+ */
+function statusLine(interaction: Interaction, fallback: string,
+                    columns: number): string {
+  const full = permissionStatus(interaction, fallback);
+  if (full.length <= columns) return full;
+  if (interaction.state !== "waiting") return full;
+  const short = fallback
+    ? `←→ · enter · esc ${choiceLabel(fallback)}`
+    : "←→ · enter";
+  return short.length <= columns ? short : full;
 }
 
 function QuestionCard({ question, waiting, width, onChange }: {
@@ -1467,12 +1843,13 @@ function hint(many: boolean, custom: boolean, writing: boolean): string {
   return parts.join("   ");
 }
 
-function Palette({ state, onQuery, onPick }: {
+function Palette({ state, rows, onQuery, onPick }: {
   state: PaletteState<Screen>;
+  /** How many result rows the terminal height affords. */
+  rows: number;
   onQuery: (text: string) => void;
   onPick: (id: string) => void;
 }): React.ReactNode {
-  const rows = 8;
   const { from, to } = paletteWindow(state, rows);
   const shown = state.results.slice(from, to);
 
@@ -1505,6 +1882,105 @@ function Palette({ state, onQuery, onPick }: {
         {`↑↓ Move   enter Run   esc Close`
          + (state.results.length > rows
             ? `   ${state.index + 1}/${state.results.length}` : "")}
+      </text>
+    </box>
+  );
+}
+
+/**
+ * Earlier conversations, newest first, as the core's store describes them.
+ * Opening one is a remount against the reopened session: the transcript, the
+ * plan and the title come back from the core, and every presentation state
+ * that belonged to the old conversation starts clean.
+ */
+function SessionPicker({ state, rows, onQuery, onPick }: {
+  state: SessionPickerState;
+  /** How many rows the terminal height affords. */
+  rows: number;
+  onQuery: (text: string) => void;
+  onPick: (entry: SessionEntry) => void;
+}): React.ReactNode {
+  const { from, to } = sessionWindow(state, rows);
+  const shown = state.matches.slice(from, to);
+
+  return (
+    <box style={{ borderStyle: "single", flexDirection: "column",
+                  flexShrink: 0, padding: 1,
+                  borderColor: theme["border.focused"],
+                  backgroundColor: theme["surface.overlay"] }}>
+      <input value={state.query} focused placeholder="type a title"
+             onInput={onQuery} />
+      {shown.map((entry, offset) => {
+        const here = from + offset === state.index;
+        const style = here
+          ? { fg: theme["text.primary"], bg: theme["surface.selected"] }
+          : { fg: theme["text.secondary"] };
+        return (
+          <text key={entry.id} style={{ ...style, flexShrink: 0 }}
+                onMouseDown={() => onPick(entry)}>
+            {`${here ? "›" : " "} ${entry.title}  ·  ${entry.messages} msg  ·  ${sessionWhen(entry.updatedAt)}`}
+          </text>
+        );
+      })}
+      {state.matches.length === 0
+        ? <text style={{ fg: theme["text.muted"] }}>No session matches.</text>
+        : null}
+      <text style={{ fg: theme["text.muted"] }}>
+        {`↑↓ Move   enter Open   esc Close`
+         + (state.matches.length > rows
+            ? `   ${state.index + 1}/${state.matches.length}` : "")}
+      </text>
+    </box>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+
+/**
+ * The model chooser. The list is the core's answer to `model.list`, fetched
+ * when the overlay opens; choosing asks the core, and the header moves only
+ * when `model.changed` says it happened. The current model is marked, not
+ * hidden: picking it again is the no-op it looks like.
+ */
+function ModelPicker({ state, rows, onQuery, onPick }: {
+  state: ModelPickerState;
+  /** How many result rows the terminal height affords. */
+  rows: number;
+  onQuery: (text: string) => void;
+  onPick: (model: string) => void;
+}): React.ReactNode {
+  const { from, to } = modelWindow(state, rows);
+  const shown = state.matches.slice(from, to);
+
+  return (
+    <box style={{ borderStyle: "single", flexDirection: "column",
+                  flexShrink: 0, padding: 1,
+                  borderColor: theme["border.focused"],
+                  backgroundColor: theme["surface.overlay"] }}>
+      <input value={state.query} focused placeholder="type a model"
+             onInput={onQuery} />
+      {shown.map((model, offset) => {
+        const here = from + offset === state.index;
+        // Highlight and word both: the row in use says so, and the row under
+        // the cursor is marked, so neither fact is carried by colour alone.
+        const style = here
+          ? { fg: theme["text.primary"], bg: theme["surface.selected"] }
+          : { fg: theme["text.secondary"] };
+        const current = model === state.current ? "  (current)" : "";
+        return (
+          <text key={model} style={{ ...style, flexShrink: 0 }}
+                onMouseDown={() => onPick(model)}>
+            {`${here ? "›" : " "} ${model}${current}`}
+          </text>
+        );
+      })}
+      {state.matches.length === 0
+        ? <text style={{ fg: theme["text.muted"] }}>No model matches.</text>
+        : null}
+      <text style={{ fg: theme["text.muted"] }}>
+        {`↑↓ Move   enter Choose   esc Close`
+         + (state.matches.length > rows
+            ? `   ${state.index + 1}/${state.matches.length}` : "")}
       </text>
     </box>
   );

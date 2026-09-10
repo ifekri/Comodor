@@ -28,7 +28,24 @@
  * message nobody could see was missing.
  */
 
-import type { EventName, Mode, Session } from "@comodor/protocol";
+import type { EventName, Mode, ModelResult, Session } from "@comodor/protocol";
+
+/** Which provider and model answer, as the core reports them. */
+export type ModelInfo = ModelResult;
+
+/**
+ * One usage report. Every field is optional because the core reports only
+ * what the provider measured: a local model has no honest cost, and a client
+ * shows nothing there rather than a guessed zero.
+ */
+export interface UsageInfo {
+  readonly contextUsed?: number | undefined;
+  readonly contextLimit?: number | undefined;
+  readonly fill?: number | undefined;
+  readonly inputTokens?: number | undefined;
+  readonly outputTokens?: number | undefined;
+  readonly costUsd?: number | undefined;
+}
 
 export type Speaker = "you" | "comodor";
 
@@ -160,6 +177,13 @@ export interface Interaction {
 export interface State {
   readonly connection: Connection;
   readonly session?: Session | undefined;
+  /**
+   * What answers this session, as the core last said it — provider, model,
+   * and whether it could respond right now. Populated from `model.get` at
+   * connect and kept current by `model.changed`; absent only on a core too
+   * old to answer, where the header shows nothing rather than a guess.
+   */
+  readonly model?: ModelInfo | undefined;
   readonly lines: readonly Line[];
   readonly tools: readonly ToolRun[];
   /**
@@ -174,6 +198,13 @@ export interface State {
    * look like a delegate that never existed.
    */
   readonly delegates: readonly Delegate[];
+  /**
+   * The latest usage report the core sent: how full the context is and what
+   * the conversation has cost. Whole-report replacement — the numbers
+   * describe a moment, and merging two moments would show a fill and a cost
+   * that were never true together. Absent on a core too old to send it.
+   */
+  readonly usage?: UsageInfo | undefined;
   /** The most recent notification, shown until the next one replaces it. */
   readonly notice?: { level: string; text: string } | undefined;
   /**
@@ -245,10 +276,14 @@ export interface Snapshot {
     question?: Record<string, unknown>;
     permission?: Record<string, unknown>;
   }>;
+  /** The latest usage report, when the core has sent one. */
+  usage?: Record<string, unknown> | undefined;
 }
 
 export type Action =
   | { type: "connected"; session: Session }
+  /** What answers: the `model.get` answer at connect, from the core. */
+  | { type: "modelInfo"; model: ModelInfo }
   | { type: "resynchronising" }
   | { type: "lost"; reason: string }
   /** The person's prompt, before the core has accepted it. */
@@ -261,6 +296,13 @@ export type Action =
   /** The core refused it. The interaction stays, and stays answerable. */
   | { type: "submitFailed"; id: string; reason: string }
   | { type: "snapshot"; snapshot: Snapshot }
+  /**
+   * A snapshot of a *different* session — the user opened another
+   * conversation. `revision` is per-session, so the staleness guard has no
+   * meaning across the switch: the new session's snapshot replaces the
+   * projection whole, whatever number it carries.
+   */
+  | { type: "switched"; snapshot: Snapshot }
   | { type: "event"; name: EventName; params: Record<string, unknown>;
       seq: number };
 
@@ -268,6 +310,9 @@ export function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "connected":
       return { ...state, connection: { kind: "ready" }, session: action.session };
+
+    case "modelInfo":
+      return { ...state, model: action.model };
 
     case "resynchronising":
       return { ...state, connection: { kind: "resynchronising" } };
@@ -326,6 +371,14 @@ export function reduce(state: State, action: Action): State {
 
     case "snapshot":
       return applySnapshot(state, action.snapshot);
+
+    case "switched":
+      // The staleness guard is scoped to a session's own sequence: a snapshot
+      // of another session is not older state, it is the whole truth of the
+      // one now on screen. Applying it through `applySnapshot` would drop any
+      // reopened session whose revision is smaller than the one being left.
+      return applySnapshot({ ...initial, connection: state.connection },
+                           action.snapshot);
 
     case "event":
       return applyEvent(state, action);
@@ -404,9 +457,31 @@ function applySnapshot(state: State, snapshot: Snapshot): State {
     tasks: restoredTasks(snapshot),
     delegates: restoredDelegates(snapshot),
     interactions: restoredInteractions(snapshot, at),
+    usage: restoredUsage(snapshot),
     revision: snapshot.revision,
     arrivals: at,
     gap: false,
+  };
+}
+
+/** The usage a snapshot carries, or none — mapped field by field. */
+function restoredUsage(snapshot: Snapshot): UsageInfo | undefined {
+  const raw = snapshot.usage;
+  if (!raw) return undefined;
+  return usageOf(raw);
+}
+
+/** One report's fields, converted; absent fields stay absent, not zero. */
+function usageOf(params: Record<string, unknown>): UsageInfo {
+  const number = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return {
+    contextUsed: number(params["context_used"]),
+    contextLimit: number(params["context_limit"]),
+    fill: number(params["fill"]),
+    inputTokens: number(params["input_tokens"]),
+    outputTokens: number(params["output_tokens"]),
+    costUsd: number(params["cost_usd"]),
   };
 }
 
@@ -574,6 +649,24 @@ function apply(state: State, name: EventName,
         session: { ...state.session, mode: params["mode"] as Mode },
       };
     }
+
+
+    case "model.changed": {
+      // The core's own announcement after `model.set`, whichever client asked.
+      // A header painted from local state would claim a switch a refusal left
+      // unmade; only this event moves it.
+      return {
+        ...state,
+        model: {
+          provider: String(params["provider"] ?? ""),
+          model: String(params["model"] ?? ""),
+          configured: Boolean(params["configured"]),
+        },
+      };
+    }
+
+    case "usage.updated":
+      return { ...state, usage: usageOf(params) };
 
     case "message.started": {
       if (!messageId) return state;
