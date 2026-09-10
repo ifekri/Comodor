@@ -473,8 +473,13 @@ def test_a_snapshot_describes_a_session_that_has_run_a_turn(core):
     assert snapshot["messages"][-1]["status"] == "completed"
 
     # A snapshot describes a conversation, not the machine running it. None of
-    # this may cross the protocol, however the session was configured.
+    # this may cross the protocol, however the session was configured. The
+    # token-*count* fields of a usage report are numbers, not credentials —
+    # they pass only by name, while the words themselves stay forbidden.
     body = json.dumps(snapshot)
+    for counter in ("input_tokens", "output_tokens", "cached_tokens",
+                    "written_tokens", "reasoning_tokens"):
+        body = body.replace(f'"{counter}"', '""')
     for forbidden in ("api_key", "providers", "token", "secret", "ANTHROPIC"):
         assert forbidden not in body, f"{forbidden} reached a client"
 

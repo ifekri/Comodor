@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import copy
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -244,6 +245,11 @@ class SessionHandle:
     #: Held closed until the acceptance for this turn has been written. See
     #: `CoreService.send`.
     _released: threading.Event = field(default_factory=threading.Event)
+    #: How much of the conversation is already on disk, so appending is
+    #: appending rather than writing the whole thing again every turn. A
+    #: session opened from the store starts past its seeded history, which is
+    #: already there.
+    _saved: int = 0
     #: Set when the service is closing this session. A turn worker between
     #: turns checks it before delivering a background completion: starting a
     #: fresh agent turn on the way out of the process would run it against
@@ -320,7 +326,7 @@ class CoreService:
         #: two live sessions appending to one transcript file would interleave
         #: their lines into a record neither of them said.
         self._opened: dict[str, str] = {}
-        self._session_store: Any = None
+        self._store_cache: Any = None
 
     def _shared_delegates(self) -> Any:
         """The process's delegate store, created the first time a session needs it."""
@@ -408,7 +414,7 @@ class CoreService:
         with self._lock:
             return [handle.describe() for handle in self._sessions.values()]
 
-    def _session_store(self) -> Any:
+    def _store(self) -> Any:
         """Where conversations live on disk, shared with the other surfaces.
 
         The same store the terminal and the web session write to, on purpose:
@@ -420,10 +426,10 @@ class CoreService:
         from ..session.store import SessionStore
 
         with self._lock:
-            if self._session_store is None:
-                self._session_store = SessionStore(
+            if self._store_cache is None:
+                self._store_cache = SessionStore(
                     self._config.paths.user / "sessions")
-            return self._session_store
+            return self._store_cache
 
     def _persist(self, handle: SessionHandle) -> None:
         """Append what the turn added, and update the session's record.
@@ -438,7 +444,7 @@ class CoreService:
         try:
             from ..session.store import SessionMeta, derive_title
 
-            store = self._session_store()
+            store = self._store()
             with handle._lock:
                 messages = list(conversation.messages)
                 fresh = messages[handle._saved:]
@@ -477,7 +483,7 @@ class CoreService:
             {"id": meta.id, "title": meta.title, "messages": meta.messages,
              "updated_at": meta.updated_at, "compactions": meta.compactions,
              "cost_usd": meta.cost_usd}
-            for meta in self._session_store().list_sessions()
+            for meta in self._store().list_sessions()
         ]}
 
     def open_session(self, stored_id: str) -> dict[str, Any]:
@@ -495,7 +501,7 @@ class CoreService:
             if live is not None and live in self._sessions:
                 return {"session": self._sessions[live].describe()}
 
-        store = self._session_store()
+        store = self._store()
         messages = store.load(stored_id)
         if not messages:
             raise Refused(f"no stored session named {stored_id!r}")
