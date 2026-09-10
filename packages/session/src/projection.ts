@@ -296,6 +296,13 @@ export type Action =
   /** The core refused it. The interaction stays, and stays answerable. */
   | { type: "submitFailed"; id: string; reason: string }
   | { type: "snapshot"; snapshot: Snapshot }
+  /**
+   * A snapshot of a *different* session — the user opened another
+   * conversation. `revision` is per-session, so the staleness guard has no
+   * meaning across the switch: the new session's snapshot replaces the
+   * projection whole, whatever number it carries.
+   */
+  | { type: "switched"; snapshot: Snapshot }
   | { type: "event"; name: EventName; params: Record<string, unknown>;
       seq: number };
 
@@ -364,6 +371,14 @@ export function reduce(state: State, action: Action): State {
 
     case "snapshot":
       return applySnapshot(state, action.snapshot);
+
+    case "switched":
+      // The staleness guard is scoped to a session's own sequence: a snapshot
+      // of another session is not older state, it is the whole truth of the
+      // one now on screen. Applying it through `applySnapshot` would drop any
+      // reopened session whose revision is smaller than the one being left.
+      return applySnapshot({ ...initial, connection: state.connection },
+                           action.snapshot);
 
     case "event":
       return applyEvent(state, action);

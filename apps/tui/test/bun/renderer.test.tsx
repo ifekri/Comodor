@@ -400,6 +400,28 @@ function locate(frame: string, needle: string): { x: number; y: number } {
   throw new Error(`"${needle}" is not on screen:\n${frame}`);
 }
 
+/**
+ * Wait for text the way the wall clock measures it, not render passes.
+ *
+ * `waitForFrame` ends early when the renderer goes quiet — the right call
+ * for a key press, wrong for a multi-hop flow: the pickers ask the core,
+ * then the open asks again, and between the two round trips the renderer is
+ * idle with a frame that predates both. A wall-clock poll still asserts the
+ * content; it just cannot mistake "nothing rendering" for "nothing coming".
+ */
+async function waitForText(view: View, needle: string,
+                           timeoutMs = 5_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const frame = view.frame();
+    if (frame.includes(needle)) return frame;
+    if (Date.now() > deadline) {
+      throw new Error(`"${needle}" never appeared:\n${frame}`);
+    }
+    await Bun.sleep(10);
+  }
+}
+
 // --------------------------------------------------------------------------- //
 
 describe("the interface starts", () => {
@@ -657,10 +679,9 @@ describe("the model chooser", () => {
     await view.waitForVisualIdle();
     view.mockInput.pressEnter();
     // The chooser's list is a round trip: ask the core, then draw. An idle
-    // renderer has no frame to wait on until the answer lands, so the loop
-    // is turned first — waiting on frames alone would time out on nothing.
-    await letReactRun(view);
-    await view.waitForFrame((frame) => frame.includes("type a model"));
+    // renderer has no frame to wait on until the answer lands — a wall-clock
+    // poll cannot mistake "nothing rendering" for "nothing coming".
+    await waitForText(view, "type a model");
 
     const frame = view.frame();
     // Asked when opened — never cached from some earlier run of the overlay.
@@ -682,10 +703,9 @@ describe("the model chooser", () => {
     await view.waitForVisualIdle();
     view.mockInput.pressEnter();
     // The chooser's list is a round trip: ask the core, then draw. An idle
-    // renderer has no frame to wait on until the answer lands, so the loop
-    // is turned first — waiting on frames alone would time out on nothing.
-    await letReactRun(view);
-    await view.waitForFrame((frame) => frame.includes("type a model"));
+    // renderer has no frame to wait on until the answer lands — a wall-clock
+    // poll cannot mistake "nothing rendering" for "nothing coming".
+    await waitForText(view, "type a model");
 
     // The current model opens highlighted; Down picks the row beneath it.
     view.mockInput.pressArrow("down");
@@ -723,10 +743,9 @@ describe("the model chooser", () => {
     await view.waitForVisualIdle();
     view.mockInput.pressEnter();
     // The chooser's list is a round trip: ask the core, then draw. An idle
-    // renderer has no frame to wait on until the answer lands, so the loop
-    // is turned first — waiting on frames alone would time out on nothing.
-    await letReactRun(view);
-    await view.waitForFrame((frame) => frame.includes("type a model"));
+    // renderer has no frame to wait on until the answer lands — a wall-clock
+    // poll cannot mistake "nothing rendering" for "nothing coming".
+    await waitForText(view, "type a model");
     view.mockInput.pressArrow("down");
     await view.flush();
     await view.waitForVisualIdle();
@@ -750,10 +769,9 @@ describe("the model chooser", () => {
     await view.waitForVisualIdle();
     view.mockInput.pressEnter();
     // The chooser's list is a round trip: ask the core, then draw. An idle
-    // renderer has no frame to wait on until the answer lands, so the loop
-    // is turned first — waiting on frames alone would time out on nothing.
-    await letReactRun(view);
-    await view.waitForFrame((frame) => frame.includes("type a model"));
+    // renderer has no frame to wait on until the answer lands — a wall-clock
+    // poll cannot mistake "nothing rendering" for "nothing coming".
+    await waitForText(view, "type a model");
 
     await pressEscape(view);
     await view.waitForVisualIdle();
@@ -773,10 +791,9 @@ describe("the model chooser", () => {
     await view.waitForVisualIdle();
     view.mockInput.pressEnter();
     // The chooser's list is a round trip: ask the core, then draw. An idle
-    // renderer has no frame to wait on until the answer lands, so the loop
-    // is turned first — waiting on frames alone would time out on nothing.
-    await letReactRun(view);
-    await view.waitForFrame((frame) => frame.includes("type a model"));
+    // renderer has no frame to wait on until the answer lands — a wall-clock
+    // poll cannot mistake "nothing rendering" for "nothing coming".
+    await waitForText(view, "type a model");
 
     const at = locate(view.frame(), "qwen3:8b");
     await view.mockMouse.click(at.x, at.y);
@@ -796,10 +813,9 @@ describe("the model chooser", () => {
     await view.waitForVisualIdle();
     view.mockInput.pressEnter();
     // The chooser's list is a round trip: ask the core, then draw. An idle
-    // renderer has no frame to wait on until the answer lands, so the loop
-    // is turned first — waiting on frames alone would time out on nothing.
-    await letReactRun(view);
-    await view.waitForFrame((frame) => frame.includes("type a model"));
+    // renderer has no frame to wait on until the answer lands — a wall-clock
+    // poll cannot mistake "nothing rendering" for "nothing coming".
+    await waitForText(view, "type a model");
 
     await emitRun(view, "permission.requested", { ...PERMISSION });
     expect(view.frame()).toContain("Permission needed");
@@ -3119,7 +3135,7 @@ describe("earlier conversations", () => {
     await view.waitForVisualIdle();
     view.mockInput.pressEnter();
     await letReactRun(view);
-    await view.waitForFrame((frame) => frame.includes("type a title"));
+    await waitForText(view, "type a title");
 
     let frame = view.frame();
     expect(frame).toContain("fix the parser");
@@ -3148,8 +3164,9 @@ describe("earlier conversations", () => {
     await view.flush();
     await view.waitForVisualIdle();
     view.mockInput.pressEnter();
-    await letReactRun(view);
-    await view.waitForVisualIdle();
+    // The empty answer is a round trip too: the notice lands a hop after
+    // the key, so wait on the text rather than on one settled frame.
+    await waitForText(view, "no earlier conversations");
 
     const frame = view.frame();
     expect(frame).toContain("no earlier conversations");
@@ -3168,7 +3185,7 @@ describe("earlier conversations", () => {
     await view.waitForVisualIdle();
     view.mockInput.pressEnter();
     await letReactRun(view);
-    await view.waitForFrame((frame) => frame.includes("type a title"));
+    await waitForText(view, "type a title");
 
     await pressEscape(view);
     await view.waitForVisualIdle();
@@ -3191,16 +3208,86 @@ describe("earlier conversations", () => {
     await view.waitForVisualIdle();
     view.mockInput.pressEnter();
     await letReactRun(view);
-    await view.waitForFrame((frame) => frame.includes("type a title"));
+    await waitForText(view, "type a title");
     view.mockInput.pressEnter();
     await letReactRun(view);
-    await view.waitForFrame((frame) =>
-      frame.includes("the parser drops braces"), MODE_PASSES);
+    await waitForText(view, "the parser drops braces");
 
     // The draft belonged to the conversation it was typed for. Carrying it
     // into another session would send it to the wrong agent.
     const frame = view.frame();
     expect(frame).not.toContain("about the old conversation");
+    view.client.close();
+  });
+
+  test("a shorter stored session opens past a longer live one's revision",
+       async () => {
+    // Revision is per-session: the guard that drops a stale snapshot of the
+    // *same* session must not drop the first snapshot of a *different* one,
+    // or a short stored conversation can never open over a long live one.
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    // Push the live session's sequence well past the stored one's length.
+    for (let at = 1; at <= 6; at++) {
+      await emitRun(view, "message.started",
+                    { turn_id: "t1", message_id: `m${at}` });
+      await emitRun(view, "message.delta",
+                    { turn_id: "t1", message_id: `m${at}`,
+                      text: `live message ${at}\n` });
+      await emitRun(view, "message.completed",
+                    { turn_id: "t1", message_id: `m${at}`,
+                      text: `live message ${at}`, status: "completed" });
+    }
+    stock(view.core as never as Parameters<typeof stock>[0]);
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("earlier");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await waitForText(view, "type a title");
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+
+    // The stored session's snapshot carries revision 2 over a projection
+    // that had reached the teens; it must win, whole.
+    await waitForText(view, "the scanner skips them");
+    expect(view.frame()).not.toContain("live message 1");
+    view.client.close();
+  });
+
+  test("an event from the session left behind does not land on screen",
+       async () => {
+    // `session.open` leaves the first session alive — its worker may still
+    // be finishing when the person is reading the reopened one, and its
+    // events must never mix into the conversation on screen.
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    stock(view.core as never as Parameters<typeof stock>[0]);
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("earlier");
+    await view.flush();
+    await view.waitForVisualIdle();
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await waitForText(view, "type a title");
+    view.mockInput.pressEnter();
+    await letReactRun(view);
+    await waitForText(view, "the parser drops braces");
+
+    // The abandoned session's turn finishing now must not appear.
+    view.core.emit("message.started",
+                   { session_id: "s1", turn_id: "t9", message_id: "stale" });
+    view.core.emit("message.delta",
+                   { session_id: "s1", turn_id: "t9", message_id: "stale",
+                     text: "words from the session you left" });
+    await letReactRun(view);
+
+    const frame = view.frame();
+    expect(frame).not.toContain("words from the session you left");
+    expect(frame).toContain("the scanner skips them");
     view.client.close();
   });
 });

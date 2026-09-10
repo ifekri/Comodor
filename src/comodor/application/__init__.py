@@ -250,6 +250,10 @@ class SessionHandle:
     #: session opened from the store starts past its seeded history, which is
     #: already there.
     _saved: int = 0
+    #: Which on-disk record this session's turns append to. A reopened session
+    #: keeps the original's id, so the continuation lands in the file a later
+    #: `session.history` lists — not in a new one holding only the tail.
+    store_id: str = ""
     #: Set when the service is closing this session. A turn worker between
     #: turns checks it before delivering a background completion: starting a
     #: fresh agent turn on the way out of the process would run it against
@@ -370,6 +374,7 @@ class CoreService:
             assembly=self._assemble(
                 config, delegates=self._shared_delegates().bind(session_id)),
             workspace=str(config.paths.project),
+            store_id=session_id,
         )
         handle._announced_mode = handle.mode
         handle.assembly.bus.subscribe(_relay(self, handle))
@@ -447,14 +452,23 @@ class CoreService:
             store = self._store()
             with handle._lock:
                 messages = list(conversation.messages)
-                fresh = messages[handle._saved:]
-                handle._saved = len(messages)
-            for message in fresh:
-                store.append(handle.id, message)
-            meta = store.load_meta(handle.id) or SessionMeta(
-                id=handle.id, cwd=handle.workspace,
+                saved = handle._saved
+            written = saved
+            for message in messages[saved:]:
+                # The cursor follows the disk, never the other way: a write
+                # that fails mid-list must not drop the remainder from the
+                # record — the next boundary retries from the last line that
+                # actually landed.
+                store.append(handle.store_id, message)
+                written += 1
+            with handle._lock:
+                handle._saved = written
+            meta = store.load_meta(handle.store_id) or SessionMeta(
+                id=handle.store_id, cwd=handle.workspace,
                 provider=str(self._config.provider),
                 model=self._config.active_model() or "")
+            if handle.title:
+                meta.title = handle.title
             meta.messages = len(messages)
             meta.updated_at = time.time()
             if not meta.title:
@@ -509,13 +523,31 @@ class CoreService:
 
         handle = self.session(self.create_session()["id"])
         handle.assembly.conversation.extend(messages)
-        # Seeded history is already on disk — persisting starts after it.
+        # Seeded history is already on disk — persisting starts after it,
+        # and it goes to the record it came from.
+        handle.store_id = stored_id
         handle._saved = len(handle.assembly.conversation.messages)
         handle.journal.seed_messages(messages)
         if meta is not None:
             handle.title = meta.title
             if meta.todos:
                 handle.journal.seed_tasks(list(meta.todos))
+                # The person sees the plan in the panel; the model must see
+                # it too, or a resumed session displays a plan its agent
+                # knows nothing about and the next `todo_write` starts from
+                # an empty list.
+                from ..tools.base import TodoItem
+
+                try:
+                    context = handle.assembly.agent._tool_context()
+                except Exception:  # pragma: no cover - a bare assembly has none
+                    context = None
+                if context is not None:
+                    context.todos[:] = [
+                        TodoItem(text=str(item.get("text", "")),
+                                 state=str(item.get("state", "pending")))
+                        for item in meta.todos if item.get("text")
+                    ]
         with self._lock:
             self._opened[stored_id] = handle.id
         return {"session": handle.describe()}

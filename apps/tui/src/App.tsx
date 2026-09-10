@@ -286,6 +286,20 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
     let alive = true;
     const stop = client.on((name: EventName, params, seq) => {
       if (!alive) return;
+      // One screen, one session: an event that names another session belongs
+      // to it, and folding it in would mix two conversations on one screen —
+      // the opened session's own delegate finishing while the person reads
+      // the one they switched to is precisely how that happens. Events name
+      // their session as `session_id`, or as the nested `session.id` of a
+      // session.* announcement.
+      const owner = typeof params["session_id"] === "string"
+        ? params["session_id"] as string
+        : typeof (params["session"] as Record<string, unknown> | undefined)
+                  ?.["id"] === "string"
+          ? (params["session"] as Record<string, unknown>)["id"] as string
+          : undefined;
+      const current = latest.current.session?.id;
+      if (owner && current && owner !== current) return;
       dispatch({ type: "event", name, params, seq });
       if (name === "mode.changed") {
         // The core is the authority, and this is it speaking — whoever asked.
@@ -660,21 +674,30 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   const openSession = useCallback((entry: SessionEntry) => {
     setSessions(undefined);
     void client.call("session.open", { session_id: entry.id })
-      .then((answer) => {
+      .then(async (answer) => {
         const session = answer["session"] as Session | undefined;
         if (!session?.id) return;
         setDraft("");
         setWorkbench({ open: false, at: 0 });
         setExpanded(new Set());
         setFollow(followStart);
-        void resync(session.id, true);
+        // A switch, not a resync: the snapshot belongs to a different session
+        // with its own revision domain, and the staleness guard that keeps a
+        // live session honest would discard it as "old" precisely when the
+        // earlier conversation is the shorter one.
+        dispatch({ type: "resynchronising" });
+        const snapshot = (await client.call("session.snapshot",
+                                            { session_id: session.id }))
+          ["snapshot"] as Snapshot;
+        dispatch({ type: "switched", snapshot });
+        setIntent(beginIntent(snapshot.session.mode as Mode));
       })
       .catch((problem: unknown) => {
         dispatch({ type: "event", name: "notification.created", seq: 0,
                    params: { level: "warning",
                              text: (problem as Error).message } });
       });
-  }, [client, resync]);
+  }, [client]);
 
   const toggleTool = useCallback((id: string) => {
     setExpanded((was) => {
