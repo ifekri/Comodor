@@ -246,8 +246,6 @@ def test_a_failed_append_retries_the_unwritten_tail(config):
     the next boundary starts from the first line that did not — never past
     it.
     """
-    from comodor.session.store import SessionMeta, SessionStore
-
     service = CoreService(config)
     try:
         session = service.create_session()["id"]
