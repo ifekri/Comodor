@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "comodor"
 dynamic = ["version"]
-description = "Comodor — a self-improving terminal coding agent with a Rich TUI"
+description = "Comodor — a self-improving terminal coding agent with an OpenTUI interface"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
