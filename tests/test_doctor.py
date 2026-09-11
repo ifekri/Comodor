@@ -28,7 +28,8 @@ def home(tmp_path, monkeypatch):
     fake = tmp_path / "bin"
     fake.mkdir()
     bun = fake / ("bun.exe" if os.name == "nt" else "bun")
-    bun.write_text("", encoding="utf-8")
+    bun.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    bun.chmod(0o755)
     monkeypatch.setenv("PATH", f"{fake}{os.pathsep}{os.environ.get('PATH', '')}")
     return tmp_path
 
