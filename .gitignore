@@ -30,6 +30,14 @@ next-env.d.ts
 npm-debug.log*
 CLAUDE.md
 dist/
+# The production TUI renderer is a deliberate, generated, committed artifact
+# under this one path: the wheel is built from the repository, so the bundle
+# and its manifest are versioned. Rebuild with
+# `bun tools/build-tui-distribution.ts`; never edit those files by hand.
+!src/comodor/tui/dist/
+# Its OpenTUI native backend ships inside the artifact — the one directory
+# named node_modules that is deliberately tracked.
+!src/comodor/tui/dist/node_modules/
 __sample
 
 TODO
