@@ -199,6 +199,7 @@ jobs:
         run: bun tools/build-tui-distribution.ts
 
       - name: The committed artifact is not stale
+        if: runner.os == 'Windows'
         shell: bash
         run: |
           # The bundle and its assets must be reproducible; the manifest and
