@@ -70,7 +70,30 @@ async function main(): Promise<number> {
     await client.close();
   };
 
-  root.render(<App client={client} onQuit={() => { void leave(); }} />);
+  // Reopening an earlier conversation is the core's to perform; the client
+  // only names which. The launcher passes it through the environment because
+  // that is the one channel a spawned process shares with its launcher.
+  // `COMODOR_RESUME` empty means "the newest there is".
+  let resumed: string | undefined;
+  const wanted = process.env["COMODOR_RESUME"];
+  if (wanted !== undefined) {
+    try {
+      const id = wanted
+        || ((await client.call("session.history"))["sessions"] as
+              Array<{ id: string }>)[0]?.id;
+      if (id) {
+        const answer = await client.call("session.open", { session_id: id });
+        resumed = String(
+          ((answer["session"] ?? {}) as Record<string, unknown>)["id"] ?? "");
+      }
+    } catch (problem) {
+      process.stderr.write(
+        `comodor: could not reopen that session — ${(problem as Error).message}\n`);
+    }
+  }
+
+  root.render(<App client={client} onQuit={() => { void leave(); }}
+                   sessionId={resumed} />);
 
   await new Promise<void>((resolve) => {
     const finish = (): void => { void leave().then(resolve); };

@@ -165,3 +165,93 @@ jobs:
 
       - name: What it costs
         run: bun apps/tui/test/bun/measure.tsx
+
+  packaged:
+    name: Installed package on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: python -m pip install --upgrade pip && pip install build
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # The production artifact is built from the checkout, so the wheel the
+      # next step builds cannot silently ship yesterday's renderer.
+      - run: npm ci
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Build the production TUI artifact
+        run: bun tools/build-tui-distribution.ts
+
+      - name: The committed artifact is not stale
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # The bundle and its assets must be reproducible; the manifest and
+          # the native backend differ per platform by definition, so they are
+          # outside this comparison — `comodor doctor` verifies them instead.
+          git status --porcelain -- src/comodor/tui/dist/ ':(exclude)src/comodor/tui/dist/manifest.json' ':(exclude)src/comodor/tui/dist/node_modules' | tee stale.txt
+          test ! -s stale.txt || (echo "src/comodor/tui/dist is stale: rebuild it with bun tools/build-tui-distribution.ts and commit the result" && exit 1)
+
+      - name: Build the wheel and the sdist
+        run: python -m build
+
+      - name: Install the wheel into a clean environment
+        shell: bash
+        run: |
+          python -m venv smoke-venv
+          WHEEL=$(ls dist/*.whl | head -1)
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            smoke-venv/Scripts/python -m pip install "$WHEEL"
+          else
+            smoke-venv/bin/python -m pip install "$WHEEL"
+          fi
+
+      # The default interface is the packaged renderer: these run from a
+      # directory that is not the checkout, against the wheel just installed,
+      # so a renderer that only exists in the repo cannot pass them.
+      - name: The installed package answers from outside the checkout
+        shell: bash
+        run: |
+          mkdir -p somewhere-else && cd somewhere-else
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            PY="../smoke-venv/Scripts/python"
+          else
+            PY="../smoke-venv/bin/python"
+          fi
+          COMODOR_HOME="$PWD/home" $PY -m comodor --version
+          COMODOR_HOME="$PWD/home" $PY -m comodor --help > /dev/null
+          COMODOR_HOME="$PWD/home" $PY -m comodor doctor > doctor.txt || true
+          grep -q "renderer from the package" doctor.txt
+
+      - name: The installed demo starts the packaged renderer
+        shell: bash
+        run: |
+          cd somewhere-else
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            PY="../smoke-venv/Scripts/python"
+          else
+            PY="../smoke-venv/bin/python"
+          fi
+          # The probe is a checked-in script rather than a string built
+          # here: it has to kill a process tree and read output through
+          # files, and both of those deserve a comment and a test rather
+          # than a printf. See tools/smoke-installed-demo.py for why pipes
+          # hung this step for six hours on Windows.
+          COMODOR_HOME="$PWD/home" $PY ../tools/smoke-installed-demo.py
+

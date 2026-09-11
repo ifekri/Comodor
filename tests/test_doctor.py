@@ -21,6 +21,16 @@ from comodor.doctor import Status, apply_fixes, run_checks
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("COMODOR_HOME", str(tmp_path / "home"))
     (tmp_path / "project").mkdir(parents=True, exist_ok=True)
+    # The default interface needs Bun; these tests are about everything else.
+    # A fake on the path keeps "no problems here" a statement about the
+    # machine under test rather than about whether CI installed a renderer
+    # runtime into the Python job.
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    bun = fake / ("bun.exe" if os.name == "nt" else "bun")
+    bun.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    bun.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}{os.pathsep}{os.environ.get('PATH', '')}")
     return tmp_path
 
 

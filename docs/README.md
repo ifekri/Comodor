@@ -60,7 +60,7 @@ ends with the agent doing something useful.
 |---|---|
 | [The application architecture](app-architecture.md) | Where the boundary between the core and an interface is drawn, and why |
 | [The protocol](protocol.md) | What a core and a client say to each other, in one versioned contract |
-| [TUI v2](tui-v2.md) | The new terminal interface: OpenTUI, React, and what it needs to run |
+| [The terminal interface](tui-v2.md) | The OpenTUI/React interface: what it needs to run, and what is on it |
 | [The desktop application](desktop-architecture.md) | Planned, not built — and what the core must already be true for |
 
 ### When something is wrong

@@ -97,9 +97,13 @@ The whole table, and how to run it against your own model, is in
 | **Works with any model** | Sixteen hosted providers and three local runtimes, or anything with an OpenAI-compatible URL. [→](docs/models.md) |
 | **Costs less** | 86% of input tokens served from cache, measured — not estimated. [→](docs/cost.md) |
 
-**One dependency.** The HTTP client, the SSE reader, the WebSocket that drives
-Chrome, the PNG encoder for screenshots, the Telegram client — all written here.
-Installing Comodor pulls in `rich` and nothing else.
+**One Python dependency.** The HTTP client, the SSE reader, the WebSocket that
+drives Chrome, the PNG encoder for screenshots, the Telegram client — all
+written here. Installing Comodor pulls in `rich` and nothing else; the terminal
+interface itself is shipped inside the package and needs only
+[Bun](https://bun.sh) on the machine that runs it (the renderer binds native
+code through `bun:ffi`). `comodor doctor` reports the Bun state plainly, and
+`comodor legacy` is the interface that does not need it.
 
 ## Install (Recommended)
 
@@ -181,8 +185,9 @@ Published to both [Docker Hub](https://hub.docker.com/r/ifekri/comodor)
 Full details, including how to reach it from another machine safely:
 [Docker](docs/docker.md).
 
-Then `comodor`. Python 3.11 or newer. Six questions the first time, never
-again.
+Then `comodor`. Python 3.11 or newer, and [Bun](https://bun.sh) for the
+interface itself (one install, `curl -fsSL https://bun.sh/install | bash` or
+your platform's package manager). Six questions the first time, never again.
 
 **No API key?** `comodor --demo` runs the whole interface offline. Or pick a
 local model in the setup and pay nothing, ever.

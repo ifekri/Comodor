@@ -1,21 +1,38 @@
-# TUI v2
+# The terminal interface
 
-The new terminal interface: OpenTUI, React and TypeScript, driving a Python
-core over [the protocol](protocol.md).
-
-**It does not replace anything yet.** `comodor` is still the Rich interface,
-and remains so until this one is proven at parity. A migration that swaps the
-default first is one where every gap is found by somebody trying to work.
+The terminal interface: OpenTUI, React and TypeScript, driving a Python core
+over [the protocol](protocol.md). Since F7 it is what `comodor` runs.
 
 ```sh
-comodor tui-v2          # from a source checkout
+comodor                 # the interface
+comodor --demo          # the same, against a scripted offline provider
+comodor tui-v2          # kept as a compatibility alias for the same thing
 ```
 
-A first run with no provider configured asks the same setup questions `comodor`
-asks — in the same invocation, before the renderer, through the same setup path
-— and starts only once they are answered. It will not spawn a core that has
-nothing to talk to; cancelling setup leaves nothing started. This does not make
-`comodor tui-v2` the default, which is still `comodor`.
+A first run with no provider configured asks the same setup questions `comodor
+setup` asks — in the same invocation, before the renderer, through the same
+setup path — and starts only once they are answered. It will not spawn a core
+that has nothing to talk to; cancelling setup leaves nothing started.
+
+The launcher checks its own requirements before it asks anything: that a
+renderer is present and, for an installed package, whole (the same manifest
+and native-backend check `comodor doctor` makes), and that the Bun on the path
+is 1.3 or newer. A machine that fails one of those is told so first, rather
+than after answering the setup questions.
+
+The previous interface is still present as `comodor legacy` for compatibility,
+and will be removed in a later release. It asks the same first-run questions
+on a fresh machine. Nothing about the default falls back to it silently: a
+machine that cannot run the renderer is told so, not quietly handed the other
+interface.
+
+### What the installed package carries
+
+The renderer is not fetched at runtime. The wheel and the sdist ship a
+pre-built production artifact — `comodor/tui/dist` inside the Python package —
+which `comodor` launches through `importlib.resources`, from any working
+directory, without Node or npm being involved at all. The one external
+requirement is Bun, below.
 
 ---
 
@@ -470,11 +487,13 @@ maps the same names to CSS variables.
 ## Lifecycle
 
 ```text
-comodor tui-v2
+comodor            # or `comodor tui-v2`, the same launcher kept as an alias
+  → renderer artifact, then Bun — checked before any setup question is asked
+  → canonical setup, only if the configuration does not answer yet
   → spawn `comodor core --stdio`
   → client.hello, and refuse to proceed on a version mismatch
   → take the terminal only after the handshake
-  → session.create
+  → session.create  (or `session.open`, when --resume names one)
   → render
   → on quit: unmount, release the terminal, shutdown the core
 ```

@@ -1042,7 +1042,7 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   return (
     <box style={{ flexDirection: "column", width: "100%", height: "100%",
                   backgroundColor: theme["surface.base"] }}>
-      <Header state={state} narrow={narrow} />
+      <Header state={state} width={width} />
       <box style={{ flexDirection: "row", flexGrow: 1, flexShrink: 1 }}>
         <box style={{ flexDirection: "column", flexGrow: 1, flexShrink: 1 }}>
           <Conversation state={state} scroller={scroller} follow={follow}
@@ -1117,14 +1117,23 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
 // pieces
 // --------------------------------------------------------------------------- //
 
-function Header({ state, narrow }: { state: State; narrow: boolean }):
+function Header({ state, width }: { state: State; width: number }):
     React.ReactNode {
+  const narrow = width < NARROW;
   const where = state.session?.workspace ?? "";
-  const shown = narrow ? where.split(/[/\\]/).pop() ?? "" : where;
   const model = state.model;
   const engine = model
     ? narrow ? model.model : `${model.provider} · ${model.model}`
     : "";
+  // The path gives way; the model does not. One row holds a name, a path
+  // and which brain is answering, and when they do not all fit it is the
+  // path that is elided from the left — its tail is the part a person
+  // recognises. Cutting from the right, which is what overflow did, took
+  // the end off the model label instead and showed `comodor-` for
+  // `comodor-demo`: a wrong name, not a shortened one.
+  const room = width - 2 - "Comodor".length - 2
+    - (engine ? Array.from(engine).length + 2 : 0);
+  const shown = elide(narrow ? where.split(/[/\\]/).pop() ?? "" : where, room);
   return (
     <box style={{ flexDirection: "row", height: 1, flexShrink: 0,
                   paddingLeft: 1, paddingRight: 1,
@@ -1146,6 +1155,14 @@ function Header({ state, narrow }: { state: State; narrow: boolean }):
         : null}
     </box>
   );
+}
+
+/** `text`, or its tail behind an ellipsis when it is longer than `room`. */
+function elide(text: string, room: number): string {
+  const glyphs = Array.from(text);
+  if (glyphs.length <= room) return text;
+  if (room < 4) return "";
+  return `…${glyphs.slice(glyphs.length - (room - 1)).join("")}`;
 }
 
 function Conversation({ state, scroller, follow, width, expanded,
