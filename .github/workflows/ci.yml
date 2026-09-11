@@ -165,3 +165,88 @@ jobs:
 
       - name: What it costs
         run: bun apps/tui/test/bun/measure.tsx
+
+  packaged:
+    name: Installed package on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: python -m pip install --upgrade pip && pip install build
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # The production artifact is built from the checkout, so the wheel the
+      # next step builds cannot silently ship yesterday's renderer.
+      - run: npm ci
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Build the production TUI artifact
+        run: bun tools/build-tui-distribution.ts
+
+      - name: The committed artifact is not stale
+        shell: bash
+        run: |
+          git status --porcelain src/comodor/tui/dist/ | tee stale.txt
+          test ! -s stale.txt || (echo "src/comodor/tui/dist is stale: rebuild it with bun tools/build-tui-distribution.ts and commit the result" && exit 1)
+
+      - name: Build the wheel and the sdist
+        run: python -m build
+
+      - name: Install the wheel into a clean environment
+        shell: bash
+        run: |
+          python -m venv smoke-venv
+          WHEEL=$(ls dist/*.whl | head -1)
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            smoke-venv/Scripts/python -m pip install "$WHEEL"
+          else
+            smoke-venv/bin/python -m pip install "$WHEEL"
+          fi
+
+      # The default interface is the packaged renderer: these run from a
+      # directory that is not the checkout, against the wheel just installed,
+      # so a renderer that only exists in the repo cannot pass them.
+      - name: The installed package answers from outside the checkout
+        shell: bash
+        run: |
+          mkdir -p somewhere-else && cd somewhere-else
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            PY="../smoke-venv/Scripts/python"
+          else
+            PY="../smoke-venv/bin/python"
+          fi
+          COMODOR_HOME="$PWD/home" $PY -m comodor --version
+          COMODOR_HOME="$PWD/home" $PY -m comodor --help > /dev/null
+          COMODOR_HOME="$PWD/home" $PY -m comodor doctor > doctor.txt || true
+          grep -q "renderer from the package" doctor.txt
+
+      - name: The installed demo starts the packaged renderer
+        shell: bash
+        run: |
+          cd somewhere-else
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            PY="../smoke-venv/Scripts/python"
+          else
+            PY="../smoke-venv/bin/python"
+          fi
+          # A TUI needs a terminal; a piped stdin is a closed one, and a
+          # closed stdin is a session over — which is also a healthy exit.
+          COMODOR_HOME="$PWD/home" timeout 60 $PY -m comodor --demo < /dev/null > demo.out 2>&1
+          grep -aq "Comodor" demo.out
+          grep -aq "comodor-demo" demo.out
+

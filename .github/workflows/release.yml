@@ -165,6 +165,24 @@ jobs:
         run: |
           python -m pip install --upgrade pip build twine
 
+      # The production TUI artifact is committed for the wheel and sdist to
+      # carry; a release wheel must render on every supported platform, so
+      # the backends the commit's own platform did not have are fetched at
+      # the lockfile's pinned version before packaging. Build-time only:
+      # runtime never downloads anything.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - run: npm ci
+
+      - name: Build the production TUI artifact for every platform
+        run: bun tools/build-tui-distribution.ts --platforms all
+
       - name: Build sdist and wheel
         run: python -m build
 
