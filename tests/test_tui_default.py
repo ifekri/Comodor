@@ -66,13 +66,17 @@ def test_the_legacy_command_reaches_the_previous_interface(spy, config):
     assert spy["tui"] is None
 
 
-def test_a_subcommand_never_reaches_an_interface(spy, config):
+def test_a_subcommand_never_reaches_an_interface(spy, config, monkeypatch):
     """`comodor run` and friends bypass both interfaces entirely."""
     called: list[str] = []
 
-    import comodor.cli as module
-
-    module.run_headless = lambda cfg, args: called.append("run") or 0
+    # Through `monkeypatch`, so it is undone. A bare assignment here leaked
+    # into every test that ran after it on the same xdist worker, and
+    # `test_headless.py` — which reads `run_headless`'s source and drives the
+    # real one — then failed on whichever platform's scheduling put it
+    # second. That is what a "flaky on macOS and 3.12" failure was.
+    monkeypatch.setattr(cli, "run_headless",
+                        lambda cfg, args: called.append("run") or 0)
     code = cli.main(["--cwd", str(config.paths.project), "run", "do a thing"])
 
     assert code == 0
@@ -142,6 +146,7 @@ def test_the_spawned_core_is_this_interpreter_and_gets_the_flags(
     assert not config.needs_setup
 
     monkeypatch.setattr(runtime, "bun", lambda: "/fake/bun")
+    monkeypatch.setattr(runtime, "bun_version", lambda executable: (1, 4))
     monkeypatch.setattr(runtime, "checkout_entry",
                         lambda: config.paths.project / "main.tsx")
     monkeypatch.setattr(runtime, "packaged_dist", lambda: None)
@@ -173,3 +178,65 @@ def test_the_spawned_core_is_this_interpreter_and_gets_the_flags(
     assert "--no-loop" in args
     # The workspace is the project, never the artifact's own directory.
     assert seen["cwd"] == str(config.paths.project)
+
+
+def test_bare_command_does_not_run_setup_before_the_launcher(spy, config,
+                                                             monkeypatch):
+    """Runtime checks first, then setup — and the launcher owns both.
+
+    `main()` used to run the setup questions for the bare command before the
+    launcher was reached, so a fresh machine without Bun answered everything
+    and was refused afterwards. Now a configuration that still needs setup
+    goes to the launcher as it is, and the launcher decides the order.
+    """
+    monkeypatch.setattr(type(config), "needs_setup",
+                        property(lambda self: True))
+
+    def forbidden(cfg):
+        raise AssertionError("main() ran setup before the launcher")
+
+    monkeypatch.setattr("comodor.setup.run_setup", forbidden)
+
+    code = cli.main(["--cwd", str(config.paths.project)])
+
+    assert code == 0
+    assert spy["tui"] is config, "the launcher received the unconfigured config"
+
+
+def test_the_legacy_command_still_gets_first_run_setup(spy, config, monkeypatch):
+    """`comodor legacy` on a fresh machine asks before starting.
+
+    It returned above the only setup block, so the previous interface came up
+    with no provider — and a machine without Bun is sent exactly there.
+    """
+    asked: list[str] = []
+    # Fresh until setup has run once, which is what the real property says.
+    monkeypatch.setattr(type(config), "needs_setup",
+                        property(lambda self: not asked))
+
+    def setup(cfg):
+        asked.append("setup")
+        return cfg
+
+    monkeypatch.setattr("comodor.setup.run_setup", setup)
+
+    code = cli.main(["--cwd", str(config.paths.project), "legacy"])
+
+    assert code == 0
+    assert asked == ["setup"]
+    assert spy["legacy"] is config
+
+
+def test_legacy_stops_when_setup_is_cancelled(spy, config, monkeypatch):
+    monkeypatch.setattr(type(config), "needs_setup",
+                        property(lambda self: True))
+
+    def cancelling(cfg):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("comodor.setup.run_setup", cancelling)
+
+    code = cli.main(["--cwd", str(config.paths.project), "legacy"])
+
+    assert code == 130
+    assert spy["legacy"] is None, "a cancelled setup must not start an interface"

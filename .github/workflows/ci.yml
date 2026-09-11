@@ -248,23 +248,10 @@ jobs:
           else
             PY="../smoke-venv/bin/python"
           fi
-          # A TUI needs a terminal; a piped stdin is a closed one, and a
-          # closed stdin is a session over — which is also a healthy exit.
-          # Python enforces the bound itself, because `timeout` is GNU-only
-          # and macOS has no coreutils.
-          printf '%s\n' \
-            'import subprocess, sys' \
-            'try:' \
-            '    done = subprocess.run([sys.executable, "-m", "comodor", "--demo"],' \
-            '                          stdin=subprocess.DEVNULL, capture_output=True, timeout=60)' \
-            'except subprocess.TimeoutExpired:' \
-            '    raise SystemExit(0)' \
-            'out = (done.stdout or b"") + (done.stderr or b"")' \
-            'if b"Comodor" not in out:' \
-            '    raise SystemExit("no interface was drawn at all")' \
-            'if b"comodor-demo" not in out:' \
-            '    raise SystemExit("the demo provider never reached the header")' \
-            'print("installed demo: ok")' \
-            > demo_check.py
-          COMODOR_HOME="$PWD/home" $PY demo_check.py
+          # The probe is a checked-in script rather than a string built
+          # here: it has to kill a process tree and read output through
+          # files, and both of those deserve a comment and a test rather
+          # than a printf. See tools/smoke-installed-demo.py for why pipes
+          # hung this step for six hours on Windows.
+          COMODOR_HOME="$PWD/home" $PY ../tools/smoke-installed-demo.py
 
