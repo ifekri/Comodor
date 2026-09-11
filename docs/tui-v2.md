@@ -14,10 +14,17 @@ setup` asks — in the same invocation, before the renderer, through the same
 setup path — and starts only once they are answered. It will not spawn a core
 that has nothing to talk to; cancelling setup leaves nothing started.
 
+The launcher checks its own requirements before it asks anything: that a
+renderer is present and, for an installed package, whole (the same manifest
+and native-backend check `comodor doctor` makes), and that the Bun on the path
+is 1.3 or newer. A machine that fails one of those is told so first, rather
+than after answering the setup questions.
+
 The previous interface is still present as `comodor legacy` for compatibility,
-and will be removed in a later release. Nothing about the default falls back
-to it silently: a machine that cannot run the renderer is told so, not quietly
-handed the other interface.
+and will be removed in a later release. It asks the same first-run questions
+on a fresh machine. Nothing about the default falls back to it silently: a
+machine that cannot run the renderer is told so, not quietly handed the other
+interface.
 
 ### What the installed package carries
 

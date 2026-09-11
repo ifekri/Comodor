@@ -134,6 +134,10 @@ def checkout_with_tui(monkeypatch):
     if not ENTRY.exists():
         pytest.skip("tui-v2 launcher tests run from a source checkout")
     monkeypatch.setattr("shutil.which", lambda name: "/fake/bun")
+    # A fake executable answers no `--version`; the launcher now asks, so
+    # the fake must answer with one it accepts.
+    monkeypatch.setattr("comodor.tui.runtime.bun_version",
+                        lambda executable: (1, 4))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
 
@@ -273,3 +277,80 @@ def test_tui_v2_still_refuses_without_bun(tmp_path, monkeypatch):
     monkeypatch.setattr("comodor.setup.run_setup", forbidden)
 
     assert commands.run_tui(config, argparse.Namespace()) == 2
+
+
+def test_tui_v2_refuses_a_bun_older_than_the_minimum(tmp_path, monkeypatch):
+    """Present is not enough; `bun:ffi` is what the renderer needs.
+
+    A Bun below `MIN_BUN` used to be accepted and failed inside the bundled
+    JavaScript. The refusal comes before setup, like the missing-Bun one.
+    """
+    if not ENTRY.exists():
+        pytest.skip("tui-v2 launcher tests run from a source checkout")
+    from comodor.tui import runtime
+
+    config = a_fresh_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("shutil.which", lambda name: "/fake/bun")
+    below = (runtime.MIN_BUN[0], runtime.MIN_BUN[1] - 1)
+    monkeypatch.setattr("comodor.tui.runtime.bun_version",
+                        lambda executable: below)
+
+    def forbidden(cfg):
+        raise AssertionError("setup was offered though Bun is too old")
+
+    monkeypatch.setattr("comodor.setup.run_setup", forbidden)
+    spawned: list[int] = []
+    monkeypatch.setattr("subprocess.call",
+                        lambda *a, **k: spawned.append(1) or 0)
+
+    assert commands.run_tui(config, argparse.Namespace()) == 2
+    assert spawned == []
+
+
+def test_tui_v2_refuses_a_bun_whose_version_cannot_be_read(tmp_path, monkeypatch):
+    if not ENTRY.exists():
+        pytest.skip("tui-v2 launcher tests run from a source checkout")
+    config = a_fresh_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("shutil.which", lambda name: "/fake/bun")
+    monkeypatch.setattr("comodor.tui.runtime.bun_version",
+                        lambda executable: None)
+    spawned: list[int] = []
+    monkeypatch.setattr("subprocess.call",
+                        lambda *a, **k: spawned.append(1) or 0)
+
+    assert commands.run_tui(config, argparse.Namespace()) == 2
+    assert spawned == []
+
+
+def test_a_broken_packaged_renderer_is_refused_before_bun_is_spawned(
+        tmp_path, monkeypatch, capsys):
+    """The check `doctor` makes, made by the launcher too.
+
+    `renderer()` hands back an artifact that cannot run here on purpose, so
+    the refusal can say what is wrong with it. The launcher has to actually
+    say it; before this it spawned Bun and let the renderer fail instead.
+    """
+    from comodor.tui import runtime
+
+    config = a_fresh_config(tmp_path, monkeypatch)
+    config.use("ollama", model="qwen2.5-coder:14b")
+    config.save()
+    config = load(cwd=config.paths.project, use_environment=False)
+
+    broken = tmp_path / "dist"
+    broken.mkdir()
+    (broken / runtime.ENTRY_NAME).write_text("// not the bundle", encoding="utf-8")
+    monkeypatch.setattr(runtime, "renderer", lambda: (broken, "package"))
+    monkeypatch.setattr("shutil.which", lambda name: "/fake/bun")
+    monkeypatch.setattr("comodor.tui.runtime.bun_version",
+                        lambda executable: (1, 4))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    spawned: list[int] = []
+    monkeypatch.setattr("subprocess.call",
+                        lambda *a, **k: spawned.append(1) or 0)
+
+    assert commands.run_tui(config, argparse.Namespace()) == 2
+    assert spawned == [], "a renderer known to be broken must not be started"
+    said = capsys.readouterr().err
+    assert "manifest" in said, "the refusal names what is wrong"

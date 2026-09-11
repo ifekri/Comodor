@@ -83,6 +83,41 @@ def run_tui(config: Config, args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
 
+    # Present is not enough. `bun:ffi` arrived in 1.3, and a Bun older than
+    # that gets as far as the bundled JavaScript before failing inside it —
+    # a stack trace from the renderer, where a sentence from here was
+    # possible. Unreadable is treated the same way: a `bun --version` that
+    # cannot be parsed is not one the renderer has been proven on.
+    found = tui_runtime.bun_version(executable)
+    wanted = ".".join(str(part) for part in tui_runtime.MIN_BUN)
+    if found is None or found < tui_runtime.MIN_BUN:
+        have = ".".join(str(part) for part in found) if found else "unknown"
+        print(f"comodor needs Bun {wanted} or newer to draw the interface; "
+              f"the one on the path ({executable}) reports {have}.\n\n"
+              "  Upgrade it — `bun upgrade`, or https://bun.sh — then run "
+              "`comodor` again.\n\n"
+              "Meanwhile, `comodor legacy` runs the terminal interface that "
+              "does not need it.",
+              file=sys.stderr)
+        return 2
+
+    if origin == "package":
+        # The same check `comodor doctor` makes, made before anything is
+        # spawned. An installed artifact can be incomplete — a wheel built
+        # for another platform, a file that did not survive the install —
+        # and `renderer()` hands such an artifact back on purpose so the
+        # refusal can name what is wrong with it, rather than starting Bun
+        # and letting the renderer discover the same thing less clearly.
+        problems = tui_runtime.verify(target)
+        if problems:
+            listed = "\n".join(f"  - {problem}" for problem in problems)
+            print("comodor: the packaged renderer cannot run on this "
+                  f"machine.\n\n{listed}\n\n"
+                  "Reinstall Comodor to repair it. Meanwhile, `comodor "
+                  "legacy` runs the terminal interface that does not need it.",
+                  file=sys.stderr)
+            return 2
+
     if config.needs_setup:
         from ..setup import run_setup
 

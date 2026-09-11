@@ -1101,6 +1101,14 @@ def main(argv: list[str] | None = None) -> int:
         # The previous interface, deliberately one command deep rather than a
         # flag on the default: choosing it is a decision somebody makes, not
         # a state they can leave on.
+        #
+        # It still gets the first-run questions. This returned early, above
+        # the only setup block, and a fresh machine sent here — which is
+        # exactly where a machine without Bun is sent — started the previous
+        # interface with no provider and failed on the first message.
+        config, stopped = first_run(config)
+        if stopped is not None:
+            return stopped
         return start_interface(config, args)
     if args.command == "memory-provider":
         from .learning.providers.commands import run as run_memory_provider
@@ -1131,27 +1139,38 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         return run_headless(config, args)
 
-    if config.needs_setup:
-        # Nothing usable is configured, so ask rather than print an error and
-        # leave the user to find the documentation. This is the whole first-run
-        # experience: a few questions, then straight into the interface.
-        from .setup import run_setup
-
-        try:
-            config = run_setup(config)
-        except (KeyboardInterrupt, EOFError):
-            print("\nSetup cancelled. Run `comodor setup` when you are ready, "
-                  "or `comodor --demo` to look around offline.", file=sys.stderr)
-            return 130
-        if config.needs_setup:
-            return 1
-
-    # The default route is the production interface. `comodor legacy` reaches
-    # the previous one through `start_interface` below; everything else here
-    # was a named subcommand and has already returned.
+    # The default route is the production interface, and it is handed the
+    # configuration as found. The launcher owns the first run: it checks its
+    # own requirements — a renderer, a Bun that is new enough — and only then
+    # asks the setup questions. Asking them here first, as this used to,
+    # meant a fresh machine without Bun answered everything and was refused
+    # afterwards, which is the order the launcher exists to prevent.
     from .transport.commands import run_tui
 
     return run_tui(config, args)
+
+
+def first_run(config: Config) -> tuple[Config, int | None]:
+    """The first-run questions, if the configuration still needs them.
+
+    Returns the configuration to continue with and `None`, or the exit code
+    to stop with. Nothing usable being configured is answered by asking,
+    rather than by printing an error and leaving the person to find the
+    documentation: a few questions, then straight into an interface.
+    """
+    if not config.needs_setup:
+        return config, None
+    from .setup import run_setup
+
+    try:
+        config = run_setup(config)
+    except (KeyboardInterrupt, EOFError):
+        print("\nSetup cancelled. Run `comodor setup` when you are ready, "
+              "or `comodor --demo` to look around offline.", file=sys.stderr)
+        return config, 130
+    if config.needs_setup:
+        return config, 1
+    return config, None
 
 
 def start_interface(config: Config, args: Any = None) -> int:
