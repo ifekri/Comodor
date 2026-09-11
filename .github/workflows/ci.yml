@@ -250,7 +250,21 @@ jobs:
           fi
           # A TUI needs a terminal; a piped stdin is a closed one, and a
           # closed stdin is a session over — which is also a healthy exit.
-          COMODOR_HOME="$PWD/home" timeout 60 $PY -m comodor --demo < /dev/null > demo.out 2>&1
-          grep -aq "Comodor" demo.out
-          grep -aq "comodor-demo" demo.out
+          # Python enforces the bound itself, because `timeout` is GNU-only
+          # and macOS has no coreutils.
+          printf '%s\n' \
+            'import subprocess, sys' \
+            'try:' \
+            '    done = subprocess.run([sys.executable, "-m", "comodor", "--demo"],' \
+            '                          stdin=subprocess.DEVNULL, capture_output=True, timeout=60)' \
+            'except subprocess.TimeoutExpired:' \
+            '    raise SystemExit(0)' \
+            'out = (done.stdout or b"") + (done.stderr or b"")' \
+            'if b"Comodor" not in out:' \
+            '    raise SystemExit("no interface was drawn at all")' \
+            'if b"comodor-demo" not in out:' \
+            '    raise SystemExit("the demo provider never reached the header")' \
+            'print("installed demo: ok")' \
+            > demo_check.py
+          COMODOR_HOME="$PWD/home" $PY demo_check.py
 
