@@ -277,8 +277,11 @@ class FakeCore implements Transport {
     else this.queued.push(line);
   }
 
+  /** The workspace the session reports. A test lengthens it to crowd the header. */
+  workspace = "/work/project";
+
   session() {
-    return { id: "s1", mode: this.mode, workspace: "/work/project",
+    return { id: "s1", mode: this.mode, workspace: this.workspace,
              busy: this.busy };
   }
 
@@ -965,6 +968,29 @@ describe("at every width", () => {
       view.client.close();
     });
   }
+
+  test("a long workspace path gives way to the model, not the reverse", async () => {
+    // What the installed-package smoke hit: at 80 columns, with a path a
+    // few characters too long, the header ran out of room on the right and
+    // the model read `comodor-` instead of `comodor-demo`. The path is the
+    // part that can be shortened without becoming a different fact.
+    const core = new FakeCore();
+    core.model = "comodor-demo";
+    core.workspace = "/home/somebody/.local/share/tmp/a-rather-long-name/somewhere-else";
+    const client = new CoreClient(core, { timeoutMs: 5_000 });
+    await client.start();
+    const view = await testRender(
+      <App client={client} onQuit={() => {}} />, { width: 80, height: 24 });
+    await view.flush();
+    await view.waitForFrame((frame) => frame.includes("comodor-demo"));
+
+    const header = view.captureCharFrame().split("\n")[0] ?? "";
+    expect(header).toContain("fake · comodor-demo");
+    expect(header).toContain("…");
+    expect(header).toContain("somewhere-else");
+    expect(header.length).toBeLessThanOrEqual(80);
+    client.close();
+  });
 
   test("resizing keeps the composer and the mode on screen", async () => {
     const view = await screen(160, 30);

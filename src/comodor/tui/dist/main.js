@@ -71366,7 +71366,7 @@ function App({ client, onQuit, sessionId }) {
     children: [
       /* @__PURE__ */ import_jsx_dev_runtime2.jsxDEV(Header, {
         state,
-        narrow
+        width
       }, undefined, false, undefined, this),
       /* @__PURE__ */ import_jsx_dev_runtime2.jsxDEV("box", {
         style: { flexDirection: "row", flexGrow: 1, flexShrink: 1 },
@@ -71465,11 +71465,13 @@ function App({ client, onQuit, sessionId }) {
     ]
   }, undefined, true, undefined, this);
 }
-function Header({ state, narrow }) {
+function Header({ state, width }) {
+  const narrow = width < NARROW;
   const where = state.session?.workspace ?? "";
-  const shown = narrow ? where.split(/[/\\]/).pop() ?? "" : where;
   const model = state.model;
   const engine = model ? narrow ? model.model : `${model.provider} \xB7 ${model.model}` : "";
+  const room = width - 2 - "Comodor".length - 2 - (engine ? Array.from(engine).length + 2 : 0);
+  const shown = elide(narrow ? where.split(/[/\\]/).pop() ?? "" : where, room);
   return /* @__PURE__ */ import_jsx_dev_runtime2.jsxDEV("box", {
     style: {
       flexDirection: "row",
@@ -71494,6 +71496,14 @@ function Header({ state, narrow }) {
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
+}
+function elide(text, room) {
+  const glyphs = Array.from(text);
+  if (glyphs.length <= room)
+    return text;
+  if (room < 4)
+    return "";
+  return `\u2026${glyphs.slice(glyphs.length - (room - 1)).join("")}`;
 }
 function Conversation({
   state,
