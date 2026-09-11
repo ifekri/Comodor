@@ -165,7 +165,9 @@ def build_parser() -> argparse.ArgumentParser:
                                        "printed when this is not given")
 
     preview = sub.add_parser("preview",
-                             help="render the interface at a given size and exit")
+                             help="render the legacy interface at a given size "
+                                  "and exit (the default interface has no "
+                                  "static preview — `comodor --demo` runs it)")
     preview.add_argument("size", nargs="?", default="120x34", help="WIDTHxHEIGHT")
     preview.add_argument("--svg", help="also write an SVG to this path")
     preview.add_argument("--busy", action="store_true",
@@ -1011,6 +1013,23 @@ def main(argv: list[str] | None = None) -> int:
 
     config = apply_overrides(load_config(args.cwd), args)
 
+    # Demo mode is a contract, not a launcher's private patch: the production
+    # interface spawns the core as a second process, and the only way that
+    # process knows it is running offline is in the environment. Both the
+    # flag and the variable land here, before any dispatch, so `comodor --demo`,
+    # `comodor --demo run ...` and the spawned core all see the same scripted
+    # provider.
+    import os
+
+    if getattr(args, "demo", False) or os.environ.get("COMODOR_DEMO"):
+        from .config import ProviderConfig
+
+        config.providers["fake"] = ProviderConfig(
+            name="fake", kind="fake", base_url="offline", api_key="demo",
+            model="comodor-demo", label="Demo (offline)", configured=True)
+        config.provider = "fake"
+        config.model = "comodor-demo"
+
     if args.command == "doctor":
         return run_doctor(config, fix=getattr(args, "fix", False))
     if args.command == "update":
@@ -1078,6 +1097,11 @@ def main(argv: list[str] | None = None) -> int:
         from .transport.commands import run_tui
 
         return run_tui(config, args)
+    if args.command == "legacy":
+        # The previous interface, deliberately one command deep rather than a
+        # flag on the default: choosing it is a decision somebody makes, not
+        # a state they can leave on.
+        return start_interface(config, args)
     if args.command == "memory-provider":
         from .learning.providers.commands import run as run_memory_provider
 
@@ -1107,15 +1131,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         return run_headless(config, args)
 
-    if args.demo:
-        from .config import ProviderConfig
-
-        config.providers["fake"] = ProviderConfig(
-            name="fake", kind="fake", base_url="offline", api_key="demo",
-            model="comodor-demo", label="Demo (offline)", configured=True)
-        config.provider = "fake"
-        config.model = "comodor-demo"
-    elif config.needs_setup:
+    if config.needs_setup:
         # Nothing usable is configured, so ask rather than print an error and
         # leave the user to find the documentation. This is the whole first-run
         # experience: a few questions, then straight into the interface.
@@ -1130,16 +1146,23 @@ def main(argv: list[str] | None = None) -> int:
         if config.needs_setup:
             return 1
 
-    return start_interface(config, args)
+    # The default route is the production interface. `comodor legacy` reaches
+    # the previous one through `start_interface` below; everything else here
+    # was a named subcommand and has already returned.
+    from .transport.commands import run_tui
+
+    return run_tui(config, args)
 
 
 def start_interface(config: Config, args: Any = None) -> int:
-    """Confirm the folder, then hand over to the interface.
+    """Start the previous terminal interface, after confirming the folder.
 
-    A function of its own because two paths end here: `comodor` with nothing
-    else to do, and `comodor setup` when its closing question was answered with
-    "start it". `getattr` throughout, because the second of those comes from a
-    subcommand parser that has never heard of `--resume`.
+    A function of its own because two paths end here: `comodor legacy`, and
+    `comodor setup` when its closing question was answered with "start it" —
+    the setup flow predates the production interface and still hands over to
+    the interface it was written against. `getattr` throughout, because the
+    second of those comes from a subcommand parser that has never heard of
+    `--resume`.
     """
     # Which directory is this about? Asked once per folder, before the agent
     # exists — the project root is worked out by walking upwards, and the

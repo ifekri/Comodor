@@ -110,6 +110,7 @@ def run_checks(config: Config, online: bool = True) -> Report:
               _check_api,
               _check_memory_provider,
               _check_desktop,
+              _check_tui_runtime,
               _check_github,
               _check_telegram, _check_whatsapp, _check_slack]
     if online:
@@ -683,6 +684,54 @@ def _check_desktop(config: Config) -> Finding | None:
                        "restart it")
 
     return Finding("computer use", Status.OK, "a backend is present")
+
+
+def _check_tui_runtime(config: Config) -> Finding:
+    """Can the default interface start here at all?
+
+    `comodor` with no command is the OpenTUI screen; a machine that cannot
+    start it finds out on launch rather than after answering setup. The two
+    things that must be true are checked, and neither is guessed from "it
+    worked once": the Bun executable is found and its version read, and the
+    renderer artifact this package carries is verified against the manifest
+    that was written when it was built.
+    """
+    from .tui import runtime
+
+    executable = runtime.bun()
+    if executable is None:
+        return Finding(
+            "tui runtime", Status.WARN,
+            "no `bun` on PATH — `comodor` cannot draw the default interface",
+            remedy="install Bun from https://bun.sh (the `legacy` interface "
+                   "does not need it)")
+
+    version = runtime.bun_version(executable)
+    if version is not None and version < runtime.MIN_BUN:
+        return Finding(
+            "tui runtime", Status.WARN,
+            f"Bun {'.'.join(str(part) for part in version)} is older than "
+            f"the {'.'.join(str(part) for part in runtime.MIN_BUN)} the "
+            "renderer requires",
+            remedy="upgrade Bun: https://bun.sh")
+
+    target, origin = runtime.renderer()
+    if target is None:
+        return Finding(
+            "tui renderer", Status.FAIL,
+            "no renderer is available in this install",
+            remedy="reinstall Comodor, or run from a source checkout")
+    if origin == "package":
+        problems = runtime.verify(target)
+        if problems:
+            return Finding(
+                "tui renderer", Status.FAIL,
+                "; ".join(problems[:2]) + ("…" if len(problems) > 2 else ""),
+                remedy="reinstall Comodor — the packaged renderer does not "
+                       "match what it shipped as")
+    return Finding("tui runtime", Status.OK,
+                   f"Bun {'.'.join(str(part) for part in version or ())}, "
+                   f"renderer from the {origin}")
 
 
 def _check_github(config: Config) -> Finding | None:

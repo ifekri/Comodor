@@ -125,10 +125,17 @@ ENTRY = (Path(commands.__file__).resolve().parents[3]
 
 @pytest.fixture
 def checkout_with_tui(monkeypatch):
-    """The launcher needs apps/tui present and Bun on the path. Both faked."""
+    """The launcher needs apps/tui present, Bun on the path, and a terminal.
+
+    The terminal is faked the same way the renderer is: these tests are about
+    the launcher's order of operations, and the non-TTY refusal is its own
+    behavior with its own test below.
+    """
     if not ENTRY.exists():
         pytest.skip("tui-v2 launcher tests run from a source checkout")
     monkeypatch.setattr("shutil.which", lambda name: "/fake/bun")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
 
 
 def a_fresh_config(tmp_path, monkeypatch):
@@ -166,6 +173,30 @@ def test_tui_v2_runs_setup_before_spawning_a_core_on_a_fresh_machine(
     assert rc == 0
     assert events == ["setup", "spawn"], \
         "setup must complete before the core is spawned, in one invocation"
+
+
+def test_a_pipeline_is_refused_before_any_renderer(tmp_path, monkeypatch):
+    """A bare launch with no terminal is a refusal, not escape codes in a pipe.
+
+    The demo path is the deliberate exception — it is the scripted smoke —
+    and everything else gets a sentence and an exit code.
+    """
+    config = a_fresh_config(tmp_path, monkeypatch)
+    config.use("ollama", model="qwen2.5-coder:14b")
+    config.save()
+    config = load(cwd=config.paths.project, use_environment=False)
+    monkeypatch.setattr("shutil.which", lambda name: "/fake/bun")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+
+    forbidden: list[str] = []
+    monkeypatch.setattr("subprocess.call",
+                        lambda *a, **k: forbidden.append("spawned"))
+
+    rc = commands.run_tui(config, argparse.Namespace())
+
+    assert rc == 2
+    assert forbidden == []
 
 
 def test_tui_v2_launches_directly_when_already_configured(
