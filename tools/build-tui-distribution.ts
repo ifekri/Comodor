@@ -123,6 +123,21 @@ async function main(): Promise<void> {
     cpSync(nativeSrc, nativeOut, { recursive: true });
   }
 
+  // The bundle must be identical on every OS that builds it: a Windows build
+  // that writes CRLF and a Linux build that writes LF would disagree on the
+  // same source, which is exactly what the staleness check exists to catch.
+  // Only the text is normalized — a .wasm under that rule is not normalized,
+  // it is corrupted.
+  for (const name of readdirSync(OUT).filter((name) =>
+      statSync(join(OUT, name)).isFile()
+      && /\.(js|scm)$/.test(name))) {
+    const path = join(OUT, name);
+    const raw = require("node:fs").readFileSync(path);
+    const normalized = Buffer.from(
+      raw.toString("binary").replace(/\r\n/g, "\n"), "binary");
+    if (!normalized.equals(raw)) writeFileSync(path, normalized);
+  }
+
   // The manifest is the contract: `comodor doctor` verifies every file it
   // names, and the packaging tests refuse a wheel that does not carry all of
   // it. The hash is what proves the bundle on disk is the bundle built.
