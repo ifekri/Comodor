@@ -6,6 +6,7 @@ the module is that what it reports and what the build produced cannot drift.
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 from comodor.tui import runtime
@@ -68,17 +69,62 @@ def test_checkout_fallback_never_leaks_into_a_package(tmp_path, monkeypatch):
 
 
 def test_a_package_is_preferred_over_a_checkout(monkeypatch, tmp_path):
-    """When both exist, the package wins: the checkout is the development
-    fallback, and silently preferring it would mean a pipx install running
-    whatever a stray clone happened to hold."""
+    """A whole packaged artifact wins over the development tree.
+
+    The checkout is the development fallback; a pipx install that could see a
+    stray clone would otherwise run whatever that clone happened to hold. The
+    preference is conditional on the artifact being whole for this platform —
+    an artifact that cannot load is not an answer, and the checkout is what
+    makes a foreign-platform source tree still work.
+    """
+    import hashlib
+
     dist = tmp_path / "dist"
-    dist.mkdir()
+    backend = dist / "node_modules" / "@opentui" / runtime.current_native_package().split("/")[-1]
+    backend.mkdir(parents=True)
+    (dist / "main.js").write_text("// the bundle", encoding="utf-8")
+    native = runtime.current_native_package().split("/")[-1]
+    (dist / "manifest.json").write_text(json.dumps({
+        "entry": "main.js",
+        "native": native,
+        "natives": [native],
+        "files": ["main.js"],
+        "sha256": {"main.js": hashlib.sha256(b"// the bundle").hexdigest()},
+    }), encoding="utf-8")
     entry = tmp_path / "checkout" / "main.tsx"
     entry.parent.mkdir(parents=True)
     entry.write_text("// checkout", encoding="utf-8")
     monkeypatch.setattr(runtime, "packaged_dist", lambda: dist)
     monkeypatch.setattr(runtime, "checkout_entry", lambda: entry)
     assert runtime.renderer() == (dist, "package")
+
+
+def test_a_foreign_platform_artifact_falls_back_to_the_checkout(
+        monkeypatch, tmp_path):
+    """An artifact built for another OS is not this machine's renderer.
+
+    The committed artifact carries the platform it was built on; a source
+    checkout on another platform must use its own tree, or `comodor` would
+    try to load a backend that does not exist here.
+    """
+    dist = tmp_path / "dist"
+    (dist / "node_modules" / "@opentui" / "core-the-other-os").mkdir(
+        parents=True)
+    (dist / "main.js").write_text("// the bundle", encoding="utf-8")
+    (dist / "manifest.json").write_text(json.dumps({
+        "entry": "main.js",
+        "native": "core-the-other-os",
+        "natives": ["core-the-other-os"],
+        "files": ["main.js"],
+        "sha256": {"main.js": hashlib.sha256(b"// the bundle").hexdigest()},
+    }), encoding="utf-8")
+
+    entry = tmp_path / "checkout" / "main.tsx"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("// checkout", encoding="utf-8")
+    monkeypatch.setattr(runtime, "packaged_dist", lambda: dist)
+    monkeypatch.setattr(runtime, "checkout_entry", lambda: entry)
+    assert runtime.renderer() == (entry, "checkout")
 
 
 def test_a_missing_renderer_is_a_clear_refusal(tmp_path, monkeypatch, capsys):

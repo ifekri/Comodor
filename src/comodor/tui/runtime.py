@@ -86,17 +86,21 @@ def renderer() -> tuple[Path | None, str]:
     """Where the TUI should run from, and why.
 
     Returns (path, origin) where origin is "package", "checkout" or "". The
-    launcher prefers the package — that is the artifact whose integrity doctor
-    verifies — and falls back to the development tree only when there is no
-    packaged renderer at all.
+    package wins when its artifact can actually run here — the bundle, the
+    manifest, and the native backend for *this* platform all present — because
+    an artifact that cannot load is not an answer. The development tree is the
+    fallback, so a checkout built on another machine's OS still works.
     """
     dist = packaged_dist()
-    if dist is not None:
+    if dist is not None and not verify(dist):
         return dist, "package"
     entry = checkout_entry()
     if entry is not None:
         return entry, "checkout"
-    return None, ""
+    # The packaged artifact exists but cannot run here: return it anyway, so
+    # the launcher's refusal names the real problem (a renderer that does not
+    # match this platform) rather than pretending there is none.
+    return (dist, "package") if dist is not None else (None, "")
 
 
 def manifest(dist: Path) -> dict:
