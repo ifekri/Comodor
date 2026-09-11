@@ -130,8 +130,8 @@ def test_the_spawned_core_is_this_interpreter_and_gets_the_flags(
     import sys
 
     from comodor.config import load
-    from comodor.tui import runtime
     from comodor.transport.commands import run_tui
+    from comodor.tui import runtime
 
     monkeypatch.setenv("COMODOR_HOME", str(tmp_path / "home"))
     (tmp_path / "project").mkdir()

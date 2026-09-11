@@ -201,7 +201,10 @@ jobs:
       - name: The committed artifact is not stale
         shell: bash
         run: |
-          git status --porcelain src/comodor/tui/dist/ | tee stale.txt
+          # The bundle and its assets must be reproducible; the manifest and
+          # the native backend differ per platform by definition, so they are
+          # outside this comparison — `comodor doctor` verifies them instead.
+          git status --porcelain -- src/comodor/tui/dist/ ':(exclude)src/comodor/tui/dist/manifest.json' ':(exclude)src/comodor/tui/dist/node_modules' | tee stale.txt
           test ! -s stale.txt || (echo "src/comodor/tui/dist is stale: rebuild it with bun tools/build-tui-distribution.ts and commit the result" && exit 1)
 
       - name: Build the wheel and the sdist
