@@ -116,3 +116,60 @@ def test_cwd_is_the_launchers_workspace(spy, config, tmp_path):
     received = spy["tui"]
     assert received is not None
     assert received.paths.project == config.paths.project
+
+
+def test_the_spawned_core_is_this_interpreter_and_gets_the_flags(
+        monkeypatch, tmp_path):
+    """The core the interface spawns must be this install's own.
+
+    `COMODOR_BIN`/`COMODOR_ARGS` are the seam: a pipx environment's renderer
+    must not reach whichever `comodor` a PATH happens to name first, and the
+    flags the person set must reach the process that actually answers.
+    """
+    import argparse
+    import sys
+
+    from comodor.config import load
+    from comodor.tui import runtime
+    from comodor.transport.commands import run_tui
+
+    monkeypatch.setenv("COMODOR_HOME", str(tmp_path / "home"))
+    (tmp_path / "project").mkdir()
+    config = load(cwd=tmp_path / "project", use_environment=False)
+    config.use("ollama", model="qwen2.5-coder:14b")
+    config.save()
+    config = load(cwd=config.paths.project, use_environment=False)
+    assert not config.needs_setup
+
+    monkeypatch.setattr(runtime, "bun", lambda: "/fake/bun")
+    monkeypatch.setattr(runtime, "checkout_entry",
+                        lambda: config.paths.project / "main.tsx")
+    monkeypatch.setattr(runtime, "packaged_dist", lambda: None)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+    seen: dict[str, Any] = {}
+
+    def fake_call(argv, cwd=None, env=None):
+        seen["argv"] = argv
+        seen["cwd"] = cwd
+        seen["env"] = env
+        return 0
+
+    monkeypatch.setattr("subprocess.call", fake_call)
+
+    code = run_tui(config, argparse.Namespace(
+        provider="fake", model="fake-1", mode="plan", no_loop=True,
+        demo=False, resume=""))
+
+    assert code == 0
+    env = seen["env"]
+    assert env["COMODOR_BIN"] == sys.executable
+    args = env["COMODOR_ARGS"]
+    assert args.startswith("-m comodor")
+    assert "--provider fake" in args
+    assert "--model fake-1" in args
+    assert "--mode plan" in args
+    assert "--no-loop" in args
+    # The workspace is the project, never the artifact's own directory.
+    assert seen["cwd"] == str(config.paths.project)

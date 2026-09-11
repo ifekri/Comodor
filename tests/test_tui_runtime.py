@@ -83,9 +83,9 @@ def test_a_package_is_preferred_over_a_checkout(monkeypatch, tmp_path):
 
 def test_a_missing_renderer_is_a_clear_refusal(tmp_path, monkeypatch, capsys):
     """No artifact, no Bun — the launch refuses before any setup is asked."""
-    from comodor.transport.commands import run_tui
-
     import argparse
+
+    from comodor.transport.commands import run_tui
 
     monkeypatch.setattr(runtime, "packaged_dist", lambda: None)
     monkeypatch.setattr(runtime, "checkout_entry", lambda: None)
@@ -110,9 +110,9 @@ def test_a_missing_renderer_is_a_clear_refusal(tmp_path, monkeypatch, capsys):
 def test_a_machine_without_bun_is_a_clear_refusal(tmp_path, monkeypatch,
                                                   capsys):
     """Bun is stated, not discovered by a broken screen."""
-    from comodor.transport.commands import run_tui
-
     import argparse
+
+    from comodor.transport.commands import run_tui
 
     dist = tmp_path / "dist"
     dist.mkdir()
