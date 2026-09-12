@@ -165,3 +165,45 @@ def test_the_guide_pushes_the_tag_on_its_own():
         "a command in the guide still pushes a branch and every tag at once")
     assert re.search(r"git push origin v\d", commands), (
         "the guide never shows pushing the tag by name")
+
+
+# --------------------------------------------------------------------------- #
+# the artifact rebuild and the version
+# --------------------------------------------------------------------------- #
+
+
+def test_the_artifact_rebuild_does_not_change_the_version_a_tag_publishes():
+    """The build job rebuilds `src/comodor/tui/dist` for every platform before
+    packaging, which rewrites the committed manifest; a dirty tree makes
+    hatch-vcs append `+dYYYYMMDD`, and the tag check then refuses the wheel.
+    Never exercised before S1 — no tag was cut after the artifact entered the
+    workflow — and it would have failed the first one.
+
+    A tag build names its own version, and only after proving the rebuild is
+    the only change: the guard step must come first, and must fail on
+    anything dirty outside the artifact.
+    """
+    names = [step.get("name", "") for step in steps_of("build")]
+    guard = names.index("The only change since the tag is the rebuilt artifact")
+    rebuild = names.index("Build the production TUI artifact for every platform")
+    build = names.index("Build sdist and wheel")
+    assert rebuild < guard < build, names
+
+    guard_body = body_of("build", "The only change since the tag is the rebuilt artifact")
+    assert "git status --porcelain" in guard_body
+    assert "src/comodor/tui/dist/" in guard_body
+    assert "exit 1" in guard_body
+
+    build_body = body_of("build", "Build sdist and wheel")
+    assert "SETUPTOOLS_SCM_PRETEND_VERSION" in build_body
+    assert 'GITHUB_REF_TYPE:-}" = "tag"' in build_body, (
+        "only a tag names its version; a dry run keeps the honest dev one")
+    assert "GITHUB_REF_NAME#v" in build_body
+
+
+def test_the_release_wheel_is_checked_for_the_retired_interface():
+    """The same guard CI runs on every wheel, on the one that ships."""
+    names = [step.get("name", "") for step in steps_of("build")]
+    assert "The retired interface is not in the wheel" in names
+    assert "check-wheel-contents.py" in body_of(
+        "build", "The retired interface is not in the wheel")

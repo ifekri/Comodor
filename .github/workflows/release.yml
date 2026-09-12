@@ -115,7 +115,7 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Lint
-        run: ruff check src tests
+        run: ruff check src tests bench tools
 
       - name: Tests
         run: pytest -q
@@ -183,8 +183,39 @@ jobs:
       - name: Build the production TUI artifact for every platform
         run: bun tools/build-tui-distribution.ts --platforms all
 
+      # The rebuild above rewrites `src/comodor/tui/dist/manifest.json` — the
+      # committed one names the backend of the machine it was built on, and
+      # this one names all of them — so from here the tree is dirty, and
+      # hatch-vcs would version the wheel `X.Y.Z+dYYYYMMDD`. A tag must
+      # publish `X.Y.Z`, so a tag build names its own version. Never blindly:
+      # the only change allowed is the artifact just built. Anything else
+      # dirty means the tag and the build disagree, and that is refused.
+      - name: The only change since the tag is the rebuilt artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          unexpected="$(git status --porcelain | grep -v ' src/comodor/tui/dist/' || true)"
+
+          if [ -n "$unexpected" ]; then
+            echo "::error::The tree changed outside src/comodor/tui/dist/ during the build:"
+            echo "$unexpected"
+            exit 1
+          fi
+
       - name: Build sdist and wheel
-        run: python -m build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            export SETUPTOOLS_SCM_PRETEND_VERSION="${GITHUB_REF_NAME#v}"
+          fi
+
+          python -m build
+
+      - name: The retired interface is not in the wheel
+        run: python tools/check-wheel-contents.py dist/*.whl
 
       - name: Read version from built wheel
         id: version

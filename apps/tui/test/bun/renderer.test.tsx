@@ -301,10 +301,14 @@ class FakeCore implements Transport {
 async function screen(width = 100, height = 30,
                       sessionId?: string,
                       snapshot?: Record<string, unknown>,
-                      capabilities?: string[]) {
+                      capabilities?: string[],
+                      mode?: string) {
   const core = new FakeCore();
   if (snapshot) core.snapshot = snapshot;
   if (capabilities) core.capabilities = capabilities;
+  // What `session.create` reports. A string rather than a Mode on purpose:
+  // the core passes a configured name through as it found it.
+  if (mode !== undefined) core.mode = mode;
   const client = new CoreClient(core, { timeoutMs: 5_000 });
   await client.start();
 
@@ -543,6 +547,26 @@ describe("modes", () => {
     await view.waitForVisualIdle();
 
     expect(view.frame()).toContain("[ACT]");
+    view.client.close();
+  });
+
+  test("a mode the client does not know is named, not rendered as ACT", async () => {
+    // `agent.mode: yolo` in a config file — the user's, or a repository's,
+    // which anyone can check out. The core keeps the name and refuses every
+    // tool under it; the interface used to die on `MODES["yolo"]` at first
+    // paint, which turned a typo into a stack trace. It must draw, say what
+    // is wrong, bracket nothing, and let Tab pick a real mode.
+    const view = await screen(120, 30, undefined, undefined, undefined, "yolo");
+    await view.waitForFrame((frame) => frame.includes("is not a mode"));
+
+    const frame = view.frame();
+    expect(frame).toContain('"yolo" is not a mode');
+    expect(frame).not.toContain("[ACT]");
+    expect(frame).toContain("ask for anything");
+
+    view.mockInput.pressTab();
+    await view.waitForFrame((frame) => frame.includes("[ACT]"), MODE_PASSES);
+    expect(view.core.mode).toBe("act");
     view.client.close();
   });
 });

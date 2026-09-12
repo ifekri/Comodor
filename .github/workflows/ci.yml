@@ -28,7 +28,7 @@ jobs:
       # `bench` too: it is part of the repository and the task
       # repositories inside it are excluded in pyproject, because
       # they are fixtures and tidying them changes what is measured.
-      - run: ruff check src tests bench
+      - run: ruff check src tests bench tools
 
   test:
     name: py${{ matrix.python }} on ${{ matrix.os }}

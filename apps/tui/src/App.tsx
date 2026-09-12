@@ -17,7 +17,7 @@ import type { KeyEvent, ScrollBoxRenderable } from "@opentui/core";
 
 import { CoreClient } from "@comodor/client";
 import { terminal as theme } from "@comodor/design-tokens";
-import { MODES, type Mode } from "@comodor/modes";
+import { MODES, isMode, type Mode } from "@comodor/modes";
 import type { EventName, Session } from "@comodor/protocol";
 import {
   beginIntent,
@@ -1452,6 +1452,16 @@ function ModeBar({ mode, intent, narrow, onPick }: {
           ? <text style={{ fg: theme["text.secondary"] }}>
               {`  asking the core for ${MODES[wanted].label}…`}
             </text>
+          : !isMode(mode)
+            // A configuration can name a mode the core does not know — a
+            // typo in `agent.mode`, in the user's file or a repository's.
+            // The core keeps the name and refuses every tool under it,
+            // which is right; the bar says so in words rather than
+            // bracketing ACT (a claim) or dying on `MODES[mode]` (the crash
+            // this branch replaced). Tab still picks a real one.
+            ? <text style={{ fg: theme["semantic.danger"] }}>
+                {`  "${mode}" is not a mode; nothing runs until Tab picks one`}
+              </text>
           : narrow ? null
           : <text style={{ fg: theme["text.muted"] }}>{`  ${MODES[mode].summary}`}</text>}
     </box>

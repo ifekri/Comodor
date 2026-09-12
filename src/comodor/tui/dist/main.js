@@ -69391,6 +69391,7 @@ var terminal = {
 
 // packages/modes/src/index.ts
 var CYCLE = ["act", "plan", "ask"];
+var ALL = ["act", "plan", "ask", "chat"];
 var MODES = {
   act: {
     id: "act",
@@ -69417,6 +69418,9 @@ var MODES = {
     token: "mode.chat"
   }
 };
+function isMode(value) {
+  return typeof value === "string" && ALL.includes(value);
+}
 function next(current, back = false) {
   const at = CYCLE.indexOf(current);
   if (at < 0)
@@ -71703,6 +71707,9 @@ function ModeBar({ mode, intent, narrow, onPick }) {
       }, undefined, false, undefined, this) : wanted ? /* @__PURE__ */ import_jsx_dev_runtime2.jsxDEV("text", {
         style: { fg: terminal["text.secondary"] },
         children: `  asking the core for ${MODES[wanted].label}\u2026`
+      }, undefined, false, undefined, this) : !isMode(mode) ? /* @__PURE__ */ import_jsx_dev_runtime2.jsxDEV("text", {
+        style: { fg: terminal["semantic.danger"] },
+        children: `  "${mode}" is not a mode; nothing runs until Tab picks one`
       }, undefined, false, undefined, this) : narrow ? null : /* @__PURE__ */ import_jsx_dev_runtime2.jsxDEV("text", {
         style: { fg: terminal["text.muted"] },
         children: `  ${MODES[mode].summary}`
