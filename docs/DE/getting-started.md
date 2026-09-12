@@ -91,7 +91,9 @@ pipx install comodor         # isolated
 pip install comodor          # into whatever environment you are in
 ```
 
-Comodor braucht **Python 3.11 oder neuer** und sonst nichts.
+Comodor braucht **Python 3.11 oder neuer** und, für die interaktive Oberfläche,
+[Bun](https://bun.sh) 1.3 oder neuer — `comodor run` und `comodor web` kommen
+ohne aus. Sonst nichts.
 
 ### Prüfen, dass es angekommen ist
 
