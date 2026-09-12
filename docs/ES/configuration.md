@@ -37,23 +37,24 @@ Cuatro capas. La posterior vence a la anterior.
 5. the command line               --model, --mode, … for one run
 ```
 
-### Qué escribe `/save`
+### Qué se escribe en tu archivo
 
-**Solo lo que elegiste.** Esto importa más de lo que suena.
+**Solo lo que elegiste.** Esto importa más de lo que suena. `comodor setup` es
+lo que escribe tu archivo; sigue esta regla.
 
 La configuración sobre la que corre el agente son las cuatro capas fusionadas.
 Escribir eso de vuelta en tu archivo convertiría el techo de gasto de un
 repositorio clonado en tu valor global permanente, y copiaría al disco una clave
 de API que deliberadamente mantuviste en tu entorno.
 
-Así que `/save` recuerda de dónde vino cada valor. Un valor que siga sosteniendo
-lo que aportó una capa prestada vuelve a lo que decía *tu* archivo; un valor que
-cambiaste durante la sesión es tuyo y se escribe.
+Así que el escritor recuerda de dónde vino cada valor. Un valor que siga
+sosteniendo lo que aportó una capa prestada vuelve a lo que decía *tu* archivo;
+un valor que elegiste tú es tuyo y se escribe.
 
-- `/model x` y luego `/save` → persiste `x`
-- `/save` en un repositorio que fija `max_cost_usd: 500` → no persiste nada de
+- elegir el modelo `x` en setup → persiste `x`
+- guardar en un repositorio que fija `max_cost_usd: 500` → no persiste nada de
   eso
-- `/save` con `ANTHROPIC_API_KEY` exportada → la clave se queda en tu entorno
+- guardar con `ANTHROPIC_API_KEY` exportada → la clave se queda en tu entorno
 
 ---
 
@@ -346,7 +347,7 @@ Explicación completa: [Usar tu pantalla](computer.md).
 ```
 
 `policy` es `cost`, `speed` o `quality`. Con `enabled: true` elige de la `chain`
-y salta un proveedor que sigue fallando. `F5` o `/gw` en la interfaz.
+y salta un proveedor que sigue fallando.
 
 ### `mcp` — servidores de Model Context Protocol
 
@@ -395,8 +396,4 @@ Si un ajuste todavía parece no hacer nada:
 
 ```bash
 comodor doctor          # what it actually loaded
-```
-
-```
-/settings               # the same, in the interface
 ```

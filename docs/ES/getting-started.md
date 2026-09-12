@@ -234,12 +234,13 @@ archivo recibes un diff y una elección:
 ```
   Write  src/parser.py
     - 12 lines removed, 8 added
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-Responde `a` una vez, o `A` si prefieres que deje de preguntar por el resto de
-la sesión. En cualquier caso, cada escritura tiene punto de control: `/undo`
-revierte la última.
+Las flechas se mueven entre las opciones y `Enter` envía; `Esc` deniega. Elige
+*Permitir en esta sesión* si prefieres que deje de preguntar por el resto de la
+sesión. En cualquier caso, cada escritura tiene punto de control, así que el
+contenido anterior se conserva.
 
 ---
 
@@ -262,8 +263,8 @@ decae cuando no.
 
 Después de unas sesiones:
 
-```
-> /progress
+```bash
+comodor insights
 ```
 
 ```
@@ -291,12 +292,12 @@ aprendizaje no está funcionando, y el panel lo dice en lugar de ocultarlo.
 ## 6. Lo que vale la pena saber el primer día
 
 ```
-/help          every command
-/mode          act · plan (read-only) · chat (no tools)     F3 cycles
-/undo          restore the last file it changed
-/cost          tokens, spend, what the cache saved
-Esc            stop it, mid-thought
-Ctrl-C twice   leave
+Tab            next mode: act · plan (read-only) · ask (no tools)
+Ctrl+K         every command, searchable
+Ctrl+B         the workbench: tasks and background agents
+Ctrl+C         stop it mid-thought; quit when it is idle
+Ctrl+D         leave
+comodor help   the written help page, outside the interface
 ```
 
 ---

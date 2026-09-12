@@ -1,267 +1,166 @@
 # La interfaz
 
-Lo que ves, lo que pulsas y los 29 comandos.
+Lo que ves, lo que pulsas, y de dónde sale todo lo que hay en pantalla.
 
 ```bash
-comodor          # start it
-comodor --demo   # the whole interface, offline, no key
+comodor          # iniciarla
+comodor --demo   # toda la interfaz, sin conexión, sin clave
 ```
+
+La interfaz corre sobre [Bun](https://bun.sh) — `comodor doctor` dice si está.
+Sin él, `comodor run "..."` hace una tarea sin interfaz y `comodor web` sirve
+una en el navegador.
+
+Cómo está construida — el núcleo que dirige, el protocolo entre ambos, y por
+qué cada dato en pantalla es del núcleo y no de la pantalla — está en
+[tui-v2.md](../tui-v2.md). Esta página es la versión corta para quien la usa.
 
 ---
 
-## El diseño
+## La pantalla
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│  Comodor                              Anthropic · claude-sonnet-5      │
-│  ────────────────────────────────────────────────────────────────────  │
-│                                                                        │
-│  TASKS                    > fix the failing parser test                │
-│  ● read the test          ▸ read_file  tests/test_parser.py     0.1s   │
-│  ◐ find the cause         ▸ run_shell  pytest tests/test_pa…    2.3s   │
-│  ○ fix it                                                              │
-│                           The test expects `parse("")` to raise, but…  │
-│                                                                        │
-│  ────────────────────────────────────────────────────────────────────  │
-│  ▌Type a task, or / for commands                                       │
-│                                                                        │
-│  act · loop on · 12% of 1M · $0.03      ⏎ send  ^O attach  F3 mode     │
-└────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────┬───────────────────────┐
+│ Comodor   ~/work/my-project  fake-1      │ Agents         1 live │
+│                                          │  ● d1 running    12.3s│
+│  You                                     │    survey the retries │
+│  fix the failing parser test             │ Tasks            2/5  │
+│                                          │  ◐ write the tests    │
+│  Comodor                                 │  ● read the code      │
+│  The test expects parse("") to raise, …  │  ○ run the suite      │
+│  ✓ read_file  tests/test_parser.py  0.2s │                       │
+│  ● run_shell  pytest tests/…     running…│                       │
+│      collected 12 items                  │                       │
+│                                          │                       │
+├──────────────────────────────────────────┴───────────────────────┤
+│ ▌ask for anything                                                │
+├──────────────────────────────────────────────────────────────────┤
+│  [ACT]   PLAN    ASK    Reads, writes and runs commands…         │
+│ ● 1 agent  tab Mode  ctrl+b Work  ctrl+k Commands      42% ctx  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-**La barra lateral** es el plan, cuando lo hay. `F2` la oculta — vale la pena
-hacerlo en una terminal estrecha.
+**La cabecera** nombra el proyecto y el proveedor y modelo que responden. Es lo
+que informa el núcleo, no lo que dice un archivo de configuración: cuando el
+modelo cambia — desde aquí, desde otro cliente, o por el propio núcleo — la
+cabecera lo sigue.
 
-**La línea de estado** muestra el modo, si está iterando, cuán lleno está el
-contexto y cuánto ha costado esta sesión. La cifra del contexto es real: sigue
-al modelo, así que cambiar de un modelo de un millón de tokens a uno de 128k la
-cambia de inmediato.
+**La conversación** lleva dentro la línea de tiempo de las herramientas. Cada
+llamada a una herramienta está donde ocurrió, como una fila: una marca (`●` en
+ejecución, `✓` terminada, `×` fallida), el nombre, un resumen de una línea, y
+cuánto tardó. Una herramienta en ejecución muestra las últimas líneas de su
+salida; una terminada se pliega, y hacer clic en ella abre lo que el núcleo aún
+conserva.
 
-Funciona desde unas 60 columnas hacia arriba. Por debajo, la barra lateral se
-pliega sola. `comodor preview 80x24` la renderiza a cualquier tamaño sin
-iniciar una sesión.
+**El banco de trabajo** — `Ctrl+B` — es el trabajo fuera de la conversación:
+la lista de tareas que el agente lleva para sí, y cualquier agente en segundo
+plano que haya iniciado, cada uno con su estado. En una terminal estrecha se
+abre sobre la conversación en lugar de al lado, y la misma tecla lo cierra.
 
----
-
-## Modos
-
-| Modo | Lo que el agente puede hacer | |
-|---|---|---|
-| **act** | Todo, preguntando antes de escrituras y comandos | el predeterminado |
-| **plan** | Solo lectura. Sin escrituras, sin comandos, sin red | para "¿qué harías?" |
-| **chat** | Sin herramientas en absoluto | para una pregunta sobre código que pegas |
-
-`F3` los rota. `/mode plan` fija uno directamente.
-
-El modo plan es de verdad de solo lectura — se aplica en la capa de permisos,
-no pidiéndole amablemente al modelo. Una herramienta con un riesgo superior a
-"safe" se rechaza antes de ejecutarse.
+**El pie** imprime lo que puedes pulsar, de la misma lista de la que se leen
+las teclas, y lo que ha costado esta sesión donde el proveedor lo mide.
 
 ---
 
 ## Teclas
 
-| | |
+| Tecla | Hace |
 |---|---|
-| `Enter` | enviar |
-| `Ctrl+J` | nueva línea dentro de un mensaje |
-| `Esc` | detener lo que está haciendo |
-| `Ctrl+C` | detener; dos veces para salir |
-| `F1` | ayuda |
-| `F2` | la barra lateral |
-| `F3` | modo |
-| `F4` | activar o desactivar el loop |
-| `F5` | el gateway |
-| `Ctrl+O` | adjuntar un archivo |
-| `Ctrl+L` | limpiar la conversación |
-| `PgUp` `PgDn` | desplazar |
-| `Ctrl+↑` `Ctrl+↓` | mensajes anteriores y posteriores |
-| `!command` | ejecutar un comando de shell directamente, sin preguntarle al modelo |
+| `Enter` | envía lo que escribiste |
+| `Tab` / `Shift+Tab` | modo siguiente / anterior |
+| `Ctrl+K` | la paleta de comandos — cada acción, con búsqueda |
+| `Ctrl+B` | abrir o cerrar el banco de trabajo |
+| `End` | volver a la salida más reciente tras subir |
+| `PageUp` / `PageDown` | desplazar la conversación |
+| `Ctrl+R` | reenviar un mensaje que el núcleo rechazó |
+| `Ctrl+C` | detener lo que está haciendo; salir cuando está inactivo |
+| `Ctrl+D` | salir |
+| `Esc` | cerrar la paleta, salir de un campo, o tomar la opción segura de una tarjeta |
 
-Vale la pena recordar `!`. `!git status` lo ejecuta y te muestra la salida; el
-modelo nunca ve la pregunta. Más barato y más rápido que preguntar.
+Cada atajo que muestra el pie existe; no se puede imprimir una pista para una
+tecla que no está asignada.
 
 ---
 
-## Comandos
+## Modos
 
-Escribe `/` y la lista se filtra mientras escribes.
+```
+ACT    lee, escribe y ejecuta comandos, preguntando antes de cambiar cosas
+PLAN   lee y planifica; no puede escribir, ejecutar ni cambiar nada
+ASK    lo conversa; sin herramientas en absoluto
+```
 
-### Pídele que cambie lo que está haciendo
-
-| | |
-|---|---|
-| `/mode [act\|plan\|chat]` | lo que se le permite hacer |
-| `/loop` | seguir trabajando hasta terminar, o responder una vez |
-| `/model [id]` | elegir el modelo — una lista, o nómbralo |
-| `/provider [name]` | elegir el proveedor |
-| `/gw` | el gateway: enrutar entre proveedores por costo, velocidad o calidad |
-
-### Enséñale
-
-| | |
-|---|---|
-| `/good` | esa respuesta fue correcta |
-| `/bad` | esa respuesta fue incorrecta |
-| `/teach <text>` | recuerda esto |
-| `/memory` | lo que ha aprendido |
-| `/rules` | las reglas de la casa que sacó de tu código y tus ediciones |
-| `/progress` | la evidencia de que está mejorando |
-| `/skills` | procedimientos que sigue cuando el trabajo encaja |
-
-`/good` y `/bad` son lo más barato que puedes hacer por él. Ver
-[Cómo aprende](learning.md).
-
-### Deshacer y mirar atrás
-
-| | |
-|---|---|
-| `/undo` | restaurar el último archivo que cambió |
-| `/clear` | empezar una conversación nueva |
-| `/resume [id]` | reabrir una sesión anterior |
-| `/search <text>` | buscar algo en una conversación anterior |
-| `/export [path]` | escribir esta sesión a un archivo |
-
-### Dejar que llegue más lejos
-
-| | |
-|---|---|
-| `/computer [15m\|1h this app\|stop]` | dejarle usar tu pantalla — [guía](computer.md) |
-| `/mcp` | servidores MCP y sus herramientas — [guía](mcp.md) |
-| `/attach <path>` | añadir un archivo al siguiente mensaje |
-
-### Ponerlo a punto
-
-| | |
-|---|---|
-| `/settings` | lo que está configurado ahora mismo |
-| `/approve [writes\|shell\|all]` | dejar de preguntar antes de eso |
-| `/theme [name]` | ember, midnight, matrix, mono |
-| `/save` | escribir los ajustes actuales a tu archivo de configuración |
-| `/cost` | tokens, gasto y lo que ahorró la caché |
-| `/copy [all\|task]` | la última respuesta, o todo, al portapapeles |
-| `/mouse [on\|off]` | seguimiento del ratón, para que puedas seleccionar texto tú mismo |
-| `/help` | todo esto, dentro de la interfaz |
-| `/quit` | salir |
-
-**`/save` escribe solo lo que elegiste.** No los ajustes del repositorio, no una
-clave que guardas en tu entorno, no un `--model` que pasaste para una sola
-ejecución. Ver [Configuración](configuration.md#what-save-writes).
+`Tab` los recorre. La etiqueta se mueve cuando el núcleo confirma, no cuando
+baja la tecla: las pulsaciones dentro de un mismo viaje de ida y vuelta se
+acumulan — tres Tab preguntan una vez, por donde apuntaba el tercero — y un
+cambio rechazado lo dice con palabras en lugar de mover la etiqueta.
 
 ---
 
-## Aprobaciones
+## Cuando te pregunta algo
 
-Cuando el agente quiere escribir un archivo o ejecutar un comando:
+Una tarjeta de permiso o un formulario de preguntas toma el teclado mientras
+está abierto, para que una tecla destinada a una decisión no pueda también
+enviar un mensaje.
 
-```
-  Write  src/parser.py
-  ────────────────────────────────────────────
-   - def parse(text):
-   -     return text.split(",")
-   + def parse(text):
-   +     if not text:
-   +         raise ValueError("nothing to parse")
-   +     return text.split(",")
+- **Las flechas** se mueven entre las opciones o las preguntas; **Enter** envía.
+- **Esc** toma la opción segura propia de la petición — para un permiso es
+  *denegar*, para un cambio de modo propuesto es *sin cambio* — y la tarjeta
+  dice cuál. Nunca permite nada.
+- No hay atajo de una sola tecla para *permitir*. Permitir cuesta un movimiento
+  hasta la opción y otro para confirmarla, para que una tecla pulsada por
+  cualquier otro motivo no pueda autorizar un comando.
+- Una pregunta que ofrece una fila de escribe-lo-tuyo abre un campo para ello
+  con `Space`; `Esc` sale del campo antes de cancelar el formulario.
 
-  [a] allow   [A] allow always this session   [d] deny
-```
+Dos cosas pueden estar esperando a la vez — dos herramientas paralelas pueden
+preguntar cada una — y se muestran en el orden en que llegaron, sin perder
+ninguna.
 
-`A` lo recuerda por el resto de la sesión, por tipo de cosa — permitir
-escrituras no permite comandos.
-
-Negar no es en vano. Un rechazo es la señal de preferencia más clara que la
-interfaz recoge, y va al motor de aprendizaje: el agente tiene menos
-probabilidad de proponerlo de nuevo.
-
-Para dejar de recibir preguntas del todo:
-
-```
-/approve writes      files, yes; commands, still ask
-/approve all         everything
-```
-
-Todo sigue teniendo punto de control. `/undo` funciona igual.
+Las teclas de modo siguen funcionando mientras hay una tarjeta. La paleta no:
+un lanzador sobre una decisión ocultaría lo que hay que responder.
 
 ---
 
-## Copiar texto hacia fuera
+## Seguir el hilo
 
-Mientras se rastrea el ratón, un arrastre le pertenece a Comodor y la terminal
-nunca lo ve — así que el habitual seleccionar y copiar no funciona. Tres
-maneras de rodearlo:
-
-```
-/copy              the last answer
-/copy all          the whole conversation
-/copy task         the last thing you asked for
-/mouse             mouse tracking off, so selection works as usual
-```
-
-`/copy` no necesita nada instalado en Windows ni macOS. En Linux usa
-`wl-copy`, `xclip` o `xsel`, el que esté, y dice cuál falta si no hay ninguno.
-
-Sobre SSH recurre a una secuencia de escape que le pide a *tu* terminal poner
-el texto en *tu* portapapeles — así el texto de un agente en un servidor
-aterriza donde puedes pegarlo, en lugar de quedarse en un servidor que no
-tiene portapapeles.
-
-La mayoría de las terminales también permiten seleccionar con **Shift**
-pulsado, lo que esquiva el rastreo del ratón sin desactivarlo.
+Una respuesta larga mantiene la línea más reciente a la vista. Sube y deja de
+seguir; la salida nueva no te arrastra hacia abajo, y un marcador dice que hay
+más debajo. `End` vuelve a la cola en vivo, y enviar un mensaje nuevo hace lo
+mismo.
 
 ---
 
-## Quién está hablando
+## Sesiones
 
-Cada turno descansa sobre una banda discreta — un tono detrás de lo que
-escribiste, otro detrás de la respuesta:
+`Ctrl+K` → *Abrir una conversación anterior* lista lo que el núcleo ha
+conservado, y abre una en el sitio. El mismo almacén sirve al navegador, así que
+una conversación empezada aquí puede reabrirse allí.
 
-```
-▌ › why does the parser drop the last field?              ← warm
+`comodor --resume` reabre la más reciente al arrancar; `--resume ID` nombra una.
 
-▌   Because split is called with a maxsplit of 2 …        ← neutral
-▌
-▌   ┌─ python ────────────────────────┐
-▌   │ return text.split(',', 2)       │
-▌   └─────────────────────────────────┘
-```
+---
 
-Deliberadamente discretas. Esto está detrás de un texto que lees durante
-minutos seguidos, y un fondo con presencia propia compite con las palabras.
-Cada tema tiene su propio par, a un pequeño porcentaje de su fondo; `mono` no
-tiene ninguno, porque un tema cuya premisa es la ausencia de color no quiere
-dos.
+## Copiar texto
 
-No cuestan espacio vertical — el cambio de color es la frontera.
+Selecciona con el ratón como tu terminal lo permita. Las opciones `--theme` y
+`--ascii` se aplican a lo que imprimen los comandos — `setup`, `doctor`,
+`help` — no a la interfaz, que dibuja desde sus propios tokens de diseño.
 
 ---
 
 ## Texto de derecha a izquierda
 
-El persa, el árabe y el hebreo se alinean a la derecha, donde sus líneas
-comienzan, con una pila de fuentes que les conviene. Los párrafos mixtos — un
-identificador en inglés dentro de una frase en persa — se tratan por línea en
-lugar de por archivo, que es lo que de verdad pasa en una conversación
-técnica.
-
----
-
-## Temas
-
-```
-/theme midnight
-```
-
-`ember` (el predeterminado, ámbar cálido), `midnight` (azul frío), `matrix`
-(verde), `mono` (sin color alguno).
-
-`--ascii` cambia los caracteres de dibujo de cajas por ASCII, para terminales
-sin ellos. `NO_COLOR` en tu entorno se respeta.
+El persa, el árabe y las líneas mixtas se pasan a la terminal tal como se
+escribieron, nunca invertidas por el programa. Lo bien que se conforma una línea
+mixta es cosa de la terminal, y las que lo hacen bien lo hacen bien aquí.
 
 ---
 
 ## Ver también
 
-- [Desde la terminal](cli.md) — la misma potencia sin la interfaz
-- [Lo que el agente puede hacer](tools.md) — las herramientas detrás de esas filas `▸`
-- [Seguridad](safety.md) — lo que los avisos de aprobación protegen
+- [tui-v2.md](../tui-v2.md) — cómo está construida la interfaz, y qué puede y
+  qué no puede hacer aún
+- [questions.md](questions.md) — los formularios que el agente te presenta
+- [safety.md](safety.md) — qué pregunta, qué no, y por qué
+- [computer.md](computer.md) — dejarle usar tu pantalla

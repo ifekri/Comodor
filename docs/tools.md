@@ -47,7 +47,8 @@ it quietly disappears:
 Wrote sample.txt (1 lines, +1/-4).
 
 WARNING  4 lines were replaced in a file this session had not read. If you
-meant to change part of it, read it and use edit_file; /undo restores it.
+meant to change part of it, read it and use edit_file; the previous contents
+were checkpointed first.
 ```
 
 A warning, not a refusal — creating a file, rewriting a generated one, and

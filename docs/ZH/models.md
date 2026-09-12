@@ -49,15 +49,11 @@ comodor setup           # choose Ollama
 comodor --model claude-haiku-4-5      # this run only
 ```
 
-```
-/model                  # a list of what the provider offers
-/model gpt-4o           # by name
-/provider               # a different provider entirely
-```
+在界面中，`Ctrl+K` → *选择模型* 会列出提供商可用的模型并就地切换；要换一个提供商，用命令行的 `--provider`，或 `comodor setup`。
 
 上下文仪表跟随模型。从百万 token 的模型切换到 128k 的模型会立即改变上限——这很重要，因为智能体会在上限的某个比例处压缩对话，而过期的上限意味着它永远不压缩，然后在提供商的真实上限处失败。
 
-要让切换永久生效：`/save`，或编辑
+要让切换永久生效：`comodor setup`，或编辑
 `~/.comodor/config.json`。
 
 ---
@@ -74,7 +70,7 @@ comodor --model claude-haiku-4-5      # this run only
 export ANTHROPIC_API_KEY=sk-ant-…
 ```
 
-你环境中的密钥**会留在环境中**——`/save` 不会把它写到磁盘上。用导出代替保存是一种明确的决定，并且会被尊重。
+你环境中的密钥**会留在环境中**——`comodor setup` 不会把它写到磁盘上。用导出代替保存是一种明确的决定，并且会被尊重。
 
 Comodor 自己的配置文件以仅所有者可读的权限写入，你的密钥绝不会出现在日志、转录、导出或回溯信息中。
 [安全](safety.md#your-keys)。
@@ -84,10 +80,6 @@ Comodor 自己的配置文件以仅所有者可读的权限写入，你的密钥
 ## 网关
 
 跨多个提供商路由，而不是固定一个。
-
-```
-/gw                    # or F5
-```
 
 ```json
 {
@@ -114,8 +106,10 @@ Comodor 自己的配置文件以仅所有者可读的权限写入，你的密钥
 
 ## 花费
 
+界面中的用量角落显示本次会话；跨会话查看：
+
 ```
-/cost
+comodor insights
 ```
 
 关于缓存、预算，以及为什么花费上限有时无法强制执行，参见[成本](cost.md)。

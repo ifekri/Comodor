@@ -1,270 +1,172 @@
 # L'interface
 
-Ce que vous voyez, ce que vous pressez, et les 29 commandes.
+Ce que vous voyez, ce que vous pressez, et d'où vient tout ce qui est à l'écran.
 
 ```bash
-comodor          # start it
-comodor --demo   # the whole interface, offline, no key
+comodor          # la lancer
+comodor --demo   # toute l'interface, hors ligne, sans clé
 ```
+
+L'interface tourne sur [Bun](https://bun.sh) — `comodor doctor` dit s'il est
+là. Sans lui, `comodor run "..."` fait une tâche sans interface et
+`comodor web` en sert une dans le navigateur.
+
+Comment elle est construite — le cœur qu'elle pilote, le protocole entre les
+deux, et pourquoi chaque fait à l'écran appartient au cœur plutôt qu'à
+l'écran — se trouve dans [tui-v2.md](../tui-v2.md). Cette page est la version
+courte pour la personne qui l'utilise.
 
 ---
 
-## La disposition
+## L'écran
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│  Comodor                              Anthropic · claude-sonnet-5      │
-│  ────────────────────────────────────────────────────────────────────  │
-│                                                                        │
-│  TASKS                    > fix the failing parser test                │
-│  ● read the test          ▸ read_file  tests/test_parser.py     0.1s   │
-│  ◐ find the cause         ▸ run_shell  pytest tests/test_pa…    2.3s   │
-│  ○ fix it                                                              │
-│                           The test expects `parse("")` to raise, but…  │
-│                                                                        │
-│  ────────────────────────────────────────────────────────────────────  │
-│  ▌Type a task, or / for commands                                       │
-│                                                                        │
-│  act · loop on · 12% of 1M · $0.03      ⏎ send  ^O attach  F3 mode     │
-└────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────┬───────────────────────┐
+│ Comodor   ~/work/my-project  fake-1      │ Agents         1 live │
+│                                          │  ● d1 running    12.3s│
+│  You                                     │    survey the retries │
+│  fix the failing parser test             │ Tasks            2/5  │
+│                                          │  ◐ write the tests    │
+│  Comodor                                 │  ● read the code      │
+│  The test expects parse("") to raise, …  │  ○ run the suite      │
+│  ✓ read_file  tests/test_parser.py  0.2s │                       │
+│  ● run_shell  pytest tests/…     running…│                       │
+│      collected 12 items                  │                       │
+│                                          │                       │
+├──────────────────────────────────────────┴───────────────────────┤
+│ ▌ask for anything                                                │
+├──────────────────────────────────────────────────────────────────┤
+│  [ACT]   PLAN    ASK    Reads, writes and runs commands…         │
+│ ● 1 agent  tab Mode  ctrl+b Work  ctrl+k Commands      42% ctx  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-**La barre latérale** est le plan, quand il y en a un. `F2` la masque — cela
-vaut la peine sur un terminal étroit.
+**L'en-tête** nomme le projet, ainsi que le fournisseur et le modèle qui
+répondent. C'est ce que rapporte le cœur, pas ce que dit un fichier de
+configuration : quand le modèle change — d'ici, depuis un autre client, ou par
+le cœur lui-même — l'en-tête suit.
 
-**La ligne d'état** montre le mode, s'il itère, le remplissage du contexte, et
-ce que cette session a coûté. Le chiffre du contexte est réel : il suit le
-modèle, si bien que passer d'un modèle à un million de tokens à un modèle
-128k le change immédiatement.
+**La conversation** porte en elle la chronologie des outils. Chaque appel
+d'outil est là où il s'est produit, sur une ligne : une marque (`●` en cours,
+`✓` terminé, `×` échoué), le nom, un résumé d'une ligne, et le temps qu'il a
+pris. Un outil en cours montre les dernières lignes de sa sortie ; un outil
+terminé se replie, et cliquer dessus ouvre ce que le cœur conserve encore.
 
-Cela fonctionne à partir d'environ 60 colonnes. En dessous, la barre latérale
-se replie d'elle-même. `comodor preview 80x24` l'affiche à n'importe quelle
-taille sans démarrer de session.
+**L'établi** — `Ctrl+B` — c'est le travail hors de la conversation : la liste
+de tâches que l'agent tient pour lui-même, et les agents en arrière-plan qu'il
+a lancés, chacun avec son état. Dans un terminal étroit il s'ouvre par-dessus la
+conversation plutôt qu'à côté, et la même touche le ferme.
 
----
-
-## Modes
-
-| Mode | Ce que l'agent peut faire | |
-|---|---|---|
-| **act** | Tout, en demandant avant les écritures et les commandes | par défaut |
-| **plan** | Lecture seule. Aucune écriture, aucune commande, aucun réseau | pour « que ferais-tu ? » |
-| **chat** | Aucun outil du tout | pour une question sur du code que vous collez |
-
-`F3` les fait défiler. `/mode plan` en fixe un directement.
-
-Le mode plan est réellement en lecture seule — c'est appliqué à la couche de
-permissions, pas en priant le modèle d'être gentil. Un outil dont le risque
-dépasse « safe » est refusé avant de s'exécuter.
+**Le pied de page** affiche ce que vous pouvez presser, depuis la même liste
+d'où les touches sont lues, et ce que cette session a coûté là où le
+fournisseur le mesure.
 
 ---
 
 ## Touches
 
-| | |
+| Touche | Fait |
 |---|---|
-| `Enter` | envoyer |
-| `Ctrl+J` | saut de ligne dans un message |
-| `Esc` | arrêter ce qu'il est en train de faire |
-| `Ctrl+C` | arrêter ; deux fois pour quitter |
-| `F1` | aide |
-| `F2` | la barre latérale |
-| `F3` | mode |
-| `F4` | boucle activée/désactivée |
-| `F5` | la passerelle |
-| `Ctrl+O` | joindre un fichier |
-| `Ctrl+L` | effacer la conversation |
-| `PgUp` `PgDn` | faire défiler |
-| `Ctrl+↑` `Ctrl+↓` | messages précédents et suivants |
-| `!command` | exécuter une commande shell directement, sans demander au modèle |
+| `Entrée` | envoie ce que vous avez tapé |
+| `Tab` / `Maj+Tab` | mode suivant / précédent |
+| `Ctrl+K` | la palette de commandes — chaque action, avec recherche |
+| `Ctrl+B` | ouvrir ou fermer l'établi |
+| `Fin` | revenir à la sortie la plus récente après avoir remonté |
+| `PageUp` / `PageDown` | faire défiler la conversation |
+| `Ctrl+R` | renvoyer un message que le cœur a refusé |
+| `Ctrl+C` | arrêter ce qu'il fait ; quitter quand il est inactif |
+| `Ctrl+D` | quitter |
+| `Échap` | fermer la palette, quitter un champ, ou prendre l'option sûre d'une carte |
 
-`!` mérite d'être retenu. `!git status` l'exécute et vous montre la sortie ; le
-modèle ne voit jamais la question. Moins cher et plus rapide que de demander.
+Chaque raccourci que montre le pied de page existe ; on ne peut pas afficher
+d'indication pour une touche qui n'est pas liée.
 
 ---
 
-## Commandes
+## Modes
 
-Tapez `/` et la liste se filtre au fur et à mesure.
+```
+ACT    lit, écrit et exécute des commandes, en demandant avant de changer les choses
+PLAN   lit et planifie ; ne peut rien écrire, exécuter ni changer
+ASK    en discute ; aucun outil du tout
+```
 
-### Lui demander de changer ce qu'il est en train de faire
-
-| | |
-|---|---|
-| `/mode [act\|plan\|chat]` | ce qui lui est permis |
-| `/loop` | travailler jusqu'au bout, ou répondre une seule fois |
-| `/model [id]` | choisir le modèle — une liste, ou en nommer un |
-| `/provider [name]` | choisir le fournisseur |
-| `/gw` | la passerelle : router entre fournisseurs selon le coût, la vitesse ou la qualité |
-
-### L'enseigner
-
-| | |
-|---|---|
-| `/good` | cette réponse était juste |
-| `/bad` | cette réponse était fausse |
-| `/teach <text>` | retiens ceci |
-| `/memory` | ce qu'il a appris |
-| `/rules` | les règles de la maison qu'il a tirées de votre code et de vos modifications |
-| `/progress` | la preuve qu'il s'améliore |
-| `/skills` | des procédures qu'il suit quand le travail correspond |
-
-`/good` et `/bad` sont ce que vous pouvez faire de moins cher pour lui. Voir
-[Comment il apprend](learning.md).
-
-### Annuler et regarder en arrière
-
-| | |
-|---|---|
-| `/undo` | restaurer le dernier fichier qu'il a changé |
-| `/clear` | commencer une conversation neuve |
-| `/resume [id]` | rouvrir une session antérieure |
-| `/search <text>` | retrouver quelque chose dans une conversation antérieure |
-| `/export [path]` | écrire cette session dans un fichier |
-
-### Le pousser plus loin
-
-| | |
-|---|---|
-| `/computer [15m\|1h this app\|stop]` | lui laisser votre écran — [guide](computer.md) |
-| `/mcp` | serveurs MCP et leurs outils — [guide](mcp.md) |
-| `/attach <path>` | ajouter un fichier au prochain message |
-
-### L'apprivoiser
-
-| | |
-|---|---|
-| `/settings` | ce qui est configuré en ce moment |
-| `/approve [writes\|shell\|all]` | cesser de demander avant cela |
-| `/theme [name]` | ember, midnight, matrix, mono |
-| `/save` | écrire les réglages actuels dans votre fichier de configuration |
-| `/cost` | tokens, dépense, et ce que le cache a économisé |
-| `/copy [all\|task]` | la dernière réponse, ou tout, vers le presse-papiers |
-| `/mouse [on\|off]` | suivi de la souris, pour que vous puissiez sélectionner du texte vous-même |
-| `/help` | tout cela, dans l'interface |
-| `/quit` | quitter |
-
-**`/save` n'écrit que ce que vous avez choisi.** Pas les réglages du dépôt, pas
-une clé que vous gardez dans votre environnement, pas un `--model` passé pour
-une seule exécution. Voir
-[Configuration](configuration.md#what-save-writes).
+`Tab` les fait défiler. L'étiquette bouge quand le cœur confirme, pas quand la
+touche s'enfonce : les pressions au sein d'un aller-retour s'accumulent — trois
+Tab demandent une fois, pour là où le troisième pointait — et un changement
+refusé le dit avec des mots plutôt que de déplacer l'étiquette.
 
 ---
 
-## Approbations
+## Quand elle vous demande quelque chose
 
-Quand l'agent veut écrire un fichier ou exécuter une commande :
+Une carte de permission ou un formulaire de questions prend le clavier tant
+qu'elle est affichée, pour qu'une touche destinée à une décision ne puisse pas
+aussi envoyer un message.
 
-```
-  Write  src/parser.py
-  ────────────────────────────────────────────
-   - def parse(text):
-   -     return text.split(",")
-   + def parse(text):
-   +     if not text:
-   +         raise ValueError("nothing to parse")
-   +     return text.split(",")
+- **Les flèches** passent d'un choix ou d'une question à l'autre ;
+  **Entrée** envoie.
+- **Échap** prend l'option sûre propre à la demande — pour une permission c'est
+  *refuser*, pour un changement de mode proposé c'est *aucun changement* — et la
+  carte dit laquelle. Elle n'autorise jamais rien.
+- Il n'y a pas de raccourci à une seule touche pour *autoriser*. Autoriser
+  coûte un déplacement jusqu'au choix et un autre pour le confirmer, afin
+  qu'une touche pressée pour toute autre raison ne puisse pas autoriser une
+  commande.
+- Une question qui propose une ligne « écrivez la vôtre » ouvre un champ pour
+  cela avec `Espace` ; `Échap` quitte le champ avant d'annuler le formulaire.
 
-  [a] allow   [A] allow always this session   [d] deny
-```
+Deux choses peuvent attendre en même temps — deux outils parallèles peuvent
+chacun demander — et elles sont montrées dans l'ordre d'arrivée, aucune n'est
+perdue.
 
-`A` retient pour la session, par type de chose — autoriser les écritures
-n'autorise pas les commandes.
+Les touches de mode fonctionnent toujours pendant qu'une carte est affichée. La
+palette non : un lanceur par-dessus une décision cacherait ce qui doit être
+répondu.
 
-Refuser n'est pas perdu. Un refus est le signal de préférence le plus net que
-l'interface collecte jamais, et il part vers le moteur d'apprentissage : il est
-moins probable que l'agent le propose à nouveau.
+---
 
-Pour cesser d'être sollicité tout court :
+## Suivre le fil
 
-```
-/approve writes      files, yes; commands, still ask
-/approve all         everything
-```
+Une longue réponse garde la ligne la plus récente en vue. Remontez et elle
+cesse de suivre ; la nouvelle sortie ne vous ramène pas en bas, et un marqueur
+dit qu'il y a plus en dessous. `Fin` revient à la queue en direct, et envoyer un
+nouveau message fait de même.
 
-Tout reste sauvegardé. `/undo` fonctionne quoi qu'il arrive.
+---
+
+## Sessions
+
+`Ctrl+K` → *Ouvrir une conversation antérieure* liste ce que le cœur a gardé,
+et en ouvre une sur place. Le même magasin sert le navigateur, donc une
+conversation commencée ici peut être rouverte là-bas.
+
+`comodor --resume` rouvre la plus récente au démarrage ; `--resume ID` en
+nomme une.
 
 ---
 
 ## Copier du texte
 
-Pendant que la souris est suivie, un glissement appartient à Comodor et le
-terminal ne le voit jamais — l'habituel sélectionner-copier ne fonctionne
-donc pas. Trois façons de contourner :
-
-```
-/copy              the last answer
-/copy all          the whole conversation
-/copy task         the last thing you asked for
-/mouse             mouse tracking off, so selection works as usual
-```
-
-`/copy` ne demande rien d'installé sous Windows ni macOS. Sous Linux, il
-utilise `wl-copy`, `xclip` ou `xsel`, selon celui qui est présent, et dit
-lequel manque s'il n'y en a aucun.
-
-Par SSH, il revient à une séquence d'échappement qui demande à *votre*
-terminal de remplir *votre* presse-papiers — le texte d'un agent sur un serveur
-atterrit donc là où vous pouvez le coller, plutôt que sur un serveur qui n'a
-pas de presse-papiers.
-
-La plupart des terminaux permettent aussi de sélectionner avec **Shift**
-maintenu, ce qui contourne le suivi de la souris sans le désactiver.
-
----
-
-## Qui parle
-
-Chaque tour s'assoit sur une bande discrète — une nuance derrière ce que vous
-avez tapé, une autre derrière la réponse :
-
-```
-▌ › why does the parser drop the last field?              ← warm
-
-▌   Because split is called with a maxsplit of 2 …        ← neutral
-▌
-▌   ┌─ python ────────────────────────┐
-▌   │ return text.split(',', 2)       │
-▌   └─────────────────────────────────┘
-```
-
-Volontairement atténué. C'est derrière du texte courant que vous lisez pendant
-des minutes d'affilée, et un arrière-plan qui a trop de présence se dispute les
-mots. Chaque thème a sa propre paire, à quelques pour cent de son
-arrière-plan ; `mono` n'en a pas, car un thème dont le principe est l'absence
-de couleur n'en veut pas deux.
-
-Elles ne coûtent aucun espace vertical — le changement de couleur est la
-frontière.
+Sélectionnez à la souris comme votre terminal le permet. Les options `--theme`
+et `--ascii` s'appliquent à ce que les commandes affichent — `setup`,
+`doctor`, `help` — pas à l'interface, qui dessine à partir de ses propres
+jetons de design.
 
 ---
 
 ## Texte de droite à gauche
 
-Le persan, l'arabe et l'hébreu sont alignés à droite, là où leurs lignes
-commencent, avec une pile de polices qui leur convient. Les paragraphes mixtes
-— un identifiant anglais dans une phrase persane — sont traités par ligne
-plutôt que par fichier, ce qui correspond à ce qui se passe réellement dans une
-conversation technique.
-
----
-
-## Thèmes
-
-```
-/theme midnight
-```
-
-`ember` (le défaut, ambre chaud), `midnight` (bleu froid), `matrix` (vert),
-`mono` (aucune couleur).
-
-`--ascii` remplace les caractères de tracé de cadre par de l'ASCII, pour les
-terminaux qui n'en ont pas. `NO_COLOR` dans votre environnement est respecté.
+Le persan, l'arabe et les lignes mixtes sont passés au terminal tels qu'écrits,
+jamais inversés par le programme. La qualité du rendu d'une ligne mixte est
+l'affaire du terminal, et ceux qui le font bien le font bien ici.
 
 ---
 
 ## Voir aussi
 
-- [Depuis le terminal](cli.md) — la même puissance sans l'interface
-- [Ce que l'agent peut faire](tools.md) — les outils derrière ces lignes `▸`
-- [Sécurité](safety.md) — ce que les demandes d'approbation protègent
+- [tui-v2.md](../tui-v2.md) — comment l'interface est construite, et ce
+  qu'elle peut et ne peut pas encore faire
+- [questions.md](questions.md) — les formulaires que l'agent vous soumet
+- [safety.md](safety.md) — ce qui demande, ce qui ne demande pas, et pourquoi
+- [computer.md](computer.md) — le laisser utiliser votre écran

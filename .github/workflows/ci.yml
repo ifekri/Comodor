@@ -211,6 +211,9 @@ jobs:
       - name: Build the wheel and the sdist
         run: python -m build
 
+      - name: The retired interface is not in the wheel
+        run: python tools/check-wheel-contents.py dist/*.whl
+
       - name: Install the wheel into a clean environment
         shell: bash
         run: |
@@ -238,6 +241,11 @@ jobs:
           COMODOR_HOME="$PWD/home" $PY -m comodor --help > /dev/null
           COMODOR_HOME="$PWD/home" $PY -m comodor doctor > doctor.txt || true
           grep -q "renderer from the package" doctor.txt
+          # The retired command is refused by the parser, and starts nothing.
+          if COMODOR_HOME="$PWD/home" $PY -m comodor legacy 2> legacy.txt; then
+            echo "comodor legacy still runs"; exit 1
+          fi
+          grep -q "invalid choice" legacy.txt
 
       - name: The installed demo starts the packaged renderer
         shell: bash

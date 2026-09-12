@@ -45,13 +45,11 @@ Ya da kapatın, Refleks kalsın:
 
 ## Bilinçli olarak öğretmek
 
-| | |
-|---|---|
-| `/good` | o yanıt doğrudu |
-| `/bad` | o yanıt yanlıştı |
-| `/teach we use pytest, never unittest` | bunu hatırla |
-
-`/good` ve `/bad` tek tuş alır ve onun için yapabileceğiniz en ucuz şeydir.
+Konuşmada söyleyin. Bir düzeltme — «hayır, öyle değil» ya da yazdığını
+düzenlemek — tuttukça güveni yükselen bir derse dönüşür. Düz sözlerle
+söylenen kalıcı bir şey — «pytest kullanırız, asla unittest», «o veritabanı
+Postgres» — ajan tarafından `memory` aracıyla hafıza rafına yazılır; orada her
+turun başında durur; `comodor journey show` orada ne olduğunu listeler.
 
 Bir izin istemini reddetmek de ona öğretir. Bir red, arayüzün topladığı en net tercih sinyalidir ve ona öyle davranılır.
 
@@ -59,40 +57,21 @@ Bir izin istemini reddetmek de ona öğretir. Bir red, arayüzün topladığı e
 
 ## Neyi bildiğini görmek
 
-```
-/memory
-```
-
-Aranabilir bir liste — her ders; onu tetikleyeni, söylediğini, türünü ve güncel güvenini gösterir:
-
-```
-┌─  Memory (23)  ────────────────────────────────────────────────────┐
-│ ›  #41 writing Python strings                                      │
-│      Use single quotes for string literals.  [style 91%]           │
-│    #38 adding a test                                               │
-│      Tests go in tests/, mirroring the src layout.  [layout 84%]   │
-│    #29 adding a dependency                                         │
-│      Ask before adding one; this project has exactly one.  [78%]   │
-│    #12 parsing empty input                                         │
-│      Raise, do not return an empty list.  [behaviour 62%]          │
-└────────────────────────────────────────────────────────────────────┘
-  ↑↓ move   enter open   type filter   esc close
+```bash
+comodor journey show
 ```
 
-`/memory <text>` arar. Birini açmak, zayıflamasını durdurmak için sabitlemenizi ya da yanlışsa silmenizi sağlar.
-
-```
-/rules
-```
-
-Siz ona söylemek yerine kodunuzdan çıkardığı ev kuralları.
+Öğrendiği her şey, en eskisi önce — her ders; onu tetikleyeni, söylediğini,
+türünü ve güncel güvenini, ve siz ona söylemek yerine kodunuzdan çıkardığı ev
+kurallarını gösterir. `comodor journey remove ID` yanlış olan birini emekliye
+ayırır.
 
 ---
 
 ## Çalışıp çalışmadığını görmek
 
-```
-/progress
+```bash
+comodor insights
 ```
 
 ```

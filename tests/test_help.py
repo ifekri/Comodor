@@ -157,16 +157,27 @@ def link_path(target: str) -> str:
     return target.partition("#")[0]
 
 
+def documentation_pages() -> list[Path]:
+    """The English guides and every translation of them — a link that works
+    from `docs/` and not from `docs/FA/` is broken for the reader it was
+    translated for."""
+    pages = sorted(DOCS.glob("*.md"))
+    for locale in sorted(DOCS.iterdir()):
+        if locale.is_dir() and re.fullmatch(r"[A-Z]{2}", locale.name):
+            pages.extend(sorted(locale.glob("*.md")))
+    return pages
+
+
 def test_no_documentation_link_is_broken():
     broken = []
-    for page in sorted(DOCS.glob("*.md")):
+    for page in documentation_pages():
         for label, target in re.findall(r"\[([^\]]+)\]\(([^)]+)\)",
                                         page.read_text(encoding="utf-8")):
             if target.startswith(("http://", "https://", "mailto:", "#")):
                 continue
             path = link_path(target)
             if path and not (page.parent / path).exists():
-                broken.append(f"{page.name}: [{label}]({target})")
+                broken.append(f"{page.relative_to(DOCS).as_posix()}: [{label}]({target})")
     assert not broken, f"broken links: {broken}"
 
 

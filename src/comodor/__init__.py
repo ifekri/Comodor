@@ -9,7 +9,11 @@ The package is layered so each piece can be used on its own:
     comodor.safety     permissions, checkpoints, secret redaction
     comodor.learning   the persistent brain that makes it better over time
     comodor.session    conversation persistence and export
-    comodor.ui         the Rich terminal interface
+    comodor.application  the verbs a client asks for, and the session journal
+    comodor.protocol   what the core and a client say to each other
+    comodor.transport  `comodor core --stdio`, and the launcher for the interface
+    comodor.tui        the packaged terminal interface (OpenTUI, run by Bun)
+    comodor.terminal   what the commands need from a terminal: printing, a picker
 """
 
 # Written by the build from the git tag - see [tool.hatch.version] in

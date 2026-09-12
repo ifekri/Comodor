@@ -21,7 +21,7 @@ se termine avec l'agent faisant quelque chose d'utile.
 
 | | |
 |---|---|
-| [L'interface](interface.md) | Panneaux, touches, modes, et les 29 commandes |
+| [L'interface](interface.md) | Ce qu'il y a à l'écran, les touches, les modes, et quand elle vous demande quelque chose |
 | [Depuis le terminal](cli.md) | Chaque commande et chaque option, avec des exemples |
 | [Ce que l'agent peut faire](tools.md) | Les 13 outils dont il dispose, et quand il utilise chacun |
 | [Compétences](skills.md) | Des procédures que vous écrivez une fois et qu'il suit |
@@ -69,8 +69,8 @@ comodor                  # it asks a few questions, once
 ```
 
 Tapez ensuite ce que vous voulez. Corrigez-le quand il se trompe — modifiez le
-fichier, ou dites-le simplement — et il apprend. `/progress` vous montre si cela
-fonctionne réellement.
+fichier, ou dites-le simplement — et il apprend. `comodor insights` vous montre
+si cela fonctionne réellement.
 
 ```bash
 comodor run "fix the failing test in tests/test_parser.py"   # one task, no interface
@@ -85,11 +85,11 @@ comodor help                                                 # the written help 
 oublient dès la fin d'une session. Comodor observe ce que vous modifiez dans ses
 résultats et en fait une leçon dont la confiance monte quand elle se vérifie et
 baisse quand elle ne se vérifie pas. [Comment il apprend](learning.md) explique
-le mécanisme ; `/progress` montre les preuves.
+le mécanisme ; `comodor insights` montre les preuves.
 
 **Il demande avant d'agir, et tout est réversible.** Lire se fait en silence.
 Écrire demande. Exécuter une commande demande plus fort. Chaque écriture est
-sauvegardée, et `/undo` restaure la précédente. [Sécurité et
+d'abord sauvegardée, donc le contenu précédent n'est jamais perdu. [Sécurité et
 permissions](safety.md).
 
 **Une seule dépendance.** Le client HTTP, le lecteur SSE, le WebSocket pour le
@@ -108,7 +108,7 @@ vous montrant où il s'apprête à cliquer. [Navigateur](browser.md),
 
 | | |
 |---|---|
-| [CHANGELOG](../CHANGELOG.md) | Ce qui a changé, et pourquoi |
-| [CONTRIBUTING](../CONTRIBUTING.md) | Travailler sur Comodor lui-même |
-| [SECURITY](../SECURITY.md) | Signaler quelque chose de sensible |
-| [RELEASING](../RELEASING.md) | Comment une version est préparée |
+| [CHANGELOG](../../CHANGELOG.md) | Ce qui a changé, et pourquoi |
+| [CONTRIBUTING](../../CONTRIBUTING.md) | Travailler sur Comodor lui-même |
+| [SECURITY](../../SECURITY.md) | Signaler quelque chose de sensible |
+| [RELEASING](../../RELEASING.md) | Comment une version est préparée |

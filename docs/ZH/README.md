@@ -20,7 +20,7 @@
 
 | | |
 |---|---|
-| [终端界面](interface.md) | 面板、按键、模式，以及全部 29 条命令 |
+| [终端界面](interface.md) | 屏幕上有什么、按键、模式，以及它何时向你提问 |
 | [命令行使用](cli.md) | 每条命令与每个参数，附示例 |
 | [智能体能做什么](tools.md) | 它拥有的 13 个工具，以及各自何时使用 |
 | [技能](skills.md) | 你只需写一次、它便会遵循的操作流程 |
@@ -67,7 +67,7 @@ irm get.comodor.ai | iex           # Windows
 comodor                  # it asks a few questions, once
 ```
 
-然后输入你想做的事。它做错了就纠正——直接改文件，或者口头说明——它就会学习。`/progress` 会告诉你这样做是否真的有效。
+然后输入你想做的事。它做错了就纠正——直接改文件，或者口头说明——它就会学习。`comodor insights` 会告诉你这样做是否真的有效。
 
 ```bash
 comodor run "fix the failing test in tests/test_parser.py"   # one task, no interface
@@ -78,9 +78,9 @@ comodor help                                                 # the written help 
 
 ## 它的独特之处
 
-**它从纠正中学习，而不是从表扬中学习。** 大多数智能体在会话结束的瞬间便忘掉一切。Comodor 会观察你对其输出所做的修改，并将其转化为一条经验（lesson），其置信度在成立时上升、不成立时下降。[它如何学习](learning.md) 说明了机制；`/progress` 展示证据。
+**它从纠正中学习，而不是从表扬中学习。** 大多数智能体在会话结束的瞬间便忘掉一切。Comodor 会观察你对其输出所做的修改，并将其转化为一条经验（lesson），其置信度在成立时上升、不成立时下降。[它如何学习](learning.md) 说明了机制；`comodor insights` 展示证据。
 
-**它先询问再行动，而且一切皆可撤销。** 读取悄无声息。写入需要确认。运行命令则需要更郑重的确认。每次写入都有检查点，`/undo` 可恢复上一次。[安全与权限](safety.md)。
+**它先询问再行动，而且一切皆可撤销。** 读取悄无声息。写入需要确认。运行命令则需要更郑重的确认。每次写入之前都会先建立检查点，所以之前的内容永远不会丢失。[安全与权限](safety.md)。
 
 **仅一个依赖。** HTTP 客户端、SSE 读取器、浏览器用的 WebSocket、截图用的 PNG 编码器——都包含在软件包之内。安装 Comodor 只会引入 `rich`，别无其他。
 
@@ -92,7 +92,7 @@ comodor help                                                 # the written help 
 
 | | |
 |---|---|
-| [CHANGELOG](../CHANGELOG.md) | 变更了什么，以及原因 |
-| [CONTRIBUTING](../CONTRIBUTING.md) | 参与 Comodor 本身的开发 |
-| [SECURITY](../SECURITY.md) | 报告敏感问题 |
-| [RELEASING](../RELEASING.md) | 发布版本是如何制作的 |
+| [CHANGELOG](../../CHANGELOG.md) | 变更了什么，以及原因 |
+| [CONTRIBUTING](../../CONTRIBUTING.md) | 参与 Comodor 本身的开发 |
+| [SECURITY](../../SECURITY.md) | 报告敏感问题 |
+| [RELEASING](../../RELEASING.md) | 发布版本是如何制作的 |

@@ -44,10 +44,6 @@ comodor mcp disable notes
 comodor mcp remove notes       # forget it entirely
 ```
 
-```
-/mcp                           # the same, in the interface
-```
-
 Ein deaktivierter Server wird nicht gestartet, und seine Werkzeuge werden
 nicht angeboten.
 

@@ -58,13 +58,12 @@ O apágala, conservando el Reflejo:
 
 ## Enseñarle, deliberadamente
 
-| | |
-|---|---|
-| `/good` | esa respuesta fue correcta |
-| `/bad` | esa respuesta fue incorrecta |
-| `/teach we use pytest, never unittest` | recuerda esto |
-
-`/good` y `/bad` toman una tecla y son lo más barato que puedes hacer por él.
+Dilo en la conversación. Una corrección — «no, así no», o editar lo que
+escribió — se convierte en una lección con una confianza que sube cuando se
+cumple. Algo duradero dicho con palabras llanas — «usamos pytest, nunca
+unittest», «esa base de datos es Postgres» — el agente lo anota en su estante
+de memoria con la herramienta `memory`, donde queda al principio de cada turno;
+`comodor journey show` lista lo que hay.
 
 Rechazar un aviso de permiso también le enseña. Un rechazo es la señal de
 preferencia más clara que la interfaz recoge, y se trata como tal.
@@ -73,42 +72,21 @@ preferencia más clara que la interfaz recoge, y se trata como tal.
 
 ## Ver lo que sabe
 
-```
-/memory
-```
-
-Una lista con búsqueda — cada lección con qué la dispara, qué dice, su tipo y
-su confianza actual:
-
-```
-┌─  Memory (23)  ────────────────────────────────────────────────────┐
-│ ›  #41 writing Python strings                                      │
-│      Use single quotes for string literals.  [style 91%]           │
-│    #38 adding a test                                               │
-│      Tests go in tests/, mirroring the src layout.  [layout 84%]   │
-│    #29 adding a dependency                                         │
-│      Ask before adding one; this project has exactly one.  [78%]   │
-│    #12 parsing empty input                                         │
-│      Raise, do not return an empty list.  [behaviour 62%]          │
-└────────────────────────────────────────────────────────────────────┘
-  ↑↓ move   enter open   type filter   esc close
+```bash
+comodor journey show
 ```
 
-`/memory <text>` busca. Abrir una te deja fijarla, para que deje de decaer, o
-eliminarla si estaba mal.
-
-```
-/rules
-```
-
-Las reglas de la casa que sacó de tu código en lugar de que tú se las dijeras.
+Todo lo que ha aprendido, lo más antiguo primero — cada lección con qué la
+dispara, qué dice, su tipo y su confianza actual, y las reglas de la casa que
+sacó de tu código en lugar de que tú se las dijeras. `comodor journey remove
+ID` retira una que estaba mal.
 
 ---
 
 ## Ver si funciona
 
-```
-/progress
+```bash
+comodor insights
 ```
 
 ```

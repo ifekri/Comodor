@@ -21,7 +21,7 @@ ajanın işe yarar bir şey yapmasıyla biter.
 
 | | |
 |---|---|
-| [Arayüz](interface.md) | Paneller, tuşlar, modlar ve 29 komutun tamamı |
+| [Arayüz](interface.md) | Ekranda ne var, tuşlar, modlar ve size ne zaman bir şey sorar |
 | [Terminalden](cli.md) | Her komut ve bayrak, örnekleriyle birlikte |
 | [Ajan neler yapabilir](tools.md) | Sahip olduğu 13 araç ve hangisini ne zaman kullandığı |
 | [Skill'ler](skills.md) | Bir kez yazdığınız ve ajanın izlediği prosedürler |
@@ -69,7 +69,7 @@ comodor                  # birkaç soru sorar, yalnızca bir kez
 ```
 
 Sonra ne istediğinizi yazın. Yanlış yaptığında düzeltin — dosyayı düzenleyin
-ya da sadece söyleyin — ve o öğrenir. `/progress`, bunun gerçekten işe
+ya da sadece söyleyin — ve o öğrenir. `comodor insights`, bunun gerçekten işe
 yarayıp yaramadığını gösterir.
 
 ```bash
@@ -84,11 +84,12 @@ comodor help                                                 # yazılı yardım 
 **Övgüden değil, düzeltmelerden öğrenir.** Çoğu ajan oturum biter bitmez
 unutur. Comodor, çıktısında neyi değiştirdiğinizi izler ve bunu, tuttuğunda
 güveni yükselen tutmadığında düşen bir derse dönüştürür. [Nasıl öğrenir](learning.md)
-mekanizmayı açıklar; `/progress` kanıtı gösterir.
+mekanizmayı açıklar; `comodor insights` kanıtı gösterir.
 
 **Harekete geçmeden önce sorar ve her şey geri alınabilir.** Okuma sessizdir.
-Yazma sorar. Komut çalıştırmak daha gürültülü sorar. Her yazma işlemi
-checkpoint'lenir ve `/undo` sonuncuyu geri koyar. [Güvenlik ve izinler](safety.md).
+Yazma sorar. Komut çalıştırmak daha gürültülü sorar. Her yazma işleminden önce
+checkpoint alınır, bu yüzden önceki içerik asla kaybolmaz. [Güvenlik ve
+izinler](safety.md).
 
 **Tek bağımlılık.** HTTP istemcisi, SSE okuyucu, tarayıcı için WebSocket,
 ekran görüntüleri için PNG kodlayıcı — hepsi paketin bir parçası. Comodor
@@ -105,7 +106,7 @@ değil: JavaScript çalıştıran ve çerezleri saklayan bir tarayıcı ve — W
 
 | | |
 |---|---|
-| [CHANGELOG](../CHANGELOG.md) | Neyin değiştiği ve neden |
-| [CONTRIBUTING](../CONTRIBUTING.md) | Comodor'un kendisi üzerinde çalışmak |
-| [SECURITY](../SECURITY.md) | Hassas bir şeyi bildirmek |
-| [RELEASING](../RELEASING.md) | Bir sürümün nasıl çıkarıldığı |
+| [CHANGELOG](../../CHANGELOG.md) | Neyin değiştiği ve neden |
+| [CONTRIBUTING](../../CONTRIBUTING.md) | Comodor'un kendisi üzerinde çalışmak |
+| [SECURITY](../../SECURITY.md) | Hassas bir şeyi bildirmek |
+| [RELEASING](../../RELEASING.md) | Bir sürümün nasıl çıkarıldığı |

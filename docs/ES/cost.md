@@ -1,9 +1,11 @@
 # Costo
 
 Cuánto cuesta una sesión, y cómo hacer que cueste menos sin empeorarla.
+El rincón de uso de la interfaz muestra esta sesión sobre la marcha; entre
+sesiones:
 
 ```
-/cost
+comodor insights
 ```
 
 ```

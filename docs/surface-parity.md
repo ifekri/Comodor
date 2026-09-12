@@ -198,36 +198,42 @@ Creating or updating this PR does not authorize merge.
 
 Agents must not merge or enable auto-merge unless the user separately and explicitly authorizes this exact PR.
 
-## TUI v2 parity status
+## The terminal interface migration, complete
 
-The question F6 had to answer: **what can the Rich interface do that TUI v2
-cannot?** As of the F6 phase the answer is — nothing required for the default
-interactive workflow.
+The terminal was rewritten across F1–F8: a Python core behind a versioned
+protocol, renderer-independent client semantics in TypeScript, and an OpenTUI
+presentation — with the previous Rich interface kept running beside it until
+the new one had reached parity, made the default (F7), and then removed (F8).
+There is one terminal interface now. This section records what the migration
+decided, because the decisions still shape what the TUI row means.
 
-Normal conversation, modes, questions, permissions, the tool timeline, tasks,
-background agents, scrolling with a truthful new-output marker, model display
-and switching, session history and reopening (against the shared store, so a
-chat begun in the terminal opens in the browser and the reverse), usage and
-context reporting where the provider measures it, terminal floor behaviour,
-and a core that stops answering — all present and renderer-verified. The
-mouse table in [tui-v2](tui-v2.md) says every claimed mouse path is
-renderer-verified rather than merely wired.
+What the interface has, all renderer-verified: normal conversation, modes,
+questions, permissions, the tool timeline, tasks, background agents,
+scrolling with a truthful new-output marker, model display and switching,
+session history and reopening (against the shared store, so a chat begun in
+the terminal opens in the browser and the reverse), usage and context
+reporting where the provider measures it, terminal floor behaviour, and a
+core that stops answering. The mouse table in [tui-v2](tui-v2.md) says which
+mouse paths are renderer-verified.
 
-Deliberately not ported from Rich, and why:
+Deliberately not carried over from the previous interface, and why:
 
-- **Learning and memory commands** (`/memory`, `/rules`, `/progress`,
-  `/teach`, `/good`, `/bad`, `/journey`, `/skills`, `/mcp`, `/prompt`,
-  `/plugins`) — presentation of Core-side subsystems the protocol does not
-  expose; interactive workflow unblocked.
-- **Progressive enrichment** (`/undo`, `/settings`, `/save`, `/approve`,
-  `/theme`, `/copy`, `/mouse`, `/computer`, `/export`, `/attach`, `/clear`,
-  `/loop`, `/gateway`) — configuration and utility commands; the protocol
-  session remains usable without them and they were judged not to block the
-  default conversation.
-- **Costs across every session** (`/cost` + `/insights`) — superseded in the
-  workflow-relevant part by the live usage corner, which the core reports
-  truthfully where the provider measures anything.
+- **Learning and memory views** (what were `/memory`, `/rules`, `/progress`,
+  `/teach`, `/good`, `/bad`, `/skills`, `/mcp`, `/prompt`, `/plugins`) —
+  presentation of Core-side subsystems the protocol does not expose. The
+  commands that remain are `comodor journey`, `comodor insights`, `comodor
+  curator`, `comodor skills` and `comodor mcp`.
+- **Progressive enrichment** (what were `/undo`, `/settings`, `/save`,
+  `/approve`, `/theme`, `/copy`, `/mouse`, `/computer`, `/export`, `/attach`,
+  `/clear`, `/loop`, `/gateway`) — configuration and utility commands the
+  session is usable without. Screen use is granted when the tool asks, with a
+  length, rather than by a command; approvals are proposed by `comodor
+  approvals`; `--theme` and `--ascii` set how the commands print.
+- **Costs across every session** (what were `/cost` and `/insights`) — the
+  live usage corner shows this session; `comodor insights` shows the rest.
+- **Config complaints at startup** — the previous interface toasted them;
+  `comodor run` and `comodor doctor` print them; the interface does not yet.
 
-Future, explicitly agreed non-blocking differences: a transcript-side scroll
-search (the store lists every session by title; scrollback itself has a
-truthful new-output marker and no browser-style find-in-page).
+Known, explicitly non-blocking: no transcript-side scroll search (the store
+lists every session by title; scrollback has a truthful new-output marker and
+no find-in-page).

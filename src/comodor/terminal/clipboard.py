@@ -6,7 +6,8 @@ selection. That is a fair trade for a clickable interface and a bad one if it
 means you cannot get a paragraph out of the thing.
 
 So there are two answers, and this file is the better one — copying without
-selecting at all. The other is turning mouse tracking off, which `/mouse` does.
+selecting at all. The other is the terminal's own selection, where it offers
+one — most do with Shift held, and the interface leaves that to it.
 
 Two mechanisms, tried in that order:
 
@@ -176,7 +177,7 @@ def _osc52(text: str) -> bool:
 def _advice() -> str:
     if sys.platform == "linux":
         return ("no clipboard tool found — install wl-clipboard, xclip or "
-                "xsel, or use /mouse to turn mouse tracking off and select "
-                "the text yourself")
-    return ("could not reach the clipboard — use /mouse to turn mouse tracking "
-            "off and select the text yourself")
+                "xsel, or select the text with the mouse as your terminal "
+                "allows")
+    return ("could not reach the clipboard — select the text with the mouse "
+            "as your terminal allows")

@@ -54,10 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="starting mode")
     parser.add_argument("--no-loop", action="store_true",
                         help="answer once instead of iterating autonomously")
-    parser.add_argument("--theme", help="colour theme (ember, midnight, matrix, mono)")
+    parser.add_argument("--theme", help="colour theme for what the commands print "
+                                        "(ember, midnight, matrix, mono); the "
+                                        "interface has its own")
     parser.add_argument("--ascii", action="store_true",
-                        help="ASCII borders, for terminals without box-drawing glyphs")
-    parser.add_argument("--no-mouse", action="store_true", help="disable mouse support")
+                        help="ASCII borders in what the commands print, for "
+                             "terminals without box-drawing glyphs")
     parser.add_argument("--cwd", help="workspace directory (default: the project root)")
     parser.add_argument("--demo", action="store_true",
                         help="run the interface against a scripted offline provider")
@@ -164,15 +166,6 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--token", help="the access token; one is generated and "
                                        "printed when this is not given")
 
-    preview = sub.add_parser("preview",
-                             help="render the legacy interface at a given size "
-                                  "and exit (the default interface has no "
-                                  "static preview — `comodor --demo` runs it)")
-    preview.add_argument("size", nargs="?", default="120x34", help="WIDTHxHEIGHT")
-    preview.add_argument("--svg", help="also write an SVG to this path")
-    preview.add_argument("--busy", action="store_true",
-                         help="render as though a turn were under way")
-
     return parser
 
 
@@ -192,8 +185,6 @@ def apply_overrides(config: Config, args: argparse.Namespace) -> Config:
         config.ui.theme = args.theme
     if args.ascii:
         config.ui.ascii_borders = True
-    if args.no_mouse:
-        config.ui.mouse = False
     return config
 
 
@@ -211,8 +202,8 @@ def _greet_on_stderr(config: Config, memory: Any, skills: Any) -> None:
     """
     from rich.console import Console
 
-    from .ui import banner
-    from .ui import console as console_module
+    from .terminal import banner
+    from .terminal import console as console_module
 
     theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
                                          no_color=False)
@@ -270,7 +261,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     # the work is done and returns nothing to whatever called it. The
     # interactive path has always done this when it builds its console; the
     # headless path never builds one, so it never did.
-    from .ui.console import force_utf8
+    from .terminal.console import force_utf8
 
     force_utf8()
 
@@ -287,7 +278,8 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
         config.agent.max_steps = args.max_steps
 
     # One wiring, shared. This block used to live here in full and be mirrored
-    # in `ui/app.py`, `web/session.py`, `acp/agent.py` and `cron/runner.py` —
+    # in the previous interface, `web/session.py`, `acp/agent.py` and
+    # `cron/runner.py` —
     # the same objects in the same order, five times, so that adding a front
     # end meant a sixth copy and changing how a session is built meant finding
     # all of them. `application.assemble` is that block, moved rather than
@@ -408,7 +400,12 @@ def run_setup_command(config: Config, args: Any = None) -> int:
         # offering something that cannot work.
         return 1
     if config.start_after_setup in ("interface", "both"):
-        return start_interface(config, args)
+        # The same launcher the bare command uses, checks and all. Setup has
+        # just run, so its own setup-aware branch has nothing to ask; what it
+        # still does is confirm the renderer and Bun before spawning a core.
+        from .transport.commands import run_tui
+
+        return run_tui(config, args)
     return 0
 
 
@@ -463,7 +460,7 @@ def run_doctor(config: Config, fix: bool = False) -> int:
     from rich.table import Table
 
     from .learning import BrainStore
-    from .ui import console as console_module
+    from .terminal import console as console_module
 
     theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
                                          no_color=False)
@@ -505,7 +502,7 @@ def run_doctor(config: Config, fix: bool = False) -> int:
     console.print(f"  size: {console.size.width}×{console.size.height}")
     console.print(f"  colour: {console.color_system or 'none'}")
     console.print(f"  unicode: {console_module.supports_unicode()}")
-    console.print(f"  legacy windows console: {console.legacy_windows}")
+    console.print(f"  windows console without VT sequences: {console.legacy_windows}")
 
     missing = "" if config.paths.config_file.exists() else \
         "  [bad](missing — run comodor setup)[/bad]"
@@ -577,7 +574,7 @@ def run_update(config: Config, check_only: bool = False) -> int:
     be upgraded, and what version answers afterwards.
     """
     from . import update as updater
-    from .ui import console as console_module
+    from .terminal import console as console_module
 
     theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
                                          no_color=False)
@@ -656,7 +653,7 @@ def run_uninstall(config: Config, dry_run: bool = False,
     from rich.padding import Padding
     from rich.text import Text
 
-    from .ui import console as console_module
+    from .terminal import console as console_module
     from .uninstall import _size, apply, survey
 
     theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
@@ -793,116 +790,11 @@ def run_insights(config: Config, args: argparse.Namespace) -> int:
     else:
         from rich.console import Console
 
-        from .ui.console import force_utf8
+        from .terminal.console import force_utf8
 
         force_utf8()
         Console().print(render(result))
     return 0
-
-
-def run_preview(config: Config, args: argparse.Namespace) -> int:
-    """Render one frame at a fixed size — for screenshots and layout checks."""
-    from . import __version__ as _version
-    from .ui import console as console_module
-    from .ui import layout as layout_module
-    from .ui.screen import Screen, ScreenState
-    from .ui.widgets.statusbar import StatusModel
-
-    try:
-        width, _, height = args.size.lower().partition("x")
-        size = (int(width), int(height))
-    except ValueError:
-        print(f"bad size {args.size!r}; expected WIDTHxHEIGHT", file=sys.stderr)
-        return 2
-
-    theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
-                                         no_color=False)
-    console = console_module.build(theme, width=size[0], height=size[1],
-                                   record=bool(args.svg))
-    state = ScreenState()
-    state.status = StatusModel(
-        provider=config.active().display if config.active() else "none",
-        model=config.active_model(), connected=bool(config.available()),
-        mode=config.agent.mode, loop=config.agent.loop,
-        gateway="Disable" if not config.gateway.enabled else config.gateway.policy,
-        context_limit=config.agent.context_limit,
-        version=_version,
-        project=str(config.paths.project),
-        skills=_skill_count(config),
-    )
-    # The sidebar carries what the empty screen does not: the session's name,
-    # what the window is holding, and what is connected.
-    state.history.title = config.paths.project.name or "Comodor"
-    state.history.working_dir = str(config.paths.project)
-    state.history.version = _version
-    state.history.tokens_limit = config.agent.context_limit
-    if config.mcp.enabled and config.mcp.servers:
-        state.history.mcp_servers = [
-            (name, "connected") for name in config.mcp.servers
-        ]
-    # From the console rather than from the size asked for. Rich hands back a
-    # width one short of the request, and a layout computed from the request
-    # draws a rule one cell wider than the surface can hold — which does not
-    # clip, it wraps, and takes every row below it down by one.
-    if getattr(args, "busy", False):
-        # A frame with a conversation in it, so the sidebar and the transcript
-        # can be looked at. The empty screen is a different layout entirely and
-        # checking one says nothing about the other.
-        from .ui.widgets.chat import Entry
-
-        state.entries = [
-            Entry("user", "Add rate limiting to the web server."),
-            Entry("assistant",
-                  "I read `web/server.py` and `web/session.py` first. The "
-                  "request handler already reads `client_address` for the "
-                  "loopback check, so per-IP limiting needs no new plumbing."),
-            Entry("tool", "read_file web/server.py",
-                  {"ok": True, "elapsed": 0.03}),
-            Entry("tool", "grep client_address", {"ok": True, "elapsed": 0.11}),
-            Entry("assistant",
-                  "Three decisions are still open, so I will ask rather than "
-                  "guess at them."),
-        ]
-        state.status.busy = False
-        state.status.context_used = 14_812
-        state.status.cost_usd = 0.0182
-        state.history.title = "Rate limiting the web server"
-        state.history.tokens_used = 14_812
-        state.history.agents = [("reviewer", "running"), ("tests", "done")]
-        state.history.todos = [
-            {"text": "Read the server", "state": "done"},
-            {"text": "Ask about scope", "state": "active"},
-            {"text": "Write the limiter", "state": "pending"},
-        ]
-        if not state.history.mcp_servers:
-            state.history.mcp_servers = [
-                ("cloudflare", "connected"), ("hostinger", "connected"),
-                ("github", "connecting"), ("n8n", "failed"),
-            ]
-
-    # The same question the application asks, so a preview is a picture of
-    # what runs rather than of a third layout that exists only here.
-    from .ui.widgets.chat import is_new_session
-
-    geometry = layout_module.compute(
-        console.width, console.height or size[1],
-        stage=(layout_module.NEW if is_new_session(state.entries)
-               else layout_module.ACTIVE))
-    console.print(Screen(console, theme).render(state, geometry))
-    if args.svg:
-        # The one place this program picks a typeface. Everywhere else it is
-        # the terminal's decision, and Tahoma here is what makes a snapshot
-        # containing Persian or Arabic legible to somebody who opens it in a
-        # browser rather than a terminal.
-        console.save_svg(args.svg, title="Comodor")
-        _use_font(args.svg, console_module.SVG_FONT)
-        print(f"wrote {args.svg}", file=sys.stderr)
-    return 0
-
-
-# --------------------------------------------------------------------------- #
-# entry point
-# --------------------------------------------------------------------------- #
 
 
 def _say_what_the_copy_refused(console, found: list, already: dict) -> None:
@@ -920,7 +812,7 @@ def run_import(config: Config, args: argparse.Namespace) -> int:
     skipped silently.
     """
     from . import migrate
-    from .ui import console as console_module
+    from .terminal import console as console_module
 
     theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
                                          no_color=False)
@@ -1097,19 +989,6 @@ def main(argv: list[str] | None = None) -> int:
         from .transport.commands import run_tui
 
         return run_tui(config, args)
-    if args.command == "legacy":
-        # The previous interface, deliberately one command deep rather than a
-        # flag on the default: choosing it is a decision somebody makes, not
-        # a state they can leave on.
-        #
-        # It still gets the first-run questions. This returned early, above
-        # the only setup block, and a fresh machine sent here — which is
-        # exactly where a machine without Bun is sent — started the previous
-        # interface with no provider and failed on the first message.
-        config, stopped = first_run(config)
-        if stopped is not None:
-            return stopped
-        return start_interface(config, args)
     if args.command == "memory-provider":
         from .learning.providers.commands import run as run_memory_provider
 
@@ -1126,8 +1005,6 @@ def main(argv: list[str] | None = None) -> int:
         from .api.server import run as run_api
 
         return run_api(config, args)
-    if args.command == "preview":
-        return run_preview(config, args)
     if args.command == "insights":
         return run_insights(config, args)
     if args.command == "approvals":
@@ -1148,68 +1025,6 @@ def main(argv: list[str] | None = None) -> int:
     from .transport.commands import run_tui
 
     return run_tui(config, args)
-
-
-def first_run(config: Config) -> tuple[Config, int | None]:
-    """The first-run questions, if the configuration still needs them.
-
-    Returns the configuration to continue with and `None`, or the exit code
-    to stop with. Nothing usable being configured is answered by asking,
-    rather than by printing an error and leaving the person to find the
-    documentation: a few questions, then straight into an interface.
-    """
-    if not config.needs_setup:
-        return config, None
-    from .setup import run_setup
-
-    try:
-        config = run_setup(config)
-    except (KeyboardInterrupt, EOFError):
-        print("\nSetup cancelled. Run `comodor setup` when you are ready, "
-              "or `comodor --demo` to look around offline.", file=sys.stderr)
-        return config, 130
-    if config.needs_setup:
-        return config, 1
-    return config, None
-
-
-def start_interface(config: Config, args: Any = None) -> int:
-    """Start the previous terminal interface, after confirming the folder.
-
-    A function of its own because two paths end here: `comodor legacy`, and
-    `comodor setup` when its closing question was answered with "start it" —
-    the setup flow predates the production interface and still hands over to
-    the interface it was written against. `getattr` throughout, because the
-    second of those comes from a subcommand parser that has never heard of
-    `--resume`.
-    """
-    # Which directory is this about? Asked once per folder, before the agent
-    # exists — the project root is worked out by walking upwards, and the
-    # answer is occasionally a surprise worth seeing before anything reads it.
-    # `--cwd` is the user naming it themselves, so it does not ask again.
-    if not getattr(args, "cwd", None):
-        from .ui import console as console_module
-        from .workspace import confirm
-
-        theme = console_module.prepare_theme(config.ui.theme,
-                                             config.ui.ascii_borders, no_color=False)
-        chosen = confirm(config, console_module.build(theme), theme)
-        if chosen is None:
-            return 0
-        if chosen != config.paths.project:
-            config = apply_overrides(load_config(str(chosen)), args)
-
-    from .ui.app import App
-
-    resume = getattr(args, "resume", None)
-    if resume == "__pick__":
-        resume = None
-
-    app = App(config, demo=bool(getattr(args, "demo", False)), resume=resume)
-    try:
-        return app.run()
-    except KeyboardInterrupt:
-        return 130
 
 
 if __name__ == "__main__":

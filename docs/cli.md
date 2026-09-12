@@ -54,16 +54,15 @@ comodor --mode plan                  # start read-only
 | `--mode act\|plan\|chat` | plan is read-only; chat has no tools |
 | `--no-loop` | answer once instead of working until done |
 | `--cwd PATH` | the folder it may touch |
-| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` |
-| `--ascii` | ASCII borders |
-| `--no-mouse` | leave the mouse to the terminal |
+| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` — for what the commands print; the interface has its own |
+| `--ascii` | ASCII borders in what the commands print |
 | `--resume [ID]` | the last session, or one by id |
 | `--demo` | scripted offline provider |
 | `--version` | which version this is |
 | `-h`, `--help` | the written help page |
 
 None of these are written to your config. They apply to the one run. To make a
-change stick, use `/save` inside the interface or edit the config file —
+change stick, edit the config file, or run `comodor setup` again —
 [Configuration](configuration.md).
 
 ---
@@ -347,18 +346,6 @@ cleared cannot be named, and it tells you so rather than pretending.
 
 ---
 
-## `comodor preview` — the interface at a given size
-
-```bash
-comodor preview 80x24
-comodor preview 200x50 --svg wide.svg
-```
-
-Renders one frame and exits. Useful for checking a narrow terminal, or for a
-screenshot.
-
----
-
 ## Environment variables
 
 | | |
@@ -372,7 +359,7 @@ screenshot.
 | `NO_COLOR` | no colour, honoured everywhere |
 
 A key in the environment is **never written to your config file**. Exporting one
-rather than saving it is a decision, and `/save` respects it. See
+rather than saving it is a decision, and `comodor setup` respects it. See
 [Configuration](configuration.md).
 
 ---

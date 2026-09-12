@@ -201,8 +201,8 @@ class Computer(Tool):
         if ctx.bus is None or not getattr(ctx.bus, "listening", True):
             raise PermissionError(
                 "Comodor has not been allowed to use the screen, and there is "
-                "nobody here to ask. Run `comodor computer` to allow it, or "
-                "`/computer 15m` from the interface.")
+                "nobody here to ask. Start it from the interface, which asks "
+                "before the first action; a headless run cannot be asked.")
 
         # A grant that has just run out is asked about again rather than
         # simply refused: the run is mid-task, and "your time is up, more?" is

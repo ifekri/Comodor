@@ -26,8 +26,8 @@ from rich.table import Table
 from rich.text import Text
 
 from . import __version__
-from .ui import console as console_module
-from .ui.theme import Theme
+from .terminal import console as console_module
+from .terminal.theme import Theme
 
 DOCS = "https://github.com/ifekri/Comodor/tree/main/docs"
 
@@ -77,38 +77,36 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
 OPTIONS: list[tuple[str, str]] = [
     ("--provider NAME", "openrouter, anthropic, openai, ollama, …"),
     ("--model ID", "override the model for this run"),
-    ("--mode act|plan|chat", "plan is read-only; chat has no tools at all"),
+    ("--mode act|plan|ask", "plan is read-only; ask has no tools at all"),
     ("--no-loop", "answer once instead of working until it is done"),
     ("--cwd PATH", "the folder it may touch (default: the project root)"),
-    ("--theme NAME", "ember, midnight, matrix, mono"),
+    ("--theme NAME", "ember, midnight, matrix, mono — for what the commands print"),
     ("--ascii", "for terminals without box-drawing characters"),
-    ("--no-mouse", "leave the mouse to the terminal"),
     ("--resume [ID]", "reopen the most recent session, or one by id"),
     ("--profile NAME", "use a separate brain, sessions and config"),
     ("--demo", "the interface, offline, against a scripted provider"),
     ("--version", "which version this is"),
 ]
 
+#: The keys the interface actually binds — the same list its footer prints
+#: from, so a hint here cannot outlive the key it names.
 IN_THE_INTERFACE: list[tuple[str, str]] = [
     ("type and press Enter", "ask for something"),
-    ("/help", "every command, in the interface"),
-    ("/mode", "act, plan or chat  ·  F3 cycles"),
-    ("/undo", "put back the last file it changed"),
-    ("/memory  /rules", "what it has learned, and the rules it follows"),
-    ("/progress", "evidence that it is getting better, not a claim"),
-    ("/computer 15m", "let it use your screen, for fifteen minutes"),
-    ("/cost", "tokens, spend, and what the cache saved"),
-    ("Esc", "stop what it is doing"),
-    ("F2", "the task list  ·  F1 help  ·  Ctrl-C twice to leave"),
+    ("Tab  ·  Shift+Tab", "the mode: act, plan or ask"),
+    ("Ctrl+K", "every command, searchable"),
+    ("Ctrl+B", "the workbench: tasks and background agents"),
+    ("End", "back to the newest output after scrolling up"),
+    ("Ctrl+C", "stop what it is doing; quit when it is idle"),
+    ("Ctrl+D", "quit"),
 ]
 
 CLOSING = [
     ("It learns from corrections.", "Edit what it wrote, or tell it plainly, and "
-                                    "the next answer follows. `/progress` shows "
-                                    "whether that is working."),
+                                    "the next answer follows. `comodor help "
+                                    "learning` shows whether that is working."),
     ("It asks before it acts.", "Writing a file or running a command is a "
                                 "prompt, once, and you can say always. Every "
-                                "write is checkpointed - `/undo` puts it back."),
+                                "write is checkpointed."),
     ("Your keys stay yours.", "In your own config file or your environment, "
                               "never in a repository, never sent anywhere but "
                               "the provider you chose."),
@@ -125,10 +123,9 @@ Comodor can drive the machine the way a person does - look at the screen, move
 the mouse, click and type, in any application.
 
   Switch it on          set  computer.enabled: true  in your config
-  Allow it              /computer 15m       fifteen minutes, anywhere
-                        /computer 1h this app   only the window in front
+  Allow it              it asks before the first action, with a length —
+                        fifteen minutes, an hour, only the window in front
   Stop it               move the mouse into a corner of the screen
-                        or  /computer stop
 
 While it works you can watch: a halo marks where it is about to click before
 the pointer moves, a ripple marks where it landed, and a panel at the top of
@@ -158,13 +155,13 @@ Full guide: docs/browser.md"""),
     "learning": ("What it learns, and how to see it", """\
 Corrections first. Edit a file it wrote, or say "no, do it this way", and that
 becomes a lesson with a confidence that rises when it holds and decays when it
-does not.
+does not. Tell it a rule in plain words in the conversation and it keeps that
+too.
 
-  /memory      what it has learned
-  /rules       the house rules it drew from your code and your edits
-  /teach       tell it something directly
-  /good  /bad  say whether an answer was right
-  /progress    the evidence: recall, corrections, and whether they are falling
+  comodor journey show   everything it has learned, oldest first
+  comodor insights       the evidence over recent days: spend, activity,
+                         corrections, and whether they are falling
+  comodor curator run    a maintenance pass over the brain, now
 
 Nothing leaves your machine. The brain is a SQLite file under your config
 directory.  Full guide: docs/learning.md"""),
@@ -178,9 +175,6 @@ A skill is a written procedure - a markdown file with a name and a description
   comodor skills list       what you have
   comodor skills rollback --list
                             every change the agent made, and how to undo it
-  /skills                   the same, in the interface
-  /skills draft             procedures Comodor worked out and wants to save
-  /skills adopt NAME        save one of those drafts as your own skill
 
 Write your own in  ~/.comodor/skills/<name>/SKILL.md. The agent can write
 and patch them too (skill_manage); every change is recorded, and the
@@ -204,8 +198,9 @@ curator.interval_days sets how often it runs; the pass itself costs no
 tokens and never runs in the middle of a session."""),
 
     "cost": ("Paying less for the same work", """\
-  /cost                     tokens, spend, and what the cache saved
-  /insights [days]          spend and progress across every session
+  the usage corner          tokens and spend for this session, as it goes
+  comodor insights [--days N]
+                            spend and progress across every session
   comodor insights --json   the same numbers, for scripts
   agent.max_cost_usd        stop a task at a price
   agent.max_steps           stop it at a number of steps
@@ -240,8 +235,8 @@ transcribed is kept on disk, and its path is offered, never discarded."""),
 Every tool has a tier. Reading is silent; writing asks; running a command,
 reaching the network or driving the screen asks louder.
 
-  /approve writes           stop asking before file writes
-  /undo                     restore the last file it changed
+  "always", when asked      stop asking about that kind of action, this session
+  comodor approvals         an allowlist proposed from what you keep approving
   safety.workspace_only     it may not touch anything outside the project
   safety.deny_commands      commands no prompt can talk it into
 
@@ -255,8 +250,8 @@ approvals, not the screen.  Full guide: docs/safety.md"""),
   environment                   ANTHROPIC_API_KEY, OPENAI_API_KEY, …
   the command line              --model, --mode, …  for one run
 
-Later beats earlier. `/save` writes back only what *you* chose - never the
-repository's settings, and never a key you keep in your environment.
+Later beats earlier. `comodor setup` writes back only what *you* chose - never
+the repository's settings, and never a key you keep in your environment.
 
   comodor doctor                what is set, and what is wrong with it
 
@@ -427,8 +422,8 @@ image costs real money and an agent that can spend silently is not yours.
   The key           in the environment: image_gen.key_env, OPENAI_API_KEY
                     by default — never in the config file
   Daily limit       image_gen.max_per_day: 10 — when it is reached the tool
-                    refuses in words until tomorrow, and /cost shows the
-                    count
+                    refuses in words until tomorrow, and says how many it
+                    made
 
 The tool is only offered to the model while it is switched on, and every call
 asks permission, like a shell command. The prompt is sent to the provider

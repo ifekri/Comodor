@@ -12,7 +12,8 @@ was auch immer Sie sagen.
 - **Schreiben fragt.** Sie sehen den Diff, bevor er passiert.
 - **Einen Befehl ausführen fragt lauter**, und ebenso das Netzwerk erreichen
   oder Ihren Bildschirm steuern.
-- **Alles Umkehrbare wird durch `/undo` umgekehrt.**
+- **Jeder Schreibvorgang wird zuerst als Prüfpunkt gesichert**, sodass der
+  vorherige Inhalt erhalten bleibt.
 - **Es kann den Projektordner nicht verlassen**, außer Sie schalten das ab.
 - **Ein Repository kann nichts von all dem ändern.**
 
@@ -44,21 +45,17 @@ Im **Chat-Modus** gibt es überhaupt keine Werkzeuge.
   ────────────────────────────────────────────
   in ~/projects/api-server
 
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-`A` merkt es sich für die Sitzung, je Art von Ding — Schreibvorgänge zu erlauben
-erlaubt keine Befehle, und `pytest` zu erlauben erlaubt kein `rm`.
+Die Pfeiltasten wechseln zwischen den Wahlmöglichkeiten, `Enter` sendet, `Esc`
+lehnt ab. *Für diese Sitzung erlauben* merkt es sich für die Sitzung, je Art
+von Ding — Schreibvorgänge zu erlauben erlaubt keine Befehle, und `pytest` zu
+erlauben erlaubt kein `rm`.
 
-Um nicht mehr gefragt zu werden:
-
-```
-/approve writes      files yes, commands still ask
-/approve shell       commands yes, files still ask
-/approve all         everything
-```
-
-Oder dauerhaft, in Ihrer Konfiguration:
+Um nicht mehr gefragt zu werden, wählen Sie auf der Karte *Für diese Sitzung
+erlauben* — sie merkt es sich je Art von Sache — oder dauerhaft, in Ihrer
+Konfiguration:
 
 ```json
 {
@@ -77,19 +74,17 @@ dasselbe wieder vorzuschlagen. Ablehnen ist keine vergebene Mühe.
 
 ---
 
-## Prüfpunkte und `/undo`
+## Prüfpunkte
 
 Jede Datei, die der Agent schreibt, wird zuerst als Prüfpunkt gesichert — der
-vorherige Inhalt, gehalten unter `.comodor/checkpoints/` im Projekt.
+vorherige Inhalt, gehalten unter `.comodor/checkpoints/` im Projekt,
+inhaltsadressiert, mit einem Journal, das sagt, zu welcher Datei jeder
+Schnappschuss gehörte. Das geschieht, ob Sie den Schreibvorgang genehmigt haben
+oder nicht, und ob die Auto-Genehmigung an ist oder nicht.
 
-```
-/undo
-```
-
-stellt die letzte von ihm geänderte Datei wieder her. Das funktioniert, ob Sie
-den Schreibvorgang genehmigt haben oder nicht, und ob die Auto-Genehmigung an
-ist oder nicht. Es ist der Grund, warum `/approve all` eine vernünftige Sache
-ist.
+Einen Befehl, der einen davon wiederherstellt, gibt es noch nicht; der Speicher
+ist da, damit nichts verloren geht, was der Agent überschrieben hat, und ein
+Projekt unter Versionskontrolle hat daneben seine eigene Geschichte.
 
 Schalten Sie es ab, wenn Sie müssen:
 
@@ -165,7 +160,7 @@ gefunden und behoben: Jeder Traceback, der ein Config nannte, druckte
 früher den Schlüssel, und pytest druckt Tracebacks ständig.
 
 **Ein Schlüssel in Ihrer Umgebung bleibt dort.** Wenn Sie `ANTHROPIC_API_KEY`
-exportieren, statt ihn zu speichern, kopiert `/save` ihn nicht in Ihre
+exportieren, statt ihn zu speichern, kopiert `comodor setup` ihn nicht in Ihre
 Konfigurationsdatei. Exportieren statt Speichern ist eine Entscheidung, und sie
 wird respektiert.
 
@@ -258,7 +253,7 @@ arbeitet, hat kein Recht, Ihre Maus zu nehmen.
 ## Etwas melden
 
 Wenn Sie ein Sicherheitsproblem finden, öffnen Sie bitte kein öffentliches
-Issue. Siehe [SECURITY.md](../SECURITY.md).
+Issue. Siehe [SECURITY.md](../../SECURITY.md).
 
 ---
 

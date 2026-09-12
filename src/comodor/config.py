@@ -129,17 +129,20 @@ def provider_from_spec(spec: catalogue.ProviderSpec) -> ProviderConfig:
 
 @dataclass
 class UIConfig:
+    """How the commands print. The interface draws from its own design tokens.
+
+    `theme` and `ascii_borders` set the palette and the borders `setup`,
+    `doctor`, `help` and the channel commands print with. Keys an older
+    configuration may still carry for the previous interface — `mouse`,
+    `max_fps`, `sidebar`, `show_timestamps`, `syntax_theme` — are ignored on
+    load, as every unknown key is; nothing reads them any more.
+    """
+
     theme: str = "cyan"
     ascii_borders: bool = False          # for terminals without box-drawing glyphs
-    mouse: bool = True
-    max_fps: int = 20                    # streaming deltas are coalesced to this
-    show_timestamps: bool = False
-    sidebar: bool = True
     #: The wordmark at startup. `COMODOR_BANNER=0` switches it off for one run;
     #: this switches it off for good.
     banner: bool = True
-    #: Empty means the colour theme picks one that suits it.
-    syntax_theme: str = ""
 
 
 @dataclass
@@ -1303,7 +1306,7 @@ class Config:
 
         A borrowed value that is still exactly what the borrowed layer supplied
         goes back to whatever their own file said. A value they changed during
-        the session -- `/model`, `/approve`, the setup wizard -- is their own
+        the session -- a model chosen in setup, an approval -- is their own
         choice and is written.
         """
         document = self.to_json()
@@ -1566,8 +1569,7 @@ def _as_dict(obj: Any) -> Any:
 PROJECT_SETTABLE: dict[str, frozenset[str] | None] = {
     "provider": None,
     "model": None,
-    "ui": frozenset({"theme", "ascii_borders", "syntax_theme", "show_timestamps",
-                     "sidebar", "banner", "max_fps", "mouse"}),
+    "ui": frozenset({"theme", "ascii_borders", "banner"}),
     "agent": frozenset({"mode", "loop", "max_steps", "max_seconds", "max_cost_usd",
                         "context_limit", "compact_at", "temperature",
                         "max_output_tokens", "max_tool_chars",

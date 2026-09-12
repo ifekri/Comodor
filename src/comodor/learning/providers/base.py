@@ -67,7 +67,7 @@ class Provider(ABC):
 
     @abstractmethod
     def status(self) -> str:
-        """One honest line for `doctor` and `/memory` — reachable or why not."""
+        """One honest line for `doctor` — reachable or why not."""
 
 
 def build(config: Config) -> Provider | None:

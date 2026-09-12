@@ -135,7 +135,7 @@ class KeyPool:
     # -- introspection ----------------------------------------------------- #
 
     def status(self) -> list[dict[str, object]]:
-        """Per-key state for /provider and doctor — masked keys only."""
+        """Per-key state for doctor — masked keys only."""
         with self._lock:
             return [
                 {

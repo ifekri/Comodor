@@ -229,12 +229,13 @@ you get a diff and a choice:
 ```
   Write  src/parser.py
     - 12 lines removed, 8 added
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-Answer `a` once, or `A` if you would rather it stopped asking for the rest of
-the session. Every write is checkpointed either way: `/undo` puts the last one
-back.
+Arrows move between the choices and `Enter` sends; `Esc` denies. Choose
+*Allow for this session* if you would rather it stopped asking for the rest of
+the session. Every write is checkpointed either way, so the previous contents
+are kept.
 
 ---
 
@@ -256,8 +257,8 @@ with a confidence that rises when it holds and decays when it does not.
 
 After a few sessions:
 
-```
-> /progress
+```bash
+comodor insights
 ```
 
 ```
@@ -285,12 +286,12 @@ learning is not working, and the panel says so rather than hiding it.
 ## 6. The things worth knowing on day one
 
 ```
-/help          every command
-/mode          act · plan (read-only) · chat (no tools)     F3 cycles
-/undo          restore the last file it changed
-/cost          tokens, spend, what the cache saved
-Esc            stop it, mid-thought
-Ctrl-C twice   leave
+Tab            next mode: act · plan (read-only) · ask (no tools)
+Ctrl+K         every command, searchable
+Ctrl+B         the workbench: tasks and background agents
+Ctrl+C         stop it mid-thought; quit when it is idle
+Ctrl+D         leave
+comodor help   the written help page, outside the interface
 ```
 
 ---

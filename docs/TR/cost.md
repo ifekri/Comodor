@@ -2,9 +2,11 @@
 
 Bir oturumun neye mal olduğu ve onu daha kötü yapmadan nasıl daha ucuza
 getireceğiniz.
+Arayüzdeki kullanım köşesi bu oturumu anlık olarak gösterir; tüm oturumlar
+için:
 
 ```
-/cost
+comodor insights
 ```
 
 ```

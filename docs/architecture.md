@@ -41,8 +41,8 @@ Domain / Infrastructure
   adapters must not bypass it to perform privileged actions directly.
 
 These are conceptual boundaries, not a demand to rename directories or introduce
-a framework. Shared services should be usable without a Rich renderer, browser
-DOM, terminal dimensions or desktop widget. Event consumers may receive updates
+a framework. Shared services should be usable without a terminal renderer, a
+browser DOM, terminal dimensions or a desktop widget. Event consumers may receive updates
 in the reverse direction without making the shared layer depend on a concrete UI.
 
 ## Current source map
@@ -54,7 +54,7 @@ Use this map to find implementation, not as proof of runtime parity:
 | Shared agent behavior | [agent/](../src/comodor/agent/), [events.py](../src/comodor/events.py) |
 | Configuration | [config.py](../src/comodor/config.py) |
 | Tool and provider boundaries | [tools/](../src/comodor/tools/), [providers/](../src/comodor/providers/) |
-| Terminal interface | [ui/](../src/comodor/ui/) |
+| Terminal interface | [tui/](../src/comodor/tui/) (the packaged renderer and its launcher), [apps/tui/](../apps/tui/) and [packages/](../packages/) (the OpenTUI client and its shared semantics); what the commands print through is [terminal/](../src/comodor/terminal/) |
 | Web interface and server/session adapters | [web/](../src/comodor/web/) |
 | CLI and headless entry points | [cli.py](../src/comodor/cli.py) |
 | API and protocols | [api/](../src/comodor/api/), [acp/](../src/comodor/acp/) |

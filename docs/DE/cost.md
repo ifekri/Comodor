@@ -2,9 +2,11 @@
 
 Was eine Sitzung kostet, und wie man sie billiger macht, ohne sie schlechter
 zu machen.
+Die Verbrauchsecke der Oberfläche zeigt diese Sitzung, während sie läuft;
+über alle Sitzungen hinweg:
 
 ```
-/cost
+comodor insights
 ```
 
 ```

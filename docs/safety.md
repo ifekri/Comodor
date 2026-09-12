@@ -11,7 +11,7 @@ not do whatever you say.
 - **Writing asks.** You see the diff before it happens.
 - **Running a command asks louder**, and so does reaching the network or
   driving your screen.
-- **Everything reversible is reversed by `/undo`.**
+- **Every write is checkpointed first**, so the previous contents are kept.
 - **It cannot leave the project folder** unless you turn that off.
 - **A repository cannot change any of the above.**
 
@@ -41,21 +41,15 @@ In **chat mode** there are no tools at all.
   ────────────────────────────────────────────
   in ~/projects/api-server
 
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-`A` remembers for the session, per kind of thing — allowing writes does not
-allow commands, and allowing `pytest` does not allow `rm`.
+Arrows move between the choices and `Enter` sends; `Esc` denies. *Allow for
+this session* remembers for the session, per kind of thing — allowing writes
+does not allow commands, and allowing `pytest` does not allow `rm`.
 
-To stop being asked:
-
-```
-/approve writes      files yes, commands still ask
-/approve shell       commands yes, files still ask
-/approve all         everything
-```
-
-Or permanently, in your config:
+To stop being asked, choose *Allow for this session* on the card — it remembers
+per kind of thing — or permanently, in your config:
 
 ```json
 {
@@ -74,18 +68,16 @@ again. Denying is not wasted effort.
 
 ---
 
-## Checkpoints and `/undo`
+## Checkpoints
 
 Every file the agent writes is checkpointed first — the previous contents, kept
-under `.comodor/checkpoints/` in the project.
+under `.comodor/checkpoints/` in the project, content-addressed, with a journal
+of which file each snapshot belonged to. This happens whether or not you
+approved the write, and whether or not auto-approval is on.
 
-```
-/undo
-```
-
-restores the last file it changed. This works whether or not you approved the
-write, and whether or not auto-approval is on. It is the reason `/approve all`
-is a reasonable thing to do.
+There is no command that restores one yet; the store is there so nothing the
+agent overwrote is lost, and a project under version control has its own
+history beside it.
 
 Switch it off if you must:
 
@@ -159,7 +151,7 @@ Not a `repr` — that one was a real bug, found and fixed: any traceback naming 
 Config used to print the key, and pytest prints tracebacks constantly.
 
 **A key in your environment stays there.** If you export `ANTHROPIC_API_KEY`
-rather than saving it, `/save` will not copy it into your config file. Exporting
+rather than saving it, `comodor setup` will not copy it into your config file. Exporting
 rather than saving is a decision and it is respected.
 
 **Redaction.** Anything that looks like one of your keys is masked in tool

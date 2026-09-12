@@ -234,12 +234,13 @@ dosyaya yazmadan önce size bir fark (diff) ve bir seçenek sunar:
 ```
   Write  src/parser.py
     - 12 lines removed, 8 added
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-Bir kez `a` ile yanıtlayın, ya da oturumun geri kalanında sormayı bırakmasını
-tercih ediyorsanız `A` ile. Her iki durumda da her yazma işlemi
-checkpoint'lenir: `/undo` sonuncuyu geri koyar.
+Ok tuşları seçenekler arasında gezer, `Enter` gönderir; `Esc` reddeder. Oturumun
+geri kalanında sormayı bırakmasını tercih ediyorsanız *Bu oturum için izin
+ver*'i seçin. Her iki durumda da her yazma işleminden önce checkpoint alınır,
+bu yüzden önceki içerik korunur.
 
 ---
 
@@ -262,8 +263,8 @@ sefer hatırlanır, tuttuğunda güveni yükselir ve tutmadığında azalır.
 
 Birkaç oturumdan sonra:
 
-```
-> /progress
+```bash
+comodor insights
 ```
 
 ```
@@ -291,12 +292,12 @@ demektir ve panel bunu gizlemek yerine söyler.
 ## 6. İlk gün bilinmesi gerekenler
 
 ```
-/help          every command
-/mode          act · plan (read-only) · chat (no tools)     F3 cycles
-/undo          restore the last file it changed
-/cost          tokens, spend, what the cache saved
-Esc            stop it, mid-thought
-Ctrl-C twice   leave
+Tab            next mode: act · plan (read-only) · ask (no tools)
+Ctrl+K         every command, searchable
+Ctrl+B         the workbench: tasks and background agents
+Ctrl+C         stop it mid-thought; quit when it is idle
+Ctrl+D         leave
+comodor help   the written help page, outside the interface
 ```
 
 ---

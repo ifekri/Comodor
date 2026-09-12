@@ -27,8 +27,8 @@ from rich.console import Console
 from rich.text import Text
 
 from .config import Config
-from .ui import chooser
-from .ui.theme import Theme
+from .terminal import chooser
+from .terminal.theme import Theme
 
 
 def is_trusted(config: Config, root: Path) -> bool:

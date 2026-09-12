@@ -60,14 +60,12 @@ Ou désactivez-la, en gardant le Réflexe :
 
 ## Lui enseigner, délibérément
 
-| | |
-|---|---|
-| `/good` | cette réponse était bonne |
-| `/bad` | cette réponse était mauvaise |
-| `/teach we use pytest, never unittest` | retenez ceci |
-
-`/good` et `/bad` ne coûtent qu'une frappe et sont la chose la moins chère que
-vous puissiez faire pour lui.
+Dites-le dans la conversation. Une correction — « non, pas comme ça », ou
+modifier ce qu'il a écrit — devient une leçon dont la confiance monte quand
+elle se vérifie. Quelque chose de durable dit en mots simples — « nous
+utilisons pytest, jamais unittest », « cette base de données est Postgres » —
+l'agent le note sur son étagère de mémoire avec l'outil `memory`, où cela se
+trouve en tête de chaque tour ; `comodor journey show` liste ce qui s'y trouve.
 
 Refuser une demande d'autorisation lui enseigne aussi. Un refus est le signal
 de préférence le plus net que l'interface recueille, et il est traité comme tel.
@@ -76,43 +74,21 @@ de préférence le plus net que l'interface recueille, et il est traité comme t
 
 ## Voir ce qu'il sait
 
-```
-/memory
-```
-
-Une liste consultable — chaque leçon avec ce qui la déclenche, ce qu'elle dit,
-son genre et sa confiance actuelle :
-
-```
-┌─  Memory (23)  ────────────────────────────────────────────────────┐
-│ ›  #41 writing Python strings                                      │
-│      Use single quotes for string literals.  [style 91%]           │
-│    #38 adding a test                                               │
-│      Tests go in tests/, mirroring the src layout.  [layout 84%]   │
-│    #29 adding a dependency                                         │
-│      Ask before adding one; this project has exactly one.  [78%]   │
-│    #12 parsing empty input                                         │
-│      Raise, do not return an empty list.  [behaviour 62%]          │
-└────────────────────────────────────────────────────────────────────┘
-  ↑↓ move   enter open   type filter   esc close
+```bash
+comodor journey show
 ```
 
-`/memory <text>` cherche. En ouvrir une permet de l'épingler, pour qu'elle cesse
-de décroître, ou de la supprimer si elle était fausse.
-
-```
-/rules
-```
-
-Les règles de la maison qu'il a tirées de votre code plutôt que de ce que vous
-lui auriez dit.
+Tout ce qu'il a appris, du plus ancien au plus récent — chaque leçon avec ce
+qui la déclenche, ce qu'elle dit, son genre et sa confiance actuelle, et les
+règles de la maison qu'il a tirées de votre code plutôt que de ce que vous lui
+auriez dit. `comodor journey remove ID` en retire une qui était fausse.
 
 ---
 
 ## Voir si cela fonctionne
 
-```
-/progress
+```bash
+comodor insights
 ```
 
 ```

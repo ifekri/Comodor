@@ -188,10 +188,10 @@ comodor
 ```
   Write  src/parser.py
     - 12 lines removed, 8 added
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-回答 `a` 允许一次，或者回答 `A` 让它在本次会话内不再就此询问。无论如何，每次写入都有检查点：`/undo` 可恢复上一次。
+方向键在选项之间移动，`Enter` 发送；`Esc` 拒绝。选择*本次会话允许*，让它在本次会话内不再就此询问。无论如何，每次写入之前都有检查点，所以之前的内容会被保留。
 
 ---
 
@@ -211,8 +211,8 @@ comodor
 
 几个会话之后：
 
-```
-> /progress
+```bash
+comodor insights
 ```
 
 ```
@@ -239,12 +239,12 @@ success  83% overall
 ## 6. 第一天值得知道的事
 
 ```
-/help          every command
-/mode          act · plan (read-only) · chat (no tools)     F3 cycles
-/undo          restore the last file it changed
-/cost          tokens, spend, what the cache saved
-Esc            stop it, mid-thought
-Ctrl-C twice   leave
+Tab            next mode: act · plan (read-only) · ask (no tools)
+Ctrl+K         every command, searchable
+Ctrl+B         the workbench: tasks and background agents
+Ctrl+C         stop it mid-thought; quit when it is idle
+Ctrl+D         leave
+comodor help   the written help page, outside the interface
 ```
 
 ---

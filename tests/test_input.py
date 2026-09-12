@@ -11,14 +11,13 @@ import os
 import pytest
 
 from comodor.config import Config, ProviderConfig
-from comodor.ui.input.keys import (
+from comodor.terminal.keys import (
     FocusEvent,
     KeyDecoder,
     KeyEvent,
     MouseEvent,
     PasteEvent,
 )
-from comodor.ui.widgets.prompt import Editor, completions
 
 
 def decode(sequence: str) -> list:
@@ -148,85 +147,6 @@ def test_key_matching():
     assert KeyEvent("tab", shift=True).matches("shift+tab")
 
 
-# --------------------------------------------------------------------------- #
-# the editor
-# --------------------------------------------------------------------------- #
-
-
-def test_typing_and_deleting():
-    editor = Editor()
-    editor.insert("hello")
-    editor.backspace()
-    assert editor.text == "hell"
-    editor.insert(" there")
-    editor.home()
-    editor.delete()
-    assert editor.text == "ell there"
-
-
-def test_word_motion_and_deletion():
-    editor = Editor(text="the quick brown fox")
-    editor.cursor = len(editor.text)
-    editor.word_left()
-    assert editor.cursor == 16
-    editor.delete_word()                      # removes the word before the cursor
-    assert editor.text == "the quick fox"
-
-
-def test_multiline_navigation_preserves_the_column():
-    editor = Editor(text="first line\nshort\nthird line here")
-    editor.cursor = len("first line\nshort\nthird")
-    editor.up()
-    assert editor.cursor == len("first line\nshort")     # clamped to a short line
-    editor.up()
-    assert editor.text[:editor.cursor].count("\n") == 0
-
-
-def test_history_is_browsable():
-    editor = Editor()
-    editor.remember("first command")
-    editor.remember("second command")
-    editor.insert("draft")
-
-    editor.previous()
-    assert editor.text == "second command"
-    editor.previous()
-    assert editor.text == "first command"
-    editor.next()
-    editor.next()
-    assert editor.text == "draft", "leaving history restores what was being typed"
-
-
-def test_wrapping_measures_display_width_not_characters():
-    editor = Editor(text="日本語のテキスト")       # two cells per character
-    rows = editor.wrapped(width=8)
-    assert len(rows) > 1
-    for text, _ in rows:
-        from rich.cells import cell_len
-
-        assert cell_len(text) <= 8
-
-
-def test_cursor_position_accounts_for_wide_characters():
-    editor = Editor(text="日本abc")
-    editor.cursor = 3                                  # after 日本a
-    _, column = editor.cursor_position(width=40)
-    assert column == 5                                  # 2 + 2 + 1 cells
-
-
-def test_slash_completions_match_a_prefix():
-    commands = [("/help", "h"), ("/model", "m"), ("/memory", "mm")]
-    assert [name for name, _ in completions("/me", commands)] == ["/memory"]
-    assert [name for name, _ in completions("/m", commands)] == ["/model", "/memory"]
-    assert completions("/model gpt", commands) == []    # past the command word
-    assert completions("not a command", commands) == []
-
-
-# --------------------------------------------------------------------------- #
-# config
-# --------------------------------------------------------------------------- #
-
-
 def test_secrets_never_appear_in_the_public_config():
     config = Config()
     config.providers["x"] = ProviderConfig(name="x", api_key="sk-secret-value",
@@ -274,7 +194,7 @@ def test_reading_keys_raw_leaves_the_output_translation_alone():
     import pty
     import termios
 
-    from comodor.ui.input.reader import TerminalInput
+    from comodor.terminal.reader import TerminalInput
 
     primary, secondary = pty.openpty()
     try:

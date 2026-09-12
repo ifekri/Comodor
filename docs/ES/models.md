@@ -53,11 +53,9 @@ varios pasos.
 comodor --model claude-haiku-4-5      # this run only
 ```
 
-```
-/model                  # a list of what the provider offers
-/model gpt-4o           # by name
-/provider               # a different provider entirely
-```
+En la interfaz, `Ctrl+K` → *Elegir un modelo* lista lo que ofrece el proveedor
+y cambia en el acto; otro proveedor es `--provider` en la línea de comandos, o
+`comodor setup`.
 
 El medidor de contexto sigue al modelo. Cambiar de un modelo de un millón de
 tokens a uno de 128k cambia el límite de inmediato — lo cual importa, porque el
@@ -65,7 +63,7 @@ agente compacta la conversación a una fracción de él, y un límite
 desactualizado significa que nunca compacta y luego falla en el techo real del
 proveedor.
 
-Para hacer permanente un cambio: `/save`, o edita
+Para hacer permanente un cambio: `comodor setup`, o edita
 `~/.comodor/config.json`.
 
 ---
@@ -82,7 +80,7 @@ Cualquiera de los dos lugares funciona, y ninguno se copia al otro:
 export ANTHROPIC_API_KEY=sk-ant-…
 ```
 
-Una clave en tu entorno **se queda ahí** — `/save` no la escribirá al disco.
+Una clave en tu entorno **se queda ahí** — `comodor setup` no la escribirá al disco.
 Exportarla en lugar de guardarla es una decisión, y se respeta.
 
 El archivo de configuración propio de Comodor se escribe con permisos solo para
@@ -94,10 +92,6 @@ exportación o un traceback. [Seguridad](safety.md#your-keys).
 ## El gateway
 
 Enruta entre varios proveedores en lugar de fijar uno.
-
-```
-/gw                    # or F5
-```
 
 ```json
 {
@@ -129,8 +123,10 @@ tenga ojos, o le entregarán una imagen que no puede leer y adivinará.
 
 ## Cuánto cuesta
 
+El rincón de uso de la interfaz muestra esta sesión; entre sesiones:
+
 ```
-/cost
+comodor insights
 ```
 
 Ver [Costo](cost.md) para caché, presupuestos y por qué un límite de gasto a

@@ -54,10 +54,6 @@ comodor skills add review        # install it
 comodor skills list              # what you have
 ```
 
-```
-/skills                          # the same, in the interface
-```
-
 ومن ثَم، عندما تطلب شيئًا تغطيه مهارة، تُحمَّل ويتّبعها الوكيل. وتُخبَر حين
 يحدث ذلك:
 
@@ -101,7 +97,7 @@ Not `python -m pytest` — the project needs the venv's own interpreter.
 **الوصف** هو الأهم. فهو ما يطابقه Comodor مع طلبك ليقرر ما إذا كان سيحمّل
 المهارة من أصل، فاكتبه كالوضع، لا كعنوان.
 
-أعد التشغيل، أو `/skills`، وستكون هناك.
+أعد التشغيل، وستكون هناك.
 
 ### إرفاق ملفات
 

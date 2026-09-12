@@ -145,7 +145,7 @@ def build(store: BrainStore, scope: str = "") -> Journey:
 def remove(store: BrainStore, node_id: str) -> tuple[bool, str]:
     """Retire one node, by the curator's rules: archive or forget, never lose.
 
-    A lesson is deleted the way /memory forget does. A rule is disabled, not
+    A lesson is deleted outright. A rule is disabled, not
     deleted — its evidence is still a true fact about how the user works. A
     fact is removed. A learned skill is deleted from the brain; the folder on
     disk, if there is one, is the archive and stays where it is.

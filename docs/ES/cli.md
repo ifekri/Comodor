@@ -54,17 +54,16 @@ comodor --mode plan                  # start read-only
 | `--mode act\|plan\|chat` | plan es de solo lectura; chat no tiene herramientas |
 | `--no-loop` | responder una vez en lugar de trabajar hasta terminar |
 | `--cwd PATH` | la carpeta que puede tocar |
-| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` |
-| `--ascii` | bordes ASCII |
-| `--no-mouse` | dejar el ratón a la terminal |
+| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` — para lo que imprimen los comandos; la interfaz tiene sus propios colores |
+| `--ascii` | bordes ASCII en lo que imprimen los comandos |
 | `--resume [ID]` | la última sesión, o una por id |
 | `--demo` | proveedor offline con guion |
 | `--version` | qué versión es esta |
 | `-h`, `--help` | la página de ayuda escrita |
 
 Nada de esto se escribe en tu configuración. Se aplica solo a esa ejecución.
-Para que un cambio permanezca, usa `/save` dentro de la interfaz o edita el
-archivo de configuración — [Configuración](configuration.md).
+Para que un cambio permanezca, edita el archivo de configuración o vuelve a
+ejecutar `comodor setup` — [Configuración](configuration.md).
 
 ---
 
@@ -352,18 +351,6 @@ fue limpiada no puede nombrarse, y te lo dice en lugar de fingir.
 
 ---
 
-## `comodor preview` — la interfaz a un tamaño dado
-
-```bash
-comodor preview 80x24
-comodor preview 200x50 --svg wide.svg
-```
-
-Renderiza un fotograma y sale. Útil para comprobar una terminal estrecha, o
-para una captura de pantalla.
-
----
-
 ## Variables de entorno
 
 | | |
@@ -377,7 +364,7 @@ para una captura de pantalla.
 | `NO_COLOR` | sin color, respetado en todas partes |
 
 Una clave en el entorno **nunca se escribe en tu archivo de configuración**.
-Exportarla en lugar de guardarla es una decisión, y `/save` la respeta. Ver
+Exportarla en lugar de guardarla es una decisión, y `comodor setup` la respeta. Ver
 [Configuración](configuration.md).
 
 ---

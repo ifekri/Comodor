@@ -231,11 +231,13 @@ comodor
 ```
   Write  src/parser.py
     - 12 lines removed, 8 added
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-یک بار `a` را جواب بدهید، یا اگر ترجیح می‌دهید برای باقی نشست دیگر نپرسد، `A`
-را. در هر صورت هر نوشتن یک نقطهٔ بازگشت دارد: `/undo` آخرین آن را برمی‌گرداند.
+با کلیدهای جهت‌دار بین گزینه‌ها جابه‌جا شوید و با `Enter` بفرستید؛ `Esc` رد
+می‌کند. اگر ترجیح می‌دهید برای باقی نشست دیگر نپرسد، *اجازه برای این نشست* را
+انتخاب کنید. در هر صورت هر نوشتن یک نقطهٔ بازگشت دارد، پس محتوای قبلی نگه
+داشته می‌شود.
 
 ---
 
@@ -259,8 +261,8 @@ comodor
 
 بعد از چند نشست:
 
-```
-> /progress
+```bash
+comodor insights
 ```
 
 ```
@@ -288,12 +290,12 @@ success  83% overall
 ## ۶. چیزهایی که از روز اول به دانستنش می‌ارزد
 
 ```
-/help          every command
-/mode          act · plan (read-only) · chat (no tools)     F3 cycles
-/undo          restore the last file it changed
-/cost          tokens, spend, what the cache saved
-Esc            stop it, mid-thought
-Ctrl-C twice   leave
+Tab            next mode: act · plan (read-only) · ask (no tools)
+Ctrl+K         every command, searchable
+Ctrl+B         the workbench: tasks and background agents
+Ctrl+C         stop it mid-thought; quit when it is idle
+Ctrl+D         leave
+comodor help   the written help page, outside the interface
 ```
 
 ---

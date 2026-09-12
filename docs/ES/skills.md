@@ -60,10 +60,6 @@ comodor skills add review        # install it
 comodor skills list              # what you have
 ```
 
-```
-/skills                          # the same, in the interface
-```
-
 Desde entonces, cuando pides algo que una skill cubre, se carga y el agente la
 sigue. Se te avisa cuando pasa:
 
@@ -108,7 +104,7 @@ La **description** es lo que más importa. Es con lo que Comodor compara tu
 petición para decidir si cargar la skill, así que escríbela como la situación,
 no como un título.
 
-Reinicia, o `/skills`, y ya está.
+Reinicia, y ya está.
 
 ### Incluir archivos
 

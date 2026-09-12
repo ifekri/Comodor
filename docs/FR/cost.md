@@ -1,9 +1,11 @@
 # Coût
 
 Ce que coûte une session, et comment la faire coûter moins sans la dégrader.
+Le coin d'usage de l'interface montre cette session au fil de l'eau ; sur
+l'ensemble des sessions :
 
 ```
-/cost
+comodor insights
 ```
 
 ```

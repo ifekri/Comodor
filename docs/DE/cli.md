@@ -54,17 +54,16 @@ comodor --mode plan                  # start read-only
 | `--mode act\|plan\|chat` | plan ist nur lesend; chat hat keine Werkzeuge |
 | `--no-loop` | einmal antworten, statt zu arbeiten, bis es fertig ist |
 | `--cwd PATH` | der Ordner, den es anfassen darf |
-| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` |
-| `--ascii` | ASCII-Rahmen |
-| `--no-mouse` | die Maus beim Terminal lassen |
+| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` — für das, was die Befehle ausgeben; die Oberfläche hat ihre eigenen Farben |
+| `--ascii` | ASCII-Rahmen in dem, was die Befehle ausgeben |
 | `--resume [ID]` | die letzte Sitzung, oder eine per id |
 | `--demo` | skriptgesteuerter Offline-Provider |
 | `--version` | welche Version dies ist |
 | `-h`, `--help` | die geschriebene Hilfeseite |
 
 Keine davon wird in Ihre Konfiguration geschrieben. Sie gilt für diesen einen
-Lauf. Damit eine Änderung hängen bleibt, benutzen Sie `/save` innerhalb der
-Oberfläche oder bearbeiten Sie die Konfigurationsdatei —
+Lauf. Damit eine Änderung hängen bleibt, bearbeiten Sie die Konfigurationsdatei
+oder führen Sie `comodor setup` erneut aus —
 [Konfiguration](configuration.md).
 
 ---
@@ -354,18 +353,6 @@ statt es vorzutäuschen.
 
 ---
 
-## `comodor preview` — die Oberfläche in einer gegebenen Größe
-
-```bash
-comodor preview 80x24
-comodor preview 200x50 --svg wide.svg
-```
-
-Rendert einen Rahmen und beendet sich. Nützlich, um ein schmales Terminal zu
-prüfen, oder für einen Screenshot.
-
----
-
 ## Umgebungsvariablen
 
 | | |
@@ -380,7 +367,7 @@ prüfen, oder für einen Screenshot.
 
 Ein Schlüssel in der Umgebung wird **niemals in Ihre Konfigurationsdatei
 geschrieben**. Einen zu exportieren, statt ihn zu speichern, ist eine
-Entscheidung, und `/save` respektiert sie. Siehe [Konfiguration](configuration.md).
+Entscheidung, und `comodor setup` respektiert sie. Siehe [Konfiguration](configuration.md).
 
 ---
 

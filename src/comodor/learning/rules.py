@@ -392,8 +392,8 @@ def export_markdown(rules: list, project: str = "") -> str:
         "# House rules",
         "",
         "Conventions Comodor has observed in this project and in the edits made to",
-        "its output. Generated automatically — edit freely, or delete a rule you",
-        "disagree with using `/rules`.",
+        "its output. Generated automatically — edit freely, or retire a rule you",
+        "disagree with: `comodor journey remove rule:ID`.",
         "",
     ]
     if project:

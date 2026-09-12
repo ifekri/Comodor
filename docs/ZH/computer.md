@@ -49,14 +49,16 @@ Comodor 可以像人一样操作机器——看屏幕、移动鼠标、点击和
 
 在设置此项之前，模型完全不会被告知这个工具。它不在工具列表中，因此模型无法请求它，也无法被说服使用它。
 
-**2. 允许它执行操作**，在真正需要的那一刻：
+**2. 允许它执行操作**，在真正需要的那一刻。在它的第一个操作之前，工具会在一张权限卡片上询问一个时长，而不是一个“是”：
 
 ```
-/computer 15m              fifteen minutes, anywhere on screen
-/computer 1h this app      one hour, only while the current window is in front
-/computer                  how things stand
-/computer stop             end it now
+15 minutes                  屏幕上任何位置
+15 minutes, this app only   仅当现在位于最前面的窗口保持在最前面时
+1 hour                      屏幕上任何位置
+no
 ```
+
+当时间在任务中途用完时，它会再次询问，并说明这就是原因。
 
 也可以让模型来请求。它第一次需要屏幕时，你会看到：
 
@@ -90,11 +92,11 @@ Comodor 可以像人一样操作机器——看屏幕、移动鼠标、点击和
 
 代理自己仍可能点击角落——开始按钮、关闭框。它记得自己把指针留在了哪里，因此只有指针移动到一个没有任何程序把它放到那里的位置，才算作你操作的。
 
-当你的双手在键盘上时，还有其他停止方式：
+其他停止方式：
 
 ```
-/computer stop       ends the permission
-Esc                  stops the current task
+停止按钮             在它显示在屏幕上的倒计时面板上；结束授权
+Ctrl+C               在界面中，停止当前任务
 ```
 
 ---
@@ -151,7 +153,7 @@ Comodor 的脱敏（redaction）只作用于文本，无法读取像素。这一
 实用建议：
 
 - 关闭那些你不愿意粘贴到聊天窗口里的内容。
-- 使用 `/computer 1h this app`，让它只在一个窗口位于最前面时操作——不过它仍然*看得见*截图里的一切。
+- 选择 *15 minutes, this app only*，让它只在一个窗口位于最前面时操作——不过它仍然*看得见*截图里的一切。
 - 当任务是网页时，优先使用[浏览器工具](browser.md)。它返回文本而非像素，成本只是零头。
 
 ---
@@ -271,11 +273,7 @@ typed into them - take a screenshot if what arrived matters.
 
 **它被关闭了。** `computer.enabled` 默认为 `false`。
 
-直接问它：
-
-```
-/computer
-```
+让它使用屏幕，在没有这个工具的情况下，它会这样说：
 
 ```
 no screen control: it is switched off. Set computer.enabled in your config.

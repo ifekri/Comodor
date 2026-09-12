@@ -1162,7 +1162,7 @@ def test_the_real_shutdown_sequence_does_not_hang_or_leave_a_worker(config, bus,
                                                                     tmp_path):
     """The pair `_shutdown()` actually calls, in that order.
 
-    `app.py` does `stop_all()` and then `wait(SHUTDOWN_JOIN_SECONDS)` before
+    `CoreService.close` does `stop_all()` and then `wait(SHUTDOWN_SECONDS)` before
     closing the tools and the history. Both used to be able to block on a
     stalled write, and the second could return having joined nothing.
 
@@ -1170,7 +1170,7 @@ def test_the_real_shutdown_sequence_does_not_hang_or_leave_a_worker(config, bus,
     is being checked belongs to the manager and an App fixture would bring a
     provider, a terminal and a history along with it.
     """
-    from comodor.ui.app import SHUTDOWN_JOIN_SECONDS
+    from comodor.agent.background import SHUTDOWN_SECONDS as SHUTDOWN_JOIN_SECONDS
 
     persist = tmp_path / "delegates.json"
     release = threading.Event()

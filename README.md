@@ -56,8 +56,8 @@ behind the correction, tells you the rule it wrote, and follows it from then on.
 
 Those are real, read out of a working install.
 
-`/progress` shows whether that is actually working — corrections per turn,
-falling or not. A number, not a claim.
+`comodor insights` shows whether that is actually working — corrections per
+task, falling or not. A number, not a claim.
 
 ## Whether it is any good, measured
 
@@ -87,7 +87,7 @@ The whole table, and how to run it against your own model, is in
 | | |
 |---|---|
 | **Asks instead of guessing** | When a request reads two ways it settles what it can by reading your code, then puts the rest as one short form — before writing anything. [→](docs/questions.md) |
-| **Never surprises you** | Reading is silent. Writing shows a diff. Commands ask. Every change is checkpointed and `/undo` puts it back. [→](docs/safety.md) |
+| **Never surprises you** | Reading is silent. Writing shows a diff. Commands ask. Every change is checkpointed. [→](docs/safety.md) |
 | **Drives a real browser** | One that runs JavaScript, keeps cookies and can log in — not a page fetcher. [→](docs/browser.md) |
 | **Uses your screen** | Mouse and keyboard in any application, with a halo showing where it is about to click before it clicks. [→](docs/computer.md) |
 | **Runs on your phone** | Telegram, Slack or WhatsApp — the whole interface as buttons, running in the background whether or not a terminal is open. Read-only until you say otherwise. [→](docs/telegram.md) · [→](docs/slack.md) · [→](docs/whatsapp.md) |
@@ -102,8 +102,9 @@ drives Chrome, the PNG encoder for screenshots, the Telegram client — all
 written here. Installing Comodor pulls in `rich` and nothing else; the terminal
 interface itself is shipped inside the package and needs only
 [Bun](https://bun.sh) on the machine that runs it (the renderer binds native
-code through `bun:ffi`). `comodor doctor` reports the Bun state plainly, and
-`comodor legacy` is the interface that does not need it.
+code through `bun:ffi`). `comodor doctor` reports the Bun state plainly;
+without Bun, `comodor run "..."` does one task with no interface and
+`comodor web` serves one to a browser.
 
 ## Install (Recommended)
 
@@ -207,10 +208,9 @@ comodor doctor                             # is everything alright?
 ```
 
 ```
-/help      every command          /undo      restore the last change
-/mode      act · plan · chat      /progress  proof it is improving
-/cost      tokens and spend       /computer  let it use your screen
-Esc        stop it                F3         cycle mode
+Tab        act · plan · ask       Ctrl+K     every command, searchable
+Ctrl+B     tasks and agents       End        back to the newest output
+Ctrl+C     stop it; quit when idle
 ```
 
 ## Documentation

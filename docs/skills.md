@@ -56,10 +56,6 @@ comodor skills add review        # install it
 comodor skills list              # what you have
 ```
 
-```
-/skills                          # the same, in the interface
-```
-
 From then on, when you ask for something a skill covers, it is loaded and the
 agent follows it. You are told when that happens:
 
@@ -104,7 +100,7 @@ The **description** is what matters most. It is what Comodor matches against
 your request to decide whether to load the skill at all, so write it as the
 situation, not as a title.
 
-Restart, or `/skills`, and it is there.
+Restart, and it is there.
 
 ### Bundling files
 
@@ -167,8 +163,7 @@ comodor skills list                       # with versions
 
 The agent can save a procedure that just worked as a skill of yours
 (`skill_manage`): it proposes it in conversation first, and nothing is
-written until you agree. In the interface, `/skills draft` shows what it
-has learned and wants to keep, and `/skills adopt NAME` saves a draft.
+written until you agree.
 
 Every change the agent makes is recorded in a ledger, so anything can be
 put back exactly as it was:

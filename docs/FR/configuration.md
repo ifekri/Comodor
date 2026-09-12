@@ -37,22 +37,24 @@ Quatre couches. Ce qui vient après l'emporte sur ce qui vient avant.
 5. the command line               --model, --mode, … for one run
 ```
 
-### Ce que `/save` écrit
+### Ce qui est écrit dans votre fichier
 
 **Seulement ce que vous avez choisi.** Cela compte plus qu'il n'y paraît.
+`comodor setup` est ce qui écrit votre fichier ; il suit cette règle.
 
 La configuration sur laquelle l'agent tourne est la fusion des quatre couches.
 La réécrire dans votre fichier ferait du plafond de dépense d'un dépôt cloné
 votre défaut global permanent, et copierait sur le disque une clé API que vous
 avez délibérément gardée dans votre environnement.
 
-Donc `/save` se souvient d'où vient chaque valeur. Une valeur qui garde encore
-ce qu'une couche empruntée fournissait revient à ce que disait *votre* fichier ;
-une valeur que vous avez changée pendant la session est à vous et est écrite.
+Donc l'écriture se souvient d'où vient chaque valeur. Une valeur qui garde
+encore ce qu'une couche empruntée fournissait revient à ce que disait *votre*
+fichier ; une valeur que vous avez choisie vous-même est à vous et est écrite.
 
-- `/model x` puis `/save` → persiste `x`
-- `/save` dans un dépôt qui fige `max_cost_usd: 500` → ne persiste rien de tel
-- `/save` avec `ANTHROPIC_API_KEY` exportée → la clé reste dans votre
+- choisir le modèle `x` dans setup → persiste `x`
+- sauvegarder dans un dépôt qui fige `max_cost_usd: 500` → ne persiste rien de
+  tel
+- sauvegarder avec `ANTHROPIC_API_KEY` exportée → la clé reste dans votre
   environnement
 
 ---
@@ -347,8 +349,7 @@ Explication complète : [Utiliser votre écran](computer.md).
 ```
 
 `policy` vaut `cost`, `speed` ou `quality`. Avec `enabled: true`, il choisit
-dans `chain` et passe outre un fournisseur qui échoue sans cesse. `F5` ou `/gw`
-dans l'interface.
+dans `chain` et passe outre un fournisseur qui échoue sans cesse.
 
 ### `mcp` — serveurs Model Context Protocol
 
@@ -397,8 +398,4 @@ Si un réglage semble encore ne rien faire :
 
 ```bash
 comodor doctor          # what it actually loaded
-```
-
-```
-/settings               # the same, in the interface
 ```

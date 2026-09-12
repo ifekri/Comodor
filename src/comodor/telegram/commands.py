@@ -55,7 +55,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run(config: Config, args: argparse.Namespace) -> int:
-    from ..ui import console as console_module
+    from ..terminal import console as console_module
 
     # Through the project's theme, not a bare Console: the named styles this
     # module uses — `accent`, `warn` — are Comodor's, and a plain console

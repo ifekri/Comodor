@@ -52,18 +52,16 @@ gerçekten kullanılabilir; fark, uzun çok adımlı görevlerde ortaya çıkar.
 comodor --model claude-haiku-4-5      # this run only
 ```
 
-```
-/model                  # a list of what the provider offers
-/model gpt-4o           # by name
-/provider               # a different provider entirely
-```
+Arayüzde `Ctrl+K` → *Bir model seç*, sağlayıcının sunduklarını listeler ve
+yerinde değiştirir; farklı bir sağlayıcı için komut satırında `--provider`
+ya da `comodor setup`.
 
 Bağlam göstergesi modeli takip eder. Milyon tokenlik bir modelden 128k'lık
 birine geçmek sınırı anında değiştirir — bu önemlidir, çünkü ajan konuşmayı
 sınırın bir kesrinde sıkıştırır ve eski bir sınır, hiç sıkıştırmayıp sonra
 sağlayıcının gerçek tavanında başarısız olmak demektir.
 
-Bir değişikliği kalıcı yapmak için: `/save` ya da
+Bir değişikliği kalıcı yapmak için: `comodor setup` ya da
 `~/.comodor/config.json`'ı düzenleyin.
 
 ---
@@ -80,7 +78,7 @@ Her iki yer de çalışır ve hiçbiri diğerine kopyalanmaz:
 export ANTHROPIC_API_KEY=sk-ant-…
 ```
 
-Ortamınızdaki bir anahtar **orada kalır** — `/save` onu diske yazmaz.
+Ortamınızdaki bir anahtar **orada kalır** — `comodor setup` onu diske yazmaz.
 Kaydetmek yerine dışa aktarmak bir karardır ve buna saygı duyulur.
 
 Comodor'un kendi yapılandırma dosyası yalnızca sahibine açık izinlerle
@@ -93,10 +91,6 @@ dışa aktarmada veya bir traceback'te görünmez.
 ## Gateway
 
 Birini sabitlemek yerine birkaç sağlayıcı arasında yönlendirin.
-
-```
-/gw                    # or F5
-```
 
 ```json
 {
@@ -129,8 +123,10 @@ eder.
 
 ## Neye mal olur
 
+Arayüzdeki kullanım köşesi bu oturumu gösterir; tüm oturumlar için:
+
 ```
-/cost
+comodor insights
 ```
 
 Önbellekleme, bütçeler ve bir harcama sınırının bazen neden uygulanamadığı

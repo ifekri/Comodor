@@ -11,7 +11,8 @@ hará digas lo que digas.
 - **Escribir pregunta.** Ves el diff antes de que ocurra.
 - **Ejecutar un comando pregunta más fuerte**, y también llegar a la red o
   manejar tu pantalla.
-- **Todo lo reversible lo revierte `/undo`.**
+- **Cada escritura tiene primero un punto de control**, así que el contenido
+  anterior se conserva.
 - **No puede salir de la carpeta del proyecto** a menos que apagues eso.
 - **Un repositorio no puede cambiar nada de lo anterior.**
 
@@ -43,21 +44,16 @@ En **modo chat** no hay herramientas en absoluto.
   ────────────────────────────────────────────
   in ~/projects/api-server
 
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-`A` lo recuerda por el resto de la sesión, por tipo de cosa — permitir
-escrituras no permite comandos, y permitir `pytest` no permite `rm`.
+Las flechas se mueven entre las opciones y `Enter` envía; `Esc` deniega.
+*Permitir en esta sesión* lo recuerda por el resto de la sesión, por tipo de
+cosa — permitir escrituras no permite comandos, y permitir `pytest` no permite
+`rm`.
 
-Para dejar de recibir preguntas:
-
-```
-/approve writes      files yes, commands still ask
-/approve shell       commands yes, files still ask
-/approve all         everything
-```
-
-O permanentemente, en tu configuración:
+Para dejar de recibir preguntas, elige *Permitir en esta sesión* en la tarjeta
+— lo recuerda por cada tipo de cosa — o permanentemente, en tu configuración:
 
 ```json
 {
@@ -76,18 +72,17 @@ mismo otra vez. Negar no es esfuerzo desperdiciado.
 
 ---
 
-## Puntos de control y `/undo`
+## Puntos de control
 
 Cada archivo que el agente escribe tiene punto de control antes — el contenido
-anterior, guardado bajo `.comodor/checkpoints/` en el proyecto.
+anterior, guardado bajo `.comodor/checkpoints/` en el proyecto, direccionado por
+contenido, con un diario que dice a qué archivo pertenecía cada instantánea.
+Ocurre tanto si aprobaste la escritura como si no, y tanto si la autoaprobación
+está activada como si no.
 
-```
-/undo
-```
-
-restaura el último archivo que cambió. Funciona tanto si aprobaste la escritura
-como si no, y tanto si la autoaprobación está activada como si no. Es la razón
-por la que `/approve all` es algo razonable de hacer.
+Todavía no hay un comando que restaure uno; el almacén está ahí para que nada de
+lo que el agente sobrescribió se pierda, y un proyecto bajo control de versiones
+tiene su propia historia al lado.
 
 Apágalo si debes:
 
@@ -165,7 +160,7 @@ cualquier traceback que nombrara un Config solía imprimir la clave, y pytest
 imprime tracebacks constantemente.
 
 **Una clave en tu entorno se queda ahí.** Si exportas `ANTHROPIC_API_KEY` en
-lugar de guardarla, `/save` no la copiará a tu archivo de configuración.
+lugar de guardarla, `comodor setup` no la copiará a tu archivo de configuración.
 Exportarla en lugar de guardarla es una decisión y se respeta.
 
 **Redacción.** Cualquier cosa que parezca una de tus claves se enmascara en la
@@ -255,7 +250,7 @@ ratón.
 ## Reportar algo
 
 Si encuentras un problema de seguridad, por favor no abras un issue público.
-Ver [SECURITY.md](../SECURITY.md).
+Ver [SECURITY.md](../../SECURITY.md).
 
 ---
 

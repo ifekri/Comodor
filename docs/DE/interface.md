@@ -1,267 +1,172 @@
 # Die Oberfläche
 
-Was Sie sehen, was Sie drücken, und alle 29 Befehle.
+Was Sie sehen, was Sie drücken, und woher alles auf dem Bildschirm kommt.
 
 ```bash
-comodor          # start it
-comodor --demo   # the whole interface, offline, no key
+comodor          # starten
+comodor --demo   # die ganze Oberfläche, offline, ohne Schlüssel
 ```
+
+Die Oberfläche läuft auf [Bun](https://bun.sh) — `comodor doctor` sagt, ob es
+da ist. Ohne Bun erledigt `comodor run "..."` eine Aufgabe ohne Oberfläche, und
+`comodor web` stellt eine im Browser bereit.
+
+Wie sie gebaut ist — der Kern, den sie steuert, das Protokoll zwischen beiden,
+und warum jede Tatsache auf dem Bildschirm dem Kern gehört und nicht dem
+Bildschirm — steht in [tui-v2.md](../tui-v2.md). Diese Seite ist die kurze
+Fassung für die Person, die sie benutzt.
 
 ---
 
-## Das Layout
+## Der Bildschirm
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│  Comodor                              Anthropic · claude-sonnet-5      │
-│  ────────────────────────────────────────────────────────────────────  │
-│                                                                        │
-│  TASKS                    > fix the failing parser test                │
-│  ● read the test          ▸ read_file  tests/test_parser.py     0.1s   │
-│  ◐ find the cause         ▸ run_shell  pytest tests/test_pa…    2.3s   │
-│  ○ fix it                                                              │
-│                           The test expects `parse("")` to raise, but…  │
-│                                                                        │
-│  ────────────────────────────────────────────────────────────────────  │
-│  ▌Type a task, or / for commands                                       │
-│                                                                        │
-│  act · loop on · 12% of 1M · $0.03      ⏎ send  ^O attach  F3 mode     │
-└────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────┬───────────────────────┐
+│ Comodor   ~/work/my-project  fake-1      │ Agents         1 live │
+│                                          │  ● d1 running    12.3s│
+│  You                                     │    survey the retries │
+│  fix the failing parser test             │ Tasks            2/5  │
+│                                          │  ◐ write the tests    │
+│  Comodor                                 │  ● read the code      │
+│  The test expects parse("") to raise, …  │  ○ run the suite      │
+│  ✓ read_file  tests/test_parser.py  0.2s │                       │
+│  ● run_shell  pytest tests/…     running…│                       │
+│      collected 12 items                  │                       │
+│                                          │                       │
+├──────────────────────────────────────────┴───────────────────────┤
+│ ▌ask for anything                                                │
+├──────────────────────────────────────────────────────────────────┤
+│  [ACT]   PLAN    ASK    Reads, writes and runs commands…         │
+│ ● 1 agent  tab Mode  ctrl+b Work  ctrl+k Commands      42% ctx  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-**Die Seitenleiste** ist der Plan, wenn es einen gibt. `F2` blendet sie aus —
-auf einem schmalen Terminal wert.
+**Die Kopfzeile** nennt das Projekt sowie den Anbieter und das Modell, die
+antworten. Es ist das, was der Kern meldet, nicht das, was eine
+Konfigurationsdatei sagt: Wechselt das Modell — von hier aus, von einem anderen
+Client, oder durch den Kern selbst — folgt die Kopfzeile.
 
-**Die Statuszeile** zeigt den Modus, ob es gerade iteriert, wie voll der Kontext
-ist und was diese Sitzung gekostet hat. Die Kontextangabe ist echt: Sie folgt
-dem Modell, sodass der Wechsel von einem Million-Token-Modell auf ein 128k-Modell
-sie sofort ändert.
+**Das Gespräch** trägt die Werkzeug-Zeitleiste in sich. Jeder Werkzeugaufruf
+sitzt dort, wo er geschah, als eine Zeile: ein Zeichen (`●` läuft, `✓` fertig,
+`×` fehlgeschlagen), der Name, eine einzeilige Zusammenfassung, und wie lange
+es gedauert hat. Ein laufendes Werkzeug zeigt die letzten Zeilen seiner
+Ausgabe; ein fertiges klappt zusammen, und ein Klick darauf öffnet, was der
+Kern noch hält.
 
-Es funktioniert ab etwa 60 Spalten aufwärts. Darunter faltet sich die
-Seitenleiste von selbst zusammen. `comodor preview 80x24` rendert es in jeder
-Größe, ohne eine Sitzung zu starten.
+**Die Werkbank** — `Ctrl+B` — ist die Arbeit außerhalb des Gesprächs: die
+Aufgabenliste, die der Agent für sich führt, und alle Hintergrund-Agenten, die
+er gestartet hat, jeder mit seinem Zustand. In einem schmalen Terminal öffnet
+sie sich über dem Gespräch statt daneben, und dieselbe Taste schließt sie.
 
----
-
-## Modi
-
-| Modus | Was der Agent tun darf | |
-|---|---|---|
-| **act** | Alles, fragt vor Schreibvorgängen und Befehlen | der Standard |
-| **plan** | Nur Lesen. Keine Schreibvorgänge, keine Befehle, kein Netzwerk | für „was würdest du tun?" |
-| **chat** | Überhaupt keine Werkzeuge | für eine Frage zu Code, den Sie einfügen |
-
-`F3` schaltet sie durch. `/mode plan` setzt einen direkt.
-
-Der Plan-Modus ist wirklich nur lesend — er wird auf der Berechtigungsebene
-erzwungen, nicht durch freundliches Bitten an das Modell. Ein Werkzeug mit einem
-Risiko über „safe" wird abgelehnt, bevor es läuft.
+**Die Fußzeile** zeigt, was Sie drücken können, aus derselben Liste, aus der
+die Tasten gelesen werden, und was diese Sitzung gekostet hat, wo der Anbieter
+es misst.
 
 ---
 
 ## Tasten
 
-| | |
+| Taste | Tut |
 |---|---|
-| `Enter` | senden |
-| `Ctrl+J` | Zeilenumbruch innerhalb einer Nachricht |
-| `Esc` | stoppen, was es gerade tut |
-| `Ctrl+C` | stoppen; zweimal zum Beenden |
-| `F1` | Hilfe |
-| `F2` | die Seitenleiste |
-| `F3` | Modus |
-| `F4` | loop an/aus |
-| `F5` | das Gateway |
-| `Ctrl+O` | eine Datei anhängen |
-| `Ctrl+L` | die Konversation leeren |
-| `PgUp` `PgDn` | scrollen |
-| `Ctrl+↑` `Ctrl+↓` | frühere und spätere Nachrichten |
-| `!command` | einen Shell-Befehl direkt ausführen, ohne das Modell zu fragen |
+| `Enter` | sendet, was Sie getippt haben |
+| `Tab` / `Shift+Tab` | nächster / vorheriger Modus |
+| `Ctrl+K` | die Befehlspalette — jede Aktion, durchsuchbar |
+| `Ctrl+B` | Werkbank öffnen oder schließen |
+| `End` | zurück zur neuesten Ausgabe nach dem Hochscrollen |
+| `PageUp` / `PageDown` | das Gespräch scrollen |
+| `Ctrl+R` | eine Nachricht erneut senden, die der Kern abgelehnt hat |
+| `Ctrl+C` | anhalten, was er tut; beenden, wenn er untätig ist |
+| `Ctrl+D` | beenden |
+| `Esc` | Palette schließen, ein Feld verlassen, oder die sichere Option einer Karte nehmen |
 
-`!` ist es wert, sich zu merken. `!git status` führt es aus und zeigt Ihnen die
-Ausgabe; das Modell sieht die Frage nie. Günstiger und schneller als zu fragen.
+Jede Tastenkombination, die die Fußzeile zeigt, existiert; für eine Taste, die
+nicht belegt ist, kann kein Hinweis gedruckt werden.
 
 ---
 
-## Befehle
+## Modi
 
-Tippen Sie `/`, und die Liste filtert sich mit jeder Eingabe.
+```
+ACT    liest, schreibt und führt Befehle aus; fragt, bevor er etwas ändert
+PLAN   liest und plant; kann nichts schreiben, ausführen oder ändern
+ASK    spricht es durch; gar keine Werkzeuge
+```
 
-### Ihm sagen, was es anders machen soll
-
-| | |
-|---|---|
-| `/mode [act\|plan\|chat]` | was es erlaubt ist zu tun |
-| `/loop` | weiterarbeiten, bis es fertig ist, oder einmal antworten |
-| `/model [id]` | das Modell wählen — eine Liste, oder eines benennen |
-| `/provider [name]` | den Anbieter wählen |
-| `/gw` | das Gateway: über Anbieter hinweg nach Kosten, Geschwindigkeit oder Qualität routen |
-
-### Es lehren
-
-| | |
-|---|---|
-| `/good` | diese Antwort war richtig |
-| `/bad` | diese Antwort war falsch |
-| `/teach <text>` | sich das merken |
-| `/memory` | was es gelernt hat |
-| `/rules` | die Hausregeln, die es aus Ihrem Code und Ihren Änderungen abgeleitet hat |
-| `/progress` | der Beleg, dass es besser wird |
-| `/skills` | Abläufe, denen es folgt, wenn die Arbeit passt |
-
-`/good` und `/bad` sind das Günstigste, was Sie für es tun können. Siehe
-[Wie er lernt](learning.md).
-
-### Rückgängig machen und zurückschauen
-
-| | |
-|---|---|
-| `/undo` | die letzte von ihm geänderte Datei wiederherstellen |
-| `/clear` | eine neue Konversation beginnen |
-| `/resume [id]` | eine frühere Sitzung wieder öffnen |
-| `/search <text>` | etwas in einer früheren Konversation finden |
-| `/export [path]` | diese Sitzung in eine Datei schreiben |
-
-### Es weiter reichen lassen
-
-| | |
-|---|---|
-| `/computer [15m\|1h this app\|stop]` | es Ihren Bildschirm benutzen lassen — [Anleitung](computer.md) |
-| `/mcp` | MCP-Server und ihre Werkzeuge — [Anleitung](mcp.md) |
-| `/attach <path>` | eine Datei zur nächsten Nachricht hinzufügen |
-
-### Es einrichten
-
-| | |
-|---|---|
-| `/settings` | was gerade konfiguriert ist |
-| `/approve [writes\|shell\|all]` | bei diesen nicht mehr vorher fragen |
-| `/theme [name]` | ember, midnight, matrix, mono |
-| `/save` | die aktuellen Einstellungen in Ihre Konfigurationsdatei schreiben |
-| `/cost` | Tokens, Ausgaben und was der Cache gespart hat |
-| `/copy [all\|task]` | die letzte Antwort, oder alles, in die Zwischenablage |
-| `/mouse [on\|off]` | Maus-Tracking, damit Sie selbst Text auswählen können |
-| `/help` | all das, innerhalb der Oberfläche |
-| `/quit` | verlassen |
-
-**`/save` schreibt nur, was Sie gewählt haben.** Nicht die Einstellungen des
-Repositorys, keinen Schlüssel, den Sie in Ihrer Umgebung halten, kein `--model`,
-das Sie für einen einzigen Lauf übergeben haben. Siehe
-[Konfiguration](configuration.md#what-save-writes).
+`Tab` schaltet durch. Das Label bewegt sich, wenn der Kern bestätigt, nicht
+wenn die Taste gedrückt wird: Drücke innerhalb einer Hin- und Rückreise sammeln
+sich — drei Tabs fragen einmal, nach dem, worauf der dritte zeigte — und eine
+abgelehnte Änderung sagt es in Worten, statt das Label zu bewegen.
 
 ---
 
-## Genehmigungen
+## Wenn sie Sie etwas fragt
 
-Wenn der Agent eine Datei schreiben oder einen Befehl ausführen will:
+Eine Berechtigungskarte oder ein Frageformular nimmt die Tastatur, solange es
+offen ist, damit eine Taste, die für eine Entscheidung gemeint war, nicht
+zugleich eine Nachricht senden kann.
 
-```
-  Write  src/parser.py
-  ────────────────────────────────────────────
-   - def parse(text):
-   -     return text.split(",")
-   + def parse(text):
-   +     if not text:
-   +         raise ValueError("nothing to parse")
-   +     return text.split(",")
+- **Pfeiltasten** bewegen sich zwischen den Wahlmöglichkeiten oder Fragen;
+  **Enter** sendet.
+- **Esc** nimmt die eigene sichere Option der Anfrage — bei einer Berechtigung
+  ist das *ablehnen*, bei einem vorgeschlagenen Moduswechsel *keine
+  Änderung* — und die Karte sagt, welche. Sie erlaubt nie etwas.
+- Für *erlauben* gibt es keine Einzeltaste. Erlauben kostet einen Schritt zur
+  Wahl und einen, um sie zu bestätigen, damit eine aus irgendeinem anderen Grund
+  gedrückte Taste keinen Befehl autorisieren kann.
+- Eine Frage mit einer Zeile zum Selbstschreiben öffnet dafür mit `Space` ein
+  Feld; `Esc` verlässt das Feld, bevor es das Formular abbricht.
 
-  [a] allow   [A] allow always this session   [d] deny
-```
+Zwei Dinge können zugleich warten — zwei parallele Werkzeuge können beide
+fragen — und sie werden in der Reihenfolge ihres Eintreffens gezeigt, keines
+geht verloren.
 
-`A` merkt es sich für die Sitzung, je Art von Ding — Schreibvorgänge zu
-erlauben erlaubt keine Befehle.
+Modustasten funktionieren auch, während eine Karte offen ist. Die Palette
+nicht: ein Starter über einer Entscheidung würde verdecken, was beantwortet
+werden muss.
 
-Ablehnen ist nicht verloren. Eine Verweigerung ist das deutlichste
-Präferenzsignal, das die Oberfläche je sammelt, und es geht an die
-Lern-Engine: Der Agent schlägt das seltener wieder vor.
+---
 
-Um gar nicht mehr gefragt zu werden:
+## Mitlesen
 
-```
-/approve writes      files, yes; commands, still ask
-/approve all         everything
-```
+Eine lange Antwort hält die neueste Zeile im Blick. Scrollen Sie hoch, hört sie
+auf zu folgen; neue Ausgabe zieht Sie nicht wieder herunter, und eine Markierung
+sagt, dass unten mehr ist. `End` kehrt zum lebendigen Ende zurück, und eine neue
+Nachricht zu senden tut dasselbe.
 
-Alles wird trotzdem als Prüfpunkt gesichert. `/undo` funktioniert
-unabhängig davon.
+---
+
+## Sitzungen
+
+`Ctrl+K` → *Ein früheres Gespräch öffnen* listet, was der Kern behalten hat,
+und öffnet eines an Ort und Stelle. Derselbe Speicher bedient den Browser, also
+kann ein hier begonnenes Gespräch dort wieder geöffnet werden.
+
+`comodor --resume` öffnet beim Start das jüngste; `--resume ID` nennt eines.
 
 ---
 
 ## Text herauskopieren
 
-Solange die Maus verfolgt wird, gehört ein Ziehen zu Comodor, und das Terminal
-sieht es nie — das übliche Auswählen-und-Kopieren funktioniert also nicht.
-Drei Wege daran vorbei:
-
-```
-/copy              the last answer
-/copy all          the whole conversation
-/copy task         the last thing you asked for
-/mouse             mouse tracking off, so selection works as usual
-```
-
-`/copy` braucht unter Windows oder macOS nichts Installiertes. Unter Linux
-benutzt es `wl-copy`, `xclip` oder `xsel`, je nachdem, was da ist, und sagt,
-was fehlt, wenn keines davon vorhanden ist.
-
-Über SSH weicht es auf eine Escape-Sequenz aus, die *Ihr* Terminal bittet, *Ihre*
-Zwischenablage zu setzen — sodass Text von einem Agenten auf einem Server dort
-landet, wo Sie ihn einfügen können, und nicht auf einem Server ohne Zwischenablage.
-
-Die meisten Terminals erlauben außerdem, bei gedrückter **Shift**-Taste
-auszuwählen, was das Maus-Tracking umgeht, ohne es abzuschalten.
-
----
-
-## Wer spricht
-
-Jeder Zug sitzt auf einem leisen Band — eine Nuance hinter dem, was Sie
-getippt haben, eine andere hinter der Antwort:
-
-```
-▌ › why does the parser drop the last field?              ← warm
-
-▌   Because split is called with a maxsplit of 2 …        ← neutral
-▌
-▌   ┌─ python ────────────────────────┐
-▌   │ return text.split(',', 2)       │
-▌   └─────────────────────────────────┘
-```
-
-Bewusst gedämpft. Das liegt hinter Fließtext, den Sie minutenlang lesen, und
-ein Hintergrund mit eigener Präsenz konkurriert mit den Worten. Jedes Theme
-hat sein eigenes Paar, wenige Prozent von seinem Hintergrund entfernt; `mono`
-hat keines, denn ein Theme, dessen Prämisse keine Farbe ist, will keine zwei.
-
-Sie kosten keinen vertikalen Raum — der Farbwechsel ist die Grenze.
+Markieren Sie mit der Maus, wie Ihr Terminal es erlaubt. Die Optionen
+`--theme` und `--ascii` gelten für das, was die Befehle ausgeben — `setup`,
+`doctor`, `help` — nicht für die Oberfläche, die aus ihren eigenen Design-Tokens
+zeichnet.
 
 ---
 
 ## Text von rechts nach links
 
-Persisch, Arabisch und Hebräisch werden rechtsbündig gesetzt, dort, wo ihre
-Zeilen beginnen, mit einem Font-Stack, der zu ihnen passt. Gemischte Absätze —
-ein englischer Bezeichner innerhalb eines persischen Satzes — werden pro Zeile
-statt pro Datei behandelt, was tatsächlich in einem technischen Gespräch passiert.
-
----
-
-## Themes
-
-```
-/theme midnight
-```
-
-`ember` (der Standard, warmes Bernstein), `midnight` (kühles Blau), `matrix`
-(Grün), `mono` (gar keine Farbe).
-
-`--ascii` tauscht die Box-Zeichen gegen ASCII, für Terminals ohne sie.
-`NO_COLOR` in Ihrer Umgebung wird respektiert.
+Persisch, Arabisch und gemischte Zeilen werden dem Terminal so übergeben, wie
+sie geschrieben sind, nie vom Programm umgekehrt. Wie gut eine gemischte Zeile
+geformt wird, ist Sache des Terminals, und die, die es gut können, können es
+auch hier.
 
 ---
 
 ## Siehe auch
 
-- [Aus dem Terminal](cli.md) — dieselbe Kraft ohne die Oberfläche
-- [Was der Agent kann](tools.md) — die Werkzeuge hinter diesen `▸`-Zeilen
-- [Sicherheit](safety.md) — wovor die Genehmigungsdialoge schützen
+- [tui-v2.md](../tui-v2.md) — wie die Oberfläche gebaut ist, und was sie
+  kann und noch nicht kann
+- [questions.md](questions.md) — die Formulare, die der Agent Ihnen vorlegt
+- [safety.md](safety.md) — was fragt, was nicht, und warum
+- [computer.md](computer.md) — ihm Ihren Bildschirm überlassen

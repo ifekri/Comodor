@@ -569,7 +569,7 @@ def a_wizard(config, answers: list[str], monkeypatch, *, tunnel: bool = False):
 
     from rich.console import Console
 
-    from comodor.ui import console as console_module
+    from comodor.terminal import console as console_module
     from comodor.whatsapp import api as wapi
     from comodor.whatsapp import guide
     from comodor.whatsapp import tunnel as tunnel_mod

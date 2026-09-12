@@ -21,7 +21,7 @@ endet damit, dass der Agent etwas Nützliches tut.
 
 | | |
 |---|---|
-| [Die Oberfläche](interface.md) | Panels, Tasten, Modi und alle 29 Befehle |
+| [Die Oberfläche](interface.md) | Was auf dem Bildschirm ist, die Tasten, die Modi, und wann sie Sie etwas fragt |
 | [Aus dem Terminal](cli.md) | Jeder Befehl und jedes Flag, mit Beispielen |
 | [Was der Agent kann](tools.md) | Die 13 Werkzeuge, die er hat, und wann er welches einsetzt |
 | [Skills](skills.md) | Abläufe, die Sie einmal schreiben und denen er folgt |
@@ -69,8 +69,8 @@ comodor                  # es stellt ein paar Fragen, einmalig
 ```
 
 Dann tippen Sie, was Sie wollen. Korrigieren Sie es, wenn es falsch liegt —
-ändern Sie die Datei oder sagen Sie es einfach — und es lernt. `/progress`
-zeigt Ihnen, ob das tatsächlich funktioniert.
+ändern Sie die Datei oder sagen Sie es einfach — und es lernt. `comodor
+insights` zeigt Ihnen, ob das tatsächlich funktioniert.
 
 ```bash
 comodor run "fix the failing test in tests/test_parser.py"   # eine Aufgabe, keine Oberfläche
@@ -85,12 +85,12 @@ comodor help                                                 # die geschriebene 
 Moment, in dem eine Sitzung endet. Comodor beobachtet, was Sie an seiner
 Ausgabe ändern, und macht daraus eine Lektion mit einem Vertrauenswert, der
 steigt, wenn sie sich bewährt, und sinkt, wenn nicht. [Wie er lernt](learning.md)
-erklärt den Mechanismus; `/progress` zeigt die Belege.
+erklärt den Mechanismus; `comodor insights` zeigt die Belege.
 
 **Es fragt, bevor es handelt, und alles ist rückgängig zu machen.** Lesen
 geschieht stillschweigend. Schreiben fragt. Ein Befehl fragt deutlicher. Jeder
-Schreibvorgang wird als Prüfpunkt gesichert, und `/undo` stellt den letzten
-wieder her. [Sicherheit und Berechtigungen](safety.md).
+Schreibvorgang wird zuerst als Prüfpunkt gesichert, sodass der vorherige Inhalt
+nie verloren ist. [Sicherheit und Berechtigungen](safety.md).
 
 **Eine einzige Abhängigkeit.** Der HTTP-Client, der SSE-Reader, das WebSocket
 für den Browser, der PNG-Encoder für Screenshots — alles Teil des Pakets. Die
@@ -108,7 +108,7 @@ zeigt, wo er als Nächstes klicken wird. [Browser](browser.md),
 
 | | |
 |---|---|
-| [CHANGELOG](../CHANGELOG.md) | Was sich geändert hat, und warum |
-| [CONTRIBUTING](../CONTRIBUTING.md) | An Comodor selbst arbeiten |
-| [SECURITY](../SECURITY.md) | etwas Sensibles melden |
-| [RELEASING](../RELEASING.md) | Wie ein Release geschnitten wird |
+| [CHANGELOG](../../CHANGELOG.md) | Was sich geändert hat, und warum |
+| [CONTRIBUTING](../../CONTRIBUTING.md) | An Comodor selbst arbeiten |
+| [SECURITY](../../SECURITY.md) | etwas Sensibles melden |
+| [RELEASING](../../RELEASING.md) | Wie ein Release geschnitten wird |

@@ -52,17 +52,14 @@ comodor setup           # choose Ollama
 comodor --model claude-haiku-4-5      # this run only
 ```
 
-```
-/model                  # a list of what the provider offers
-/model gpt-4o           # by name
-/provider               # a different provider entirely
-```
+في الواجهة، `Ctrl+K` ← *اختر نموذجًا* يعرض ما يقدمه المزوّد ويبدّل في مكانه؛
+أما مزوّد مختلف فعبر `--provider` في سطر الأوامر، أو `comodor setup`.
 
 يتبع مقياس السياق النموذج. فالانتقال من نموذج بمليون رمز إلى نموذج 128k يغيّر
 الحد فورًا — وهذا مهم، لأن الوكيل يلخّص المحادثة عند جزء من الحد، والحد القديم
 يعني أنه لا يلخّص أبدًا ثم يفشل عند السقف الحقيقي للمزوّد.
 
-لجعل التبديل دائمًا: `/save`، أو عدّل `~/.comodor/config.json`.
+لجعل التبديل دائمًا: `comodor setup`، أو عدّل `~/.comodor/config.json`.
 
 ---
 
@@ -78,7 +75,7 @@ comodor --model claude-haiku-4-5      # this run only
 export ANTHROPIC_API_KEY=sk-ant-…
 ```
 
-المفتاح في بيئتك **يبقى هناك** — لن يكتبه `/save` إلى القرص. فالتصدير بدل
+المفتاح في بيئتك **يبقى هناك** — لن يكتبه `comodor setup` إلى القرص. فالتصدير بدل
 الحفظ قرار، ويُحترم.
 
 يُكتب ملف إعداد Comodor نفسه بأذونات المالك فقط، ولا يظهر مفتاحك أبدًا في سجل،
@@ -90,10 +87,6 @@ export ANTHROPIC_API_KEY=sk-ant-…
 ## البوابة
 
 وجّه عبر عدة مزوّدين بدل تثبيت واحد.
-
-```
-/gw                    # or F5
-```
 
 ```json
 {
@@ -125,8 +118,10 @@ export ANTHROPIC_API_KEY=sk-ant-…
 
 ## ما يكلف
 
+تعرض زاوية الاستخدام في الواجهة هذه الجلسة؛ وعبر الجلسات:
+
 ```
-/cost
+comodor insights
 ```
 
 راجع [التكلفة](cost.md) للتخزين المؤقت والميزانيات وسبب أحيانًا نطاق الإنفاق

@@ -51,15 +51,14 @@ comodor --mode plan                  # start read-only
 | `--mode act\|plan\|chat` | plan 为只读；chat 无工具 |
 | `--no-loop` | 只回答一次，而不是工作到完成 |
 | `--cwd PATH` | 它可以触碰的文件夹 |
-| `--theme NAME` | `ember`、`midnight`、`matrix`、`mono` |
-| `--ascii` | ASCII 边框 |
-| `--no-mouse` | 把鼠标留给终端 |
+| `--theme NAME` | `ember`、`midnight`、`matrix`、`mono`——用于各命令的打印输出；界面有自己的配色 |
+| `--ascii` | 各命令打印输出中使用 ASCII 边框 |
 | `--resume [ID]` | 上一次会话，或按 id 指定的某次会话 |
 | `--demo` | 脚本化的离线提供商 |
 | `--version` | 当前是哪个版本 |
 | `-h`、`--help` | 书面帮助页 |
 
-这些都不会写入你的配置。它们只作用于这一次运行。要让改动长期生效，请在界面中使用 `/save`，或直接编辑配置文件——[配置](configuration.md)。
+这些都不会写入你的配置。它们只作用于这一次运行。要让改动长期生效，请直接编辑配置文件，或再次运行 `comodor setup`——[配置](configuration.md)。
 
 ---
 
@@ -325,17 +324,6 @@ The program
 
 ---
 
-## `comodor preview` — 指定尺寸的界面
-
-```bash
-comodor preview 80x24
-comodor preview 200x50 --svg wide.svg
-```
-
-渲染一帧然后退出。适合检查窄终端下的效果，或用来截图。
-
----
-
 ## 环境变量
 
 | | |
@@ -348,7 +336,7 @@ comodor preview 200x50 --svg wide.svg
 | `COMODOR_WEB_TOKEN` | Web 界面的固定 token |
 | `NO_COLOR` | 无颜色，处处遵循 |
 
-环境中的密钥**绝不会写入你的配置文件**。用导出代替保存是一种明确的决定，`/save` 会尊重它。参见[配置](configuration.md)。
+环境中的密钥**绝不会写入你的配置文件**。用导出代替保存是一种明确的决定，`comodor setup` 会尊重它。参见[配置](configuration.md)。
 
 ---
 

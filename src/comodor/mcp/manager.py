@@ -10,7 +10,7 @@ discovered lazily and cached, and a server that is never used is never spawned.
 **A server that fails is a server that is dropped, once, with an explanation.**
 It is somebody else's program. If it will not start, the agent should continue
 without it rather than fail the user's task, and the reason should be visible
-in `/mcp` rather than buried in a log.
+in `comodor mcp list` rather than buried in a log.
 """
 
 from __future__ import annotations
@@ -212,7 +212,7 @@ class MCPManager:
         return "\n\n".join(lines)
 
     def report(self) -> list[tuple[str, str, str]]:
-        """(name, status, detail) for `/mcp` and for doctor."""
+        """(name, status, detail) for `comodor mcp list` and for doctor."""
         rows: list[tuple[str, str, str]] = []
         for name, server in sorted(self.configured.items()):
             if not getattr(server, "enabled", False):

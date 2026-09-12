@@ -55,7 +55,7 @@ config: this project cannot set safety, computer — only your own can
 If nothing is said and it still has no effect, check which layer wins:
 
 ```
-/settings          # what is actually loaded
+comodor doctor     # what is actually loaded
 ```
 
 ```bash
@@ -68,13 +68,13 @@ environment beats one in the file. That is deliberate —
 
 ---
 
-## `/save` did not save what I expected
+## Setup did not save what I expected
 
 By design. It writes **only what you chose** — not a repository's settings, not
 a key you keep in your environment, not a flag you passed for one run.
 
-To make a repository's setting yours, set it yourself first (`/model x`) and
-then save.
+To make a repository's setting yours, choose it yourself in `comodor setup`,
+or write it into `~/.comodor/config.json`.
 
 ---
 
@@ -83,8 +83,8 @@ then save.
 **`401` or `invalid api key`** — the key is wrong, expired, or belongs to a
 different provider. `comodor doctor` shows which provider is active.
 
-**`404 model not found`** — that provider does not serve that model id. `/model`
-lists what it actually offers.
+**`404 model not found`** — that provider does not serve that model id.
+`Ctrl+K` → *Choose a model* in the interface lists what it actually offers.
 
 **Timeouts.** A local model on a modest machine can genuinely take minutes.
 Raise `providers.<name>.timeout`.
@@ -119,18 +119,14 @@ your profile.
 ## The screen tool
 
 **It is not in the tool list.** Either this platform has no backend — Windows
-only so far — or `computer.enabled` is false. Ask it:
-
-```
-/computer
-```
+only so far — or `computer.enabled` is false. `comodor doctor` says which.
 
 **Clicks land in the wrong place.** This should not happen: DPI awareness is set
 before any screen metric is read. If it does, please report it with your display
 scaling and resolution. That is a real bug.
 
 **It stopped by itself.** The mouse went into a corner of the screen, which ends
-the grant on purpose. `/computer 15m` starts another.
+the grant on purpose. The next action asks for another.
 
 **The text that arrived is not the text it typed.** The application rewrote it —
 Windows 11's Notepad autocorrects as you type. Not a Comodor bug, and it says so

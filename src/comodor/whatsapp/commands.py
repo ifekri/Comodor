@@ -66,7 +66,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run(config: Config, args: argparse.Namespace) -> int:
-    from ..ui import console as console_module
+    from ..terminal import console as console_module
 
     theme = console_module.prepare_theme(config.ui.theme,
                                          config.ui.ascii_borders, no_color=False)
@@ -135,7 +135,7 @@ def _connect(console, config: Config, args: argparse.Namespace) -> int:
         # Nothing given at all: walk it, rather than printing instructions and
         # leaving somebody to run the command again with three flags they have
         # to go and find first.
-        from ..ui import console as console_module
+        from ..terminal import console as console_module
         from .guide import walk
 
         theme = console_module.prepare_theme(

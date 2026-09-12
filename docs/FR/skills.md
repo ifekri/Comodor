@@ -61,10 +61,6 @@ comodor skills add review        # install it
 comodor skills list              # what you have
 ```
 
-```
-/skills                          # the same, in the interface
-```
-
 Dès lors, quand vous demandez quelque chose que couvre une compétence, elle
 est chargée et l'agent la suit. On vous le dit quand cela arrive :
 
@@ -110,7 +106,7 @@ La **description** est ce qui compte le plus. C'est ce que Comodor confronte à
 votre demande pour décider s'il charge la compétence du tout, alors écrivez-la
 comme la situation, pas comme un titre.
 
-Redémarrez, ou `/skills`, et elle est là.
+Redémarrez, et elle est là.
 
 ### Embarquer des fichiers
 

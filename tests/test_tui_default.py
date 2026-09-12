@@ -20,7 +20,7 @@ from comodor import cli
 @pytest.fixture
 def spy(monkeypatch, config):
     """Capture which launcher `main()` reaches, with which config."""
-    seen: dict[str, Any] = {"tui": None, "legacy": None, "others": []}
+    seen: dict[str, Any] = {"tui": None, "others": []}
 
     monkeypatch.setattr(cli, "load_config", lambda *a, **k: config)
     import comodor.transport.commands as transport
@@ -29,8 +29,6 @@ def spy(monkeypatch, config):
                         lambda cfg, args: seen.__setitem__("tui", cfg) or 0)
     # `run_tui` is imported lazily inside `main` from the same module the
     # dispatch imports it from, so patching the module attribute is enough.
-    monkeypatch.setattr(cli, "start_interface",
-                        lambda cfg, args: seen.__setitem__("legacy", cfg) or 0)
     return seen
 
 
@@ -45,7 +43,6 @@ def test_bare_command_reaches_the_production_interface(spy, config):
 
     assert code == 0
     assert spy["tui"] is config
-    assert spy["legacy"] is None
 
 
 def test_the_v2_alias_reaches_the_same_launcher(spy, config):
@@ -54,15 +51,47 @@ def test_the_v2_alias_reaches_the_same_launcher(spy, config):
 
     assert code == 0
     assert spy["tui"] is config
-    assert spy["legacy"] is None
 
 
-def test_the_legacy_command_reaches_the_previous_interface(spy, config):
-    """`comodor legacy` is the explicit compatibility route, one command deep."""
-    code = cli.main(["--cwd", str(config.paths.project), "legacy"])
+def test_the_legacy_command_is_gone(spy, config, capsys):
+    """`comodor legacy` was the rollback route while the default changed.
 
-    assert code == 0
-    assert spy["legacy"] is config
+    The interface it started is removed, and so is the command: argparse's
+    ordinary refusal, not a hidden alias and not a custom apology. What it
+    must not do is start anything.
+    """
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["--cwd", str(config.paths.project), "legacy"])
+
+    assert stopped.value.code == 2
+    assert spy["tui"] is None, "an unknown command must not reach the launcher"
+    said = capsys.readouterr().err
+    assert "invalid choice" in said and "legacy" in said
+
+
+def test_help_does_not_advertise_the_retired_commands(capsys):
+    # `--help` is Comodor's own page (it returns rather than exiting), and
+    # argparse's usage line is what `legacy` shows up in when it is a command.
+    assert cli.main(["--help"]) == 0
+    said = capsys.readouterr().out
+    for retired in ("legacy", "preview", "--no-mouse", "/undo", "/computer"):
+        assert retired not in said, f"help still advertises {retired!r}"
+    with pytest.raises(SystemExit):
+        cli.main(["not-a-command"])
+    usage = capsys.readouterr().err
+    assert "legacy" not in usage and "preview" not in usage
+
+
+def test_preview_is_gone_with_the_interface_it_rendered(spy, config):
+    """`comodor preview` drew one frame of the previous interface to an SVG.
+
+    There is no static frame of the current one to draw — it is a live
+    renderer — and `comodor --demo` is the way to look at it.
+    """
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["--cwd", str(config.paths.project), "preview", "120x34"])
+
+    assert stopped.value.code == 2
     assert spy["tui"] is None
 
 
@@ -81,7 +110,7 @@ def test_a_subcommand_never_reaches_an_interface(spy, config, monkeypatch):
 
     assert code == 0
     assert called == ["run"]
-    assert spy["tui"] is None and spy["legacy"] is None
+    assert spy["tui"] is None
 
 
 def test_provider_and_model_reach_the_production_launcher(spy, config):
@@ -201,42 +230,3 @@ def test_bare_command_does_not_run_setup_before_the_launcher(spy, config,
 
     assert code == 0
     assert spy["tui"] is config, "the launcher received the unconfigured config"
-
-
-def test_the_legacy_command_still_gets_first_run_setup(spy, config, monkeypatch):
-    """`comodor legacy` on a fresh machine asks before starting.
-
-    It returned above the only setup block, so the previous interface came up
-    with no provider — and a machine without Bun is sent exactly there.
-    """
-    asked: list[str] = []
-    # Fresh until setup has run once, which is what the real property says.
-    monkeypatch.setattr(type(config), "needs_setup",
-                        property(lambda self: not asked))
-
-    def setup(cfg):
-        asked.append("setup")
-        return cfg
-
-    monkeypatch.setattr("comodor.setup.run_setup", setup)
-
-    code = cli.main(["--cwd", str(config.paths.project), "legacy"])
-
-    assert code == 0
-    assert asked == ["setup"]
-    assert spy["legacy"] is config
-
-
-def test_legacy_stops_when_setup_is_cancelled(spy, config, monkeypatch):
-    monkeypatch.setattr(type(config), "needs_setup",
-                        property(lambda self: True))
-
-    def cancelling(cfg):
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr("comodor.setup.run_setup", cancelling)
-
-    code = cli.main(["--cwd", str(config.paths.project), "legacy"])
-
-    assert code == 130
-    assert spy["legacy"] is None, "a cancelled setup must not start an interface"

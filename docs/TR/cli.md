@@ -54,17 +54,16 @@ comodor --mode plan                  # start read-only
 | `--mode act\|plan\|chat` | plan salt okunurdur; chat'in aracı yoktur |
 | `--no-loop` | bitene kadar çalışmak yerine bir kez yanıtla |
 | `--cwd PATH` | dokunabileceği klasör |
-| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` |
-| `--ascii` | ASCII kenarlıklar |
-| `--no-mouse` | fareyi terminale bırak |
+| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` — komutların yazdırdıkları için; arayüzün kendi renkleri var |
+| `--ascii` | komutların yazdırdıklarında ASCII kenarlıklar |
 | `--resume [ID]` | son oturum, ya da id ile bir oturum |
 | `--demo` | betiklenmiş çevrimdışı sağlayıcı |
 | `--version` | bu hangi sürüm |
 | `-h`, `--help` | yazılı yardım sayfası |
 
 Bunların hiçbiri yapılandırmanıza yazılmaz. Tek çalıştırmaya uygulanırlar.
-Bir değişikliğin kalıcı olmasını istiyorsanız, arayüzün içinde `/save`
-kullanın ya da yapılandırma dosyasını düzenleyin —
+Bir değişikliğin kalıcı olmasını istiyorsanız, yapılandırma dosyasını
+düzenleyin ya da `comodor setup` komutunu yeniden çalıştırın —
 [Yapılandırma](configuration.md).
 
 ---
@@ -352,18 +351,6 @@ klasörü adlandırılamaz ve bunu size, öyleymiş gibi yapmadan söyler.
 
 ---
 
-## `comodor preview` — arayüzün belirli bir boyutta görünümü
-
-```bash
-comodor preview 80x24
-comodor preview 200x50 --svg wide.svg
-```
-
-Tek bir çerçeve oluşturur ve çıkar. Dar bir terminali kontrol etmek ya da
-bir ekran görüntüsü almak için kullanışlıdır.
-
----
-
 ## Ortam değişkenleri
 
 | | |
@@ -377,7 +364,7 @@ bir ekran görüntüsü almak için kullanışlıdır.
 | `NO_COLOR` | renk yok, her yerde dikkate alınır |
 
 Ortamda bir anahtar **asla yapılandırma dosyanıza yazılmaz**. Bunu kaydetmek
-yerine dışa aktarmak bir karardır ve `/save` buna saygı duyar. Bkz.
+yerine dışa aktarmak bir karardır ve `comodor setup` buna saygı duyar. Bkz.
 [Yapılandırma](configuration.md).
 
 ---

@@ -187,13 +187,7 @@ on their own. `test_mode_policy.py` asserts the two layers cannot disagree.
 Stated plainly, because a migration that hides its remainder is one that never
 finishes:
 
-- **The Rich TUI still assembles its own agent.** `ui/app.py` does not use
-  `application.assemble`. It works, it is the interface people use, and its
-  wiring carries the pieces that make it that: a demo-mode gateway with
-  scripted answers, its own session store, transcript index and background
-  delegates. Folding those into one factory would grow the factory for one
-  caller; the duplication is a recorded decision, not an oversight.
-- **The web session likewise** — and it is a genuinely different lifecycle
+- **The web session assembles its own agent** — and it is a genuinely different lifecycle
   owner: `change_folder` rebuilds the agent in place for a new workspace, with
   its own conversation, checkpoints and delegates, which `assemble` does not
   model.

@@ -56,7 +56,7 @@ config: this project cannot set safety, computer — only your own can
 Si no se dice nada y aún no tiene efecto, comprueba qué capa gana:
 
 ```
-/settings          # what is actually loaded
+comodor doctor     # what is actually loaded
 ```
 
 ```bash
@@ -69,14 +69,14 @@ una clave en tu entorno le gana a una en el archivo. Eso es deliberado —
 
 ---
 
-## `/save` no guardó lo que esperaba
+## Setup no guardó lo que esperaba
 
 A propósito. Escribe **solo lo que elegiste** — no los ajustes de un
 repositorio, no una clave que guardas en tu entorno, no una bandera que pasaste
 para una ejecución.
 
-Para volver tuyo un ajuste de un repositorio, establécelo tú primero
-(`/model x`) y luego guarda.
+Para volver tuyo un ajuste de un repositorio, elígelo tú en `comodor setup`, o
+escríbelo en `~/.comodor/config.json`.
 
 ---
 
@@ -85,8 +85,8 @@ Para volver tuyo un ajuste de un repositorio, establécelo tú primero
 **`401` o `invalid api key`** — la clave está mal, expiró, o pertenece a otro
 proveedor. `comodor doctor` muestra qué proveedor está activo.
 
-**`404 model not found`** — ese proveedor no sirve ese id de modelo. `/model`
-lista lo que realmente ofrece.
+**`404 model not found`** — ese proveedor no sirve ese id de modelo. `Ctrl+K`
+→ *Elegir un modelo* en la interfaz lista lo que realmente ofrece.
 
 **Tiempos de espera agotados.** Un modelo local en una máquina modesta puede
 genuinamente tardar minutos. Sube `providers.<name>.timeout`.
@@ -121,11 +121,7 @@ de que le entreguen tu perfil.
 ## La herramienta de pantalla
 
 **No está en la lista de herramientas.** O esta plataforma no tiene backend —
-solo Windows por ahora — o `computer.enabled` es false. Pregúntale:
-
-```
-/computer
-```
+solo Windows por ahora — o `computer.enabled` es false. `comodor doctor` dice cuál.
 
 **Los clics caen en el lugar equivocado.** Esto no debería suceder: la
 conciencia de DPI se establece antes de leer cualquier métrica de pantalla. Si
@@ -133,7 +129,7 @@ sucede, por favor repórtalo con tu escala de pantalla y resolución. Ese es un
 bug real.
 
 **Se detuvo por sí solo.** El ratón fue a una esquina de la pantalla, lo que
-termina la concesión a propósito. `/computer 15m` inicia otra.
+termina la concesión a propósito. La siguiente acción pide otra.
 
 **El texto que llegó no es el texto que escribió.** La aplicación lo reescribió
 — el Bloc de notas de Windows 11 autocorrige mientras escribes. No es un bug de
@@ -195,4 +191,4 @@ comodor doctor
 `doctor` enmascara tu clave. Aun así, por favor lee la salida antes de pegarla.
 
 - Issues: <https://github.com/ifekri/Comodor/issues>
-- Algo sensible: [SECURITY.md](../SECURITY.md)
+- Algo sensible: [SECURITY.md](../../SECURITY.md)

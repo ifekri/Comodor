@@ -222,8 +222,8 @@ class Guard:
         if grant is None:
             self._refuse(
                 self._stopped_because
-                or "Comodor has not been allowed to use the screen. "
-                   "`/computer 15m` allows it for fifteen minutes.")
+                or "Comodor has not been allowed to use the screen. It asks "
+                   "before the first action; allow it there, for a length.")
 
         title = foreground or ""
         blocked = self._on_the_deny_list(title)

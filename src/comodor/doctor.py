@@ -703,8 +703,9 @@ def _check_tui_runtime(config: Config) -> Finding:
         return Finding(
             "tui runtime", Status.WARN,
             "no `bun` on PATH — `comodor` cannot draw the default interface",
-            remedy="install Bun from https://bun.sh (the `legacy` interface "
-                   "does not need it)")
+            remedy="install Bun from https://bun.sh; until then `comodor run "
+                   "\"...\"` does one task with no interface, and `comodor "
+                   "web` serves one to a browser")
 
     version = runtime.bun_version(executable)
     if version is not None and version < runtime.MIN_BUN:

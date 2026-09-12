@@ -12,7 +12,8 @@ qu'il ne fera pas quoi que vous disiez.
 - **Écrire demande.** Vous voyez le diff avant que cela arrive.
 - **Exécuter une commande demande plus fort**, et il en va de même pour
   atteindre le réseau ou piloter votre écran.
-- **Tout ce qui est réversible est annulé par `/undo`.**
+- **Chaque écriture est d'abord sauvegardée**, donc le contenu précédent est
+  conservé.
 - **Il ne peut pas sortir du dossier du projet** à moins que vous ne le
   désactiviez.
 - **Un dépôt ne peut rien changer de tout ce qui précède.**
@@ -45,21 +46,17 @@ En **mode chat**, il n'y a aucun outil du tout.
   ────────────────────────────────────────────
   in ~/projects/api-server
 
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-`A` retient pour la session, par type de chose — autoriser les écritures
-n'autorise pas les commandes, et autoriser `pytest` n'autorise pas `rm`.
+Les flèches passent d'un choix à l'autre et `Entrée` envoie ; `Échap` refuse.
+*Autoriser pour cette session* retient pour la session, par type de chose —
+autoriser les écritures n'autorise pas les commandes, et autoriser `pytest`
+n'autorise pas `rm`.
 
-Pour cesser d'être sollicité :
-
-```
-/approve writes      files yes, commands still ask
-/approve shell       commands yes, files still ask
-/approve all         everything
-```
-
-Ou de façon permanente, dans votre configuration :
+Pour cesser d'être sollicité, choisissez *Autoriser pour cette session* sur la
+carte — elle s'en souvient par type de chose — ou de façon permanente, dans
+votre configuration :
 
 ```json
 {
@@ -79,18 +76,17 @@ effort perdu.
 
 ---
 
-## Points de contrôle et `/undo`
+## Points de contrôle
 
 Chaque fichier que l'agent écrit est sauvegardé d'abord — le contenu
-précédent, conservé sous `.comodor/checkpoints/` dans le projet.
+précédent, conservé sous `.comodor/checkpoints/` dans le projet, adressé par
+contenu, avec un journal qui dit à quel fichier appartenait chaque instantané.
+Cela se produit que vous ayez approuvé l'écriture ou non, et que
+l'auto-approbation soit active ou non.
 
-```
-/undo
-```
-
-restaure le dernier fichier qu'il a changé. Cela fonctionne que vous ayez
-approuvé l'écriture ou non, et que l'auto-approbation soit active ou non. C'est
-la raison pour laquelle `/approve all` est une chose raisonnable à faire.
+Il n'y a pas encore de commande qui en restaure un ; le dépôt est là pour que
+rien de ce que l'agent a écrasé ne soit perdu, et un projet sous contrôle de
+version a son propre historique à côté.
 
 Désactivez-le s'il le faut :
 
@@ -171,7 +167,7 @@ bogue, trouvé et corrigé : toute trace d'erreur nommant une Config imprimait l
 clé, et pytest imprime des traces d'erreur en permanence.
 
 **Une clé dans votre environnement y reste.** Si vous exportez
-`ANTHROPIC_API_KEY` plutôt que de la sauvegarder, `/save` ne la copiera pas
+`ANTHROPIC_API_KEY` plutôt que de la sauvegarder, `comodor setup` ne la copiera pas
 dans votre fichier de configuration. L'exporter plutôt que la sauvegarder est
 une décision et elle est respectée.
 
@@ -263,7 +259,7 @@ de votre souris.
 ## Signaler quelque chose
 
 Si vous trouvez un problème de sécurité, merci de ne pas ouvrir un ticket
-public. Voir [SECURITY.md](../SECURITY.md).
+public. Voir [SECURITY.md](../../SECURITY.md).
 
 ---
 
