@@ -3052,6 +3052,12 @@ describe("the workbench and the rest of the screen", () => {
     await emitRun(view, "tool.output",
                   { turn_id: "t1", call_id: "a", text: "collected 12\n" });
 
+    // The last event is the one whose paint can still be a tick away on a
+    // slow runner — one macrotask is not a guarantee that the projection has
+    // reached the screen. Waiting on the frame is what every other assertion
+    // on arriving output does; this one captured after a single yield and
+    // failed on a Windows runner with the tool still "running…".
+    await view.waitForFrame((frame) => frame.includes("collected 12"));
     const frame = view.frame();
     expect(frame).toContain("on it");
     expect(frame).toContain("run: pytest");
