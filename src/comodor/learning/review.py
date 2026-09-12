@@ -13,8 +13,8 @@ The rules the review lives by, all of them structural:
   opinion of the conversation can matter.
 * It runs on a cheaper model when one is configured
   (``learning.review_model``) and every token it spends is counted
-  separately, so the review shows up in /cost as its own line, not blended
-  into the turn's.
+  separately, so the review shows up in the usage report as its own line, not
+  blended into the turn's.
 * Nothing is deleted by review. It proposes; staging and caps decide.
 """
 

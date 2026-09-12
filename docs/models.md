@@ -52,18 +52,16 @@ day-to-day work; the difference shows up on long multi-step tasks.
 comodor --model claude-haiku-4-5      # this run only
 ```
 
-```
-/model                  # a list of what the provider offers
-/model gpt-4o           # by name
-/provider               # a different provider entirely
-```
+In the interface, `Ctrl+K` → *Choose a model* lists what the provider offers
+and switches in place; a different provider is `--provider` on the command
+line, or `comodor setup`.
 
 The context gauge follows the model. Switching from a million-token model to a
 128k one changes the limit immediately — which matters, because the agent
 compacts the conversation at a fraction of it, and a stale limit means it never
 compacts and then fails at the provider's real ceiling.
 
-To make a switch permanent: `/save`, or edit
+To make a switch permanent: `comodor setup`, or edit
 `~/.comodor/config.json`.
 
 ---
@@ -80,7 +78,7 @@ Either place works, and neither is copied to the other:
 export ANTHROPIC_API_KEY=sk-ant-…
 ```
 
-A key in your environment **stays there** — `/save` will not write it to disk.
+A key in your environment **stays there** — `comodor setup` will not write it to disk.
 Exporting rather than saving is a decision, and it is respected.
 
 Comodor's own config file is written with owner-only permissions, and your key
@@ -92,10 +90,6 @@ never appears in a log, a transcript, an export, or a traceback.
 ## The gateway
 
 Route across several providers instead of pinning one.
-
-```
-/gw                    # or F5
-```
 
 ```json
 {
@@ -127,8 +121,10 @@ it will be handed an image it cannot read and will guess.
 
 ## What it costs
 
+The interface's usage corner shows this session; across sessions:
+
 ```
-/cost
+comodor insights
 ```
 
 See [Cost](cost.md) for caching, budgets, and why a spend limit sometimes cannot

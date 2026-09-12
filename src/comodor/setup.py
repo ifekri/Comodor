@@ -1135,8 +1135,8 @@ class SetupWizard:
             (str(self.config.paths.config_file), self.theme.style("value")),
             ("\nand you will not be asked again. Change anything later with ",
              self.theme.style("dim")),
-            ("/settings", self.theme.style("accent")),
-            (".", self.theme.style("dim")),
+            ("comodor setup", self.theme.style("accent")),
+            (", or by editing that file.", self.theme.style("dim")),
         )
         self.console.print(Panel(body, box=self.theme.box,
                                  border_style=self.theme.style("border"),
@@ -1835,8 +1835,8 @@ class SetupWizard:
             # above a list of things to choose between is two instructions.
             ("Type a task and press Enter. " if closing else "",
              self.theme.style("dim")),
-            ("/help" if closing else "", self.theme.style("accent")),
-            (" lists everything." if closing else "", self.theme.style("dim")),
+            ("Ctrl+K" if closing else "", self.theme.style("accent")),
+            (" lists every command." if closing else "", self.theme.style("dim")),
         )
         self.console.print()
         self.console.print(Panel(body, box=self.theme.box,

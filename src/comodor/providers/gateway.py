@@ -265,7 +265,7 @@ class Gateway:
         if last_error is not None:
             raise last_error
         raise ProviderError(
-            "no provider is configured — run `comodor setup`, or /provider here",
+            "no provider is configured — run `comodor setup`",
             retryable=False,
         )
 

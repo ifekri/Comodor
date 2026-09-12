@@ -44,10 +44,6 @@ comodor mcp disable notes
 comodor mcp remove notes       # forget it entirely
 ```
 
-```
-/mcp                           # the same, in the interface
-```
-
 A disabled server is not started and its tools are not offered.
 
 ---

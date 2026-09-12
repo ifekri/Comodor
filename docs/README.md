@@ -81,7 +81,8 @@ comodor                  # it asks a few questions, once
 ```
 
 Then type what you want. Correct it when it is wrong — edit the file, or just
-say so — and it learns. `/progress` shows you whether that is actually working.
+say so — and it learns. `comodor insights` shows you whether that is actually
+working.
 
 ```bash
 comodor run "fix the failing test in tests/test_parser.py"   # one task, no interface
@@ -95,12 +96,12 @@ comodor help                                                 # the written help 
 **It learns from corrections, not from praise.** Most agents forget the moment
 a session ends. Comodor watches what you change about its output and turns that
 into a lesson with a confidence that rises when it holds and falls when it does
-not. [How it learns](learning.md) explains the mechanism; `/progress` shows the
-evidence.
+not. [How it learns](learning.md) explains the mechanism; `comodor insights`
+shows the evidence.
 
 **It asks before it acts, and everything is reversible.** Reading is silent.
-Writing asks. Running a command asks louder. Every write is checkpointed, and
-`/undo` puts the last one back. [Safety and permissions](safety.md).
+Writing asks. Running a command asks louder. Every write is checkpointed first,
+so the previous contents are never gone. [Safety and permissions](safety.md).
 
 **One dependency.** The HTTP client, the SSE reader, the WebSocket for the
 browser, the PNG encoder for screenshots — all part of the package. Installing

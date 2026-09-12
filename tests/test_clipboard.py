@@ -57,7 +57,7 @@ def test_it_says_what_would_work_when_nothing_does(monkeypatch):
     monkeypatch.setattr(clipboard, "_tool_for_platform", lambda: None)
     monkeypatch.setattr(clipboard, "_osc52", lambda text: False)
 
-    with pytest.raises(clipboard.Unavailable, match="/mouse"):
+    with pytest.raises(clipboard.Unavailable, match="select the text"):
         clipboard.copy("something")
 
 

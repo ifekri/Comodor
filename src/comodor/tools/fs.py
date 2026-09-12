@@ -7,7 +7,7 @@ moment anything else changes; an anchored string either matches or it does not,
 and an ambiguous match is reported rather than guessed at.
 
 *Every mutation is checkpointed first.* By the time a write happens the old
-bytes are already in the checkpoint store, so ``/undo`` always has something to
+bytes are already in the checkpoint store, so a restore always has something to
 restore.
 """
 
@@ -127,7 +127,7 @@ def _write(ctx: ToolContext, path: Path, content: str, action: str,
     unreachable. The bytes are down and the checkpoint is taken; all this does
     is make sure the model finds out.
     """
-    # The snapshot records both sides: what was there before, so /undo works,
+    # The snapshot records both sides: what was there before, so a restore works,
     # and what the agent is about to leave, so a later hand-edit is detectable.
     if ctx.config.safety.checkpoints:
         ctx.checkpoints.snapshot(path, action=action, tool=tool, after=content)
@@ -277,8 +277,9 @@ class WriteFile(Tool):
                 # a run whose actual work was correct.
                 blind = (f"{len(before.splitlines())} lines were replaced in a "
                          f"file this session had not read. If you meant to "
-                         f"change part of it, read it and use edit_file; "
-                         f"/undo restores it.")
+                         f"change part of it, read it and use edit_file"
+                         + ("; the previous contents were checkpointed first."
+                            if ctx.config.safety.checkpoints else "."))
 
         report = _write(ctx, target, content,
                         action="write" if target.exists() else "create",

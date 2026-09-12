@@ -55,8 +55,8 @@ class LearningEngine:
 
         # Curated memory: a small, separate shelf. The facts service is
         # cheap to build (one store handle, no threads) and is created even
-        # when learning is off, so /memory can still list what was learned
-        # before it was switched off.
+        # when learning is off, so `comodor journey` can still list what was
+        # learned before it was switched off.
         from .facts import FactService
 
         self.facts = FactService(
@@ -94,7 +94,7 @@ class LearningEngine:
             self.facts_briefing = ""
 
     def refresh_facts(self) -> str:
-        """Rebuild the snapshot deliberately — a new conversation, a /memory change."""
+        """Rebuild the snapshot deliberately — a new conversation, a memory change."""
         self.facts_briefing = self.facts.snapshot()
         return self.facts_briefing
 
@@ -602,7 +602,7 @@ class LearningEngine:
         return False
 
     def feedback(self, lessons: list[Lesson], good: bool, note: str = "") -> None:
-        """Explicit /good or /bad on the last answer."""
+        """Explicit good or bad on the last answer."""
         if lessons:
             self.store.credit([lesson.id for lesson in lessons], won=good)
         for lesson in lessons:

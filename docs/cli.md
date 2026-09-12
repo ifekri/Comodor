@@ -62,7 +62,7 @@ comodor --mode plan                  # start read-only
 | `-h`, `--help` | the written help page |
 
 None of these are written to your config. They apply to the one run. To make a
-change stick, use `/save` inside the interface or edit the config file —
+change stick, edit the config file, or run `comodor setup` again —
 [Configuration](configuration.md).
 
 ---
@@ -359,7 +359,7 @@ cleared cannot be named, and it tells you so rather than pretending.
 | `NO_COLOR` | no colour, honoured everywhere |
 
 A key in the environment is **never written to your config file**. Exporting one
-rather than saving it is a decision, and `/save` respects it. See
+rather than saving it is a decision, and `comodor setup` respects it. See
 [Configuration](configuration.md).
 
 ---

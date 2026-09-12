@@ -250,8 +250,8 @@ approvals, not the screen.  Full guide: docs/safety.md"""),
   environment                   ANTHROPIC_API_KEY, OPENAI_API_KEY, …
   the command line              --model, --mode, …  for one run
 
-Later beats earlier. `/save` writes back only what *you* chose - never the
-repository's settings, and never a key you keep in your environment.
+Later beats earlier. `comodor setup` writes back only what *you* chose - never
+the repository's settings, and never a key you keep in your environment.
 
   comodor doctor                what is set, and what is wrong with it
 
@@ -422,8 +422,8 @@ image costs real money and an agent that can spend silently is not yours.
   The key           in the environment: image_gen.key_env, OPENAI_API_KEY
                     by default — never in the config file
   Daily limit       image_gen.max_per_day: 10 — when it is reached the tool
-                    refuses in words until tomorrow, and /cost shows the
-                    count
+                    refuses in words until tomorrow, and says how many it
+                    made
 
 The tool is only offered to the model while it is switched on, and every call
 asks permission, like a shell command. The prompt is sent to the provider

@@ -126,7 +126,7 @@ class SignalDetector:
     # -- 2. the change the user threw away -------------------------------- #
 
     def record_undo(self, paths: list[str], episode_id: int = 0) -> Outcome:
-        """`/undo` is an unambiguous rejection of what the agent just did."""
+        """An undo is an unambiguous rejection of what the agent just did."""
         outcome = Outcome()
         for path in paths:
             self.store.add_signal(Signal(

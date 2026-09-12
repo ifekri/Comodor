@@ -1,9 +1,10 @@
 # Cost
 
 What a session costs, and how to make it cost less without making it worse.
+The interface's usage corner shows this session as it goes; across sessions:
 
 ```
-/cost
+comodor insights
 ```
 
 ```

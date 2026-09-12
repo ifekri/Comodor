@@ -56,14 +56,12 @@ Or switch it off, keeping Reflex:
 
 ## Teaching it, deliberately
 
-| | |
-|---|---|
-| `/good` | that answer was right |
-| `/bad` | that answer was wrong |
-| `/teach we use pytest, never unittest` | remember this |
-
-`/good` and `/bad` take one keystroke and are the cheapest thing you can do for
-it.
+Say it in the conversation. A correction — "no, not like that", or editing
+what it wrote — becomes a lesson with a confidence that rises when it holds.
+Something durable said in plain words — "we use pytest, never unittest",
+"that database is Postgres" — the agent records on its memory shelf with the
+`memory` tool, where it sits at the top of every turn; `comodor journey show`
+lists what is there.
 
 Denying a permission prompt teaches it too. A refusal is the clearest preference
 signal the interface collects, and it is treated as one.
@@ -72,42 +70,21 @@ signal the interface collects, and it is treated as one.
 
 ## Seeing what it knows
 
-```
-/memory
-```
-
-A searchable list — each lesson with what triggers it, what it says, its kind
-and its current confidence:
-
-```
-┌─  Memory (23)  ────────────────────────────────────────────────────┐
-│ ›  #41 writing Python strings                                      │
-│      Use single quotes for string literals.  [style 91%]           │
-│    #38 adding a test                                               │
-│      Tests go in tests/, mirroring the src layout.  [layout 84%]   │
-│    #29 adding a dependency                                         │
-│      Ask before adding one; this project has exactly one.  [78%]   │
-│    #12 parsing empty input                                         │
-│      Raise, do not return an empty list.  [behaviour 62%]          │
-└────────────────────────────────────────────────────────────────────┘
-  ↑↓ move   enter open   type filter   esc close
+```bash
+comodor journey show
 ```
 
-`/memory <text>` searches. Opening one lets you pin it, so it stops decaying, or
-delete it if it was wrong.
-
-```
-/rules
-```
-
-The house rules it drew from your code rather than from you telling it.
+Everything it has learned, oldest first — each lesson with what triggers it,
+what it says, its kind and its current confidence, and the house rules it drew
+from your code rather than from you telling it. `comodor journey remove ID`
+retires one that was wrong.
 
 ---
 
 ## Seeing whether it is working
 
-```
-/progress
+```bash
+comodor insights
 ```
 
 ```

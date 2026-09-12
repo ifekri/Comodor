@@ -276,7 +276,8 @@ class Episode:
     tools_used: list[str] = field(default_factory=list)
     error_kind: str = ""
     created_at: float = field(default_factory=time.time)
-    # Metrics behind /progress — the numbers that make "it improves" checkable.
+    # Metrics behind `comodor insights` — the numbers that make "it improves"
+    # checkable.
     corrections: int = 0
     approvals_asked: int = 0
     retries: int = 0
@@ -1035,7 +1036,7 @@ class BrainStore:
         return episode
 
     def episodes(self, limit: int = 200, scope: str = "") -> list[Episode]:
-        """Recent episodes, oldest first — the series behind /progress."""
+        """Recent episodes, oldest first — the series behind `comodor insights`."""
         sql = "SELECT * FROM episodes"
         params: list[Any] = []
         if scope:

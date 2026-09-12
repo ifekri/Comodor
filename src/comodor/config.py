@@ -1306,7 +1306,7 @@ class Config:
 
         A borrowed value that is still exactly what the borrowed layer supplied
         goes back to whatever their own file said. A value they changed during
-        the session -- `/model`, `/approve`, the setup wizard -- is their own
+        the session -- a model chosen in setup, an approval -- is their own
         choice and is written.
         """
         document = self.to_json()

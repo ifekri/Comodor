@@ -1,9 +1,9 @@
 """Undo for an autonomous agent.
 
 Before any tool mutates a file, its previous bytes are copied into
-``.comodor/checkpoints/``. ``/undo`` walks the journal backwards and restores
-them. Without this, letting a loop run unattended means trusting it never makes
-a mistake; with it, a mistake costs one command.
+``.comodor/checkpoints/``. :meth:`CheckpointStore.undo_last` walks the journal
+backwards and restores them. Without this, letting a loop run unattended means
+trusting it never makes a mistake; with it, nothing it overwrote is lost.
 
 Snapshots are content-addressed, so a file rewritten twenty times in a session
 stores each distinct version once. A file that did not exist is recorded with a

@@ -56,8 +56,8 @@ behind the correction, tells you the rule it wrote, and follows it from then on.
 
 Those are real, read out of a working install.
 
-`/progress` shows whether that is actually working — corrections per turn,
-falling or not. A number, not a claim.
+`comodor insights` shows whether that is actually working — corrections per
+task, falling or not. A number, not a claim.
 
 ## Whether it is any good, measured
 

@@ -48,8 +48,8 @@ Report only what you would genuinely block a merge for.
 - `~/.comodor/skills/` — yours, in every project
 - `<project>/.comodor/skills/` — the project's, committable, wins on a name clash
 
-Comodor picks the ones matching your request and puts them in the prompt. Run
-`/skills` to see what loaded, and which ones applied.
+Comodor picks the ones matching your request and puts them in the prompt.
+`comodor skills list` shows what is installed.
 """
 
 REVIEW = """\

@@ -45,12 +45,26 @@ def test_replacing_an_unread_file_says_so(tool_context):
     assert "edit_file" in result.content, "it should say what to do instead"
 
 
-def test_the_warning_says_the_change_can_be_undone(tool_context):
+def test_the_warning_says_the_previous_contents_were_kept(tool_context):
+    """There is no command that restores a checkpoint; the message must not
+    promise one. What it may say is that the checkpoint exists — and only
+    when it does."""
     given(tool_context, "notes.md", "one\ntwo\n")
 
     result = write(tool_context, "notes.md", "gone\n")
 
-    assert "/undo" in result.content
+    assert "checkpointed first" in result.content
+    assert "/undo" not in result.content
+
+
+def test_the_warning_does_not_claim_a_checkpoint_that_was_not_taken(tool_context):
+    tool_context.config.safety.checkpoints = False
+    given(tool_context, "notes.md", "one\ntwo\n")
+
+    result = write(tool_context, "notes.md", "gone\n")
+
+    assert "WARNING" in result.content
+    assert "checkpointed" not in result.content
 
 
 # --------------------------------------------------------------------------- #

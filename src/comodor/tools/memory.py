@@ -7,8 +7,8 @@ should land as a fact while the conversation still holds it, not wait for a
 background pass to rediscover it.
 
 The tool is SAFE on purpose. Writing a fact changes no file, runs no command,
-and every fact is visible in the briefing block, in /memory and in the web
-panel — the writes are their own audit. The real guards are the caps and the
+and every fact is visible in the briefing block, in `comodor journey show`
+and in the web panel — the writes are their own audit. The real guards are the caps and the
 duplicate rule in the facts service: the model cannot grow the memory, only
 curate it, and a full shelf comes back as an error listing the entries so
 the next call replaces or removes instead of retrying the same add.

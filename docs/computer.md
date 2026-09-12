@@ -59,14 +59,17 @@ Two steps, deliberately. Neither happens by itself.
 Until this is set, the model is not offered the tool at all. It is not in the
 tool list, so it cannot ask for it and cannot be talked into it.
 
-**2. Allow it to act**, at the moment it matters:
+**2. Allow it to act**, at the moment it matters. Before its first action the
+tool asks, on a permission card, for a length rather than a yes:
 
 ```
-/computer 15m              fifteen minutes, anywhere on screen
-/computer 1h this app      one hour, only while the current window is in front
-/computer                  how things stand
-/computer stop             end it now
+15 minutes                  anywhere on screen
+15 minutes, this app only   only while the window in front now stays in front
+1 hour                      anywhere on screen
+no
 ```
+
+When the time runs out mid-task it asks again, and says that is why.
 
 Or let the model ask. The first time it needs the screen you get this:
 
@@ -105,11 +108,11 @@ The agent can still click in a corner itself — the Start button, a close box.
 It remembers where it left the pointer, so only a pointer that moved somewhere
 nobody put it counts as you.
 
-Other ways to stop it, when your hands are on the keyboard:
+Other ways to stop it:
 
 ```
-/computer stop       ends the permission
-Esc                  stops the current task
+the stop button      on the countdown panel it shows on screen; ends the permission
+Ctrl+C               in the interface, stops the current task
 ```
 
 ---
@@ -176,8 +179,8 @@ this: the feature is "let the model see your screen".
 Practical advice:
 
 - Close what you would not paste into a chat window.
-- Use `/computer 1h this app` so it only acts while one window is in front —
-  though it still *sees* whatever is in the screenshot.
+- Choose *15 minutes, this app only* so it only acts while one window is in
+  front — though it still *sees* whatever is in the screenshot.
 - Prefer the [browser tool](browser.md) when the work is a web page. It returns
   text, not pixels, and costs a fraction as much.
 
@@ -315,13 +318,8 @@ If `computer` is not among the tools, one of these is true:
 rather than offered and failing every time — a tool the model can see and never
 use invites a wasted call on every turn.
 
-**It is switched off.** `computer.enabled` defaults to `false`.
-
-Ask it directly:
-
-```
-/computer
-```
+**It is switched off.** `computer.enabled` defaults to `false`. Ask it to use
+the screen and, with the tool absent, it says so:
 
 ```
 no screen control: it is switched off. Set computer.enabled in your config.

@@ -36,23 +36,24 @@ Four layers. Later beats earlier.
 5. the command line               --model, --mode, … for one run
 ```
 
-### What `/save` writes
+### What gets written back
 
-**Only what you chose.** This matters more than it sounds.
+**Only what you chose.** This matters more than it sounds. `comodor setup`
+is what writes your file; it follows this rule.
 
 The configuration the agent runs on is all four layers merged. Writing that back
 into your file would make a cloned repository's spend ceiling your permanent
 global default, and would copy an API key you deliberately kept in your
 environment onto disk.
 
-So `/save` remembers where each value came from. A value that still holds
+So the writer remembers where each value came from. A value that still holds
 whatever a borrowed layer supplied goes back to what *your* file said; a value
-you changed during the session is yours and is written.
+you chose yourself is yours and is written.
 
-- `/model x` then `/save` → persists `x`
-- `/save` in a repository that pins `max_cost_usd: 500` → persists nothing of
+- choosing model `x` in setup → persists `x`
+- saving in a repository that pins `max_cost_usd: 500` → persists nothing of
   the sort
-- `/save` with `ANTHROPIC_API_KEY` exported → the key stays in your environment
+- saving with `ANTHROPIC_API_KEY` exported → the key stays in your environment
 
 ---
 
@@ -376,8 +377,7 @@ Full explanation: [Using your screen](computer.md).
 ```
 
 `policy` is `cost`, `speed` or `quality`. With `enabled: true` it picks from
-`chain` and steps past a provider that keeps failing. `F5` or `/gw` in the
-interface.
+`chain` and steps past a provider that keeps failing.
 
 ### `mcp` — Model Context Protocol servers
 
@@ -426,8 +426,4 @@ If a setting still seems to do nothing:
 
 ```bash
 comodor doctor          # what it actually loaded
-```
-
-```
-/settings               # the same, in the interface
 ```
