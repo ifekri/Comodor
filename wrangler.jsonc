@@ -25,6 +25,23 @@
   "name": "comodor-site",
   "compatibility_date": "2026-08-28",
   "main": "workers/site/index.js",
+  "keep_vars": true,
+
+  "vars": {
+    "GITHUB_APP_ID": "4831845",
+    "GITHUB_APP_SLUG": "comodor-agent",
+    "GITHUB_APP_CLIENT_ID": "Iv23lib4nbeUdzTilRVy"
+  },
+
+  // Secrets Require for Github App In CF
+
+  "secrets": {
+    "required": [
+      "GITHUB_APP_PRIVATE_KEY",
+      "GITHUB_APP_WEBHOOK_SECRET",
+      "GITHUB_APP_CLIENT_SECRET"
+    ]
+  },
 
   "assets": {
     "directory": "./out",
