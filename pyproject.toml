@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Mmdrza", email = "devfekri@gmail.com" }]
-keywords = ["agent", "llm", "tui", "rich", "coding-assistant", "terminal", "cli"]
+keywords = ["agent", "llm", "tui", "opentui", "coding-assistant", "terminal", "cli"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -24,8 +24,10 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Code Generators",
 ]
-# One dependency. The HTTP client, SSE reader and config loader are
-# all part of the package, so installing Comodor pulls in nothing else.
+# One dependency. The HTTP client, SSE reader and config loader are all part
+# of the package, so installing Comodor pulls in nothing else. Rich is what
+# the commands print through — `setup`, `doctor`, `help`, the channel
+# commands — not the interface, which is OpenTUI run by Bun.
 dependencies = ["rich>=13.7"]
 
 [project.urls]
