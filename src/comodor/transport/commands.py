@@ -34,11 +34,7 @@ def register(sub) -> None:
     # same canonical launcher the bare command uses; two entry paths, one
     # implementation.
     sub.add_parser(
-        "tui-v2", help="alias for `comodor` — the production terminal interface")
-    sub.add_parser(
-        "legacy",
-        help="the previous terminal interface, kept temporarily for "
-             "compatibility (it will be removed in a later release)")
+        "tui-v2", help="alias for `comodor` — the terminal interface")
 
 
 def run_tui(config: Config, args: argparse.Namespace) -> int:
@@ -78,8 +74,8 @@ def run_tui(config: Config, args: argparse.Namespace) -> int:
               "has no equivalent — `node:ffi` is not a module in any released "
               "version — so the renderer cannot start under it.\n\n"
               "  Install Bun from https://bun.sh, then run `comodor` again.\n\n"
-              "Meanwhile, `comodor legacy` runs the terminal interface that "
-              "does not need it.",
+              "Without it: `comodor run \"...\"` does one task with no "
+              "interface, and `comodor web` serves one to a browser.",
               file=sys.stderr)
         return 2
 
@@ -96,8 +92,8 @@ def run_tui(config: Config, args: argparse.Namespace) -> int:
               f"the one on the path ({executable}) reports {have}.\n\n"
               "  Upgrade it — `bun upgrade`, or https://bun.sh — then run "
               "`comodor` again.\n\n"
-              "Meanwhile, `comodor legacy` runs the terminal interface that "
-              "does not need it.",
+              "Without it: `comodor run \"...\"` does one task with no "
+              "interface, and `comodor web` serves one to a browser.",
               file=sys.stderr)
         return 2
 
@@ -113,8 +109,9 @@ def run_tui(config: Config, args: argparse.Namespace) -> int:
             listed = "\n".join(f"  - {problem}" for problem in problems)
             print("comodor: the packaged renderer cannot run on this "
                   f"machine.\n\n{listed}\n\n"
-                  "Reinstall Comodor to repair it. Meanwhile, `comodor "
-                  "legacy` runs the terminal interface that does not need it.",
+                  "Reinstall Comodor to repair it. Until then: `comodor run "
+                  "\"...\"` does one task with no interface, and `comodor "
+                  "web` serves one to a browser.",
                   file=sys.stderr)
             return 2
 
@@ -171,11 +168,15 @@ def run_tui(config: Config, args: argparse.Namespace) -> int:
         # which. `__pick__` is the flag with no id and means "the newest".
         environment["COMODOR_RESUME"] = "" if resume == "__pick__" else resume
 
-    for legacy_flag in ("theme", "ascii", "no_mouse"):
-        if getattr(args, legacy_flag, None):
-            print(f"note: --{legacy_flag.replace('_', '-')} affects the legacy "
-                  "interface only (`comodor legacy`); the current interface "
-                  "does not read it.", file=sys.stderr)
+    for printing_flag in ("theme", "ascii"):
+        if getattr(args, printing_flag, None):
+            # Both are real: they set how `setup`, `doctor`, `help` and the
+            # channel commands print. The interface draws from its own design
+            # tokens and reads neither, which is worth one line rather than a
+            # flag that is quietly ignored.
+            print(f"note: --{printing_flag} sets how the commands print; the "
+                  "interface has its own colours and does not read it.",
+                  file=sys.stderr)
             break
     command = [executable, "run", str(entry)]
     # The workspace is the user's project — never the artifact's directory.

@@ -184,3 +184,85 @@ def test_a_run_that_used_nothing_says_so_rather_than_omitting_it(scripted):
 
     report = json.loads(out.getvalue())
     assert report["tools"] == [], "an empty list and a missing key are not the same"
+
+
+# --------------------------------------------------------------------------- #
+# the interface is not a cost the headless paths pay
+# --------------------------------------------------------------------------- #
+
+#: Modules that belong to drawing or reading a terminal. A headless run has no
+#: terminal to draw on; loading these would be work with nothing to show for
+#: it, and — for the launcher — a Bun requirement on a command that never
+#: starts Bun.
+#:
+#: `comodor.transport.commands` is not on the list on purpose: building the
+#: parser registers `core` and `tui-v2` from it, the way every subcommand
+#: module is imported to register itself, and everything it needs to actually
+#: launch — the renderer lookup, Bun, the spawn — is imported inside `run_tui`.
+INTERFACE_ONLY = (
+    "comodor.tui.runtime",          # where the packaged renderer is and whether it runs
+    "comodor.terminal.chooser",     # the interactive picker
+    "comodor.terminal.reader",      # raw key reading
+    "comodor.terminal.keys",
+)
+
+
+@pytest.mark.parametrize("argv", [["--version"], ["--help"]])
+def test_the_quick_commands_do_not_load_the_interface(argv, tmp_path):
+    """`comodor --version` is answered without touching a renderer or a key
+    reader. Measured in a fresh interpreter, because the test process has
+    already imported half the package."""
+    import os
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys, comodor.cli as cli\n"
+        "try:\n"
+        f"    cli.main({argv!r})\n"
+        "except SystemExit:\n"
+        "    pass\n"
+        "loaded = [name for name in sys.modules if name in "
+        f"{INTERFACE_ONLY!r}]\n"
+        "print('LOADED:' + ','.join(loaded))\n"
+    )
+    environment = dict(os.environ, COMODOR_HOME=str(tmp_path / "home"),
+                       PYTHONIOENCODING="utf-8")
+    done = subprocess.run([sys.executable, "-c", probe], capture_output=True,
+                          text=True, encoding="utf-8", env=environment,
+                          cwd=str(tmp_path), timeout=60)
+    assert done.returncode == 0, done.stderr
+    marker = [line for line in done.stdout.splitlines() if line.startswith("LOADED:")]
+    assert marker, done.stdout
+    assert marker[0] == "LOADED:", f"{argv} loaded {marker[0][7:]}"
+
+
+def test_a_headless_run_does_not_load_the_interface(tmp_path):
+    """`comodor run` answers through the core alone.
+
+    A fresh interpreter, driven the way a script drives it — `--demo` so the
+    scripted provider answers and nothing reaches a network — because the
+    test process itself has long since imported the picker for other tests.
+    """
+    import os
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys, comodor.cli as cli\n"
+        "code = cli.main(['--demo', 'run', 'say hi', '--json', '--yes'])\n"
+        "loaded = [name for name in sys.modules if name in "
+        f"{INTERFACE_ONLY!r}]\n"
+        "print('LOADED:' + ','.join(loaded))\n"
+        "raise SystemExit(code)\n"
+    )
+    environment = dict(os.environ, COMODOR_HOME=str(tmp_path / "home"),
+                       PYTHONIOENCODING="utf-8", COMODOR_OFFLINE="1")
+    (tmp_path / "project").mkdir()
+    done = subprocess.run([sys.executable, "-c", probe], capture_output=True,
+                          text=True, encoding="utf-8", env=environment,
+                          cwd=str(tmp_path / "project"), timeout=120)
+    assert done.returncode == 0, done.stderr
+    marker = [line for line in done.stdout.splitlines() if line.startswith("LOADED:")]
+    assert marker, done.stdout
+    assert marker[0] == "LOADED:", f"a headless run loaded {marker[0][7:]}"

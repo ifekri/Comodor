@@ -180,5 +180,53 @@ def test_a_machine_without_bun_is_a_clear_refusal(tmp_path, monkeypatch,
     out = capsys.readouterr()
     assert code == 2
     assert "Bun" in out.err
-    assert "legacy" in out.err
+    assert "bun.sh" in out.err, "the refusal says where to get it"
+    # And what to do meanwhile is something that exists: the previous
+    # interface this used to point at is gone, and a refusal that names a
+    # removed command is worse than one that names nothing.
+    assert "comodor run" in out.err
+    for gone in ("legacy", "previous interface", "Rich"):
+        assert gone not in out.err, f"the refusal still points at {gone!r}"
+
+
+def test_no_refusal_points_at_the_retired_interface(tmp_path, monkeypatch,
+                                                    capsys):
+    """Every way the launcher can say no, and none of them may say `legacy`.
+
+    Bun missing, Bun too old, a renderer artifact that cannot run here: each
+    refusal names something a person can actually do.
+    """
+    import argparse
+
+    from comodor.config import Config
+    from comodor.paths import Paths
+    from comodor.transport.commands import run_tui
+
+    (tmp_path / "project").mkdir()
+    (tmp_path / "home").mkdir()
+    config = Config(paths=Paths(user=tmp_path / "home",
+                                project=tmp_path / "project"))
+    config.providers = {}
+    config.provider = ""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "main.js").write_text("// the bundle", encoding="utf-8")
+    monkeypatch.setattr(runtime, "packaged_dist", lambda: dist)
+    monkeypatch.setattr(runtime, "checkout_entry", lambda: None)
+
+    refusals = {}
+    # Bun too old.
+    monkeypatch.setattr(runtime, "bun", lambda: "/fake/bun")
+    monkeypatch.setattr(runtime, "bun_version", lambda executable: (1, 0))
+    assert run_tui(config, argparse.Namespace(demo=False)) == 2
+    refusals["old bun"] = capsys.readouterr().err
+    # A broken packaged artifact (no manifest), Bun fine.
+    monkeypatch.setattr(runtime, "bun_version", lambda executable: (1, 4))
+    assert run_tui(config, argparse.Namespace(demo=False)) == 2
+    refusals["broken artifact"] = capsys.readouterr().err
+
+    for name, said in refusals.items():
+        assert said, f"{name}: nothing was said"
+        for gone in ("legacy", "previous interface", "Rich"):
+            assert gone not in said, f"{name}: still points at {gone!r}"
 
