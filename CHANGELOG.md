@@ -6,12 +6,23 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 Nothing yet.
 
-## 1.3.0 — 2026-09-12
+## 2.0.0 — 2026-09-12
 
 The terminal architecture migration, complete: a Python core behind a
 versioned protocol, an OpenTUI interface that ships in the package and is
 what `comodor` starts, and the previous interface removed. Everything since
 1.2.1 is here; the sections are in the order a person meets them.
+
+A major version, because the supported interactive contract changed and
+not only its implementation: `comodor` now needs Bun on the machine, which
+1.2.1 did not, so an ordinary update can leave the interactive command
+refusing until Bun is installed; and `comodor preview`, `--no-mouse` and the
+old interface's slash commands — all documented in 1.2.1 — are gone. What
+did not change is everything that does not draw a screen: `comodor run`,
+`comodor web`, the channels, the API, the configuration file, sessions,
+profiles, the brain, skills and checkpoints load as they are, and the
+protocol stays v2. **Before upgrading, install [Bun](https://bun.sh) 1.3 or
+newer if you use the interactive interface.**
 
 ### OpenTUI is the interface
 
