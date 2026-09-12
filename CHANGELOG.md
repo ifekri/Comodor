@@ -94,10 +94,11 @@ finished and whether a resumable one is waiting.
 `comodor github connect` opens the browser, waits for GitHub to finish, and
 continues — no receipt to copy, nothing to paste back. Polling is signed,
 the deadline is the server's, and nothing is written to disk until a result
-has been checked. *At the time of this release the production server refuses
-new connections with "the GitHub integration is not configured"; the client
-fails clearly, changes nothing, and works once the server does. A repository
-checked out on the machine needs no connection at all.*
+has been checked. Verified end to end against the production Comodor Worker
+and GitHub App before this release: the installation page opens, the
+repositories are chosen, GitHub confirms the installation is yours, the
+browser says it is connected, and the terminal picks the result up on its
+own. A repository checked out on the machine needs no connection at all.
 
 ### Documentation, in nine languages, tells the same truth
 
