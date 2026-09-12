@@ -119,6 +119,21 @@ def test_leftover_temporary_files_are_removed(home):
     assert not (config.paths.user / "config.json.tmp").exists()
 
 
+def test_a_fresh_install_is_told_no_provider_is_chosen_not_that_its_name_is_wrong(home):
+    """Before setup the provider is the empty string. That is not a typo, and
+    "'' is not a known provider" read as one to the first person who ran
+    doctor on a new machine."""
+    config = load(cwd=home / "project", use_environment=False)
+    assert config.provider == ""
+
+    found = finding(run_checks(config), "provider")
+
+    assert found.status is Status.FAIL
+    assert "none is chosen yet" in found.detail
+    assert "''" not in found.detail
+    assert "comodor setup" in found.remedy
+
+
 def test_a_selected_provider_that_does_not_exist_is_replaced(home):
     config = configured(home)
     config.provider = "a-provider-that-was-removed"

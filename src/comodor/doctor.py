@@ -233,8 +233,12 @@ def _check_provider(config: Config) -> Finding:
                 f"{name!r} is selected but is not a provider Comodor knows",
                 remedy=f"switch to one that is set up ({', '.join(ready)})",
                 repair=repair)
+        # A fresh install has no provider at all, which is not the same
+        # finding as a name that is wrong: "'' is not a known provider" told
+        # a new user their empty setting was a typo.
         return Finding(
-            "provider", Status.FAIL, f"{name!r} is not a known provider",
+            "provider", Status.FAIL,
+            "none is chosen yet" if not name else f"{name!r} is not a known provider",
             remedy="run `comodor setup` to choose one")
 
     if not entry.ready:
