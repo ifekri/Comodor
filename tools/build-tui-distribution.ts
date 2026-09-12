@@ -59,20 +59,24 @@ function thisPlatformsPackage(): string {
 function fetchNativePackage(name: string, version: string): void {
   const target = join(ROOT, "node_modules", ...name.split("/"));
   if (existsSync(target)) return;
-  const tmp = join(ROOT, "node_modules", ".cache", "comodor-native");
+  // One directory per package, emptied first, so the only tarball in it is
+  // the one this `npm pack` writes: a cache that survives a rebuild or a
+  // version bump holds stale archives, and `core-linux-x64` is a substring of
+  // `core-linux-x64-musl`'s — a search by name picked the wrong backend.
+  const [scope, bare] = name.split("/");
+  const tmp = join(ROOT, "node_modules", ".cache", "comodor-native", bare);
+  rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true });
   const pack = spawnSync("npm", ["pack", `${name}@${version}`,
                                  "--pack-destination", tmp],
                          { cwd: ROOT, stdio: "inherit" });
   if (pack.status !== 0) throw new Error(`npm pack ${name} failed`);
-  // `npm pack` names a scoped package `opentui-core-linux-x64-0.5.11.tgz`:
-  // scope and name joined, never the bare name this used to look for, so
-  // the lookup found nothing and `tar` was handed the directory. Matched by
-  // the bare name inside the file name, and required to exist.
-  const bare = name.split("/")[1];
-  const tarball = readdirSync(tmp).find(
-    (f) => f.endsWith(".tgz") && f.includes(bare));
-  if (!tarball) throw new Error(`npm pack ${name} left no tarball in ${tmp}`);
+  // `npm pack` names a scoped package `<scope>-<name>-<version>.tgz`, scope
+  // without its `@`. The exact name is required to exist rather than found.
+  const tarball = `${scope.replace(/^@/, "")}-${bare}-${version}.tgz`;
+  if (!existsSync(join(tmp, tarball))) {
+    throw new Error(`npm pack ${name}@${version} did not produce ${tarball} in ${tmp}`);
+  }
   // Relative to `tmp`, on purpose: GNU tar reads `E:\...` as `host:path`
   // and tries to connect to a machine called E.
   const untar = spawnSync("tar", ["-xzf", tarball, "-C", "."],
