@@ -65,10 +65,18 @@ function fetchNativePackage(name: string, version: string): void {
                                  "--pack-destination", tmp],
                          { cwd: ROOT, stdio: "inherit" });
   if (pack.status !== 0) throw new Error(`npm pack ${name} failed`);
-  const tarball = join(tmp, readdirSync(tmp).find((f) => f.startsWith(
-    name.split("/")[1])) ?? "");
-  const untar = spawnSync("tar", ["-xzf", tarball, "-C", tmp],
-                          { stdio: "inherit" });
+  // `npm pack` names a scoped package `opentui-core-linux-x64-0.5.11.tgz`:
+  // scope and name joined, never the bare name this used to look for, so
+  // the lookup found nothing and `tar` was handed the directory. Matched by
+  // the bare name inside the file name, and required to exist.
+  const bare = name.split("/")[1];
+  const tarball = readdirSync(tmp).find(
+    (f) => f.endsWith(".tgz") && f.includes(bare));
+  if (!tarball) throw new Error(`npm pack ${name} left no tarball in ${tmp}`);
+  // Relative to `tmp`, on purpose: GNU tar reads `E:\...` as `host:path`
+  // and tries to connect to a machine called E.
+  const untar = spawnSync("tar", ["-xzf", tarball, "-C", "."],
+                          { cwd: tmp, stdio: "inherit" });
   if (untar.status !== 0) throw new Error(`untar ${name} failed`);
   mkdirSync(join(ROOT, "node_modules", "@opentui"), { recursive: true });
   cpSync(join(tmp, "package"), target, { recursive: true });
