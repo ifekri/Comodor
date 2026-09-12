@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import sys
 
+import pytest
+
 from comodor.agent import AgentLoop, Conversation
 from comodor.agent import verify as project
 from comodor.events import Kind
@@ -81,6 +83,7 @@ def test_a_command_that_hangs_is_given_up_on(tmp_path):
     assert "no result within" in outcome.output
 
 
+@pytest.mark.performance
 def test_patience_is_a_ceiling_and_not_a_suggestion(tmp_path):
     """The message said "no result within 2s" after waiting twenty.
 
@@ -102,6 +105,7 @@ def test_patience_is_a_ceiling_and_not_a_suggestion(tmp_path):
         f"waited {took:.0f}s for a 1s ceiling — the child outlived the shell"
 
 
+@pytest.mark.performance
 def test_giving_up_does_not_leave_the_command_running(tmp_path):
     """A check that starts workers — `pytest -n`, a bundler — leaves them
     behind if only the shell is killed. They then run on against the user's

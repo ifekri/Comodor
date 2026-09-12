@@ -694,6 +694,7 @@ def test_nothing_is_left_running_after_close(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.performance
 def test_a_download_does_not_block_the_caller(tmp_path, served, monkeypatch):
     """The web session starts one and answers the request immediately."""
     monkeypatch.setattr(dl, "EVERY", 0.0)
