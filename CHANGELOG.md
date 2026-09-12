@@ -4,6 +4,28 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 ## Unreleased
 
+### The previous terminal interface is removed
+
+`comodor` has run the OpenTUI interface since the last release; the Rich
+interface it replaced stayed reachable as `comodor legacy` while the default
+changed hands. It is gone now, with `comodor preview` (which rendered one
+frame of it to an SVG) and the `--no-mouse` flag that only it read. A refusal
+— Bun missing, Bun too old, a packaged renderer that cannot run here — points
+at `comodor run` and `comodor web`, which need no renderer, rather than at a
+command that no longer exists.
+
+`rich` stays a dependency: `setup`, `doctor`, `help` and the channel commands
+print through it. What those still need from a terminal — a console, the
+themes, one interactive picker, the wordmark, the clipboard — moved from
+`comodor.ui` to `comodor.terminal`; nothing else of the old package survives.
+`--theme` and `--ascii` set how those commands print; the interface draws
+from its own design tokens.
+
+One thing the old interface did on its own is now the core's: switching to a
+model with a smaller context window moves the point at which the conversation
+is compacted, for every client, rather than for the one interface that used
+to rewrite the limit itself.
+
 ### 1.1.1 shipped without the release it was cut for
 
 The tag was placed on a commit eighteen behind `main`, so the GitHub App

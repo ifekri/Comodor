@@ -54,9 +54,8 @@ comodor --mode plan                  # start read-only
 | `--mode act\|plan\|chat` | plan is read-only; chat has no tools |
 | `--no-loop` | answer once instead of working until done |
 | `--cwd PATH` | the folder it may touch |
-| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` |
-| `--ascii` | ASCII borders |
-| `--no-mouse` | leave the mouse to the terminal |
+| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` — for what the commands print; the interface has its own |
+| `--ascii` | ASCII borders in what the commands print |
 | `--resume [ID]` | the last session, or one by id |
 | `--demo` | scripted offline provider |
 | `--version` | which version this is |
@@ -344,18 +343,6 @@ The program
 It names everything before it removes anything, and says what it cannot find —
 a `.comodor` folder in a project you used but whose session history has been
 cleared cannot be named, and it tells you so rather than pretending.
-
----
-
-## `comodor preview` — the interface at a given size
-
-```bash
-comodor preview 80x24
-comodor preview 200x50 --svg wide.svg
-```
-
-Renders one frame and exits. Useful for checking a narrow terminal, or for a
-screenshot.
 
 ---
 

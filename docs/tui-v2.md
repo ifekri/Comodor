@@ -1,7 +1,10 @@
 # The terminal interface
 
 The terminal interface: OpenTUI, React and TypeScript, driving a Python core
-over [the protocol](protocol.md). Since F7 it is what `comodor` runs.
+over [the protocol](protocol.md). It is what `comodor` runs, and the only
+terminal interface there is — the one it replaced was removed once this one
+had reached parity with it. For the person using it, [interface.md](interface.md)
+is the short version; this page is how it is built.
 
 ```sh
 comodor                 # the interface
@@ -20,11 +23,10 @@ and native-backend check `comodor doctor` makes), and that the Bun on the path
 is 1.3 or newer. A machine that fails one of those is told so first, rather
 than after answering the setup questions.
 
-The previous interface is still present as `comodor legacy` for compatibility,
-and will be removed in a later release. It asks the same first-run questions
-on a fresh machine. Nothing about the default falls back to it silently: a
-machine that cannot run the renderer is told so, not quietly handed the other
-interface.
+A machine that cannot run the renderer is told so, and told what does not
+need it: `comodor run "..."` for one task with no interface, `comodor web`
+for a browser. Nothing falls back to another terminal interface, because there
+is not one.
 
 ### What the installed package carries
 
@@ -453,7 +455,7 @@ order the core lists them in and the one a person expects.
 
 ## Terminals that are not generous
 
-The floor is the Rich layout's own: 40×12. Below it the screen says so —
+The floor is 40×12, kept from the interface this one replaced. Below it the screen says so —
 "Too small — resize to at least 40×12 — ctrl+d Quit" — instead of letting
 columns share cells. A blocking decision outranks the floor: a permission or
 a question the core is waiting on replaces the notice, because a tiny

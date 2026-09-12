@@ -119,14 +119,14 @@ If any of these is reimplemented for the desktop, the boundary has failed:
 ## Phases
 
 ```text
-F1  headless core, protocol, TUI v2 bootstrap    ← this
+F1  headless core, protocol, TUI bootstrap
 F2  session and streaming parity
 F3  ACT / PLAN / ASK UX and questions
 F4  setup wizard and GitHub
 F5  tools, permissions, agent surfaces
 F6  full TUI parity and performance
-F7  make TUI v2 the default
-F8  remove the Rich presentation layer
+F7  make the OpenTUI interface the default
+F8  remove the previous Rich presentation layer     ← done; F1–F8 are all merged
 
 D1  Tauri foundation
 D2  the workbench shell

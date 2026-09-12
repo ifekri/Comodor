@@ -1,335 +1,165 @@
 # The interface
 
-What you see, what you press, and all 29 commands.
+What you see, what you press, and where everything on the screen comes from.
 
 ```bash
 comodor          # start it
 comodor --demo   # the whole interface, offline, no key
 ```
 
----
+The interface runs on [Bun](https://bun.sh) — `comodor doctor` says whether it
+is there. Without it, `comodor run "..."` does one task with no interface and
+`comodor web` serves one to a browser.
 
-## The two screens
-
-Comodor has two, and only two. Before anything has been said there is nothing
-to read, so that screen is arranged around the one thing you can act on:
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                                                                        │
-│                    ░█▀▀░█▀█░█▄█░█▀█░█▀▄░█▀█░█▀▄                        │
-│                    ░█░░░█░█░█░█░█░█░█░█░█░█░█▀▄                        │
-│                    ░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀░░▀▀▀░▀░▀                        │
-│                                                                        │
-│                   it learns the way you correct it                     │
-│                     Xiaomi MiMo / mimo-v2.5-pro                        │
-│                                                                        │
-│      ┌──────────────────────────────────────────────────────────┐      │
-│      │ ▌ask for anything, or press / for a command              │      │
-│      │                                                          │      │
-│      └──────────────────────────────────────────────────────────┘      │
-│                                                                        │
-│  Mode: ACT [TAB]  ● Command /  ● Sub-agent off /delegates  MODEL mimo… │
-│                                                                        │
-│  Workspace: …/my-project         Skill: 4            version: 1.1.2    │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-It has **no sidebar at any width**. Every section of one would read zero before
-a conversation exists, and a 240-column terminal has the room for a column of
-zeros without having anything to put in it.
-
-The three facts along the bottom are the ones worth checking before typing
-anything: which folder it is pointed at, whether your skills loaded, what you
-are running. The badge on the right names the model that is going to answer —
-the single fact people most often get wrong about a session, settled before the
-first question rather than after it. Nothing here is a placeholder: a value that
-is not known is left out rather than filled in.
-
-The box is the real editor, not a picture of one. What you type into it is what
-arrives, and pressing enter moves straight into the conversation — there is no
-second widget for the first message to be lost between.
-
-Once somebody has spoken, that is the other screen:
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│  You › fix the failing parser test                    add a health…    │
-│                                                       ──────────────   │
-│      Comodor                                          › Context        │
-│      The test expects `parse("")` to raise, but…        143,000 used   │
-│                                                         Limit : 1M     │
-│      ✓ read    tests/test_parser.py            0.1s     Sub-agent: 1   │
-│      ● run     pytest tests/test_pa…      running…                     │
-│                                                       › Workspace      │
-│                                                         …/my-project   │
-│                                                                        │
-│  ────────────────────────────────────────────────────────────────────  │
-│  ▌now add a /version endpoint too                                      │
-│                                                                        │
-│  Mode : Act [TAB]  ● openrouter/…  12% of 1M  loop  $0.03  Command : / │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-**The sidebar sits on the right**, because what your eye should land on first is
-the conversation, not a column of counters. It is reference material — how much
-context is left, which folder, which servers are up, which sub-agents are
-running — and it shows only what is real: a section with nothing in it is not
-drawn rather than drawn empty. `F2` hides it.
-
-It appears at 140 columns and wider at full width, narrows between 100 and 139,
-and folds away below 100 so the conversation keeps the room. The whole interface
-works from about 60 columns upward, and `comodor preview 80x24` renders it at
-any size without starting a session.
-
-**The status line** shows the mode, whether it is iterating, how full the
-context is, and what this session has cost. The context figure is real: it
-follows the model, so switching from a million-token model to a 128k one changes
-it immediately.
-
-A warning that arrives before you have typed anything — a server that would not
-start, a setting the config asked for and did not get — is shown on the opening
-screen rather than replacing it. It is not a conversation, so it does not start
-one.
+For how it is built — the core it drives, the protocol between them, and why
+every fact on screen is the core's rather than the screen's — see
+[tui-v2.md](tui-v2.md). This page is the short version for the person using
+it.
 
 ---
 
-## Modes
+## The screen
 
-| Mode | What the agent may do | |
-|---|---|---|
-| **act** | Everything, asking before writes and commands | the default |
-| **plan** | Read only. No writes, no commands, no network | for "what would you do?" |
-| **chat** | No tools at all | for a question about code you paste |
+```
+┌──────────────────────────────────────────┬───────────────────────┐
+│ Comodor   ~/work/my-project  fake-1      │ Agents         1 live │
+│                                          │  ● d1 running    12.3s│
+│  You                                     │    survey the retries │
+│  fix the failing parser test             │ Tasks            2/5  │
+│                                          │  ◐ write the tests    │
+│  Comodor                                 │  ● read the code      │
+│  The test expects parse("") to raise, …  │  ○ run the suite      │
+│  ✓ read_file  tests/test_parser.py  0.2s │                       │
+│  ● run_shell  pytest tests/…     running…│                       │
+│      collected 12 items                  │                       │
+│                                          │                       │
+├──────────────────────────────────────────┴───────────────────────┤
+│ ▌ask for anything                                                │
+├──────────────────────────────────────────────────────────────────┤
+│  [ACT]   PLAN    ASK    Reads, writes and runs commands…         │
+│ ● 1 agent  tab Mode  ctrl+b Work  ctrl+k Commands      42% ctx  │
+└──────────────────────────────────────────────────────────────────┘
+```
 
-`F3` cycles them. `/mode plan` sets one directly.
+**The header** names the project and the provider and model that are
+answering. It is what the core reports, not what a config file says: when
+the model changes — from here, from another client, or by the core itself —
+the header follows.
 
-Plan mode is genuinely read-only — it is enforced at the permission layer, not
-by asking the model nicely. A tool with a risk above "safe" is refused before it
-runs.
+**The conversation** carries the tool timeline inside it. Every tool call
+sits where it happened, as one row: a mark (`●` running, `✓` done, `×`
+failed), the name, a one-line summary, and how long it took. A running tool
+shows the last lines of its output; a finished one collapses, and clicking
+it opens what the core still holds.
+
+**The workbench** — `Ctrl+B` — is the work outside the conversation: the
+task list the agent keeps for itself, and any background agents it has
+started, each with its state. On a narrow terminal it opens over the
+conversation instead of beside it, and the same key closes it.
+
+**The footer** prints what you can press, from the same list the keys are
+read from, and what this session has cost where the provider measures it.
 
 ---
 
 ## Keys
 
-| | |
+| Key | Does |
 |---|---|
-| `Enter` | send |
-| `Ctrl+J` | newline inside a message |
-| `Esc` | stop what it is doing |
-| `Ctrl+C` | stop; twice to quit |
+| `Enter` | send what you typed |
+| `Tab` / `Shift+Tab` | next / previous mode |
+| `Ctrl+K` | the command palette — every action, searchable |
+| `Ctrl+B` | open or close the workbench |
+| `End` | back to the newest output after scrolling up |
+| `PageUp` / `PageDown` | scroll the conversation |
+| `Ctrl+R` | send again a message the core refused |
+| `Ctrl+C` | stop what it is doing; quit when it is idle |
 | `Ctrl+D` | quit |
-| `F1` | help |
-| `F2` | the sidebar |
-| `F3` | mode |
-| `F4` | loop on/off |
-| `F5` | the gateway |
-| `Ctrl+O` | attach a file |
-| `Ctrl+L` | clear the conversation |
-| `PgUp` `PgDn` | scroll |
-| `Ctrl+↑` `Ctrl+↓` | earlier and later messages |
-| `!command` | run a shell command directly, without asking the model |
+| `Esc` | close the palette, leave a field, or take a card's safe option |
 
-`!` is worth remembering. `!git status` runs it and shows you the output; the
-model never sees the question. Cheaper and faster than asking.
+Every shortcut the footer shows exists; a hint cannot be printed for a key
+that is not bound.
 
 ---
 
-## Commands
+## Modes
 
-Type `/` and the list filters as you go.
+```
+ACT    reads, writes and runs commands, asking before it changes things
+PLAN   reads and plans; cannot write, run or change anything
+ASK    talks it through; no tools at all
+```
 
-### Ask it to change what it is doing
-
-| | |
-|---|---|
-| `/mode [act\|plan\|chat]` | what it is allowed to do |
-| `/loop` | keep working until done, or answer once |
-| `/model [id]` | choose the model — a list, or name one |
-| `/provider [name]` | choose the provider |
-| `/gw` | the gateway: route across providers by cost, speed or quality |
-
-### Teach it
-
-| | |
-|---|---|
-| `/good` | that answer was right |
-| `/bad` | that answer was wrong |
-| `/teach <text>` | remember this |
-| `/memory` | what it has learned |
-| `/rules` | the house rules it drew from your code and your edits |
-| `/progress` | the evidence that it is improving |
-| `/skills` | procedures it follows when the work matches |
-
-`/good` and `/bad` are the cheapest thing you can do for it. See
-[How it learns](learning.md).
-
-### Undo and look back
-
-| | |
-|---|---|
-| `/undo` | restore the last file it changed |
-| `/clear` | start a fresh conversation |
-| `/resume [id]` | reopen an earlier session |
-| `/search <text>` | find something in an earlier conversation |
-| `/export [path]` | write this session to a file |
-
-### Let it reach further
-
-| | |
-|---|---|
-| `/computer [15m\|1h this app\|stop]` | let it use your screen — [guide](computer.md) |
-| `/mcp` | MCP servers and their tools — [guide](mcp.md) |
-| `/attach <path>` | add a file to the next message |
-
-### Settle it
-
-| | |
-|---|---|
-| `/settings` | what is configured right now |
-| `/approve [writes\|shell\|all]` | stop asking before those |
-| `/theme [name]` | ember, midnight, matrix, mono |
-| `/save` | write the current settings to your config file |
-| `/cost` | tokens, spend, and what the cache saved |
-| `/copy [all\|task]` | the last answer, or everything, to the clipboard |
-| `/mouse [on\|off]` | mouse tracking, so you can select text yourself |
-| `/help` | all of this, inside the interface |
-| `/quit` | leave |
-
-**`/save` writes only what you chose.** Not the repository's settings, not a key
-you keep in your environment, not a `--model` you passed for one run. See
-[Configuration](configuration.md#what-save-writes).
+`Tab` cycles them. The label moves when the core confirms, not when the key
+goes down: presses inside one round trip accumulate — three Tabs ask once,
+for where the third pointed — and a refused change says so in words rather
+than moving the label.
 
 ---
 
-## Approvals
+## When it asks you something
 
-When the agent wants to write a file or run a command:
+A permission card or a question form takes the keyboard while it is up, so a
+key meant for a decision cannot also send a message.
 
-```
-  Write  src/parser.py
-  ────────────────────────────────────────────
-   - def parse(text):
-   -     return text.split(",")
-   + def parse(text):
-   +     if not text:
-   +         raise ValueError("nothing to parse")
-   +     return text.split(",")
+- **Arrows** move between the choices or the questions; **Enter** sends.
+- **Esc** takes the request's own safe option — for a permission that is
+  *deny*, for a proposed mode change it is *no change* — and the card says
+  which. It never allows anything.
+- There is no single-key shortcut for *allow*. Allowing costs one move to the
+  choice and one to confirm it, so a key pressed for any other reason cannot
+  authorise a command.
+- A question that offers a write-your-own row opens a field for it on
+  `Space`; `Esc` leaves the field before it cancels the form.
 
-  [a] allow   [A] allow always this session   [d] deny
-```
+Two things can be waiting at once — two parallel tools may each ask — and
+they are shown in the order they arrived, none of them lost.
 
-`A` remembers for the session, per kind of thing — allowing writes does not
-allow commands.
+Mode keys still work while a card is up. The palette does not: a launcher
+over a decision would hide the thing that has to be answered.
 
-Denying is not wasted. A refusal is the clearest preference signal the interface
-ever collects, and it goes to the learning engine: the agent is less likely to
-propose that again.
+---
 
-To stop being asked at all:
+## Following along
 
-```
-/approve writes      files, yes; commands, still ask
-/approve all         everything
-```
+A long answer keeps the newest line in view. Scroll up and it stops
+following; new output does not pull you back down, and a marker says there is
+more below. `End` returns to the live tail, and sending a new message does
+the same.
 
-Everything is still checkpointed. `/undo` works regardless.
+---
+
+## Sessions
+
+`Ctrl+K` → *Open an earlier conversation* lists what the core has kept, and
+opens one in place. The same store serves the browser, so a conversation
+begun here can be reopened there.
+
+`comodor --resume` reopens the most recent one at startup; `--resume ID`
+names one.
 
 ---
 
 ## Copying text out
 
-While the mouse is being tracked, a drag belongs to Comodor and the terminal
-never sees it — so the usual select-and-copy does not work. Three ways round it:
-
-```
-/copy              the last answer
-/copy all          the whole conversation
-/copy task         the last thing you asked for
-/mouse             mouse tracking off, so selection works as usual
-```
-
-`/copy` needs nothing installed on Windows or macOS. On Linux it uses
-`wl-copy`, `xclip` or `xsel`, whichever is there, and says which is missing if
-none is.
-
-Over SSH it falls back to an escape sequence that asks *your* terminal to set
-*your* clipboard — so text from an agent on a server lands where you can paste
-it, rather than on a server that has no clipboard.
-
-Most terminals also let you select with **Shift** held down, which bypasses
-mouse tracking without turning it off.
-
----
-
-## Who is speaking
-
-Three things say it, and each works where the others do not — a name, a quiet
-band, and the indent:
-
-```
-▌ You › why does the parser drop the last field?          ← warm
-
-▌     Comodor                                             ← neutral
-▌     Because split is called with a maxsplit of 2 …
-▌
-▌     ┌─ python ────────────────────────┐
-▌     │ return text.split(',', 2)       │
-▌     └─────────────────────────────────┘
-```
-
-The bands are deliberately muted. This is behind body text you read for minutes
-at a time, and a background with any presence of its own competes with the
-words. Each theme has its own pair, a few percent from its background; one band
-per message rather than per paragraph, so a long answer stays one block.
-
-`mono` has no bands, and neither does `--no-color` — which is exactly why the
-names are there. A colour is the fast answer and a word is the reliable one.
-
-The name costs the question no row: it sits on the same line as the words,
-because a conversation is mostly one-line questions and a label above each would
-be half an exchange off the top of a short terminal. An answer gets its own row,
-which it can afford, and which survives the answer opening with a heading.
-
-Tool calls carry a mark saying what they did:
-
-```
-✓ edit    src/app.py       0.2s      done
-● run     pytest -q     running…     working
-○ read    tests/…                    waiting
-× run     pytest -q       1.4s       failed
-```
-
-Under `--ascii` these become `[OK]`, `[..]`, `[--]` and `[!!]`. They are plain
-characters, not icons from a font you have to install first.
+Select with the mouse as your terminal allows. The `--theme` and `--ascii`
+flags apply to what the commands print — `setup`, `doctor`, `help` — not to
+the interface, which draws from its own design tokens.
 
 ---
 
 ## Right-to-left text
 
-Persian, Arabic and Hebrew are set to the right, where their lines begin, with
-a font stack that suits them. Mixed paragraphs — an English identifier inside a
-Persian sentence — are handled per line rather than per file, which is what
-actually happens in a technical conversation.
-
----
-
-## Themes
-
-```
-/theme midnight
-```
-
-`ember` (the default, warm amber), `midnight` (cool blue), `matrix` (green),
-`mono` (no colour at all).
-
-`--ascii` swaps the box-drawing characters for ASCII, for terminals without
-them. `NO_COLOR` in your environment is honoured.
+Persian, Arabic and mixed lines are passed to the terminal as written, never
+reversed by the program. How well a mixed line is shaped is the terminal's
+doing, and the ones that shape it well do so here.
 
 ---
 
 ## See also
 
-- [From the terminal](cli.md) — the same power without the interface
-- [What the agent can do](tools.md) — the tools behind those `▸` rows
-- [Safety](safety.md) — what the approval prompts are protecting
+- [tui-v2.md](tui-v2.md) — how the interface is built, and what it can and
+  cannot do yet
+- [questions.md](questions.md) — the forms the agent puts to you
+- [safety.md](safety.md) — what asks, what does not, and why
+- [computer.md](computer.md) — letting it use your screen
