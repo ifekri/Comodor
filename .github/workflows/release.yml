@@ -522,6 +522,13 @@ jobs:
           generate_release_notes: true
 
           body: |
+            ## Requirements
+
+            Python 3.11 or newer. The interactive interface also needs
+            [Bun](https://bun.sh) 1.3 or newer on the machine; `comodor run`
+            and `comodor web` work without it. Nothing is downloaded at
+            first launch. `comodor doctor` says what is there.
+
             ## Install
 
             ### Linux and macOS
