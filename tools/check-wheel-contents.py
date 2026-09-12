@@ -14,6 +14,7 @@ draw.
 
 from __future__ import annotations
 
+import glob
 import sys
 import zipfile
 from pathlib import Path
@@ -47,10 +48,30 @@ def check(wheel: Path) -> list[str]:
     return problems
 
 
+def wheels_named(argv: list[str]) -> list[Path]:
+    """The wheels the arguments name, patterns expanded here.
+
+    `dist/*.whl` is expanded by bash and handed over verbatim by PowerShell,
+    which is what CI runs on Windows; a guard that passes on one shell and
+    crashes on the other is not guarding anything. A pattern that matches
+    nothing is kept as written, so the failure names what was asked for.
+    """
+    found: list[Path] = []
+    for arg in argv:
+        matches = sorted(glob.glob(arg)) if any(c in arg for c in "*?[") else []
+        found.extend(Path(match) for match in matches or [arg])
+    return found
+
+
 def main(argv: list[str]) -> int:
-    wheels = [Path(arg) for arg in argv]
+    wheels = wheels_named(argv)
     if not wheels:
         sys.stderr.write("usage: check-wheel-contents.py WHEEL...\n")
+        return 2
+    missing = [wheel for wheel in wheels if not wheel.is_file()]
+    if missing:
+        for wheel in missing:
+            sys.stderr.write(f"no such wheel: {wheel}\n")
         return 2
     problems = [problem for wheel in wheels for problem in check(wheel)]
     for problem in problems:
