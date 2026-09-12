@@ -36,24 +36,24 @@ Dört katman. Sonrakiler öncekileri yener.
 5. the command line               --model, --mode, … for one run
 ```
 
-### `/save` ne yazar
+### Dosyanıza ne yazılır
 
-**Yalnızca seçtiklerinizi.** Kulağa geldiğinden daha önemli.
+**Yalnızca seçtiklerinizi.** Kulağa geldiğinden daha önemli. Dosyanızı yazan
+`comodor setup`'tır ve bu kurala uyar.
 
 Ajanın üzerinde çalıştığı yapılandırma, dört katmanın tümünün
 birleştirilmişidir. Bunun dosyanıza geri yazılması, klonlanmış bir deponun
 harcama tavanını kalıcı küresel varsayılanınız yapar ve bilinçli olarak
 ortamınızda tuttuğunuz bir API anahtarını diske kopyalar.
 
-Bu yüzden `/save` her değerin nereden geldiğini hatırlar. Ödünç alınmış bir
+Bu yüzden yazan taraf her değerin nereden geldiğini hatırlar. Ödünç alınmış bir
 katmanın sağladığı ne varsa hâlâ tutan bir değer, *sizin* dosyanızın
-söylediğine geri döner; oturum sırasında değiştirdiğiniz bir değer sizindir
-ve yazılır.
+söylediğine geri döner; kendi seçtiğiniz bir değer sizindir ve yazılır.
 
-- `/model x` sonra `/save` → `x`'i kalıcılaştırır
-- `max_cost_usd: 500` sabitleyen bir depoda `/save` → bu türden hiçbir şeyi
+- setup'ta `x` modelini seçmek → `x`'i kalıcılaştırır
+- `max_cost_usd: 500` sabitleyen bir depoda kaydetmek → bu türden hiçbir şeyi
   kalıcılaştırmaz
-- `ANTHROPIC_API_KEY` dışa aktarılmışken `/save` → anahtar ortamınızda kalır
+- `ANTHROPIC_API_KEY` dışa aktarılmışken kaydetmek → anahtar ortamınızda kalır
 
 ---
 
@@ -346,8 +346,7 @@ Tam açıklama: [Ekranınızı kullanması](computer.md).
 ```
 
 `policy`, `cost`, `speed` veya `quality`'dir. `enabled: true` ile `chain`'den
-seçer ve sürekli başarısız olan bir sağlayıcının yanından geçer. Arayüzde
-`F5` veya `/gw`.
+seçer ve sürekli başarısız olan bir sağlayıcının yanından geçer.
 
 ### `mcp` — Model Context Protocol sunucuları
 
@@ -396,8 +395,4 @@ Bir ayar hâlâ hiçbir şey yapmıyorsa:
 
 ```bash
 comodor doctor          # what it actually loaded
-```
-
-```
-/settings               # the same, in the interface
 ```

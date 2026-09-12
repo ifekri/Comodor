@@ -61,14 +61,12 @@ Oder schalte es ab und behalte Reflex:
 
 ## Es absichtlich lehren
 
-| | |
-|---|---|
-| `/good` | diese Antwort war richtig |
-| `/bad` | diese Antwort war falsch |
-| `/teach we use pytest, never unittest` | merke dir das |
-
-`/good` und `/bad` kosten einen Tastendruck und sind das Billigste, was du
-für ihn tun kannst.
+Sag es im Gespräch. Eine Korrektur — „nein, nicht so“, oder das Bearbeiten
+dessen, was er geschrieben hat — wird zu einer Lektion, deren Zuverlässigkeit
+steigt, wenn sie sich bewährt. Etwas Dauerhaftes in schlichten Worten — „wir
+benutzen pytest, nie unittest“, „diese Datenbank ist Postgres“ — legt der Agent
+mit dem Werkzeug `memory` in seinem Gedächtnisregal ab, wo es am Anfang jeder
+Runde steht; `comodor journey show` listet, was dort liegt.
 
 Einen Berechtigungsdialog abzulehnen lehrt ihn ebenfalls. Eine Ablehnung
 ist das klarste Präferenzsignal, das die Oberfläche einsammelt, und es wird
@@ -78,43 +76,21 @@ als eines behandelt.
 
 ## Sehen, was er weiß
 
-```
-/memory
-```
-
-Eine durchsuchbare Liste — jede Lektion mit dem, was sie auslöst, was sie
-sagt, ihrer Art und ihrer aktuellen Zuverlässigkeit:
-
-```
-┌─  Memory (23)  ────────────────────────────────────────────────────┐
-│ ›  #41 writing Python strings                                      │
-│      Use single quotes for string literals.  [style 91%]           │
-│    #38 adding a test                                               │
-│      Tests go in tests/, mirroring the src layout.  [layout 84%]   │
-│    #29 adding a dependency                                         │
-│      Ask before adding one; this project has exactly one.  [78%]   │
-│    #12 parsing empty input                                         │
-│      Raise, do not return an empty list.  [behaviour 62%]          │
-└────────────────────────────────────────────────────────────────────┘
-  ↑↓ move   enter open   type filter   esc close
+```bash
+comodor journey show
 ```
 
-`/memory <text>` durchsucht. Eines zu öffnen lässt dich es anheften, sodass
-es nicht mehr abfällt, oder löschen, falls es falsch war.
-
-```
-/rules
-```
-
-Die Hausregeln, die er aus deinem Code zog, statt dir zu sagen, sie ihm zu
-übermitteln.
+Alles, was er gelernt hat, das Älteste zuerst — jede Lektion mit dem, was sie
+auslöst, was sie sagt, ihrer Art und ihrer aktuellen Zuverlässigkeit, und die
+Hausregeln, die er aus deinem Code zog, statt dass du sie ihm sagst.
+`comodor journey remove ID` zieht eine zurück, die falsch war.
 
 ---
 
 ## Sehen, ob es funktioniert
 
-```
-/progress
+```bash
+comodor insights
 ```
 
 ```

@@ -238,12 +238,13 @@ d'écrire un fichier, vous recevez un diff et un choix :
 ```
   Write  src/parser.py
     - 12 lines removed, 8 added
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-Répondez `a` une fois, ou `A` si vous préférez qu'il cesse de demander pour le
-reste de la session. Chaque écriture est sauvegardée dans tous les cas :
-`/undo` restaure la précédente.
+Les flèches passent d'un choix à l'autre et `Entrée` envoie ; `Échap` refuse.
+Choisissez *Autoriser pour cette session* si vous préférez qu'il cesse de
+demander pour le reste de la session. Chaque écriture est sauvegardée dans tous
+les cas, donc le contenu précédent est conservé.
 
 ---
 
@@ -267,8 +268,8 @@ et décroît quand elle ne se vérifie pas.
 
 Après quelques sessions :
 
-```
-> /progress
+```bash
+comodor insights
 ```
 
 ```
@@ -297,12 +298,12 @@ cacher.
 ## 6. Ce qu'il vaut la peine de savoir dès le premier jour
 
 ```
-/help          every command
-/mode          act · plan (read-only) · chat (no tools)     F3 cycles
-/undo          restore the last file it changed
-/cost          tokens, spend, what the cache saved
-Esc            stop it, mid-thought
-Ctrl-C twice   leave
+Tab            next mode: act · plan (read-only) · ask (no tools)
+Ctrl+K         every command, searchable
+Ctrl+B         the workbench: tasks and background agents
+Ctrl+C         stop it mid-thought; quit when it is idle
+Ctrl+D         leave
+comodor help   the written help page, outside the interface
 ```
 
 ---

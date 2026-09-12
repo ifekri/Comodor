@@ -45,10 +45,6 @@ comodor skills add review        # install it
 comodor skills list              # what you have
 ```
 
-```
-/skills                          # the same, in the interface
-```
-
 从那时起，当你请求某个技能所涵盖的东西时，它会被加载，智能体会遵循它。发生时你会被告知：
 
 ```
@@ -90,7 +86,7 @@ Not `python -m pytest` — the project needs the venv's own interpreter.
 
 **description** 最重要。它是 Comodor 用来与你的请求比对、从而决定是否加载这个技能的东西，所以把它写成情境本身，而不是一个标题。
 
-重启，或执行 `/skills`，它就在那里了。
+重启，它就在那里了。
 
 ### 打包文件
 

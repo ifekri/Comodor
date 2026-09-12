@@ -21,7 +21,7 @@ termina con el agente haciendo algo útil.
 
 | | |
 |---|---|
-| [La interfaz](interface.md) | Paneles, teclas, modos y los 29 comandos |
+| [La interfaz](interface.md) | Qué hay en pantalla, las teclas, los modos y cuándo te pregunta algo |
 | [Desde la terminal](cli.md) | Todos los comandos y flags, con ejemplos |
 | [Lo que el agente puede hacer](tools.md) | Las 13 herramientas que tiene y cuándo usa cada una |
 | [Skills](skills.md) | Procedimientos que escribes una vez y él sigue |
@@ -69,8 +69,8 @@ comodor                  # it asks a few questions, once
 ```
 
 Luego escribe lo que quieras. Corrígelo cuando se equivoque — edita el archivo,
-o simplemente díselo — y aprende. `/progress` te muestra si eso realmente está
-funcionando.
+o simplemente díselo — y aprende. `comodor insights` te muestra si eso
+realmente está funcionando.
 
 ```bash
 comodor run "fix the failing test in tests/test_parser.py"   # one task, no interface
@@ -84,13 +84,13 @@ comodor help                                                 # the written help 
 **Aprende de las correcciones, no de los elogios.** La mayoría de los agentes
 olvidan en cuanto termina la sesión. Comodor observa qué cambias de su salida y
 lo convierte en una lección con una confianza que sube cuando se cumple y baja
-cuando no. [Cómo aprende](learning.md) explica el mecanismo; `/progress` muestra
-la evidencia.
+cuando no. [Cómo aprende](learning.md) explica el mecanismo; `comodor insights`
+muestra la evidencia.
 
 **Pregunta antes de actuar, y todo es reversible.** Leer es silencioso.
 Escribir pregunta. Ejecutar un comando pregunta más fuerte. Cada escritura tiene
-un punto de control, y `/undo` revierte la última. [Seguridad y
-permisos](safety.md).
+primero un punto de control, así que el contenido anterior nunca se pierde.
+[Seguridad y permisos](safety.md).
 
 **Una sola dependencia.** El cliente HTTP, el lector de SSE, el WebSocket para
 el navegador, el codificador PNG para las capturas de pantalla — todo parte del
@@ -107,7 +107,7 @@ a hacer clic. [Navegador](browser.md), [pantalla](computer.md).
 
 | | |
 |---|---|
-| [CHANGELOG](../CHANGELOG.md) | Qué cambió, y por qué |
-| [CONTRIBUTING](../CONTRIBUTING.md) | Trabajar en el propio Comodor |
-| [SECURITY](../SECURITY.md) | Reportar algo delicado |
-| [RELEASING](../RELEASING.md) | Cómo se corta una versión |
+| [CHANGELOG](../../CHANGELOG.md) | Qué cambió, y por qué |
+| [CONTRIBUTING](../../CONTRIBUTING.md) | Trabajar en el propio Comodor |
+| [SECURITY](../../SECURITY.md) | Reportar algo delicado |
+| [RELEASING](../../RELEASING.md) | Cómo se corta una versión |

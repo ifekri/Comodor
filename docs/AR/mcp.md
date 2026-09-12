@@ -42,10 +42,6 @@ comodor mcp disable notes
 comodor mcp remove notes       # forget it entirely
 ```
 
-```
-/mcp                           # the same, in the interface
-```
-
 الخادم المعطَّل لا يُبدَأ ولا تُعرض أدواته.
 
 ---

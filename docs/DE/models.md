@@ -53,11 +53,9 @@ Mehrstufig-Aufgaben.
 comodor --model claude-haiku-4-5      # this run only
 ```
 
-```
-/model                  # a list of what the provider offers
-/model gpt-4o           # by name
-/provider               # a different provider entirely
-```
+In der Oberfläche listet `Ctrl+K` → *Modell wählen* auf, was der Anbieter
+bietet, und wechselt an Ort und Stelle; ein anderer Anbieter ist `--provider`
+auf der Kommandozeile, oder `comodor setup`.
 
 Die Kontextanzeige folgt dem Modell. Der Wechsel von einem Million-Token-Modell
 auf ein 128k-Modell ändert das Limit sofort — das ist wichtig, denn der Agent
@@ -65,7 +63,7 @@ kompaktiert die Konversation bei einem Bruchteil davon, und ein veraltetes Limit
 bedeutet, dass er nie kompaktiert und dann an der echten Decke des Anbieters
 scheitert.
 
-Um einen Wechsel dauerhaft zu machen: `/save`, oder
+Um einen Wechsel dauerhaft zu machen: `comodor setup`, oder
 `~/.comodor/config.json` bearbeiten.
 
 ---
@@ -82,7 +80,7 @@ Beide Orte funktionieren, und keiner wird auf den anderen kopiert:
 export ANTHROPIC_API_KEY=sk-ant-…
 ```
 
-Ein Schlüssel in Ihrer Umgebung **bleibt dort** — `/save` schreibt ihn nicht
+Ein Schlüssel in Ihrer Umgebung **bleibt dort** — `comodor setup` schreibt ihn nicht
 auf die Platte. Exportieren statt Speichern ist eine Entscheidung, und sie wird
 respektiert.
 
@@ -96,10 +94,6 @@ einem Export oder einem Traceback.
 ## Das Gateway
 
 Über mehrere Anbieter hinweg routen, statt einen festzunageln.
-
-```
-/gw                    # or F5
-```
 
 ```json
 {
@@ -132,8 +126,11 @@ nicht lesen kann, und rät.
 
 ## Was es kostet
 
+Die Verbrauchsecke der Oberfläche zeigt diese Sitzung; über alle Sitzungen
+hinweg:
+
 ```
-/cost
+comodor insights
 ```
 
 Siehe [Kosten](cost.md) für Caching, Budgets und warum eine Ausgabenbegrenzung

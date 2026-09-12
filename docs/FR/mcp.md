@@ -44,10 +44,6 @@ comodor mcp disable notes
 comodor mcp remove notes       # forget it entirely
 ```
 
-```
-/mcp                           # the same, in the interface
-```
-
 Un serveur désactivé n'est pas démarré et ses outils ne sont pas proposés.
 
 ---

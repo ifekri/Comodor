@@ -37,9 +37,10 @@ Vier Schichten. Die spätere schlägt die frühere.
 5. the command line               --model, --mode, … for one run
 ```
 
-### Was `/save` schreibt
+### Was zurückgeschrieben wird
 
-**Nur was Sie gewählt haben.** Das ist wichtiger, als es klingt.
+**Nur was Sie gewählt haben.** Das ist wichtiger, als es klingt. `comodor setup`
+schreibt Ihre Datei; es folgt dieser Regel.
 
 Die Konfiguration, auf der der Agent läuft, ist die Verschmelzung aller vier
 Schichten. Das in Ihre Datei zurückzuschreiben würde die Ausgabendeckelung eines
@@ -47,15 +48,15 @@ geklonten Repositorys zu Ihrem dauerhaften globalen Standard machen und einen
 API-Schlüssel, den Sie bewusst in Ihrer Umgebung gehalten haben, auf die Platte
 kopieren.
 
-Deshalb merkt sich `/save`, woher jeder Wert kam. Ein Wert, der immer noch das
-hält, was eine geliehene Schicht geliefert hat, kehrt zu dem zurück, was *Ihre*
-Datei sagte; ein Wert, den Sie während der Sitzung geändert haben, ist Ihrer und
-wird geschrieben.
+Deshalb merkt sich der Schreiber, woher jeder Wert kam. Ein Wert, der immer noch
+das hält, was eine geliehene Schicht geliefert hat, kehrt zu dem zurück, was
+*Ihre* Datei sagte; ein Wert, den Sie selbst gewählt haben, ist Ihrer und wird
+geschrieben.
 
-- `/model x` gefolgt von `/save` → hält `x` fest
-- `/save` in einem Repository, das `max_cost_usd: 500` festnagelt → hält nichts
-  dergleichen fest
-- `/save` mit exportiertem `ANTHROPIC_API_KEY` → der Schlüssel bleibt in Ihrer
+- Modell `x` im Setup gewählt → hält `x` fest
+- Speichern in einem Repository, das `max_cost_usd: 500` festnagelt → hält
+  nichts dergleichen fest
+- Speichern mit exportiertem `ANTHROPIC_API_KEY` → der Schlüssel bleibt in Ihrer
   Umgebung
 
 ---
@@ -351,8 +352,7 @@ Vollständige Erklärung: [Den Bildschirm benutzen](computer.md).
 ```
 
 `policy` ist `cost`, `speed` oder `quality`. Mit `enabled: true` wählt es aus
-`chain` und geht über einen Anbieter hinweg, der ständig fehlschlägt. `F5` oder
-`/gw` in der Oberfläche.
+`chain` und geht über einen Anbieter hinweg, der ständig fehlschlägt.
 
 ### `mcp` — Model Context Protocol Server
 
@@ -402,8 +402,4 @@ Wenn eine Einstellung immer noch nichts zu tun scheint:
 
 ```bash
 comodor doctor          # what it actually loaded
-```
-
-```
-/settings               # the same, in the interface
 ```

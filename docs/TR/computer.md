@@ -49,14 +49,18 @@ Ajan başka bir yerde çalışıyorsa — bir sunucu, bir kapsayıcı — aynı 
 
 Bu ayarlanana kadar modele araç hiç sunulmaz. Araç listesinde değildir; bu yüzden isteyemez ve ona ikna edilemez.
 
-**2. Harekete geçmesine izin verin**, önemli olduğu anda:
+**2. Harekete geçmesine izin verin**, önemli olduğu anda. İlk eyleminden önce
+araç, bir izin kartında bir «evet» yerine bir süre sorar:
 
 ```
-/computer 15m              fifteen minutes, anywhere on screen
-/computer 1h this app      one hour, only while the current window is in front
-/computer                  how things stand
-/computer stop             end it now
+15 minutes                  ekranın herhangi bir yerinde
+15 minutes, this app only   yalnızca şu an öndeki pencere önde kaldığı sürece
+1 hour                      ekranın herhangi bir yerinde
+no
 ```
+
+Süre bir görevin ortasında dolduğunda yeniden sorar ve sebebinin bu olduğunu
+söyler.
 
 Ya da modelin sormasına izin verin. Ekranı ilk kez gereksindiğinde şunu görürsünüz:
 
@@ -90,11 +94,11 @@ Bir köşeye dokunmak çalışmayı sona erdirir ve izni geri alır. Tekrar sorm
 
 Ajan yine de kendisi bir köşeye tıklayabilir — Başlat düğmesi, bir kapatma kutusu. İşaretçiyi nereye bıraktığını hatırlar; bu yüzden yalnızca kimsenin koymadığı bir yere gitmiş bir işaretçi siz sayılır.
 
-Elleriniz klavyedeyken durdurmanın diğer yolları:
+Durdurmanın diğer yolları:
 
 ```
-/computer stop       ends the permission
-Esc                  stops the current task
+durdur düğmesi       ekranda gösterdiği geri sayım panelinde; izni sona erdirir
+Ctrl+C               arayüzde, mevcut görevi durdurur
 ```
 
 ---
@@ -151,7 +155,7 @@ Comodor'un redaksiyonu metin üzerinde çalışır ve piksel okuyamaz. Bunun çe
 Pratik öğütler:
 
 - Bir sohbet penceresine yapıştırmayacağınız her şeyi kapatın.
-- Yalnızca tek bir pencere öndeyken işlem yapması için `/computer 1h this app` kullanın — yine de ekran görüntüsündeki *her şeyi görür*.
+- Yalnızca tek bir pencere öndeyken işlem yapması için *15 minutes, this app only* seçeneğini seçin — yine de ekran görüntüsündeki *her şeyi görür*.
 - İş bir web sayfasıysa [tarayıcı aracını](browser.md) tercih edin. Metin döndürür, piksel değil ve maliyeti çok daha düşüktür.
 
 ---
@@ -271,11 +275,7 @@ Boyut, modelin kabul edeceğine göre ayarlanır: 2.576 piksellik bir uzun kenar
 
 **Kapalıdır.** `computer.enabled` varsayılanı `false`'tur.
 
-Doğrudan sorun:
-
-```
-/computer
-```
+Ekranı kullanmasını isteyin; araç yokken bunu kendisi söyler:
 
 ```
 no screen control: it is switched off. Set computer.enabled in your config.

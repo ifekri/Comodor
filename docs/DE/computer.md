@@ -64,14 +64,19 @@ Solange das nicht gesetzt ist, wird dem Modell das Werkzeug überhaupt nicht
 angeboten. Es steht nicht in der Werkzeugliste, es kann also nicht danach
 fragen und nicht hineingeredet werden.
 
-**2. Ihm erlauben zu handeln**, in dem Moment, in dem es darauf ankommt:
+**2. Ihm erlauben zu handeln**, in dem Moment, in dem es darauf ankommt. Vor
+seiner ersten Aktion fragt das Werkzeug auf einer Berechtigungskarte nach einer
+Dauer statt nach einem Ja:
 
 ```
-/computer 15m              fifteen minutes, anywhere on screen
-/computer 1h this app      one hour, only while the current window is in front
-/computer                  how things stand
-/computer stop             end it now
+15 minutes                  überall auf dem Bildschirm
+15 minutes, this app only   nur solange das jetzt vordere Fenster vorn bleibt
+1 hour                      überall auf dem Bildschirm
+no
 ```
+
+Läuft die Zeit mitten in einer Aufgabe ab, fragt es erneut und sagt, dass das
+der Grund ist.
 
 Oder das Modell lässt fragen. Das erste Mal, wenn es den Bildschirm braucht,
 bekommst du das:
@@ -112,11 +117,11 @@ Der Agent kann selbst weiterhin in eine Ecke klicken — der Start-Knopf, ein
 Schließfeld. Er merkt sich, wo er den Zeiger gelassen hat; nur ein Zeiger,
 der sich irgendwohin bewegte, wo ihn niemand hingesetzt hat, zählt als du.
 
-Andere Wege, es zu stoppen, wenn deine Hände auf der Tastatur sind:
+Andere Wege, es zu stoppen:
 
 ```
-/computer stop       ends the permission
-Esc                  stops the current task
+der Stopp-Knopf      auf dem Countdown-Panel, das es auf dem Bildschirm zeigt; beendet die Berechtigung
+Ctrl+C               in der Oberfläche, stoppt die aktuelle Aufgabe
 ```
 
 ---
@@ -191,7 +196,7 @@ Bildschirm sehen".
 Praktische Ratschläge:
 
 - Schließe, was du nicht in ein Chat-Fenster einfügen würdest.
-- Benutze `/computer 1h this app`, damit es nur handelt, solange ein
+- Wähle *15 minutes, this app only*, damit es nur handelt, solange ein
   Fenster vorn ist — es *sieht* trotzdem alles, was auf dem Screenshot ist.
 - Bevorzuge das [Browser-Werkzeug](browser.md), wenn die Arbeit eine
   Webseite ist. Es gibt Text statt Pixel zurück und kostet einen Bruchteil.
@@ -339,11 +344,7 @@ zu einem verschwendeten Aufruf ein.
 
 **Es ist abgeschaltet.** `computer.enabled` ist standardmäßig `false`.
 
-Frage es direkt:
-
-```
-/computer
-```
+Bitte es, den Bildschirm zu benutzen, und ohne das Werkzeug sagt es das:
 
 ```
 no screen control: it is switched off. Set computer.enabled in your config.

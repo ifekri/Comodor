@@ -54,17 +54,16 @@ comodor --mode plan                  # start read-only
 | `--mode act\|plan\|chat` | plan est en lecture seule ; chat n'a pas d'outils |
 | `--no-loop` | répondre une fois au lieu de travailler jusqu'au bout |
 | `--cwd PATH` | le dossier qu'il peut toucher |
-| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` |
-| `--ascii` | bordures ASCII |
-| `--no-mouse` | laisser la souris au terminal |
+| `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` — pour ce que les commandes affichent ; l'interface a ses propres couleurs |
+| `--ascii` | bordures ASCII dans ce que les commandes affichent |
 | `--resume [ID]` | la dernière session, ou une par identifiant |
 | `--demo` | fournisseur hors ligne scripté |
 | `--version` | quelle version ceci est |
 | `-h`, `--help` | la page d'aide écrite |
 
 Aucune de ces options n'est écrite dans votre configuration. Elles ne
-s'appliquent qu'à cette exécution. Pour qu'un changement persiste, utilisez
-`/save` dans l'interface ou modifiez le fichier de configuration —
+s'appliquent qu'à cette exécution. Pour qu'un changement persiste, modifiez le
+fichier de configuration ou relancez `comodor setup` —
 [Configuration](configuration.md).
 
 ---
@@ -356,18 +355,6 @@ plutôt que de faire semblant.
 
 ---
 
-## `comodor preview` — l'interface à une taille donnée
-
-```bash
-comodor preview 80x24
-comodor preview 200x50 --svg wide.svg
-```
-
-Affiche une image puis quitte. Utile pour vérifier un terminal étroit, ou pour
-une capture d'écran.
-
----
-
 ## Variables d'environnement
 
 | | |
@@ -382,7 +369,7 @@ une capture d'écran.
 
 Une clé dans l'environnement n'est **jamais écrite dans votre fichier de
 configuration**. En exporter une plutôt que de la sauvegarder est une décision,
-et `/save` la respecte. Voir [Configuration](configuration.md).
+et `comodor setup` la respecte. Voir [Configuration](configuration.md).
 
 ---
 

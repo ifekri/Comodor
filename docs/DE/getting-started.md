@@ -236,12 +236,13 @@ Datei schreibt, bekommen Sie einen Diff und eine Wahl:
 ```
   Write  src/parser.py
     - 12 lines removed, 8 added
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-Antworten Sie `a` einmalig, oder `A`, wenn es für den Rest der Sitzung lieber
-aufhören soll zu fragen. Jeder Schreibvorgang wird so oder so als Prüfpunkt
-gesichert: `/undo` stellt den letzten wieder her.
+Die Pfeiltasten wechseln zwischen den Wahlmöglichkeiten, `Enter` sendet, `Esc`
+lehnt ab. Wählen Sie *Für diese Sitzung erlauben*, wenn es für den Rest der
+Sitzung lieber aufhören soll zu fragen. Jeder Schreibvorgang wird so oder so
+als Prüfpunkt gesichert, sodass der vorherige Inhalt erhalten bleibt.
 
 ---
 
@@ -265,8 +266,8 @@ sich bewährt, und verfällt, wenn nicht.
 
 Nach einigen Sitzungen:
 
-```
-> /progress
+```bash
+comodor insights
 ```
 
 ```
@@ -294,12 +295,12 @@ das Lernen nicht, und das Panel sagt das, statt es zu verbergen.
 ## 6. Was man am ersten Tag wissen sollte
 
 ```
-/help          every command
-/mode          act · plan (read-only) · chat (no tools)     F3 cycles
-/undo          restore the last file it changed
-/cost          tokens, spend, what the cache saved
-Esc            stop it, mid-thought
-Ctrl-C twice   leave
+Tab            next mode: act · plan (read-only) · ask (no tools)
+Ctrl+K         every command, searchable
+Ctrl+B         the workbench: tasks and background agents
+Ctrl+C         stop it mid-thought; quit when it is idle
+Ctrl+D         leave
+comodor help   the written help page, outside the interface
 ```
 
 ---

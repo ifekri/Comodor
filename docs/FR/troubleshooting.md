@@ -59,7 +59,7 @@ config: this project cannot set safety, computer — only your own can
 Si rien n'est dit et qu'il reste sans effet, vérifiez quelle couche l'emporte :
 
 ```
-/settings          # what is actually loaded
+comodor doctor     # what is actually loaded
 ```
 
 ```bash
@@ -72,14 +72,14 @@ fichier. C'est délibéré — [Configuration](configuration.md#what-wins).
 
 ---
 
-## `/save` n'a pas enregistré ce à quoi je m'attendais
+## Setup n'a pas enregistré ce à quoi je m'attendais
 
 C'est voulu. Il écrit **uniquement ce que vous avez choisi** — pas les réglages
 d'un dépôt, pas une clé que vous gardez dans votre environnement, pas une option
 passée pour une seule exécution.
 
-Pour vous approprier le réglage d'un dépôt, définissez-le d'abord vous-même
-(`/model x`), puis enregistrez.
+Pour vous approprier le réglage d'un dépôt, choisissez-le vous-même dans
+`comodor setup`, ou écrivez-le dans `~/.comodor/config.json`.
 
 ---
 
@@ -89,7 +89,8 @@ Pour vous approprier le réglage d'un dépôt, définissez-le d'abord vous-même
 autre fournisseur. `comodor doctor` montre quel fournisseur est actif.
 
 **`404 model not found`** — ce fournisseur ne dessert pas cet identifiant de
-modèle. `/model` liste ce qu'il offre réellement.
+modèle. `Ctrl+K` → *Choisir un modèle* dans l'interface liste ce qu'il offre
+réellement.
 
 **Délais dépassés.** Un modèle local sur une machine modeste peut réellement
 prendre des minutes. Augmentez `providers.<name>.timeout`.
@@ -125,11 +126,7 @@ session au lieu qu'on lui remette votre profil.
 
 **Il n'est pas dans la liste des outils.** Soit cette plateforme n'a pas de
 backend — Windows uniquement, pour l'instant — soit `computer.enabled` est
-faux. Demandez :
-
-```
-/computer
-```
+faux. `comodor doctor` dit lequel.
 
 **Les clics tombent au mauvais endroit.** Cela ne devrait pas arriver : la prise
 en compte des DPI est déclarée avant la lecture de toute métrique d'écran. Si
@@ -137,7 +134,7 @@ cela arrive, signalez-le avec l'échelle et la résolution de votre écran. C'es
 un vrai bogue.
 
 **Il s'est arrêté tout seul.** La souris est allée dans un coin de l'écran, ce
-qui met fin à l'autorisation exprès. `/computer 15m` en démarre une autre.
+qui met fin à l'autorisation exprès. L'action suivante en demande une autre.
 
 **Le texte arrivé n'est pas celui qu'il a tapé.** L'application l'a réécrit — le
 Notepad de Windows 11 corrige automatiquement pendant la frappe. Ce n'est pas un
@@ -201,4 +198,4 @@ comodor doctor
 `doctor` masque votre clé. Lisez quand même la sortie avant de la coller.
 
 - Problèmes : <https://github.com/ifekri/Comodor/issues>
-- Quelque chose de sensible : [SECURITY.md](../SECURITY.md)
+- Quelque chose de sensible : [SECURITY.md](../../SECURITY.md)

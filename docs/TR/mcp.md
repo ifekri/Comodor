@@ -42,10 +42,6 @@ comodor mcp disable notes
 comodor mcp remove notes       # forget it entirely
 ```
 
-```
-/mcp                           # the same, in the interface
-```
-
 Devre dışı bırakılmış bir sunucu başlatılmaz ve araçları sunulmaz.
 
 ---

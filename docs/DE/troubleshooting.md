@@ -60,7 +60,7 @@ config: this project cannot set safety, computer — only your own can
 Wird nichts gesagt und es bleibt wirkungslos, prüfe, welche Ebene gewinnt:
 
 ```
-/settings          # what is actually loaded
+comodor doctor     # what is actually loaded
 ```
 
 ```bash
@@ -73,14 +73,14 @@ Absicht so — [Konfiguration](configuration.md#what-wins).
 
 ---
 
-## `/save` hat nicht gespeichert, was ich erwartete
+## Setup hat nicht gespeichert, was ich erwartete
 
 Mit Absicht. Es schreibt **nur das, was du gewählt hast** — nicht die
 Einstellungen eines Repositorys, nicht einen Schlüssel, den du in deiner
 Umgebung hältst, nicht eine Option, die du für einen Lauf übergabst.
 
-Um die Einstellung eines Repositorys zu deiner zu machen, setze sie selbst
-zuerst (`/model x`) und speichere dann.
+Um die Einstellung eines Repositorys zu deiner zu machen, wähle sie selbst in
+`comodor setup`, oder schreibe sie in `~/.comodor/config.json`.
 
 ---
 
@@ -91,7 +91,7 @@ oder gehört einem anderen Anbieter. `comodor doctor` zeigt, welcher
 Anbieter aktiv ist.
 
 **`404 model not found`** — dieser Anbieter liefert diese Modell-id nicht.
-`/model` listet, was er tatsächlich anbietet.
+`Ctrl+K` → *Modell wählen* in der Oberfläche listet, was er tatsächlich anbietet.
 
 **Zeitüberschreitungen.** Ein lokales Modell auf einer bescheidenen Maschine
 kann wahrhaftig Minuten brauchen. Erhöhe `providers.<name>.timeout`.
@@ -127,12 +127,7 @@ Sitzung benutzt, statt dir dein Profil hingereicht zu bekommen.
 ## Das Bildschirm-Werkzeug
 
 **Es ist nicht in der Werkzeugliste.** Entweder hat diese Plattform kein
-Backend — bisher nur Windows — oder `computer.enabled` ist false. Frage
-es:
-
-```
-/computer
-```
+Backend — bisher nur Windows — oder `computer.enabled` ist false. `comodor doctor` sagt, was von beidem.
 
 **Klicks landen an der falschen Stelle.** Das sollte nicht geschehen:
 DPI-Erkennung wird gesetzt, bevor eine Bildschirmmetrik gelesen wird.
@@ -140,8 +135,8 @@ Falls es doch geschieht, berichte es bitte mit deiner
 Anzeigeskalierung und -auflösung. Das ist ein echter Fehler.
 
 **Er hat von selbst aufgehört.** Die Maus ging in eine Ecke des
-Bildschirms, was die Erteilung mit Absicht beendet. `/computer 15m`
-startet eine neue.
+Bildschirms, was die Erteilung mit Absicht beendet. Die nächste Aktion fragt
+nach einer neuen.
 
 **Der Text, der ankam, ist nicht der, den er tippte.** Die Anwendung hat
 ihn umgeschrieben — Windows 11s Editor korrigiert beim Tippen. Kein
@@ -207,4 +202,4 @@ comodor doctor
 einfügst.
 
 - Probleme: <https://github.com/ifekri/Comodor/issues>
-- Etwas Sensibles: [SECURITY.md](../SECURITY.md)
+- Etwas Sensibles: [SECURITY.md](../../SECURITY.md)

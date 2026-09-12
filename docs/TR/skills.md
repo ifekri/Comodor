@@ -59,10 +59,6 @@ comodor skills add review        # install it
 comodor skills list              # what you have
 ```
 
-```
-/skills                          # the same, in the interface
-```
-
 O andan itibaren, bir skill'in kapsadığı bir şey istediğinizde yüklenir ve
 ajan onu izler. Bu olduğunda size söylenir:
 
@@ -107,7 +103,7 @@ Not `python -m pytest` — the project needs the venv's own interpreter.
 karşı, skill'i hiç yükleyip yüklemeyeceğine karar vermek için eşleştirdiği
 şeydir; bu yüzden onu bir başlık gibi değil, durum olarak yazın.
 
-Yeniden başlatın ya da `/skills`, ve oradadır.
+Yeniden başlatın, ve oradadır.
 
 ### Dosya paketlemek
 

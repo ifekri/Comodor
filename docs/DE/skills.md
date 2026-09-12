@@ -61,10 +61,6 @@ comodor skills add review        # install it
 comodor skills list              # what you have
 ```
 
-```
-/skills                          # the same, in the interface
-```
-
 Von da an, wenn Sie um etwas bitten, das ein Skill abdeckt, wird er geladen,
 und der Agent folgt ihm. Sie werden informiert, wenn das passiert:
 
@@ -110,7 +106,7 @@ Die **Beschreibung** ist das Wichtigste. Sie ist das, womit Comodor Ihre
 Anfrage abgleicht, um zu entscheiden, ob es den Skill überhaupt laden soll —
 schreiben Sie sie als die Situation, nicht als einen Titel.
 
-Neustart, oder `/skills`, und sie ist da.
+Neustart, und sie ist da.
 
 ### Dateien bündeln
 

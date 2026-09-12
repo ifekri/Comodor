@@ -1,265 +1,163 @@
 # Arayüz
 
-Gördüğünüz şey, bastığınız tuşlar ve 29 komutun tamamı.
+Ne gördüğünüz, neye bastığınız ve ekrandaki her şeyin nereden geldiği.
 
 ```bash
-comodor          # start it
-comodor --demo   # the whole interface, offline, no key
+comodor          # başlatın
+comodor --demo   # tüm arayüz, çevrimdışı, anahtarsız
 ```
+
+Arayüz [Bun](https://bun.sh) üzerinde çalışır — `comodor doctor` var olup
+olmadığını söyler. O olmadan `comodor run "..."` arayüzsüz tek bir işi yapar
+ve `comodor web` tarayıcıya bir arayüz sunar.
+
+Nasıl kurulduğu — sürdüğü çekirdek, aralarındaki protokol ve ekrandaki her
+gerçeğin neden ekranın değil çekirdeğin olduğu — [tui-v2.md](../tui-v2.md)
+içinde. Bu sayfa, onu kullanan kişi için kısa sürüm.
 
 ---
 
-## Düzen
+## Ekran
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│  Comodor                              Anthropic · claude-sonnet-5      │
-│  ────────────────────────────────────────────────────────────────────  │
-│                                                                        │
-│  TASKS                    > fix the failing parser test                │
-│  ● read the test          ▸ read_file  tests/test_parser.py     0.1s   │
-│  ◐ find the cause         ▸ run_shell  pytest tests/test_pa…    2.3s   │
-│  ○ fix it                                                              │
-│                           The test expects `parse("")` to raise, but…  │
-│                                                                        │
-│  ────────────────────────────────────────────────────────────────────  │
-│  ▌Type a task, or / for commands                                       │
-│                                                                        │
-│  act · loop on · 12% of 1M · $0.03      ⏎ send  ^O attach  F3 mode     │
-└────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────┬───────────────────────┐
+│ Comodor   ~/work/my-project  fake-1      │ Agents         1 live │
+│                                          │  ● d1 running    12.3s│
+│  You                                     │    survey the retries │
+│  fix the failing parser test             │ Tasks            2/5  │
+│                                          │  ◐ write the tests    │
+│  Comodor                                 │  ● read the code      │
+│  The test expects parse("") to raise, …  │  ○ run the suite      │
+│  ✓ read_file  tests/test_parser.py  0.2s │                       │
+│  ● run_shell  pytest tests/…     running…│                       │
+│      collected 12 items                  │                       │
+│                                          │                       │
+├──────────────────────────────────────────┴───────────────────────┤
+│ ▌ask for anything                                                │
+├──────────────────────────────────────────────────────────────────┤
+│  [ACT]   PLAN    ASK    Reads, writes and runs commands…         │
+│ ● 1 agent  tab Mode  ctrl+b Work  ctrl+k Commands      42% ctx  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-**Kenar çubuğu**, varsa plan buradadır. `F2` gizler — dar bir terminalde
-yapmaya değer.
+**Başlık** projeyi ve yanıt veren sağlayıcı ile modeli adlandırır. Bu,
+çekirdeğin bildirdiğidir, bir yapılandırma dosyasının söylediği değil: model
+değiştiğinde — buradan, başka bir istemciden ya da çekirdeğin kendisiyle —
+başlık onu izler.
 
-**Durum satırı** modu, yinelenip yinelenmediğini, bağlamın ne kadar dolu
-olduğunu ve bu oturumun neye mal olduğunu gösterir. Bağlam rakamı gerçektir:
-modeli takip eder, yani milyon tokenlik bir modelden 128k'lık birine geçmek
-onu anında değiştirir.
+**Sohbet**, araç zaman çizelgesini içinde taşır. Her araç çağrısı, gerçekleştiği
+yerde tek bir satır olarak durur: bir işaret (`●` çalışıyor, `✓` bitti, `×`
+başarısız), ad, tek satırlık bir özet ve ne kadar sürdüğü. Çalışan bir araç
+çıktısının son satırlarını gösterir; biten bir araç katlanır ve tıklandığında
+çekirdeğin hâlâ tuttuğu şey açılır.
 
-Yaklaşık 60 sütundan yukarısında çalışır. Onun altında kenar çubuğu kendi
-kendine katlanır. `comodor preview 80x24` oturum başlatmadan herhangi bir
-boyutta görüntüler.
+**Çalışma tezgâhı** — `Ctrl+B` — sohbetin dışındaki iştir: ajanın kendisi için
+tuttuğu görev listesi ve başlattığı arka plan ajanları, her biri kendi
+durumuyla. Dar bir terminalde sohbetin yanında değil üstünde açılır ve aynı
+tuş onu kapatır.
 
----
-
-## Modlar
-
-| Mod | Ajanın yapabilecekleri | |
-|---|---|---|
-| **act** | Her şey, yazma işlemlerinden ve komutlardan önce sorarak | varsayılan |
-| **plan** | Yalnızca okuma. Yazma yok, komut yok, ağ yok | "ne yapardın?" için |
-| **chat** | Hiçbir araç yok | yapıştırdığınız bir kod hakkında soru için |
-
-`F3` aralarında dolaşır. `/mode plan` doğrudan birini ayarlar.
-
-Plan modu gerçekten salt okunurdur — izin katmanında uygulanır, modele
-nazikçe yalvararak değil. "safe" üzerindeki riske sahip bir araç çalıştırılmadan
-önce reddedilir.
+**Alt bilgi**, basabileceklerinizi tuşların okunduğu aynı listeden yazdırır ve
+sağlayıcının ölçtüğü yerde bu oturumun neye mal olduğunu gösterir.
 
 ---
 
 ## Tuşlar
 
-| | |
+| Tuş | Ne yapar |
 |---|---|
-| `Enter` | gönder |
-| `Ctrl+J` | bir mesajın içinde yeni satır |
-| `Esc` | o anda yaptığı şeyi durdur |
-| `Ctrl+C` | durdur; çıkmak için iki kez |
-| `F1` | yardım |
-| `F2` | kenar çubuğu |
-| `F3` | mod |
-| `F4` | döngü aç/kapa |
-| `F5` | gateway |
-| `Ctrl+O` | dosya ekle |
-| `Ctrl+L` | konuşmayı temizle |
-| `PgUp` `PgDn` | kaydır |
-| `Ctrl+↑` `Ctrl+↓` | önceki ve sonraki mesajlar |
-| `!command` | modele sormadan doğrudan bir kabuk komutu çalıştır |
+| `Enter` | yazdığınızı gönderir |
+| `Tab` / `Shift+Tab` | sonraki / önceki mod |
+| `Ctrl+K` | komut paleti — her eylem, aranabilir |
+| `Ctrl+B` | çalışma tezgâhını açar ya da kapatır |
+| `End` | yukarı kaydırdıktan sonra en yeni çıktıya döner |
+| `PageUp` / `PageDown` | sohbeti kaydırır |
+| `Ctrl+R` | çekirdeğin reddettiği bir mesajı yeniden gönderir |
+| `Ctrl+C` | yaptığı şeyi durdurur; boştayken çıkar |
+| `Ctrl+D` | çıkar |
+| `Esc` | paleti kapatır, bir alandan çıkar ya da bir kartın güvenli seçeneğini alır |
 
-`!`'i hatırlamaya değer. `!git status` çalıştırır ve çıktıyı size gösterir;
-model soruyu asla görmez. Sormaktan daha ucuz ve hızlıdır.
+Alt bilginin gösterdiği her kısayol vardır; bağlı olmayan bir tuş için ipucu
+yazdırılamaz.
 
 ---
 
-## Komutlar
+## Modlar
 
-`/` yazın ve liste siz yazdıkça filtrelenir.
+```
+ACT    okur, yazar ve komut çalıştırır; bir şeyi değiştirmeden önce sorar
+PLAN   okur ve planlar; yazamaz, çalıştıramaz ya da hiçbir şeyi değiştiremez
+ASK    konuşarak çözer; hiç araç yok
+```
 
-### Ne yaptığını değiştirmesini isteyin
-
-| | |
-|---|---|
-| `/mode [act\|plan\|chat]` | neye izni olduğu |
-| `/loop` | bitene kadar çalışmaya devam et, ya da bir kez yanıtla |
-| `/model [id]` | modeli seç — bir liste, ya da ismini verin |
-| `/provider [name]` | sağlayıcıyı seç |
-| `/gw` | gateway: sağlayıcılar arasında maliyet, hız veya kaliteye göre yönlendirir |
-
-### Öğretin
-
-| | |
-|---|---|
-| `/good` | o cevap doğrudu |
-| `/bad` | o cevap yanlıştı |
-| `/teach <text>` | bunu hatırla |
-| `/memory` | ne öğrendiği |
-| `/rules` | kodunuzdan ve düzenlemelerinizden çıkardığı ev kuralları |
-| `/progress` | geliştiğine dair kanıt |
-| `/skills` | iş uyuştuğunda izlediği prosedürler |
-
-`/good` ve `/bad`, onun için yapabileceğiniz en ucuz şeydir. Bkz.
-[Nasıl öğrenir](learning.md).
-
-### Geri al ve geriye bak
-
-| | |
-|---|---|
-| `/undo` | değiştirdiği son dosyayı eski haline getir |
-| `/clear` | taze bir konuşma başlat |
-| `/resume [id]` | daha önceki bir oturumu yeniden aç |
-| `/search <text>` | önceki bir konuşmada bir şey bul |
-| `/export [path]` | bu oturumu bir dosyaya yaz |
-
-### Daha uzağa ulaşmasını sağlayın
-
-| | |
-|---|---|
-| `/computer [15m\|1h this app\|stop]` | ekranınızı kullanmasına izin verin — [rehber](computer.md) |
-| `/mcp` | MCP sunucuları ve araçları — [rehber](mcp.md) |
-| `/attach <path>` | bir sonraki mesaja dosya ekle |
-
-### Onu rahatlatın
-
-| | |
-|---|---|
-| `/settings` | şu anda ne yapılandırılmış |
-| `/approve [writes\|shell\|all]` | bunlardan önce sormayı bırak |
-| `/theme [name]` | ember, midnight, matrix, mono |
-| `/save` | geçerli ayarları yapılandırma dosyanıza yaz |
-| `/cost` | tokenler, harcama ve önbelleğin tasarruf ettirdikleri |
-| `/copy [all\|task]` | son cevabı ya da her şeyi panoya kopyala |
-| `/mouse [on\|off]` | fare takibi, böylece metni kendiniz seçebilirsiniz |
-| `/help` | bunların tümü, arayüzün içinde |
-| `/quit` | çık |
-
-**`/save` yalnızca seçtiklerinizi yazar.** Deponun ayarlarını değil,
-ortamınızda tuttuğunuz bir anahtarı değil, tek bir çalıştırma için
-geçirdiğiniz bir `--model`'i değil. Bkz.
-[Yapılandırma](configuration.md#what-save-writes).
+`Tab` aralarında döner. Etiket tuş inince değil, çekirdek onayladığında
+hareket eder: tek bir gidiş-dönüş içindeki basışlar birikir — üç Tab, üçüncünün
+gösterdiği yer için bir kez sorar — ve reddedilen bir değişiklik etiketi
+oynatmak yerine bunu sözle söyler.
 
 ---
 
-## Onaylar
+## Size bir şey sorduğunda
 
-Ajan bir dosyaya yazmak ya da bir komut çalıştırmak istediğinde:
+Bir izin kartı ya da soru formu, açık olduğu sürece klavyeyi alır; böylece bir
+karar için basılan tuş aynı zamanda bir mesaj gönderemez.
 
-```
-  Write  src/parser.py
-  ────────────────────────────────────────────
-   - def parse(text):
-   -     return text.split(",")
-   + def parse(text):
-   +     if not text:
-   +         raise ValueError("nothing to parse")
-   +     return text.split(",")
+- **Ok tuşları** seçenekler ya da sorular arasında gezer; **Enter** gönderir.
+- **Esc** isteğin kendi güvenli seçeneğini alır — bir izin için bu *reddet*,
+  önerilen bir mod değişikliği için *değişiklik yok* — ve kart hangisi
+  olduğunu söyler. Asla hiçbir şeye izin vermez.
+- *İzin ver* için tek tuşlu bir kısayol yoktur. İzin vermek, seçeneğe bir
+  hareket ve onaylamak için bir hareket daha ister; böylece başka herhangi bir
+  nedenle basılan bir tuş bir komuta yetki veremez.
+- Kendiniz-yazın satırı sunan bir soru, `Space` ile bunun için bir alan açar;
+  `Esc` formu iptal etmeden önce alandan çıkar.
 
-  [a] allow   [A] allow always this session   [d] deny
-```
+Aynı anda iki şey bekleyebilir — iki paralel araç ayrı ayrı sorabilir — ve
+geldikleri sırayla gösterilirler, hiçbiri kaybolmaz.
 
-`A`, oturum boyunca, işin türüne göre hatırlar — yazma işlemlerine izin
-vermek komutlara izin vermez.
-
-Reddetmek boşa gitmez. Bir ret, arayüzün topladığı en net tercih sinyalidir
-ve öğrenme motoruna gider: ajan o öneriyi bir daha sunma ihtimali daha
-düşüktür.
-
-Hiç sorulmamak için:
-
-```
-/approve writes      files, yes; commands, still ask
-/approve all         everything
-```
-
-Her şey yine de checkpoint'lenir. `/undo` her koşulda çalışır.
+Kart açıkken mod tuşları çalışmaya devam eder. Palet çalışmaz: bir kararın
+üstündeki bir başlatıcı, yanıtlanması gereken şeyi gizlerdi.
 
 ---
 
-## Metni dışarı kopyalama
+## Takip etmek
 
-Fare takip edilirken sürükleme Comodor'a aittir ve terminal onu asla
-görmez — yani olağan seç-kopyala çalışmaz. Üç çözüm yolu:
-
-```
-/copy              the last answer
-/copy all          the whole conversation
-/copy task         the last thing you asked for
-/mouse             mouse tracking off, so selection works as usual
-```
-
-`/copy`, Windows veya macOS'ta hiçbir şeyin kurulmasını gerektirmez.
-Linux'ta `wl-copy`, `xclip` veya `xsel` kullanır, hangisi varsa, ve hiçbiri
-yoksa hangisinin eksik olduğunu söyler.
-
-SSH üzerinden bir escape dizisine düşer, *sizin* terminalinizden *sizin*
-panonuzu ayarlamasını ister — böylece bir sunucudaki ajandan gelen metin,
-yapıştırabileceğiniz yere gelir, panosu olmayan bir sunucuya değil.
-
-Çoğu terminal ayrıca **Shift** basılıyken seçim yapmanıza izin verir; bu,
-takibi kapatmadan fare takibini aşar.
+Uzun bir yanıt en yeni satırı görünür tutar. Yukarı kaydırın; takip durur. Yeni
+çıktı sizi aşağı çekmez ve bir işaret aşağıda daha fazlası olduğunu söyler.
+`End` canlı kuyruğa döner; yeni bir mesaj göndermek de aynısını yapar.
 
 ---
 
-## Kim konuşuyor
+## Oturumlar
 
-Her tur, sakin bir bant üzerinde durur — bir ton, yazdıklarınızın arkasında;
-başka bir ton, cevabın arkasında:
+`Ctrl+K` → *Önceki bir sohbeti aç*, çekirdeğin sakladıklarını listeler ve
+birini yerinde açar. Aynı depo tarayıcıya da hizmet eder; bu yüzden burada
+başlayan bir sohbet orada yeniden açılabilir.
 
-```
-▌ › why does the parser drop the last field?              ← warm
+`comodor --resume` başlangıçta en yenisini yeniden açar; `--resume ID` birini
+adlandırır.
 
-▌   Because split is called with a maxsplit of 2 …        ← neutral
-▌
-▌   ┌─ python ────────────────────────┐
-▌   │ return text.split(',', 2)       │
-▌   └─────────────────────────────────┘
-```
+---
 
-Kasıtlı olarak kısık. Bu, dakikalarca okuduğunuz gövde metninin
-arkasındadır ve kendi varlığı olan bir arka plan kelimelerle yarışır. Her
-temanın kendi çifti vardır, arka planından birkaç yüzde uzakta; `mono`'nun
-yoktur, çünkü öncülü renksizlik olan bir tema ikisini istemez.
+## Metni dışarı kopyalamak
 
-Dikey alan maliyeti yoktur — renk değişimi sınırın kendisidir.
+Terminalinizin izin verdiği şekilde fareyle seçin. `--theme` ve `--ascii`
+bayrakları komutların yazdırdıklarına uygulanır — `setup`, `doctor`, `help` —
+kendi tasarım belirteçlerinden çizen arayüze değil.
 
 ---
 
 ## Sağdan sola metin
 
-Farsça, Arapça ve İbranice, satırlarının başladığı sağa doğru dizilir,
-onlara uyan bir yazı tipi yığınıyla. Karışık paragraflar — Farsça bir
-cümlenin içinde bir İngilizce tanımlayıcı — dosya başına değil satır
-başına ele alınır; teknik bir konuşmada gerçekten olan da budur.
+Farsça, Arapça ve karışık satırlar terminale yazıldığı gibi aktarılır, program
+tarafından asla ters çevrilmez. Karışık bir satırın ne kadar iyi şekillendiği
+terminalin işidir ve bunu iyi yapanlar burada da iyi yapar.
 
 ---
 
-## Temalar
+## Ayrıca bakınız
 
-```
-/theme midnight
-```
-
-`ember` (varsayılan, sıcak kehribar), `midnight` (serin mavi), `matrix`
-(yeşil), `mono` (hiç renk yok).
-
-`--ascii`, kutu çizim karakterlerini, onlara sahip olmayan terminaller için
-ASCII ile değiştirir. Ortamınızdaki `NO_COLOR` dikkate alınır.
-
----
-
-## Ayrıca bakın
-
-- [Terminalden](cli.md) — arayüz olmadan aynı güç
-- [Ajan neler yapabilir](tools.md) — o `▸` satırlarının ardındaki araçlar
-- [Güvenlik](safety.md) — onay istemlerinin koruduğu şey
+- [tui-v2.md](../tui-v2.md) — arayüzün nasıl kurulduğu, neleri yapabildiği ve
+  henüz neleri yapamadığı
+- [questions.md](questions.md) — ajanın önünüze koyduğu formlar
+- [safety.md](safety.md) — ne sorar, ne sormaz ve neden
+- [computer.md](computer.md) — ekranınızı kullanmasına izin vermek

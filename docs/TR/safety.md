@@ -11,7 +11,8 @@ dediğinizden bağımsız olarak neyi yapmayacağı.
 - **Yazma sorar.** Değişiklik olmadan önce farkı görürsünüz.
 - **Komut çalıştırmak daha gürültülü sorar**, ağa ulaşmak veya ekranınızı
   sürmek de öyle.
-- **Geri alınabilir her şey `/undo` ile geri alınır.**
+- **Her yazma işleminden önce checkpoint alınır**, bu yüzden önceki içerik
+  korunur.
 - **Proje klasöründen dışarı çıkamaz**, siz bunu kapatmadıkça.
 - **Bir depo, yukarıdakilerin hiçbirini değiştiremez.**
 
@@ -42,21 +43,16 @@ değil.
   ────────────────────────────────────────────
   in ~/projects/api-server
 
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-`A`, oturum boyunca, işin türüne göre hatırlar — yazma işlemlerine izin
-vermek komutlara izin vermez, `pytest`'e izin vermek `rm`'ye izin vermez.
+Ok tuşları seçenekler arasında gezer, `Enter` gönderir; `Esc` reddeder. *Bu
+oturum için izin ver*, oturum boyunca, işin türüne göre hatırlar — yazma
+işlemlerine izin vermek komutlara izin vermez, `pytest`'e izin vermek `rm`'ye
+izin vermez.
 
-Hiç sorulmamak için:
-
-```
-/approve writes      files yes, commands still ask
-/approve shell       commands yes, files still ask
-/approve all         everything
-```
-
-Ya da kalıcı olarak, yapılandırmanızda:
+Hiç sorulmamak için, karttaki *Bu oturum için izin ver* seçeneğini seçin — her
+tür iş için ayrı ayrı hatırlar — ya da kalıcı olarak, yapılandırmanızda:
 
 ```json
 {
@@ -75,18 +71,17 @@ harcanan çaba değildir.
 
 ---
 
-## Checkpoint'ler ve `/undo`
+## Checkpoint'ler
 
 Ajanın yazdığı her dosya, önce checkpoint'lenir — önceki içerikler, projenin
-altındaki `.comodor/checkpoints/` içinde tutulur.
+altındaki `.comodor/checkpoints/` içinde, içerik adresli olarak ve her
+anlık görüntünün hangi dosyaya ait olduğunu söyleyen bir günlükle tutulur. Bu,
+yazma işlemini onaylamış olup olmadığınıza ve otomatik onayın açık olup
+olmamasına bakılmaksızın gerçekleşir.
 
-```
-/undo
-```
-
-değiştirdiği son dosyayı geri getirir. Bu, yazma işlemini onaylamış
-olup olmadığınıza ve otomatik onayın açık olup olmamasına bakılmaksızın
-çalışır. `/approve all`'ın makul bir şey olmasının sebebi budur.
+Bunlardan birini geri getiren bir komut henüz yok; depo, ajanın üzerine
+yazdığı hiçbir şeyin kaybolmaması için orada, ve sürüm kontrolü altındaki bir
+projenin kendi geçmişi de yanı başında.
 
 Kapatmanız gerekiyorsa:
 
@@ -163,7 +158,7 @@ düzeltilti: bir Config adını taşıyan her traceback anahtarı basardı ve py
 sürekli traceback basar.
 
 **Ortamınızdaki bir anahtar orada kalır.** `ANTHROPIC_API_KEY`'i kaydetmek
-yerine dışa aktarırsanız, `/save` onu yapılandırma dosyanıza kopyalamaz.
+yerine dışa aktarırsanız, `comodor setup` onu yapılandırma dosyanıza kopyalamaz.
 Kaydetmek yerine dışa aktarmak bir karardır ve buna saygı duyulur.
 
 **Kırmızileştirme.** Anahtarlarınızdan birine benzeyen her şey, araç
@@ -253,7 +248,7 @@ yolla açıklanamaz.
 ## Bir şey bildirmek
 
 Bir güvenlik sorunu bulursanız, lütfen herkese açık bir issue açmayın. Bkz.
-[SECURITY.md](../SECURITY.md).
+[SECURITY.md](../../SECURITY.md).
 
 ---
 

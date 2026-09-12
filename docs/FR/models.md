@@ -53,18 +53,16 @@ tâches multi-étapes.
 comodor --model claude-haiku-4-5      # this run only
 ```
 
-```
-/model                  # a list of what the provider offers
-/model gpt-4o           # by name
-/provider               # a different provider entirely
-```
+Dans l'interface, `Ctrl+K` → *Choisir un modèle* liste ce que propose le
+fournisseur et bascule sur place ; un autre fournisseur, c'est `--provider` sur
+la ligne de commande, ou `comodor setup`.
 
 La jauge de contexte suit le modèle. Passer d'un modèle à un million de tokens
 à un modèle 128k change la limite immédiatement — ce qui compte, car l'agent
 compacte la conversation à une fraction de celle-ci, et une limite périmée
 signifie qu'il ne compacte jamais puis échoue au vrai plafond du fournisseur.
 
-Pour rendre un changement permanent : `/save`, ou éditez
+Pour rendre un changement permanent : `comodor setup`, ou éditez
 `~/.comodor/config.json`.
 
 ---
@@ -81,7 +79,7 @@ L'un ou l'autre endroit fonctionne, et rien n'est copié de l'un vers l'autre :
 export ANTHROPIC_API_KEY=sk-ant-…
 ```
 
-Une clé dans votre environnement **y reste** — `/save` ne l'écrira pas sur le
+Une clé dans votre environnement **y reste** — `comodor setup` ne l'écrira pas sur le
 disque. L'exporter plutôt que la sauvegarder est une décision, et elle est
 respectée.
 
@@ -95,10 +93,6 @@ transcription, un export ou une trace d'erreur.
 ## La passerelle
 
 Router entre plusieurs fournisseurs au lieu d'en figer un.
-
-```
-/gw                    # or F5
-```
 
 ```json
 {
@@ -131,8 +125,11 @@ il devinera.
 
 ## Ce que cela coûte
 
+Le coin d'usage de l'interface montre cette session ; sur l'ensemble des
+sessions :
+
 ```
-/cost
+comodor insights
 ```
 
 Voir [Coût](cost.md) pour le cache, les budgets, et pourquoi une limite de

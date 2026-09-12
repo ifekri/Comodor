@@ -41,11 +41,12 @@ In **chat mode** there are no tools at all.
   ────────────────────────────────────────────
   in ~/projects/api-server
 
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-`A` remembers for the session, per kind of thing — allowing writes does not
-allow commands, and allowing `pytest` does not allow `rm`.
+Arrows move between the choices and `Enter` sends; `Esc` denies. *Allow for
+this session* remembers for the session, per kind of thing — allowing writes
+does not allow commands, and allowing `pytest` does not allow `rm`.
 
 To stop being asked, choose *Allow for this session* on the card — it remembers
 per kind of thing — or permanently, in your config:

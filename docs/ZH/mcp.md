@@ -42,10 +42,6 @@ comodor mcp disable notes
 comodor mcp remove notes       # forget it entirely
 ```
 
-```
-/mcp                           # the same, in the interface
-```
-
 被禁用的服务器不会启动，它的工具也不会被提供。
 
 ---

@@ -50,7 +50,7 @@ config: this project cannot set safety, computer — only your own can
 如果什么都没说而它仍然不生效，检查哪一层赢了：
 
 ```
-/settings          # what is actually loaded
+comodor doctor     # what is actually loaded
 ```
 
 ```bash
@@ -62,11 +62,11 @@ comodor doctor     # the same, plus where every file is
 
 ---
 
-## `/save` 没有保存我期望的东西
+## Setup 没有保存我期望的东西
 
 这是设计如此。它只写**你选定的东西**——不写仓库的设置，不写你保存在环境里的密钥，不写你只为一次运行传过的标志。
 
-想把一个仓库的设置变成你自己的，先自己设置一遍（`/model x`），然后保存。
+想把一个仓库的设置变成你自己的，在 `comodor setup` 中自己选一遍，或写进 `~/.comodor/config.json`。
 
 ---
 
@@ -74,7 +74,7 @@ comodor doctor     # the same, plus where every file is
 
 **`401` 或 `invalid api key`** — 密钥错了、过期了，或属于另一个提供商。`comodor doctor` 会显示当前激活的是哪个提供商。
 
-**`404 model not found`** — 那个提供商不提供那个模型 id。`/model` 会列出它实际提供的模型。
+**`404 model not found`** — 那个提供商不提供那个模型 id。界面中的 `Ctrl+K` → *选择模型* 会列出它实际提供的模型。
 
 **超时。** 在一台普通的机器上，本地模型真的可能要花几分钟。调高 `providers.<name>.timeout`。
 
@@ -102,15 +102,11 @@ comodor doctor     # the same, plus where every file is
 
 ## 屏幕工具
 
-**它不在工具列表里。** 要么这个平台没有后端——目前仅支持 Windows——要么 `computer.enabled` 是 false。问它：
-
-```
-/computer
-```
+**它不在工具列表里。** 要么这个平台没有后端——目前仅支持 Windows——要么 `computer.enabled` 是 false。`comodor doctor` 会说明是哪一种。
 
 **点击落错了地方。** 这不应该发生：DPI 感知在任何屏幕度量被读取之前就已设置。如果真的发生了，请附上你的显示缩放和分辨率报告。那是一个真正的 bug。
 
-**它自己停了。** 鼠标进入了屏幕的一个角落，这会按设计结束授权。`/computer 15m` 开始新的一次。
+**它自己停了。** 鼠标进入了屏幕的一个角落，这会按设计结束授权。下一次操作会请求新的授权。
 
 **到达的文本不是它输入的文本。** 是应用程序改写了它——
 Windows 11 的记事本会边打边自动更正。这不是 Comodor 的 bug，它在每次 `type` 时都会说明。[更多](computer.md#typed-is-not-the-same-as-arrived)。
@@ -165,4 +161,4 @@ comodor doctor
 `doctor` 会遮蔽你的密钥。不过无论如何，粘贴之前还是请先读一遍输出。
 
 - Issues: <https://github.com/ifekri/Comodor/issues>
-- 敏感事项: [SECURITY.md](../SECURITY.md)
+- 敏感事项: [SECURITY.md](../../SECURITY.md)

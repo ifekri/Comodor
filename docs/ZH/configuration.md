@@ -35,17 +35,17 @@ comodor doctor      # tells you exactly where all of these are
 5. the command line               --model, --mode, … for one run
 ```
 
-### `/save` 写入什么
+### 什么会写回你的文件
 
-**只写入你选择的内容。** 这件事比听起来更重要。
+**只写入你选择的内容。** 这件事比听起来更重要。写入你文件的是 `comodor setup`，它遵循这条规则。
 
 智能体实际运行所依据的配置，是全部四个层次合并后的结果。若把这份合并结果原样写回你的文件，会让一个克隆仓库的花费上限变成你永久性的全局默认值，也会把你刻意留在环境中的 API 密钥写到磁盘上。
 
-因此 `/save` 会记住每个值的来源。凡仍由借来的层次所提供的值，会退回到*你的*文件原先的说法；凡你在会话中修改过的值，就归你所有，会被写入。
+因此写入方会记住每个值的来源。凡仍由借来的层次所提供的值，会退回到*你的*文件原先的说法；凡你自己选择的值，就归你所有，会被写入。
 
-- `/model x` 然后 `/save` → 持久化 `x`
-- 在一个把 `max_cost_usd` 固定为 `500` 的仓库中执行 `/save` → 这类内容什么都不会持久化
-- 在导出了 `ANTHROPIC_API_KEY` 的情况下执行 `/save` → 密钥留在你的环境中
+- 在 setup 中选择模型 `x` → 持久化 `x`
+- 在一个把 `max_cost_usd` 固定为 `500` 的仓库中保存 → 这类内容什么都不会持久化
+- 在导出了 `ANTHROPIC_API_KEY` 的情况下保存 → 密钥留在你的环境中
 
 ---
 
@@ -327,7 +327,7 @@ comodor doctor      # tells you exactly where all of these are
 }
 ```
 
-`policy` 是 `cost`、`speed` 或 `quality`。设为 `enabled: true` 时，它会从 `chain` 中挑选，并跳过持续失败的提供商。界面中使用 `F5` 或 `/gw`。
+`policy` 是 `cost`、`speed` 或 `quality`。设为 `enabled: true` 时，它会从 `chain` 中挑选，并跳过持续失败的提供商。
 
 ### `mcp` — Model Context Protocol 服务器
 
@@ -374,8 +374,4 @@ config: this project cannot set safety, computer — only your own can
 
 ```bash
 comodor doctor          # what it actually loaded
-```
-
-```
-/settings               # the same, in the interface
 ```

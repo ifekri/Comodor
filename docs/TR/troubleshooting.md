@@ -48,7 +48,7 @@ config: this project cannot set safety, computer — only your own can
 Hiçbir şey söylenmiyorsa ve yine de etkisizse, hangi katmanın kazandığını denetleyin:
 
 ```
-/settings          # what is actually loaded
+comodor doctor     # what is actually loaded
 ```
 
 ```bash
@@ -60,11 +60,11 @@ Komut satırındaki bir `--model`, yapılandırma dosyanızı yener ve ortamın�
 
 ---
 
-## `/save` beklediğimi kaydetmedi
+## Setup beklediğimi kaydetmedi
 
 Tasarım gereği. **Yalnızca seçtiklerinizi** yazar — bir deponun ayarlarını değil, ortamınızda tuttuğunuz bir anahtarı değil, tek bir çalıştırma için geçirdiğiniz bir bayrağı değil.
 
-Bir deponun ayarını kendinize yapmak için önce kendiniz ayarlayın (`/model x`), sonra kaydedin.
+Bir deponun ayarını kendinize yapmak için onu `comodor setup` içinde kendiniz seçin ya da `~/.comodor/config.json` dosyasına yazın.
 
 ---
 
@@ -72,7 +72,7 @@ Bir deponun ayarını kendinize yapmak için önce kendiniz ayarlayın (`/model 
 
 **`401` ya da `invalid api key`** — anahtar yanlış, süresi dolmuş ya da farklı bir sağlayıcıya ait. `comodor doctor` hangi sağlayıcının etkin olduğunu gösterir.
 
-**`404 model not found`** — o sağlayıcı o model kimliğini sunmuyor. `/model`, gerçekte sunduklarını listeler.
+**`404 model not found`** — o sağlayıcı o model kimliğini sunmuyor. Arayüzde `Ctrl+K` → *Bir model seç*, gerçekte sunduklarını listeler.
 
 **Zaman aşımları.** Vasat bir makinede yerel bir model gerçekten dakikalar sürebilir. `providers.<name>.timeout` değerini yükseltin.
 
@@ -99,15 +99,11 @@ Büyük olasılıkla çalışamaz ve Comodor bunu söyler. Bkz.
 
 ## Ekran aracı
 
-**Araç listesinde yok.** Ya bu platformun arka ucu yoktur — şimdilik yalnızca Windows — ya da `computer.enabled` yanlıştır. Ona sorun:
-
-```
-/computer
-```
+**Araç listesinde yok.** Ya bu platformun arka ucu yoktur — şimdilik yalnızca Windows — ya da `computer.enabled` yanlıştır. Hangisi olduğunu `comodor doctor` söyler.
 
 **Tıklamalar yanlış yere düşüyor.** Bu olmamalı: DPI farkındalığı, herhangi bir ekran ölçüsü okunmadan önce ayarlanır. Oluyorsa, lütfen ekran ölçeklemeniz ve çözünürlüğünüzle bildirin. Bu gerçek bir hatadır.
 
-**Kendiliğinden durdu.** Fare ekranın bir köşesine gitti; bu da verileni bilinçli olarak sona erdirir. `/computer 15m` yenisini başlatır.
+**Kendiliğinden durdu.** Fare ekranın bir köşesine gitti; bu da verileni bilinçli olarak sona erdirir. Bir sonraki eylem yenisini ister.
 
 **Ulaşan metin, yazdığı metin değil.** Uygulama onu yeniden yazdı — Windows 11'in Not Defteri, yazarken otomatik düzeltir. Bu bir Comodor hatası değildir ve her `type` üzerinde bunu söyler. [Daha fazlası](computer.md#typed-is-not-the-same-as-arrived).
 
@@ -160,4 +156,4 @@ comodor doctor
 `doctor`, anahtarınızı maskeler. Yine de lütfen yapıştırmadan önce çıktıyı okuyun.
 
 - Issues: <https://github.com/ifekri/Comodor/issues>
-- Hassas bir şey: [SECURITY.md](../SECURITY.md)
+- Hassas bir şey: [SECURITY.md](../../SECURITY.md)

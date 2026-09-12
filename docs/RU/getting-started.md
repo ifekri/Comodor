@@ -233,12 +233,13 @@ Socket Mode означает, что публичный адрес вообще 
 ```
   Write  src/parser.py
     - 12 lines removed, 8 added
-  [a] allow   [A] allow always this session   [d] deny
+  Allow   ·   Allow for this session   ·   Deny
 ```
 
-Ответьте `a` один раз или `A`, если хотите, чтобы он перестал спрашивать до конца
-сессии. В любом случае каждая запись фиксируется контрольной точкой: `/undo`
-возвращает последнюю.
+Стрелки переключают варианты, `Enter` отправляет, `Esc` отказывает. Выберите
+*Разрешить на эту сессию*, если хотите, чтобы он перестал спрашивать до конца
+сессии. В любом случае перед каждой записью создаётся контрольная точка, так
+что прежнее содержимое сохраняется.
 
 ---
 
@@ -261,8 +262,8 @@ Socket Mode означает, что публичный адрес вообще 
 
 После нескольких сессий:
 
-```
-> /progress
+```bash
+comodor insights
 ```
 
 ```
@@ -290,12 +291,12 @@ success  83% overall
 ## 6. Что стоит знать с первого дня
 
 ```
-/help          every command
-/mode          act · plan (read-only) · chat (no tools)     F3 cycles
-/undo          restore the last file it changed
-/cost          tokens, spend, what the cache saved
-Esc            stop it, mid-thought
-Ctrl-C twice   leave
+Tab            next mode: act · plan (read-only) · ask (no tools)
+Ctrl+K         every command, searchable
+Ctrl+B         the workbench: tasks and background agents
+Ctrl+C         stop it mid-thought; quit when it is idle
+Ctrl+D         leave
+comodor help   the written help page, outside the interface
 ```
 
 ---

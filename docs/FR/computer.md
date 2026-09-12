@@ -62,14 +62,18 @@ Tant que ce n'est pas défini, l'outil n'est pas proposé du tout au modèle. Il
 n'est pas dans la liste des outils, donc il ne peut pas le demander ni être
 convaincu de l'utiliser.
 
-**2. Lui permettre d'agir**, au moment où cela compte :
+**2. Lui permettre d'agir**, au moment où cela compte. Avant sa première action,
+l'outil demande, sur une carte de permission, une durée plutôt qu'un oui :
 
 ```
-/computer 15m              fifteen minutes, anywhere on screen
-/computer 1h this app      one hour, only while the current window is in front
-/computer                  how things stand
-/computer stop             end it now
+15 minutes                  n'importe où sur l'écran
+15 minutes, this app only   seulement tant que la fenêtre actuellement au premier plan y reste
+1 hour                      n'importe où sur l'écran
+no
 ```
+
+Quand le temps s'épuise en pleine tâche, il redemande, et dit que c'est la
+raison.
 
 Ou laissez le modèle demander. La première fois qu'il a besoin de l'écran, vous
 obtenez ceci :
@@ -110,11 +114,11 @@ L'agent peut toujours cliquer lui-même dans un coin — le bouton Démarrer, un
 boîte de fermeture. Il se souvient où il a laissé le pointeur ; seul un pointeur
 déplacé vers un endroit où personne ne l'avait mis compte comme vous.
 
-Autres façons de l'arrêter, quand vos mains sont sur le clavier :
+Autres façons de l'arrêter :
 
 ```
-/computer stop       ends the permission
-Esc                  stops the current task
+le bouton stop       sur le panneau de compte à rebours qu'il affiche à l'écran ; met fin à la permission
+Ctrl+C               dans l'interface, arrête la tâche en cours
 ```
 
 ---
@@ -188,8 +192,8 @@ n'y a pas de contour : la fonctionnalité est « laisser le modèle voir votre
 Conseils pratiques :
 
 - Fermez ce que vous ne colleriez pas dans une fenêtre de discussion.
-- Utilisez `/computer 1h this app` pour qu'il n'agisse que lorsqu'une fenêtre
-  est au premier plan — même s'il *voit* toujours tout ce qui figure dans la
+- Choisissez *15 minutes, this app only* pour qu'il n'agisse que lorsqu'une
+  fenêtre est au premier plan — même s'il *voit* toujours tout ce qui figure dans la
   capture.
 - Préférez l'[outil navigateur](browser.md) quand le travail est une page web.
   Il renvoie du texte, pas des pixels, et coûte une fraction du prix.
@@ -335,11 +339,7 @@ gaspillé à chaque tour.
 
 **Il est désactivé.** `computer.enabled` vaut `false` par défaut.
 
-Demandez-lui directement :
-
-```
-/computer
-```
+Demandez-lui d'utiliser l'écran et, sans l'outil, il le dit :
 
 ```
 no screen control: it is switched off. Set computer.enabled in your config.

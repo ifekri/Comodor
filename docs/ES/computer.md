@@ -61,14 +61,18 @@ Mientras esto no esté establecido, al modelo no se le ofrece la herramienta en
 absoluto. No está en la lista de herramientas, así que no puede pedirla ni
 pueden convencerlo de usarla.
 
-**2. Permitirle actuar**, en el momento en que importa:
+**2. Permitirle actuar**, en el momento en que importa. Antes de su primera
+acción la herramienta pide, en una tarjeta de permiso, una duración y no un sí:
 
 ```
-/computer 15m              fifteen minutes, anywhere on screen
-/computer 1h this app      one hour, only while the current window is in front
-/computer                  how things stand
-/computer stop             end it now
+15 minutes                  en cualquier parte de la pantalla
+15 minutes, this app only   solo mientras la ventana que está al frente ahora siga al frente
+1 hour                      en cualquier parte de la pantalla
+no
 ```
+
+Cuando el tiempo se acaba a mitad de una tarea vuelve a preguntar, y dice que
+ese es el motivo.
 
 O deja que el modelo pregunte. La primera vez que necesite la pantalla verás
 esto:
@@ -109,11 +113,11 @@ El agente aún puede hacer clic en una esquina por sí mismo — el botón Inici
 un cuadro de cerrar. Recuerda dónde dejó el puntero, así que solo un puntero
 que se movió a un lugar donde nadie lo puso cuenta como tú.
 
-Otras formas de detenerlo, cuando tus manos están en el teclado:
+Otras formas de detenerlo:
 
 ```
-/computer stop       ends the permission
-Esc                  stops the current task
+el botón de parar    en el panel de cuenta atrás que muestra en pantalla; termina el permiso
+Ctrl+C               en la interfaz, detiene la tarea actual
 ```
 
 ---
@@ -184,8 +188,8 @@ hay forma de evitarlo: la función es "dejar que el modelo vea tu pantalla".
 Consejos prácticos:
 
 - Cierra lo que no pegarías en una ventana de chat.
-- Usa `/computer 1h this app` para que solo actúe mientras una ventana esté al
-  frente — aunque todavía *ve* lo que haya en la captura.
+- Elige *15 minutes, this app only* para que solo actúe mientras una ventana
+  esté al frente — aunque todavía *ve* lo que haya en la captura.
 - Prefiere la [herramienta de navegador](browser.md) cuando el trabajo es una
   página web. Devuelve texto, no píxeles, y cuesta una fracción de lo que
   cuesta esto.
@@ -329,11 +333,7 @@ modelo puede ver y nunca usar invita a una llamada desperdiciada en cada turno.
 
 **Está apagada.** `computer.enabled` por defecto es `false`.
 
-Pregúntalo directamente:
-
-```
-/computer
-```
+Pídele que use la pantalla y, sin la herramienta, lo dice:
 
 ```
 no screen control: it is switched off. Set computer.enabled in your config.

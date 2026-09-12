@@ -45,13 +45,7 @@
 
 ## 刻意地教它
 
-| | |
-|---|---|
-| `/good` | 那个回答是对的 |
-| `/bad` | 那个回答是错的 |
-| `/teach we use pytest, never unittest` | 记住这个 |
-
-`/good` 和 `/bad` 只需一次按键，是你能为它做的最便宜的事。
+在对话里说出来。一次纠正——“不，不是这样”，或者直接修改它写的内容——会变成一条经验，成立时置信度上升。用平常的话说出的持久信息——“我们用 pytest，从不用 unittest”、“那个数据库是 Postgres”——智能体会用 `memory` 工具记到它的记忆架上，放在每一轮的最前面；`comodor journey show` 会列出那里有什么。
 
 拒绝一个权限提示也是在教它。一次拒绝是界面收集到的最清晰的偏好信号，它也被当作信号对待。
 
@@ -59,40 +53,18 @@
 
 ## 看看它知道什么
 
-```
-/memory
-```
-
-一个可搜索的列表——每条经验带有什么触发它、它说什么、它的种类和它当前的置信度：
-
-```
-┌─  Memory (23)  ────────────────────────────────────────────────────┐
-│ ›  #41 writing Python strings                                      │
-│      Use single quotes for string literals.  [style 91%]           │
-│    #38 adding a test                                               │
-│      Tests go in tests/, mirroring the src layout.  [layout 84%]   │
-│    #29 adding a dependency                                         │
-│      Ask before adding one; this project has exactly one.  [78%]   │
-│    #12 parsing empty input                                         │
-│      Raise, do not return an empty list.  [behaviour 62%]          │
-└────────────────────────────────────────────────────────────────────┘
-  ↑↓ move   enter open   type filter   esc close
+```bash
+comodor journey show
 ```
 
-`/memory <text>` 用于搜索。点开一条可以固定它，让它不再衰减，或者它错了就删掉。
-
-```
-/rules
-```
-
-它从你的代码里提炼出的家规，而不是靠你亲口告诉它的。
+它学到的一切，从最早的开始——每条经验带有什么触发它、它说什么、它的种类和当前的置信度，以及它从你的代码里提炼出的家规，而不是靠你亲口告诉它的。`comodor journey remove ID` 会让一条错误的经验退役。
 
 ---
 
 ## 看看它是否在起作用
 
-```
-/progress
+```bash
+comodor insights
 ```
 
 ```
