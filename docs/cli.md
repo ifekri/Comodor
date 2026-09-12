@@ -51,7 +51,7 @@ comodor --mode plan                  # start read-only
 |---|---|
 | `--provider NAME` | `openrouter`, `anthropic`, `openai`, `ollama`, … |
 | `--model ID` | override the model for this run |
-| `--mode act\|plan\|chat` | plan is read-only; chat has no tools |
+| `--mode act\|plan\|ask` | plan is read-only; ask has no tools (`chat` is the older name for ask) |
 | `--no-loop` | answer once instead of working until done |
 | `--cwd PATH` | the folder it may touch |
 | `--theme NAME` | `ember`, `midnight`, `matrix`, `mono` — for what the commands print; the interface has its own |
@@ -343,6 +343,31 @@ The program
 It names everything before it removes anything, and says what it cannot find —
 a `.comodor` folder in a project you used but whose session history has been
 cleared cannot be named, and it tells you so rather than pretending.
+
+---
+
+## Every command
+
+The ones above are the ones most people run. These are the rest, each with
+`--help` of its own and, where there is one, a `comodor help <topic>` page:
+
+| Command | Does |
+|---|---|
+| `comodor tui-v2` | the same interface as bare `comodor`, kept as an alias |
+| `comodor core --stdio` | the agent with no interface, speaking the protocol on stdin and stdout, for a client to drive — [protocol.md](protocol.md) |
+| `comodor serve` | the OpenAI chat protocol on a port, so other frontends can drive the agent — `comodor help serve` |
+| `comodor acp` | an agent your editor can drive over the Agent Client Protocol — [acp.md](acp.md) |
+| `comodor github` | connect, disconnect, refresh, list repositories — [github.md](github.md) |
+| `comodor discord` | drive it from a Discord server, like `telegram` and `slack` above — `comodor help discord` |
+| `comodor webhook` | let external systems hand the agent work — `comodor help webhook` |
+| `comodor cron` | list, add, pause, resume, remove and run scheduled jobs |
+| `comodor approvals` | propose an allowlist from the commands you keep approving; `--apply` writes it — [safety.md](safety.md) |
+| `comodor journey` | everything the brain has learned, oldest first; `remove ID` retires one — [learning.md](learning.md) |
+| `comodor insights` | spend, activity and progress over recent days; `--json` for scripts — [cost.md](cost.md) |
+| `comodor curator` | run, read or steer the brain's maintenance pass — `comodor help curator` |
+| `comodor memory-provider` | point the brain at one external memory service, optional — `comodor help memory-provider` |
+| `comodor local` | run a model on this machine with no network: list, get, use, remove — [local-models.md](local-models.md) |
+| `comodor plugins` | your own tools, hooks and commands: list, trust, untrust, doctor |
 
 ---
 

@@ -4,6 +4,34 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 ## Unreleased
 
+### Hardened after the migration
+
+A stabilization pass over the whole product, from a clean install to a killed
+process, found and fixed four things a release would have shipped or failed
+on:
+
+- The package declared Python 3.9 while the code, the docs and the CI matrix
+  all needed 3.11, so `pip install comodor` succeeded on 3.9 and 3.10 and the
+  first `comodor --version` was a traceback. The metadata says 3.11 now, and a
+  test keeps it agreeing with the documentation.
+- A mode the interface does not know — `agent.mode: yolo` in a config file,
+  the user's or a repository's — crashed the interface at first paint. The
+  core already refused every tool under such a mode; the interface now says
+  so in words and lets Tab pick a real one.
+- The release workflow rebuilds the TUI artifact for every platform before
+  packaging. That rebuild never worked (`npm pack` names a scoped tarball
+  differently from what the build looked for), and once it does it dirties
+  the tree, which would have versioned the wheel `X.Y.Z+d…` and failed the
+  tag check. Fixed at both layers; a tag build names its own version only
+  after proving the rebuilt artifact is the only change.
+- `comodor doctor` on a fresh install said `'' is not a known provider`; it
+  says no provider is chosen yet.
+
+Three wall-clock tests moved under the performance marker where the repository
+keeps timing assertions, and `docs/cli.md` now lists every registered command,
+with a test holding the parser and the page to the same list in both
+directions.
+
 ### The previous terminal interface is removed
 
 `comodor` has run the OpenTUI interface since the last release; the Rich
