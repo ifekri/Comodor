@@ -4,6 +4,138 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 ## Unreleased
 
+Nothing yet.
+
+## 1.3.0 — 2026-09-12
+
+The terminal architecture migration, complete: a Python core behind a
+versioned protocol, an OpenTUI interface that ships in the package and is
+what `comodor` starts, and the previous interface removed. Everything since
+1.2.1 is here; the sections are in the order a person meets them.
+
+### OpenTUI is the interface
+
+`comodor` starts the OpenTUI interface — a React renderer run by
+[Bun](https://bun.sh), driving a Python core over a versioned protocol. The
+renderer ships inside the package: `pip install comodor` carries the bundle,
+its assets, a manifest with the hash of every file, and the OpenTUI native
+backend for each supported platform. Nothing is downloaded at first launch,
+and nothing is read from a source checkout. `comodor tui-v2` stays as an alias
+for the same launcher.
+
+Bun 1.3 or newer is a prerequisite for the interactive interface, and it is
+the only one: `comodor doctor` says whether it is there, and a refusal — Bun
+missing, too old, a packaged renderer that cannot run on this machine — says
+so in one sentence and names the two paths that need no renderer,
+`comodor run "..."` and `comodor web`. Neither of those, nor any channel or
+the API, starts Bun or loads the interface's code.
+
+What is on the screen is the core's: the provider and model that are
+answering, the conversation with every tool call where it happened, the
+agent's task list and background agents in the workbench (`Ctrl+B`), the
+mode strip, the usage corner, and a footer that prints only keys that are
+bound. A permission card or a question form takes the keyboard while it is
+up; `Esc` takes the request's own safe option and never allows anything;
+allowing costs two keys on purpose. `Ctrl+K` opens a command palette — choose
+a model from what the provider lists, reopen an earlier conversation from the
+same store the browser uses, stop a delegate. A long answer follows its tail
+until you scroll up, and a marker says there is more below. A core that stops
+answering is said on screen, and quitting stays possible. The interface draws
+from its own design tokens; `--theme` and `--ascii` apply to what the
+commands print, and say so once when passed to the interface.
+
+### One core, one protocol
+
+Every front end — the terminal, the browser, the channels, the editor — used
+to reach into the agent and take what it needed, and the terminal owned
+behaviour the others could not see. There is an application layer now, a
+core that owns sessions, modes, questions, permissions, tools, tasks and
+delegates, and **protocol v2** between it and any client: `comodor core
+--stdio` speaks it on stdin and stdout, and `schemas/protocol/v2.json` is the
+one source both the Python and the TypeScript types are generated from.
+
+The core numbers what it says. Every event carries a session sequence, every
+message, tool call and request an identity, and `session.snapshot` carries the
+revision it covers, so a client that missed events — or was just started —
+rebuilds exactly the screen a client that watched would have. A permission
+request that times out says so, a late reply is refused rather than
+"accepted", cancelling unblocks a turn parked in a prompt, and two blocking
+requests at once are both kept. Switching to a model with a smaller context
+window moves the point at which the conversation is compacted, for every
+client, rather than for one interface that used to rewrite the limit itself.
+Background delegates run on their own event bus, so a child's output cannot
+land in its parent's transcript, and one process keeps one record of what is
+running.
+
+### Setup is a transaction
+
+The first-run questions are a plan (`SetupPlan`) rather than a script: a
+valid configuration stays valid until the new answers commit, cancelling at
+any point changes nothing, and an interrupted run leaves a checkpoint — never
+a credential — that the next `comodor setup` offers to continue. A credential
+the provider refuses is retried in place, not discovered at the end. The
+interface's own first run asks the same questions through the same path and
+starts only once they are answered, and `comodor doctor` reports whether setup
+finished and whether a resumable one is waiting.
+
+### GitHub connection finishes on its own
+
+`comodor github connect` opens the browser, waits for GitHub to finish, and
+continues — no receipt to copy, nothing to paste back. Polling is signed,
+the deadline is the server's, and nothing is written to disk until a result
+has been checked. *At the time of this release the production server refuses
+new connections with "the GitHub integration is not configured"; the client
+fails clearly, changes nothing, and works once the server does. A repository
+checked out on the machine needs no connection at all.*
+
+### Documentation, in nine languages, tells the same truth
+
+The English guides were rewritten for the one interface there is, and the
+Arabic, German, Spanish, Persian, French, Russian, Turkish and Chinese
+translations were synchronized with them page by page: no retired command is
+taught anywhere, and a test reads every guide in every language to keep it
+that way.
+
+### Removed
+
+- `comodor legacy` — the previous Rich interface. Gone, not deprecated.
+- `comodor preview` — rendered one frame of that interface to text or SVG.
+- `--no-mouse` — a flag only that interface read.
+- The slash commands only that interface answered (`/save`, `/undo`,
+  `/approve`, `/model`, `/progress`, `/memory`, `/rules`, `/cost`,
+  `/settings`, `/skills`, `/mcp`, `/computer`, …). What each did is reached
+  another way now — `comodor setup`, `comodor insights`, `comodor journey`,
+  `Ctrl+K`, the permission card's own choices, the screen-use grant the tool
+  asks for — and the guides say which.
+- Python 3.9 and 3.10. The package declared 3.9 while needing 3.11; it says
+  3.11 now, which is what every page has said all along. An older
+  configuration file still loads: the `ui.*` keys only the previous interface
+  read are ignored, as any unknown key is. Sessions, profiles, the brain,
+  skills and checkpoints need no migration.
+
+### The previous terminal interface is removed
+
+The Rich interface that `comodor` started until 1.2.1 is gone — not kept
+behind a flag, not deprecated — together with `comodor preview` (which
+rendered one frame of it to an SVG) and the `--no-mouse` flag that only it
+read. During the migration it was reachable as `comodor legacy` on `main`;
+no release shipped that command, and this one does not either. A refusal —
+Bun missing, Bun too old, a packaged renderer that cannot run here — points
+at `comodor run` and `comodor web`, which need no renderer, rather than at a
+command that does not exist.
+
+`rich` stays a dependency: `setup`, `doctor`, `help` and the channel commands
+print through it. What those still need from a terminal — a console, the
+themes, one interactive picker, the wordmark, the clipboard — moved from
+`comodor.ui` to `comodor.terminal`; nothing else of the old package survives.
+`--theme` and `--ascii` set how those commands print; the interface draws
+from its own design tokens.
+
+One thing the old interface did on its own is now the core's: switching to a
+model with a smaller context window moves the point at which the conversation
+is compacted, for every client, rather than for the one interface that used
+to rewrite the limit itself.
+
 ### Hardened after the migration
 
 A stabilization pass over the whole product, from a clean install to a killed
@@ -32,27 +164,22 @@ keeps timing assertions, and `docs/cli.md` now lists every registered command,
 with a test holding the parser and the page to the same list in both
 directions.
 
-### The previous terminal interface is removed
+## 1.2.1 — 2026-09-07
 
-`comodor` has run the OpenTUI interface since the last release; the Rich
-interface it replaced stayed reachable as `comodor legacy` while the default
-changed hands. It is gone now, with `comodor preview` (which rendered one
-frame of it to an SVG) and the `--no-mouse` flag that only it read. A refusal
-— Bun missing, Bun too old, a packaged renderer that cannot run here — points
-at `comodor run` and `comodor web`, which need no renderer, rather than at a
-command that no longer exists.
+The release workflow only: split into a quality gate, a build, and the
+publications that follow it, with an existing published GitHub release
+treated as satisfied rather than as something to overwrite. No change to
+the package.
 
-`rich` stays a dependency: `setup`, `doctor`, `help` and the channel commands
-print through it. What those still need from a terminal — a console, the
-themes, one interactive picker, the wordmark, the clipboard — moved from
-`comodor.ui` to `comodor.terminal`; nothing else of the old package survives.
-`--theme` and `--ascii` set how those commands print; the interface draws
-from its own design tokens.
+## 1.2.0 — 2026-09-07
 
-One thing the old interface did on its own is now the core's: switching to a
-model with a smaller context window moves the point at which the conversation
-is compacted, for every client, rather than for the one interface that used
-to rewrite the limit itself.
+The terminal session workspace was redesigned; a delegate's record is written
+before its worker can change it; arrow-down reaches the commands it was
+already selecting; local models come from their own catalogue branch;
+channel startup detection is deterministic; and every pull request must
+state its impact on each surface.
+
+## 1.1.2 — 2026-09-04
 
 ### 1.1.1 shipped without the release it was cut for
 
@@ -111,6 +238,13 @@ connected. An organisation owner who is demoted stops being able to mint the
 next time, not at some renewal. The token a turn holds carries five
 permissions and nothing else — `members` is the server's, and never travels.
 
+## 1.1.1 — 2026-09-03
+
+Test-suite and benchmark fixes only: a flaky cron wait, platform-guarded test
+imports, a faster suite, and the benchmark run on a server. No change to the
+package — and see 1.1.2 for what this tag did not contain.
+
+## 1.1.0 — 2026-09-02
 
 ### The user's own rules, put back where they apply — and what it did not do
 
@@ -248,6 +382,10 @@ Against the benchmark, three attempts per task, before and after:
 **31/39 → 33/39.** No task scored lower. One went from 1/3 to 3/3.
 
 Fewer tokens, and not one answer worse.
+
+Also: an `ask` mode with mode suggestions from the agent, a plan that survives
+compaction, live channel settings, and Act revoked in the chats that were
+already using it.
 
 ## 0.21.0 — 2026-08-30
 
