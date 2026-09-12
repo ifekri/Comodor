@@ -207,3 +207,25 @@ def test_the_release_wheel_is_checked_for_the_retired_interface():
     assert "The retired interface is not in the wheel" in names
     assert "check-wheel-contents.py" in body_of(
         "build", "The retired interface is not in the wheel")
+
+
+def test_every_release_page_states_the_requirements():
+    """Python 3.11 and Bun for the interface, on the page a person reads
+    before installing — whether the workflow wrote the draft or found one
+    somebody wrote by hand. The hand-written path used to publish the draft
+    untouched, so a release could omit the one prerequisite the installer
+    does not mention."""
+    for step in steps_of("github-release"):
+        if step.get("name") == "Create draft release and attach distributions":
+            body = step["with"]["body"]
+            assert body.lstrip().startswith("## Requirements"), body[:60]
+            assert "Python 3.11" in body and "bun.sh" in body
+            break
+    else:
+        raise AssertionError("no fresh-draft step")
+
+    draft = body_of("github-release", "Attach distributions to existing draft")
+    assert "## Requirements" in draft and "bun.sh" in draft
+    assert "gh release edit" in draft and "--notes-file" in draft
+    assert "grep -q '^## Requirements'" in draft, (
+        "a draft that already states them must be left alone")
