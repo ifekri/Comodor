@@ -87,6 +87,9 @@ def service_for(config, scripts, extra_tools: list[Tool] | None = None,
         if parallel:
             agent._profile = Profile(model="fake-1", context=100_000,
                                      source="configured", parallel_tools=True)
+            # The cache is keyed on the model it describes, so a profile put
+            # there by hand has to say which model that is or it is rebuilt.
+            agent._profile_for = (built_config.provider, built_config.model)
         return Assembly(config=built_config, bus=bus, gateway=None, memory=None,
                         permissions=None, skills=None, mcp=None, tools=tools,
                         agent=agent)

@@ -48,7 +48,7 @@ def register(sub: argparse._SubParsersAction) -> None:
 
 
 def run(config: Config, args: argparse.Namespace) -> int:
-    from ..ui import console as console_module
+    from ..terminal import console as console_module
 
     theme = console_module.prepare_theme(config.ui.theme, config.ui.ascii_borders,
                                          no_color=False)

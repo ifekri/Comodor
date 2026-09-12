@@ -347,6 +347,37 @@ def test_setting_a_model_announces_it_to_every_session(service):
     assert service.model()["model"] == "fake-1"
 
 
+def test_the_context_window_follows_a_model_switch(service):
+    """A million-token window does not survive a move to a 128k model.
+
+    The loop compacts the conversation at a fraction of the window it believes
+    the model has. Left at the old model's number after `model.set`, it never
+    compacts, and the first sign is the provider refusing the request. This
+    invariant used to be held by the previous interface, which rewrote
+    `agent.context_limit` on every switch; the core holds it now, for every
+    client, by rebuilding the model profile when the model changes.
+    """
+    from comodor.providers import registry
+
+    windows = {info.context: info.id for info in registry.known_models()}
+    wide, narrow = windows[max(windows)], windows[min(windows)]
+    assert registry.lookup(wide).context > registry.lookup(narrow).context, (
+        "this test needs two models with genuinely different windows")
+
+    # The configured limit caps the window — the smaller number wins — so it
+    # is lifted here to let the registry's answer show through.
+    service._config.agent.context_limit = 0
+    session = service.create_session()
+    agent = service.session(session["id"]).assembly.agent
+    service.set_model(wide)
+    assert agent._window() == registry.lookup(wide).context
+
+    service.set_model(narrow)
+
+    assert agent._window() == registry.lookup(narrow).context, (
+        "the loop is still compacting against the previous model's window")
+
+
 # --------------------------------------------------------------------------- #
 # the module itself
 # --------------------------------------------------------------------------- #

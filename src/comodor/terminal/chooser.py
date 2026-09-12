@@ -37,8 +37,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .input.keys import KeyEvent
-from .input.reader import TerminalInput
+from .keys import KeyEvent
+from .reader import TerminalInput
 from .theme import Theme
 
 #: Rows the frame spends on itself: two borders, the hint line under it, the

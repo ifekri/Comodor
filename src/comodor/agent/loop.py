@@ -123,10 +123,13 @@ class AgentLoop:
         self._used: list[str] = []
         #: What the user said not to do this turn, in their own words.
         self._rules: list[str] = []
-        #: Worked out once. The model does not change mid-turn, and reading a
-        #: cached catalogue from disk on every step would be a file read per
-        #: message for an answer that cannot have moved.
+        #: Worked out once per model. The model does not change mid-turn, and
+        #: reading a cached catalogue from disk on every step would be a file
+        #: read per message for an answer that cannot have moved. It *can*
+        #: change between turns — `model.set` from a client — so the cache
+        #: remembers which model it describes and is rebuilt for another.
         self._profile: Any = None
+        self._profile_for: tuple[str, str] = ("", "")
 
     # -- public API ------------------------------------------------------- #
 
@@ -599,13 +602,21 @@ class AgentLoop:
         as "assume the usual" — a profile that cannot be built must never be
         the reason a turn behaves differently.
         """
-        if self._profile is None:
+        current = (str(self.config.provider or ""), str(self.config.model or ""))
+        if self._profile is None or self._profile_for != current:
             from ..providers import profile
 
             try:
                 self._profile = profile.of(self.config)
             except Exception:
                 return None
+            # Keyed on the model, because a profile cached for the model the
+            # session started with described a 1M window after a switch to a
+            # 128k one, and compaction never fired: the provider refused the
+            # request instead. The previous interface papered over this by
+            # rewriting `agent.context_limit` on every switch; the core owns
+            # it now, for every client.
+            self._profile_for = current
         return self._profile
 
     def _window(self) -> int:

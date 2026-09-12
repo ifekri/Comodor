@@ -193,7 +193,7 @@ def _list(console: Console, catalogue, store, *, show_all: bool) -> int:
 
 def _choose(console: Console, catalogue, store, *, only_downloaded: bool = False):
     """Ask which model, when the command did not name one."""
-    from ..ui.chooser import choose
+    from ..terminal.chooser import choose
 
     options = []
     for model in catalogue:

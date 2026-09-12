@@ -42,7 +42,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run(config: Config, args: argparse.Namespace) -> int:
-    from ..ui import console as console_module
+    from ..terminal import console as console_module
 
     theme = console_module.prepare_theme(config.ui.theme,
                                          config.ui.ascii_borders, no_color=False)
@@ -94,7 +94,7 @@ def _offer_the_link(console, url: str, opened: bool) -> None:
     twice, which is what a "here it is, and here it is again in case" layout
     becomes on a narrow terminal.
     """
-    from ..ui import clipboard
+    from ..terminal import clipboard
 
     lines: list[Text] = [
         Text("Browser opened." if opened else "No browser could be opened."),

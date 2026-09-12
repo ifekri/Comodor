@@ -282,114 +282,12 @@ def test_the_tool_is_offered_by_default():
 
 
 # --------------------------------------------------------------------------- #
-# the terminal form
+# the glyphs a terminal form draws with, in both glyph sets
 # --------------------------------------------------------------------------- #
 
 
-def _form(count: int = 2):
-    from comodor.ui.widgets.questions import Form
-
-    raw = [a_question()]
-    if count > 1:
-        raw.append(a_question(question="Keep the old API?", header="Old API"))
-    return Form(questions=parse(raw))
-
-
-def test_picking_replaces_for_a_single_answer_question():
-    form = _form(1)
-    form.pick()
-    form.move(1)
-    form.pick()
-    assert form.answers()[0].chosen == ["SQLite"]
-
-
-def test_picking_accumulates_for_a_multi_answer_question():
-    from comodor.ui.widgets.questions import Form
-
-    form = Form(questions=parse([a_question(multi=True)]))
-    form.pick()
-    form.move(1)
-    form.pick()
-    assert form.answers()[0].chosen == ["PostgreSQL", "SQLite"]
-
-
-def test_typing_an_answer_clears_a_picked_option():
-    form = _form(1)
-    form.pick()
-    form.cursor = len(form.question.options) - 1
-    form.pick()
-    for char in "DuckDB":
-        form.type_char(char)
-    answer = form.answers()[0]
-    assert answer.chosen == []
-    assert answer.written == "DuckDB"
-
-
-def test_picking_an_option_clears_a_typed_answer():
-    form = _form(1)
-    form.cursor = len(form.question.options) - 1
-    form.pick()
-    for char in "DuckDB":
-        form.type_char(char)
-    form.cursor = 0
-    form.pick()
-    answer = form.answers()[0]
-    assert answer.chosen == ["PostgreSQL"]
-    assert answer.written == ""
-
-
-def test_the_free_row_is_never_reported_as_a_chosen_label():
-    form = _form(1)
-    form.cursor = len(form.question.options) - 1
-    form.pick()
-    for char in "DuckDB":
-        form.type_char(char)
-    assert forms.WRITE_YOUR_OWN not in form.answers()[0].chosen
-
-
-def test_a_cursor_is_remembered_per_question():
-    form = _form(2)
-    form.move(1)
-    form.go(1)
-    assert form.cursor == 0
-    form.go(-1)
-    assert form.cursor == 1
-
-
-def test_next_unanswered_stops_when_everything_is_answered():
-    form = _form(2)
-    form.pick()
-    assert form.next_unanswered() is True
-    form.pick()
-    assert form.next_unanswered() is False
-    assert form.complete
-
-
-def test_the_form_renders_at_a_narrow_width():
-    from rich.console import Console
-
-    from comodor.ui.theme import Theme
-    from comodor.ui.widgets.questions import render_form
-
-    console = Console(width=44, force_terminal=False, record=True)
-    console.print(render_form(_form(2), 44, 20, Theme()))
-    assert console.export_text().strip()
-
-
-def test_the_hint_uses_the_theme_glyphs_not_literal_arrows():
-    """On a terminal that cannot draw them, the hint must degrade too."""
-    from comodor.ui.theme import Theme
-    from comodor.ui.widgets.questions import form_hint
-
-    # `ascii` is what a terminal that cannot draw the glyphs sets; the theme
-    # picks the glyph set from it, so there is nothing to override.
-    hint = form_hint(_form(2), Theme(ascii=True))
-    assert "↑" not in hint and "→" not in hint
-    assert "^" in hint and ">" in hint
-
-
 def test_every_glyph_the_form_uses_exists_in_both_sets():
-    from comodor.ui.theme import ASCII_GLYPHS, Glyphs
+    from comodor.terminal.theme import ASCII_GLYPHS, Glyphs
 
     for name in ("ticked", "unticked", "arrow", "rise", "fall", "left",
                  "right", "dot"):

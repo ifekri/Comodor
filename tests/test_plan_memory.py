@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from comodor.agent import plan
 from comodor.session import SessionMeta, SessionStore
 from comodor.tools.base import TodoItem
@@ -255,19 +253,3 @@ def test_as_records_survives_a_round_trip_through_json():
     records = plan.as_records(a_plan("done", "blocked"))
 
     assert json.loads(json.dumps(records)) == records
-
-
-@pytest.mark.parametrize("method", ["_restore_plan"])
-def test_resume_restores_the_plan_for_the_agent_not_only_the_sidebar(method):
-    """A resumed session whose plan reaches only `state.history` gives the
-    person a list they can see and the agent cannot."""
-    import inspect
-
-    from comodor.ui.app import App
-
-    source = inspect.getsource(getattr(App, method))
-
-    assert "state.history.todos" in source, "the sidebar is not restored"
-    assert "context.todos" in source, "the agent's own list is not restored"
-    assert inspect.getsource(App._resume).count(method) == 1, \
-        "resume never restores the plan"

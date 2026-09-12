@@ -14,8 +14,8 @@ import io
 import pytest
 from rich.console import Console
 
-from comodor.ui import banner
-from comodor.ui import console as console_module
+from comodor.terminal import banner
+from comodor.terminal import console as console_module
 
 
 @pytest.fixture
@@ -340,25 +340,3 @@ def test_it_is_actually_coloured(theme):
     output = painted(banner.render(theme, standing=banner.Standing(lessons=3)))
 
     assert "\x1b[" in output
-
-
-# --------------------------------------------------------------------------- #
-# interactive mode skips the banner
-# --------------------------------------------------------------------------- #
-
-
-def test_the_banner_is_skipped_in_interactive_mode(config):
-    """The welcome box in the Live screen replaces the banner."""
-    from comodor.ui import layout as layout_module
-    from comodor.ui.app import App
-
-    app = App(config, demo=True)
-    app.geometry = layout_module.compute(128, 36)
-
-    # The app should not have called _greet() — the banner is replaced by
-    # the welcome box. We verify this by checking that the welcome box is
-    # rendered when the state is empty (no entries).
-    assert app.state.entries == []
-    # The welcome box should be part of the frame
-    frame = app._frame()
-    assert frame is not None

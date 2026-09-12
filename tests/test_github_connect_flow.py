@@ -29,7 +29,7 @@ from comodor.github.connect import (
     Connector,
     Pending,
 )
-from comodor.ui import theme as theme_module
+from comodor.terminal import theme as theme_module
 
 URL = ("https://github.com/apps/comodor-agent/installations/new"
        "?state=comodor." + "x" * 240 + ".yyyy")
@@ -278,7 +278,7 @@ def test_a_flow_the_terminal_cannot_finish_refuses_to_be_waited_on(config):
 
 def drawn(width: int = 100, *, opened: bool = True, clipboard_works: bool = True,
           clipboard_raises: bool = False, monkeypatch=None) -> str:
-    from comodor.ui import clipboard as clip
+    from comodor.terminal import clipboard as clip
 
     # The product's own theme, because the panel asks for styles by name and a
     # bare console does not have them.

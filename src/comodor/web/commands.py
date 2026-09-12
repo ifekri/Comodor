@@ -130,8 +130,8 @@ def _configured_or_explain(config: Config) -> Config | None:
 
 def banner_shown(server: Server) -> bool:
     """Whether the wordmark went out, and with it the model's name."""
-    from ..ui import banner
-    from ..ui import console as console_module
+    from ..terminal import banner
+    from ..terminal import console as console_module
 
     theme = console_module.prepare_theme(server.config.ui.theme,
                                          server.config.ui.ascii_borders,
@@ -147,8 +147,8 @@ def _wordmark(server: Server) -> None:
     something that emitted a URL.
     """
     from .. import __version__ as release
-    from ..ui import banner
-    from ..ui import console as console_module
+    from ..terminal import banner
+    from ..terminal import console as console_module
 
     theme = console_module.prepare_theme(server.config.ui.theme,
                                          server.config.ui.ascii_borders,

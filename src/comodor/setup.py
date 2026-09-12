@@ -52,9 +52,9 @@ from .onboarding import (
     clear_checkpoint,
     read_checkpoint,
 )
-from .ui import chooser
-from .ui import console as console_module
-from .ui.theme import Theme
+from .terminal import chooser
+from .terminal import console as console_module
+from .terminal.theme import Theme
 
 #: Injected in tests so the wizard can be driven without a terminal.
 Prompt = Callable[[str], str]
@@ -196,7 +196,7 @@ class SetupWizard:
         of logo on a twenty-row screen is five rows the questions do not get,
         which is the same trade the width rule already makes.
         """
-        from .ui.banner import TAGLINE, wordmark
+        from .terminal.banner import TAGLINE, wordmark
 
         size = self.console.size
         if size.height < 22 or size.width < 51:

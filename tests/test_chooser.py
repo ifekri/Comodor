@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import pytest
 
-from comodor.ui import theme as theme_module
-from comodor.ui.chooser import Chooser, Option, choose
-from comodor.ui.console import build
-from comodor.ui.input.keys import KeyEvent
+from comodor.terminal import theme as theme_module
+from comodor.terminal.chooser import Chooser, Option, choose
+from comodor.terminal.console import build
+from comodor.terminal.keys import KeyEvent
 
 
 def make(count: int = 40, height: int = 24) -> Chooser:
@@ -160,7 +160,7 @@ def test_a_filter_that_matches_nothing_says_so_and_returns_nothing():
     assert chooser.matching == []
     assert "nothing matches" in _text(chooser)
     # Enter on an empty list cannot invent an answer.
-    from comodor.ui.chooser import _CANCEL
+    from comodor.terminal.chooser import _CANCEL
 
     assert chooser._handle(KeyEvent("enter")) is _CANCEL
 
@@ -194,7 +194,7 @@ def test_enter_returns_the_row_under_the_cursor_after_filtering():
 
 @pytest.mark.parametrize("event", [KeyEvent("escape"), KeyEvent("c", ctrl=True)])
 def test_backing_out_returns_nothing(event):
-    from comodor.ui.chooser import _CANCEL
+    from comodor.terminal.chooser import _CANCEL
 
     assert make()._handle(event) is _CANCEL
 
@@ -278,7 +278,7 @@ def test_enter_with_nothing_ticked_is_an_answer_not_a_refusal():
 
 
 def test_escape_is_still_a_refusal():
-    from comodor.ui.chooser import _CANCEL
+    from comodor.terminal.chooser import _CANCEL
 
     chooser = ticking()
     press(chooser, "space")
@@ -365,7 +365,7 @@ def test_the_count_of_what_is_taken_is_on_screen():
 def test_choose_many_gives_up_quietly_without_a_terminal():
     """The wizard has to answer in a pipe, so this returning None is the
     signal to ask some other way — and it must not be confused with []."""
-    from comodor.ui.chooser import choose_many
+    from comodor.terminal.chooser import choose_many
 
     theme = theme_module.load("ember")
     console = build(theme, width=80, height=24)
@@ -384,8 +384,8 @@ def test_choose_many_gives_up_quietly_without_a_terminal():
 
 
 def test_the_unicode_probe_asks_about_every_glyph_it_will_draw(monkeypatch):
-    from comodor.ui.console import supports_unicode
-    from comodor.ui.theme import Glyphs
+    from comodor.terminal.console import supports_unicode
+    from comodor.terminal.theme import Glyphs
 
     class Stdout:
         def __init__(self, encoding):
@@ -414,7 +414,7 @@ def test_a_glyph_added_later_widens_the_probe():
     so every glyph added after it was outside what had been checked."""
     import inspect
 
-    from comodor.ui import console as console_module
+    from comodor.terminal import console as console_module
 
     source = inspect.getsource(console_module.supports_unicode)
     assert "Glyphs" in source, "the probe has gone back to a fixed string"
