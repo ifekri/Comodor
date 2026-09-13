@@ -2800,7 +2800,9 @@ describe("stopping a background agent", () => {
 
     await emitRun(view, "delegate.updated",
                   { session_id: "s1", delegate: wireAgent("d1", "stopping") });
-    expect(view.frame()).toContain("d1 stopping");
+    // Waited for, not assumed after one yield: a loaded runner captured
+    // the frame with the row still on its way, as in the other tests.
+    await view.waitForFrame((frame) => frame.includes("d1 stopping"));
 
     // And once it is stopping, Enter has nothing left to ask for.
     view.mockInput.pressEnter();
@@ -2809,7 +2811,7 @@ describe("stopping a background agent", () => {
 
     await emitRun(view, "delegate.updated",
                   { session_id: "s1", delegate: wireAgent("d1", "stopped") });
-    expect(view.frame()).toContain("d1 stopped");
+    await view.waitForFrame((frame) => frame.includes("d1 stopped"));
     view.client.close();
   });
 

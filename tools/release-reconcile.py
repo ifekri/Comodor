@@ -7,6 +7,8 @@
     python tools/release-reconcile.py image --repository ghcr.io/ifekri/comodor \
         --version 2.0.1 [--apply]
     python tools/release-reconcile.py simulate state.json
+    python tools/release-reconcile.py identity --event workflow_dispatch --ref-type branch \
+        --ref-name main --dry-run true --target-version 2.0.1
 
 A release is four publications — PyPI, the GitHub Release, GHCR and Docker
 Hub — and a workflow that stops between two of them must be able to run
@@ -39,6 +41,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -149,6 +152,84 @@ class Plan:
         lines = [f"{self.destination}: {self.state}"]
         lines.extend(f"  {action}" for action in self.actions)
         return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# what a run is releasing, and whether it may
+# --------------------------------------------------------------------------- #
+
+#: A release version, and nothing that is not one: no dev, rc, post or
+#: local part. The tag `vX.Y.Z` is the only thing that publishes.
+RELEASE_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+
+
+@dataclass(frozen=True)
+class Identity:
+    """What one workflow run is about.
+
+    `version` is what the build must produce ("" means the source's own,
+    development version); `tag` is the release the destinations are asked
+    about ("" means none is); `publish` is whether anything may be written.
+    `mode` names the situation: production (a tag was pushed), recovery
+    (a run by hand on an existing tag), rehearsal (a run by hand on a
+    branch, asked to act as a version), development (a run by hand on a
+    branch, as it is).
+    """
+
+    mode: str
+    version: str
+    tag: str
+    publish: bool
+
+
+class Refused(ValueError):
+    """The run asked for something the release rules do not allow."""
+
+
+def decide_identity(event: str, ref_type: str, ref_name: str,
+                    dry_run: bool, target_version: str = "") -> Identity:
+    """The one place that says what a run releases and whether it may.
+
+    Publication is anchored to a real tag ref: a tag that was pushed, or a
+    run by hand on a tag that already exists (recovery). A run by hand on
+    a branch never publishes — with or without a version typed into the
+    box — and with `target_version` it rehearses that release: the build
+    names itself the version, and every destination is asked about the
+    tag the version would have, without that tag existing anywhere.
+    """
+    target_version = target_version or ""
+    if target_version and not RELEASE_VERSION.match(target_version):
+        raise Refused(f"{target_version!r} is not a release version (X.Y.Z); "
+                      "a development or pre-release version cannot be rehearsed "
+                      "or released")
+    if event == "push":
+        if ref_type != "tag":
+            raise Refused("a push releases only through a tag")
+        version = ref_name[1:] if ref_name.startswith("v") else ""
+        if not RELEASE_VERSION.match(version):
+            raise Refused(f"tag {ref_name!r} is not a release tag (vX.Y.Z)")
+        return Identity("production", version, ref_name, True)
+    if event != "workflow_dispatch":
+        raise Refused(f"no release path for a {event!r} event")
+    if ref_type == "tag":
+        version = ref_name[1:] if ref_name.startswith("v") else ""
+        if not RELEASE_VERSION.match(version):
+            raise Refused(f"tag {ref_name!r} is not a release tag (vX.Y.Z)")
+        if target_version and target_version != version:
+            raise Refused(f"target_version {target_version} does not match the "
+                          f"tag {ref_name} this run is on")
+        if dry_run:
+            return Identity("rehearsal", version, ref_name, False)
+        return Identity("recovery", version, ref_name, True)
+    if ref_type != "branch":
+        raise Refused(f"no release path for a run on a {ref_type!r} ref")
+    if not dry_run:
+        raise Refused("a run on a branch cannot publish: production publication "
+                      "is anchored to a tag ref. Push the tag, or run this on "
+                      "the existing tag to recover a release.")
+    if target_version:
+        return Identity("rehearsal", target_version, f"v{target_version}", False)
+    return Identity("development", "", "", False)
 
 
 # --------------------------------------------------------------------------- #
@@ -737,6 +818,7 @@ def cmd_github(args) -> int:
     github = GitHub(args.repo)
     release = github.release(args.tag)
     plan = plan_github(expected, release)
+    found = plan.state
     if plan.ok and args.apply and plan.state != COMPLETE:
         print(plan.render())
         print()
@@ -747,7 +829,7 @@ def cmd_github(args) -> int:
                                 f"{plan.state}; see the actions above")
     elif plan.ok and args.verify and plan.state != COMPLETE:
         plan.fail(args.tag, f"the release was expected to be complete but is {plan.state}")
-    write_outputs({"state": plan.state,
+    write_outputs({"found": found, "state": plan.state,
                    "url": release.html_url if release else ""}, args.github_output)
     write_summary(summarize(plan, f"GitHub Release — {args.tag}"), args.summary)
     return finish(plan)
@@ -791,6 +873,21 @@ def cmd_image(args) -> int:
                   args.github_output)
     write_summary(summarize(plan, f"{args.name} — {args.repository}"), args.summary)
     return finish(plan)
+
+
+def cmd_identity(args) -> int:
+    try:
+        identity = decide_identity(args.event, args.ref_type, args.ref_name,
+                                   args.dry_run == "true", args.target_version)
+    except Refused as refused:
+        print(f"::error::{refused}")
+        return 1
+    print(f"mode={identity.mode} version={identity.version or '(source)'} "
+          f"tag={identity.tag or '(none)'} publish={str(identity.publish).lower()}")
+    write_outputs({"mode": identity.mode, "version": identity.version,
+                   "tag": identity.tag, "publish": str(identity.publish).lower()},
+                  args.github_output)
+    return 0
 
 
 def cmd_simulate(args) -> int:
@@ -850,6 +947,14 @@ def main(argv: list[str] | None = None) -> int:
     simulate = commands.add_parser("simulate")
     simulate.add_argument("state")
     simulate.set_defaults(func=cmd_simulate)
+
+    identity = commands.add_parser("identity", parents=[common])
+    identity.add_argument("--event", required=True)
+    identity.add_argument("--ref-type", required=True)
+    identity.add_argument("--ref-name", required=True)
+    identity.add_argument("--dry-run", required=True, choices=("true", "false"))
+    identity.add_argument("--target-version", default="")
+    identity.set_defaults(func=cmd_identity)
 
     args = parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):     # a runner's log is UTF-8; a console may not be

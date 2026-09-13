@@ -7,3 +7,6 @@
 *
 !Dockerfile
 !docker/start
+# A wheel the build just produced, for a rehearsal that installs it
+# instead of asking PyPI (`--build-arg COMODOR_WHEEL=<name>`).
+!dist/*.whl

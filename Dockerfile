@@ -33,11 +33,22 @@ FROM python:3.13-slim-bookworm AS build
 
 # Empty means the newest release on PyPI. A version here pins it.
 ARG COMODOR_VERSION=
+# A wheel filename under `dist/` installs that file instead of asking PyPI:
+# how a release is rehearsed before its version exists anywhere. `Dockerfile`
+# is named alongside so the copy succeeds when there is no `dist/` at all.
+ARG COMODOR_WHEEL=
+
+COPY Dockerfile dist*/ /tmp/dist/
 
 RUN python -m venv /opt/comodor \
  && /opt/comodor/bin/pip install --no-cache-dir --upgrade pip \
- && /opt/comodor/bin/pip install --no-cache-dir \
-      "comodor${COMODOR_VERSION:+==$COMODOR_VERSION}"
+ && if [ -n "$COMODOR_WHEEL" ]; then \
+      /opt/comodor/bin/pip install --no-cache-dir "/tmp/dist/$COMODOR_WHEEL"; \
+    else \
+      /opt/comodor/bin/pip install --no-cache-dir \
+        "comodor${COMODOR_VERSION:+==$COMODOR_VERSION}"; \
+    fi \
+ && rm -rf /tmp/dist
 
 # --------------------------------------------------------------------------- #
 FROM python:3.13-slim-bookworm

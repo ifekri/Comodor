@@ -6,11 +6,26 @@ name: Release
 #    Normal production release path. The tag identifies the exact immutable
 #    source commit that is being published.
 #
-# 2. workflow_dispatch:
-#    Build/verify by default. Publishing is enabled only when dry_run=false.
+# 2. workflow_dispatch, dry run (the default):
+#    Build and verify, publish nothing. With `target_version` the run is a
+#    rehearsal of that release: the build names itself the version and
+#    every destination is asked what it holds for the tag the version
+#    would have — without that tag existing. Without it, a development
+#    dry run: the source's own version, no destination asked.
+#
+# 3. workflow_dispatch on an existing tag, dry_run=false:
+#    Recovery: publish that tag's release, reconciled like a push.
+#
+# A run on a branch never publishes, whatever was typed into the inputs.
+# Production publication is anchored to a tag ref, twice: `SHOULD_PUBLISH`
+# below says so, and the `identity` job says so again, in Python, and
+# refuses the combinations that must not exist (a branch with dry_run off,
+# a target that is not a release version, a target that is not the tag).
 #
 # The workflow is intentionally split into:
 #
+#   Release identity
+#       ↓
 #   Quality gate
 #       ↓
 #   Build distributions
@@ -41,14 +56,85 @@ on:
         description: 'Dry run — build and verify only, publish nothing'
         type: boolean
         default: true
+      target_version:
+        description: 'Rehearse this release (X.Y.Z) without its tag — dry run only'
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 env:
-  SHOULD_PUBLISH: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) }}
+  # Only a tag ref publishes: pushed, or run by hand with dry_run off.
+  # A branch never does, and no input changes that.
+  SHOULD_PUBLISH: ${{ github.ref_type == 'tag' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)) }}
 
 jobs:
+
+  # ---------------------------------------------------------------------------
+  # Release identity
+  # ---------------------------------------------------------------------------
+  #
+  # What this run is about, decided once, in one testable place: the
+  # version the build must produce, the tag the destinations are asked
+  # about, and whether anything may be written. The rules are in
+  # `decide_identity` in tools/release-reconcile.py; a combination the
+  # rules refuse stops the run here, before anything is built.
+
+  identity:
+    name: Release identity
+    runs-on: ubuntu-latest
+
+    outputs:
+      mode: ${{ steps.decide.outputs.mode }}
+      version: ${{ steps.decide.outputs.version }}
+      tag: ${{ steps.decide.outputs.tag }}
+      publish: ${{ steps.decide.outputs.publish }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Decide what this run releases
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
+          TARGET: ${{ inputs.target_version }}
+          SHOULD_PUBLISH_EXPR: ${{ env.SHOULD_PUBLISH }}
+        run: |
+          python3 tools/release-reconcile.py identity \
+            --event "$EVENT" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" \
+            --dry-run "$DRY_RUN" --target-version "$TARGET"
+
+          # Two gates, one answer. If the expression and the rules ever
+          # disagree about publishing, neither is trusted.
+          decided="$(grep '^publish=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)"
+          if [ "$decided" != "$SHOULD_PUBLISH_EXPR" ]; then
+            echo "::error::the identity rules say publish=$decided, the workflow expression says $SHOULD_PUBLISH_EXPR"
+            exit 1
+          fi
+
+      - name: Record the identity
+        env:
+          MODE: ${{ steps.decide.outputs.mode }}
+          VERSION: ${{ steps.decide.outputs.version }}
+          TAG: ${{ steps.decide.outputs.tag }}
+          PUBLISH: ${{ steps.decide.outputs.publish }}
+        shell: bash
+        run: |
+          {
+            case "$MODE" in
+              production) echo "## Production release of \`$TAG\`" ;;
+              recovery)   echo "## Recovery of the \`$TAG\` release" ;;
+              rehearsal)  echo "## Rehearsal of \`$TAG\` — DRY RUN, ZERO PRODUCTION MUTATIONS" ;;
+              *)          echo "## Development dry run — DRY RUN, ZERO PRODUCTION MUTATIONS" ;;
+            esac
+            echo
+            echo "Build version: \`${VERSION:-the source version}\` · release asked about: \`${TAG:-none}\` · publishing: \`$PUBLISH\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
   # Quality Gate
@@ -56,6 +142,7 @@ jobs:
 
   gate:
     name: Quality gate
+    needs: identity
     runs-on: ubuntu-latest
 
     steps:
@@ -75,7 +162,7 @@ jobs:
       # A tag outside main is allowed deliberately for maintenance/hotfix
       # releases, but a tag that is merely behind main is rejected.
       - name: The tag must not be behind main
-        if: github.event_name == 'push'
+        if: needs.identity.outputs.publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -151,12 +238,16 @@ jobs:
 
   build:
     name: Build distributions
-    needs: gate
+    needs: [identity, gate]
     runs-on: ubuntu-latest
 
     outputs:
       version: ${{ steps.version.outputs.version }}
-      publish: ${{ env.SHOULD_PUBLISH }}
+      wheel: ${{ steps.version.outputs.wheel }}
+      # Both gates, and both must say yes.
+      publish: ${{ needs.identity.outputs.publish == 'true' && env.SHOULD_PUBLISH == 'true' }}
+      mode: ${{ needs.identity.outputs.mode }}
+      tag: ${{ needs.identity.outputs.tag }}
 
     steps:
       - name: Checkout
@@ -194,10 +285,11 @@ jobs:
       # The rebuild above rewrites `src/comodor/tui/dist/manifest.json` — the
       # committed one names the backend of the machine it was built on, and
       # this one names all of them — so from here the tree is dirty, and
-      # hatch-vcs would version the wheel `X.Y.Z+dYYYYMMDD`. A tag must
-      # publish `X.Y.Z`, so a tag build names its own version. Never blindly:
-      # the only change allowed is the artifact just built. Anything else
-      # dirty means the tag and the build disagree, and that is refused.
+      # hatch-vcs would version the wheel `X.Y.Z+dYYYYMMDD`. A release must
+      # publish `X.Y.Z`, so a run with a release identity names its own
+      # version (a tag's, or the rehearsed one). Never blindly: the only
+      # change allowed is the artifact just built. Anything else dirty
+      # means the tag and the build disagree, and that is refused.
       - name: The only change since the tag is the rebuilt artifact
         shell: bash
         run: |
@@ -213,11 +305,16 @@ jobs:
 
       - name: Build sdist and wheel
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.identity.outputs.version }}
         run: |
           set -euo pipefail
 
-          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-            export SETUPTOOLS_SCM_PRETEND_VERSION="${GITHUB_REF_NAME#v}"
+          # A release identity names the version — a tag's, or the one a
+          # rehearsal was asked for. A development dry run builds the
+          # source's own version and stays honest about being one.
+          if [ -n "$RELEASE_VERSION" ]; then
+            export SETUPTOOLS_SCM_PRETEND_VERSION="$RELEASE_VERSION"
           fi
 
           python -m build
@@ -246,28 +343,46 @@ jobs:
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "wheel=$(basename "$wheel")" >> "$GITHUB_OUTPUT"
           echo "Package version: $version"
 
-      - name: A tag must produce its own version
-        if: github.ref_type == 'tag'
+      - name: A release must produce its own version
+        if: needs.identity.outputs.version != ''
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.identity.outputs.version }}
+          BUILT_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
 
-          tag_version="${GITHUB_REF_NAME#v}"
-          built_version="${{ steps.version.outputs.version }}"
-
-          if [ "$tag_version" != "$built_version" ]; then
-            echo "::error::Tag v$tag_version produced package version $built_version."
-            echo "::error::The release tag and built artefact must have exactly the same version."
+          if [ "$RELEASE_VERSION" != "$BUILT_VERSION" ]; then
+            echo "::error::Release $RELEASE_VERSION produced package version $BUILT_VERSION."
+            echo "::error::The release and the built artefact must have exactly the same version."
             exit 1
           fi
+
+          # The wheel's own metadata, not only its filename.
+          python - <<'PY'
+          import os, re, sys, zipfile, glob
+          wheel = glob.glob("dist/*.whl")[0]
+          with zipfile.ZipFile(wheel) as archive:
+              meta = [n for n in archive.namelist() if n.endswith(".dist-info/METADATA")][0]
+              text = archive.read(meta).decode("utf-8")
+          version = re.search(r"^Version: (.+)$", text, re.M).group(1).strip()
+          wanted = os.environ["RELEASE_VERSION"]
+          print(f"METADATA Version: {version}")
+          if version != wanted:
+              print(f"::error::the wheel's METADATA says {version}, not {wanted}")
+              sys.exit(1)
+          PY
 
       - name: Check package metadata
         run: twine check --strict dist/*
 
       - name: Verify the built wheel
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.identity.outputs.version }}
         run: |
           set -euo pipefail
 
@@ -281,13 +396,9 @@ jobs:
 
           echo "Installed wheel reports version: $reported"
 
-          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-            tag_version="${GITHUB_REF_NAME#v}"
-
-            if [ "$reported" != "$tag_version" ]; then
-              echo "::error::Tag v$tag_version produced a wheel reporting $reported."
-              exit 1
-            fi
+          if [ -n "$RELEASE_VERSION" ] && [ "$reported" != "$RELEASE_VERSION" ]; then
+            echo "::error::Release $RELEASE_VERSION produced a wheel reporting $reported."
+            exit 1
           fi
 
       - name: Upload distributions artifact
@@ -310,7 +421,7 @@ jobs:
             echo '```'
             echo
 
-            if [ "$SHOULD_PUBLISH" = "true" ]; then
+            if [ "${{ needs.identity.outputs.publish }}" = "true" ] && [ "$SHOULD_PUBLISH" = "true" ]; then
               echo "**Production publication is enabled for this run.**"
             else
               echo "**Dry run — no package, release or production image will be published.**"
@@ -446,7 +557,8 @@ jobs:
   # It runs after PyPI has the version — a rerun where PyPI was already
   # complete finds `pypi-publish` skipped, which is why `always()` is here
   # and why the first step checks PyPI itself rather than trusting a job
-  # result.
+  # result. It runs whenever the identity names a tag: a real one, or the
+  # one a rehearsal asks about — read-only then, since nothing publishes.
 
   github-release:
     name: GitHub release
@@ -459,12 +571,13 @@ jobs:
       && needs.pypi-plan.result == 'success'
       && needs.pypi-publish.result != 'failure'
       && needs.pypi-publish.result != 'cancelled'
-      && github.ref_type == 'tag'
+      && needs.build.outputs.tag != ''
 
     permissions:
       contents: write
 
     outputs:
+      found: ${{ steps.reconcile.outputs.found }}
       state: ${{ steps.reconcile.outputs.state }}
 
     steps:
@@ -494,7 +607,7 @@ jobs:
         id: reconcile
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.build.outputs.tag }}
           VERSION: ${{ needs.build.outputs.version }}
           APPLY: ${{ needs.build.outputs.publish == 'true' && '--apply' || '' }}
         run: |
@@ -525,7 +638,7 @@ jobs:
       && needs.pypi-plan.result == 'success'
       && needs.pypi-publish.result != 'failure'
       && needs.pypi-publish.result != 'cancelled'
-      && (github.ref_type == 'tag' || needs.build.outputs.publish != 'true')
+      && (needs.build.outputs.tag != '' || needs.build.outputs.publish != 'true')
 
     uses: ./.github/workflows/image.yml
 
@@ -533,6 +646,9 @@ jobs:
       version: ${{ needs.build.outputs.version }}
       revision: ${{ github.sha }}
       dry_run: ${{ needs.build.outputs.publish != 'true' }}
+      # A rehearsal installs the wheel this run built: the version is not
+      # on PyPI, and the image must still carry exactly it.
+      wheel: ${{ needs.build.outputs.mode == 'rehearsal' && needs.build.outputs.wheel || '' }}
 
     permissions:
       contents: read
@@ -569,12 +685,15 @@ jobs:
       - name: Write the summary
         env:
           VERSION: ${{ needs.build.outputs.version }}
+          MODE: ${{ needs.build.outputs.mode }}
+          TAG: ${{ needs.build.outputs.tag }}
           PUBLISH: ${{ needs.build.outputs.publish }}
           PYPI_PLAN: ${{ needs.pypi-plan.outputs.state }}
           PYPI_UPLOADS: ${{ needs.pypi-plan.outputs.uploads }}
           PYPI_RESULT: ${{ needs.pypi-publish.result }}
           PYPI_AFTER: ${{ needs.pypi-publish.outputs.state }}
           RELEASE_RESULT: ${{ needs.github-release.result }}
+          RELEASE_FOUND: ${{ needs.github-release.outputs.found }}
           RELEASE_STATE: ${{ needs.github-release.outputs.state }}
           IMAGE_RESULT: ${{ needs.image.result }}
           GHCR_FOUND: ${{ needs.image.outputs.ghcr_found }}
@@ -587,39 +706,89 @@ jobs:
         run: |
           set -euo pipefail
 
+          # What was found and what was (or would be) done, per destination.
+          # A destination that was not asked is said to be not asked, never
+          # guessed at.
+          case "$MODE" in
+            production) title="Comodor $VERSION — production release of $TAG"; mode="Publishing run." ;;
+            recovery)   title="Comodor $VERSION — recovery of $TAG"; mode="Publishing run." ;;
+            rehearsal)  title="Comodor $VERSION — publication rehearsal of $TAG"
+                        mode="**DRY RUN — ZERO PRODUCTION MUTATIONS.** Version-targeted release rehearsal: the build named itself $VERSION and every destination was asked what it holds for $TAG; the outcomes are what a publishing run would do." ;;
+            *)          title="Comodor $VERSION — development dry run"
+                        mode="**DRY RUN — ZERO PRODUCTION MUTATIONS.** Generic development dry run: the source's own version was built and tested; no release was asked about." ;;
+          esac
+
           if [ "$PUBLISH" = "true" ]; then
-            mode="Publishing run"
+            pypi_verb="uploaded"; verb="published"
           else
-            mode="Dry run — nothing was published; the states are what a publishing run would find"
+            pypi_verb="would upload"; verb="would publish"
           fi
 
           {
-            echo "## Comodor $VERSION — publication"
+            echo "## $title"
             echo
-            echo "$mode."
+            echo "$mode"
             echo
             echo "| Destination | Found | Outcome |"
             echo "|---|---|---|"
+
             case "$PYPI_RESULT" in
-              success) pypi="published $PYPI_UPLOADS file(s) → ${PYPI_AFTER:-verified}" ;;
+              success) pypi="$pypi_verb $PYPI_UPLOADS file(s) → ${PYPI_AFTER:-verified}" ;;
               skipped) if [ "$PYPI_UPLOADS" = "0" ]; then pypi="no-op: already complete";
-                       else pypi="not published (dry run: $PYPI_UPLOADS file(s) would be uploaded)"; fi ;;
+                       else pypi="$pypi_verb $PYPI_UPLOADS file(s)"; fi ;;
               *)       pypi="$PYPI_RESULT" ;;
             esac
-            echo "| PyPI | ${PYPI_PLAN:-—} | $pypi |"
+            echo "| PyPI \`comodor==$VERSION\` | ${PYPI_PLAN:-—} | $pypi |"
+
             case "$RELEASE_RESULT" in
-              success) release="${RELEASE_STATE:-—}" ;;
-              skipped) release="not a tag build" ;;
-              *)       release="$RELEASE_RESULT" ;;
+              success)
+                if [ "$PUBLISH" = "true" ]; then
+                  release="${RELEASE_STATE:-—}"
+                else
+                  case "$RELEASE_FOUND" in
+                    ABSENT)   release="$verb: create draft, attach assets, publish" ;;
+                    PARTIAL)  release="$verb: attach what is missing" ;;
+                    COMPLETE) release="no-op: already complete" ;;
+                    *)        release="${RELEASE_FOUND:-—}" ;;
+                  esac
+                fi
+                echo "| GitHub Release \`$TAG\` | ${RELEASE_FOUND:-—} | $release |" ;;
+              skipped)
+                echo "| GitHub Release | not asked | no release tag in this run |" ;;
+              *)
+                echo "| GitHub Release \`$TAG\` | ${RELEASE_FOUND:-—} | $RELEASE_RESULT |" ;;
             esac
-            echo "| GitHub Release | — | $release |"
+
+            row_image() { # name found state latest
+              if [ -z "$2" ]; then
+                echo "| $1 | not asked | no release version in this run |"
+                return
+              fi
+              case "$2" in
+                ABSENT)          outcome="$verb: build and push; latest → $VERSION" ;;
+                COMPLETE)        outcome="no-op on the version tag; latest ${4:-—}" ;;
+                NOT_CONFIGURED)  outcome="skipped: no credentials" ;;
+                *)               outcome="$2" ;;
+              esac
+              if [ "$PUBLISH" = "true" ]; then
+                outcome="${3:-—}; latest ${4:-—}"
+              fi
+              echo "| $1 | $2 | $outcome |"
+            }
             case "$IMAGE_RESULT" in
               success)
-                echo "| GHCR version | ${GHCR_FOUND:-—} | ${GHCR_STATE:-—}; latest ${GHCR_LATEST:-—} |"
-                echo "| Docker Hub version | ${HUB_FOUND:-—} | ${HUB_STATE:-—}; latest ${HUB_LATEST:-—} |" ;;
+                row_image "GHCR \`ghcr.io/ifekri/comodor:$VERSION\`" "$GHCR_FOUND" "$GHCR_STATE" "$GHCR_LATEST"
+                row_image "Docker Hub \`comodor:$VERSION\`" "$HUB_FOUND" "$HUB_STATE" "$HUB_LATEST" ;;
               skipped)
-                echo "| Container images | — | not a tag build |" ;;
+                echo "| GHCR | not asked | no image job in this run |"
+                echo "| Docker Hub | not asked | no image job in this run |" ;;
               *)
-                echo "| Container images | — | $IMAGE_RESULT |" ;;
+                echo "| GHCR | ${GHCR_FOUND:-—} | $IMAGE_RESULT |"
+                echo "| Docker Hub | ${HUB_FOUND:-—} | $IMAGE_RESULT |" ;;
             esac
+
+            if [ "$PUBLISH" != "true" ]; then
+              echo
+              echo "DRY RUN — ZERO PRODUCTION MUTATIONS: nothing was uploaded, created, pushed, retagged or tagged."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
