@@ -2765,9 +2765,10 @@ describe("the agents panel", () => {
                     { session_id: "s1", delegate: wireAgent(id, "done") });
     }
     // Five settled rows, four drawn: unfocused, the newest are shown and the
-    // oldest one is not.
-    expect(view.frame()).toContain("d5 done");
-    expect(view.frame()).not.toContain("d1 done");
+    // oldest one is not. The fifth row is waited for, not assumed after one
+    // yield: a loaded machine captured the frame with four rows drawn.
+    const settled = await waitForText(view, "d5 done");
+    expect(settled).not.toContain("d1 done");
 
     view.mockInput.pressKey("b", { ctrl: true });
     // The cursor opened on the first row, which the window now draws —
@@ -3281,6 +3282,31 @@ describe("earlier conversations", () => {
     await waitForText(view, "cover the cache", 2_000);
     expect(view.frame()).not.toContain("the parser drops braces");
     expect(view.core.methods()).toContain("session.open");
+    view.client.close();
+  });
+
+  test("a second Enter before the picker is drawn gone is the picker's, not the composer's",
+       async () => {
+    // A draft is waiting in the composer. Two returns in one chunk — a key
+    // held down, a paste — open the conversation once and send nothing:
+    // the second return belongs to the picker the person can still see,
+    // not to a draft that would go to a conversation about to be replaced.
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    await view.mockInput.typeText("keep this draft");
+    await waitForText(view, "keep this draft");
+    stock(view.core as never as Parameters<typeof stock>[0]);
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("earlier");
+    view.mockInput.pressEnter();
+    await waitForText(view, "type a title", 2_000);
+    view.mockInput.pressEnter();
+    view.mockInput.pressEnter();
+    await waitForText(view, "the scanner skips them", 2_000);
+    const methods = view.core.methods();
+    expect(methods.filter((method) => method === "session.open")).toEqual(["session.open"]);
+    expect(methods).not.toContain("session.send");
     view.client.close();
   });
 

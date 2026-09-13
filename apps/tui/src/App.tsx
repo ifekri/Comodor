@@ -164,7 +164,8 @@ interface PermissionDraft {
  * answer nobody gave.
  */
 /**
- * State a key handler must see as it is now, not as it was last drawn.
+ * An overlay's state as a key handler must see it: as it is now, not as
+ * it was last drawn — and still its own until it is drawn gone.
  *
  * A ref assigned during render lags the state by a render: every update
  * queued since is invisible to a handler that reads it. That is one key
@@ -172,24 +173,37 @@ interface PermissionDraft {
  * "earlier" and its Enter arrive in one chunk, every key handler runs
  * before React draws once, and Enter then acts on the palette as it was
  * drawn: the whole registry, "Next mode" on top. The mode flipped and the
- * picker never opened.
+ * picker never opened. So the ref is written where the state changes, in
+ * the same call, and the handler reads the ref; a functional update is
+ * applied to the ref's value, for the same reason.
  *
- * So the ref is written where the state changes, in the same call, and
- * the handler reads the ref. A functional update is applied to the ref's
- * value, for the same reason: what was last queued, not last drawn.
+ * The other direction has the same shape. A close is queued too, and
+ * until React draws it the overlay is still on screen; a second Enter in
+ * the same chunk (a key held down, two returns pasted) must not fall
+ * through to whatever is under it — the composer, with a draft that would
+ * go to a conversation about to be replaced. So `closing` holds from the
+ * close until the render that shows it, and the handler consumes keys
+ * meanwhile: they belong to the overlay the person can still see.
  */
-function useLatest<T>(initial: T): [
-  T, React.RefObject<T>, (next: T | ((was: T) => T)) => void,
+function useOverlay<T>(): [
+  T | undefined, React.RefObject<T | undefined>,
+  (next: T | undefined | ((was: T | undefined) => T | undefined)) => void,
+  React.RefObject<boolean>,
 ] {
-  const [state, setState] = useState<T>(initial);
-  const ref = useRef<T>(initial);
-  const update = useCallback((next: T | ((was: T) => T)) => {
-    const value = typeof next === "function"
-      ? (next as (was: T) => T)(ref.current) : next;
-    ref.current = value;
-    setState(value);
-  }, []);
-  return [state, ref, update];
+  const [state, setState] = useState<T | undefined>(undefined);
+  const ref = useRef<T | undefined>(undefined);
+  const closing = useRef(false);
+  const update = useCallback(
+    (next: T | undefined | ((was: T | undefined) => T | undefined)) => {
+      const value = typeof next === "function"
+        ? (next as (was: T | undefined) => T | undefined)(ref.current) : next;
+      if (value === undefined && ref.current !== undefined) closing.current = true;
+      ref.current = value;
+      setState(value);
+    }, []);
+  // Drawn closed: the keys are nobody's again.
+  if (state === undefined) closing.current = false;
+  return [state, ref, update, closing];
 }
 
 function safestChoice(request: Record<string, unknown>): number {
@@ -211,15 +225,15 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   const [state, dispatch] = useReducer(reduce, initial);
   const [draft, setDraft] = useState("");
   // The three overlays a query is typed into. Their state is read by the
-  // key handler as it is *now*, not as it was last drawn: see `useLatest`.
-  const [palette, paletteRef, setPalette] =
-    useLatest<PaletteState<Screen> | undefined>(undefined);
+  // key handler as it is *now*, not as it was last drawn: see `useOverlay`.
+  const [palette, paletteRef, setPalette, paletteClosing] =
+    useOverlay<PaletteState<Screen>>();
   /** The model chooser, while open. The list is the core's, fetched per open. */
-  const [models, modelsRef, setModels] =
-    useLatest<ModelPickerState | undefined>(undefined);
+  const [models, modelsRef, setModels, modelsClosing] =
+    useOverlay<ModelPickerState>();
   /** The session picker, while open. Same fetch-on-open rule as the chooser. */
-  const [sessions, sessionsRef, setSessions] =
-    useLatest<SessionPickerState | undefined>(undefined);
+  const [sessions, sessionsRef, setSessions, sessionsClosing] =
+    useOverlay<SessionPickerState>();
   const [question, setQuestion] = useState<FormState | undefined>();
   const [permit, setPermit] = useState<PermissionDraft | undefined>();
   const [intent, setIntent] = useState<ModeIntent>(() => beginIntent("act"));
@@ -928,6 +942,14 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
       return;
     }
 
+
+    // An overlay that has closed but is still on screen keeps its keys:
+    // see `useOverlay`. Checked before the branches, so the fallthrough to
+    // the composer below cannot see a key the person aimed at the overlay.
+    if (paletteClosing.current || modelsClosing.current
+        || sessionsClosing.current) {
+      return;
+    }
 
     if (open) {
       if (named === "escape") { setPalette(undefined); return; }
