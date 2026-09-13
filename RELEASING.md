@@ -165,21 +165,33 @@ describe it in a JSON file and ask the tool:
 python tools/release-reconcile.py simulate state.json
 ```
 
-## Two ways to run it
+## Three ways to run it
 
-**Dry run** — Actions → Release → *Run workflow*, leaving **dry run** ticked.
-Everything up to publishing happens — the build, the image, and the plan for
-every destination — and the run summary says plainly that nothing was
-published. Use it to rehearse, and before rerunning a release that stopped.
+**Rehearse a release** — Actions → Release → *Run workflow* on `main`, with
+**dry run** ticked and **target_version** set to the version about to be cut,
+`2.0.1` say. The build names itself exactly that version (the wheel's
+`METADATA` and the installed `comodor --version` both say so), the image is
+built from that wheel and labelled with it, and every destination is asked
+what it holds for `v2.0.1` — PyPI, the release page, both registries —
+without the tag existing anywhere. Nothing is uploaded, created, pushed or
+retagged; the summary is the plan a publishing run would follow. Do this
+before pushing the tag, and before rerunning a release that stopped.
 
-**Publish by hand** — the same, with **dry run** unticked. Useful for the first
-release, or to recover from a failed one. The version published is whatever
-`pyproject.toml` says.
+**Development dry run** — the same with **target_version** empty: the
+source's own version (`2.0.2.dev3+g…`) is built and tested, and no
+destination is asked, because no release is named. The summary says so
+rather than guessing.
+
+**Recover a release** — *Run workflow* **on the existing tag** (choose the tag
+in the ref picker), with **dry run** unticked. The tag's release is
+reconciled exactly as a push of it would be. A run on a branch never
+publishes, whatever is typed into the inputs: production publication is
+anchored to a tag ref, and the run refuses before building anything.
 
 **Publish by tag** — the normal path, described above.
 
 A run that publishes nothing still finishes green, so read the run summary: it
-states which of the two happened.
+states which of these happened.
 
 ## After the first release
 

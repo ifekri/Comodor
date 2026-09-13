@@ -49,6 +49,11 @@ on:
         required: false
         default: false
         type: boolean
+      wheel:
+        description: "Install this wheel from the run's `distributions` artifact instead of PyPI (a rehearsal of a version PyPI does not have)"
+        required: false
+        default: ""
+        type: string
     outputs:
       ghcr_found:
         value: ${{ jobs.build.outputs.ghcr_found }}
@@ -184,9 +189,35 @@ jobs:
       # version that exists and gets told it does not, which reads as a broken
       # Dockerfile rather than as a race. A dry run of a version that is not
       # on PyPI builds the newest release instead, and says so.
+      # A rehearsal's version is not on PyPI — that is what is being
+      # rehearsed — so the image installs the wheel the run just built: the
+      # bytes that would be published, and the version they carry.
+      - name: Fetch the wheel this run built
+        if: inputs.wheel != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+      - name: The wheel is the one asked for
+        id: wheel
+        if: inputs.wheel != ''
+        env:
+          WHEEL: ${{ inputs.wheel }}
+          VERSION: ${{ steps.pick.outputs.version }}
+        run: |
+          set -euo pipefail
+          test -f "dist/$WHEEL" || { echo "::error::dist/$WHEEL is not in the artifact"; exit 1; }
+          case "$WHEEL" in
+            "comodor-$VERSION-"*.whl) ;;
+            *) echo "::error::$WHEEL is not a comodor $VERSION wheel"; exit 1 ;;
+          esac
+          echo "install=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Installing $WHEEL from the build, not PyPI"
+
       - name: Wait for PyPI to have it
         id: pypi
-        if: steps.pick.outputs.version != ''
+        if: steps.pick.outputs.version != '' && inputs.wheel == ''
         env:
           VERSION: ${{ steps.pick.outputs.version }}
           PUBLISH: ${{ steps.pick.outputs.publish }}
@@ -323,7 +354,8 @@ jobs:
           push: ${{ steps.pick.outputs.publish == 'yes' }}
           load: ${{ steps.pick.outputs.publish != 'yes' }}
           build-args: |
-            COMODOR_VERSION=${{ steps.pypi.outputs.install }}
+            COMODOR_VERSION=${{ steps.wheel.outputs.install || steps.pypi.outputs.install }}
+            COMODOR_WHEEL=${{ inputs.wheel }}
             COMODOR_REVISION=${{ inputs.revision }}
           # One build, pushed to both. Building twice would publish two
           # images from two runs of the same Dockerfile, and only one of them
@@ -370,9 +402,9 @@ jobs:
       # The label says the version and the label is checked by the plan; this
       # asks the image itself, which is the proof the label stands for.
       - name: The image carries the version it is tagged with
-        if: steps.pypi.outputs.install != ''
+        if: steps.wheel.outputs.install != '' || steps.pypi.outputs.install != ''
         env:
-          VERSION: ${{ steps.pypi.outputs.install }}
+          VERSION: ${{ steps.wheel.outputs.install || steps.pypi.outputs.install }}
         run: |
           image="${{ steps.image.outputs.ref }}"
           reported="$(docker run --rm --entrypoint comodor "$image" --version | awk '{print $2}')"

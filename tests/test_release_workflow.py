@@ -65,8 +65,11 @@ def test_the_tag_and_the_built_version_must_agree():
     here that cannot be undone."""
     run = "\n".join(step.get("run", "") for step in steps_of("build"))
 
-    assert "GITHUB_REF_NAME#v" in run
+    assert 'if [ "$RELEASE_VERSION" != "$BUILT_VERSION" ]' in run
+    assert "METADATA Version" in run, "the wheel's own metadata, not only its filename"
     assert "::error::" in run
+    names = [step.get("name") for step in steps_of("build")]
+    assert "A release must produce its own version" in names
 
 
 def test_the_checkout_is_deep_enough_to_carry_the_tag():
@@ -81,7 +84,8 @@ def test_the_checkout_is_deep_enough_to_carry_the_tag():
 
 
 def test_publishing_needs_the_gate_to_have_passed():
-    assert job("build")["needs"] == "gate"
+    assert job("gate")["needs"] == "identity"
+    assert job("build")["needs"] == ["identity", "gate"]
     assert job("pypi-plan")["needs"] == "build"
     assert job("pypi-publish")["needs"] == ["build", "pypi-plan"]
     assert "pypi-publish" in job("github-release")["needs"]
@@ -197,9 +201,12 @@ def test_the_artifact_rebuild_does_not_change_the_version_a_tag_publishes():
 
     build_body = body_of("build", "Build sdist and wheel")
     assert "SETUPTOOLS_SCM_PRETEND_VERSION" in build_body
-    assert 'GITHUB_REF_TYPE:-}" = "tag"' in build_body, (
-        "only a tag names its version; a dry run keeps the honest dev one")
-    assert "GITHUB_REF_NAME#v" in build_body
+    assert 'if [ -n "$RELEASE_VERSION" ]' in build_body, (
+        "only a release identity names its version; a development dry run "
+        "keeps the honest dev one")
+    for step in steps_of("build"):
+        if step.get("name") == "Build sdist and wheel":
+            assert step["env"]["RELEASE_VERSION"] == "${{ needs.identity.outputs.version }}"
 
 
 def test_the_release_wheel_is_checked_for_the_retired_interface():
