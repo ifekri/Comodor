@@ -70651,6 +70651,16 @@ var PAGE = 8;
 var RUNNING_OUTPUT_LINES = 3;
 var EXPANDED_OUTPUT_LINES = 20;
 var ERROR_LINES = 3;
+function useLatest(initial) {
+  const [state, setState] = import_react18.useState(initial);
+  const ref = import_react18.useRef(initial);
+  const update = import_react18.useCallback((next) => {
+    const value = typeof next === "function" ? next(ref.current) : next;
+    ref.current = value;
+    setState(value);
+  }, []);
+  return [state, ref, update];
+}
 function safestChoice(request) {
   const options = Array.isArray(request["options"]) ? request["options"] : [];
   const at = options.findIndex((option) => String(option) === "deny");
@@ -70662,9 +70672,9 @@ function choicesOf(request) {
 function App({ client, onQuit, sessionId }) {
   const [state, dispatch] = import_react18.useReducer(reduce, initial);
   const [draft, setDraft] = import_react18.useState("");
-  const [palette, setPalette] = import_react18.useState();
-  const [models, setModels] = import_react18.useState();
-  const [sessions, setSessions] = import_react18.useState();
+  const [palette, paletteRef, setPalette] = useLatest(undefined);
+  const [models, modelsRef, setModels] = useLatest(undefined);
+  const [sessions, sessionsRef, setSessions] = useLatest(undefined);
   const [question, setQuestion] = import_react18.useState();
   const [permit, setPermit] = import_react18.useState();
   const [intent, setIntent] = import_react18.useState(() => begin("act"));
@@ -70684,12 +70694,6 @@ function App({ client, onQuit, sessionId }) {
   questionRef.current = question;
   const permitRef = import_react18.useRef(permit);
   permitRef.current = permit;
-  const paletteRef = import_react18.useRef(palette);
-  paletteRef.current = palette;
-  const modelsRef = import_react18.useRef(models);
-  modelsRef.current = models;
-  const sessionsRef = import_react18.useRef(sessions);
-  sessionsRef.current = sessions;
   const workbenchRef = import_react18.useRef(workbench);
   workbenchRef.current = workbench;
   const blockedRef = import_react18.useRef(undefined);
