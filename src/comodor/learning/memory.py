@@ -411,21 +411,53 @@ class LearningEngine:
             # lessons from the useless ones.
             self.store.credit([lesson.id for lesson in recalled], won=success)
 
-        if self.config.learning.reflect and self.gateway is not None:
-            self._reflect_async(goal, list(messages), stopped, episode.id)
-
-        self._review_async(messages, stopped, episode.id)
+        self._learn_async(goal, list(messages), stopped, episode.id,
+                          cancel_reason=cancel_reason)
 
     # -- 4. reflect ------------------------------------------------------- #
 
-    def _reflect_async(self, goal: str, messages: list[Any], outcome: str,
-                       episode_id: int) -> None:
+    def _learn_async(self, goal: str, messages: list[Any], outcome: str,
+                     episode_id: int, cancel_reason: str = "") -> None:
+        """The model-backed passes over a finished task, on one worker.
+
+        Reflection distils lessons; the review curates facts. Each is one
+        model call against the same gateway, and they used to start on two
+        threads at once — which made their order a scheduling accident. In
+        production that was two requests in flight for one turn; against a
+        scripted provider it handed the reflection's reply to the review one
+        run in forty, and a lesson was never learned. One worker runs them in
+        a fixed order, reflection first, so the order is a fact of the code
+        rather than of the scheduler, and one request is in flight at a time.
+        """
+        reflect = bool(self.config.learning.reflect and self.gateway is not None)
+        review = bool(self.config.learning.enabled and self.config.learning.review
+                      and self.gateway is not None)
+        if not reflect and not review:
+            return
         thread = threading.Thread(
-            target=self._reflect, args=(goal, messages, outcome, episode_id),
-            daemon=True, name="comodor-reflect",
+            target=self._learn_in_background,
+            args=(goal, messages, outcome, episode_id, cancel_reason, reflect, review),
+            daemon=True, name="comodor-learn",
         )
         thread.start()
         self._threads.append(thread)
+
+    def _learn_in_background(self, goal: str, messages: list[Any], outcome: str,
+                             episode_id: int, cancel_reason: str,
+                             reflect: bool, review: bool) -> None:
+        if reflect:
+            try:
+                self._reflect(goal, messages, outcome, episode_id)
+            except Exception:              # noqa: BLE001 - the review still runs
+                pass
+        if review:
+            # The reviewer keeps its own thread and its own "latest wins"
+            # generation; this worker waits for it, so joining the worker is
+            # joining everything the task started.
+            thread = self._review_async(messages, outcome, episode_id,
+                                        cancel_reason=cancel_reason)
+            if thread is not None:
+                thread.join()
 
     def _review_async(self, messages: list[Any], outcome: str,
                       episode_id: int, cancel_reason: str = "") -> None:
@@ -507,14 +539,24 @@ class LearningEngine:
         return stored, merged
 
     def wait_for_reflection(self, timeout: float = 30.0) -> None:
-        """Block until background reflection settles — used by tests and exit."""
+        """Block until every background learning pass has settled.
+
+        Used by tests and at exit. When this returns before the deadline,
+        nothing the engine started is still running and everything it
+        learned is in the store: the wait re-reads the thread list after
+        every join rather than snapshotting it once, because a pass can start
+        another (the worker starts the review) after the snapshot was taken.
+        """
         deadline = time.monotonic() + timeout
-        for thread in list(self._threads):
+        while True:
+            alive = [thread for thread in list(self._threads) if thread.is_alive()]
+            self._threads = alive
+            if not alive:
+                return
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                break
-            thread.join(timeout=remaining)
-        self._threads = [thread for thread in self._threads if thread.is_alive()]
+                return
+            alive[0].join(timeout=remaining)
 
     # -- 5. consolidate --------------------------------------------------- #
 

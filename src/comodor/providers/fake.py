@@ -8,6 +8,7 @@ downstream of it is exercised for real.
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Iterator
@@ -53,6 +54,9 @@ class FakeProvider:
         self.chunk = chunk
         self.calls: list[list[Message]] = []
         self._index = 0
+        # Two background passes can ask at once; the queue must hand each
+        # script to exactly one of them, in call order.
+        self._lock = threading.Lock()
 
     def stream(self, messages: list[Message], *, tools: list[ToolSpec] | None = None,
                model: str = "", temperature: float = 0.3, max_tokens: int = 4096,
@@ -85,10 +89,11 @@ class FakeProvider:
                           finish_reason="tool_use" if script.tool_calls else "end_turn")
 
     def _next_script(self, messages: list[Message]) -> Script:
-        if self._index < len(self.scripts):
-            script = self.scripts[self._index]
-            self._index += 1
-            return script
+        with self._lock:
+            if self._index < len(self.scripts):
+                script = self.scripts[self._index]
+                self._index += 1
+                return script
         if self.scripts:
             return self.scripts[-1]
         return Script(text=_echo(messages))
