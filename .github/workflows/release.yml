@@ -15,12 +15,20 @@ name: Release
 #       ↓
 #   Build distributions
 #       ↓
-#   Publish to PyPI
+#   PyPI plan → Publish to PyPI (only what PyPI is missing)
 #      ↙         ↘
 # GitHub Release  Container Image
+#       ↘         ↙
+#   Publication summary
 #
-# GitHub Release and Container Image are independent after PyPI succeeds.
-# A pre-existing GitHub Release must never prevent PyPI or Docker publication.
+# Every destination is reconciled on its own by `tools/release-reconcile.py`:
+# what is already there and correct is verified and skipped, what is missing
+# is published, and what is there but is not this release stops the run. So
+# the same tag can be run again after a failure at any point and finishes
+# the release instead of failing on what the first run already did. The
+# GitHub Release and the container image are independent after PyPI holds
+# the version; a release page that cannot be completed never blocks the
+# image, and vice versa.
 
 on:
   push:
@@ -313,13 +321,64 @@ jobs:
   # ---------------------------------------------------------------------------
   # PyPI
   # ---------------------------------------------------------------------------
+  #
+  # Two jobs, so that the plan needs no environment and the environment is
+  # entered only when there is something to upload. The plan classifies the
+  # version on PyPI against the files this run built — ABSENT, PARTIAL,
+  # COMPLETE or CONFLICT — and stages only the files PyPI does not hold. A
+  # file it holds with the digest this build produced is verified and left
+  # alone; a file it holds with another digest stops the release. PyPI never
+  # takes a filename twice, so nothing is ever uploaded twice.
 
-  publish:
-    name: Publish to PyPI
+  pypi-plan:
+    name: PyPI plan
     needs: build
     runs-on: ubuntu-latest
 
-    if: needs.build.outputs.publish == 'true'
+    outputs:
+      state: ${{ steps.plan.outputs.state }}
+      uploads: ${{ steps.plan.outputs.uploads }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+      - name: Compare the build with what PyPI holds
+        id: plan
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python tools/release-reconcile.py pypi \
+            --version "$VERSION" --dist dist/ --stage publish/
+
+      # Only the files PyPI is missing travel to the publish job.
+      - name: Stage the files PyPI is missing
+        if: steps.plan.outputs.uploads != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypi-uploads
+          path: publish/
+          if-no-files-found: error
+
+  pypi-publish:
+    name: Publish to PyPI
+    needs: [build, pypi-plan]
+    runs-on: ubuntu-latest
+
+    # Nothing to do is a successful outcome for the jobs after this one;
+    # they read `needs.pypi-publish.result` as `skipped` and go on.
+    if: needs.build.outputs.publish == 'true' && needs.pypi-plan.outputs.uploads != '0'
 
     environment:
       name: pypi
@@ -328,349 +387,152 @@ jobs:
     permissions:
       id-token: write
 
+    outputs:
+      state: ${{ steps.verify.outputs.state }}
+
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Download distributions
         uses: actions/download-artifact@v4
         with:
           name: distributions
           path: dist/
 
+      - name: Download the files PyPI is missing
+        uses: actions/download-artifact@v4
+        with:
+          name: pypi-uploads
+          path: publish/
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish/
 
-      - name: Record PyPI publication
-        shell: bash
+      # Every file this run built is on PyPI with the digest it was built
+      # with, or the release stops here — before anything else is published
+      # against a package that is not there.
+      - name: Verify the version is complete on PyPI
+        id: verify
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
-          {
-            echo "## PyPI"
-            echo
-            echo "Published:"
-            echo
-            echo "\`comodor==${{ needs.build.outputs.version }}\`"
-            echo
-            echo '```bash'
-            echo "pipx install comodor==${{ needs.build.outputs.version }}"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          python tools/release-reconcile.py pypi \
+            --version "$VERSION" --dist dist/ --verify --wait 300
 
 
   # ---------------------------------------------------------------------------
   # GitHub Release
   # ---------------------------------------------------------------------------
   #
-  # Important:
+  # A release object is not a release; the page has to carry the files. The
+  # tool classifies the tag's release against the distributions this run
+  # built and does only what is missing:
   #
-  # GitHub can make published releases immutable. If the repository owner
-  # creates and publishes the release from the GitHub UI before this workflow
-  # reaches this job, uploading assets afterwards will fail.
+  #   no release           create a draft, attach every file, publish it
+  #   draft                attach what is missing, publish it
+  #   published, complete  verify the digests and stop
+  #   published, mutable   attach what is missing, verify
+  #   published, immutable cannot be completed: fail, and say so plainly
+  #   asset differs        never replaced: fail
   #
-  # Therefore:
-  #
-  # - Published release already exists:
-  #     Treat this stage as satisfied.
-  #     Do NOT try to mutate it.
-  #     Missing assets produce a warning only.
-  #
-  # - Draft release already exists:
-  #     Attach/replace the distributions and publish the draft.
-  #
-  # - No release exists:
-  #     Create a draft first, upload all assets while mutation is still allowed,
-  #     then publish it.
-  #
-  # This makes the GitHub Release stage idempotent without hiding real errors.
+  # It runs after PyPI has the version — a rerun where PyPI was already
+  # complete finds `pypi-publish` skipped, which is why `always()` is here
+  # and why the first step checks PyPI itself rather than trusting a job
+  # result.
 
   github-release:
     name: GitHub release
-    needs: [build, publish]
+    needs: [build, pypi-plan, pypi-publish]
     runs-on: ubuntu-latest
 
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      always()
+      && needs.build.result == 'success'
+      && needs.pypi-plan.result == 'success'
+      && needs.pypi-publish.result != 'failure'
+      && needs.pypi-publish.result != 'cancelled'
+      && github.ref_type == 'tag'
 
     permissions:
       contents: write
 
+    outputs:
+      state: ${{ steps.reconcile.outputs.state }}
+
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Download distributions
         uses: actions/download-artifact@v4
         with:
           name: distributions
           path: dist/
 
-      - name: Inspect existing GitHub release
-        id: release
+      - name: PyPI holds the version this release page will describe
+        if: needs.build.outputs.publish == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        shell: bash
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
-          set -euo pipefail
+          python tools/release-reconcile.py pypi \
+            --version "$VERSION" --dist dist/ --verify --wait 300 --summary ""
 
-          endpoint="repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
-
-          if gh api "$endpoint" > /tmp/release.json 2> /tmp/release.err; then
-            draft="$(jq -r '.draft // false' /tmp/release.json)"
-            immutable="$(jq -r '.immutable // false' /tmp/release.json)"
-            release_id="$(jq -r '.id' /tmp/release.json)"
-
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "draft=$draft" >> "$GITHUB_OUTPUT"
-            echo "immutable=$immutable" >> "$GITHUB_OUTPUT"
-            echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
-
-            echo "GitHub Release $TAG already exists."
-            echo "draft=$draft"
-            echo "immutable=$immutable"
-
-          else
-            if grep -q "HTTP 404" /tmp/release.err; then
-              echo "exists=false" >> "$GITHUB_OUTPUT"
-              echo "draft=false" >> "$GITHUB_OUTPUT"
-              echo "immutable=false" >> "$GITHUB_OUTPUT"
-              echo "release_id=" >> "$GITHUB_OUTPUT"
-
-              echo "GitHub Release $TAG does not exist."
-            else
-              echo "::error::Unable to determine whether GitHub Release $TAG exists."
-              cat /tmp/release.err >&2
-              exit 1
-            fi
-          fi
-
-      # A published release is already a valid release result.
-      #
-      # In particular, an immutable release MUST NOT receive another upload
-      # attempt. Doing so is the exact failure this branch prevents.
-      - name: Existing published release satisfies this stage
-        if: steps.release.outputs.exists == 'true' && steps.release.outputs.draft != 'true'
+      - name: Reconcile the GitHub Release
+        id: reconcile
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.build.outputs.version }}
-        shell: bash
+          APPLY: ${{ needs.build.outputs.publish == 'true' && '--apply' || '' }}
         run: |
-          set -euo pipefail
-
-          endpoint="repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
-
-          mapfile -t published_assets < <(
-            gh api "$endpoint" --jq '.assets[].name'
-          )
-
-          missing=0
-
-          for file in dist/*; do
-            name="$(basename "$file")"
-
-            if ! printf '%s\n' "${published_assets[@]}" | grep -Fxq "$name"; then
-              echo "::warning::Existing release $TAG does not contain asset: $name"
-              missing=1
-            fi
-          done
-
-          {
-            echo "## GitHub Release"
-            echo
-            echo "\`$TAG\` already exists and is published."
-            echo
-            echo "The existing release is treated as a completed release stage."
-            echo
-            echo "No attempt was made to modify or upload assets to it."
-
-            if [ "${{ steps.release.outputs.immutable }}" = "true" ]; then
-              echo
-              echo "The release is immutable."
-            fi
-
-            if [ "$missing" -eq 1 ]; then
-              echo
-              echo "> [!WARNING]"
-              echo "> One or more distribution assets are not attached to the existing"
-              echo "> GitHub Release. This does not fail the workflow because the"
-              echo "> release was already published and may be immutable."
-              echo ">"
-              echo "> The package itself was published to PyPI successfully."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      # A draft release can still accept assets safely.
-      - name: Attach distributions to existing draft
-        if: steps.release.outputs.exists == 'true' && steps.release.outputs.draft == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          gh release upload "$TAG" \
-            dist/* \
-            --clobber \
-            --repo "$GITHUB_REPOSITORY"
-
-          # A draft somebody wrote by hand keeps its words, but a release
-          # page must state what the package needs. The block the fresh-draft
-          # path writes is put above the draft's own notes when it is not
-          # already there — the same two requirements, once.
-          notes="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
-
-          if ! printf '%s' "$notes" | grep -q '^## Requirements'; then
-            {
-              echo "## Requirements"
-              echo
-              echo "Python 3.11 or newer. The interactive interface also needs"
-              echo "[Bun](https://bun.sh) 1.3 or newer on the machine; \`comodor run\`"
-              echo "and \`comodor web\` work without it. Nothing is downloaded at"
-              echo "first launch. \`comodor doctor\` says what is there."
-              echo
-              printf '%s\n' "$notes"
-            } > /tmp/release-notes.md
-
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --notes-file /tmp/release-notes.md
-          fi
-
-      # If no release exists, create it as a draft first.
-      #
-      # Assets must be attached before publication because published releases
-      # may become immutable.
-      - name: Create draft release and attach distributions
-        if: steps.release.outputs.exists != 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          files: dist/*
-          fail_on_unmatched_files: true
-          generate_release_notes: true
-
-          body: |
-            ## Requirements
-
-            Python 3.11 or newer. The interactive interface also needs
-            [Bun](https://bun.sh) 1.3 or newer on the machine; `comodor run`
-            and `comodor web` work without it. Nothing is downloaded at
-            first launch. `comodor doctor` says what is there.
-
-            ## Install
-
-            ### Linux and macOS
-
-            ```bash
-            curl -fsSL get.comodor.ai | sh
-            ```
-
-            ### Windows
-
-            ```powershell
-            irm get.comodor.ai | iex
-            ```
-
-            ### UV
-
-            ```bash
-            uv tool install comodor==${{ needs.build.outputs.version }}
-            ```
-
-            ### PIP
-
-            ```bash
-            pip install comodor==${{ needs.build.outputs.version }}
-            ```
-
-            ### PIPX
-
-            ```bash
-            pipx install comodor==${{ needs.build.outputs.version }}
-            ```
-
-      # Publish either:
-      #
-      # - the draft we found before this job, or
-      # - the draft we just created.
-      #
-      # A release that was already published never reaches this step.
-      - name: Publish prepared draft release
-        if: steps.release.outputs.exists != 'true' || steps.release.outputs.draft == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          release_id="$(
-            gh api \
-              "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-              --jq '.id'
-          )"
-
-          if [ -z "$release_id" ]; then
-            echo "::error::Could not determine GitHub Release ID for $TAG."
-            exit 1
-          fi
-
-          gh api \
-            --method PATCH \
-            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
-            -F draft=false \
-            > /dev/null
-
-          echo "Published GitHub Release $TAG."
-
-      - name: Verify GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          draft="$(
-            gh api \
-              "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-              --jq '.draft'
-          )"
-
-          if [ "$draft" = "true" ]; then
-            echo "::error::GitHub Release $TAG still exists only as a draft."
-            exit 1
-          fi
-
-          url="$(
-            gh api \
-              "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-              --jq '.html_url'
-          )"
-
-          {
-            echo "## GitHub Release verified"
-            echo
-            echo "Release: \`$TAG\`"
-            echo
-            echo "$url"
-          } >> "$GITHUB_STEP_SUMMARY"
+          # A dry run passes no flag, and the tool then reads and reports only.
+          python tools/release-reconcile.py github \
+            --tag "$TAG" --version "$VERSION" --dist dist/ \
+            --repo "$GITHUB_REPOSITORY" $APPLY
 
 
   # ---------------------------------------------------------------------------
   # Container Image
   # ---------------------------------------------------------------------------
   #
-  # Docker publication deliberately does NOT depend on the GitHub Release job.
-  #
-  # Once the package is successfully on PyPI, the container can be built.
-  # A manually-created or immutable GitHub Release must never prevent Docker
-  # publication.
+  # Independent of the GitHub Release: a release page that cannot be
+  # completed must never keep the image from being published. The called
+  # workflow reconciles GHCR and Docker Hub the same way — a version tag
+  # that resolves and verifies is kept, `latest` is retagged to it without a
+  # rebuild, and a version tag that resolves to something else stops the
+  # run. A dry run builds and tests the image and publishes nothing.
 
   image:
     name: Container image
-    needs: [build, publish]
+    needs: [build, pypi-plan, pypi-publish]
 
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      always()
+      && needs.build.result == 'success'
+      && needs.pypi-plan.result == 'success'
+      && needs.pypi-publish.result != 'failure'
+      && needs.pypi-publish.result != 'cancelled'
+      && (github.ref_type == 'tag' || needs.build.outputs.publish != 'true')
 
     uses: ./.github/workflows/image.yml
 
     with:
       version: ${{ needs.build.outputs.version }}
+      revision: ${{ github.sha }}
+      dry_run: ${{ needs.build.outputs.publish != 'true' }}
 
     permissions:
       contents: read
@@ -687,3 +549,77 @@ jobs:
     # The called workflow handles the absence of those secrets and falls back
     # to GHCR-only publication.
     secrets: inherit
+
+
+  # ---------------------------------------------------------------------------
+  # Summary
+  # ---------------------------------------------------------------------------
+  #
+  # One table, whatever happened: what each destination held, and what this
+  # run did about it. Read this before deciding anything about a rerun.
+
+  summary:
+    name: Publication summary
+    needs: [build, pypi-plan, pypi-publish, github-release, image]
+    runs-on: ubuntu-latest
+
+    if: always() && needs.build.result == 'success'
+
+    steps:
+      - name: Write the summary
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          PUBLISH: ${{ needs.build.outputs.publish }}
+          PYPI_PLAN: ${{ needs.pypi-plan.outputs.state }}
+          PYPI_UPLOADS: ${{ needs.pypi-plan.outputs.uploads }}
+          PYPI_RESULT: ${{ needs.pypi-publish.result }}
+          PYPI_AFTER: ${{ needs.pypi-publish.outputs.state }}
+          RELEASE_RESULT: ${{ needs.github-release.result }}
+          RELEASE_STATE: ${{ needs.github-release.outputs.state }}
+          IMAGE_RESULT: ${{ needs.image.result }}
+          GHCR_FOUND: ${{ needs.image.outputs.ghcr_found }}
+          GHCR_STATE: ${{ needs.image.outputs.ghcr_state }}
+          GHCR_LATEST: ${{ needs.image.outputs.ghcr_latest }}
+          HUB_FOUND: ${{ needs.image.outputs.dockerhub_found }}
+          HUB_STATE: ${{ needs.image.outputs.dockerhub_state }}
+          HUB_LATEST: ${{ needs.image.outputs.dockerhub_latest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$PUBLISH" = "true" ]; then
+            mode="Publishing run"
+          else
+            mode="Dry run — nothing was published; the states are what a publishing run would find"
+          fi
+
+          {
+            echo "## Comodor $VERSION — publication"
+            echo
+            echo "$mode."
+            echo
+            echo "| Destination | Found | Outcome |"
+            echo "|---|---|---|"
+            case "$PYPI_RESULT" in
+              success) pypi="published $PYPI_UPLOADS file(s) → ${PYPI_AFTER:-verified}" ;;
+              skipped) if [ "$PYPI_UPLOADS" = "0" ]; then pypi="no-op: already complete";
+                       else pypi="not published (dry run: $PYPI_UPLOADS file(s) would be uploaded)"; fi ;;
+              *)       pypi="$PYPI_RESULT" ;;
+            esac
+            echo "| PyPI | ${PYPI_PLAN:-—} | $pypi |"
+            case "$RELEASE_RESULT" in
+              success) release="${RELEASE_STATE:-—}" ;;
+              skipped) release="not a tag build" ;;
+              *)       release="$RELEASE_RESULT" ;;
+            esac
+            echo "| GitHub Release | — | $release |"
+            case "$IMAGE_RESULT" in
+              success)
+                echo "| GHCR version | ${GHCR_FOUND:-—} | ${GHCR_STATE:-—}; latest ${GHCR_LATEST:-—} |"
+                echo "| Docker Hub version | ${HUB_FOUND:-—} | ${HUB_STATE:-—}; latest ${HUB_LATEST:-—} |" ;;
+              skipped)
+                echo "| Container images | — | not a tag build |" ;;
+              *)
+                echo "| Container images | — | $IMAGE_RESULT |" ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"

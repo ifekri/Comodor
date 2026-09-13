@@ -39,6 +39,29 @@ on:
         description: "Comodor version to install"
         required: false
         type: string
+      revision:
+        description: "Commit the release was built from, for the image label"
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: "Build and test, plan the publication, publish nothing"
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      ghcr_found:
+        value: ${{ jobs.build.outputs.ghcr_found }}
+      ghcr_state:
+        value: ${{ jobs.build.outputs.ghcr_state }}
+      ghcr_latest:
+        value: ${{ jobs.build.outputs.ghcr_latest }}
+      dockerhub_found:
+        value: ${{ jobs.build.outputs.dockerhub_found }}
+      dockerhub_state:
+        value: ${{ jobs.build.outputs.dockerhub_state }}
+      dockerhub_latest:
+        value: ${{ jobs.build.outputs.dockerhub_latest }}
   pull_request:
     paths:
       - Dockerfile
@@ -65,6 +88,16 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # What each registry held, and what it holds now. `found` is the plan's
+    # reading before anything was pushed; `state` is after (or the plan's,
+    # on a dry run, which pushes nothing).
+    outputs:
+      ghcr_found: ${{ steps.ghcr.outputs.state }}
+      ghcr_state: ${{ steps.ghcr_apply.outputs.state || steps.ghcr.outputs.state }}
+      ghcr_latest: ${{ steps.ghcr_apply.outputs.latest || steps.ghcr.outputs.latest }}
+      dockerhub_found: ${{ steps.hubplan.outputs.state }}
+      dockerhub_state: ${{ steps.hub_apply.outputs.state || steps.hubplan.outputs.state }}
+      dockerhub_latest: ${{ steps.hub_apply.outputs.latest || steps.hubplan.outputs.latest }}
     # A ceiling on the whole thing. One of these steps ran a server in the
     # foreground and captured its output, which hung for three hours before
     # anybody noticed. Every wait below is bounded as well; this is the
@@ -76,8 +109,9 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       # Only where it will be published. Emulating arm64 to build an image
-      # nobody will pull costs about four minutes on every pull request.
-      - if: github.event_name != 'pull_request'
+      # nobody will pull costs about four minutes on every pull request, and
+      # a dry run publishes nothing either.
+      - if: github.event_name != 'pull_request' && inputs.dry_run != true
         uses: docker/setup-qemu-action@v3
 
       - if: github.event_name != 'pull_request'
@@ -116,68 +150,159 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # A release names a version. The image workflow is also run for a push
+      # to `main` that touches the Dockerfile (no version: `edge`), for a pull
+      # request (built, never pushed) and for a dry run of the release (the
+      # same as a pull request, plus the plan a publishing run would follow).
       - name: Which version
         id: pick
         env:
           # One expression for both callers: `inputs` covers workflow_call and
           # workflow_dispatch alike.
           WANTED: ${{ inputs.version }}
+          DRY: ${{ inputs.dry_run }}
         run: |
           echo "version=$WANTED" >> "$GITHUB_OUTPUT"
+          # Only a release version names an image tag worth reconciling: a
+          # dry run from a branch builds `2.0.2.dev3+g1234abc`, which no
+          # registry tag can carry.
+          if [[ "$WANTED" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "$DRY" = "true" ]; then
+            echo "publish=" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=yes" >> "$GITHUB_OUTPUT"
+          fi
           echo "Building Comodor ${WANTED:-newest release}"
 
       # PyPI is a CDN, and a version that has just been uploaded is not
       # instantly installable everywhere. Without this the build asks for a
       # version that exists and gets told it does not, which reads as a broken
-      # Dockerfile rather than as a race.
+      # Dockerfile rather than as a race. A dry run of a version that is not
+      # on PyPI builds the newest release instead, and says so.
       - name: Wait for PyPI to have it
+        id: pypi
         if: steps.pick.outputs.version != ''
         env:
           VERSION: ${{ steps.pick.outputs.version }}
+          PUBLISH: ${{ steps.pick.outputs.publish }}
         run: |
-          for attempt in $(seq 1 30); do
-            if curl -fsS -m 10 "https://pypi.org/pypi/comodor/$VERSION/json"                  -o /dev/null; then
+          attempts=30
+          [ -n "$PUBLISH" ] || attempts=1
+          for attempt in $(seq 1 $attempts); do
+            if curl -fsS -m 10 "https://pypi.org/pypi/comodor/$VERSION/json" -o /dev/null; then
               echo "comodor $VERSION is on PyPI."
+              echo "install=$VERSION" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "  not there yet ($attempt/30)"
-            sleep 10
+            echo "  not there yet ($attempt/$attempts)"
+            [ "$attempt" -lt "$attempts" ] && sleep 10
           done
+          if [ -z "$PUBLISH" ]; then
+            echo "::notice::comodor $VERSION is not on PyPI; the dry run builds the newest release"
+            echo "install=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "::error::comodor $VERSION never appeared on PyPI"
           exit 1
 
+      # What each registry holds for this version, and what to do about it.
+      # The tool reads only; the build and the retag below act on its plan.
+      #
+      #   ABSENT     build and push the version tag
+      #   COMPLETE   keep it; retag `latest` to it if `latest` is elsewhere
+      #   CONFLICT   a version tag that is not this release: stop
+      - name: Plan GHCR
+        id: ghcr
+        if: steps.pick.outputs.release == 'yes' && github.event_name != 'pull_request'
+        env:
+          VERSION: ${{ steps.pick.outputs.version }}
+        run: |
+          python3 tools/release-reconcile.py image --name GHCR \
+            --repository "ghcr.io/${{ github.repository_owner }}/comodor" \
+            --version "$VERSION"
+
+      # Docker Hub gets the same image: pushed by the same build when both
+      # registries lack the version, copied registry-to-registry from the
+      # verified GHCR image when only Docker Hub lacks it. Never a second
+      # build — two builds would publish two images and test one.
+      - name: Plan Docker Hub
+        id: hubplan
+        if: steps.pick.outputs.release == 'yes' && github.event_name != 'pull_request'
+        env:
+          VERSION: ${{ steps.pick.outputs.version }}
+          REPO: ${{ steps.hub.outputs.repo }}
+          SOURCE: ${{ steps.ghcr.outputs.state == 'COMPLETE' && format('ghcr.io/{0}/comodor:{1}', github.repository_owner, steps.pick.outputs.version) || '' }}
+        run: |
+          if [ -z "$REPO" ]; then
+            python3 tools/release-reconcile.py image --name "Docker Hub" \
+              --repository "docker.io/comodor" --version "$VERSION" --not-configured
+          else
+            python3 tools/release-reconcile.py image --name "Docker Hub" \
+              --repository "$REPO" --version "$VERSION" --source "$SOURCE"
+          fi
+
+      # The tags one build pushes. On a release: the version tags the plan
+      # says to build, and nothing else — `latest` is moved afterwards by
+      # retagging, never by a build. Off a release (`edge`): as before,
+      # `latest` and `edge` together. A pull request or dry run pushes
+      # nothing; the local tag names the image under test.
       - name: Which tags
         id: tags
         env:
           VERSION: ${{ steps.pick.outputs.version }}
+          RELEASE: ${{ steps.pick.outputs.release }}
+          PUBLISH: ${{ steps.pick.outputs.publish }}
           HUB: ${{ steps.hub.outputs.repo }}
+          GHCR_BUILD: ${{ steps.ghcr.outputs.build }}
+          HUB_BUILD: ${{ steps.hubplan.outputs.build }}
         run: |
-          # `edge` rather than a version when there is no release to name:
-          # a push to main is not a release, and tagging it `latest` alone
-          # would leave nothing pointing at the tested build.
-          label="${VERSION:-edge}"
           owner="${{ github.repository_owner }}"
+          label="${VERSION:-edge}"
+          build=""
           {
             echo "list<<EOF"
-            echo "ghcr.io/$owner/comodor:latest"
-            echo "ghcr.io/$owner/comodor:$label"
-            if [ -n "$HUB" ]; then
-              echo "$HUB:latest"
-              echo "$HUB:$label"
+            if [ -z "$PUBLISH" ]; then
+              echo "ghcr.io/$owner/comodor:$label"
+              build=yes
+            elif [ -z "$RELEASE" ]; then
+              echo "ghcr.io/$owner/comodor:latest"
+              echo "ghcr.io/$owner/comodor:$label"
+              if [ -n "$HUB" ]; then
+                echo "$HUB:latest"
+                echo "$HUB:$label"
+              fi
+              build=yes
+            else
+              if [ "$GHCR_BUILD" = "true" ]; then
+                echo "ghcr.io/$owner/comodor:$label"
+                build=yes
+              fi
+              if [ -n "$HUB" ] && [ "$HUB_BUILD" = "true" ]; then
+                echo "$HUB:$label"
+                build=yes
+              fi
             fi
             echo "EOF"
+            echo "build=$build"
+            echo "test=ghcr.io/$owner/comodor:$label"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and push
+        if: steps.tags.outputs.build == 'yes'
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ github.event_name == 'pull_request'
-                         && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          platforms: ${{ steps.pick.outputs.publish == 'yes'
+                         && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: ${{ steps.pick.outputs.publish == 'yes' }}
+          load: ${{ steps.pick.outputs.publish != 'yes' }}
           build-args: |
-            COMODOR_VERSION=${{ steps.pick.outputs.version }}
+            COMODOR_VERSION=${{ steps.pypi.outputs.install }}
+            COMODOR_REVISION=${{ inputs.revision }}
           # One build, pushed to both. Building twice would publish two
           # images from two runs of the same Dockerfile, and only one of them
           # would have been tested.
@@ -185,11 +310,55 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # On a pull request the build is loaded into the local daemon rather
-      # than pushed, so the same tag names it either way.
+      # Now the version tag resolves in each registry (built just now, or
+      # there already and verified): copy it to Docker Hub if that is what
+      # its plan said, and point `latest` at it where `latest` is elsewhere.
+      # Registry-side retags; nothing is rebuilt. Then each registry is read
+      # back and must verify, or the job fails.
+      - name: Publish GHCR
+        id: ghcr_apply
+        if: steps.pick.outputs.release == 'yes' && steps.pick.outputs.publish == 'yes'
+        env:
+          VERSION: ${{ steps.pick.outputs.version }}
+        run: |
+          python3 tools/release-reconcile.py image --name GHCR \
+            --repository "ghcr.io/${{ github.repository_owner }}/comodor" \
+            --version "$VERSION" --apply --verify --summary ""
+
+      - name: Publish Docker Hub
+        id: hub_apply
+        if: steps.pick.outputs.release == 'yes' && steps.pick.outputs.publish == 'yes' && steps.hub.outputs.repo != ''
+        env:
+          VERSION: ${{ steps.pick.outputs.version }}
+          REPO: ${{ steps.hub.outputs.repo }}
+        run: |
+          python3 tools/release-reconcile.py image --name "Docker Hub" \
+            --repository "$REPO" --version "$VERSION" \
+            --source "ghcr.io/${{ github.repository_owner }}/comodor:$VERSION" \
+            --apply --verify --summary ""
+
+      # On a pull request or dry run the build is loaded into the local
+      # daemon rather than pushed, so the same tag names it either way. On a
+      # release it is the version tag in GHCR — built just now or found and
+      # verified — which is pulled, so what is tested is what is published.
       - name: Name the image under test
         id: image
-        run: echo "ref=ghcr.io/${{ github.repository_owner }}/comodor:latest" >> "$GITHUB_OUTPUT"
+        run: echo "ref=${{ steps.tags.outputs.test }}" >> "$GITHUB_OUTPUT"
+
+      # The label says the version and the label is checked by the plan; this
+      # asks the image itself, which is the proof the label stands for.
+      - name: The image carries the version it is tagged with
+        if: steps.pypi.outputs.install != ''
+        env:
+          VERSION: ${{ steps.pypi.outputs.install }}
+        run: |
+          image="${{ steps.image.outputs.ref }}"
+          reported="$(docker run --rm --entrypoint comodor "$image" --version | awk '{print $2}')"
+          echo "The image reports: $reported"
+          if [ "$reported" != "$VERSION" ]; then
+            echo "::error::$image reports comodor $reported, not $VERSION"
+            exit 1
+          fi
 
       # With no key it starts anyway and says the page will ask.
       #

@@ -82,8 +82,9 @@ def test_the_checkout_is_deep_enough_to_carry_the_tag():
 
 def test_publishing_needs_the_gate_to_have_passed():
     assert job("build")["needs"] == "gate"
-    assert job("publish")["needs"] == "build"
-    assert "publish" in job("github-release")["needs"]
+    assert job("pypi-plan")["needs"] == "build"
+    assert job("pypi-publish")["needs"] == ["build", "pypi-plan"]
+    assert "pypi-publish" in job("github-release")["needs"]
 
 
 def test_the_gate_runs_the_whole_suite():
@@ -109,7 +110,7 @@ def test_the_release_builds_the_container_image():
     entry = job("image")
 
     assert entry["uses"].endswith("image.yml")
-    assert "publish" in entry["needs"], \
+    assert "pypi-publish" in entry["needs"], \
         "it would build before PyPI has the version it installs"
 
 
@@ -214,18 +215,23 @@ def test_every_release_page_states_the_requirements():
     before installing — whether the workflow wrote the draft or found one
     somebody wrote by hand. The hand-written path used to publish the draft
     untouched, so a release could omit the one prerequisite the installer
-    does not mention."""
-    for step in steps_of("github-release"):
-        if step.get("name") == "Create draft release and attach distributions":
-            body = step["with"]["body"]
-            assert body.lstrip().startswith("## Requirements"), body[:60]
-            assert "Python 3.11" in body and "bun.sh" in body
-            break
-    else:
-        raise AssertionError("no fresh-draft step")
+    does not mention. Both paths live in `tools/release-reconcile.py` now."""
+    import importlib.util
+    import sys
 
-    draft = body_of("github-release", "Attach distributions to existing draft")
-    assert "## Requirements" in draft and "bun.sh" in draft
-    assert "gh release edit" in draft and "--notes-file" in draft
-    assert "grep -q '^## Requirements'" in draft, (
+    spec = importlib.util.spec_from_file_location(
+        "release_reconcile_pages", ROOT / "tools" / "release-reconcile.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    body = module.release_body("9.9.9")
+    assert body.lstrip().startswith("## Requirements"), body[:60]
+    assert "Python 3.11" in body and "bun.sh" in body
+    assert "comodor==9.9.9" in body
+
+    source = (ROOT / "tools" / "release-reconcile.py").read_text(encoding="utf-8")
+    assert 'if "## Requirements" not in body:' in source, (
         "a draft that already states them must be left alone")
+    assert "REQUIREMENTS + " in source, "the block goes above the draft's own notes"

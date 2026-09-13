@@ -104,7 +104,7 @@ That is the whole of it. Pushing the tag runs `release.yml`, which:
 4. installs the wheel into a clean virtual environment and runs
    `comodor --version`, so a distribution that cannot start never ships, and
    checks that what it prints is the tag;
-5. publishes to PyPI;
+5. publishes to PyPI — only the files PyPI does not already hold;
 6. attaches the files to a GitHub release with generated notes;
 7. builds the container image and pushes it to Docker Hub and GHCR.
 
@@ -117,11 +117,60 @@ one time the release event *did* fire, for a release made by hand, the build
 started twenty seconds before the upload finished and asked for a version that
 was not there yet.
 
+## If a release stops halfway
+
+Run it again — the same tag, from the Actions page. Each of the four
+destinations is reconciled on its own by `tools/release-reconcile.py` against
+the files the run just built, and classified:
+
+| State | Meaning | What the run does |
+|---|---|---|
+| `ABSENT` | nothing there | publishes it |
+| `PARTIAL` | some of it there, all of it correct | publishes only the rest |
+| `COMPLETE` | all there, verified | nothing; the run summary says so |
+| `CONFLICT` | something there that is not this release | stops, and says what |
+
+"Verified" means checked, not assumed: a wheel or sdist on PyPI or on the
+release page is the same file when its SHA-256 matches what the run built —
+the build is byte-reproducible, and both services report the digest. An image
+in a registry is the same image when its `org.opencontainers.image.version`
+label names the release and it carries both platforms; the run also starts it
+and asks `comodor --version`.
+
+So a run that died after PyPI does not upload to PyPI again (PyPI would refuse
+the filename, and the release would be stuck forever); a run that died after
+the release page leaves the page alone and publishes the images; a run that
+died after GHCR copies the verified image to Docker Hub rather than building
+a second one; and a run of a release that is entirely done publishes nothing
+and finishes green. `latest` in each registry is a pointer and is moved to
+the release by retagging, never by a rebuild.
+
+Two things it will not do. It never overwrites: a PyPI file, a release asset
+or a semantic version image that differs from what the run built stops the
+run with both digests in the log — that is either another publisher's release
+under our number or a toolchain that no longer reproduces the tag, and either
+one needs a person. And it cannot finish a GitHub Release that was published
+and then frozen: this repository has immutable releases on, so a published
+release with files missing (`v1.2.1` and `v2.0.0` are both like this) cannot
+be completed in place, and the run says so plainly rather than warning and
+going green. The package on PyPI is unaffected; the files ship on the next
+patch release's page.
+
+`workflow_dispatch` with **dry run** ticked reads every destination and
+writes the same table without publishing anything — the way to see what a
+rerun would do before doing it. To rehearse a state that does not exist,
+describe it in a JSON file and ask the tool:
+
+```bash
+python tools/release-reconcile.py simulate state.json
+```
+
 ## Two ways to run it
 
 **Dry run** — Actions → Release → *Run workflow*, leaving **dry run** ticked.
-Everything up to publishing happens, and the run summary says plainly that
-nothing was published. Use it to rehearse.
+Everything up to publishing happens — the build, the image, and the plan for
+every destination — and the run summary says plainly that nothing was
+published. Use it to rehearse, and before rerunning a release that stopped.
 
 **Publish by hand** — the same, with **dry run** unticked. Useful for the first
 release, or to recover from a failed one. The version published is whatever
