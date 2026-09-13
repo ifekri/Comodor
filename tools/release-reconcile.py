@@ -296,8 +296,10 @@ class GitHub:
         self.repo = repo
         self._run = run or _run
 
-    def api(self, endpoint: str, *args: str) -> str:
-        return self._run(["gh", "api", f"repos/{self.repo}/{endpoint}", *args])
+    def api(self, endpoint: str, *args: str, stdin: str | None = None) -> str:
+        """One call to the REST API. `stdin` is the request body for a call
+        that passes `--input -`; it goes to `gh` on standard input."""
+        return self._run(["gh", "api", f"repos/{self.repo}/{endpoint}", *args], stdin=stdin)
 
     def release(self, tag: str) -> Release | None:
         try:
@@ -325,12 +327,21 @@ class GitHub:
 
     def download_sha256(self, asset: Asset) -> str:
         """GitHub reports a digest for every asset uploaded since mid-2025;
-        an older one is fetched and hashed, which is slower and just as true."""
+        an older one is fetched and hashed, which is slower and just as true.
+
+        `gh api` writes a non-JSON body to standard output as it is, so the
+        asset's bytes are read there, as bytes: an archive decoded as text
+        would hash as something else. Written to a file before hashing, so
+        what was hashed can be looked at when a digest disagrees.
+        """
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / asset.name
-            self._run(["gh", "api", f"repos/{self.repo}/releases/assets/{asset.id}",
-                       "-H", "Accept: application/octet-stream", "--output", str(target)])
+            target.write_bytes(self.download(asset))
             return sha256_of(target)
+
+    def download(self, asset: Asset) -> bytes:
+        return self._run(["gh", "api", f"repos/{self.repo}/releases/assets/{asset.id}",
+                          "-H", "Accept: application/octet-stream"], binary=True)
 
     def create_draft(self, tag: str, name: str, body: str) -> Release:
         # The body is put above the notes GitHub generates, as the API says.
@@ -621,13 +632,18 @@ def load_state(data: dict) -> list[Plan]:
 # --------------------------------------------------------------------------- #
 
 
-def _run(argv: list[str], stdin: str | None = None) -> str:
-    completed = subprocess.run(argv, input=stdin, capture_output=True, text=True,
-                               check=False, encoding="utf-8")
+def _run(argv: list[str], stdin: str | None = None, binary: bool = False) -> str | bytes:
+    """Run a command and return what it printed: text, or with `binary` the
+    raw bytes. A failure raises `CalledProcessError` carrying both streams
+    as text, whichever mode the call was in."""
+    completed = subprocess.run(argv, input=None if stdin is None else stdin.encode("utf-8"),
+                               capture_output=True, check=False)
     if completed.returncode != 0:
-        raise subprocess.CalledProcessError(completed.returncode, argv,
-                                            completed.stdout, completed.stderr)
-    return completed.stdout
+        raise subprocess.CalledProcessError(
+            completed.returncode, argv,
+            completed.stdout.decode("utf-8", errors="replace"),
+            completed.stderr.decode("utf-8", errors="replace"))
+    return completed.stdout if binary else completed.stdout.decode("utf-8")
 
 
 def sha256_of(path: Path) -> str:

@@ -161,6 +161,7 @@ jobs:
           # workflow_dispatch alike.
           WANTED: ${{ inputs.version }}
           DRY: ${{ inputs.dry_run }}
+          EVENT: ${{ github.event_name }}
         run: |
           echo "version=$WANTED" >> "$GITHUB_OUTPUT"
           # Only a release version names an image tag worth reconciling: a
@@ -171,7 +172,7 @@ jobs:
           else
             echo "release=" >> "$GITHUB_OUTPUT"
           fi
-          if [ "${{ github.event_name }}" = "pull_request" ] || [ "$DRY" = "true" ]; then
+          if [ "$EVENT" = "pull_request" ] || [ "$DRY" = "true" ]; then
             echo "publish=" >> "$GITHUB_OUTPUT"
           else
             echo "publish=yes" >> "$GITHUB_OUTPUT"
@@ -245,14 +246,25 @@ jobs:
               --repository "$REPO" --version "$VERSION" --source "$SOURCE"
           fi
 
-      # The tags one build pushes. On a release: the version tags the plan
-      # says to build, and nothing else — `latest` is moved afterwards by
-      # retagging, never by a build. Off a release (`edge`): as before,
-      # `latest` and `edge` together. A pull request or dry run pushes
-      # nothing; the local tag names the image under test.
+      # The tags one build pushes, and the one tag that names the image.
+      #
+      # The package version and the image tag are two different things. A
+      # release is tagged with exactly its version — `2.0.1` — and nothing
+      # else is ever accepted in its place. A build that publishes nothing
+      # (a pull request, a dry run) is tagged `dry-run`: a dry run from a
+      # branch builds a version like `2.0.2.dev3+g1234abc`, which no
+      # registry tag can carry (`+` is not in the tag grammar), and the tag
+      # is local anyway. A push to `main` that touches the Dockerfile is
+      # `edge`, as before, together with `latest`.
+      #
+      # On a release only the version tags the plan says to build are
+      # pushed — `latest` is moved afterwards by retagging, never by a
+      # build — and a version that is not a release version is refused
+      # rather than rewritten into something a registry would take.
       - name: Which tags
         id: tags
         env:
+          OWNER: ${{ github.repository_owner }}
           VERSION: ${{ steps.pick.outputs.version }}
           RELEASE: ${{ steps.pick.outputs.release }}
           PUBLISH: ${{ steps.pick.outputs.publish }}
@@ -260,35 +272,45 @@ jobs:
           GHCR_BUILD: ${{ steps.ghcr.outputs.build }}
           HUB_BUILD: ${{ steps.hubplan.outputs.build }}
         run: |
-          owner="${{ github.repository_owner }}"
-          label="${VERSION:-edge}"
+          set -euo pipefail
+          if [ -z "$PUBLISH" ]; then
+            tag="dry-run"
+          elif [ -n "$RELEASE" ]; then
+            tag="$VERSION"
+          elif [ -z "$VERSION" ]; then
+            tag="edge"
+          else
+            echo "::error::$VERSION is not a release version and cannot name a published image"
+            exit 1
+          fi
           build=""
           {
             echo "list<<EOF"
             if [ -z "$PUBLISH" ]; then
-              echo "ghcr.io/$owner/comodor:$label"
+              echo "ghcr.io/$OWNER/comodor:$tag"
               build=yes
             elif [ -z "$RELEASE" ]; then
-              echo "ghcr.io/$owner/comodor:latest"
-              echo "ghcr.io/$owner/comodor:$label"
+              echo "ghcr.io/$OWNER/comodor:latest"
+              echo "ghcr.io/$OWNER/comodor:$tag"
               if [ -n "$HUB" ]; then
                 echo "$HUB:latest"
-                echo "$HUB:$label"
+                echo "$HUB:$tag"
               fi
               build=yes
             else
               if [ "$GHCR_BUILD" = "true" ]; then
-                echo "ghcr.io/$owner/comodor:$label"
+                echo "ghcr.io/$OWNER/comodor:$tag"
                 build=yes
               fi
               if [ -n "$HUB" ] && [ "$HUB_BUILD" = "true" ]; then
-                echo "$HUB:$label"
+                echo "$HUB:$tag"
                 build=yes
               fi
             fi
             echo "EOF"
             echo "build=$build"
-            echo "test=ghcr.io/$owner/comodor:$label"
+            echo "tag=$tag"
+            echo "test=ghcr.io/$OWNER/comodor:$tag"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and push

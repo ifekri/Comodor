@@ -17,9 +17,11 @@ underneath the executors, and never touch a live service.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -828,3 +830,326 @@ def test_the_gate_still_refuses_a_tag_behind_main(bash, tmp_path):
     git(checkout, "fetch", "-q", "--tags")
     current = run_gate(bash, checkout, "v9.9.10", tmp_path)
     assert current.returncode == 0, current.stdout + current.stderr
+
+
+# --------------------------------------------------------------------------- #
+# the GitHub client over a `gh` that is not there: every call the release
+# makes, with the arguments and the standard input it makes it with
+# --------------------------------------------------------------------------- #
+
+
+class FakeGh:
+    """Stands in for the `gh` binary under `GitHub`: answers the calls the
+    release makes, records each one with its standard input, and refuses
+    what the real `gh api` refuses — a flag it does not have, a body sent
+    without `--input -`. Binary output is bytes, as `gh` prints it."""
+
+    def __init__(self, tool, release_json=None, assets_bytes=None):
+        self.tool = tool
+        self.release = release_json          # None: no release for the tag
+        self.assets_bytes = assets_bytes or {}
+        self.calls: list[tuple[list[str], str | None, bool]] = []
+        self._next_asset_id = 900
+
+    def __call__(self, argv, stdin=None, binary=False):
+        self.calls.append((list(argv), stdin, binary))
+        if "--output" in argv:
+            raise subprocess.CalledProcessError(1, argv, "", "unknown flag: --output")
+        if argv[:2] == ["gh", "api"]:
+            return self._api(argv, stdin, binary)
+        if argv[:3] == ["gh", "release", "upload"]:
+            assert self.release is not None
+            path = Path(argv[4])
+            self.release["assets"].append({
+                "name": path.name, "id": self._next_asset_id, "state": "uploaded",
+                "digest": "sha256:" + self.tool.sha256_of(path)})
+            self._next_asset_id += 1
+            return ""
+        raise AssertionError(f"unexpected command {argv}")
+
+    def _api(self, argv, stdin, binary):
+        endpoint = argv[2]
+        method = argv[argv.index("--method") + 1] if "--method" in argv else "GET"
+        if "--input" in argv:
+            assert argv[argv.index("--input") + 1] == "-", "a body is sent on stdin"
+            assert stdin is not None, "gh would block on an empty stdin"
+            payload = json.loads(stdin)
+        else:
+            payload = None
+        if endpoint.endswith("/releases") and method == "POST":
+            assert self.release is None
+            self.release = {"id": 42, "draft": payload["draft"], "immutable": False,
+                            "assets": [], "html_url": "https://x/" + payload["tag_name"],
+                            "body": payload["body"] + "\n\n## What's Changed\n* generated\n",
+                            "tag_name": payload["tag_name"]}
+            assert payload["generate_release_notes"] is True
+            return json.dumps(self.release)
+        if "/releases/tags/" in endpoint:
+            if self.release is None:
+                raise subprocess.CalledProcessError(
+                    1, argv, "", "gh: Not Found (HTTP 404)")
+            return json.dumps(self.release)
+        if "/releases/assets/" in endpoint:
+            asset_id = int(endpoint.rsplit("/", 1)[1])
+            assert "Accept: application/octet-stream" in argv
+            if not binary:
+                raise AssertionError("an asset body must be read as bytes")
+            return self.assets_bytes[asset_id]
+        if endpoint.endswith(f"/releases/{self.release['id']}"):
+            if "--jq" in argv:
+                return self.release["body"]
+            if method == "PATCH":
+                if payload is not None:
+                    self.release.update(payload)
+                elif "draft=false" in argv:
+                    self.release["draft"] = False
+                    self.release["immutable"] = True
+                return json.dumps(self.release)
+        raise AssertionError(f"unexpected api call {argv}")
+
+
+def calls_to(gh: FakeGh, *prefix: str):
+    return [call for call in gh.calls if call[0][:len(prefix)] == list(prefix)]
+
+
+def expected_from(tool, dist_dir):
+    return tool.local_dists(dist_dir, VERSION)
+
+
+def test_a_first_release_is_created_through_the_wrapper_with_stdin(tool, dist_dir):
+    """Path A, the normal first publication: no release for the tag, so the
+    draft is created with a JSON body on `gh api`'s standard input, the
+    files are uploaded, the draft is published. On the previous head the
+    wrapper took no `stdin` and the very first call raised a TypeError."""
+    gh = FakeGh(tool)
+    github = tool.GitHub("ifekri/Comodor", run=gh)
+    plan = tool.plan_github(expected_from(tool, dist_dir), github.release("v" + VERSION))
+    assert plan.state == tool.ABSENT
+    after = tool.apply_github(plan, github, "v" + VERSION, VERSION, dist_dir, None)
+    assert tool.plan_github(expected_from(tool, dist_dir), after).state == tool.COMPLETE
+
+    creates = [c for c in calls_to(gh, "gh", "api") if "POST" in c[0]]
+    assert len(creates) == 1
+    argv, stdin, binary = creates[0]
+    assert argv[2] == "repos/ifekri/Comodor/releases"
+    assert argv[argv.index("--input") + 1] == "-" and binary is False
+    body = json.loads(stdin)
+    assert body["tag_name"] == "v" + VERSION and body["draft"] is True
+    assert body["body"].startswith("## Requirements")
+    uploads = calls_to(gh, "gh", "release", "upload")
+    assert [Path(c[0][4]).name for c in uploads] == [WHEEL, SDIST]
+    assert all("--clobber" not in c[0] for c in uploads)
+    assert not gh.release["draft"], "published at the end"
+
+
+def test_a_draft_gains_the_requirements_through_stdin(tool, dist_dir):
+    """Path B: a hand-written draft is finished and its body is set with a
+    JSON document on standard input — the second call that took `stdin`."""
+    gh = FakeGh(tool, {"id": 7, "draft": True, "immutable": False, "assets": [],
+                       "html_url": "https://x/v" + VERSION,
+                       "body": "Hand-written notes.\n"})
+    github = tool.GitHub("ifekri/Comodor", run=gh)
+    found = github.release("v" + VERSION)
+    plan = tool.plan_github(expected_from(tool, dist_dir), found)
+    tool.apply_github(plan, github, "v" + VERSION, VERSION, dist_dir, found)
+
+    patches = [c for c in calls_to(gh, "gh", "api")
+               if "PATCH" in c[0] and "--input" in c[0]]
+    assert len(patches) == 1
+    argv, stdin, _ = patches[0]
+    assert argv[2] == "repos/ifekri/Comodor/releases/7"
+    assert json.loads(stdin)["body"].startswith("## Requirements")
+    assert "Hand-written notes." in json.loads(stdin)["body"]
+    assert gh.release["body"].startswith("## Requirements")
+    assert not gh.release["draft"]
+
+
+def test_a_legacy_asset_without_a_digest_is_downloaded_as_bytes_and_hashed(tool):
+    """Path C: an asset uploaded before GitHub reported digests. `gh api`
+    has no `--output`; the body is read from standard output as bytes —
+    a wheel is a zip and is not UTF-8 — and hashed from those bytes."""
+    payload = b"PK\x03\x04\xff\xfe\x00\x80 not text \xc3\x28" * 1000
+    gh = FakeGh(tool, {"id": 7, "draft": False, "immutable": True,
+                       "html_url": "", "body": "",
+                       "assets": [{"name": WHEEL, "id": 321, "state": "uploaded",
+                                   "size": len(payload)}]},
+                assets_bytes={321: payload})
+    github = tool.GitHub("ifekri/Comodor", run=gh)
+    found = github.release("v" + VERSION)
+    assert found is not None
+    assert found.assets[0].sha256 == hashlib.sha256(payload).hexdigest()
+
+    fetches = [c for c in gh.calls if "/releases/assets/321" in c[0][2]]
+    assert len(fetches) == 1
+    argv, stdin, binary = fetches[0]
+    assert argv == ["gh", "api", "repos/ifekri/Comodor/releases/assets/321",
+                    "-H", "Accept: application/octet-stream"]
+    assert binary is True and stdin is None
+
+
+def test_the_runner_keeps_bytes_as_bytes_and_errors_as_text(tool, tmp_path):
+    """`_run` itself, on a real process: binary output is returned intact,
+    text output is decoded, a failure carries both streams as text."""
+    script = tmp_path / "emit.py"
+    script.write_text(
+        "import sys\n"
+        "sys.stdout.buffer.write(bytes(range(256)))\n"
+        "sys.stdout.buffer.flush()\n"
+        "sys.stderr.write('warned')\n"
+        "sys.exit(int(sys.argv[1]))\n", encoding="utf-8")
+    raw = tool._run([sys.executable, str(script), "0"], binary=True)
+    assert raw == bytes(range(256))
+    with pytest.raises(subprocess.CalledProcessError) as caught:
+        tool._run([sys.executable, str(script), "3"], binary=True)
+    assert caught.value.returncode == 3 and "warned" in caught.value.stderr
+    assert isinstance(caught.value.stdout, str)
+
+    echo = tmp_path / "echo.py"
+    echo.write_text("import sys; sys.stdout.write(sys.stdin.read().upper())",
+                    encoding="utf-8")
+    assert tool._run([sys.executable, str(echo)], stdin="hello") == "HELLO"
+
+
+# --------------------------------------------------------------------------- #
+# the image tag is not the package version
+# --------------------------------------------------------------------------- #
+
+# The reference grammar from distribution/reference (docker/distribution):
+# a name is domain-optional path components; a tag is up to 128 word
+# characters, dots and dashes, starting with a word character. `+` is not
+# in it — and a hatch-vcs dev version has one.
+_COMPONENT = r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
+_LABEL = r"[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?"
+_DOMAIN = rf"(?:{_LABEL}(?:\.{_LABEL})*(?::[0-9]+)?)"
+REFERENCE = re.compile(
+    rf"^(?:{_DOMAIN}/)?{_COMPONENT}(?:/{_COMPONENT})*(?::(?P<tag>[\w][\w.-]{{0,127}}))?$")
+
+
+def is_valid_reference(reference: str) -> bool:
+    return REFERENCE.match(reference) is not None
+
+
+def test_the_reference_grammar_is_the_one_registries_use():
+    assert is_valid_reference("ghcr.io/ifekri/comodor:2.0.1")
+    assert is_valid_reference("ifekri/comodor:latest")
+    assert is_valid_reference("ghcr.io/ifekri/comodor:dry-run")
+    assert not is_valid_reference("ghcr.io/ifekri/comodor:2.0.2.dev3+g1234abc")
+    assert not is_valid_reference("ghcr.io/ifekri/comodor:")
+    assert not is_valid_reference("ghcr.io/ifekri/comodor:-x")
+
+
+def image_step(name: str) -> dict:
+    for step in workflow(IMAGE_YML)["jobs"]["build"]["steps"]:
+        if step.get("name") == name:
+            return step
+    raise AssertionError(f"no step {name!r}")
+
+
+def run_step(bash: str, step: dict, env: dict[str, str], tmp_path: Path) -> dict[str, str]:
+    """Run a workflow step's script with `env`, the way the runner would,
+    and return what it wrote to GITHUB_OUTPUT (multi-line values included)."""
+    output = tmp_path / f"{step['id']}.out"
+    output.write_text("", encoding="utf-8")
+    full = {**os.environ, **env, "GITHUB_OUTPUT": str(output)}
+    completed = subprocess.run([bash, "-c", step["run"]], env=full,
+                               capture_output=True, text=True)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    parsed: dict[str, str] = {}
+    lines = output.read_text(encoding="utf-8").splitlines()
+    index = 0
+    while index < len(lines):
+        key, _, value = lines[index].partition("=")
+        if lines[index].endswith("<<EOF"):
+            key, _, _ = lines[index].partition("<<")
+            block = []
+            index += 1
+            while lines[index] != "EOF":
+                block.append(lines[index])
+                index += 1
+            parsed[key] = "\n".join(block)
+        else:
+            parsed[key] = value
+        index += 1
+    return parsed
+
+
+def pick_and_tag(bash, tmp_path, *, version, event, dry_run,
+                 hub="", ghcr_build="", hub_build=""):
+    pick = run_step(bash, image_step("Which version"),
+                    {"WANTED": version, "DRY": dry_run, "EVENT": event}, tmp_path)
+    tags = run_step(bash, image_step("Which tags"), {
+        "OWNER": "ifekri", "VERSION": pick["version"], "RELEASE": pick["release"],
+        "PUBLISH": pick["publish"], "HUB": hub,
+        "GHCR_BUILD": ghcr_build, "HUB_BUILD": hub_build}, tmp_path)
+    return pick, tags
+
+
+def test_a_dry_run_from_a_development_main_gets_a_docker_safe_tag(bash, tmp_path):
+    """Path D: `workflow_dispatch` between releases, where hatch-vcs names
+    the tree `2.0.2.dev3+g1234abc`. Not a release version, so nothing is
+    published — and the local tag must be one a registry would accept,
+    because `docker build -t` applies the same grammar."""
+    pick, tags = pick_and_tag(bash, tmp_path, version="2.0.2.dev3+g1234abc",
+                              event="workflow_dispatch", dry_run="true")
+    assert pick["release"] == "" and pick["publish"] == ""
+    assert tags["build"] == "yes"
+    references = tags["list"].splitlines()
+    assert references == ["ghcr.io/ifekri/comodor:dry-run"]
+    assert tags["test"] == "ghcr.io/ifekri/comodor:dry-run"
+    for reference in references + [tags["test"]]:
+        assert is_valid_reference(reference), reference
+        assert "2.0.2.dev3" not in reference
+
+
+def test_a_pull_request_build_is_tagged_the_same_way(bash, tmp_path):
+    pick, tags = pick_and_tag(bash, tmp_path, version="", event="pull_request", dry_run="")
+    assert pick["publish"] == ""
+    assert tags["list"].splitlines() == ["ghcr.io/ifekri/comodor:dry-run"]
+    assert all(is_valid_reference(r) for r in tags["list"].splitlines())
+
+
+def test_a_stable_release_is_tagged_with_exactly_its_version(bash, tmp_path):
+    """Path E: the version is the tag, character for character, in every
+    registry the plan says to push to, and `latest` is not among them."""
+    pick, tags = pick_and_tag(bash, tmp_path, version="2.0.1", event="push", dry_run="",
+                              hub="ifekri/comodor", ghcr_build="true", hub_build="true")
+    assert pick["release"] == "yes" and pick["publish"] == "yes"
+    assert tags["tag"] == "2.0.1"
+    assert tags["list"].splitlines() == ["ghcr.io/ifekri/comodor:2.0.1",
+                                         "ifekri/comodor:2.0.1"]
+    assert tags["test"] == "ghcr.io/ifekri/comodor:2.0.1"
+    assert all(is_valid_reference(r) for r in tags["list"].splitlines())
+
+    _, only_hub = pick_and_tag(bash, tmp_path, version="2.0.1", event="push", dry_run="",
+                               hub="ifekri/comodor", ghcr_build="false", hub_build="true")
+    assert only_hub["list"].splitlines() == ["ifekri/comodor:2.0.1"]
+    _, nothing = pick_and_tag(bash, tmp_path, version="2.0.1", event="push", dry_run="",
+                              hub="", ghcr_build="false", hub_build="false")
+    assert nothing["list"] == "" and nothing["build"] == ""
+
+
+def test_a_main_push_without_a_version_is_edge_and_latest(bash, tmp_path):
+    _, tags = pick_and_tag(bash, tmp_path, version="", event="push", dry_run="",
+                           hub="ifekri/comodor")
+    assert tags["list"].splitlines() == [
+        "ghcr.io/ifekri/comodor:latest", "ghcr.io/ifekri/comodor:edge",
+        "ifekri/comodor:latest", "ifekri/comodor:edge"]
+
+
+def test_a_publishing_run_never_rewrites_a_non_release_version_into_a_tag(bash, tmp_path):
+    """A version that is not a release version is refused, not sanitized:
+    a tag that differs from the version would be a different identity."""
+    pick = run_step(bash, image_step("Which version"),
+                    {"WANTED": "2.0.2.dev3+g1234abc", "DRY": "false", "EVENT": "push"},
+                    tmp_path)
+    assert pick["publish"] == "yes" and pick["release"] == ""
+    step = image_step("Which tags")
+    output = tmp_path / "refused.out"
+    output.write_text("", encoding="utf-8")
+    completed = subprocess.run([bash, "-c", step["run"]], env={
+        **os.environ, "OWNER": "ifekri", "VERSION": "2.0.2.dev3+g1234abc", "RELEASE": "",
+        "PUBLISH": "yes", "HUB": "", "GHCR_BUILD": "", "HUB_BUILD": "",
+        "GITHUB_OUTPUT": str(output)}, capture_output=True, text=True)
+    assert completed.returncode == 1
+    assert "not a release version" in completed.stdout
+    assert output.read_text(encoding="utf-8") == ""
