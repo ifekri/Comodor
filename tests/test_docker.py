@@ -106,7 +106,7 @@ def test_the_image_is_rebuilt_when_a_version_ships():
         text(ROOT / ".github" / "workflows" / "release.yml"))
     image = release["jobs"]["image"]
     assert image["uses"].endswith("image.yml")
-    assert "publish" in image["needs"], (
+    assert "pypi-publish" in image["needs"], (
         "it would build before PyPI has the version it installs")
 
 

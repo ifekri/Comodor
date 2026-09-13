@@ -42,10 +42,20 @@ RUN python -m venv /opt/comodor \
 # --------------------------------------------------------------------------- #
 FROM python:3.13-slim-bookworm
 
+# Declared again: a build argument does not cross a stage boundary. The
+# version and the commit go on the image as labels, so a registry can be
+# asked what a tag holds without pulling it — that is how a release that
+# is run again tells an image it already published from one it must not
+# overwrite. Empty for an unpinned build, which is not a release.
+ARG COMODOR_VERSION=
+ARG COMODOR_REVISION=
+
 LABEL org.opencontainers.image.title="Comodor" \
       org.opencontainers.image.description="A self-improving terminal coding agent, in a browser." \
       org.opencontainers.image.source="https://github.com/ifekri/Comodor" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${COMODOR_VERSION}" \
+      org.opencontainers.image.revision="${COMODOR_REVISION}"
 
 # chromium: the browser tool, which has nothing to drive otherwise.
 # chromium-sandbox: without it Chromium will not start at all here, and the
