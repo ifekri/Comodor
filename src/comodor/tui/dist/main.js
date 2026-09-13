@@ -70651,6 +70651,21 @@ var PAGE = 8;
 var RUNNING_OUTPUT_LINES = 3;
 var EXPANDED_OUTPUT_LINES = 20;
 var ERROR_LINES = 3;
+function useOverlay() {
+  const [state, setState] = import_react18.useState(undefined);
+  const ref = import_react18.useRef(undefined);
+  const closing = import_react18.useRef(false);
+  const update = import_react18.useCallback((next) => {
+    const value = typeof next === "function" ? next(ref.current) : next;
+    if (value === undefined && ref.current !== undefined)
+      closing.current = true;
+    ref.current = value;
+    setState(value);
+  }, []);
+  if (state === undefined)
+    closing.current = false;
+  return [state, ref, update, closing];
+}
 function safestChoice(request) {
   const options = Array.isArray(request["options"]) ? request["options"] : [];
   const at = options.findIndex((option) => String(option) === "deny");
@@ -70662,9 +70677,9 @@ function choicesOf(request) {
 function App({ client, onQuit, sessionId }) {
   const [state, dispatch] = import_react18.useReducer(reduce, initial);
   const [draft, setDraft] = import_react18.useState("");
-  const [palette, setPalette] = import_react18.useState();
-  const [models, setModels] = import_react18.useState();
-  const [sessions, setSessions] = import_react18.useState();
+  const [palette, paletteRef, setPalette, paletteClosing] = useOverlay();
+  const [models, modelsRef, setModels, modelsClosing] = useOverlay();
+  const [sessions, sessionsRef, setSessions, sessionsClosing] = useOverlay();
   const [question, setQuestion] = import_react18.useState();
   const [permit, setPermit] = import_react18.useState();
   const [intent, setIntent] = import_react18.useState(() => begin("act"));
@@ -70684,12 +70699,6 @@ function App({ client, onQuit, sessionId }) {
   questionRef.current = question;
   const permitRef = import_react18.useRef(permit);
   permitRef.current = permit;
-  const paletteRef = import_react18.useRef(palette);
-  paletteRef.current = palette;
-  const modelsRef = import_react18.useRef(models);
-  modelsRef.current = models;
-  const sessionsRef = import_react18.useRef(sessions);
-  sessionsRef.current = sessions;
   const workbenchRef = import_react18.useRef(workbench);
   workbenchRef.current = workbench;
   const blockedRef = import_react18.useRef(undefined);
@@ -71190,6 +71199,9 @@ function App({ client, onQuit, sessionId }) {
         }
         return;
       }
+      return;
+    }
+    if (paletteClosing.current || modelsClosing.current || sessionsClosing.current) {
       return;
     }
     if (open) {

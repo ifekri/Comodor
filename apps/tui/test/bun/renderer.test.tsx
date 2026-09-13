@@ -751,6 +751,24 @@ describe("the model chooser", () => {
     view.client.close();
   });
 
+  test("a pasted name and its Enter choose the model the name filtered",
+       async () => {
+    // "qwen" and Enter in one chunk: Enter must act on the filtered list,
+    // not on the list as last drawn, where the current model sits on top.
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("model");
+    view.mockInput.pressEnter();
+    await waitForText(view, "type a model");
+    await view.mockInput.typeText("qwen");
+    view.mockInput.pressEnter();
+    await view.waitForFrame((frame) => frame.includes("fake · qwen3:8b"), MODE_PASSES);
+    expect(view.core.model).toBe("qwen3:8b");
+    view.client.close();
+  });
+
   test("a refused switch leaves the header alone and says why", async () => {
     const view = await screen();
     await view.waitForFrame((frame) => frame.includes("fake-1"));
@@ -2747,9 +2765,10 @@ describe("the agents panel", () => {
                     { session_id: "s1", delegate: wireAgent(id, "done") });
     }
     // Five settled rows, four drawn: unfocused, the newest are shown and the
-    // oldest one is not.
-    expect(view.frame()).toContain("d5 done");
-    expect(view.frame()).not.toContain("d1 done");
+    // oldest one is not. The fifth row is waited for, not assumed after one
+    // yield: a loaded machine captured the frame with four rows drawn.
+    const settled = await waitForText(view, "d5 done");
+    expect(settled).not.toContain("d1 done");
 
     view.mockInput.pressKey("b", { ctrl: true });
     // The cursor opened on the first row, which the window now draws —
@@ -2843,7 +2862,9 @@ describe("stopping a background agent", () => {
 
     // Selecting is a click on the row. It must not stop anything — one
     // accidental click on an arbitrary row is not a decision about work.
-    const row = locate(view.frame(), "d2 running");
+    // The row is waited for, not assumed after one yield: a loaded machine
+    // captured the frame with the second agent still on its way.
+    const row = locate(await waitForText(view, "d2 running"), "d2 running");
     view.mockMouse.click(row.x, row.y);
     await letReactRun(view);
     expect(view.sentStops()).toEqual([]);
@@ -3160,8 +3181,11 @@ describe("the workbench after a reconnect", () => {
                                      state: "pending" }] }, 50));
     await letReactRun(view);
 
-    await view.waitForFrame((frame) => frame.includes("the true plan"),
-                            MODE_PASSES);
+    // The repair is a round trip: the snapshot is asked for, then drawn. An
+    // idle renderer has no frame to wait on until the answer lands, and
+    // `waitForFrame` gives up the moment nothing is scheduled — so a
+    // wall-clock poll, as the chooser tests do for the same reason.
+    await waitForText(view, "the true plan");
     const frame = view.frame();
     expect(view.core.methods()).toContain("session.snapshot");
     expect(frame).toMatch(/Tasks\s+1\/1/);
@@ -3218,6 +3242,71 @@ describe("earlier conversations", () => {
     frame = view.frame();
     expect(frame).toContain("the parser drops braces");
     expect(view.core.methods()).toContain("session.open");
+    view.client.close();
+  });
+
+  test("a pasted query and its Enter pick the command the query names",
+       async () => {
+    // "earlier" and Enter in one chunk, the way a paste arrives: every key
+    // handler runs before React has re-rendered once. Enter must act on
+    // the query that was just typed, not on the palette as last drawn —
+    // which is the whole registry with "Next mode" on top.
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    stock(view.core as never as Parameters<typeof stock>[0]);
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("earlier");
+    view.mockInput.pressEnter();
+    await waitForText(view, "type a title", 2_000);
+    expect(view.core.methods()).toContain("session.history");
+    expect(view.core.methods()).not.toContain("session.set_mode");
+    expect(view.frame()).toContain("[ACT]");
+    view.client.close();
+  });
+
+  test("a pasted title and its Enter open the conversation it filtered",
+       async () => {
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    stock(view.core as never as Parameters<typeof stock>[0]);
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("earlier");
+    view.mockInput.pressEnter();
+    await waitForText(view, "type a title", 2_000);
+    // "add" narrows the list to the second conversation; Enter in the same
+    // chunk must open that one, not the first as last drawn.
+    await view.mockInput.typeText("add");
+    view.mockInput.pressEnter();
+    await waitForText(view, "cover the cache", 2_000);
+    expect(view.frame()).not.toContain("the parser drops braces");
+    expect(view.core.methods()).toContain("session.open");
+    view.client.close();
+  });
+
+  test("a second Enter before the picker is drawn gone is the picker's, not the composer's",
+       async () => {
+    // A draft is waiting in the composer. Two returns in one chunk — a key
+    // held down, a paste — open the conversation once and send nothing:
+    // the second return belongs to the picker the person can still see,
+    // not to a draft that would go to a conversation about to be replaced.
+    const view = await screen();
+    await view.waitForFrame((frame) => frame.includes("fake-1"));
+    await view.mockInput.typeText("keep this draft");
+    await waitForText(view, "keep this draft");
+    stock(view.core as never as Parameters<typeof stock>[0]);
+    view.mockInput.pressKey("k", { ctrl: true });
+    await view.waitForFrame((frame) => frame.includes("type a command"));
+    await view.mockInput.typeText("earlier");
+    view.mockInput.pressEnter();
+    await waitForText(view, "type a title", 2_000);
+    view.mockInput.pressEnter();
+    view.mockInput.pressEnter();
+    await waitForText(view, "the scanner skips them", 2_000);
+    const methods = view.core.methods();
+    expect(methods.filter((method) => method === "session.open")).toEqual(["session.open"]);
+    expect(methods).not.toContain("session.send");
     view.client.close();
   });
 
