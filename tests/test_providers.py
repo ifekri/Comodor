@@ -628,3 +628,40 @@ def test_bai_is_reachable_and_makes_tool_calls():
     choice = body["choices"][0]
     assert choice.get("finish_reason") == "tool_calls"
     assert choice["message"].get("tool_calls"), "no tool call came back"
+
+
+# --------------------------------------------------------------------------- #
+# the fake provider's script queue, under concurrent callers
+# --------------------------------------------------------------------------- #
+
+
+def test_the_fake_provider_hands_each_script_to_exactly_one_caller():
+    """Two background passes ask the fake at once. Reading the index and then
+    bumping it is two steps; without a lock, callers arriving together could
+    both be served the same script, or one skipped."""
+    import threading
+
+    from comodor.providers.base import Message
+    from comodor.providers.fake import FakeProvider, Script
+
+    scripts = [Script(text=f"reply {n}") for n in range(16)]
+    provider = FakeProvider(scripts=scripts)
+    gate = threading.Barrier(len(scripts))
+    served: list[str] = []
+    lock = threading.Lock()
+
+    def ask() -> None:
+        gate.wait()
+        text = "".join(event.text for event in provider.stream([Message.user("?")])
+                       if getattr(event, "text", ""))
+        with lock:
+            served.append(text)
+
+    threads = [threading.Thread(target=ask) for _ in scripts]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert sorted(served) == sorted(script.text for script in scripts), (
+        "every script exactly once, whatever the arrival order")

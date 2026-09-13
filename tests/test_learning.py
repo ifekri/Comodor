@@ -313,3 +313,67 @@ def test_a_failed_task_penalises_the_lessons_it_relied_on(config, bus):
     assert stored.losses == 1
     assert stored.wins == 0
     memory.close()
+
+
+# --------------------------------------------------------------------------- #
+# the two background passes, in a fixed order
+# --------------------------------------------------------------------------- #
+
+
+def test_reflection_asks_the_model_before_the_review_does(config, bus):
+    """Reflection and the curated-memory review are each one model call after
+    a task. They used to start on two threads at once, and against a scripted
+    provider the review took the reflection's reply one run in forty — the
+    lesson was never stored, and the test above failed on a CI runner. The
+    order is a fact of the code now: reflection first, then the review, on one
+    worker, with both enabled here on purpose.
+    """
+    from comodor.agent.prompts import REFLECT_PROMPT, REVIEW_PROMPT
+
+    assert config.learning.reflect and config.learning.review
+    scripts = [
+        Script(text="I ran the tests from the root and they passed."),
+        Script(text=f"```json\n{REFLECTION}\n```"),      # the reflection pass
+        Script(text=json.dumps({"facts": []})),          # the review pass
+    ]
+    gateway = Gateway(config, scripts=scripts)
+    memory = LearningEngine(config, bus, gateway)
+    agent = AgentLoop(config, gateway, ToolRegistry(), bus,
+                      PermissionEngine(config, bus), Conversation(), memory)
+
+    agent.run("run the test suite")
+    memory.wait_for_reflection(timeout=10.0)
+
+    provider = gateway.provider("fake")
+    systems = [call[0].content for call in provider.calls if call]
+    assert systems[1:] == [REFLECT_PROMPT, REVIEW_PROMPT], (
+        "the second call is the reflection and the third the review; nothing "
+        "else may sit between the turn and them")
+    assert len(memory.store.all_lessons()) == 1
+    memory.close()
+
+
+def test_the_wait_covers_a_pass_started_by_another_pass(config, bus):
+    """The worker starts the review after reflecting. A wait that snapshotted
+    the thread list once would join the worker and return while the review
+    it started still ran — and `close()` would leave it running."""
+    import threading
+
+    scripts = [
+        Script(text="done."),
+        Script(text=f"```json\n{REFLECTION}\n```"),
+        Script(text=json.dumps({"facts": []})),
+    ]
+    gateway = Gateway(config, scripts=scripts)
+    memory = LearningEngine(config, bus, gateway)
+    agent = AgentLoop(config, gateway, ToolRegistry(), bus,
+                      PermissionEngine(config, bus), Conversation(), memory)
+
+    agent.run("do the thing")
+    memory.wait_for_reflection(timeout=10.0)
+
+    assert not memory._threads, "nothing started by the engine may still be running"
+    assert not [thread.name for thread in threading.enumerate()
+                if thread.name in ("comodor-learn", "comodor-review")], (
+        "a learning thread outlived the wait")
+    memory.close()

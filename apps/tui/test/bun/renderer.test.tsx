@@ -2027,6 +2027,10 @@ describe("permissions", () => {
         title: "run: a command long enough to have to wrap somewhere in here",
         detail: Array.from({ length: 12 }, (_each, at) => `output line ${at}`).join("\n"),
       });
+      // One macrotask is not a paint: on a slow macOS runner the frame was
+      // captured with the card still on its way. Wait for it, as the other
+      // permission tests do.
+      await view.waitForFrame((frame) => frame.includes("[Deny]"));
 
       const frame = view.frame();
       for (const row of frame.split("\n")) {
@@ -2070,7 +2074,9 @@ describe("permissions", () => {
       detail: "$ npm test — پوشهٔ build",
     });
 
-    const frame = view.frame();
+    // The card is waited for, not assumed after one yield: on a loaded
+    // runner the frame was captured with the card still on its way.
+    const frame = await view.waitForFrame((frame) => frame.includes("[Deny]"));
     expect(frame).toContain("اجازه");
     expect(frame).toContain("[Deny]");
     view.client.close();
@@ -2945,7 +2951,9 @@ describe("the workbench and the rest of the screen", () => {
       { text: "carry on", state: "active" }] });
     await emitRun(view, "delegate.updated",
                   { session_id: "s1", delegate: wireAgent("d1", "stopping") });
-    const frame = view.frame();
+    // The last update is waited for, not assumed after one yield: a loaded
+    // runner captured "d1 running" with the stop still on its way.
+    const frame = await view.waitForFrame((frame) => frame.includes("d1 stopping"));
     expect(frame).toContain("Permission needed");
     expect(frame).toContain("carry on");
     expect(frame).toContain("d1 stopping");

@@ -52,6 +52,9 @@ class LearningEngine:
         self.project_scope = f"project:{project_key(config.paths.project)}"
         self._reflect_lock = threading.Lock()
         self._threads: list[threading.Thread] = []
+        #: Guards `_threads`: callers append while a waiter prunes, and a
+        #: prune written as a fresh list would drop an append made in between.
+        self._threads_lock = threading.Lock()
 
         # Curated memory: a small, separate shelf. The facts service is
         # cheap to build (one store handle, no threads) and is created even
@@ -166,7 +169,8 @@ class LearningEngine:
 
         thread = threading.Thread(target=work, daemon=True, name="comodor-scan")
         thread.start()
-        self._threads.append(thread)
+        with self._threads_lock:
+            self._threads.append(thread)
         return 1
 
     # -- 1. recall -------------------------------------------------------- #
@@ -411,35 +415,61 @@ class LearningEngine:
             # lessons from the useless ones.
             self.store.credit([lesson.id for lesson in recalled], won=success)
 
-        if self.config.learning.reflect and self.gateway is not None:
-            self._reflect_async(goal, list(messages), stopped, episode.id)
-
-        self._review_async(messages, stopped, episode.id)
+        self._learn_async(goal, list(messages), stopped, episode.id,
+                          cancel_reason=cancel_reason)
 
     # -- 4. reflect ------------------------------------------------------- #
 
-    def _reflect_async(self, goal: str, messages: list[Any], outcome: str,
-                       episode_id: int) -> None:
+    def _learn_async(self, goal: str, messages: list[Any], outcome: str,
+                     episode_id: int, cancel_reason: str = "") -> None:
+        """The model-backed passes over a finished task, on one worker.
+
+        Reflection distils lessons; the review curates facts. Each is one
+        model call against the same gateway, and they used to start on two
+        threads at once — which made their order a scheduling accident. In
+        production that was two requests in flight for one turn; against a
+        scripted provider it handed the reflection's reply to the review one
+        run in forty, and a lesson was never learned. One worker runs them in
+        a fixed order, reflection first, so the order is a fact of the code
+        rather than of the scheduler, and one request is in flight at a time.
+        """
+        reflect = bool(self.config.learning.reflect and self.gateway is not None)
+        review = bool(self.config.learning.enabled and self.config.learning.review
+                      and self.gateway is not None)
+        if not reflect and not review:
+            return
+        # The review's "latest wins" ticket is drawn here, on the turn's own
+        # thread, so two turns' reviews rank in the order the turns ended even
+        # when the earlier one runs behind a slower reflection.
+        generation = self._ensure_reviewer().reserve() if review else None
         thread = threading.Thread(
-            target=self._reflect, args=(goal, messages, outcome, episode_id),
-            daemon=True, name="comodor-reflect",
+            target=self._learn_in_background,
+            args=(goal, messages, outcome, episode_id, cancel_reason,
+                  reflect, generation),
+            daemon=True, name="comodor-learn",
         )
         thread.start()
-        self._threads.append(thread)
+        with self._threads_lock:
+            self._threads.append(thread)
 
-    def _review_async(self, messages: list[Any], outcome: str,
-                      episode_id: int, cancel_reason: str = "") -> None:
-        """The curated-memory review, after the turn has fully ended.
+    def _learn_in_background(self, goal: str, messages: list[Any], outcome: str,
+                             episode_id: int, cancel_reason: str,
+                             reflect: bool, generation: int | None) -> None:
+        if reflect:
+            try:
+                self._reflect(goal, messages, outcome, episode_id)
+            except Exception:              # noqa: BLE001 - the review still runs
+                pass
+        if generation is not None:
+            # The reviewer keeps its own thread; this worker waits for it, so
+            # a join on the worker is a join on everything the task started.
+            thread = self._review_async(messages, outcome, episode_id,
+                                        cancel_reason=cancel_reason,
+                                        generation=generation)
+            if thread is not None:
+                thread.join()
 
-        Announced through the bus when something stuck, for the same reason
-        every other learned thing is announced: silent adaptation is the
-        version of this feature nobody trusts.
-        """
-        if not self.config.learning.enabled or not self.config.learning.review:
-            return
-        if self.gateway is None:
-            return
-
+    def _ensure_reviewer(self):
         if self._reviewer is None:
             from .review import Reviewer
 
@@ -450,10 +480,26 @@ class LearningEngine:
                 staging=self.config.learning.review_write_approval,
             )
             self._reviewer.on_accepted = self._announce_facts
-        thread = self._reviewer.review_async(
-            messages, outcome, episode_id, cancel_reason=cancel_reason)
-        if thread is not None:
-            self._threads.append(thread)
+        return self._reviewer
+
+    def _review_async(self, messages: list[Any], outcome: str,
+                      episode_id: int, cancel_reason: str = "",
+                      generation: int | None = None) -> threading.Thread | None:
+        """The curated-memory review, after the turn has fully ended.
+
+        Announced through the bus when something stuck, for the same reason
+        every other learned thing is announced: silent adaptation is the
+        version of this feature nobody trusts. Returns the thread it started
+        for the worker that started it to wait on; it is not added to
+        `_threads`, because the worker already there outlives it.
+        """
+        if not self.config.learning.enabled or not self.config.learning.review:
+            return None
+        if self.gateway is None:
+            return None
+        return self._ensure_reviewer().review_async(
+            messages, outcome, episode_id, cancel_reason=cancel_reason,
+            generation=generation)
 
     def _announce_facts(self, facts: list[Any], staged: bool) -> None:
         """Say what the review wrote, once it has actually written it."""
@@ -507,14 +553,26 @@ class LearningEngine:
         return stored, merged
 
     def wait_for_reflection(self, timeout: float = 30.0) -> None:
-        """Block until background reflection settles — used by tests and exit."""
+        """Block until every background learning pass has settled.
+
+        Used by tests and at exit. When this returns before the deadline,
+        nothing the engine started is still running and everything it
+        learned is in the store: the wait re-reads the thread list after
+        every join rather than snapshotting it once, because a pass can start
+        another (the worker starts the review) after the snapshot was taken.
+        """
         deadline = time.monotonic() + timeout
-        for thread in list(self._threads):
+        while True:
+            with self._threads_lock:
+                self._threads[:] = [thread for thread in self._threads
+                                    if thread.is_alive()]
+                alive = list(self._threads)
+            if not alive:
+                return
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                break
-            thread.join(timeout=remaining)
-        self._threads = [thread for thread in self._threads if thread.is_alive()]
+                return
+            alive[0].join(timeout=remaining)
 
     # -- 5. consolidate --------------------------------------------------- #
 
