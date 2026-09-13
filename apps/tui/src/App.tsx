@@ -163,6 +163,35 @@ interface PermissionDraft {
  * Falling back to the last option matches the core, which treats that as the
  * answer nobody gave.
  */
+/**
+ * State a key handler must see as it is now, not as it was last drawn.
+ *
+ * A ref assigned during render lags the state by a render: every update
+ * queued since is invisible to a handler that reads it. That is one key
+ * behind for a person typing, and a whole word behind for a paste —
+ * "earlier" and its Enter arrive in one chunk, every key handler runs
+ * before React draws once, and Enter then acts on the palette as it was
+ * drawn: the whole registry, "Next mode" on top. The mode flipped and the
+ * picker never opened.
+ *
+ * So the ref is written where the state changes, in the same call, and
+ * the handler reads the ref. A functional update is applied to the ref's
+ * value, for the same reason: what was last queued, not last drawn.
+ */
+function useLatest<T>(initial: T): [
+  T, React.RefObject<T>, (next: T | ((was: T) => T)) => void,
+] {
+  const [state, setState] = useState<T>(initial);
+  const ref = useRef<T>(initial);
+  const update = useCallback((next: T | ((was: T) => T)) => {
+    const value = typeof next === "function"
+      ? (next as (was: T) => T)(ref.current) : next;
+    ref.current = value;
+    setState(value);
+  }, []);
+  return [state, ref, update];
+}
+
 function safestChoice(request: Record<string, unknown>): number {
   const options = Array.isArray(request["options"])
     ? (request["options"] as readonly unknown[])
@@ -181,11 +210,16 @@ function choicesOf(request: Record<string, unknown>): string[] {
 export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   const [state, dispatch] = useReducer(reduce, initial);
   const [draft, setDraft] = useState("");
-  const [palette, setPalette] = useState<PaletteState<Screen> | undefined>();
+  // The three overlays a query is typed into. Their state is read by the
+  // key handler as it is *now*, not as it was last drawn: see `useLatest`.
+  const [palette, paletteRef, setPalette] =
+    useLatest<PaletteState<Screen> | undefined>(undefined);
   /** The model chooser, while open. The list is the core's, fetched per open. */
-  const [models, setModels] = useState<ModelPickerState | undefined>();
+  const [models, modelsRef, setModels] =
+    useLatest<ModelPickerState | undefined>(undefined);
   /** The session picker, while open. Same fetch-on-open rule as the chooser. */
-  const [sessions, setSessions] = useState<SessionPickerState | undefined>();
+  const [sessions, sessionsRef, setSessions] =
+    useLatest<SessionPickerState | undefined>(undefined);
   const [question, setQuestion] = useState<FormState | undefined>();
   const [permit, setPermit] = useState<PermissionDraft | undefined>();
   const [intent, setIntent] = useState<ModeIntent>(() => beginIntent("act"));
@@ -228,12 +262,6 @@ export function App({ client, onQuit, sessionId }: AppProps): React.ReactNode {
   questionRef.current = question;
   const permitRef = useRef(permit);
   permitRef.current = permit;
-  const paletteRef = useRef(palette);
-  paletteRef.current = palette;
-  const modelsRef = useRef(models);
-  modelsRef.current = models;
-  const sessionsRef = useRef(sessions);
-  sessionsRef.current = sessions;
   const workbenchRef = useRef(workbench);
   workbenchRef.current = workbench;
   const blockedRef = useRef<Interaction | undefined>(undefined);
