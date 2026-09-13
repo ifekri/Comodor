@@ -52,6 +52,9 @@ class LearningEngine:
         self.project_scope = f"project:{project_key(config.paths.project)}"
         self._reflect_lock = threading.Lock()
         self._threads: list[threading.Thread] = []
+        #: Guards `_threads`: callers append while a waiter prunes, and a
+        #: prune written as a fresh list would drop an append made in between.
+        self._threads_lock = threading.Lock()
 
         # Curated memory: a small, separate shelf. The facts service is
         # cheap to build (one store handle, no threads) and is created even
@@ -166,7 +169,8 @@ class LearningEngine:
 
         thread = threading.Thread(target=work, daemon=True, name="comodor-scan")
         thread.start()
-        self._threads.append(thread)
+        with self._threads_lock:
+            self._threads.append(thread)
         return 1
 
     # -- 1. recall -------------------------------------------------------- #
@@ -434,44 +438,38 @@ class LearningEngine:
                       and self.gateway is not None)
         if not reflect and not review:
             return
+        # The review's "latest wins" ticket is drawn here, on the turn's own
+        # thread, so two turns' reviews rank in the order the turns ended even
+        # when the earlier one runs behind a slower reflection.
+        generation = self._ensure_reviewer().reserve() if review else None
         thread = threading.Thread(
             target=self._learn_in_background,
-            args=(goal, messages, outcome, episode_id, cancel_reason, reflect, review),
+            args=(goal, messages, outcome, episode_id, cancel_reason,
+                  reflect, generation),
             daemon=True, name="comodor-learn",
         )
         thread.start()
-        self._threads.append(thread)
+        with self._threads_lock:
+            self._threads.append(thread)
 
     def _learn_in_background(self, goal: str, messages: list[Any], outcome: str,
                              episode_id: int, cancel_reason: str,
-                             reflect: bool, review: bool) -> None:
+                             reflect: bool, generation: int | None) -> None:
         if reflect:
             try:
                 self._reflect(goal, messages, outcome, episode_id)
             except Exception:              # noqa: BLE001 - the review still runs
                 pass
-        if review:
-            # The reviewer keeps its own thread and its own "latest wins"
-            # generation; this worker waits for it, so joining the worker is
-            # joining everything the task started.
+        if generation is not None:
+            # The reviewer keeps its own thread; this worker waits for it, so
+            # a join on the worker is a join on everything the task started.
             thread = self._review_async(messages, outcome, episode_id,
-                                        cancel_reason=cancel_reason)
+                                        cancel_reason=cancel_reason,
+                                        generation=generation)
             if thread is not None:
                 thread.join()
 
-    def _review_async(self, messages: list[Any], outcome: str,
-                      episode_id: int, cancel_reason: str = "") -> None:
-        """The curated-memory review, after the turn has fully ended.
-
-        Announced through the bus when something stuck, for the same reason
-        every other learned thing is announced: silent adaptation is the
-        version of this feature nobody trusts.
-        """
-        if not self.config.learning.enabled or not self.config.learning.review:
-            return
-        if self.gateway is None:
-            return
-
+    def _ensure_reviewer(self):
         if self._reviewer is None:
             from .review import Reviewer
 
@@ -482,10 +480,26 @@ class LearningEngine:
                 staging=self.config.learning.review_write_approval,
             )
             self._reviewer.on_accepted = self._announce_facts
-        thread = self._reviewer.review_async(
-            messages, outcome, episode_id, cancel_reason=cancel_reason)
-        if thread is not None:
-            self._threads.append(thread)
+        return self._reviewer
+
+    def _review_async(self, messages: list[Any], outcome: str,
+                      episode_id: int, cancel_reason: str = "",
+                      generation: int | None = None) -> threading.Thread | None:
+        """The curated-memory review, after the turn has fully ended.
+
+        Announced through the bus when something stuck, for the same reason
+        every other learned thing is announced: silent adaptation is the
+        version of this feature nobody trusts. Returns the thread it started
+        for the worker that started it to wait on; it is not added to
+        `_threads`, because the worker already there outlives it.
+        """
+        if not self.config.learning.enabled or not self.config.learning.review:
+            return None
+        if self.gateway is None:
+            return None
+        return self._ensure_reviewer().review_async(
+            messages, outcome, episode_id, cancel_reason=cancel_reason,
+            generation=generation)
 
     def _announce_facts(self, facts: list[Any], staged: bool) -> None:
         """Say what the review wrote, once it has actually written it."""
@@ -549,8 +563,10 @@ class LearningEngine:
         """
         deadline = time.monotonic() + timeout
         while True:
-            alive = [thread for thread in list(self._threads) if thread.is_alive()]
-            self._threads = alive
+            with self._threads_lock:
+                self._threads[:] = [thread for thread in self._threads
+                                    if thread.is_alive()]
+                alive = list(self._threads)
             if not alive:
                 return
             remaining = deadline - time.monotonic()

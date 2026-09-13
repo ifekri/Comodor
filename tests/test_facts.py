@@ -365,3 +365,191 @@ def test_record_outcome_runs_the_review_and_lands_facts(tmp_path):
         assert "Learned by the review pass" in texts
     finally:
         engine.store.close()
+
+
+def test_a_reserved_ticket_outranks_a_review_that_started_later(store, service):
+    """`reserve` hands a turn its "latest wins" ticket the moment the turn
+    ends; the pass itself may start much later. A pass carrying an older
+    ticket is stale even when it is the one that starts (and finishes) last."""
+    gateway = FakeGateway(
+        [
+            json.dumps({"facts": [{"kind": "memory", "text": "From the second turn"}]}),
+            json.dumps({"facts": [{"kind": "memory", "text": "From the first turn"}]}),
+        ]
+    )
+    reviewer = Reviewer(service, gateway)
+    first = reviewer.reserve()
+    second = reviewer.reserve()
+    assert (first, second) == (1, 2)
+
+    reviewer.review_async([], "done", 0, generation=second).join(timeout=5)
+    reviewer.review_async([], "done", 0, generation=first).join(timeout=5)
+    texts = [fact.text for fact in service.entries()]
+    assert texts == ["From the second turn"], (
+        "the first turn's review ran last but must not outrank the second's")
+
+
+class GatedGateway(FakeGateway):
+    """A `FakeGateway` that holds one pass until the test releases it.
+
+    `hold(system_prompt, marker)` blocks every call whose system prompt is
+    `system_prompt` and whose transcript contains `marker` on `released`.
+    """
+
+    def __init__(self, replies: list[str]) -> None:
+        super().__init__(replies)
+        import threading
+
+        self.released = threading.Event()
+        self.reached = threading.Event()
+        self._held: tuple[str, str] | None = None
+
+    def hold(self, system_prompt: str, marker: str) -> None:
+        self._held = (system_prompt, marker)
+
+    def stream(self, messages, **kwargs):
+        if self._held is not None:
+            system, marker = self._held
+            if messages[0].content == system and marker in messages[1].content:
+                self.reached.set()
+                assert self.released.wait(timeout=10), "the test never released the gate"
+        yield from super().stream(messages, **kwargs)
+
+
+def _engine(tmp_path, gateway):
+    from dataclasses import replace
+
+    from comodor.config import Config
+    from comodor.events import EventBus
+    from comodor.learning import BrainStore, LearningEngine
+
+    config = Config()
+    config.paths = replace(config.paths, user=tmp_path, project=tmp_path)
+    assert config.learning.reflect and config.learning.review, "both passes on"
+    store = BrainStore(tmp_path / "brain.db")
+    return LearningEngine(config, EventBus(), gateway, store=store)
+
+
+def _record(engine, goal: str) -> None:
+    engine.record_outcome(goal=goal, messages=[], recalled=[], success=True,
+                          stopped="done", steps=1, elapsed=0.1)
+
+
+def test_reviews_rank_by_the_order_their_turns_ended(tmp_path):
+    """Each turn's worker reflects, then reviews. When the first turn's
+    reflection is slow, the second turn's review reaches the store first —
+    and the first turn's review, arriving last, must still lose: "latest"
+    means the latest turn, not the latest thread to reach the gateway.
+    """
+    import threading
+
+    from comodor.agent.prompts import REFLECT_PROMPT
+
+    gateway = GatedGateway(
+        [
+            "",                                                         # turn 2 reflection
+            json.dumps({"facts": [{"kind": "memory", "text": "From the second turn"}]}),
+            "",                                                         # turn 1 reflection
+            json.dumps({"facts": [{"kind": "memory", "text": "From the first turn"}]}),
+        ]
+    )
+    gateway.hold(REFLECT_PROMPT, "GOAL: the first turn")
+    engine = _engine(tmp_path, gateway)
+    reviewer = engine._ensure_reviewer()
+    announce, landed = reviewer.on_accepted, threading.Event()
+
+    def on_accepted(facts, staged):
+        announce(facts, staged)
+        landed.set()
+
+    reviewer.on_accepted = on_accepted
+    try:
+        _record(engine, "the first turn")
+        assert gateway.reached.wait(timeout=10), "the first turn never reached its reflection"
+        _record(engine, "the second turn")
+        # The second turn's worker runs to completion behind the gate...
+        assert landed.wait(timeout=10), "the second turn's review was blocked by the first's"
+        assert [fact.text for fact in engine.facts.entries()] == ["From the second turn"]
+        # ...then the first turn is let through, and finishes after it.
+        gateway.released.set()
+        engine.wait_for_reflection(timeout=10.0)
+        assert not engine._threads
+        texts = [fact.text for fact in engine.facts.entries()]
+        assert texts == ["From the second turn"], (
+            "the first turn's review finished last but its turn ended first; "
+            "it must not replace the second turn's facts")
+    finally:
+        gateway.released.set()
+        engine.close()
+
+
+def test_the_wait_holds_until_the_review_the_worker_started_is_done(tmp_path):
+    """The review thread is not in the engine's own list any more; the worker
+    that started it waits for it. So a wait that finds the worker finds the
+    review too — and a wait that expires while the review is held reports
+    the worker still alive rather than returning as if settled."""
+    import threading
+
+    from comodor.agent.prompts import REVIEW_PROMPT
+
+    gateway = GatedGateway(
+        [
+            "",                                                         # reflection
+            json.dumps({"facts": [{"kind": "memory", "text": "Landed after the gate"}]}),
+        ]
+    )
+    gateway.hold(REVIEW_PROMPT, "GOAL: ")
+    engine = _engine(tmp_path, gateway)
+    try:
+        _record(engine, "a task")
+        assert gateway.reached.wait(timeout=10), "the review never reached the gateway"
+
+        engine.wait_for_reflection(timeout=0.2)     # expires: the review is held
+        assert [t for t in engine._threads if t.is_alive()], (
+            "the worker returned while the review it started was still running")
+        assert "comodor-review" in {t.name for t in threading.enumerate()}
+
+        gateway.released.set()
+        engine.wait_for_reflection(timeout=10.0)
+        assert not engine._threads
+        assert "comodor-review" not in {t.name for t in threading.enumerate()}
+        assert [fact.text for fact in engine.facts.entries()] == ["Landed after the gate"]
+    finally:
+        gateway.released.set()
+        engine.close()
+
+
+def test_a_turn_recorded_during_a_wait_is_covered_by_that_wait(tmp_path):
+    """`_threads` is shared between the recorder and the waiter. A turn that
+    ends while a wait is pruning the list must not fall out of it: the wait
+    returns only once that turn's worker is done as well."""
+    import threading
+
+    from comodor.agent.prompts import REFLECT_PROMPT
+
+    gateway = GatedGateway(["", json.dumps({"facts": []}),
+                            "", json.dumps({"facts": []})])
+    gateway.hold(REFLECT_PROMPT, "GOAL: ")            # every reflection is held
+    engine = _engine(tmp_path, gateway)
+    try:
+        _record(engine, "the first turn")
+        assert gateway.reached.wait(timeout=10)
+        returned = threading.Event()
+
+        def wait():
+            engine.wait_for_reflection(timeout=10.0)
+            returned.set()
+
+        waiter = threading.Thread(target=wait, name="test-waiter")
+        waiter.start()
+        _record(engine, "the second turn")            # appended during the wait
+        with engine._threads_lock:
+            assert len(engine._threads) == 2, "the append was lost"
+        gateway.released.set()
+        waiter.join(timeout=10)
+        assert returned.is_set()
+        assert not engine._threads, "the wait returned with a worker still listed"
+        assert "comodor-learn" not in {t.name for t in threading.enumerate()}
+    finally:
+        gateway.released.set()
+        engine.close()

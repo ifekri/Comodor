@@ -158,9 +158,21 @@ class Reviewer:
             result.accepted = self._absorb(result, episode_id)
         return result
 
+    def reserve(self) -> int:
+        """Claim the next generation now, for a pass that starts later.
+
+        "Latest wins" is about turns, not about which thread reached the
+        gateway first. A pass that runs behind a slow reflection would
+        otherwise draw its number late and outrank a newer turn's review;
+        reserving at the moment the turn ends keeps the order the turns had.
+        """
+        with self._lock:
+            self._generation += 1
+            return self._generation
+
     def review_async(
         self, messages: list, outcome: str, episode_id: int = 0,
-        cancel_reason: str = "",
+        cancel_reason: str = "", generation: int | None = None,
     ) -> threading.Thread | None:
         """Start one pass on a daemon thread, replacing any in-flight one.
 
@@ -169,10 +181,14 @@ class Reviewer:
         thread is not killed — Python offers no safe way — but it carries the
         generation it was born into, and only its own generation's result is
         ever absorbed, which is the same thing from the memory's point of view.
+        A `generation` from `reserve` is used as is; otherwise one is drawn now.
         """
         with self._lock:
-            self._generation += 1
-            mine = self._generation
+            if generation is None:
+                self._generation += 1
+                mine = self._generation
+            else:
+                mine = generation
             thread = threading.Thread(
                 target=self._work,
                 args=(list(messages), outcome, episode_id, mine, cancel_reason),
