@@ -4,9 +4,6 @@
   "private": true,
   "type": "module",
   "description": "Comodor TUI v2 \u2014 an OpenTUI client for the Comodor protocol.",
-  "bin": {
-    "comodor-tui": "./src/main.tsx"
-  },
   "scripts": {
     "start": "bun run src/main.tsx"
   },
