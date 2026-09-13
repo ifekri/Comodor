@@ -2027,6 +2027,10 @@ describe("permissions", () => {
         title: "run: a command long enough to have to wrap somewhere in here",
         detail: Array.from({ length: 12 }, (_each, at) => `output line ${at}`).join("\n"),
       });
+      // One macrotask is not a paint: on a slow macOS runner the frame was
+      // captured with the card still on its way. Wait for it, as the other
+      // permission tests do.
+      await view.waitForFrame((frame) => frame.includes("[Deny]"));
 
       const frame = view.frame();
       for (const row of frame.split("\n")) {
