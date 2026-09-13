@@ -6,6 +6,31 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 Nothing yet.
 
+## 2.0.1 — 2026-09-13
+
+### The release that 2.0.0 did not finish
+
+2.0.0 was tagged and its release build began, but publication never
+completed: on the Linux runner, `npm ci` made `apps/tui/src/main.tsx`
+executable — the workspace manifest declared the interface entry as an npm
+`bin`, and npm chmods every bin target to 0755 — and the release build's
+integrity guard, which refuses any change to the tree outside the generated
+TUI artifact, refused the build. Not one byte of the file changed, only its
+mode; Windows never showed it, because git ignores the executable bit
+there. Nothing was published: no wheel on PyPI, no assets on the GitHub
+release, no container image.
+
+The cause is removed rather than excused. Nothing ever used that bin — the
+interface is started by `bun run` on its entry, or on the packaged
+`main.js` — so the declaration is gone from the manifest and the lockfile,
+and a test now holds that any bin a workspace package declares is tracked
+executable. The integrity guard is unchanged and as strict as it was: it
+still refuses anything dirty outside `src/comodor/tui/dist/`.
+
+2.0.1 is the complete recovery release: the same 2.0 platform described
+below, plus that packaging fix. Everything the 2.0.0 section says about
+breaking changes, requirements and compatibility applies to 2.0.1 verbatim.
+
 ## 2.0.0 — 2026-09-12
 
 The terminal architecture migration, complete: a Python core behind a
