@@ -363,6 +363,10 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
             "usage": {
                 "input_tokens": result.usage.input_tokens,
                 "output_tokens": result.usage.output_tokens,
+                # What the provider served from its cache. Kept apart from
+                # `input_tokens` because it is billed differently and because
+                # the benchmark's paired report needs both halves (FR-076).
+                "cached_tokens": result.usage.cached_tokens,
                 "cost_usd": round(result.usage.cost_usd, 6),
             },
             "elapsed": round(result.elapsed, 2),

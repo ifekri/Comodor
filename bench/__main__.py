@@ -13,7 +13,8 @@ import sys
 import time
 from pathlib import Path
 
-from .report import write
+from . import baseline
+from .report import write, write_paired
 from .runner import run_task
 from .task import TaskError, load_tasks
 
@@ -37,6 +38,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="directory to move failed workspaces into")
     parser.add_argument("--dry-run", action="store_true",
                         help="load every task and print the suite, run nothing")
+    parser.add_argument("--strategy", choices=baseline.STRATEGIES,
+                        default=baseline.CURRENT,
+                        help="the context strategy to measure (default: current)")
+    parser.add_argument("--paired", action="store_true",
+                        help="run every task under both strategies and write the "
+                             "paired baseline report")
     args = parser.parse_args(argv)
 
     _load_env(ROOT / "src" / ".env")
@@ -66,18 +73,30 @@ def main(argv: list[str] | None = None) -> int:
 
     keep = Path(args.keep).resolve() if args.keep else None
 
+    strategies = list(baseline.STRATEGIES) if args.paired else [args.strategy]
     print(f"{len(tasks)} tasks, {args.tries} attempts each, "
-          f"against {args.model} via {args.provider}\n")
+          f"against {args.model} via {args.provider}, "
+          f"strategy {' and '.join(strategies)}\n")
     started = time.monotonic()
-    outcomes = []
-    for index, task in enumerate(tasks, start=1):
-        print(f"[{index}/{len(tasks)}] {task.category}/{task.name}")
-        outcomes.append(run_task(task, provider=args.provider, model=args.model,
-                                 tries=args.tries, keep=keep))
+    by_strategy: dict[str, list] = {}
+    for strategy in strategies:
+        outcomes = by_strategy.setdefault(strategy, [])
+        for index, task in enumerate(tasks, start=1):
+            print(f"[{strategy}] [{index}/{len(tasks)}] {task.category}/{task.name}",
+                  flush=True)
+            outcomes.append(run_task(task, provider=args.provider, model=args.model,
+                                     tries=args.tries, keep=keep, strategy=strategy))
 
-    json_file, markdown_file = write(outcomes, HERE / "results",
-                                     provider=args.provider, model=args.model,
-                                     tries=args.tries)
+    outcomes = by_strategy[strategies[0]]
+    if args.paired:
+        json_file, markdown_file = write_paired(
+            by_strategy[baseline.CURRENT], by_strategy[baseline.NAIVE],
+            HERE / "results", provider=args.provider, model=args.model,
+            tries=args.tries)
+    else:
+        json_file, markdown_file = write(outcomes, HERE / "results",
+                                         provider=args.provider, model=args.model,
+                                         tries=args.tries)
 
     total = sum(one.passed for one in outcomes)
     of = sum(one.tries for one in outcomes)
@@ -87,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
           f"minutes")
     print(f"{markdown_file}")
 
-    kept = [path for one in outcomes for path in one.kept]
+    kept = [path for group in by_strategy.values() for one in group for path in one.kept]
     if kept:
         print(f"\n{len(kept)} failed workspace(s) kept:")
         for path in kept[:10]:

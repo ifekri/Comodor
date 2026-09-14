@@ -3505,3 +3505,77 @@ describe("what the conversation has cost", () => {
     view.client.close();
   });
 });
+
+// -------------------------------------------------------------------------- //
+// the question overlay at every width, characterized (spec 002, T008)
+// -------------------------------------------------------------------------- //
+//
+// Pinned before the form gains optional `reason` / `evidence_consulted`
+// fields: at every width the suite cares about the free row is visible, the
+// position marker says which question is showing, nothing spills past the
+// edge, and the keyboard reaches every option including the free row
+// (FR-031, SC-008). No behaviour is changed here.
+
+describe("the question overlay at every width", () => {
+  const form = {
+    id: "ask-w",
+    session_id: "s1",
+    title: "2 questions before I start",
+    questions: [
+      { header: "Database", prompt: "Which database should this use?", multiple: false,
+        options: [
+          { id: "SQLite", label: "SQLite", description: "one file, no server" },
+          { id: "PostgreSQL", label: "PostgreSQL", description: "a server to run" },
+          { id: "Something else", label: "Something else", free: true },
+        ] },
+      { header: "Languages", prompt: "Which languages?", multiple: true,
+        options: [
+          { id: "Python", label: "Python" },
+          { id: "Go", label: "Go" },
+          { id: "Something else", label: "Something else", free: true },
+        ] },
+    ],
+  };
+
+  for (const width of [160, 120, 100, 80, 60]) {
+    test(`${width} columns: the free row and the position marker are visible`, async () => {
+      const view = await screen(width, 30);
+      view.core.push(event("question.requested", form as never));
+      await view.waitForFrame((frame) => frame.includes("Which database"));
+
+      const frame = view.frame();
+      expect(frame).toContain("Something else");
+      expect(frame).toContain("1 of 2");
+      for (const row of frame.split("\n")) {
+        expect(row.length).toBeLessThanOrEqual(width);
+      }
+      view.client.close();
+    });
+
+    test(`${width} columns: the keyboard reaches the free row`, async () => {
+      const view = await screen(width, 30);
+      view.core.push(event("question.requested", form as never));
+      await view.waitForFrame((frame) => frame.includes("Which database"));
+
+      // Down twice lands on the write-your-own row; space opens the field.
+      view.mockInput.pressArrow("down");
+      view.mockInput.pressArrow("down");
+      view.mockInput.pressKey(" ");
+      await view.waitForFrame((frame) => frame.includes("▌"));
+      expect(view.frame()).toContain("(*) Something else");
+      view.client.close();
+    });
+
+    test(`${width} columns: the keyboard walks to the second question`, async () => {
+      const view = await screen(width, 30);
+      view.core.push(event("question.requested", form as never));
+      await view.waitForFrame((frame) => frame.includes("Which database"));
+
+      view.mockInput.pressArrow("right");
+      await view.waitForFrame((frame) => frame.includes("Which languages?"));
+      expect(view.frame()).toContain("2 of 2");
+      expect(view.frame()).toContain("Something else");
+      view.client.close();
+    });
+  }
+});

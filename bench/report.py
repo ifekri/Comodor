@@ -39,19 +39,31 @@ def as_json(outcomes: list[Outcome], *, provider: str, model: str,
             "cost_usd": round(sum(one.cost for one in outcomes), 4),
             "seconds": round(sum(one.seconds for one in outcomes), 1),
         },
-        "tasks": [
-            {
-                "name": one.task.name,
-                "category": one.task.category,
-                "passed": one.passed,
-                "tries": one.tries,
-                "mean_steps": round(one.steps, 1),
-                "cost_usd": round(one.cost, 4),
-                "seconds": round(one.seconds, 1),
-                "why": one.why(),
-            }
-            for one in outcomes
-        ],
+        "tasks": [_task_record(one) for one in outcomes],
+    }
+
+
+def _task_record(one: Outcome) -> dict:
+    """One task's row: the rate, and the cost figures the rate travels with.
+
+    The token figures are per attempt (means), so a task run three times
+    reads the same as a task run once. A rate without its cost, or a cost
+    without its rate, is half a result (FR-076).
+    """
+    return {
+        "name": one.task.name,
+        "category": one.task.category,
+        "passed": one.passed,
+        "tries": one.tries,
+        "mean_steps": round(one.steps, 1),
+        "mean_tool_calls": round(one.mean("tool_calls"), 1),
+        "mean_input_tokens": round(one.mean("input_tokens")),
+        "mean_output_tokens": round(one.mean("output_tokens")),
+        "mean_cached_tokens": round(one.mean("cached_tokens")),
+        "mean_total_tokens": round(one.mean("total_tokens")),
+        "cost_usd": round(one.cost, 4),
+        "seconds": round(one.seconds, 1),
+        "why": one.why(),
     }
 
 
@@ -108,6 +120,157 @@ def write(outcomes: list[Outcome], directory: Path, *, provider: str,
 
     markdown_file = directory / f"{stem}.md"
     markdown_file.write_text(as_markdown(report), encoding="utf-8")
+    return json_file, markdown_file
+
+
+# --------------------------------------------------------------------------- #
+# the paired baseline: the product beside the naive strategy (SC-036)
+# --------------------------------------------------------------------------- #
+
+
+def as_paired_json(current: list[Outcome], naive: list[Outcome], *,
+                   provider: str, model: str, tries: int) -> dict:
+    """Both strategies, task by task, in one document.
+
+    This is the baseline every efficiency figure in spec 002 is measured
+    against, and the source the SC-011 threshold is set from. It carries,
+    per task and per strategy: the outcome rate over the attempts, and the
+    input, output and cached tokens, model turns and tool calls behind it.
+    """
+    by_name = {one.task.name: one for one in naive}
+    tasks = []
+    for one in current:
+        other = by_name.get(one.task.name)
+        tasks.append({
+            "name": one.task.name,
+            "category": one.task.category,
+            "current": _strategy_record(one),
+            "naive": _strategy_record(other) if other is not None else None,
+        })
+    return {
+        "kind": "paired-baseline",
+        "model": model,
+        "provider": provider,
+        "date": date.today().isoformat(),
+        "tries_per_task": tries,
+        "platform": f"{platform.system()} {platform.release()}",
+        "python": platform.python_version(),
+        "strategies": {
+            "current": "the product as shipped",
+            "naive": ("full history, full files and full tool output re-sent "
+                      "every turn; no sweep, no pruning, no optimization"),
+        },
+        "totals": {
+            "current": _strategy_totals(current),
+            "naive": _strategy_totals(naive),
+        },
+        "tasks": tasks,
+    }
+
+
+def _strategy_record(one: Outcome) -> dict:
+    record = _task_record(one)
+    record.pop("name")
+    record.pop("category")
+    return record
+
+
+def _mean_over(outcomes: list[Outcome], name: str) -> int:
+    if not outcomes:
+        return 0
+    return round(sum(one.mean(name) for one in outcomes) / len(outcomes))
+
+
+def _strategy_totals(outcomes: list[Outcome]) -> dict:
+    attempts = sum(one.tries for one in outcomes)
+    passed = sum(one.passed for one in outcomes)
+    return {
+        "attempts_passed": passed,
+        "attempts": attempts,
+        "outcome_rate": round(passed / attempts, 4) if attempts else 0.0,
+        "mean_total_tokens": _mean_over(outcomes, "total_tokens"),
+        "mean_input_tokens": _mean_over(outcomes, "input_tokens"),
+        "mean_output_tokens": _mean_over(outcomes, "output_tokens"),
+        "mean_cached_tokens": _mean_over(outcomes, "cached_tokens"),
+        "cost_usd": round(sum(one.cost for one in outcomes), 4),
+        "seconds": round(sum(one.seconds for one in outcomes), 1),
+    }
+
+
+def as_paired_markdown(report: dict) -> str:
+    lines = [
+        f"# Comodor paired baseline — {report['model']}",
+        "",
+        f"`{report['provider']}` · {report['date']} · "
+        f"{report['tries_per_task']} attempts per task per strategy · "
+        f"{report['platform']}, Python {report['python']}",
+        "",
+        "`current` is the product as shipped. `naive` re-sends full history, "
+        "full files and full tool output every turn with no sweep, pruning or "
+        "optimization. Every token figure is a per-attempt mean and travels "
+        "with the outcome rate it was measured beside.",
+        "",
+        "| Task | Category | Passed (current) | Passed (naive) | Total tokens "
+        "(current) | Total tokens (naive) | In / Out / Cached (current) | "
+        "In / Out / Cached (naive) | Turns (current) | Turns (naive) | "
+        "Tool calls (current) | Tool calls (naive) |",
+        "| --- | --- | --- | --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |",
+    ]
+    for task in report["tasks"]:
+        cur, nai = task["current"], task.get("naive")
+        lines.append(
+            f"| {task['name']} | {task['category']} | "
+            f"{cur['passed']}/{cur['tries']} | {_rate(nai)} | "
+            f"{cur['mean_total_tokens']:,} | {_num(nai, 'mean_total_tokens')} | "
+            f"{_triple(cur)} | {_triple(nai)} | "
+            f"{cur['mean_steps']} | {_num(nai, 'mean_steps')} | "
+            f"{cur['mean_tool_calls']} | {_num(nai, 'mean_tool_calls')} |")
+    totals = report["totals"]
+    lines += [
+        "",
+        f"**Totals** — current: {totals['current']['attempts_passed']}/"
+        f"{totals['current']['attempts']} attempts, mean "
+        f"{totals['current']['mean_total_tokens']:,} tokens per attempt; naive: "
+        f"{totals['naive']['attempts_passed']}/{totals['naive']['attempts']} "
+        f"attempts, mean {totals['naive']['mean_total_tokens']:,} tokens per attempt.",
+        "",
+        "The SC-011 threshold is set from these figures and recorded in "
+        "`specs/002-grounded-agent-quality/spec.md`; no efficiency work is "
+        "accepted against a target that predates this file.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _rate(record: dict | None) -> str:
+    return f"{record['passed']}/{record['tries']}" if record else "—"
+
+
+def _num(record: dict | None, key: str) -> str:
+    if not record:
+        return "—"
+    value = record[key]
+    return f"{value:,}" if isinstance(value, int) else str(value)
+
+
+def _triple(record: dict | None) -> str:
+    if not record:
+        return "—"
+    return (f"{record['mean_input_tokens']:,} / {record['mean_output_tokens']:,} / "
+            f"{record['mean_cached_tokens']:,}")
+
+
+def write_paired(current: list[Outcome], naive: list[Outcome], directory: Path, *,
+                 provider: str, model: str, tries: int) -> tuple[Path, Path]:
+    directory.mkdir(parents=True, exist_ok=True)
+    report = as_paired_json(current, naive, provider=provider, model=model, tries=tries)
+    stem = f"baseline-{_slug(model)}-{report['date']}"
+    if (directory / f"{stem}.json").exists():
+        stem = f"{stem}-{int(time.time()) % 100000}"
+    json_file = directory / f"{stem}.json"
+    json_file.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    markdown_file = directory / f"{stem}.md"
+    markdown_file.write_text(as_paired_markdown(report), encoding="utf-8")
     return json_file, markdown_file
 
 

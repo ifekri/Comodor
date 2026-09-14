@@ -73,33 +73,33 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
 
 **⚠️ Hard gate**: tasks Phase 5 (token-efficient context; plan Phase 4) may not begin until T015 publishes the paired baseline (SC-036, Constitution XXI).
 
-- [ ] T001 [P] [US6] Characterize prompt-head stability in `tests/test_baseline_prompts.py`
+- [X] T001 [P] [US6] Characterize prompt-head stability in `tests/test_baseline_prompts.py`
   - **Req**: FR-050, FR-091, SC-015 · **Dep**: none · **Evidence**: assembled head byte-identical across three turns with differing recall · **Done when**: passes against unmodified `src/comodor/agent/prompts.py`
-- [ ] T002 [P] [US6] Characterize context assembly and compaction boundaries in `tests/test_baseline_context.py`
+- [X] T002 [P] [US6] Characterize context assembly and compaction boundaries in `tests/test_baseline_context.py`
   - **Req**: FR-049, FR-051 · **Dep**: none · **Evidence**: `Conversation.render()` shape pinned; no orphaned tool call after `safe_cut`; original request always retained · **Done when**: current boundary rules are locked
-- [ ] T003 [P] [US6] Characterize token-estimator calibration in `tests/test_baseline_tokens.py`
+- [X] T003 [P] [US6] Characterize token-estimator calibration in `tests/test_baseline_tokens.py`
   - **Req**: FR-055, SC-011 · **Dep**: none · **Evidence**: estimate vs recorded provider `Usage` within a tolerance constant that the test defines and justifies · **Done when**: tolerance is explicit, not implicit
-- [ ] T004 [P] [US6] Characterize superseded-read removal in `tests/test_baseline_staleness.py`
+- [X] T004 [P] [US6] Characterize superseded-read removal in `tests/test_baseline_staleness.py`
   - **Req**: FR-045, FR-046, SC-013 · **Dep**: none · **Evidence**: newest read and reads of unedited files are never rewritten · **Done when**: `src/comodor/agent/staleness.py` rules pinned
-- [ ] T005 [P] [US4] Characterize learning-cycle ordering and caps in `tests/test_baseline_learning.py`
+- [X] T005 [P] [US4] Characterize learning-cycle ordering and caps in `tests/test_baseline_learning.py`
   - **Req**: FR-063, FR-065 · **Dep**: none · **Evidence**: recall precedes storing the user message; at-cap add refuses and lists contents rather than evicting · **Done when**: ordering pinned
-- [ ] T006 [P] [US1] Characterize the shared question/ASK flow and Web UI question round-trip in `tests/test_baseline_questions.py` and `tests/test_web.py`
+- [X] T006 [P] [US1] Characterize the shared question/ASK flow and Web UI question round-trip in `tests/test_baseline_questions.py` and `tests/test_web.py`
   - **Req**: FR-016, FR-017, FR-020, FR-021, FR-079, FR-082 · **Dep**: none · **Evidence (shared flow)**: `questions.py::_options()` appends the free row and strips model-authored escape hatches; answers match by header; single- and multi-choice both round-trip · **Evidence (Web UI, against the UNMODIFIED implementation, extending the existing authoritative suite `tests/test_web.py` rather than a new Web test subsystem)**: (1) a core question reaches the page intact through `src/comodor/web/session.py` (`request.meta["questions"]` on the pending-request payload); (2) option ordering survives transport; (3) the centrally appended `free: true` custom-answer row survives into the Web form as rendered by `src/comodor/web/ui.js` (`drawOwn`), and the page adds none of its own; (4) single-choice and multi-choice answers round-trip through `web/session.py` `decode_answers`; (5) answers bind by stable `header`, not by position; (6) today's dismissal path — the page answering `CANCELLED` into `tools/ask.py`'s current "sensible defaults" branch — is pinned exactly as it behaves now, so the plan Phase 3 change is measurable; (7) current browser behaviour is captured, not fixed · **Done when**: existing invariants locked for both the shared flow and the Web round-trip, with zero behaviour change in this phase
-- [ ] T007 [P] [US1] Characterize session pending-interaction round-trip in `tests/test_baseline_session.py`
+- [X] T007 [P] [US1] Characterize session pending-interaction round-trip in `tests/test_baseline_session.py`
   - **Req**: FR-023, FR-081, SC-024 · **Dep**: none · **Evidence**: snapshot with a pending question serialises and restores intact; fixtures written by the current version remain readable · **Done when**: reconnect path pinned
-- [ ] T008 [P] [US1] Characterize question-overlay rendering at widths 160/120/100/80/60 in `apps/tui/test/bun/renderer.test.tsx`
+- [X] T008 [P] [US1] Characterize question-overlay rendering at widths 160/120/100/80/60 in `apps/tui/test/bun/renderer.test.tsx`
   - **Req**: FR-031, SC-008 · **Dep**: none · **Evidence**: free row visible and outstanding-question markers present at every width; full keyboard operability · **Done when**: all five widths pass
-- [ ] T009 [P] [US1] Characterize today's no-listener behaviour in `tests/test_baseline_headless.py`
+- [X] T009 [P] [US1] Characterize today's no-listener behaviour in `tests/test_baseline_headless.py`
   - **Req**: FR-033, FR-082, FR-121 · **Dep**: none · **Evidence**: record the current "choose sensible defaults, carry on" result as the documented **starting point for the one intended behaviour change** · **Done when**: the behaviour being removed is captured before removal
-- [ ] T010 [P] [US2] Characterize model-orchestration completion guards in `tests/test_baseline_loop.py`
+- [X] T010 [P] [US2] Characterize model-orchestration completion guards in `tests/test_baseline_loop.py`
   - **Req**: FR-038, FR-039, FR-040, FR-041, FR-043 · **Dep**: none · **Evidence**: project check runs once, only when a file changed, bounded, and an unrunnable check never converts a good turn into a failure · **Done when**: `_iterate` guards pinned
-- [ ] T011 [P] [US1] Characterize permission and mode enforcement in `tests/test_baseline_permissions.py`
+- [X] T011 [P] [US1] Characterize permission and mode enforcement in `tests/test_baseline_permissions.py`
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: none · **Evidence**: existing `tests/test_protocol_permissions.py` green; mode policy table read-only; unknown mode denies everything · **Done when**: this file becomes the per-phase permission gate referenced by T028, T060, T069, T098, T119, T129, T146
-- [ ] T012 [P] [US1] Characterize capability advertisement per mode in `tests/test_baseline_capabilities.py`
+- [X] T012 [P] [US1] Characterize capability advertisement per mode in `tests/test_baseline_capabilities.py`
   - **Req**: FR-117, FR-118, FR-120 · **Dep**: none · **Evidence**: write tools are not advertised in plan mode; advertisement and enforcement both derive from `src/comodor/safety/modes.py` · **Done when**: current filtering pinned
-- [ ] T013 [P] [US6] Fingerprint every existing benchmark scenario in `bench/integrity.py`
+- [X] T013 [P] [US6] Fingerprint every existing benchmark scenario in `bench/integrity.py`
   - **Req**: SC-026, FR-077 · **Dep**: none · **Evidence**: record a content fingerprint of each `bench/tasks/*/task.md`, `check.py` and `repo/` tree so later weakening is detectable · **Done when**: fingerprints stored and a check command reports any drift
-- [ ] T014 [US6] Implement the naive full-resend comparison strategy in `bench/baseline.py`
+- [X] T014 [US6] Implement the naive full-resend comparison strategy in `bench/baseline.py`
   - **Req**: SC-011, SC-036 · **Dep**: T003 · **Evidence**: resends full history, full file contents and full tool output every turn, selectable by flag · **Done when**: runs the existing suite end to end
 - [ ] T015 [US6] Publish the paired quality-and-cost baseline into `bench/results/` via `bench/report.py`
   - **Req**: SC-036, FR-076 · **Dep**: T003, T013, T014 · **Evidence**: per task — outcome rate over three attempts, input/output/cached tokens, model turns, tool calls — for both current and naive strategies · **Done when**: report exists and is cited by `spec.md` §SC-011 as the threshold source

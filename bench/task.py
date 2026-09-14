@@ -61,6 +61,17 @@ class Attempt:
     cost_usd: float = 0.0
     elapsed: float = 0.0
     error: str = ""
+    #: The paired-report figures (spec 002, SC-036): what the model read,
+    #: what it wrote, what the provider served from cache, and how many
+    #: tool calls the turn made. Zero when the run reported nothing.
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    tool_calls: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.cached_tokens + self.output_tokens
 
     def used(self, name: str) -> bool:
         return name in self.tools

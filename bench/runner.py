@@ -35,6 +35,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import baseline
 from .task import Attempt, Task, Verdict, fresh_copy
 
 #: What a run is given to spend before it is stopped, whatever the task's own
@@ -55,6 +56,8 @@ class Outcome:
     verdicts: list[Verdict] = field(default_factory=list)
     attempts: list[Attempt] = field(default_factory=list)
     kept: list[str] = field(default_factory=list)
+    #: Which context strategy the attempts ran under (see `baseline.py`).
+    strategy: str = baseline.CURRENT
 
     @property
     def passed(self) -> int:
@@ -82,6 +85,12 @@ class Outcome:
             return 0.0
         return sum(attempt.steps for attempt in self.attempts) / len(self.attempts)
 
+    def mean(self, name: str) -> float:
+        """The per-attempt mean of one numeric attempt field."""
+        if not self.attempts:
+            return 0.0
+        return sum(getattr(attempt, name) for attempt in self.attempts) / len(self.attempts)
+
     def why(self) -> str:
         """The first reason it failed, which is the one worth reading."""
         for verdict in self.verdicts:
@@ -91,10 +100,11 @@ class Outcome:
 
 
 def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
-             keep: Path | None = None, say=print) -> Outcome:
-    outcome = Outcome(task=task)
+             keep: Path | None = None, say=print,
+             strategy: str = baseline.CURRENT) -> Outcome:
+    outcome = Outcome(task=task, strategy=strategy)
     for attempt_number in range(1, tries + 1):
-        attempt, verdict, workspace = _one(task, provider, model, keep)
+        attempt, verdict, workspace = _one(task, provider, model, keep, strategy)
         outcome.attempts.append(attempt)
         outcome.verdicts.append(verdict)
         if not verdict.passed:
@@ -108,13 +118,13 @@ def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
 
 
 def _one(task: Task, provider: str, model: str,
-         keep: Path | None) -> tuple[Attempt, Verdict, Path]:
+         keep: Path | None, strategy: str = baseline.CURRENT) -> tuple[Attempt, Verdict, Path]:
     root = Path(tempfile.mkdtemp(prefix=f"comodor-bench-{task.name}-"))
     workspace = root / "work"
     home = root / "home"
     fresh_copy(task.repo, workspace)
     home.mkdir()
-    _settings(home, task)
+    _settings(home, task, strategy)
 
     attempt = _invoke(task, workspace, home, provider, model)
 
@@ -163,7 +173,7 @@ def _keep_the_answer(root: Path, task: Task, attempt: Attempt,
         pass
 
 
-def _settings(home: Path, task: Task) -> None:
+def _settings(home: Path, task: Task, strategy: str = baseline.CURRENT) -> None:
     """The config this attempt runs under, written into its own empty home.
 
     Three of these are what make the number mean something.
@@ -184,6 +194,10 @@ def _settings(home: Path, task: Task) -> None:
             "max_steps": task.max_steps,
             "max_seconds": task.timeout,
             "max_cost_usd": COST_CEILING,
+            # The context strategy under measurement. The budgets above are
+            # the same for every strategy; only how the conversation is
+            # assembled differs — see `baseline.py`.
+            **baseline.settings(strategy),
         },
         "learning": {"enabled": False},
     }
@@ -246,6 +260,10 @@ def _invoke(task: Task, workspace: Path, home: Path,
         cost_usd=float(usage.get("cost_usd", 0.0)),
         elapsed=elapsed,
         error=str(report.get("error", "")),
+        input_tokens=int(usage.get("input_tokens", 0) or 0),
+        output_tokens=int(usage.get("output_tokens", 0) or 0),
+        cached_tokens=int(usage.get("cached_tokens", 0) or 0),
+        tool_calls=int(report.get("tool_calls", 0) or 0),
     )
 
 

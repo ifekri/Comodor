@@ -514,12 +514,18 @@ class AgentLoop:
 
     def _maybe_compact(self, system_prompt: str, specs: list[ToolSpec]) -> None:
         agent = self.config.agent
+        # The benchmark's comparison strategy: everything is re-sent as it
+        # was, so the cost of the product's context work can be measured
+        # against it. Compaction stays — a request larger than the window is
+        # refused by every provider, and a baseline that cannot finish a task
+        # measures nothing — but nothing below it runs.
+        naive = getattr(agent, "context_strategy", "current") == "naive"
 
         # Before measuring anything. Screenshots are the largest thing in a
         # desktop run's history and the fastest to go stale, and dropping them
         # is exact and free - where compaction is a model call. Doing it first
         # also means the measurement below is of what will actually be sent.
-        gone = self.conversation.forget_old_pictures(
+        gone = 0 if naive else self.conversation.forget_old_pictures(
             getattr(agent, "keep_screenshots", 2))
         if gone:
             self._emit_usage(system_prompt, specs)
@@ -542,7 +548,7 @@ class AgentLoop:
         # every step would have spent more than it saved. Doing it at the point
         # compaction would happen anyway costs nothing extra, because
         # compaction busts the same cache and pays a model call on top.
-        stale, freed = self.conversation.forget_superseded_reads()
+        stale, freed = (0, 0) if naive else self.conversation.forget_superseded_reads()
         if stale:
             self._note(f"Dropped {stale} file read{'s' if stale > 1 else ''} "
                        f"that later edits had already made out of date "
