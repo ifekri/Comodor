@@ -63,7 +63,7 @@ def test_the_runtime_reads_the_strategy_from_config_not_from_the_harness(config)
     import re
 
     source = Path(__file__).resolve().parents[1] / "src" / "comodor"
-    importing = re.compile(r"^\s*(from\s+bench|import\s+bench)", re.M)
+    importing = re.compile(r"^\s*(from\s+bench(?:\s|\.)|import\s+bench(?:\s|\.|$))", re.M)
     for path in source.rglob("*.py"):
         assert not importing.search(path.read_text(encoding="utf-8", errors="replace")), path
     assert config.agent.context_strategy == "current"

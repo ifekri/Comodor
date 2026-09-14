@@ -159,6 +159,7 @@ class AgentLoop:
         self.conversation.add(
             Message.user(user_text, images=images or [], briefing=playbook))
         self.bus.emit(Kind.TURN_START, text=user_text)
+        self._open_ledger(user_text)
 
         deadline = started + self.config.agent.max_seconds
 
@@ -280,6 +281,7 @@ class AgentLoop:
             result.tool_calls += len(calls)
             self._execute(calls)
             self.bus.emit(Kind.STEP, step=result.steps, tool_calls=len(calls))
+            self._advance_ledger(result.steps)
 
             if not agent.loop:
                 # Loop off: run the tools the model asked for, then stop and
@@ -410,6 +412,7 @@ class AgentLoop:
             said = self._what_was_asked(context, call.name)
             if said:
                 message.content = f"{message.content}\n\n{said}"
+            self._record_evidence(context, call, result)
             # A tool that produced a picture — a screenshot of a page — sends
             # it as one. Where the dialect allows an image beside a tool result
             # it goes there; where it does not, the adapter moves it.
@@ -477,6 +480,62 @@ class AgentLoop:
             return ""
         context.rules_shown += 1
         return reminder(context.rules)
+
+    # -- the evidence ledger ----------------------------------------------- #
+    #
+    # Bookkeeping about what this turn has been told and has seen. Every
+    # method here is wrapped the way `_say_if_unverified` is: a fault in the
+    # record must never be the reason a turn fails.
+
+    def _open_ledger(self, user_text: str) -> None:
+        """A fresh ledger for the turn, seeded with what the user stated."""
+        try:
+            context = self._tool_context()
+            context.reset_evidence()
+            context.evidence.known("the request, as the user stated it",
+                                   material=user_text)
+        except Exception:
+            pass
+
+    def _advance_ledger(self, step: int) -> None:
+        try:
+            if self.tool_context is not None:
+                self.tool_context.evidence.step = step
+        except Exception:
+            pass
+
+    #: Tools whose result is an observation of the repository or the machine.
+    OBSERVERS = frozenset({"read_file", "list_dir", "glob", "grep", "run_shell",
+                           "run_python", "web_fetch", "web_search", "browse"})
+
+    def _record_evidence(self, context: ToolContext, call: ToolCall,
+                         result: ToolResult) -> None:
+        """What one tool result establishes, as the ledger sees it.
+
+        A read, search or command that succeeded is `VERIFIED`, with the
+        path or the command as its source and a fingerprint of what came
+        back. A result that failed, or one the table cannot place, stays
+        `UNKNOWN`: the safe state, because nothing may rest on it. Writes are
+        recorded by the tools themselves through `note_read`; questions and
+        plans are not observations and record nothing here.
+        """
+        try:
+            if call.name in staleness.WRITERS or call.name not in self.OBSERVERS:
+                return
+            book = context.evidence
+            path = str(result.meta.get("path") or call.arguments.get("path") or "")
+            subject = path or self._describe(call)
+            claim = f"{call.name} {subject}".strip()
+            if not result.ok:
+                if book.find(claim) is None:
+                    book.unknown(claim)
+                return
+            if path and call.name == "read_file" and context.was_read(context.resolve(path)):
+                return                     # the whole-file read is already recorded
+            source = path if call.name == "read_file" and path else f"{call.name}:{subject}"
+            book.verified(claim, source=source, material=result.content)
+        except Exception:
+            pass
 
     def _tool_context(self) -> ToolContext:
         # The context is built once and kept — it holds the checkpoint store,

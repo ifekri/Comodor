@@ -112,31 +112,31 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
 
 **Purpose**: the smallest shared mechanism separating resolved, unresolved-required, clarification-required and blocked. **Deliberately invisible** — no user-facing change.
 
-- [ ] T016 [US1] Write the evidence state-transition tests first in `tests/test_evidence_ledger.py`
+- [X] T016 [US1] Write the evidence state-transition tests first in `tests/test_evidence_ledger.py`
   - **Req**: FR-001, FR-002 · **Dep**: none · **Evidence**: every legal transition in [data-model.md §2](./data-model.md) passes; every illegal one is rejected; a `DERIVED` entry resting on `UNKNOWN` is refused · **Done when**: tests exist and fail
-- [ ] T017 [US1] Create the ledger and its closed transition table in `src/comodor/agent/evidence.py`
+- [X] T017 [US1] Create the ledger and its closed transition table in `src/comodor/agent/evidence.py`
   - **Req**: FR-001, FR-002, [contracts/evidence-ledger.md](./contracts/evidence-ledger.md) · **Dep**: T016 · **Evidence**: the complete closed `EvidenceState` set defined in [data-model.md §2](./data-model.md) — including `UNRESOLVED` — with its transition table; no model call, no network, no new dependency · **Done when**: T016 passes
-- [ ] T018 [US1] Carry the ledger on `ToolContext` in `src/comodor/tools/base.py`
+- [X] T018 [US1] Carry the ledger on `ToolContext` in `src/comodor/tools/base.py`
   - **Req**: FR-001, plan IP-1 · **Dep**: T017 · **Evidence**: created and discarded with the turn; never serialised; existing `note_read` writes a `VERIFIED` entry · **Done when**: full suite unchanged
-- [ ] T019 [US1] Record `VERIFIED` entries from tool results in `src/comodor/agent/loop.py`
+- [X] T019 [US1] Record `VERIFIED` entries from tool results in `src/comodor/agent/loop.py`
   - **Req**: FR-004, [contracts/evidence-ledger.md §E2](./contracts/evidence-ledger.md) · **Dep**: T018 · **Evidence**: read, search and shell each produce an entry with source and fingerprint; unclassifiable results stay `UNKNOWN` · **Done when**: no user-observable change
-- [ ] T020 [US1] Implement the materiality test against the closed FR-007 list in `src/comodor/agent/evidence.py`
+- [X] T020 [US1] Implement the materiality test against the closed FR-007 list in `src/comodor/agent/evidence.py`
   - **Req**: FR-007, FR-122 · **Dep**: T017 · **Materiality**: the eleven FR-007 classes, table-driven · **Evidence**: fixed decision table, each row classified; immaterial decisions never become `REQUIRES_CLARIFICATION` · **Done when**: classification is deterministic, not heuristic prose
-- [ ] T021 [US1] Confine agent discretion to non-material decisions in `src/comodor/agent/evidence.py`
+- [X] T021 [US1] Confine agent discretion to non-material decisions in `src/comodor/agent/evidence.py`
   - **Req**: FR-130, FR-003, FR-011, FR-012, SC-004 · **Dep**: T020 · **Materiality**: material ⇒ assumption path unreachable · **Evidence**: mutation-checked — a decision passing the materiality test can never reach the assumption path; zero proceed-on-assumption cases involve a material decision; where readings compete the decision is treated as material · **Done when**: guard fails when removed
-- [ ] T022 [US1] Make the evidence-first duty mode-aware by reading `src/comodor/safety/modes.py`
+- [X] T022 [US1] Make the evidence-first duty mode-aware by reading `src/comodor/safety/modes.py`
   - **Req**: FR-009, FR-010, FR-032 · **Dep**: T020 · **Evidence**: with `may_use_read_tools=False` an empty `evidence_consulted` is accepted and no inspection claim is made; the mode table is read, never written · **Done when**: both modes covered
-- [ ] T023 [US5] Implement low-confidence escalation in `src/comodor/agent/evidence.py`
+- [X] T023 [US5] Implement low-confidence escalation in `src/comodor/agent/evidence.py`
   - **Req**: FR-115, SC-033 · **Dep**: T020 · **Materiality**: low confidence on a material decision escalates to clarification · **Evidence**: four cases — (a) low confidence alone never licenses fabricated certainty; (b) material uncertainty raises a clarification; (c) non-material uncertainty is reported or handled by discretion; (d) **hedging language cannot substitute for escalation** · **Done when**: case (d) is mutation-checked
-- [ ] T024 [US5] Implement the insufficient-information outcome in `src/comodor/agent/evidence.py`
+- [X] T024 [US5] Implement the insufficient-information outcome in `src/comodor/agent/evidence.py`
   - **Req**: FR-113 · **Dep**: T017 · **Evidence**: names what is missing; is not fabricated success, not a generic failure that hides the missing decision, and not a default assumption · **Done when**: all three negative forms are asserted against
-- [ ] T025 [P] [US5] Implement conflict and partial-access reporting in `src/comodor/agent/evidence.py`
+- [X] T025 [P] [US5] Implement conflict and partial-access reporting in `src/comodor/agent/evidence.py`
   - **Req**: FR-069, FR-070 · **Dep**: T019 · **Evidence**: contradictory evidence surfaced rather than silently resolved; uninspected areas named · **Done when**: both cases tested
-- [ ] T026 [US1] Assert ledger security boundaries in `tests/test_evidence_ledger_boundaries.py`
+- [X] T026 [US1] Assert ledger security boundaries in `tests/test_evidence_ledger_boundaries.py`
   - **Req**: FR-074, [contracts/evidence-ledger.md §E4](./contracts/evidence-ledger.md), Constitution VIII · **Dep**: T018 · **Evidence**: mutation-checked — prompt head unchanged, entries hold fingerprints not content, ledger never persisted to snapshot/journal/checkpoint · **Done when**: guard restored after mutation
-- [ ] T027 [US1] Assert ledger failure degrades safely in `tests/test_evidence_ledger_resilience.py`
+- [X] T027 [US1] Assert ledger failure degrades safely in `tests/test_evidence_ledger_resilience.py`
   - **Req**: FR-002, [contracts/evidence-ledger.md §E5](./contracts/evidence-ledger.md) · **Dep**: T017 · **Evidence**: an internal ledger error leaves entries `UNKNOWN` and never kills the turn · **Done when**: test passes
-- [ ] T028 **Permission regression gate — Phase 2** via `tests/test_baseline_permissions.py`
+- [X] T028 **Permission regression gate — Phase 2** via `tests/test_baseline_permissions.py`
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T011, all of Phase 2 · **Evidence**: the existing permission suite is green after this phase, not only in Phase 10 · **Done when**: suite green on the phase commit
 
 **Checkpoint**: ledger populated; **full test suite unchanged**. If behaviour moved, something was wired too early.

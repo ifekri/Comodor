@@ -30,7 +30,7 @@ persisted (research R7).
 **Validation rules**
 
 - `state = VERIFIED` requires a non-empty `source` naming a tool or a path.
-- `state = KNOWN` requires `source = user`.
+- `state = KNOWN` requires `source = user`, or a `knowledge:<record>` reference when the entry is established project or user knowledge (FR-001's third category, recorded as `category = knowledge`; the record itself is admitted only through the learning admission gate).
 - `state = DERIVED` requires at least one `derived_from`, and every referenced
   entry must itself be `KNOWN`, `VERIFIED` or `DERIVED` — a derivation may never
   rest on an `UNKNOWN`. This single rule is what mechanically prevents a gap from

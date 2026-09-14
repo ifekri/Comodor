@@ -89,8 +89,35 @@ class ToolContext:
     #: metadata table, so a delegate cannot quietly sidestep the count.
     brain_store: Any = None
 
-    def note_read(self, path: Path) -> None:
+    #: The turn's evidence ledger (`agent/evidence.py`): what has been stated,
+    #: observed and derived, and which decisions are still open. Built on
+    #: first use so a context made without one costs nothing, shared by
+    #: reference across the per-call views, and never serialised — it lives
+    #: exactly as long as this context does.
+    _evidence: Any = field(default=None, repr=False, compare=False)
+
+    @property
+    def evidence(self) -> Any:
+        if self._evidence is None:
+            from ..agent.evidence import Ledger
+
+            self._evidence = Ledger(mode=getattr(self.config.agent, "mode", "act"))
+        return self._evidence
+
+    def reset_evidence(self) -> None:
+        """A new turn, a new ledger. The old one is simply dropped."""
+        self._evidence = None
+
+    def note_read(self, path: Path, material: str | bytes = "") -> None:
         self.seen.add(self._key(path))
+        # A whole-file read is an observation: the ledger records that the
+        # file was seen, from where, and a fingerprint of what was there —
+        # never the contents. Bookkeeping must not be the reason a read fails.
+        try:
+            self.evidence.verified(f"read {self.relative(path)}",
+                                   source=self.relative(path), material=material)
+        except Exception:
+            pass
 
     def was_read(self, path: Path) -> bool:
         return self._key(path) in self.seen
