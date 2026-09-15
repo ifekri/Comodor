@@ -48,6 +48,24 @@ class Insights:
     recent_corrections_per_ten: float = 0.0
     cron_runs: int = 0
     cron_failures: int = 0
+    #: From the paired record each episode carries (FR-072, FR-073): counts
+    #: over the window, zero when no episode recorded one.
+    measured_episodes: int = 0
+    task_input_tokens: int = 0
+    task_output_tokens: int = 0
+    task_cached_tokens: int = 0
+    model_turns: int = 0
+    tool_calls: int = 0
+    clarifications_raised: int = 0
+    clarifications_answered: int = 0
+    knowledge_hits: int = 0
+    knowledge_stale: int = 0
+    validation_failures: int = 0
+
+    @property
+    def knowledge_stale_rate(self) -> float:
+        seen = self.knowledge_hits + self.knowledge_stale
+        return self.knowledge_stale / seen if seen else 0.0
 
     @property
     def cache_hit_rate(self) -> float:
@@ -129,11 +147,12 @@ def _episodes(config, since: float, result: Insights) -> None:
 
     store = BrainStore(config.paths.brain_db)
     rows = store.connection.execute(
-        "SELECT steps, corrections, created_at FROM episodes "
+        "SELECT steps, corrections, created_at, measurement FROM episodes "
         "WHERE created_at >= ? ORDER BY created_at", (since,)).fetchall()
     result.episodes = len(rows)
     if not rows:
         return
+    _measured(rows, result)
     total_steps = sum(max(1, row["steps"]) for row in rows)
     total_corrections = sum(row["corrections"] for row in rows)
     result.corrections_per_ten = total_corrections / total_steps * 10.0
@@ -145,6 +164,32 @@ def _episodes(config, since: float, result: Insights) -> None:
         recent_steps = sum(max(1, row["steps"]) for row in recent)
         result.recent_corrections_per_ten = (
             sum(row["corrections"] for row in recent) / recent_steps * 10.0)
+
+
+def _measured(rows, result: Insights) -> None:
+    """Sum the paired records the episodes carry. Counts only; an episode
+    from before the record existed contributes nothing."""
+    import json
+
+    for row in rows:
+        try:
+            record = json.loads(row["measurement"] or "{}")
+        except (ValueError, TypeError, KeyError, IndexError):
+            continue
+        if not isinstance(record, dict) or not record:
+            continue
+        result.measured_episodes += 1
+        result.task_input_tokens += int(record.get("input_tokens", 0) or 0)
+        result.task_output_tokens += int(record.get("output_tokens", 0) or 0)
+        result.task_cached_tokens += int(record.get("cached_tokens", 0) or 0)
+        result.model_turns += int(record.get("model_turns", 0) or 0)
+        result.tool_calls += int(record.get("tool_calls", 0) or 0)
+        result.clarifications_raised += int(record.get("clarifications_raised", 0) or 0)
+        result.clarifications_answered += int(record.get("clarifications_answered", 0) or 0)
+        result.knowledge_hits += int(record.get("knowledge_hits", 0) or 0)
+        result.knowledge_stale += int(record.get("knowledge_stale", 0) or 0)
+        if str(record.get("validation_outcome", "")) in ("failed", "contradicted"):
+            result.validation_failures += 1
 
 
 def _cron(config, since: float, result: Insights) -> None:

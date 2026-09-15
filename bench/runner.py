@@ -58,6 +58,10 @@ class Outcome:
     kept: list[str] = field(default_factory=list)
     #: Which context strategy the attempts ran under (see `baseline.py`).
     strategy: str = baseline.CURRENT
+    #: Whether the learning engine was on for these attempts. Off is the
+    #: measurement default; on is the explicit mode the learning scenarios
+    #: use, where the brain starts empty in a home of its own every attempt.
+    learning: bool = False
 
     @property
     def passed(self) -> int:
@@ -101,10 +105,11 @@ class Outcome:
 
 def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
              keep: Path | None = None, say=print,
-             strategy: str = baseline.CURRENT) -> Outcome:
+             strategy: str = baseline.CURRENT, learning: bool = False) -> Outcome:
     outcome = Outcome(task=task, strategy=strategy)
+    outcome.learning = learning
     for attempt_number in range(1, tries + 1):
-        attempt, verdict, workspace = _one(task, provider, model, keep, strategy)
+        attempt, verdict, workspace = _one(task, provider, model, keep, strategy, learning)
         outcome.attempts.append(attempt)
         outcome.verdicts.append(verdict)
         if not verdict.passed:
@@ -118,13 +123,14 @@ def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
 
 
 def _one(task: Task, provider: str, model: str,
-         keep: Path | None, strategy: str = baseline.CURRENT) -> tuple[Attempt, Verdict, Path]:
+         keep: Path | None, strategy: str = baseline.CURRENT,
+         learning: bool = False) -> tuple[Attempt, Verdict, Path]:
     root = Path(tempfile.mkdtemp(prefix=f"comodor-bench-{task.name}-"))
     workspace = root / "work"
     home = root / "home"
     fresh_copy(task.repo, workspace)
     home.mkdir()
-    _settings(home, task, strategy)
+    _settings(home, task, strategy, learning)
 
     attempt = _invoke(task, workspace, home, provider, model)
 
@@ -173,13 +179,19 @@ def _keep_the_answer(root: Path, task: Task, attempt: Attempt,
         pass
 
 
-def _settings(home: Path, task: Task, strategy: str = baseline.CURRENT) -> None:
+def _settings(home: Path, task: Task, strategy: str = baseline.CURRENT,
+              learning: bool = False) -> None:
     """The config this attempt runs under, written into its own empty home.
 
     Three of these are what make the number mean something.
 
-    `learning.enabled` is off: the brain is the feature that makes the second
-    run better than the first, and a measurement cannot have that.
+    `learning.enabled` is an explicit mode, off unless asked for: the brain
+    is the feature that makes the second run better than the first, and a
+    measurement of the agent cannot have that. A scenario that measures the
+    brain itself asks for it on — and still gets an empty brain in a home of
+    its own, so what it learns is what the attempt taught it and nothing
+    from the machine it runs on. Either way the mode is written into the
+    attempt's config, never inferred from what happens to be on disk.
 
     `max_cost_usd` is a real ceiling. A task that goes wrong on a metered model
     goes wrong at a known price rather than an open-ended one.
@@ -199,7 +211,7 @@ def _settings(home: Path, task: Task, strategy: str = baseline.CURRENT) -> None:
             # assembled differs — see `baseline.py`.
             **baseline.settings(strategy),
         },
-        "learning": {"enabled": False},
+        "learning": {"enabled": bool(learning)},
     }
     (home / "config.json").write_text(
         json.dumps(settings, indent=2), encoding="utf-8")

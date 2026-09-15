@@ -99,8 +99,12 @@ def test_today_the_json_report_has_exactly_these_fields(scripted):
     """The shape a caller reads now; additions later must be additive."""
     config = scripted([Script(text="Hello.")])
     _, report = run_json(config)
+    assert {"text", "ok", "stopped", "steps", "tool_calls",
+            "tools", "error", "usage", "elapsed"} <= set(report)
+    # Two additions since: `usage.cached_tokens` (T015) and the paired
+    # `measurement` record (T061); nothing a pre-change caller read moved.
     assert set(report) == {"text", "ok", "stopped", "steps", "tool_calls",
-                           "tools", "error", "usage", "elapsed"}
+                           "tools", "error", "usage", "elapsed", "measurement"}
     # `cached_tokens` is the one addition Phase 1 makes (T015 needs it for the
     # paired baseline); everything a pre-change caller read is still there.
     assert {"input_tokens", "output_tokens", "cost_usd"} <= set(report["usage"])

@@ -44,6 +44,7 @@ from ..tools import ToolContext, ToolRegistry, ToolResult
 from . import plan, staleness
 from .context import Conversation
 from .prompts import COMPACT_PROMPT, build_system_prompt
+from .tokens import TaskMeasurement
 
 MAX_PARALLEL_TOOLS = 6
 
@@ -78,6 +79,8 @@ class TurnResult:
     #: question ended without an answer: the decision, its candidates, what
     #: was consulted, and `outcome` — cancelled, expired or unattended.
     clarification: dict[str, Any] | None = None
+    #: What the turn cost beside how it went — counts only (FR-072).
+    measurement: TaskMeasurement = field(default_factory=TaskMeasurement)
     #: Why a turn was cancelled, when it was ("stop" — the human pressed stop
     #: — or "interrupt" — a new message took over under the interrupt busy
     #: mode). The learn step reads this so the review knows which kind of
@@ -138,6 +141,8 @@ class AgentLoop:
         #: remembers which model it describes and is rebuilt for another.
         self._profile: Any = None
         self._profile_for: tuple[str, str] = ("", "")
+        #: The turn's paired record; replaced at the start of every turn.
+        self._measurement = TaskMeasurement()
 
     # -- public API ------------------------------------------------------- #
 
@@ -155,6 +160,7 @@ class AgentLoop:
         self._cancel_reason = ""
         self._used = []
         result = TurnResult()
+        self._measurement = result.measurement
 
         # What the user said not to do, pulled out once. Patterns over their
         # own words — no model call, and nothing that could cost a request.
@@ -206,6 +212,8 @@ class AgentLoop:
 
         result.elapsed = time.monotonic() - started
         result.usage = self.conversation.usage
+        result.measurement.outcome = result.stopped
+        result.measurement.knowledge_hits = len(self._recalled)
         self._say_if_unverified(result)
         self.bus.emit(Kind.TURN_END, stopped=result.stopped, steps=result.steps,
                       elapsed=result.elapsed, error=result.error,
@@ -346,7 +354,7 @@ class AgentLoop:
 
     def _stream_once(self, system_prompt: str, specs: list[ToolSpec]) -> dict[str, Any]:
         """One streamed assistant response, surfaced to the UI as it arrives."""
-        payload = self.conversation.render(system_prompt)
+        payload = self.conversation.render(system_prompt, specs)
         agent = self.config.agent
 
         self._message_id = uuid.uuid4().hex[:12]
@@ -386,6 +394,7 @@ class AgentLoop:
                       tool_calls=[call.name for call in tool_calls])
 
         self.conversation.record_usage(usage)
+        self._measurement.record_turn(usage, self.conversation.last_request_tokens)
         if usage.prompt_tokens:
             # What the model *read*, not what it was billed for. With caching on
             # those differ by an order of magnitude, and it is the former the
@@ -418,7 +427,13 @@ class AgentLoop:
         else:
             results = [self._run_one(call, context) for call in calls]
 
+        self._measurement.tool_calls += len(calls)
         for call, result in zip(calls, results, strict=True):
+            if not result.ok:
+                self._measurement.retries += 1
+            if call.name == "ask":
+                self._measurement.clarifications_raised += int(result.meta.get("asked", 0) or 0)
+                self._measurement.clarifications_answered += int(result.meta.get("given", 0) or 0)
             message = Message.tool(
                 call_id=call.id, name=call.name,
                 content=result.content, is_error=not result.ok,
@@ -813,7 +828,11 @@ class AgentLoop:
 
     def _emit_usage(self, system_prompt: str, specs: list[ToolSpec]) -> None:
         limit = self._window()
-        used = self.conversation.used_tokens(system_prompt, specs)
+        # What the last request actually carried, counted where it was
+        # rendered; a fresh count only when nothing has been sent yet or the
+        # history moved since (compaction, a sweep).
+        used = (self.conversation.last_request_tokens
+                or self.conversation.used_tokens(system_prompt, specs))
         usage = self.conversation.usage
         self.bus.emit(
             Kind.USAGE,
@@ -907,7 +926,8 @@ class AgentLoop:
             return ""
 
         try:
-            self.memory.before_turn(user_text)
+            noticed = self.memory.before_turn(user_text)
+            self._measurement.corrections += len(getattr(noticed, "corrections", []) or [])
         except Exception:
             pass
 
@@ -998,6 +1018,7 @@ class AgentLoop:
                 approvals=approvals,
                 tokens=self.conversation.usage.total,
                 cost_usd=self.conversation.usage.cost_usd,
+                measurement=result.measurement.as_dict(),
             )
         except Exception:
             # Learning is a background nicety; it must never break a turn.

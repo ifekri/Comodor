@@ -237,6 +237,13 @@ class MemoryProviderConfig:
 
 @dataclass
 class LearningConfig:
+    #: The whole of automatic learning, on or off. Off means no durable
+    #: write from any automatic path — no episode, no reflection, no review,
+    #: no correction signal, no vocabulary, and the model's own memory tool
+    #: refuses to write — and no recall into the prompt. What was learned
+    #: before stays readable (`comodor journey`) and a person may still
+    #: teach explicitly. The benchmark sets this off so a measurement cannot
+    #: depend on what the previous attempt taught (FR-064).
     enabled: bool = True
     top_k: int = 6                       # lessons recalled per turn
     max_playbook_tokens: int = 800       # hard cap on injected memory

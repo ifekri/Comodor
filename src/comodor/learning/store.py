@@ -261,6 +261,16 @@ class Signal:
     created_at: float = field(default_factory=time.time)
 
 
+def _measurement(row: Any) -> dict[str, Any]:
+    """The episode's paired record, or an empty dict for an older row."""
+    try:
+        raw = row["measurement"] if "measurement" in row.keys() else "{}"
+        loaded = json.loads(raw or "{}")
+        return loaded if isinstance(loaded, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
 @dataclass
 class Episode:
     """One completed task, kept so reflection has something to look at."""
@@ -287,6 +297,10 @@ class Episode:
     #: model publishes no price — the insights view shows a dash for that,
     #: never a guess.
     cost_usd: float = 0.0
+    #: The paired record behind the figures above — input/output/cached
+    #: tokens, context size, clarifications, knowledge hits — as counts only
+    #: (FR-072, FR-074). Empty for an episode written before it existed.
+    measurement: dict[str, Any] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------- #
@@ -519,6 +533,7 @@ class BrainStore:
                 ("tokens", "INTEGER NOT NULL DEFAULT 0"),
                 ("rules_active", "INTEGER NOT NULL DEFAULT 0"),
                 ("cost_usd", "REAL NOT NULL DEFAULT 0"),
+                ("measurement", "TEXT NOT NULL DEFAULT '{}'"),
             ],
             "lessons": [
                 # The curator's status: 'active' is the default and the only
@@ -1024,13 +1039,14 @@ class BrainStore:
                 """INSERT INTO episodes(session_id, goal, scope, success, stopped,
                                         steps, elapsed, tools_used, error_kind, created_at,
                                         corrections, approvals_asked, retries, tokens,
-                                        rules_active, cost_usd)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                        rules_active, cost_usd, measurement)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (episode.session_id, episode.goal, episode.scope, int(episode.success),
                  episode.stopped, episode.steps, episode.elapsed,
                  json.dumps(episode.tools_used), episode.error_kind, episode.created_at,
                  episode.corrections, episode.approvals_asked, episode.retries,
-                 episode.tokens, episode.rules_active, episode.cost_usd),
+                 episode.tokens, episode.rules_active, episode.cost_usd,
+                 json.dumps(episode.measurement or {})),
             )
             episode.id = int(cursor.lastrowid or 0)
         return episode
@@ -1056,6 +1072,7 @@ class BrainStore:
                 retries=row["retries"], tokens=row["tokens"],
                 rules_active=row["rules_active"],
                 cost_usd=row["cost_usd"] if "cost_usd" in row.keys() else 0.0,
+                measurement=_measurement(row),
             )
             for row in reversed(rows)
         ]

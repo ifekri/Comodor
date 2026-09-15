@@ -93,6 +93,11 @@ class Memory(Tool):
     def run(self, ctx: ToolContext, **args: Any) -> ToolResult:
         action = str(args.get("action") or "").strip().lower()
         kind = str(args.get("kind") or "memory")
+        if action in ("add", "replace", "remove") and not getattr(
+                getattr(ctx.config, "learning", None), "enabled", True):
+            return ToolResult.failure(
+                "learning is switched off (learning.enabled = false), so the "
+                "memory is read-only; nothing durable is written")
         try:
             if action == "add":
                 fact = self._service.add(str(args.get("text") or ""), kind=kind)

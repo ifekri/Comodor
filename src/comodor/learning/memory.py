@@ -374,8 +374,17 @@ class LearningEngine:
                        success: bool, stopped: str, steps: int, elapsed: float,
                        approvals: int = 0, tokens: int = 0,
                        corrections: int = 0, cancel_reason: str = "",
-                       cost_usd: float = 0.0) -> None:
-        """Close the loop on one task: credit, store, then reflect in the background."""
+                       cost_usd: float = 0.0,
+                       measurement: dict[str, Any] | None = None) -> None:
+        """Close the loop on one task: credit, store, then reflect in the background.
+
+        `measurement` is the turn's paired record (`agent/tokens.py`) — counts
+        only — kept with the episode so `comodor insights` can aggregate it.
+        """
+        if not self.config.learning.enabled:
+            # Off is off: nothing durable is written from a finished task —
+            # not an episode, not a signal, not a lesson, not a fact.
+            return
         tools_used = sorted({message.name for message in messages
                              if getattr(message.role, "value", "") == "tool" and message.name})
         errors = [message for message in messages
@@ -397,6 +406,7 @@ class LearningEngine:
             retries=len(errors),
             rules_active=len(self.active_rules()),
             cost_usd=cost_usd,
+            measurement=dict(measurement or {}),
         ))
 
         # One task is one bag of words that belonged together. This is where
@@ -433,8 +443,9 @@ class LearningEngine:
         a fixed order, reflection first, so the order is a fact of the code
         rather than of the scheduler, and one request is in flight at a time.
         """
-        reflect = bool(self.config.learning.reflect and self.gateway is not None)
-        review = bool(self.config.learning.enabled and self.config.learning.review
+        enabled = bool(self.config.learning.enabled)
+        reflect = bool(enabled and self.config.learning.reflect and self.gateway is not None)
+        review = bool(enabled and self.config.learning.review
                       and self.gateway is not None)
         if not reflect and not review:
             return

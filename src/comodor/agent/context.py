@@ -30,6 +30,9 @@ class Conversation:
     counter: TokenCounter = field(default_factory=TokenCounter)
     usage: Usage = field(default_factory=Usage)
     compactions: int = 0
+    #: The estimated size of the last payload `render()` produced, counted
+    #: where it was assembled so the gauge and the request agree (FR-051).
+    last_request_tokens: int = 0
 
     # -- basics ----------------------------------------------------------- #
 
@@ -45,9 +48,17 @@ class Conversation:
         self.usage = Usage()
         self.compactions = 0
 
-    def render(self, system_prompt: str) -> list[Message]:
-        """The full payload for one request."""
-        return [Message.system(system_prompt), *self.messages]
+    def render(self, system_prompt: str,
+               tools: list[ToolSpec] | None = None) -> list[Message]:
+        """The full payload for one request.
+
+        Its size is recorded here, once, as it goes out: everything that
+        reports context size reads this rather than assembling the payload
+        a second time to count it.
+        """
+        payload = [Message.system(system_prompt), *self.messages]
+        self.last_request_tokens = self.counter.count(payload, tools)
+        return payload
 
     @property
     def last_user_text(self) -> str:

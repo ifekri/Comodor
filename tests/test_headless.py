@@ -106,7 +106,10 @@ def test_a_question_nobody_can_answer_does_not_hold_the_run(scripted):
     code = cli.run_headless(config, run(config))
     elapsed = time.monotonic() - started
 
-    assert code == 0
+    # Since spec 002 (FR-082) a question nobody can answer ends the run
+    # needing a decision rather than carrying on; the exit is non-zero and
+    # the run still does not wait.
+    assert code != 0
     assert elapsed < 15.0, f"the run waited {elapsed:.0f}s for an answer"
 
 

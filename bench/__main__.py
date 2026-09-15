@@ -44,6 +44,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--paired", action="store_true",
                         help="run every task under both strategies and write the "
                              "paired baseline report")
+    parser.add_argument("--learning", action="store_true",
+                        help="switch the learning engine on for every attempt (off "
+                             "by default; each attempt still starts with an empty brain)")
     args = parser.parse_args(argv)
 
     _load_env(ROOT / "src" / ".env")
@@ -85,7 +88,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[{strategy}] [{index}/{len(tasks)}] {task.category}/{task.name}",
                   flush=True)
             outcomes.append(run_task(task, provider=args.provider, model=args.model,
-                                     tries=args.tries, keep=keep, strategy=strategy))
+                                     tries=args.tries, keep=keep, strategy=strategy,
+                                     learning=args.learning))
 
     outcomes = by_strategy[strategies[0]]
     if args.paired:

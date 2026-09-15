@@ -373,6 +373,8 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
                 "cost_usd": round(result.usage.cost_usd, 6),
             },
             "elapsed": round(result.elapsed, 2),
+            # The paired record: counts only, beside the outcome above.
+            "measurement": result.measurement.as_dict(),
         }, ensure_ascii=False, indent=2))
     else:
         print(result.text)

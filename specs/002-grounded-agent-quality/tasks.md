@@ -234,23 +234,23 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
 
 **Purpose**: measure before optimizing. Lightweight instrumentation that leaks nothing.
 
-- [ ] T061 [US3] Record per-turn input, output and cached tokens in `src/comodor/agent/tokens.py`
+- [X] T061 [US3] Record per-turn input, output and cached tokens in `src/comodor/agent/tokens.py`
   - **Req**: FR-055, FR-072 · **Dep**: T003 · **Evidence**: provider-reported `Usage` is the source of truth; the estimator fills in only where a provider figure is absent · **Done when**: three figures separated per turn
-- [ ] T062 [US3] Aggregate per-task measurements in `src/comodor/agent/tokens.py`, surfaced via `src/comodor/insights.py`
+- [X] T062 [US3] Aggregate per-task measurements in `src/comodor/agent/tokens.py`, surfaced via `src/comodor/insights.py`
   - **Req**: FR-072, FR-073 · **Dep**: T061 · **Evidence**: model turns, tool calls, retries, clarifications raised/answered, corrections, knowledge hits and stale rate recorded · **Done when**: aggregation reads records the product already writes
-- [ ] T063 [US3] Record assembled context size at the render funnel in `src/comodor/agent/context.py`
+- [X] T063 [US3] Record assembled context size at the render funnel in `src/comodor/agent/context.py`
   - **Req**: FR-051, FR-072 · **Dep**: T002 · **Evidence**: recorded per request without a second render pass · **Done when**: gauge and request agree
-- [ ] T064 [US3] Test metrics redaction in `tests/test_metrics_redaction.py`
+- [X] T064 [US3] Test metrics redaction in `tests/test_metrics_redaction.py`
   - **Req**: FR-074 · **Dep**: T062 · **Evidence**: mutation-checked — no credential, no prompt body, no file content in any recorded field; counts, sizes and identifiers only · **Done when**: guard restored after mutation
-- [ ] T065 [P] [US3] Test measurement locality in `tests/test_metrics_locality.py`
+- [X] T065 [P] [US3] Test measurement locality in `tests/test_metrics_locality.py`
   - **Req**: FR-075 · **Dep**: T062 · **Evidence**: this feature introduces no outbound transmission · **Done when**: no new network path exists
-- [ ] T066 [P] [US3] Bound instrumentation overhead in `tests/test_metrics_overhead.py` under the `performance` marker
+- [X] T066 [P] [US3] Bound instrumentation overhead in `tests/test_metrics_overhead.py` under the `performance` marker
   - **Req**: SC-022 · **Dep**: T062 · **Evidence**: recall stays off the critical path; no added model call; existing ceilings hold · **Done when**: `pytest -m performance` green
-- [ ] T067 [US6] Make learning explicitly switchable off in `src/comodor/config.py` and `src/comodor/learning/memory.py`
+- [X] T067 [US6] Make learning explicitly switchable off in `src/comodor/config.py` and `src/comodor/learning/memory.py`
   - **Req**: FR-064 · **Dep**: T005 · **Provenance**: n/a — this governs whether admission runs at all · **Scope**: process-wide · **Evidence**: an explicit, documented switch; with learning off, no durable write occurs from any path including reflection and review · **Reject**: a silent or incidental disable is not acceptable · **Done when**: the switch is explicit, not inferred
-- [ ] T068 [US6] Make benchmark learning mode explicit and deterministic in `bench/runner.py`
+- [X] T068 [US6] Make benchmark learning mode explicit and deterministic in `bench/runner.py`
   - **Req**: FR-064, SC-026 · **Dep**: T067 · **Evidence**: learning-enabled and learning-disabled benchmark modes are both selectable and both deterministic; **reproduction does not depend on undocumented incidental behaviour**; isolation of workspace and `COMODOR_HOME` asserted · **Done when**: two runs of the same mode produce the same measurement inputs
-- [ ] T069 **Permission regression gate — Phase 4** via `tests/test_baseline_permissions.py`
+- [X] T069 **Permission regression gate — Phase 4** via `tests/test_baseline_permissions.py`
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T011, all of Phase 4 · **Evidence**: this phase touches agent orchestration; permission suite green here · **Done when**: suite green on the phase commit
 
 **Checkpoint**: every benchmark figure is measurable; nothing sensitive is recorded; benchmark modes are explicit.
