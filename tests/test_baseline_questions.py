@@ -39,7 +39,11 @@ def context_on(config):
         return ToolContext(config=config, permissions=PermissionEngine(config, bus),
                            checkpoints=CheckpointStore(config.paths.checkpoints),
                            bus=bus, redact=Redactor([]), cancel=Cancellation(),
-                           cwd=config.paths.project)
+                           cwd=config.paths.project,
+            # The request names every candidate used below, so the options
+            # are grounded (FR-016) and reach the form.
+            request_text=("Which database, SQLite or PostgreSQL? Which "
+                          "language, Python or Go?"))
     return build
 
 
@@ -83,8 +87,9 @@ def test_a_model_authored_escape_hatch_is_stripped_before_the_row_is_appended(ha
 def test_the_free_row_survives_encoding_for_every_surface():
     parsed = forms.parse([a_question()])
     wire = forms.encode(parsed)
-    assert wire[0]["options"][-1] == {"label": forms.WRITE_YOUR_OWN,
-                                      "description": "", "free": True}
+    last = wire[0]["options"][-1]
+    assert last["label"] == forms.WRITE_YOUR_OWN and last["free"] is True
+    assert last["description"] == ""
     back = forms.decode(wire)
     assert back[0].options[-1].free is True
 
@@ -173,17 +178,19 @@ def test_an_answer_for_an_unknown_header_leaves_the_question_unanswered(context_
 # --------------------------------------------------------------------------- #
 
 
-def test_today_a_dismissed_form_tells_the_model_to_choose_sensible_defaults(context_on):
-    """The behaviour spec 002 removes, captured before removal (FR-082)."""
+def test_a_dismissed_form_no_longer_tells_the_model_to_choose_defaults(context_on):
+    """Before spec 002 this returned "Choose sensible defaults, carry on" —
+    the behaviour FR-082 removes. Now the decision stays open."""
     result, _ = _run(context_on, forms.CANCELLED, {"questions": [a_question()]})
     assert result.ok
     assert result.meta["answered"] is False
-    assert "Choose sensible defaults" in result.content
-    assert "Do not ask again" in result.content
+    assert result.meta["outcome"] == "cancelled"
+    assert "sensible defaults" not in result.content.lower()
+    assert "remain unresolved" in result.content
 
 
-def test_today_an_expired_form_is_read_exactly_like_a_dismissed_one(context_on, monkeypatch):
-    """`bus.resolve` says it expired; the tool discards that flag today."""
+def test_an_expired_form_is_told_apart_from_a_dismissed_one(context_on, monkeypatch):
+    """`bus.resolve` says it expired; the tool used to discard that flag."""
     from comodor.tools import ask as ask_tool
 
     monkeypatch.setattr(ask_tool, "WAIT_FOR", 0.0)
@@ -191,7 +198,9 @@ def test_today_an_expired_form_is_read_exactly_like_a_dismissed_one(context_on, 
     bus.subscribe(lambda event: None)          # somebody listening, nobody answering
     result = Ask().run(context_on(bus), questions=[a_question()])
     assert result.meta["answered"] is False
-    assert "Choose sensible defaults" in result.content
+    assert result.meta["outcome"] == "expired"
+    assert "expired" in result.content
+    assert "sensible defaults" not in result.content.lower()
 
 
 def test_the_decoder_reads_every_dismissal_spelling_as_none():

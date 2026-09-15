@@ -1592,11 +1592,14 @@ class Session:
 
     # -- what a browser does ------------------------------------------------ #
 
-    def send(self, text: str, images: list[str] | None = None) -> bool:
+    def send(self, text: str, images: list[str] | None = None,
+             decisions: list[dict[str, Any]] | None = None) -> bool:
         """Start a turn. False if one is already running.
 
         ``images`` is base64 picture data for a model with vision, riding the
         user message the way the web interface's own screenshots do.
+        ``decisions`` are clarification payloads a delegate left open, which
+        the turn carries as open decisions of its own.
         """
         if not text.strip() and not images:
             return False
@@ -1610,7 +1613,8 @@ class Session:
             self.busy = True
             self.bus.emit(Kind.STATUS, busy=True)
             try:
-                self.agent.run(text, images=images or None)
+                self.agent.run(text, images=images or None,
+                               decisions=decisions or None)
             except Exception as error:                # never lose the worker
                 self.bus.emit(Kind.ERROR, text=f"{type(error).__name__}: {error}")
             finally:
@@ -1649,7 +1653,9 @@ class Session:
         summary_max = self.config.delegation.completion_summary_max
         text = "\n\n".join(completion_turn(record, summary_max)
                            for record in records)
-        if not self.send(text):
+        carried = [record["clarification"] for record in records
+                   if isinstance(record.get("clarification"), dict)]
+        if not self.send(text, decisions=carried or None):
             # A message the user just sent took the turn between the check
             # and here. The completions go back to pending for the next
             # boundary rather than being dropped.
@@ -1674,8 +1680,16 @@ class Session:
         # that fails to parse would reach the tool as "cancelled" while the
         # browser was told it had been sent.
         if request.kind == "questions":
-            if decode_answers(choice) is None and choice != CANCELLED:
+            decoded = decode_answers(choice)
+            if decoded is None and choice != CANCELLED:
                 return False, "those answers could not be read"
+            if decoded is not None:
+                from ..questions import decode, invalid_answers
+
+                problem = invalid_answers(
+                    decode(request.meta.get("questions") or []), decoded)
+                if problem:
+                    return False, problem
         elif request.options and choice not in request.options:
             return False, (f"{choice!r} is not one of the choices: "
                            f"{', '.join(request.options)}")

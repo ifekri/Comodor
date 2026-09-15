@@ -149,81 +149,81 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
 
 ### Option grounding and the custom-answer invariant
 
-- [ ] T029 [P] [US1] Property-test the custom-answer invariant in `tests/test_questions_invariant.py`
+- [X] T029 [P] [US1] Property-test the custom-answer invariant in `tests/test_questions_invariant.py`
   - **Req**: FR-017, SC-005 · **Dep**: T006 · **Evidence**: adversarial forms where the model authors "Other", "None of the above", "Custom" — exactly one free row survives, appended centrally · **Done when**: mutation-checked
-- [ ] T030 [P] [US1] Test custom-answer entry and carry-back in `tests/test_questions_custom_answer.py` and `packages/questions/test/`
+- [X] T030 [P] [US1] Test custom-answer entry and carry-back in `tests/test_questions_custom_answer.py` and `packages/questions/test/`
   - **Req**: FR-017, SC-005 · **Dep**: T006 · **Evidence**: free text reaches the tool result bound to that question's header, in both the Python decode path and the TS reducer · **Done when**: both covered
-- [ ] T031 [US1] Enforce grounded candidate options in `src/comodor/tools/ask.py`
+- [X] T031 [US1] Enforce grounded candidate options in `src/comodor/tools/ask.py`
   - **Req**: FR-015, FR-016 · **Dep**: T020 · **Evidence**: every option traces to user input, verified repository evidence, project configuration, trustworthy learned knowledge, or deterministic derivation; a model-invented alternative is rejected rather than presented as grounded · **Done when**: option provenance is checkable per option
-- [ ] T032 [P] [US1] Test the empty-candidate and invariant-preservation cases in `tests/test_questions_grounding.py`
+- [X] T032 [P] [US1] Test the empty-candidate and invariant-preservation cases in `tests/test_questions_grounding.py`
   - **Req**: FR-015, FR-016, FR-017 · **Dep**: T031 · **Evidence**: an empty candidate list is permitted when no alternative can be grounded, and the mandatory custom-answer row is still appended centrally in that case · **Done when**: both cases pass
 
 ### When to ask, and when not to
 
-- [ ] T033 [US1] Wire the ask decision to the ledger's open decisions in `src/comodor/tools/ask.py`
+- [X] T033 [US1] Wire the ask decision to the ledger's open decisions in `src/comodor/tools/ask.py`
   - **Req**: FR-008, FR-009, FR-013 · **Dep**: T020, T022 · **Materiality**: only FR-007 classes escalate · **Waiting**: the form is raised before any dependent mutating action · **Evidence**: an unsettled material decision raises a form; a settled one does not · **Done when**: both directions tested
-- [ ] T034 [P] [US1] Test anti-over-asking in `tests/test_clarification_restraint.py`
+- [X] T034 [P] [US1] Test anti-over-asking in `tests/test_clarification_restraint.py`
   - **Req**: FR-008, FR-011, FR-012, SC-006 · **Dep**: T033 · **Evidence**: **zero forms raised** when the question is settled by (a) repository evidence, (b) project configuration, (c) trustworthy learned knowledge, (d) safe implementation discretion, or (e) an established obvious default — measured in a mode permitted to inspect · **Done when**: all five cases pass; this guards against "never guess" regressing into "ask about everything"
-- [ ] T035 [US1] Test that clarification is never used for permission or plan confirmation in `tests/test_clarification_restraint.py`
+- [X] T035 [US1] Test that clarification is never used for permission or plan confirmation in `tests/test_clarification_restraint.py`
   - **Req**: FR-011 · **Dep**: T033, T034 (same test file — not parallel with T034) · **Evidence**: no form asks to proceed or to have a plan confirmed back · **Done when**: mutation-checked
 
 ### The non-answer paths — no material decision may become an assumption
 
-- [ ] T036 [US1] Remove self-resolution from every no-answer path in `src/comodor/tools/ask.py`
+- [X] T036 [US1] Remove self-resolution from every no-answer path in `src/comodor/tools/ask.py`
   - **Req**: FR-019, FR-033, FR-035, plan IP-2, research R1 · **Dep**: T033 · **Outcomes**: all three report `stopped: "clarification_required"`, distinguished by `clarification.outcome` — cancelled/declined → `cancelled`; expiry → `expired` (recover the flag `bus.resolve()` already returns, currently discarded at `ask.py:170`); nobody listening → `unattended`. **`stopped: "cancelled"` is NOT used — it stays reserved for turn-level cancellation** · **Dependent work**: does not run under any of them · **Evidence**: the "choose sensible defaults, carry on" instruction is gone from **all** paths; presence read from the bus's `listening` · **Done when**: no path returns a result that lets the model supply the missing answer, and a dismissed question is never reported as a cancelled turn
-- [ ] T037 [US1] Add the `clarification_required` terminal state to `TurnResult` in `src/comodor/agent/loop.py`
+- [X] T037 [US1] Add the `clarification_required` terminal state to `TurnResult` in `src/comodor/agent/loop.py`
   - **Req**: FR-123, plan IP-3, [contracts/clarification.md §C3](./contracts/clarification.md) · **Dep**: T036 · **Evidence**: `ok` is false; partial `steps`/`tool_calls` still reported; payload carries decision, candidates and `evidence_consulted` · **Done when**: distinguishable from both success and failure
-- [ ] T038 [US1] Make only a valid answer resume dependent work in `src/comodor/agent/loop.py` and `src/comodor/tools/ask.py`
+- [X] T038 [US1] Make only a valid answer resume dependent work in `src/comodor/agent/loop.py` and `src/comodor/tools/ask.py`
   - **Req**: FR-018, SC-042 · **Dep**: T036 · **Waiting**: dependent work paused while outstanding · **Outcomes**: answer resumes; cancel/decline/expiry leaves unresolved or terminates · **Evidence**: replay test — an answer supplied after cancellation produces the same result as a first-time answer · **Done when**: cancellation demonstrably does not satisfy the information requirement
-- [ ] T039 [US1] Enforce zero fabricated values on all four non-answer outcomes in `tests/test_clarification_no_fabrication.py`
+- [X] T039 [US1] Enforce zero fabricated values on all four non-answer outcomes in `tests/test_clarification_no_fabrication.py`
   - **Req**: FR-019, SC-037, SC-038, SC-039, SC-040 · **Dep**: T036 · **Evidence**: cancelled, declined, expired and unattended each assert no invented value, no option selected, no default applied, no assumption substituted — each independently mutation-checked · **Done when**: all four guards fail when removed
-- [ ] T040 [US1] Block dependent mutating actions after any non-answer outcome in `src/comodor/agent/loop.py`
+- [X] T040 [US1] Block dependent mutating actions after any non-answer outcome in `src/comodor/agent/loop.py`
   - **Req**: FR-018, SC-041, SC-043 · **Dep**: T038 · **Dependent work**: zero dependent writes, shell invocations or external calls after the outcome · **Evidence**: continued work is proven independent of the open decision; **uncertain dependency is treated as dependent** · **Done when**: mutation-checked
-- [ ] T041 [US1] Suppress re-raising a cancelled mandatory question in `src/comodor/tools/ask.py`
+- [X] T041 [US1] Suppress re-raising a cancelled mandatory question in `src/comodor/tools/ask.py`
   - **Req**: FR-129, SC-044 · **Dep**: T036 · **Evidence**: zero repeat forms for a cancelled decision within the same decision attempt; the unresolved decision is reported instead; a later explicit user request may resume it · **Done when**: both halves tested
-- [ ] T042 [US1] Test the full lifecycle matrix in `tests/test_clarification_lifecycle.py`
+- [X] T042 [US1] Test the full lifecycle matrix in `tests/test_clarification_lifecycle.py`
   - **Req**: FR-018, FR-019, FR-022, FR-024, FR-025, FR-026, SC-010 · **Dep**: T036, T038 · **Outcomes**: eight separately-asserted cases — answered, unanswered, explicit cancellation, explicit decline/dismiss, expiry, unattended/no-listener, stale answer, duplicate answer · **Evidence**: each distinguishable in the reported outcome, asserted at the **transport layer** — clarification cancellation, decline, expiry and unattended each yield `stopped == "clarification_required"` with `clarification.outcome` of `cancelled`, `cancelled`, `expired` and `unattended` respectively; **turn cancellation still yields `stopped == "cancelled"`, and clarification cancellation never does**; **none of the seven non-answer cases resolves a material decision**; duplicates resolve through the existing atomic claim, not timing · **Done when**: all eight pass with no timing dependency, and the turn-vs-question cancellation assertion is mutation-checked
-- [ ] T043 [P] [US1] Test execution pause by state in `tests/test_clarification_pause.py`
+- [X] T043 [P] [US1] Test execution pause by state in `tests/test_clarification_pause.py`
   - **Req**: FR-013, FR-018, SC-002 · **Dep**: T038 · **Evidence**: asserted by state, never by timing — no mutating tool ran before resolution; independent work not blocked · **Done when**: deterministic with a controlled bus
-- [ ] T044 [US1] Test non-interactive blocking in `tests/test_clarification_required.py`
+- [X] T044 [US1] Test non-interactive blocking in `tests/test_clarification_required.py`
   - **Req**: FR-033, FR-121, SC-002 · **Dep**: T037 · **Evidence**: with no bus subscriber a material clarification ends the turn in `clarification_required` and **no invented value appears anywhere in the output** · **Done when**: mutation-checked
-- [ ] T045 [P] [US1] Test expiry observability in `tests/test_clarification_expiry.py`
+- [X] T045 [P] [US1] Test expiry observability in `tests/test_clarification_expiry.py`
   - **Req**: FR-027 · **Dep**: T042 · **Evidence**: expiry publishes its event so no client keeps showing a settled request; expiry is not an answer · **Done when**: no client left with a live card
 
 ### Protocol, persistence and surfaces of the interaction
 
-- [ ] T046 [P] [US1] Add optional `reason`, `evidence_consulted`, `decision_ref` and `outcome` to the question/clarification shapes in `schemas/protocol/v2.json`
+- [X] T046 [P] [US1] Add optional `reason`, `evidence_consulted`, `decision_ref` and `outcome` to the question/clarification shapes in `schemas/protocol/v2.json`
   - **Req**: FR-080, FR-022, FR-035, research R8, [contracts/clarification.md §C1, §C2](./contracts/clarification.md) · **Dep**: none · **Evidence**: all four optional; `outcome` constrained to `cancelled` \| `expired` \| `unattended`, carried in the clarification payload and never in the turn outcome; a client ignoring them behaves identically · **Done when**: schema edited at source only — generated files never hand-edited
-- [ ] T047 [US1] Regenerate protocol artifacts with `python tools/protocol-codegen.py` and verify `--check`
+- [X] T047 [US1] Regenerate protocol artifacts with `python tools/protocol-codegen.py` and verify `--check`
   - **Req**: FR-080, Constitution VI · **Dep**: T046 · **Evidence**: `src/comodor/protocol/_generated.py` and `packages/protocol/src/generated.ts` regenerate cleanly · **Done when**: `--check` green
-- [ ] T048 [US1] Register the clarification-required outcome capability in `schemas/protocol/v2.json` `x-capabilities`
+- [X] T048 [US1] Register the clarification-required outcome capability in `schemas/protocol/v2.json` `x-capabilities`
   - **Req**: FR-080, SC-023, [contracts/clarification.md §C2](./contracts/clarification.md) · **Dep**: T046 · **Evidence**: a client not advertising it never receives the outcome · **Done when**: negotiation test proves an old client is unaffected
-- [ ] T049 [P] [US1] Populate `reason` and `evidence_consulted` on every raised form in `src/comodor/tools/ask.py`
+- [X] T049 [P] [US1] Populate `reason` and `evidence_consulted` on every raised form in `src/comodor/tools/ask.py`
   - **Req**: FR-034 · **Dep**: T046 · **Evidence**: the user is never asked to repeat inspection the agent already did · **Done when**: both fields present on every form
-- [ ] T050 [US1] Persist and restore an outstanding form across reconnect in `src/comodor/session/store.py`
+- [X] T050 [US1] Persist and restore an outstanding form across reconnect in `src/comodor/session/store.py`
   - **Req**: FR-023, SC-009 · **Dep**: T046 · **Evidence**: snapshot round-trip restores the pending interaction with its new optional fields · **Done when**: reconnect test passes
-- [ ] T051 [US1] Represent the full question lifecycle in transcript and export in `src/comodor/session/store.py`
+- [X] T051 [US1] Represent the full question lifecycle in transcript and export in `src/comodor/session/store.py`
   - **Req**: FR-030 · **Dep**: T042, T050 · **Evidence**: question text, grounded options, the custom-answer row, the user's answer, cancellation/decline, and final resolution state all appear correctly in session history and in exports, with secrets redacted · **Done when**: every one of the six elements is asserted
-- [ ] T052 [P] [US1] Render `reason` and `evidence_consulted` in the overlay in `apps/tui/src/App.tsx` and `packages/questions/src/index.ts`
+- [X] T052 [P] [US1] Render `reason` and `evidence_consulted` in the overlay in `apps/tui/src/App.tsx` and `packages/questions/src/index.ts`
   - **Req**: FR-031, FR-034, SC-008 · **Dep**: T046 · **Evidence**: renderer tests at all five widths; keyboard operability unchanged; **no timing dependency introduced** · **Done when**: renderer suite green
-- [ ] T053 [P] [US1] Test model switching during an outstanding form in `tests/test_clarification_model_switch.py`
+- [X] T053 [P] [US1] Test model switching during an outstanding form in `tests/test_clarification_model_switch.py`
   - **Req**: FR-028 · **Dep**: T042 · **Evidence**: the form survives; the answer applies to the work, not the model that raised it · **Done when**: test passes
 
 ### Delegated and background clarification
 
-- [ ] T054 [US1] Route delegate clarifications through the same mechanism in `src/comodor/agent/background.py`
+- [X] T054 [US1] Route delegate clarifications through the same mechanism in `src/comodor/agent/background.py`
   - **Req**: FR-029 · **Dep**: T036 · **Evidence**: a delegate's clarification reaches the same user-facing form via the existing `ScopedBus`, carrying origin/work attribution · **Done when**: attribution present and the mechanism is not duplicated
-- [ ] T055 [US1] Ensure a delegate clarification is never injected into another active turn in `src/comodor/agent/background.py`
+- [X] T055 [US1] Ensure a delegate clarification is never injected into another active turn in `src/comodor/agent/background.py`
   - **Req**: FR-029 · **Dep**: T054 · **Evidence**: completions and questions land at turn boundaries only; the parent's stream and cached prefix are untouched · **Done when**: mid-stream injection is asserted impossible
-- [ ] T056 [US1] Pause only the dependent delegated work in `src/comodor/agent/background.py`
+- [X] T056 [US1] Pause only the dependent delegated work in `src/comodor/agent/background.py`
   - **Req**: FR-029, FR-018 · **Dep**: T054 · **Dependent work**: the delegate that raised it pauses; siblings and the parent continue if independent · **Evidence**: asserted by state · **Done when**: independence proven per delegate
-- [ ] T057 [US1] Apply the anti-assumption rules to delegate clarifications in `src/comodor/agent/background.py`
+- [X] T057 [US1] Apply the anti-assumption rules to delegate clarifications in `src/comodor/agent/background.py`
   - **Req**: FR-029, FR-019, SC-037 to SC-040 · **Dep**: T054, T039 · **Outcomes**: identical to the parent's — no fabricated value on cancel, decline, expiry or absence · **Done when**: the four cases pass for a delegate-raised question
-- [ ] T058 [P] [US1] Test delegate clarification cancellation and reconnect in `tests/test_delegate_clarification.py`
+- [X] T058 [P] [US1] Test delegate clarification cancellation and reconnect in `tests/test_delegate_clarification.py`
   - **Req**: FR-029, FR-022, FR-023 · **Dep**: T054, T050 · **Evidence**: cancelling a delegate's question leaves its decision unresolved; a reconnect restores it with its origin intact; a crashed delegate is reported `lost`, never pretended alive · **Done when**: all three pass
-- [ ] T059 [P] [US1] Test clarification availability across modes in `tests/test_clarification_modes.py`
+- [X] T059 [P] [US1] Test clarification availability across modes in `tests/test_clarification_modes.py`
   - **Req**: FR-032, FR-010 · **Dep**: T022 · **Evidence**: every real mode may ask; a conversation-only mode asks without claiming it inspected the repository · **Done when**: both assertions pass
-- [ ] T060 **Permission regression gate — Phase 3** via `tests/test_baseline_permissions.py`
+- [X] T060 **Permission regression gate — Phase 3** via `tests/test_baseline_permissions.py`
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T011, all of Phase 3 · **Evidence**: this phase changes questions, ASK behaviour, session interaction and protocol, so the permission suite is re-run and green here, not only in Phase 10 · **Done when**: suite green on the phase commit
 
 **Checkpoint**: the agent asks when it must, never self-resolves a material decision, never over-asks, and old clients are unaffected.

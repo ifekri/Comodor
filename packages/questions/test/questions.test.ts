@@ -10,6 +10,7 @@ import {
   begin,
   cancel,
   current,
+  grounds,
   isSelected,
   move,
   optionAt,
@@ -188,4 +189,53 @@ test("the arrow keys do nothing while a person is typing", () => {
   const free = field({ options: [{ id: "own", label: "own", free: true }] });
   const state = type(begin(form(free)), "x");
   assert.equal(move(state, 1).cursor, state.cursor);
+});
+
+// Custom-answer carry-back through the reducer (spec 002, T030; FR-017).
+
+test("text written on one question is carried back under that question's header", () => {
+  const free = (header: string) => field({
+    header,
+    options: [...field().options, { id: "own", label: "own", free: true }],
+  });
+  let state = begin(form(free("database"), free("language")));
+  state = type(state, "DuckDB, in-process");
+  state = step(state, 1);
+  state = select(state, "Keep what is there");
+
+  assert.deepEqual(answer(state).answers, [
+    { header: "database", chosen: [], written: "DuckDB, in-process" },
+    { header: "language", chosen: ["Keep what is there"] },
+  ]);
+});
+
+test("written text is never coerced into an offered option", () => {
+  const free = field({ options: [
+    ...field().options,
+    { id: "own", label: "own", free: true },
+  ] });
+  const state = type(begin(form(free)), "keep what is there");
+  const sent = answer(state).answers?.[0];
+  assert.deepEqual(sent?.chosen, []);
+  assert.equal(sent?.written, "keep what is there");
+});
+
+test("a form with no free row cannot carry written text", () => {
+  const state = type(begin(form()), "anything");
+  assert.equal(answer(state).answers?.[0]?.written, undefined);
+});
+
+// Why a question is asked, and what was checked (spec 002, T052; FR-034).
+
+test("grounds are read from the current question and are empty for an older core", () => {
+  const bare = begin(form());
+  assert.deepEqual(grounds(bare), { reason: "", evidence: [] });
+
+  const explained = field({
+    header: "why", reason: "architecture",
+    evidence_consulted: ["settings.py", "README.md"],
+  } as Partial<QuestionField>);
+  const state = step(begin(form(field(), explained)), 1);
+  assert.deepEqual(grounds(state), { reason: "architecture",
+                                      evidence: ["settings.py", "README.md"] });
 });

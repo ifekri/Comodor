@@ -67,9 +67,17 @@ class TurnResult:
     steps: int = 0
     tool_calls: int = 0
     usage: Usage = field(default_factory=Usage)
-    stopped: str = "done"        # done | max_steps | budget | cancelled | error
+    #: done | max_steps | budget | cancelled | error | clarification_required.
+    #: `cancelled` means the whole turn was cancelled or interrupted, and
+    #: nothing else: a question the person dismissed ends the turn as
+    #: `clarification_required` with the dismissal inside `clarification`.
+    stopped: str = "done"
     error: str = ""
     elapsed: float = 0.0
+    #: The structured clarification-required payload, when a mandatory
+    #: question ended without an answer: the decision, its candidates, what
+    #: was consulted, and `outcome` — cancelled, expired or unattended.
+    clarification: dict[str, Any] | None = None
     #: Why a turn was cancelled, when it was ("stop" — the human pressed stop
     #: — or "interrupt" — a new message took over under the interrupt busy
     #: mode). The learn step reads this so the review knows which kind of
@@ -133,8 +141,15 @@ class AgentLoop:
 
     # -- public API ------------------------------------------------------- #
 
-    def run(self, user_text: str, images: list[str] | None = None) -> TurnResult:
-        """Handle one user message from start to finish."""
+    def run(self, user_text: str, images: list[str] | None = None,
+            decisions: list[dict[str, Any]] | None = None) -> TurnResult:
+        """Handle one user message from start to finish.
+
+        `decisions` are clarification payloads left open by work that this
+        turn is reporting on — a delegate that stopped for an answer. They
+        enter the turn's ledger as unresolved, so nothing that depends on
+        them runs here either.
+        """
         started = time.monotonic()
         self.cancel.reset()
         self._cancel_reason = ""
@@ -159,7 +174,7 @@ class AgentLoop:
         self.conversation.add(
             Message.user(user_text, images=images or [], briefing=playbook))
         self.bus.emit(Kind.TURN_START, text=user_text)
-        self._open_ledger(user_text)
+        self._open_ledger(user_text, decisions or [])
 
         deadline = started + self.config.agent.max_seconds
 
@@ -193,7 +208,8 @@ class AgentLoop:
         result.usage = self.conversation.usage
         self._say_if_unverified(result)
         self.bus.emit(Kind.TURN_END, stopped=result.stopped, steps=result.steps,
-                      elapsed=result.elapsed, error=result.error)
+                      elapsed=result.elapsed, error=result.error,
+                      clarification=result.clarification)
 
         self._learn(user_text, result)
         return result
@@ -282,6 +298,17 @@ class AgentLoop:
             self._execute(calls)
             self.bus.emit(Kind.STEP, step=result.steps, tool_calls=len(calls))
             self._advance_ledger(result.steps)
+
+            # A mandatory question ended without an answer. The decision is
+            # open, nothing that depends on it may run, and the model is not
+            # the one to fill it in — so the turn ends here, saying what is
+            # needed (FR-018, FR-033, FR-035).
+            needed = self._clarification_outcome()
+            if needed is not None:
+                result.stopped = "clarification_required"
+                result.clarification = needed
+                result.text = self._needs_a_decision(needed)
+                return result
 
             if not agent.loop:
                 # Loop off: run the tools the model asked for, then stop and
@@ -400,6 +427,11 @@ class AgentLoop:
             # untrue can be found and dropped. The tools already know; nothing
             # was carrying it across.
             staleness.note(message, str(result.meta.get("path") or ""))
+            # A form, as it was shown and how it ended, so the transcript and
+            # an export can say what was asked and what came back (FR-030).
+            form = result.meta.get("form")
+            if isinstance(form, dict):
+                message.meta["question"] = form
 
             # What the user said not to do, while the model is still deciding.
             #
@@ -428,6 +460,11 @@ class AgentLoop:
                       summary=self._describe(call))
         if self.cancel.cancelled:
             result = ToolResult.failure("cancelled before the tool ran")
+        elif self._withheld_by(context, call):
+            # A mutating action after a mandatory question went unanswered.
+            # Whether it depends on the open decision cannot be known from
+            # here, and uncertain dependency is treated as dependent (FR-018).
+            result = ToolResult.failure(self._withheld_by(context, call), withheld=True)
         else:
             # The tool is handed a view of the context that knows which call
             # it is, so anything it streams is tagged where it is produced
@@ -442,6 +479,27 @@ class AgentLoop:
     def _describe(self, call: ToolCall) -> str:
         tool = self.tools.get(call.name)
         return tool.summary(call.arguments) if tool else call.name
+
+    def _withheld_by(self, context: ToolContext, call: ToolCall) -> str:
+        """Why a mutating call may not run now, or an empty string.
+
+        Read-only tools stay available — they are how the agent gathers what
+        it can without the answer. Anything that changes the project, runs a
+        command or reaches outside waits for the decision.
+        """
+        try:
+            tool = self.tools.get(call.name)
+            if tool is None or tool.risk is Risk.SAFE:
+                return ""
+            open_decisions = [decision for decision in context.evidence.withheld()
+                              if decision.state in ("unresolved", "blocked", "asked")]
+            if not open_decisions:
+                return ""
+            named = "; ".join(decision.what for decision in open_decisions)
+            return (f"not run: a required decision is still open ({named}). "
+                    f"Nothing that may depend on it runs until it is answered.")
+        except Exception:
+            return ""
 
     def _can_parallelise(self, calls: list[ToolCall]) -> bool:
         """Only when nothing in the batch could stop to ask a question.
@@ -487,15 +545,69 @@ class AgentLoop:
     # method here is wrapped the way `_say_if_unverified` is: a fault in the
     # record must never be the reason a turn fails.
 
-    def _open_ledger(self, user_text: str) -> None:
-        """A fresh ledger for the turn, seeded with what the user stated."""
+    def _open_ledger(self, user_text: str,
+                     decisions: list[dict[str, Any]] | None = None) -> None:
+        """A fresh ledger for the turn, seeded with what the user stated.
+
+        The request text and what recall brought ride on the context too,
+        so a candidate answer can be grounded against them.
+        """
         try:
             context = self._tool_context()
             context.reset_evidence()
+            context.request_text = user_text
+            context.recalled = [
+                getattr(item, "text", "") or str(item) for item in self._recalled]
             context.evidence.known("the request, as the user stated it",
                                    material=user_text)
+            for carried in decisions or []:
+                self._carry_open_decision(context, carried)
         except Exception:
             pass
+
+    def _carry_open_decision(self, context: ToolContext, carried: dict[str, Any]) -> None:
+        """A decision another piece of work left open enters this ledger open too."""
+        what = str(carried.get("decision") or "")
+        if not what:
+            return
+        book = context.evidence
+        decision = book.open_decision(
+            what, affects=[str(carried.get("reason") or "behaviour")],
+            candidates=[entry.get("label", entry) if isinstance(entry, dict) else entry
+                        for entry in carried.get("candidates") or []],
+            evidence_consulted=list(carried.get("evidence_consulted") or []))
+        outcome = str(carried.get("outcome") or "cancelled")
+        book.asked(decision.id)
+        book.ended_without_answer(decision.id, outcome)
+
+    def _clarification_outcome(self) -> dict[str, Any] | None:
+        """The payload for the decisions this turn left open, or None."""
+        try:
+            context = self.tool_context
+            if context is None:
+                return None
+            ended = [decision for decision in context.evidence.withheld()
+                     if decision.state in ("unresolved", "blocked")]
+            if not ended:
+                return None
+            from ..tools.ask import payload_for
+
+            return payload_for(ended, ended[0].outcome or "cancelled")
+        except Exception:
+            return None
+
+    @staticmethod
+    def _needs_a_decision(payload: dict[str, Any]) -> str:
+        """The answer of a turn that stopped for a decision — nothing invented."""
+        ended = {"cancelled": "the question was cancelled",
+                 "expired": "the question expired unanswered",
+                 "unattended": "nobody was there to answer"}
+        names = [entry.get("decision", "") for entry in payload.get("decisions", [])] \
+            or [payload.get("decision", "")]
+        listed = "\n".join(f"- {name}" for name in names if name)
+        return (f"Stopped: a decision is needed before this can continue "
+                f"({ended.get(payload.get('outcome', ''), 'no answer was given')}).\n"
+                f"{listed}\nNothing depending on it was done, and no default was chosen.")
 
     def _advance_ledger(self, step: int) -> None:
         try:

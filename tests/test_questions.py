@@ -207,6 +207,8 @@ def context_on(config):
             redact=Redactor([]),
             cancel=Cancellation(),
             cwd=config.paths.project,
+            # The request names the candidates, so they are grounded (FR-016).
+            request_text="Use SQLite or PostgreSQL? one, two, three",
         )
 
     return build
@@ -255,11 +257,17 @@ def test_the_request_carries_no_options(context_on):
     assert answerer.seen[0].options == []
 
 
-def test_a_dismissed_form_tells_the_model_to_carry_on(context_on):
+def test_a_dismissed_form_leaves_the_decision_open(context_on):
+    """The one intended behaviour change (spec 002, FR-082): a dismissed form
+    no longer tells the model to choose sensible defaults. The decision stays
+    unresolved and the model is told not to fill it in."""
     result, _ = _run(context_on, CANCELLED, {"questions": [a_question()]})
     assert result.ok, "dismissing a form is not a tool failure"
     assert result.meta["answered"] is False
-    assert "do not ask again" in result.content.lower()
+    assert result.meta["outcome"] == "cancelled"
+    assert "remain unresolved" in result.content
+    assert "sensible defaults" not in result.content.lower()
+    assert result.meta["clarification"]["outcome"] == "cancelled"
 
 
 def test_malformed_questions_come_back_as_a_usable_error(context_on):

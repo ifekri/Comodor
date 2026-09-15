@@ -72,7 +72,11 @@ def run_json(config):
     return code, json.loads(out.getvalue())
 
 
-def test_today_a_headless_form_is_answered_cancelled_at_once_and_the_run_carries_on(scripted):
+def test_a_headless_form_ends_the_run_unattended_instead_of_carrying_on(scripted):
+    """Before spec 002 the form was answered `cancelled` at once, the tool
+    told the model to choose sensible defaults, and the run reported `done`
+    with `ok: true`. That is the behaviour FR-082 removes; this is what
+    replaces it (FR-033, FR-121)."""
     config = scripted([
         Script(text="One thing first.", tool_calls=[a_question()]),
         Script(text="Flask it is — I picked it for you."),
@@ -80,16 +84,15 @@ def test_today_a_headless_form_is_answered_cancelled_at_once_and_the_run_carries
 
     code, report = run_json(config)
 
-    assert code == 0
-    assert report["ok"] is True
-    assert report["stopped"] == "done"
+    assert code != 0
+    assert report["ok"] is False
+    assert report["stopped"] == "clarification_required"
     assert report["tools"] == ["ask"]
-    assert "Flask it is" in report["text"]
-    assert "clarification" not in report, "no such field exists yet"
+    assert "Flask it is" not in report["text"]
 
     replies = [message.content for call in scripted.providers[0].calls
                for message in call]
-    assert any("Choose sensible defaults" in reply for reply in replies)
+    assert not any("sensible defaults" in reply.lower() for reply in replies)
 
 
 def test_today_the_json_report_has_exactly_these_fields(scripted):

@@ -311,7 +311,10 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
         elif event.kind is Kind.REQUEST:
             request = event.get("request")
             if request is not None and request.kind == "questions":
-                request.answer(forms.CANCELLED)
+                # Nobody is here. Said as that, not as a cancellation: the
+                # tool reports the decision as unattended and the run ends
+                # needing it, rather than carrying on without it.
+                request.answer(forms.UNATTENDED)
 
     bus.subscribe(observe)
 

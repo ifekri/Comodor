@@ -46,7 +46,9 @@ def _ask_in_background(service, session_id, questions):
             config=handle.assembly.config, permissions=handle.assembly.permissions,
             checkpoints=CheckpointStore(handle.assembly.config.paths.checkpoints),
             bus=handle.assembly.bus, redact=Redactor([]), cancel=Cancellation(),
-            cwd=handle.assembly.config.paths.project)
+            cwd=handle.assembly.config.paths.project,
+            # The request names the candidates, so they are grounded (FR-016).
+            request_text="SQLite or PostgreSQL?")
         out["result"] = Ask().run(context, questions=questions)
 
     worker = threading.Thread(target=work, daemon=True)

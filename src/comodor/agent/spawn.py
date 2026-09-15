@@ -45,7 +45,8 @@ def spawner(config: Any, gateway: Any, bus: EventBus, skills: Any = None,
 
     def spawn(cwd: Path, mode: str = "plan", max_steps: int = 8,
               max_seconds: float = 300.0,
-              cancel: Cancellation | None = None) -> Any:
+              cancel: Cancellation | None = None,
+              identifier: str = "") -> Any:
         from .context import Conversation
         from .loop import AgentLoop
 
@@ -68,7 +69,12 @@ def spawner(config: Any, gateway: Any, bus: EventBus, skills: Any = None,
         # turn never mistakes the child's answer, tools or plan for it. What
         # still rides through is a request — a permission the child needs is
         # the person's to answer, and the reply travels on the Request itself.
-        child_bus = ScopedBus(bus, origin=DELEGATE_ORIGIN)
+        # The origin names the delegate, so a question it raises reaches the
+        # person attributed to the work that asked it (FR-029). Kept as a
+        # prefix of the generic origin, so anything that reads "delegate"
+        # still recognises it.
+        origin = f"{DELEGATE_ORIGIN}:{identifier}" if identifier else DELEGATE_ORIGIN
+        child_bus = ScopedBus(bus, origin=origin)
         permissions = PermissionEngine(settings, child_bus)
         permissions.assess = make_assessor(settings, gateway)
         loop = AgentLoop(settings, gateway, tools, child_bus,

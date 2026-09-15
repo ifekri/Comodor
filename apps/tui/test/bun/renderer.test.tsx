@@ -3579,3 +3579,60 @@ describe("the question overlay at every width", () => {
     });
   }
 });
+
+// -------------------------------------------------------------------------- //
+// why a question is asked, on the card (spec 002, T052; FR-031, FR-034)
+// -------------------------------------------------------------------------- //
+
+describe("the question card says why and what was checked", () => {
+  const explained = {
+    id: "ask-g",
+    session_id: "s1",
+    title: "One question",
+    questions: [
+      { header: "Database", prompt: "Which database should this use?", multiple: false,
+        reason: "architecture",
+        evidence_consulted: ["settings.py", "README.md"],
+        options: [
+          { id: "SQLite", label: "SQLite" },
+          { id: "PostgreSQL", label: "PostgreSQL" },
+          { id: "Something else", label: "Something else", free: true },
+        ] },
+    ],
+  };
+  const bare = {
+    ...explained, id: "ask-b",
+    questions: [{ header: "Database", prompt: "Which database should this use?",
+                  multiple: false, options: explained.questions[0]!.options }],
+  };
+
+  for (const width of [160, 120, 100, 80, 60]) {
+    test(`${width} columns: the grounds line is drawn and nothing spills`, async () => {
+      const view = await screen(width, 30);
+      view.core.push(event("question.requested", explained as never));
+      await view.waitForFrame((frame) => frame.includes("Which database"));
+      const frame = view.frame();
+      expect(frame).toContain("needed for: architecture");
+      expect(frame).toContain("checked: settings.py");
+      expect(frame).toContain("Something else");
+      for (const row of frame.split("\n")) {
+        expect(row.length).toBeLessThanOrEqual(width);
+      }
+      // The keyboard still reaches the options: down then space chooses.
+      view.mockInput.pressArrow("down");
+      view.mockInput.pressKey(" ");
+      await view.waitForFrame((f) => f.includes("(*) PostgreSQL"));
+      view.client.close();
+    });
+
+    test(`${width} columns: an older core's form draws no grounds line`, async () => {
+      const view = await screen(width, 30);
+      view.core.push(event("question.requested", bare as never));
+      await view.waitForFrame((frame) => frame.includes("Which database"));
+      const frame = view.frame();
+      expect(frame).not.toContain("needed for");
+      expect(frame).not.toContain("checked:");
+      view.client.close();
+    });
+  }
+});

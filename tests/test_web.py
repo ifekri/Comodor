@@ -1857,7 +1857,9 @@ def _ask_from_the_worker(served, questions):
         config=config, permissions=PermissionEngine(config, served.session.bus),
         checkpoints=CheckpointStore(config.paths.checkpoints),
         bus=served.session.bus, redact=Redactor([]), cancel=Cancellation(),
-        cwd=config.paths.project)
+        cwd=config.paths.project,
+        # The request names every candidate, so the options are grounded.
+        request_text="SQLite, PostgreSQL or MySQL? Python or Go?")
     out: dict = {}
     worker = threading.Thread(
         target=lambda: out.update(result=Ask().run(context, questions=questions)),
@@ -2000,10 +2002,10 @@ def test_an_unreadable_answer_is_refused_and_the_worker_keeps_waiting(served):
     _wait(worker, out)
 
 
-def test_today_a_dismissal_from_the_page_makes_the_tool_choose_defaults(served):
-    """The page's `closeForm(true)` posts `cancelled`. Today the tool then
-    tells the model to choose sensible defaults — the behaviour FR-082
-    removes, pinned here so the removal is measurable."""
+def test_a_dismissal_from_the_page_leaves_the_decision_open(served):
+    """The page's `closeForm(true)` posts `cancelled`. Before spec 002 the
+    tool then told the model to choose sensible defaults — the behaviour
+    FR-082 removes. Now the decision stays unresolved."""
     worker, out = _ask_from_the_worker(served, _two_questions()[:1])
     frame = _the_request_frame(served)
 
@@ -2014,7 +2016,9 @@ def test_today_a_dismissal_from_the_page_makes_the_tool_choose_defaults(served):
     result = _wait(worker, out)
     assert result.ok
     assert result.meta["answered"] is False
-    assert "Choose sensible defaults" in result.content
+    assert result.meta["outcome"] == "cancelled"
+    assert "sensible defaults" not in result.content.lower()
+    assert result.meta["clarification"]["outcome"] == "cancelled"
 
 
 def test_a_dismissed_question_is_not_a_cancelled_turn_on_the_page(served):

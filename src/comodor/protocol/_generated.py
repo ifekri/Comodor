@@ -56,6 +56,7 @@ EVENT_SHAPES: dict[str, str] = {
     "delegate.updated": "DelegateUpdated",
     "question.requested": "QuestionRequest",
     "question.resolved": "QuestionResolved",
+    "clarification.required": "ClarificationRequired",
     "permission.requested": "PermissionRequest",
     "permission.resolved": "PermissionResolved",
     "mode.changed": "ModeChanged",
@@ -102,10 +103,12 @@ CORE_CAPABILITIES: tuple[str, ...] = (
     "tasks",
     "delegates",
     "usage",
+    "clarification_required",
 )
 CLIENT_CAPABILITIES: tuple[str, ...] = (
     "questions",
     "permissions",
+    "clarification_required",
 )
 
 MODES: tuple[str, ...] = ("act", "plan", "ask", "chat",)
@@ -155,7 +158,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "role": ("str", True),
         "text": ("str", True),
         "reasoning": ("str", False),
-        "status": ("MessageStatus", True),
+        "status": ("str", True),
         "started_seq": ("int", True),
     },
     "SnapshotTool": {
@@ -163,7 +166,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "turn_id": ("str", True),
         "name": ("str", True),
         "summary": ("str", False),
-        "state": ("ToolState", True),
+        "state": ("str", True),
         "started_seq": ("int", True),
         "output": ("str", False),
         "output_truncated": ("bool", False),
@@ -172,7 +175,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
     },
     "TaskItem": {
         "text": ("str", True),
-        "state": ("TaskState", True),
+        "state": ("str", True),
     },
     "TasksUpdated": {
         "session_id": ("str", True),
@@ -181,7 +184,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
     "Delegate": {
         "id": ("str", True),
         "label": ("str", True),
-        "state": ("DelegateState", True),
+        "state": ("str", True),
         "steps": ("int", True),
         "tool_calls": ("int", True),
         "tokens": ("int", True),
@@ -213,7 +216,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "usage": ("Usage", False),
     },
     "PendingInteraction": {
-        "kind": ("InteractionKind", True),
+        "kind": ("str", True),
         "question": ("QuestionRequest", False),
         "permission": ("PermissionRequest", False),
     },
@@ -259,12 +262,35 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "session_id": ("str", True),
         "title": ("str", True),
         "questions": ("list", True),
+        "origin": ("str", False),
     },
     "QuestionResolved": {
         "id": ("str", True),
         "session_id": ("str", True),
         "answers": ("list", False),
         "cancelled": ("bool", False),
+    },
+    "ClarificationCandidate": {
+        "label": ("str", True),
+        "description": ("str", False),
+    },
+    "ClarificationDecision": {
+        "id": ("str", True),
+        "decision": ("str", True),
+        "candidates": ("list", False),
+        "evidence_consulted": ("list", False),
+        "reason": ("str", False),
+    },
+    "ClarificationRequired": {
+        "session_id": ("str", True),
+        "turn_id": ("str", True),
+        "kind": ("str", True),
+        "decision": ("str", True),
+        "candidates": ("list", True),
+        "evidence_consulted": ("list", True),
+        "reason": ("str", True),
+        "outcome": ("str", False),
+        "decisions": ("list", False),
     },
     "AnswerParams": {
         "id": ("str", True),
@@ -278,7 +304,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "detail": ("str", False),
         "options": ("list", True),
         "tool": ("str", False),
-        "risk": ("RiskLevel", False),
+        "risk": ("str", False),
     },
     "PermissionResolved": {
         "id": ("str", True),
@@ -313,7 +339,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "turn_id": ("str", True),
         "message_id": ("str", True),
         "text": ("str", False),
-        "status": ("MessageStatus", True),
+        "status": ("str", True),
         "error": ("str", False),
     },
     "ToolStarted": {
@@ -363,6 +389,9 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "prompt": ("str", True),
         "options": ("list", True),
         "multiple": ("bool", True),
+        "reason": ("str", False),
+        "evidence_consulted": ("list", False),
+        "decision_ref": ("str", False),
     },
     "QuestionAnswer": {
         "header": ("str", True),
@@ -692,17 +721,21 @@ class QuestionOption(_QuestionOptionRequired, total=False):
     free: bool
 
 
-class QuestionRequest(TypedDict):
+class _QuestionRequestRequired(TypedDict):
+    id: str
+    session_id: str
+    title: str
+    questions: list[QuestionField]
+
+
+class QuestionRequest(_QuestionRequestRequired, total=False):
     """A form the agent is waiting on, as a protocol primitive rather than a
     numbered list in prose. It carries *several* questions because the
     agent asks several at once — one round trip rather than four — so a
     client renders a form, not a prompt.
     """
 
-    id: str
-    session_id: str
-    title: str
-    questions: list[QuestionField]
+    origin: str
 
 
 class _QuestionResolvedRequired(TypedDict):
@@ -713,6 +746,56 @@ class _QuestionResolvedRequired(TypedDict):
 class QuestionResolved(_QuestionResolvedRequired, total=False):
     answers: list[QuestionAnswer]
     cancelled: bool
+
+
+class _ClarificationCandidateRequired(TypedDict):
+    label: str
+
+
+class ClarificationCandidate(_ClarificationCandidateRequired, total=False):
+    """One grounded candidate answer to an open decision. Never invented:
+    each traces to the request, the repository or established knowledge.
+    """
+
+    description: str
+
+
+class _ClarificationDecisionRequired(TypedDict):
+    id: str
+    decision: str
+
+
+class ClarificationDecision(_ClarificationDecisionRequired, total=False):
+    """One decision the turn left open."""
+
+    candidates: list[str]
+    evidence_consulted: list[str]
+    reason: str
+
+
+class _ClarificationRequiredRequired(TypedDict):
+    session_id: str
+    turn_id: str
+    kind: str
+    decision: str
+    candidates: list[ClarificationCandidate]
+    evidence_consulted: list[str]
+    reason: str
+
+
+class ClarificationRequired(_ClarificationRequiredRequired, total=False):
+    """A turn stopped because a mandatory clarification ended without an
+    answer. `decision`, `candidates`, `evidence_consulted` and `reason`
+    describe the first open decision — enough for the caller to answer it
+    in a later invocation; `decisions` lists every one. `outcome` says how
+    the clarification ended. Sent only to a client that negotiated the
+    `clarification_required` capability: a client that misread it would
+    report a blocked run as a completed one, so an older client never
+    receives it and keeps its existing behaviour.
+    """
+
+    outcome: str
+    decisions: list[ClarificationDecision]
 
 
 class _AnswerParamsRequired(TypedDict):
@@ -883,16 +966,24 @@ class Error(_ErrorRequired, total=False):
     data: dict[str, Any]
 
 
-class QuestionField(TypedDict):
-    """One question within a form. `header` is its stable name and is what an
-    answer is matched on — not the position, which would silently reattach
-    every answer if a question were reordered.
-    """
-
+class _QuestionFieldRequired(TypedDict):
     header: str
     prompt: str
     options: list[QuestionOption]
     multiple: bool
+
+
+class QuestionField(_QuestionFieldRequired, total=False):
+    """One question within a form. `header` is its stable name and is what an
+    answer is matched on — not the position, which would silently reattach
+    every answer if a question were reordered. `reason`,
+    `evidence_consulted` and `decision_ref` are optional and additive:
+    absent, the form is exactly the form an earlier core sent.
+    """
+
+    reason: str
+    evidence_consulted: list[str]
+    decision_ref: str
 
 
 class _QuestionAnswerRequired(TypedDict):

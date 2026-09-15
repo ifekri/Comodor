@@ -95,6 +95,12 @@ class ToolContext:
     #: reference across the per-call views, and never serialised — it lives
     #: exactly as long as this context does.
     _evidence: Any = field(default=None, repr=False, compare=False)
+    #: The request this turn is answering, as the user wrote it, and what
+    #: recall brought for it — the two things a candidate answer can be
+    #: grounded against besides the ledger (`tools/ask.py`). Set by the
+    #: loop at the start of every turn.
+    request_text: str = ""
+    recalled: list[str] = field(default_factory=list)
 
     @property
     def evidence(self) -> Any:

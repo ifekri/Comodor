@@ -110,21 +110,23 @@ def test_a_question_nobody_can_answer_does_not_hold_the_run(scripted):
     assert elapsed < 15.0, f"the run waited {elapsed:.0f}s for an answer"
 
 
-def test_the_model_is_told_to_carry_on_rather_than_ask_again(scripted):
-    """The tool already has the right words for an unfilled form. What matters
-    is that the model is handed them, rather than a timeout and no explanation."""
+def test_a_headless_form_ends_the_run_needing_a_decision(scripted):
+    """Nobody is there to answer, so the run stops and says what is needed
+    (spec 002, FR-033, FR-082). The model is never told to carry on."""
     config = scripted([
         Script(text="One thing first.", tool_calls=[a_question()]),
         Script(text="Flask it is."),
     ])
 
-    cli.run_headless(config, run(config))
+    code = cli.run_headless(config, run(config))
 
+    assert code != 0
     assert scripted.providers, "the run should have built a gateway"
     replies = [message.content for call in scripted.providers[0].calls
                for message in call]
-    assert any("closed the form without answering" in reply for reply in replies), \
-        f"the model was never told the form came back empty: {replies}"
+    assert not any("sensible defaults" in reply for reply in replies)
+    assert not any("Flask it is" in reply for reply in replies), \
+        "the second script never ran: the turn stopped at the question"
 
 
 def test_a_permission_prompt_is_left_to_its_own_deadline(scripted):
