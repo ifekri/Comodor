@@ -101,7 +101,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
   - **Req**: SC-026, FR-077 · **Dep**: none · **Evidence**: record a content fingerprint of each `bench/tasks/*/task.md`, `check.py` and `repo/` tree so later weakening is detectable · **Done when**: fingerprints stored and a check command reports any drift
 - [X] T014 [US6] Implement the naive full-resend comparison strategy in `bench/baseline.py`
   - **Req**: SC-011, SC-036 · **Dep**: T003 · **Evidence**: resends full history, full file contents and full tool output every turn, selectable by flag · **Done when**: runs the existing suite end to end
-- [ ] T015 [US6] Publish the paired quality-and-cost baseline into `bench/results/` via `bench/report.py`
+- [X] T015 [US6] Publish the paired quality-and-cost baseline into `bench/results/` via `bench/report.py`
   - **Req**: SC-036, FR-076 · **Dep**: T003, T013, T014 · **Evidence**: per task — outcome rate over three attempts, input/output/cached tokens, model turns, tool calls — for both current and naive strategies · **Done when**: report exists and is cited by `spec.md` §SC-011 as the threshold source
 
 **Checkpoint**: behaviour is executable, baseline published, nothing changed.

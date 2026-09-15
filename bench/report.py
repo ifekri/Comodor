@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import platform
+import subprocess
 import time
 from datetime import date
 from pathlib import Path
@@ -116,11 +117,27 @@ def write(outcomes: list[Outcome], directory: Path, *, provider: str,
         stem = f"{stem}-{int(time.time()) % 100000}"
 
     json_file = directory / f"{stem}.json"
-    json_file.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    _write_lf(json_file, json.dumps(report, indent=2) + "\n")
 
     markdown_file = directory / f"{stem}.md"
-    markdown_file.write_text(as_markdown(report), encoding="utf-8")
+    _write_lf(markdown_file, as_markdown(report))
     return json_file, markdown_file
+
+
+def _write_lf(path: Path, text: str) -> None:
+    """LF regardless of platform: results are committed and diffed."""
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+
+
+def _commit() -> str:
+    """The commit the run measured, or an empty string outside a checkout."""
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+            cwd=Path(__file__).resolve().parent, timeout=5).stdout.strip()
+    except Exception:
+        return ""
 
 
 # --------------------------------------------------------------------------- #
@@ -152,6 +169,9 @@ def as_paired_json(current: list[Outcome], naive: list[Outcome], *,
         "model": model,
         "provider": provider,
         "date": date.today().isoformat(),
+        # Which code was measured. A baseline is a statement about one
+        # commit; without this it is a statement about a date.
+        "commit": _commit(),
         "tries_per_task": tries,
         "platform": f"{platform.system()} {platform.release()}",
         "python": platform.python_version(),
@@ -203,7 +223,8 @@ def as_paired_markdown(report: dict) -> str:
         "",
         f"`{report['provider']}` · {report['date']} · "
         f"{report['tries_per_task']} attempts per task per strategy · "
-        f"{report['platform']}, Python {report['python']}",
+        f"{report['platform']}, Python {report['python']}"
+        + (f" · commit `{report['commit']}`" if report.get("commit") else ""),
         "",
         "`current` is the product as shipped. `naive` re-sends full history, "
         "full files and full tool output every turn with no sweep, pruning or "
@@ -268,9 +289,9 @@ def write_paired(current: list[Outcome], naive: list[Outcome], directory: Path, 
     if (directory / f"{stem}.json").exists():
         stem = f"{stem}-{int(time.time()) % 100000}"
     json_file = directory / f"{stem}.json"
-    json_file.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    _write_lf(json_file, json.dumps(report, indent=2) + "\n")
     markdown_file = directory / f"{stem}.md"
-    markdown_file.write_text(as_paired_markdown(report), encoding="utf-8")
+    _write_lf(markdown_file, as_paired_markdown(report))
     return json_file, markdown_file
 
 

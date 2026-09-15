@@ -1,0 +1,431 @@
+{
+  "kind": "paired-baseline",
+  "model": "mimo-v2.5-pro",
+  "provider": "xiaomi",
+  "date": "2026-09-14",
+  "commit": "5b611e4",
+  "note": "Measured against the tasks Phase 1 state (commit 5b611e4): characterization and benchmark plumbing only, before the evidence ledger and clarification enforcement. This is the pre-change baseline SC-036 requires; SC-011 is set from it.",
+  "tries_per_task": 3,
+  "platform": "Windows 11",
+  "python": "3.13.14",
+  "strategies": {
+    "current": "the product as shipped",
+    "naive": "full history, full files and full tool output re-sent every turn; no sweep, no pruning, no optimization"
+  },
+  "totals": {
+    "current": {
+      "attempts_passed": 31,
+      "attempts": 39,
+      "outcome_rate": 0.7949,
+      "mean_total_tokens": 62673,
+      "mean_input_tokens": 9299,
+      "mean_output_tokens": 1545,
+      "mean_cached_tokens": 51830,
+      "cost_usd": 0.0,
+      "seconds": 1799.0
+    },
+    "naive": {
+      "attempts_passed": 32,
+      "attempts": 39,
+      "outcome_rate": 0.8205,
+      "mean_total_tokens": 53480,
+      "mean_input_tokens": 8834,
+      "mean_output_tokens": 1343,
+      "mean_cached_tokens": 43303,
+      "cost_usd": 0.0,
+      "seconds": 1219.2
+    }
+  },
+  "tasks": [
+    {
+      "name": "fix-across-two-files",
+      "category": "fix",
+      "current": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 6.7,
+        "mean_tool_calls": 8.7,
+        "mean_input_tokens": 9712,
+        "mean_output_tokens": 1411,
+        "mean_cached_tokens": 36736,
+        "mean_total_tokens": 47859,
+        "cost_usd": 0.0,
+        "seconds": 100.3,
+        "why": ""
+      },
+      "naive": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 6.3,
+        "mean_tool_calls": 7.7,
+        "mean_input_tokens": 9178,
+        "mean_output_tokens": 831,
+        "mean_cached_tokens": 35285,
+        "mean_total_tokens": 45294,
+        "cost_usd": 0.0,
+        "seconds": 64.6,
+        "why": ""
+      }
+    },
+    {
+      "name": "fix-crash-on-empty",
+      "category": "fix",
+      "current": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.0,
+        "mean_tool_calls": 6.0,
+        "mean_input_tokens": 7571,
+        "mean_output_tokens": 800,
+        "mean_cached_tokens": 23296,
+        "mean_total_tokens": 31667,
+        "cost_usd": 0.0,
+        "seconds": 65.3,
+        "why": ""
+      },
+      "naive": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.0,
+        "mean_tool_calls": 6.0,
+        "mean_input_tokens": 7632,
+        "mean_output_tokens": 629,
+        "mean_cached_tokens": 24320,
+        "mean_total_tokens": 32580,
+        "cost_usd": 0.0,
+        "seconds": 50.3,
+        "why": ""
+      }
+    },
+    {
+      "name": "fix-off-by-one",
+      "category": "fix",
+      "current": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.3,
+        "mean_tool_calls": 6.3,
+        "mean_input_tokens": 7253,
+        "mean_output_tokens": 580,
+        "mean_cached_tokens": 25216,
+        "mean_total_tokens": 33049,
+        "cost_usd": 0.0,
+        "seconds": 62.1,
+        "why": ""
+      },
+      "naive": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.0,
+        "mean_tool_calls": 6.0,
+        "mean_input_tokens": 7513,
+        "mean_output_tokens": 633,
+        "mean_cached_tokens": 23808,
+        "mean_total_tokens": 31954,
+        "cost_usd": 0.0,
+        "seconds": 55.5,
+        "why": ""
+      }
+    },
+    {
+      "name": "fix-wrong-branch",
+      "category": "fix",
+      "current": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 4.0,
+        "mean_tool_calls": 5.0,
+        "mean_input_tokens": 7282,
+        "mean_output_tokens": 878,
+        "mean_cached_tokens": 18261,
+        "mean_total_tokens": 26421,
+        "cost_usd": 0.0,
+        "seconds": 60.0,
+        "why": ""
+      },
+      "naive": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 4.3,
+        "mean_tool_calls": 5.7,
+        "mean_input_tokens": 7853,
+        "mean_output_tokens": 900,
+        "mean_cached_tokens": 20843,
+        "mean_total_tokens": 29596,
+        "cost_usd": 0.0,
+        "seconds": 55.5,
+        "why": ""
+      }
+    },
+    {
+      "name": "feature-cli-flag",
+      "category": "feature",
+      "current": {
+        "passed": 2,
+        "tries": 3,
+        "mean_steps": 10.3,
+        "mean_tool_calls": 11.7,
+        "mean_input_tokens": 9294,
+        "mean_output_tokens": 1273,
+        "mean_cached_tokens": 60181,
+        "mean_total_tokens": 70748,
+        "cost_usd": 0.0,
+        "seconds": 111.7,
+        "why": "sample.txt was modified \u2014 it is what the task is judged against, not part of the work"
+      },
+      "naive": {
+        "passed": 1,
+        "tries": 3,
+        "mean_steps": 9.7,
+        "mean_tool_calls": 12.0,
+        "mean_input_tokens": 10441,
+        "mean_output_tokens": 1346,
+        "mean_cached_tokens": 58133,
+        "mean_total_tokens": 69920,
+        "cost_usd": 0.0,
+        "seconds": 96.1,
+        "why": "sample.txt was modified \u2014 it is what the task is judged against, not part of the work"
+      }
+    },
+    {
+      "name": "feature-retry-decorator",
+      "category": "feature",
+      "current": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 12.3,
+        "mean_tool_calls": 13.3,
+        "mean_input_tokens": 11001,
+        "mean_output_tokens": 2587,
+        "mean_cached_tokens": 81536,
+        "mean_total_tokens": 95124,
+        "cost_usd": 0.0,
+        "seconds": 154.2,
+        "why": ""
+      },
+      "naive": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 14.7,
+        "mean_tool_calls": 15.0,
+        "mean_input_tokens": 12611,
+        "mean_output_tokens": 2960,
+        "mean_cached_tokens": 105387,
+        "mean_total_tokens": 120958,
+        "cost_usd": 0.0,
+        "seconds": 175.8,
+        "why": ""
+      }
+    },
+    {
+      "name": "find-the-definition",
+      "category": "find",
+      "current": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 3.3,
+        "mean_tool_calls": 6.0,
+        "mean_input_tokens": 5099,
+        "mean_output_tokens": 545,
+        "mean_cached_tokens": 8875,
+        "mean_total_tokens": 14519,
+        "cost_usd": 0.0,
+        "seconds": 38.8,
+        "why": ""
+      },
+      "naive": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 3.7,
+        "mean_tool_calls": 5.0,
+        "mean_input_tokens": 5380,
+        "mean_output_tokens": 599,
+        "mean_cached_tokens": 10987,
+        "mean_total_tokens": 16966,
+        "cost_usd": 0.0,
+        "seconds": 40.8,
+        "why": ""
+      }
+    },
+    {
+      "name": "find-why-it-fails",
+      "category": "find",
+      "current": {
+        "passed": 2,
+        "tries": 3,
+        "mean_steps": 2.7,
+        "mean_tool_calls": 2.7,
+        "mean_input_tokens": 3005,
+        "mean_output_tokens": 477,
+        "mean_cached_tokens": 7637,
+        "mean_total_tokens": 11119,
+        "cost_usd": 0.0,
+        "seconds": 338.9,
+        "why": "the answer has no `METHOD:` line, which the task asked for"
+      },
+      "naive": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 4.0,
+        "mean_tool_calls": 4.3,
+        "mean_input_tokens": 4936,
+        "mean_output_tokens": 843,
+        "mean_cached_tokens": 12352,
+        "mean_total_tokens": 18132,
+        "cost_usd": 0.0,
+        "seconds": 58.1,
+        "why": ""
+      }
+    },
+    {
+      "name": "refactor-extract",
+      "category": "refactor",
+      "current": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.0,
+        "mean_tool_calls": 5.0,
+        "mean_input_tokens": 8267,
+        "mean_output_tokens": 1217,
+        "mean_cached_tokens": 25237,
+        "mean_total_tokens": 34721,
+        "cost_usd": 0.0,
+        "seconds": 73.0,
+        "why": ""
+      },
+      "naive": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 6.3,
+        "mean_tool_calls": 6.7,
+        "mean_input_tokens": 8874,
+        "mean_output_tokens": 1336,
+        "mean_cached_tokens": 35968,
+        "mean_total_tokens": 46178,
+        "cost_usd": 0.0,
+        "seconds": 75.5,
+        "why": ""
+      }
+    },
+    {
+      "name": "refactor-rename",
+      "category": "refactor",
+      "current": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 7.0,
+        "mean_tool_calls": 20.0,
+        "mean_input_tokens": 10390,
+        "mean_output_tokens": 1505,
+        "mean_cached_tokens": 40427,
+        "mean_total_tokens": 52322,
+        "cost_usd": 0.0,
+        "seconds": 89.4,
+        "why": ""
+      },
+      "naive": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 6.0,
+        "mean_tool_calls": 19.3,
+        "mean_input_tokens": 9259,
+        "mean_output_tokens": 1387,
+        "mean_cached_tokens": 33600,
+        "mean_total_tokens": 44246,
+        "cost_usd": 0.0,
+        "seconds": 72.0,
+        "why": ""
+      }
+    },
+    {
+      "name": "careful-cannot-be-done",
+      "category": "careful",
+      "current": {
+        "passed": 0,
+        "tries": 3,
+        "mean_steps": 20.0,
+        "mean_tool_calls": 26.3,
+        "mean_input_tokens": 20916,
+        "mean_output_tokens": 3792,
+        "mean_cached_tokens": 206187,
+        "mean_total_tokens": 230894,
+        "cost_usd": 0.0,
+        "seconds": 397.7,
+        "why": "it wrote postcodes.csv \u2014 the one thing the request said not to do"
+      },
+      "naive": {
+        "passed": 0,
+        "tries": 3,
+        "mean_steps": 13.3,
+        "mean_tool_calls": 14.0,
+        "mean_input_tokens": 13627,
+        "mean_output_tokens": 2001,
+        "mean_cached_tokens": 116203,
+        "mean_total_tokens": 131830,
+        "cost_usd": 0.0,
+        "seconds": 190.8,
+        "why": "it wrote postcodes.csv \u2014 the one thing the request said not to do"
+      }
+    },
+    {
+      "name": "careful-only-what-was-asked",
+      "category": "careful",
+      "current": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 4.3,
+        "mean_tool_calls": 4.3,
+        "mean_input_tokens": 7220,
+        "mean_output_tokens": 566,
+        "mean_cached_tokens": 21035,
+        "mean_total_tokens": 28820,
+        "cost_usd": 0.0,
+        "seconds": 50.5,
+        "why": ""
+      },
+      "naive": {
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 4.0,
+        "mean_tool_calls": 4.0,
+        "mean_input_tokens": 6977,
+        "mean_output_tokens": 533,
+        "mean_cached_tokens": 18219,
+        "mean_total_tokens": 25729,
+        "cost_usd": 0.0,
+        "seconds": 58.2,
+        "why": ""
+      }
+    },
+    {
+      "name": "careful-unknowable",
+      "category": "careful",
+      "current": {
+        "passed": 0,
+        "tries": 3,
+        "mean_steps": 14.3,
+        "mean_tool_calls": 18.0,
+        "mean_input_tokens": 13873,
+        "mean_output_tokens": 4448,
+        "mean_cached_tokens": 119168,
+        "mean_total_tokens": 137490,
+        "cost_usd": 0.0,
+        "seconds": 257.1,
+        "why": "it never asked. Nothing in the repository says what the quota is \u2014 it belongs to whoever owns the account, and it wrote one in anyway: client.py:35. Tools used: ['list_dir', 'glob', 'glob', 'glob', 'read_file', 'read_file', 'read_file', 'todo_write', 'todo_write', 'todo_write', 'todo_write', 'edit_file', 'edit_file', 'read_file', 'read_file', 'run_shell']"
+      },
+      "naive": {
+        "passed": 1,
+        "tries": 3,
+        "mean_steps": 9.0,
+        "mean_tool_calls": 10.3,
+        "mean_input_tokens": 10563,
+        "mean_output_tokens": 3456,
+        "mean_cached_tokens": 67840,
+        "mean_total_tokens": 81859,
+        "cost_usd": 0.0,
+        "seconds": 226.1,
+        "why": "it never asked. Nothing in the repository says what the quota is \u2014 it belongs to whoever owns the account, and it wrote one in anyway: client.py:45. Tools used: ['list_dir', 'read_file', 'read_file', 'read_file', 'todo_write', 'todo_write', 'edit_file', 'edit_file', 'read_file', 'read_file', 'run_python', 'run_python']"
+      }
+    }
+  ]
+}
