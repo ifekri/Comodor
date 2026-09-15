@@ -62,6 +62,8 @@ class Outcome:
     #: measurement default; on is the explicit mode the learning scenarios
     #: use, where the brain starts empty in a home of its own every attempt.
     learning: bool = False
+    #: Context optimizations switched off for these attempts, by name.
+    without: tuple[str, ...] = ()
 
     @property
     def passed(self) -> int:
@@ -105,11 +107,14 @@ class Outcome:
 
 def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
              keep: Path | None = None, say=print,
-             strategy: str = baseline.CURRENT, learning: bool = False) -> Outcome:
+             strategy: str = baseline.CURRENT, learning: bool = False,
+             without: tuple[str, ...] = ()) -> Outcome:
     outcome = Outcome(task=task, strategy=strategy)
     outcome.learning = learning
+    outcome.without = tuple(without)
     for attempt_number in range(1, tries + 1):
-        attempt, verdict, workspace = _one(task, provider, model, keep, strategy, learning)
+        attempt, verdict, workspace = _one(task, provider, model, keep, strategy,
+                                           learning, without)
         outcome.attempts.append(attempt)
         outcome.verdicts.append(verdict)
         if not verdict.passed:
@@ -124,13 +129,14 @@ def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
 
 def _one(task: Task, provider: str, model: str,
          keep: Path | None, strategy: str = baseline.CURRENT,
-         learning: bool = False) -> tuple[Attempt, Verdict, Path]:
+         learning: bool = False,
+         without: tuple[str, ...] = ()) -> tuple[Attempt, Verdict, Path]:
     root = Path(tempfile.mkdtemp(prefix=f"comodor-bench-{task.name}-"))
     workspace = root / "work"
     home = root / "home"
     fresh_copy(task.repo, workspace)
     home.mkdir()
-    _settings(home, task, strategy, learning)
+    _settings(home, task, strategy, learning, without)
 
     attempt = _invoke(task, workspace, home, provider, model)
 
@@ -180,7 +186,7 @@ def _keep_the_answer(root: Path, task: Task, attempt: Attempt,
 
 
 def _settings(home: Path, task: Task, strategy: str = baseline.CURRENT,
-              learning: bool = False) -> None:
+              learning: bool = False, without: tuple[str, ...] = ()) -> None:
     """The config this attempt runs under, written into its own empty home.
 
     Three of these are what make the number mean something.
@@ -209,7 +215,7 @@ def _settings(home: Path, task: Task, strategy: str = baseline.CURRENT,
             # The context strategy under measurement. The budgets above are
             # the same for every strategy; only how the conversation is
             # assembled differs — see `baseline.py`.
-            **baseline.settings(strategy),
+            **baseline.settings(strategy, without),
         },
         "learning": {"enabled": bool(learning)},
     }

@@ -196,6 +196,11 @@ class AgentConfig:
     #: rather than asserted. Set by `bench/baseline.py`; never a setting a
     #: person is offered.
     context_strategy: str = "current"
+    #: Context optimizations switched off, by name — see
+    #: `agent/context.py::OPTIMIZATIONS`. Empty means all of them run. The
+    #: benchmark uses this to measure each one against the paired baseline;
+    #: it is not a setting a person needs.
+    optimizations_off: list[str] = field(default_factory=list)
 
 
 @dataclass

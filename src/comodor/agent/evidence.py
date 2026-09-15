@@ -157,6 +157,10 @@ class EvidenceEntry:
     observed_at: int = 0
     fingerprint: str = ""
     derived_from: list[str] = field(default_factory=list)
+    #: Where the material can be re-examined: the tool call that holds it
+    #: in the conversation, or a path to read again (FR-103). A citation,
+    #: never a copy.
+    reference: str = ""
 
 
 @dataclass
@@ -293,6 +297,7 @@ class Ledger:
         self._assumptions: list[Assumption] = []
         self._conflicts: list[Conflict] = []
         self._uninspected: list[str] = []
+        self._repeats: dict[str, int] = {}
         self._ids = itertools.count(1)
         self.step = 0
         self.mode = mode
@@ -330,8 +335,10 @@ class Ledger:
         return self._decisions[decision_id]
 
     def find(self, claim: str) -> EvidenceEntry | None:
+        """The newest entry for a claim — the one that describes the source
+        as it is now, after any earlier entry was sent back by a change."""
         wanted = claim.strip().lower()
-        for entry in self._entries.values():
+        for entry in reversed(list(self._entries.values())):
             if entry.claim.strip().lower() == wanted:
                 return entry
         return None
@@ -368,11 +375,51 @@ class Ledger:
         return self._add(claim, EvidenceState.KNOWN, source=f"knowledge:{ref}",
                          category="knowledge")
 
-    def verified(self, claim: str, source: str, material: str | bytes = "") -> EvidenceEntry:
-        """Observed through a tool or the repository. Holds a fingerprint, never the material."""
-        return self._add(claim, EvidenceState.VERIFIED, source=source,
-                         category="verified",
-                         fingerprint=fingerprint_of(material) if material else "")
+    def verified(self, claim: str, source: str, material: str | bytes = "",
+                 reference: str = "") -> EvidenceEntry:
+        """Observed through a tool or the repository. Holds a fingerprint, never the material.
+
+        A fresh observation of a source already recorded with a different
+        fingerprint sends the earlier entry back to `UNKNOWN`: the source
+        changed, and that — never the passage of steps or turns — is what
+        invalidates a verified fact (FR-105). The same source with the same
+        fingerprint is the same fact, already known: nothing is re-verified
+        without cause, and the existing entry is returned.
+        """
+        fingerprint = fingerprint_of(material) if material else ""
+        for entry in list(self._entries.values()):
+            if entry.state is not EvidenceState.VERIFIED or entry.source != source:
+                continue
+            if fingerprint and entry.fingerprint and entry.fingerprint != fingerprint:
+                self.transition(entry.id, "source_changed")
+            elif fingerprint and entry.fingerprint == fingerprint \
+                    and entry.claim.strip().lower() == claim.strip().lower():
+                # Observed again, unchanged: the same fact, already known.
+                # Counted as a rediscovery (FR-104), not re-verified.
+                self._repeats[source] = self._repeats.get(source, 0) + 1
+                if reference and not entry.reference:
+                    entry.reference = reference
+                return entry
+        entry = self._add(claim, EvidenceState.VERIFIED, source=source,
+                          category="verified", fingerprint=fingerprint)
+        entry.reference = reference or source
+        return entry
+
+    def cite(self, claim: str) -> str:
+        """Where a claim's material can be re-examined, or "" if it cannot.
+
+        Only a usable entry cites anything: one sent back to `UNKNOWN` by a
+        source change cites nothing, so stale evidence is never pointed at.
+        """
+        found = self.find(claim)
+        if found is None or found.state not in USABLE:
+            return ""
+        return found.reference or found.source
+
+    def rediscoveries(self, source: str) -> int:
+        """How many times `source` was observed again unchanged this turn —
+        the repeat-discovery count the incremental understanding removes."""
+        return self._repeats.get(source, 0)
 
     def derive(self, claim: str, derived_from: list[str]) -> EvidenceEntry:
         """A deterministic conclusion. Every premise must itself be sound (E4.1)."""

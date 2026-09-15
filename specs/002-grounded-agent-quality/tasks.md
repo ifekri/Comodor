@@ -267,63 +267,63 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
 
 **Universal correctness rule**: a cached, summarised, referenced or deduplicated representation **must never survive an invalidation event that makes it incorrect**.
 
-- [ ] T070 [US3] Implement the context budget manager in `src/comodor/agent/context.py`
+- [X] T070 [US3] Implement the context budget manager in `src/comodor/agent/context.py`
   - **Req**: FR-096 · **Dep**: T015, T063 · **Baseline**: T015 per-turn context sizes · **Metric**: assembled tokens per turn · **Invalidation**: budget recomputed each turn; withheld set never carried across turns · **Correctness**: what was withheld is determinable and retrievable · **Rollback**: universal · **Done when**: budget respected on a fixed conversation
-- [ ] T071 [US3] Implement relevance ranking in `src/comodor/agent/context.py` reusing `src/comodor/learning/bm25.py`
+- [X] T071 [US3] Implement relevance ranking in `src/comodor/agent/context.py` reusing `src/comodor/learning/bm25.py`
   - **Req**: FR-097 · **Dep**: T070 · **Baseline**: T015 · **Metric**: assembled tokens per turn · **Invalidation**: ranking recomputed whenever the request, the working set or any ranked item's fingerprint changes; a stale ranking is never reused · **Correctness**: never removes the current request or an outstanding tool result; demoted material remains retrievable via T075 · **Rollback**: universal · **Done when**: fixed corpus yields a deterministic ranking
-- [ ] T072 [US3] Implement content-hash deduplication in `src/comodor/agent/context.py`
+- [X] T072 [US3] Implement content-hash deduplication in `src/comodor/agent/context.py`
   - **Req**: FR-099, SC-028 · **Dep**: T070 · **Baseline**: T015 · **Metric**: duplicate bytes eliminated · **Invalidation**: **content change ⇒ new hash ⇒ new entry**; a hash is invalidated by source-file change, tool-output change, and branch or worktree state change · **Correctness**: identical content only; near-duplicates handled separately and conservatively · **Rollback**: universal · **Done when**: zero duplicate-bearing requests and a changed source never resolves to the stale copy
-- [ ] T073 [US3] Implement unchanged-content referencing in `src/comodor/agent/context.py`
+- [X] T073 [US3] Implement unchanged-content referencing in `src/comodor/agent/context.py`
   - **Req**: FR-101 · **Dep**: T072 · **Baseline**: T015 · **Metric**: retransmission avoided · **Invalidation**: a reference is invalidated when its target's fingerprint changes, when the file is edited, or when the branch/worktree moves; an invalidated reference resolves to a re-read, never to stale bytes · **Correctness**: a reference resolves to exactly the content it names · **Rollback**: universal · **Done when**: round-trip and invalidation both tested
-- [ ] T074 [US3] Implement delta context in `src/comodor/agent/context.py`
+- [X] T074 [US3] Implement delta context in `src/comodor/agent/context.py`
   - **Req**: FR-100 · **Dep**: T073 · **Baseline**: T015 · **Metric**: restatement avoided · **Invalidation**: a delta is invalid once its base is evicted or its base fingerprint changes; the full form is sent instead · **Correctness**: delta plus base reconstructs the original exactly · **Rollback**: universal · **Done when**: round-trip and base-evicted fallback pass
-- [ ] T075 [US3] Implement selective expansion in `src/comodor/agent/context.py`
+- [X] T075 [US3] Implement selective expansion in `src/comodor/agent/context.py`
   - **Req**: FR-098 · **Dep**: T073 · **Baseline**: T015 · **Metric**: detail not carried pre-emptively · **Invalidation**: expansion always reads current state, never a cached copy · **Correctness**: expansion returns the referenced content unchanged · **Rollback**: universal · **Done when**: expansion test passes
-- [ ] T076 [US3] Implement canonical summaries with provenance in `src/comodor/agent/context.py`
+- [X] T076 [US3] Implement canonical summaries with provenance in `src/comodor/agent/context.py`
   - **Req**: FR-086, FR-102, SC-030 · **Dep**: T070 · **Baseline**: T015 · **Metric**: history bytes replaced · **Invalidation**: a summary is invalidated when any source it summarises changes; the original request is never summarised away · **Correctness**: every summary names what it replaced and from where · **Rollback**: universal · **Done when**: 100% of summaries carry provenance
-- [ ] T077 [US3] Implement evidence references in `src/comodor/agent/evidence.py`
+- [X] T077 [US3] Implement evidence references in `src/comodor/agent/evidence.py`
   - **Req**: FR-103 · **Dep**: T019, T073 · **Baseline**: T015 · **Metric**: evidence bytes not resident · **Invalidation**: a citation is invalidated when the cited material's fingerprint changes or the underlying repository fact is superseded; the entry returns to `UNKNOWN` rather than citing stale evidence · **Correctness**: a citation always resolves to re-examinable material · **Rollback**: universal · **Done when**: invalidation path tested
-- [ ] T078 [US3] Implement bounded history in `src/comodor/agent/context.py`
+- [X] T078 [US3] Implement bounded history in `src/comodor/agent/context.py`
   - **Req**: FR-049 · **Dep**: T002, T070 · **Baseline**: T015 · **Metric**: window occupancy · **Invalidation**: cut point recomputed per turn against the current outstanding-tool set · **Correctness**: no cut leaves a tool request without its result; original request preserved · **Rollback**: universal · **Done when**: orphaned-tool-call assertion passes
-- [ ] T079 [US3] Implement tool-result deduplication and compaction in `src/comodor/tools/overflow.py`
+- [X] T079 [US3] Implement tool-result deduplication and compaction in `src/comodor/tools/overflow.py`
   - **Req**: FR-047, FR-089, SC-014 · **Dep**: T072 · **Baseline**: T015 · **Metric**: result bytes resident · **Invalidation**: a spilled pointer is invalidated if its backing file is pruned; the result then re-reports rather than pointing at nothing · **Correctness**: nothing discarded — head, tail and exact pointer; on-disk files pointed at in place, never copied · **Rollback**: universal · **Done when**: full recoverability proven
-- [ ] T080 [US3] Implement failure-preserving log summarisation in `src/comodor/tools/overflow.py`
+- [X] T080 [US3] Implement failure-preserving log summarisation in `src/comodor/tools/overflow.py`
   - **Req**: FR-090, SC-027 · **Dep**: T079 · **Baseline**: T015 · **Metric**: passing-log bytes eliminated · **Invalidation**: a summarised outcome is invalidated by any re-run of that command · **Correctness**: a passing run collapses to its outcome; **a failing run retains the failing case, its location and its message and is never reduced to a flag** · **Rollback**: universal · **Done when**: failure recoverable from the carried form in 100% of failing runs
-- [ ] T081 [US3] Implement diff-as-representation in `src/comodor/agent/context.py`
+- [X] T081 [US3] Implement diff-as-representation in `src/comodor/agent/context.py`
   - **Req**: FR-088 · **Dep**: T004, T070 · **Baseline**: T015 · **Metric**: file bytes avoided · **Invalidation**: a diff is invalidated by a further edit to the same path; superseded diffs follow the staleness rule · **Correctness**: the model sees the change that actually happened · **Rollback**: universal · **Done when**: correctness test passes
-- [ ] T082 [US3] Implement partial-file carriage in `src/comodor/agent/context.py`
+- [X] T082 [US3] Implement partial-file carriage in `src/comodor/agent/context.py`
   - **Req**: FR-087 · **Dep**: T075 · **Baseline**: T015 · **Metric**: file bytes resident · **Invalidation**: any write to the file invalidates the carried region · **Correctness**: withheld regions remain retrievable · **Rollback**: universal · **Done when**: retrieval of a withheld region works
-- [ ] T083 [US3] Implement incremental repository understanding in `src/comodor/agent/evidence.py`
+- [X] T083 [US3] Implement incremental repository understanding in `src/comodor/agent/evidence.py`
   - **Req**: FR-104 · **Dep**: T019 · **Baseline**: T015 · **Metric**: repeat-discovery calls avoided · **Invalidation**: an accumulated fact is invalidated by a change to its source fingerprint, by a branch/worktree change, or by supersession of the underlying repository fact · **Correctness**: nothing is carried forward that a change has falsified · **Rollback**: universal · **Done when**: rediscovery count falls on a fixed multi-file task with no stale carry-forward
-- [ ] T084 [US3] Implement content-change invalidation of verified facts in `src/comodor/agent/evidence.py`
+- [X] T084 [US3] Implement content-change invalidation of verified facts in `src/comodor/agent/evidence.py`
   - **Req**: FR-105, SC-029 · **Dep**: T083 · **Baseline**: T015 · **Metric**: redundant re-verification calls · **Invalidation**: **the source changing is the only cause; the passage of turns is not** · **Correctness**: a falsified fact returns to `UNKNOWN` rather than being relied upon · **Rollback**: universal · **Done when**: zero redundant re-verifications and zero stale reliances
-- [ ] T085 [US3] Carry project instructions once in a stable position in `src/comodor/agent/context.py`
+- [X] T085 [US3] Carry project instructions once in a stable position in `src/comodor/agent/context.py`
   - **Req**: FR-091, FR-050, SC-015 · **Dep**: T001, T070 · **Baseline**: T015 prompt-head and per-turn sizes · **Metric**: restatement avoided; cache-hit rate from provider `Usage` · **Invalidation**: only a genuine instruction change invalidates, and never mid-task · **Correctness**: stable portion byte-identical across turns · **Rollback**: universal, plus revert if cache-hit rate falls · **Done when**: byte-identity assertion passes
-- [ ] T086 [US3] Reuse stored conversation on resume in `src/comodor/session/store.py`
+- [X] T086 [US3] Reuse stored conversation on resume in `src/comodor/session/store.py`
   - **Req**: FR-095, FR-054 · **Dep**: T007, T070 · **Baseline**: T015 resume payload size · **Metric**: resume payload tokens · **Invalidation**: stored records are invalidated only by a newer record for the same message · **Correctness**: nothing re-derived; the resumed conversation is the stored one · **Rollback**: universal · **Done when**: resume sends no re-derived context
-- [ ] T087 [US3] Avoid verbatim restatement of established content in `src/comodor/agent/context.py`
+- [X] T087 [US3] Avoid verbatim restatement of established content in `src/comodor/agent/context.py`
   - **Req**: FR-052 · **Dep**: T073 · **Baseline**: T015 · **Metric**: restated bytes eliminated · **Invalidation**: the reference is invalidated if the established content is compacted away or changes · **Correctness**: a reference suffices only while the referent is still present and current; otherwise the content is re-sent · **Rollback**: universal · **Done when**: no verbatim restatement remains where a live reference exists
-- [ ] T088 [US3] Return delegate conclusions rather than read material in `src/comodor/tools/delegate.py`
+- [X] T088 [US3] Return delegate conclusions rather than read material in `src/comodor/tools/delegate.py`
   - **Req**: FR-053, FR-094 · **Dep**: T077 · **Baseline**: T015 on a delegate-using task · **Metric**: parent-conversation bytes attributable to delegate reading · **Invalidation**: the conclusion's supporting evidence references invalidate with their sources (T077) · **Correctness**: the conclusion travels with citations, so correctness-critical evidence stays recoverable · **Rollback**: universal · **Done when**: delegate reading does not persist in the parent
-- [ ] T089 [US3] Bound recalled-knowledge injection in `src/comodor/learning/memory.py`
+- [X] T089 [US3] Bound recalled-knowledge injection in `src/comodor/learning/memory.py`
   - **Req**: FR-092, FR-062 · **Dep**: T005 · **Baseline**: T015 recall block size · **Metric**: recall tokens per turn · **Invalidation**: recall recomputed per turn; stale and superseded items excluded · **Correctness**: the budget does not grow as the store grows · **Rollback**: universal · **Done when**: recall stays within the cap at 10× store size
-- [ ] T090 [US3] Avoid restating established content across repeated turns in `src/comodor/agent/context.py`
+- [X] T090 [US3] Avoid restating established content across repeated turns in `src/comodor/agent/context.py`
   - **Req**: FR-093 · **Dep**: T087 · **Baseline**: T015 multi-turn task · **Metric**: repeated-turn bytes · **Invalidation**: as T087 · **Correctness**: content established in an earlier turn is referenced, not repeated, and is re-sent if the reference dies · **Rollback**: universal · **Done when**: repeated-turn restatement eliminated on a fixed task
-- [ ] T091 [P] [US3] Verify zero superseded copies in `tests/test_context_no_superseded.py`
+- [X] T091 [P] [US3] Verify zero superseded copies in `tests/test_context_no_superseded.py`
   - **Req**: FR-045, SC-013 · **Dep**: T004, T081 · **Evidence**: **zero superseded file copies present in any assembled request across a full benchmark run** · **Done when**: mutation-checked
-- [ ] T092 [P] [US3] Verify deduplication in `tests/test_context_dedup.py`
+- [X] T092 [P] [US3] Verify deduplication in `tests/test_context_dedup.py`
   - **Req**: FR-099, SC-028 · **Dep**: T072 · **Evidence**: zero duplicate-bearing requests; a changed source is never served from a stale hash · **Done when**: both assertions pass
-- [ ] T093 [P] [US3] Verify stable-prefix integrity in `tests/test_context_stable_prefix.py`
+- [X] T093 [P] [US3] Verify stable-prefix integrity in `tests/test_context_stable_prefix.py`
   - **Req**: FR-050, SC-015 · **Dep**: T085 · **Evidence**: zero mid-task changes to the stable portion · **Done when**: mutation-checked
-- [ ] T094 [P] [US3] Verify invalidation across every optimization in `tests/test_context_invalidation.py`
+- [X] T094 [P] [US3] Verify invalidation across every optimization in `tests/test_context_invalidation.py`
   - **Req**: FR-105, FR-101, FR-102, FR-103 · **Dep**: T072, T073, T076, T077, T083, T084 · **Evidence**: for each of content-hash change, source-file change, branch/worktree change, tool-output change, superseded repository fact and stale learned fact, assert **no cached or summarised representation survives the event** · **Done when**: all six events tested per applicable optimization
-- [ ] T095 [P] [US3] Verify evidence recoverability in `tests/test_context_recoverability.py`
+- [X] T095 [P] [US3] Verify evidence recoverability in `tests/test_context_recoverability.py`
   - **Req**: FR-044, FR-047, FR-090, FR-098 · **Dep**: T079, T080, T075 · **Evidence**: for every optimization, correctness-critical evidence remains recoverable — nothing is lost, only relocated · **Done when**: recoverability asserted per optimization
 - [ ] T096 [US3] Verify optimization neutrality in `tests/test_context_optimization_neutrality.py`
   - **Req**: FR-044, SC-012 · **Dep**: all of Phase 5 · **Evidence**: run the benchmark with each optimization toggled; **no task's outcome rate falls** · **Done when**: every Phase 5 task has a recorded paired comparison
-- [ ] T097 [US3] Verify no optimization weakens validation in `tests/test_context_no_validation_loss.py`
+- [X] T097 [US3] Verify no optimization weakens validation in `tests/test_context_no_validation_loss.py`
   - **Req**: FR-044 · **Dep**: all of Phase 5 · **Evidence**: no optimization suppresses a clarification, skips relevant inspection, or truncates critical evidence · **Done when**: mutation-checked
-- [ ] T098 **Permission regression gate — Phase 5** via `tests/test_baseline_permissions.py`
+- [X] T098 **Permission regression gate — Phase 5** via `tests/test_baseline_permissions.py`
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T011, all of Phase 5 · **Evidence**: this phase changes agent orchestration and context assembly; permission suite green here · **Done when**: suite green on the phase commit
 
 **Checkpoint**: tokens measurably lower, no outcome rate moved, every cache has an invalidation rule.

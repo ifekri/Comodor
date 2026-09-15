@@ -42,8 +42,8 @@ from ..providers.gateway import Gateway
 from ..safety import PermissionEngine, Risk
 from ..tools import ToolContext, ToolRegistry, ToolResult
 from . import plan, staleness
-from .context import Conversation
-from .prompts import COMPACT_PROMPT, build_system_prompt
+from .context import Conversation, Optimizer
+from .prompts import COMPACT_PROMPT, build_system_prompt, project_instructions
 from .tokens import TaskMeasurement
 
 MAX_PARALLEL_TOOLS = 6
@@ -105,6 +105,10 @@ class AgentLoop:
         self.bus = bus
         self.permissions = permissions
         self.conversation = conversation or Conversation()
+        # Which context optimizations run, from the settings — all of them
+        # unless switched off by name, none under the benchmark's naive
+        # strategy (`agent/context.py::OPTIMIZATIONS`).
+        self.conversation.optimizer = Optimizer.from_config(config)
         self.memory = memory                     # LearningEngine, or None
         self.skills = skills                     # SkillRegistry, or None
         #: The background-delegate manager, when this session has one. Read at
@@ -143,6 +147,8 @@ class AgentLoop:
         self._profile_for: tuple[str, str] = ("", "")
         #: The turn's paired record; replaced at the start of every turn.
         self._measurement = TaskMeasurement()
+        #: The project-instructions block for the current turn.
+        self._instructions: str | None = None
 
     # -- public API ------------------------------------------------------- #
 
@@ -161,6 +167,13 @@ class AgentLoop:
         self._used = []
         result = TurnResult()
         self._measurement = result.measurement
+        # The project's instructions, read once for the turn. Every step's
+        # head is built from this same string, so the stable portion stays
+        # byte-identical for the whole task (FR-050, FR-091).
+        try:
+            self._instructions = project_instructions(self.config)
+        except Exception:
+            self._instructions = ""
 
         # What the user said not to do, pulled out once. Patterns over their
         # own words — no model call, and nothing that could cost a request.
@@ -258,7 +271,8 @@ class AgentLoop:
             specs = self.tools.specs(agent.mode)
             system_prompt = build_system_prompt(
                 self.config, profile=self._model_profile(),
-                tool_bridge=self._tool_bridge_live())
+                tool_bridge=self._tool_bridge_live(),
+                instructions=self._instructions)
             self._maybe_compact(system_prompt, specs)
 
             completion = self._stream_once(system_prompt, specs)
@@ -466,7 +480,10 @@ class AgentLoop:
             picture = result.meta.get("image")
             if isinstance(picture, str) and picture:
                 message.images = [picture]
-            self.conversation.add(message)
+            # Through the funnel: identical material already resident is
+            # admitted as a reference, a changed file as a delta (FR-099,
+            # FR-100, FR-101). The earlier copy is never rewritten.
+            self.conversation.admit(message, path=str(result.meta.get("path") or ""))
 
     def _run_one(self, call: ToolCall, context: ToolContext) -> ToolResult:
         self._used.append(call.name)
@@ -660,7 +677,8 @@ class AgentLoop:
             if path and call.name == "read_file" and context.was_read(context.resolve(path)):
                 return                     # the whole-file read is already recorded
             source = path if call.name == "read_file" and path else f"{call.name}:{subject}"
-            book.verified(claim, source=source, material=result.content)
+            book.verified(claim, source=source, material=result.content,
+                          reference=f"call {call.id}")
         except Exception:
             pass
 
@@ -745,6 +763,23 @@ class AgentLoop:
                 # Enough. The history is smaller *and* more accurate, and
                 # nothing was summarised away to get there.
                 return
+
+        # Still under pressure. Before a model call summarises history away,
+        # the budget manager moves retrievable, low-relevance tool results
+        # aside — exact pointers, no summary, nothing lost (FR-096, FR-097).
+        if not naive:
+            head = self.conversation.counter.count(
+                [Message.system(system_prompt)], specs)
+            budget = max(0, int(limit * agent.compact_at) - head)
+            moved, freed = self.conversation.withhold(budget, self.conversation.last_user_text)
+            if moved:
+                self._note(f"Moved {moved} tool result{'s' if moved > 1 else ''} out "
+                           f"of the conversation to stay within the context budget "
+                           f"({freed:,} tokens); each is retrievable.")
+                self._emit_usage(system_prompt, specs)
+                if not self.conversation.needs_compaction(limit, agent.compact_at,
+                                                          system_prompt, specs):
+                    return
 
         removed = self.conversation.compact(self._summarise)
         if removed:

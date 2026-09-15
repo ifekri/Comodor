@@ -22,7 +22,7 @@ benchmark code from quietly becoming runtime behaviour.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
 #: The product as shipped, and the comparison it is measured against.
 CURRENT = "current"
@@ -30,15 +30,18 @@ NAIVE = "naive"
 STRATEGIES = (CURRENT, NAIVE)
 
 
-def settings(strategy: str) -> dict[str, Any]:
+def settings(strategy: str, without: Iterable[str] = ()) -> dict[str, Any]:
     """The `agent` settings that make one attempt run under `strategy`.
 
     Merged over the runner's own settings, so the step, time and cost
     ceilings a task declares are the same for both strategies — otherwise the
-    comparison would be between two budgets, not two strategies.
+    comparison would be between two budgets, not two strategies. `without`
+    names context optimizations to switch off under the current strategy,
+    one at a time, so each can be measured against the rest (T096).
     """
     if strategy == CURRENT:
-        return {"context_strategy": CURRENT}
+        off = [str(name) for name in without if str(name)]
+        return {"context_strategy": CURRENT, "optimizations_off": off}
     if strategy == NAIVE:
         return {
             "context_strategy": NAIVE,

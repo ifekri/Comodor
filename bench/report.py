@@ -108,11 +108,19 @@ def as_markdown(report: dict) -> str:
 
 
 def write(outcomes: list[Outcome], directory: Path, *, provider: str,
-          model: str, tries: int) -> tuple[Path, Path]:
+          model: str, tries: int, label: str = "") -> tuple[Path, Path]:
     directory.mkdir(parents=True, exist_ok=True)
     report = as_json(outcomes, provider=provider, model=model, tries=tries)
+    report["commit"] = _commit()
+    if label:
+        report["label"] = label
+    if outcomes and outcomes[0].without:
+        report["without"] = list(outcomes[0].without)
+    if outcomes:
+        report["strategy"] = outcomes[0].strategy
+        report["learning"] = outcomes[0].learning
 
-    stem = f"{_slug(model)}-{report['date']}"
+    stem = f"{_slug(model)}-{report['date']}" + (f"-{_slug(label)}" if label else "")
     if (directory / f"{stem}.json").exists():
         stem = f"{stem}-{int(time.time()) % 100000}"
 

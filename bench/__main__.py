@@ -47,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--learning", action="store_true",
                         help="switch the learning engine on for every attempt (off "
                              "by default; each attempt still starts with an empty brain)")
+    parser.add_argument("--without", nargs="*", default=[],
+                        help="context optimizations to switch off, by name "
+                             "(dedup delta budget ranking summary_provenance log_summary)")
+    parser.add_argument("--label", default="",
+                        help="a name for this run, carried into the result files")
     args = parser.parse_args(argv)
 
     _load_env(ROOT / "src" / ".env")
@@ -89,7 +94,8 @@ def main(argv: list[str] | None = None) -> int:
                   flush=True)
             outcomes.append(run_task(task, provider=args.provider, model=args.model,
                                      tries=args.tries, keep=keep, strategy=strategy,
-                                     learning=args.learning))
+                                     learning=args.learning,
+                                     without=tuple(args.without)))
 
     outcomes = by_strategy[strategies[0]]
     if args.paired:
@@ -100,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         json_file, markdown_file = write(outcomes, HERE / "results",
                                          provider=args.provider, model=args.model,
-                                         tries=args.tries)
+                                         tries=args.tries, label=args.label)
 
     total = sum(one.passed for one in outcomes)
     of = sum(one.tries for one in outcomes)

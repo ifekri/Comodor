@@ -28,12 +28,34 @@ tools that read paths. The cost is bounded, and nothing is unreachable.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 from pathlib import Path
 from typing import Any
 
 from .base import ToolContext, ToolResult
+
+#: Tools whose output is a log: a test run, a build, a script. A passing log
+#: collapses to its outcome; a failing one keeps every failing case.
+COMMANDS = frozenset({"run_shell", "run_python"})
+
+#: A line that says a run passed. Kept when the rest of a passing log goes.
+_PASSED = re.compile(
+    r"(\b\d+ passed\b|\bpassed\b.*\bin \d|\bok\b\s*$|\ball tests passed\b"
+    r"|\bbuild succeeded\b|\bcompiled successfully\b|\bsuccess\b)", re.I)
+
+#: A line that belongs to a failure: the case, its location, its message.
+_FAILING = re.compile(
+    r"(\bFAILED?\b|\bERROR\b|\bError\b|\bTraceback\b|\bException\b|\bassert"
+    r"|\bAssertionError\b|\bpanic\b|\bfatal\b|\bnot ok\b|\bFAIL:|^E\s{2,}"
+    r"|^\s+File \".+\", line \d+|\berror\[E\d+\]|\berror:)", re.I | re.M)
+
+#: How many lines around a failing line travel with it.
+_AROUND = 3
+
+#: Above this a passing log is worth collapsing; below it the log is cheap.
+_LOG_WORTH = 1_500
 
 #: Characters kept inline before the rest is moved aside. Four to a token,
 #: roughly, so this is about three thousand tokens — enough for a stack trace,
@@ -69,6 +91,14 @@ def contain(result: ToolResult, ctx: ToolContext, tool: str) -> ToolResult:
     the same rule as the ones that exist today.
     """
     content = result.content or ""
+    if tool in COMMANDS and len(content) > _LOG_WORTH and _log_summaries_on(ctx):
+        # A log first: a passing run collapses to its outcome, a failing run
+        # to its failing cases — before the size rule, which would otherwise
+        # keep an arbitrary head and tail of a log whose useful part is the
+        # failure in the middle (FR-090).
+        summarised = _summarise_log(result, content, ctx, tool)
+        if summarised is not None:
+            return summarised
     budget = _budget(ctx)
     if len(content) <= budget:
         return result
@@ -87,6 +117,71 @@ def contain(result: ToolResult, ctx: ToolContext, tool: str) -> ToolResult:
         meta={**result.meta, "overflowed": True, "full_chars": len(content)},
         elapsed=result.elapsed,
     )
+
+
+def _log_summaries_on(ctx: ToolContext) -> bool:
+    agent = getattr(ctx.config, "agent", None)
+    if getattr(agent, "context_strategy", "current") == "naive":
+        return False
+    return "log_summary" not in set(getattr(agent, "optimizations_off", None) or ())
+
+
+def _summarise_log(result: ToolResult, content: str, ctx: ToolContext,
+                   tool: str) -> ToolResult | None:
+    """The carried form of a command's output (FR-090, SC-027).
+
+    Passing: the header, the outcome lines, and a pointer to the whole log.
+    Failing: every failing line with its surroundings — the case, where it
+    is, what it said — the tail, and the pointer. A failing run is never a
+    flag: if nothing in it reads as a failure, it is carried as it was.
+    """
+    passed = _exit_code(result) == 0 and not _FAILING.search(content)
+    lines = content.splitlines()
+    pointer = _point_at_a_copy(content, ctx, tool)
+    if passed:
+        kept = lines[:2] + [line for line in lines[2:] if _PASSED.search(line)][-6:]
+        if len(kept) < 2:
+            kept = lines[:2] + lines[-3:]
+        body = "\n".join(kept)
+        note = (f"[Passing run: {len(lines):,} lines collapsed to the outcome. "
+                f"{pointer}]")
+        return ToolResult(
+            ok=result.ok, content=f"{body}\n\n{note}",
+            display=_for_the_pane(result.display or content),
+            meta={**result.meta, "overflowed": True, "log": "passed",
+                  "full_chars": len(content)},
+            elapsed=result.elapsed)
+    failing = [index for index, line in enumerate(lines) if _FAILING.search(line)]
+    if not failing:
+        return None
+    keep: set[int] = set(range(min(2, len(lines))))
+    for index in failing:
+        keep.update(range(max(0, index - _AROUND), min(len(lines), index + _AROUND + 1)))
+    keep.update(range(max(0, len(lines) - 5), len(lines)))
+    kept_lines: list[str] = []
+    previous = -1
+    for index in sorted(keep):
+        if previous >= 0 and index != previous + 1:
+            kept_lines.append("…")
+        kept_lines.append(lines[index])
+        previous = index
+    body = "\n".join(kept_lines)
+    if len(body) >= len(content):
+        return None
+    note = (f"[Failing run: {len(failing)} failing line{'s' if len(failing) != 1 else ''} "
+            f"kept with context out of {len(lines):,}; nothing else is claimed about "
+            f"the rest. {pointer}]")
+    return ToolResult(
+        ok=result.ok, content=f"{body}\n\n{note}",
+        display=_for_the_pane(result.display or content),
+        meta={**result.meta, "overflowed": True, "log": "failed",
+              "full_chars": len(content)},
+        elapsed=result.elapsed)
+
+
+def _exit_code(result: ToolResult) -> int | None:
+    code = result.meta.get("exit_code")
+    return int(code) if isinstance(code, int) and not isinstance(code, bool) else None
 
 
 def _for_the_pane(text: str) -> str:
@@ -147,14 +242,19 @@ def _write(content: str, ctx: ToolContext, tool: str) -> Path | None:
     try:
         folder.mkdir(parents=True, exist_ok=True)
         name = _SAFE.sub("-", tool.lower()) or "tool"
-        target = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{name}.txt"
-        # Two calls in the same second must not overwrite each other.
-        counter = 2
-        while target.exists():
-            target = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{name}-{counter}.txt"
-            counter += 1
+        # The same output spilled twice points at one file, not two: the
+        # name carries a hash of the content, so identical results dedup
+        # on disk and a changed result — a different hash — never resolves
+        # to the old copy (FR-089).
+        digest = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:12]
+        target = folder / f"{name}-{digest}.txt"
+        if target.exists():
+            target.touch()
+            _remember(ctx, target)
+            return target
         target.write_text(content, encoding="utf-8", errors="replace")
-        _prune(folder)
+        _remember(ctx, target)
+        _prune(folder, keep=_referenced(ctx))
         return target
     except OSError:
         # A full disk or a read-only home must not turn a working tool call
@@ -162,14 +262,37 @@ def _write(content: str, ctx: ToolContext, tool: str) -> Path | None:
         return None
 
 
-def _prune(folder: Path) -> None:
+def _remember(ctx: ToolContext, target: Path) -> None:
+    """A pointer handed to this session stays valid for the session: pruning
+    never removes a file the conversation still points at."""
+    try:
+        held = getattr(ctx, "spilled", None)
+        if held is None:
+            held = set()
+            ctx.spilled = held                      # type: ignore[attr-defined]
+        held.add(str(target))
+    except Exception:
+        pass
+
+
+def _referenced(ctx: ToolContext) -> set[str]:
+    try:
+        return set(getattr(ctx, "spilled", None) or ())
+    except Exception:
+        return set()
+
+
+def _prune(folder: Path, keep: set[str] | None = None) -> None:
     try:
         files = sorted(folder.glob("*.txt"), key=lambda p: p.stat().st_mtime,
                        reverse=True)
     except OSError:
         return
     cutoff = time.time() - KEEP_SECONDS
+    protected = keep or set()
     for index, path in enumerate(files):
+        if str(path) in protected:
+            continue
         try:
             if index >= KEEP_FILES or path.stat().st_mtime < cutoff:
                 path.unlink()

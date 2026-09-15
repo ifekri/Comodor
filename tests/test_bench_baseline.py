@@ -36,7 +36,9 @@ def test_the_naive_settings_switch_every_sweep_off():
     assert naive["max_tool_chars"] >= 1_000_000
     assert naive["keep_screenshots"] >= 1_000
     assert naive["compact_at"] >= 0.9
-    assert baseline.settings(baseline.CURRENT) == {"context_strategy": "current"}
+    assert baseline.settings(baseline.CURRENT) == {"context_strategy": "current",
+                                                   "optimizations_off": []}
+    assert baseline.settings(baseline.CURRENT, ["dedup"])["optimizations_off"] == ["dedup"]
     with pytest.raises(ValueError):
         baseline.settings("clever")
 

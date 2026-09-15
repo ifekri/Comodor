@@ -54,6 +54,10 @@ class DelegateRun:
     #: decision nobody answered. Carried to the parent's turn; never turned
     #: into an answer here.
     clarification: dict[str, Any] = field(default_factory=dict)
+    #: What the delegate read and observed, as citations. Its conclusion
+    #: travels with these rather than with the material itself, so the
+    #: parent can re-examine any of it without carrying all of it (FR-094).
+    consulted: list[str] = field(default_factory=list)
     #: Which session launched it, when the store is shared. Only the owner
     #: drains or stops it; a run nobody owns — one reloaded from a dead
     #: process's record — belongs to whichever session asks next, which is
@@ -73,6 +77,7 @@ class DelegateRun:
             "started_at": round(self.started_at, 3),
             "error": self.error[:200],
             **({"clarification": dict(self.clarification)} if self.clarification else {}),
+            **({"consulted": list(self.consulted)} if self.consulted else {}),
         }
 
 
@@ -406,10 +411,12 @@ class BackgroundDelegates:
                 loop = spawner(cwd=cwd, mode="act" if write else "plan",
                                max_steps=12, max_seconds=600.0, cancel=cancel)
             result = loop.run(brief)
+            consulted = _consulted(loop)
             with self._lock:
                 run = self._runs.get(identifier)
                 if run is None:
                     return
+                run.consulted = consulted
                 run.steps = result.steps
                 run.tool_calls = result.tool_calls
                 run.tokens = result.usage.prompt_tokens
@@ -983,6 +990,23 @@ def _id_number(identifier: str) -> int:
 SUMMARY_FLOOR = 2_000
 
 
+def _consulted(loop: Any) -> list[str]:
+    """The sources a finished delegate verified, from its own ledger."""
+    try:
+        from .evidence import EvidenceState
+
+        context = getattr(loop, "tool_context", None)
+        if context is None:
+            return []
+        seen: list[str] = []
+        for entry in context.evidence.entries:
+            if entry.state is EvidenceState.VERIFIED and entry.source not in seen:
+                seen.append(entry.source)
+        return seen
+    except Exception:
+        return []
+
+
 def completion_turn(record: dict[str, Any],
                     summary_max: int = 24_000) -> str:
     """Format one finished delegate as the text of a new turn.
@@ -1004,6 +1028,11 @@ def completion_turn(record: dict[str, Any],
                 f"Do not decide it yourself; report it.]\n\n{body}")
     if state == "done":
         body = str(record.get("answer", "")).strip()
+        consulted = [str(item) for item in record.get("consulted") or []]
+        if consulted:
+            shown = ", ".join(consulted[:12]) + (f" and {len(consulted) - 12} more"
+                                                 if len(consulted) > 12 else "")
+            body = f"{body}\n\n[Consulted: {shown} — re-read any of these to check.]"
         spilled = ""
         limit = max(SUMMARY_FLOOR, summary_max)
         if len(body) > limit:

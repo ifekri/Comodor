@@ -101,6 +101,10 @@ class ToolContext:
     #: loop at the start of every turn.
     request_text: str = ""
     recalled: list[str] = field(default_factory=list)
+    #: Spill files this session's tool results point at. Pruning leaves
+    #: these alone, so a pointer the model was given resolves for as long as
+    #: the conversation that holds it (FR-089).
+    spilled: set[str] = field(default_factory=set)
 
     @property
     def evidence(self) -> Any:
@@ -121,7 +125,8 @@ class ToolContext:
         # never the contents. Bookkeeping must not be the reason a read fails.
         try:
             self.evidence.verified(f"read {self.relative(path)}",
-                                   source=self.relative(path), material=material)
+                                   source=self.relative(path), material=material,
+                                   reference=f"call {self.call_id}" if self.call_id else "")
         except Exception:
             pass
 
