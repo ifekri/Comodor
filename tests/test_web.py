@@ -1329,7 +1329,7 @@ def test_what_you_wrote_sorts_above_what_it_inferred(served):
     """Burying an instruction under forty inferences reads as the agent having
     opinions of its own."""
     for _ in range(20):
-        served.session.memory.store.observe_rule(
+        served.session.memory.store.observe_rule(provenance="counted_convention",
             key="python.quotes", scope="global", category="style",
             statement="Use single quotes", detail="most literals",
             source="observation", weight=1)
@@ -1345,7 +1345,7 @@ def test_an_inferred_rule_carries_its_evidence(served):
     """A claim about how somebody works should be checkable rather than
     asserted, which is the whole difference between a rule and a guess."""
     for _ in range(6):
-        served.session.memory.store.observe_rule(
+        served.session.memory.store.observe_rule(provenance="counted_convention",
             key="git.messages", scope="global", category="style",
             statement="Imperative commit subjects", detail="22 of 24 commits",
             source="observation", weight=1)
@@ -1455,7 +1455,7 @@ def test_the_rule_count_is_the_rules_this_folder_has(served):
     elsewhere = "project:somewhere-else-entirely"
     for key in ("other.style", "other.tests"):
         for _ in range(6):
-            served.session.memory.store.observe_rule(
+            served.session.memory.store.observe_rule(provenance="counted_convention",
                 key=key, scope=elsewhere, category="style",
                 statement=f"Learned somewhere else ({key})", detail="",
                 source="observation", weight=1)

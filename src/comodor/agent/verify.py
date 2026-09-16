@@ -32,9 +32,10 @@ switch off.
 from __future__ import annotations
 
 import os
+import re
 import signal
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 #: How long the project's own check may take before it is given up on. Long
@@ -158,4 +159,165 @@ def as_correction(command: str, outcome: Outcome) -> str:
         f"Fix the cause. If the failure is not something your change caused, "
         f"say so plainly and leave it alone — do not change unrelated code to "
         f"make a command pass."
+    )
+
+
+# --------------------------------------------------------------------------- #
+# the completion gate: request versus delivery (IP-4, FR-036 to FR-043,
+# FR-124 to FR-127)
+# --------------------------------------------------------------------------- #
+#
+# This is a return value computed at the end of a turn, never durable state.
+# The default authority is to *annotate*: unresolved work is named beside the
+# answer and the user is never denied what the agent did produce. The one
+# blocking case is an answer that explicitly claims completion while the
+# gathered evidence contradicts it (FR-125); blocking costs at most one
+# correction turn (FR-127). A gate that cannot reach a verdict annotates.
+
+#: A line that names one requested thing: a bullet or a numbered item.
+_ELEMENT = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?P<what>.+?)\s*$")
+
+#: Words too common to identify an element by.
+_UNINFORMATIVE = frozenset("""
+a an and are as at be by do does for from get in into is it its make made of on or
+please should so that the their them then there these this to up us use used with
+you your add added fix fixed change changed update updated new
+""".split())
+
+
+@dataclass
+class Element:
+    """One requested thing and the evidence that shows it was delivered."""
+
+    what: str
+    evidence: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Assessment:
+    """The turn's request-versus-delivery comparison. Never persisted."""
+
+    requested: list[str] = field(default_factory=list)
+    delivered: list[Element] = field(default_factory=list)
+    unresolved: list[str] = field(default_factory=list)
+    unresolved_reasons: dict[str, str] = field(default_factory=dict)
+    claims_completion: bool = False
+    contradicted: bool = False
+    pending_clarification: str = ""
+    verdict: str = "no_intervention"          # no_intervention | annotate | block
+
+    def annotation(self) -> str:
+        """The notice shown beside an answer with unresolved work (FR-037)."""
+        if not self.unresolved:
+            return ""
+        lines = [f"  - {what}" + (f" ({self.unresolved_reasons.get(what)})"
+                                  if self.unresolved_reasons.get(what) else "")
+                 for what in self.unresolved]
+        return ("Not everything the request asked for was delivered:\n"
+                + "\n".join(lines))
+
+
+def requested_elements(request: str) -> list[str]:
+    """The explicitly enumerated things a request asked for.
+
+    Only items the person actually wrote as a list are taken; prose is not
+    parsed into a checklist, because guessing the elements of a sentence would
+    invent work the user never asked for. A request with no list has no
+    elements, and the gate then acts only on a failed tool or an open
+    decision.
+    """
+    found: list[str] = []
+    for line in (request or "").splitlines():
+        match = _ELEMENT.match(line)
+        if not match:
+            continue
+        what = " ".join(match.group("what").split())
+        if what and what not in found:
+            found.append(what[:200])
+    return found
+
+
+def _keywords(text: str) -> set[str]:
+    words = re.findall(r"[a-z0-9_][a-z0-9_.\-/]{1,}", (text or "").lower())
+    return {word for word in words if word not in _UNINFORMATIVE and len(word) > 2}
+
+
+def _delivered(element: str, entries, changed_paths) -> list[str]:
+    """Evidence refs showing `element` was done, or empty."""
+    wanted = _keywords(element)
+    if not wanted:
+        return []
+    refs: list[str] = []
+    for entry in entries or []:
+        state = getattr(getattr(entry, "state", None), "value", "")
+        if state not in ("verified", "known", "derived"):
+            continue
+        claim = str(getattr(entry, "claim", "") or "")
+        if wanted & _keywords(claim):
+            ref = str(getattr(entry, "fingerprint", "") or getattr(entry, "source", ""))
+            if ref and ref not in refs:
+                refs.append(ref)
+    for path in changed_paths or []:
+        if wanted & _keywords(str(path)):
+            refs.append(str(path))
+    return refs
+
+
+def assess(request: str, *, entries=(), changed_paths=(), failures=(),
+           pending=(), answer: str = "") -> Assessment:
+    """Compare the request against the delivery and decide the gate's verdict.
+
+    `failures` are `(tool, reason)` for tool calls that failed; `pending` are
+    open decisions. Either names real unresolved work, so the gate can see a
+    completion claim contradicted even when the request was not a list.
+    """
+    from .claims import claims_completion
+
+    result = Assessment()
+    result.requested = requested_elements(request)
+
+    for element in result.requested:
+        evidence = _delivered(element, entries, changed_paths)
+        if evidence:
+            result.delivered.append(Element(element, evidence))
+        else:
+            result.unresolved.append(element)
+            result.unresolved_reasons[element] = "the gathered evidence does not show it"
+
+    for tool, reason in failures or []:
+        what = f"the {tool} call failed"
+        if what not in result.unresolved:
+            result.unresolved.append(what)
+            result.unresolved_reasons[what] = str(reason or "the tool reported a failure")
+
+    for decision in pending or []:
+        what = str(getattr(decision, "what", "") or "an open decision")
+        if what in result.unresolved:
+            continue
+        result.unresolved.append(what)
+        state = str(getattr(decision, "state", "") or "unresolved")
+        result.unresolved_reasons[what] = f"blocked by an open decision ({state})"
+        if not result.pending_clarification:
+            result.pending_clarification = str(getattr(decision, "id", "") or "")
+
+    result.claims_completion = claims_completion(answer)
+    result.contradicted = bool(result.claims_completion and result.unresolved)
+
+    if result.contradicted:
+        result.verdict = "block"
+    elif result.unresolved:
+        result.verdict = "annotate"
+    return result
+
+
+def as_incomplete(assessment: Assessment) -> str:
+    """What the model is told when a completion claim is contradicted (FR-125)."""
+    named = "\n".join(f"  - {what}" for what in assessment.unresolved)
+    return (
+        "Your answer says the task is complete, but the evidence does not "
+        "support that. These are still unresolved:\n"
+        f"{named}\n\n"
+        "Correct the answer to state the work as incomplete and name what is "
+        "still needed. Do not claim completion for work the evidence does not "
+        "show."
     )

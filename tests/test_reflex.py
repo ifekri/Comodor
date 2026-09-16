@@ -229,7 +229,8 @@ def test_a_contested_rule_stops_being_applied():
 
 def test_repeat_observations_accumulate_on_one_rule(engine):
     for _ in range(4):
-        engine.store.observe_rule(key="quotes.style", scope=engine.write_scope,
+        engine.store.observe_rule(provenance="counted_convention",
+                                  key="quotes.style", scope=engine.write_scope,
                                   statement="Use single quotes.", detail="counted")
     rules = engine.store.all_rules()
 
@@ -240,7 +241,8 @@ def test_repeat_observations_accumulate_on_one_rule(engine):
 
 def test_confident_rules_reach_the_system_prompt(engine):
     for _ in range(4):
-        engine.store.observe_rule(key="quotes.style", scope=engine.write_scope,
+        engine.store.observe_rule(provenance="counted_convention",
+                                  key="quotes.style", scope=engine.write_scope,
                                   statement="Use single quotes for string literals.",
                                   detail="31 of 34 literals")
     playbook = engine.render_playbook([], rules=engine.active_rules())
@@ -250,7 +252,8 @@ def test_confident_rules_reach_the_system_prompt(engine):
 
 
 def test_an_unproven_rule_stays_out_of_the_prompt(engine):
-    engine.store.observe_rule(key="quotes.style", scope=engine.write_scope,
+    engine.store.observe_rule(provenance="counted_convention",
+                              key="quotes.style", scope=engine.write_scope,
                               statement="Use single quotes.", detail="seen once")
     assert engine.render_playbook([], rules=engine.active_rules()) == ""
 
@@ -260,9 +263,10 @@ def test_rules_survive_a_tight_budget_that_truncates_lessons(engine):
     from comodor.learning.store import Lesson
 
     for _ in range(4):
-        engine.store.observe_rule(key="quotes.style", scope=engine.write_scope,
+        engine.store.observe_rule(provenance="counted_convention",
+                                  key="quotes.style", scope=engine.write_scope,
                                   statement="Use single quotes.", detail="counted")
-    lessons = [engine.store.add_lesson(Lesson(
+    lessons = [engine.store.add_lesson(Lesson(provenance="user_statement",
         scope=engine.write_scope, trigger=f"case {i}",
         guidance="a long piece of distilled guidance " * 10)) for i in range(5)]
 
@@ -278,7 +282,8 @@ def test_a_user_stated_rule_applies_immediately(engine):
 
 def test_rules_export_is_readable_and_committable(engine, workspace):
     for _ in range(4):
-        engine.store.observe_rule(key="quotes.style", scope=engine.write_scope,
+        engine.store.observe_rule(provenance="counted_convention",
+                                  key="quotes.style", scope=engine.write_scope,
                                   statement="Use single quotes.",
                                   detail="31 of 34 literals")
     path = engine.export_rules()

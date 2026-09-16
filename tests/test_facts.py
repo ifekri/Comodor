@@ -15,6 +15,13 @@ from comodor.learning.facts import (
 )
 from comodor.learning.review import Reviewer, parse_review
 from comodor.learning.store import BrainStore
+from comodor.providers.base import Message
+
+
+def _said(*texts: str) -> list[Message]:
+    """A transcript in which the person said these things — what makes a
+    fact the review proposes admissible (FR-056)."""
+    return [Message.user(text) for text in texts]
 
 # --------------------------------------------------------------------------- #
 # fixtures
@@ -204,7 +211,7 @@ def test_the_reviewer_stores_what_the_model_proposed(store, service):
         ]
     )
     reviewer = Reviewer(service, gateway)
-    reviewer.review([], "done")
+    reviewer.review(_said("Remember the CI runner is Linux only."), "done")
     assert [fact.text for fact in service.entries()] == ["The CI runner is Linux only"]
 
 
@@ -228,8 +235,8 @@ def test_a_new_review_replaces_the_result_of_an_in_flight_one(store, service):
         delay=0.3,
     )
     reviewer = Reviewer(service, gateway)
-    first = reviewer.review_async([], "done", 0)
-    second = reviewer.review_async([], "done", 0)
+    first = reviewer.review_async(_said("From the first turn"), "done", 0)
+    second = reviewer.review_async(_said("From the second turn"), "done", 0)
     for thread in (first, second):
         thread.join(timeout=5)
     reviewer.wait(timeout=5)
@@ -267,7 +274,8 @@ def test_stale_facts_do_not_block_new_ones_from_the_briefing(store, service):
 
     for number in range(40):
         service.store.add_fact(
-            Fact(kind="memory", scope="global", text=f"Bulk fact {number} " + "y" * 60)
+            Fact(provenance="user_statement",
+                 kind="memory", scope="global", text=f"Bulk fact {number} " + "y" * 60)
         )
     briefing = service.snapshot()
     # The budgets capped it; it did not grow to forty facts.
@@ -347,7 +355,7 @@ def test_record_outcome_runs_the_review_and_lands_facts(tmp_path):
     try:
         engine.record_outcome(
             goal="a task",
-            messages=[],
+            messages=_said("this fact should be learned by the review pass"),
             recalled=[],
             success=True,
             stopped="done",
@@ -382,8 +390,10 @@ def test_a_reserved_ticket_outranks_a_review_that_started_later(store, service):
     second = reviewer.reserve()
     assert (first, second) == (1, 2)
 
-    reviewer.review_async([], "done", 0, generation=second).join(timeout=5)
-    reviewer.review_async([], "done", 0, generation=first).join(timeout=5)
+    reviewer.review_async(_said("from the second turn"), "done", 0,
+                          generation=second).join(timeout=5)
+    reviewer.review_async(_said("from the first turn"), "done", 0,
+                          generation=first).join(timeout=5)
     texts = [fact.text for fact in service.entries()]
     assert texts == ["From the second turn"], (
         "the first turn's review ran last but must not outrank the second's")
@@ -430,9 +440,9 @@ def _engine(tmp_path, gateway):
     return LearningEngine(config, EventBus(), gateway, store=store)
 
 
-def _record(engine, goal: str) -> None:
-    engine.record_outcome(goal=goal, messages=[], recalled=[], success=True,
-                          stopped="done", steps=1, elapsed=0.1)
+def _record(engine, goal: str, said: str = "") -> None:
+    engine.record_outcome(goal=goal, messages=_said(said or goal), recalled=[],
+                          success=True, stopped="done", steps=1, elapsed=0.1)
 
 
 def test_reviews_rank_by_the_order_their_turns_ended(tmp_path):
@@ -464,9 +474,9 @@ def test_reviews_rank_by_the_order_their_turns_ended(tmp_path):
 
     reviewer.on_accepted = on_accepted
     try:
-        _record(engine, "the first turn")
+        _record(engine, "the first turn", "this is from the first turn")
         assert gateway.reached.wait(timeout=10), "the first turn never reached its reflection"
-        _record(engine, "the second turn")
+        _record(engine, "the second turn", "this is from the second turn")
         # The second turn's worker runs to completion behind the gate...
         assert landed.wait(timeout=10), "the second turn's review was blocked by the first's"
         assert [fact.text for fact in engine.facts.entries()] == ["From the second turn"]
@@ -501,7 +511,7 @@ def test_the_wait_holds_until_the_review_the_worker_started_is_done(tmp_path):
     gateway.hold(REVIEW_PROMPT, "GOAL: ")
     engine = _engine(tmp_path, gateway)
     try:
-        _record(engine, "a task")
+        _record(engine, "a task", "it landed after the gate")
         assert gateway.reached.wait(timeout=10), "the review never reached the gateway"
 
         engine.wait_for_reflection(timeout=0.2)     # expires: the review is held

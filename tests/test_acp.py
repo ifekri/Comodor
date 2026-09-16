@@ -639,3 +639,40 @@ def test_login_is_refused_because_none_is_offered(driven):
 
     with pytest.raises(RpcError):
         agent.login({})
+
+
+# --------------------------------------------------------------------------- #
+# a clarification is a structured outcome, not a completed turn (T134)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_clarification_turn_is_not_reported_as_completed(driven, config):
+    agent, out = driven
+    made = agent.session_new({"cwd": str(config.paths.project)})
+    session = agent.sessions[made["sessionId"]]
+
+    from comodor.agent.loop import TurnResult
+
+    result = TurnResult()
+    result.stopped = "clarification_required"
+    result.text = "A decision is needed."
+    result.clarification = {
+        "kind": "clarification_required", "decision": "Which database?",
+        "candidates": [], "evidence_consulted": [], "reason": "",
+        "outcome": "unattended"}
+    session.loop.run = lambda text: result
+
+    session.prompt([{"type": "text", "text": "do it"}])
+    assert session._turn.acquire(timeout=5), "the turn did not finish"
+    session._turn.release()
+
+    updates = [message["params"]["update"] for message in out.messages
+               if message.get("method") == "session/update"]
+    stops = [update.get("stopReason") for update in updates
+             if update.get("sessionUpdate") == "state_update"]
+    assert "end_turn" not in stops
+    assert "refusal" in stops, "a clarification-required turn is not completion"
+
+    clarifications = [update for update in updates
+                      if update.get("sessionUpdate") == "clarification_required"]
+    assert clarifications and clarifications[0]["outcome"] == "unattended"

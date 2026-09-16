@@ -4,7 +4,17 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 ## Unreleased
 
-Nothing yet.
+### Changed
+
+- **A material clarification can no longer be resolved by default, assumption
+  or invented value when the required information was not supplied.** This is
+  the single intended behaviour change. Previously a dismissed, expired or
+  unattended question fell back to "choose sensible defaults and carry on";
+  now it leaves the decision unresolved, runs no dependent work, and the turn
+  ends reporting `clarification_required` with a `clarification.outcome` of
+  `cancelled`, `expired` or `unattended`. An answered question behaves as
+  before. `comodor run` exits `3` for this outcome and `--json` carries the
+  decision in a `clarification` block.
 
 ## 2.0.1 — 2026-09-13
 

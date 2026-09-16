@@ -138,7 +138,7 @@ Already in `learning/store.py` as `Lesson` / `Fact` / `Rule` / `Skill` with
 | --- | --- | --- |
 | `provenance` | enum | `user_correction`, `user_statement`, `settled_decision`, `counted_convention`, `validated_outcome`, `tool_confirmed`. **No other value is admissible** (FR-056) |
 | `source_ref` | text | What it was derived from |
-| `fingerprint` | opaque | Of the derivation source; mismatch ⇒ stale (research R5). **Granularity (whole file vs region/rule) is deliberately undecided here**: T111 (tasks Phase 6; plan Phase 5) decides it from real `rules.py` observation shapes and records the choice, rationale and invalidation implications in this row |
+| `fingerprint` | opaque | Of the derivation source. Its **granularity is per provenance class**, decided in T111 from the real shapes in `rules.py` and `store.py`: a `counted_convention` rule is a tally over a *sample*, so its fingerprint is the sample's manifest (`rules.manifest_fingerprint`) and a mismatch is the cue to **re-count**, not the verdict — the rule goes stale only when `rules.recount` no longer supports it; a `layout.*` structural rule is fingerprinted over the directory structure (names only, two levels), so moving what it describes invalidates it and editing a file inside does not; a `tool_confirmed` fact is whole-file, because nothing records which region of the file backed it, so any change to that file marks it stale; a `user_correction` carries the corrected file's fingerprint for the record only and is displaced by a later contradicting correction, never by an edit (research R5) |
 | `confidence` | float | Where meaningful |
 | `established_at` | timestamp | For supersession ordering |
 | `status` | enum | `active` \| `superseded` \| `stale` \| `removed` |
@@ -165,6 +165,12 @@ active --user deletes--------------------> removed
 - Scope prevents cross-project application (FR-058).
 - Caps are unchanged; reaching one produces an explicit refusal listing current
   contents (FR-065).
+- Fingerprint invalidation is per class (see the `fingerprint` row): a counted
+  convention is invalidated by its sample changing *and* a re-count flipping it;
+  a layout convention by the structure moving; a `tool_confirmed` fact by its
+  file changing; a user correction only by a later contradicting correction.
+  A stale item returns to `UNKNOWN` rather than being relied on (FR-060,
+  FR-114, SC-029, SC-032).
 
 ---
 

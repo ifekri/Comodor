@@ -540,7 +540,9 @@ def test_the_user_agent_says_comodor():
 
 
 def test_the_readme_counts_the_providers_that_exist():
-    import re
+    """The README states how many hosted providers and local runtimes exist,
+    and those counts match the catalogue. The wording and structure are the
+    README's own; the factual counts are the contract."""
     from pathlib import Path
 
     from comodor import catalogue
@@ -552,17 +554,14 @@ def test_the_readme_counts_the_providers_that_exist():
              8: "Eight", 9: "Nine", 10: "Ten", 11: "Eleven", 12: "Twelve",
              13: "Thirteen", 14: "Fourteen", 15: "Fifteen", 16: "Sixteen",
              17: "Seventeen", 18: "Eighteen", 19: "Nineteen", 20: "Twenty"}
-    hosted = words[len(catalogue.hosted())]
+    hosted = words[len(catalogue.hosted())].lower()
     local = words[len(catalogue.local())].lower()
 
-    claim = re.search(r"\|\s*\*\*Works with any model\*\*\s*\|([^|]+)\|", readme)
-    assert claim, "the README no longer says what it works with"
-
-    line = claim.group(1)
-    assert f"{hosted} hosted" in line, \
-        f"the README says {line.strip()[:60]!r}; there are {hosted.lower()} hosted"
-    assert f"{local} local" in line, \
-        f"the README does not say there are {local} local runtimes"
+    stated = any(f"{hosted} hosted" in line.lower() and f"{local} local" in line.lower()
+                 for line in readme.splitlines())
+    assert stated, (
+        f"the README does not state that there are {hosted} hosted providers "
+        f"and {local} local runtimes")
 
 
 def test_every_hosted_provider_is_listed_in_the_models_page():

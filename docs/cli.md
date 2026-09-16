@@ -81,6 +81,7 @@ comodor run "refactor the parser" --max-steps 40
 | `--yes` | approve writes and commands automatically |
 | `--json` | a machine-readable result on stdout |
 | `--max-steps N` | override the step limit for this run |
+| `--interactions JSON` | script answers to question forms, in order: `"answer"` (or `{"action":"answer","value":"…"}`), `"cancel"`, `"expire"`, `"unattended"`. Without it, a form nobody can answer is `unattended` |
 
 Without `--yes` it will ask, on stderr, and refuse rather than assume if nothing
 can answer. That is deliberate: a script that silently self-approves is a script
@@ -113,7 +114,31 @@ that does something you did not expect at three in the morning.
 | `max_steps` | it hit `agent.max_steps` |
 | `budget` | it hit `agent.max_cost_usd` or `agent.max_seconds` |
 | `cancelled` | you interrupted it |
+| `clarification_required` | it stopped because a decision it needs is unanswered |
 | `error` | something went wrong; `error` says what |
+
+A `clarification_required` turn carries the decision in a `clarification`
+block, so a script can see what is needed without parsing prose:
+
+```json
+{
+  "stopped": "clarification_required",
+  "ok": false,
+  "clarification": {
+    "kind": "clarification_required",
+    "decision": "Which database should we use?",
+    "candidates": [{"label": "SQLite"}, {"label": "PostgreSQL"}],
+    "outcome": "unattended"
+  }
+}
+```
+
+`clarification.outcome` is `cancelled` (the form was dismissed or a material
+question was declined), `expired` (the form waited out) or `unattended`
+(nobody was listening). All three leave the decision open and run no
+dependent work. `outcome` is never `cancelled` for a dismissed question if
+that would read as the whole turn being cancelled — `stopped: "cancelled"`
+keeps that meaning exclusively.
 
 `ok` is true for `done` and `max_steps` — running out of steps is not a failure,
 it is a ceiling doing its job — so check `stopped` too if you need the
@@ -123,6 +148,10 @@ difference:
 comodor run "update the changelog for this release" --yes --json > result.json
 jq -e '.stopped == "done"' result.json
 ```
+
+`comodor run` exits `3` when a decision is still needed, distinct from `0`
+(done), `1` (an error) and `130` (interrupted). A script can therefore tell
+"waiting on a human" apart from "it failed".
 
 It still learns from a headless run. A correction you make afterwards teaches
 the same lesson an interactive one would.

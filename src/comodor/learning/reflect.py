@@ -109,6 +109,9 @@ def parse_reflection(text: str, scope: str, source: str = "") -> Reflection:
             confidence = float(entry.get("confidence", 0.5))
         except (TypeError, ValueError):
             confidence = 0.5
+        # No provenance yet: a reflected lesson is the model's own assertion,
+        # and it becomes storable only once the engine corroborates it into
+        # one of the admissible classes (FR-056).
         reflection.lessons.append(Lesson(
             kind=kind,
             scope=scope,

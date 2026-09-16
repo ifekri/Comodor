@@ -188,7 +188,7 @@ def test_recall_stays_within_the_cap_at_ten_times_the_store_size(config, bus):
         sizes = []
         for round_number in range(1, 11):
             for index in range(20):
-                engine.store.add_lesson(Lesson(
+                engine.store.add_lesson(Lesson(provenance="user_statement",
                     scope=engine.write_scope, trigger=f"situation {round_number}-{index} retry",
                     guidance="a fairly long piece of guidance about retries " * 6,
                     confidence=0.8))

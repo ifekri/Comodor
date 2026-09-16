@@ -59,6 +59,16 @@ SAY_WHAT_HAPPENED = (
 #: Blank line between the skill block and the playbook block.
 SECTION_GAP = "\n\n"
 
+#: Tools that change the project. Kept here so a successful write can be
+#: recorded for the completion gate's delivery evidence (FR-036).
+_WRITE_TOOLS = frozenset({"write_file", "edit_file"})
+
+
+def _brief_failure(content: str) -> str:
+    text = " ".join((content or "").split())
+    return text[:160]
+
+
 
 @dataclass
 class TurnResult:
@@ -136,6 +146,13 @@ class AgentLoop:
         #: turn to tell "it says the tests pass and ran them" from "it says the
         #: tests pass".
         self._used: list[str] = []
+        #: Tool calls that failed this turn, `(tool, reason)`, and the paths a
+        #: successful write touched. Both feed the completion gate (FR-116,
+        #: FR-036).
+        self._failed: list[tuple[str, str]] = []
+        self._written_paths: list[str] = []
+        #: The request this turn is answering, for the gate's element list.
+        self._request_text = ""
         #: What the user said not to do this turn, in their own words.
         self._rules: list[str] = []
         #: Worked out once per model. The model does not change mid-turn, and
@@ -165,6 +182,9 @@ class AgentLoop:
         self.cancel.reset()
         self._cancel_reason = ""
         self._used = []
+        self._failed = []
+        self._written_paths = []
+        self._request_text = user_text
         result = TurnResult()
         self._measurement = result.measurement
         # The project's instructions, read once for the turn. Every step's
@@ -263,6 +283,7 @@ class AgentLoop:
         spoken = ""
         asked_to_speak = False
         checked = False
+        corrected = False
 
         while True:
             self.cancel.raise_if_cancelled()
@@ -313,6 +334,22 @@ class AgentLoop:
                     if self._project_check_failed():
                         continue
 
+                # The completion gate. Annotate unresolved work beside the
+                # answer; block only an explicit completion claim the evidence
+                # contradicts, and only once — the fallback is to annotate
+                # (FR-124 to FR-127).
+                assessment = self._completion_gate(result)
+                result.measurement.validation_outcome = assessment.verdict
+                if assessment.verdict == "block" and not corrected:
+                    corrected = True
+                    result.text = ""          # this answer is replaced, not kept
+                    from . import verify
+
+                    self.conversation.add(Message.user(verify.as_incomplete(assessment)))
+                    continue
+                if assessment.unresolved:
+                    self._note(assessment.annotation())
+
                 result.stopped = "done"
                 return result
 
@@ -329,7 +366,14 @@ class AgentLoop:
             if needed is not None:
                 result.stopped = "clarification_required"
                 result.clarification = needed
+                result.measurement.validation_outcome = "clarification_required"
                 result.text = self._needs_a_decision(needed)
+                # Every surface — terminal, browser, and every messaging
+                # channel that drives the shared session — must show which
+                # decision is needed and how the clarification ended. Emitted
+                # as the turn's closing assistant message; nothing is invented
+                # and no dependent work runs (FR-121).
+                self._announce_decision(result.text)
                 return result
 
             if not agent.loop:
@@ -445,9 +489,15 @@ class AgentLoop:
         for call, result in zip(calls, results, strict=True):
             if not result.ok:
                 self._measurement.retries += 1
+                self._failed.append((call.name, _brief_failure(result.content)))
+            elif call.name in _WRITE_TOOLS:
+                path = str(result.meta.get("path") or "")
+                if path:
+                    self._written_paths.append(path)
             if call.name == "ask":
                 self._measurement.clarifications_raised += int(result.meta.get("asked", 0) or 0)
                 self._measurement.clarifications_answered += int(result.meta.get("given", 0) or 0)
+                self._learn_decisions(result)
             message = Message.tool(
                 call_id=call.id, name=call.name,
                 content=result.content, is_error=not result.ok,
@@ -456,6 +506,12 @@ class AgentLoop:
             # untrue can be found and dropped. The tools already know; nothing
             # was carrying it across.
             staleness.note(message, str(result.meta.get("path") or ""))
+            # A learned item that this file no longer supports is marked
+            # stale now, and the model is told, so an answer resting on it
+            # is corrected before the turn ends (FR-114).
+            contradicted = self._learning_contradicted(str(result.meta.get("path") or ""))
+            if contradicted:
+                message.content = f"{message.content}\n\n{contradicted}"
             # A form, as it was shown and how it ended, so the transcript and
             # an export can say what was asked and what came back (FR-030).
             form = result.meta.get("form")
@@ -582,20 +638,77 @@ class AgentLoop:
         """A fresh ledger for the turn, seeded with what the user stated.
 
         The request text and what recall brought ride on the context too,
-        so a candidate answer can be grounded against them.
+        so a candidate answer can be grounded against them. Decisions the
+        project has already settled enter as KNOWN, so the same question
+        is answered from the record rather than asked again (FR-109).
         """
         try:
             context = self._tool_context()
             context.reset_evidence()
             context.request_text = user_text
+            context.stated = [
+                message.content for message in self.conversation.messages
+                if getattr(message.role, "value", "") == "user"
+                and isinstance(message.content, str) and message.content][-20:]
             context.recalled = [
                 getattr(item, "text", "") or str(item) for item in self._recalled]
             context.evidence.known("the request, as the user stated it",
                                    material=user_text)
             for carried in decisions or []:
                 self._carry_open_decision(context, carried)
+            for decision in self._settled_decisions():
+                context.evidence.knowledge(decision.trigger, f"lesson:{decision.id}",
+                                           answer=decision.guidance)
         except Exception:
             pass
+
+    def _settled_decisions(self) -> list[Any]:
+        if self.memory is None or not self.config.learning.enabled:
+            return []
+        try:
+            return list(self.memory.settled_decisions())[:50]
+        except Exception:
+            return []
+
+    def _learn_decisions(self, result: ToolResult) -> None:
+        """What an answered form settled, kept for the project (T106).
+
+        Only answers: a question left blank, and a form that was cancelled,
+        expired or found nobody to answer, teach nothing.
+        """
+        if self.memory is None or not self.config.learning.enabled:
+            return
+        form = result.meta.get("form")
+        if not isinstance(form, dict):
+            return
+        prompts = {str(question.get("header") or ""): str(question.get("prompt") or "")
+                   for question in form.get("questions") or [] if isinstance(question, dict)}
+        for answer in form.get("answers") or []:
+            if not isinstance(answer, dict):
+                continue
+            text = str(answer.get("written") or "").strip() or ", ".join(
+                str(choice) for choice in answer.get("chosen") or [] if str(choice).strip())
+            prompt = prompts.get(str(answer.get("header") or ""), "")
+            if not text or not prompt:
+                continue
+            try:
+                self.memory.settle_decision(prompt, text)
+            except Exception:
+                continue
+
+    def _learning_contradicted(self, path: str) -> str:
+        """Learned items this file no longer supports, marked stale — or ""."""
+        if not path or self.memory is None or not self.config.learning.enabled:
+            return ""
+        try:
+            marked = self.memory.check_staleness([path])
+        except Exception:
+            return ""
+        if not marked:
+            return ""
+        lines = "\n".join(f"- {item['text']} ({item['why']})" for item in marked)
+        return ("[Learned knowledge contradicted by what was just observed and "
+                f"marked stale — rely on the observation, not on it:\n{lines}]")
 
     def _carry_open_decision(self, context: ToolContext, carried: dict[str, Any]) -> None:
         """A decision another piece of work left open enters this ledger open too."""
@@ -934,8 +1047,49 @@ class AgentLoop:
         if notice:
             self._note(notice)
 
+    def _completion_gate(self, result: TurnResult) -> Any:
+        """Compare the request against what the turn delivered (IP-4).
+
+        Annotate by default; the one blocking case is an explicit completion
+        claim the evidence contradicts. Never persisted.
+        """
+        from . import verify
+
+        try:
+            context = self._tool_context()
+            ledger = context.evidence
+            decisions = getattr(ledger, "decisions", []) or []
+            pending = [decision for decision in decisions
+                       if str(getattr(decision, "state", "")) in ("unresolved", "blocked")]
+            return verify.assess(
+                self._request_text,
+                entries=getattr(ledger, "entries", []) or [],
+                changed_paths=self._written_paths,
+                failures=self._failed,
+                pending=pending,
+                answer=result.text)
+        except Exception:
+            # A gate that cannot reach a verdict annotates nothing and blocks
+            # nothing: it falls back to delivering the answer (FR-127).
+            return verify.Assessment()
+
     def _note(self, text: str) -> None:
         self.bus.emit(Kind.NOTICE, text=text)
+
+    def _announce_decision(self, text: str) -> None:
+        """Close the turn with the needed decision as a visible message.
+
+        A clarification-required turn produces no streamed answer of its own,
+        so without this a channel would draw only whatever the model said
+        before it asked and never the decision that stopped it. The message is
+        the turn's own closing text; it adds nothing to the model's history.
+        """
+        if not text:
+            return
+        self._message_id = uuid.uuid4().hex[:12]
+        self.bus.emit(Kind.ASSISTANT_START, id=self._message_id)
+        self.bus.emit(Kind.ASSISTANT_END, text=text, id=self._message_id,
+                      tool_calls=[])
 
     # -- learning --------------------------------------------------------- #
 

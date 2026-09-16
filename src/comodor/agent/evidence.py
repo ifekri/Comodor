@@ -161,6 +161,9 @@ class EvidenceEntry:
     #: in the conversation, or a path to read again (FR-103). A citation,
     #: never a copy.
     reference: str = ""
+    #: For a KNOWN entry seeded from a settled decision: what was decided,
+    #: so the question is answered from the record instead of re-asked.
+    answer: str = ""
 
 
 @dataclass
@@ -370,10 +373,12 @@ class Ledger:
         return self._add(claim, EvidenceState.KNOWN, source=source, category="stated",
                          fingerprint=fingerprint_of(material) if material else "")
 
-    def knowledge(self, claim: str, ref: str) -> EvidenceEntry:
+    def knowledge(self, claim: str, ref: str, answer: str = "") -> EvidenceEntry:
         """Established project or user knowledge, by reference to its record."""
-        return self._add(claim, EvidenceState.KNOWN, source=f"knowledge:{ref}",
-                         category="knowledge")
+        entry = self._add(claim, EvidenceState.KNOWN, source=f"knowledge:{ref}",
+                          category="knowledge")
+        entry.answer = str(answer or "")
+        return entry
 
     def verified(self, claim: str, source: str, material: str | bytes = "",
                  reference: str = "") -> EvidenceEntry:
@@ -505,7 +510,7 @@ class Ledger:
         )
         if settled is not None:
             decision.state = "answered"
-            decision.answer = f"settled by {settled.source}"
+            decision.answer = settled.answer or f"settled by {settled.source}"
         elif materiality and entry.state is EvidenceState.UNKNOWN:
             self.transition(entry.id, "materiality")
         self._decisions[decision.id] = decision

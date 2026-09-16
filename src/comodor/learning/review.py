@@ -43,15 +43,17 @@ LEARNABLE_STOPS = ("cancelled",)
 
 
 class ReviewResult:
-    """What one review pass produced."""
+    """What one review pass proposed, what stuck, and what was refused."""
 
-    __slots__ = ("facts", "raw", "usage", "accepted")
+    __slots__ = ("facts", "raw", "usage", "accepted", "refused")
 
     def __init__(self) -> None:
         self.facts: list[Fact] = []
         self.raw = ""
         self.usage: Any = None
         self.accepted = 0
+        #: Proposals nothing in the transcript corroborated (FR-056).
+        self.refused: list[Fact] = []
 
     @property
     def empty(self) -> bool:
@@ -123,6 +125,7 @@ class Reviewer:
         without absorbing it. Returns an empty result on any failure.
         """
         result = ReviewResult()
+        self._messages = list(messages)
         transcript = build_transcript(messages, goal="", outcome=outcome)
         if outcome in LEARNABLE_STOPS:
             # "cancelled" carries a reason now ("stop" — the human pressed it
@@ -214,6 +217,13 @@ class Reviewer:
         except Exception:
             return
 
+    @staticmethod
+    def corroborate(text: str, messages: list) -> tuple[str, str, str]:
+        """What in the transcript backs a proposed fact, or three empty strings."""
+        from .memory import corroborate
+
+        return corroborate(text, messages)
+
     def _absorb(self, result: ReviewResult, episode_id: int) -> int:
         """Offer each proposed fact to the service. Returns how many stuck.
 
@@ -224,9 +234,17 @@ class Reviewer:
         """
         accepted: list[Fact] = []
         for fact in result.facts:
+            # The review's proposal is a model assertion. It is stored only
+            # once the transcript it reviewed corroborates it — the person
+            # said it, or a tool showed it — and refused otherwise (FR-056).
+            provenance, source_ref, fingerprint = self.corroborate(fact.text, self._messages)
+            if not provenance:
+                result.refused.append(fact)
+                continue
             try:
                 self.service.add(
-                    fact.text, kind=fact.kind, staged=self.staging, origin_episode=episode_id
+                    fact.text, kind=fact.kind, staged=self.staging, origin_episode=episode_id,
+                    provenance=provenance, source_ref=source_ref, fingerprint=fingerprint,
                 )
                 accepted.append(fact)
             except Exception:

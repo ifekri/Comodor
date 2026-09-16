@@ -378,3 +378,49 @@ def test_a_user_step_cap_is_not_overridden(config):
     config.agent.max_steps = 40
     Server(config, host="127.0.0.1", port=0)
     assert config.agent.max_steps == 40
+
+
+# --------------------------------------------------------------------------- #
+# a clarification is not a normal completion (T132; contracts §C4)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_clarification_required_turn_does_not_map_to_stop():
+    from comodor.api.server import _finish_reason
+
+    assert _finish_reason({"stopped": "clarification_required"}) == "clarification_required"
+    assert _finish_reason({"stopped": "done"}) == "stop"
+    assert _finish_reason({"stopped": "max_steps"}) == "length"
+
+
+def test_the_api_session_bridge_carries_the_clarification_outcome():
+    """The turn outcome and the nested `clarification.outcome` both survive
+    `session_map._outcome` intact and un-collapsed."""
+    from comodor.api.session_map import Talk
+
+    class _Session:
+        def state(self):
+            return {}
+
+    bridge = object.__new__(Talk)
+    bridge.session = _Session()
+    body = bridge._outcome(["", "Still needed."], 2, "clarification_required",
+                           {"kind": "clarification_required",
+                            "decision": "Which database?",
+                            "outcome": "expired"})
+    assert body["stopped"] == "clarification_required"
+    assert body["clarification"]["outcome"] == "expired"
+    assert body["steps"] == 2
+
+
+def test_a_normal_turn_has_no_clarification_block():
+    from comodor.api.session_map import Talk
+
+    class _Session:
+        def state(self):
+            return {}
+
+    bridge = object.__new__(Talk)
+    bridge.session = _Session()
+    body = bridge._outcome(["done"], 1, "done", None)
+    assert "clarification" not in body

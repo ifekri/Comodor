@@ -74,6 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--yes", action="store_true",
                      help="approve file writes and commands automatically")
     run.add_argument("--max-steps", type=int, help="override the step limit")
+    run.add_argument(
+        "--interactions", default="",
+        help="JSON list of answers to script for question forms, applied in "
+             "order: \"answer\" (with an optional value), \"cancel\", "
+             "\"expire\" or \"unattended\". Nothing is scripted without it.")
 
     written = sub.add_parser(
         "help", help="what this is and how to use it, in full")
@@ -253,6 +258,74 @@ def _load_plugins(config: Config, bus: Any) -> Any:
     return manager
 
 
+def _scripted_interactions(raw: Any) -> list[Any]:
+    """The caller's scripted answers, in order. Empty when none were given.
+
+    The contract is a JSON list whose entries are either an action string
+    (`"cancel"`, `"expire"`, `"unattended"`, `"answer"`) or an object with an
+    `action` and, for an answer, a `value`. A headless run with an empty
+    script behaves exactly as it always has: every form is unattended.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, (list, tuple)):
+        return list(raw)
+    try:
+        parsed = json.loads(str(raw))
+    except ValueError:
+        return []
+    return list(parsed) if isinstance(parsed, list) else []
+
+
+def _apply_interaction(request: Any, action: Any, forms: Any) -> None:
+    """Do to a form what a person would have done. The tool does the rest.
+
+    Every branch resolves the *request* the way its surface would, so the ask
+    tool, the ledger and the loop produce the same lifecycle they do for a
+    real answer, a real dismissal, a real expiry or a real absence.
+    """
+    if isinstance(action, dict):
+        verb = str(action.get("action", "")).strip().lower()
+        value = str(action.get("value", "") or "")
+    else:
+        verb, value = str(action).strip().lower(), ""
+
+    if verb == "cancel":
+        request.answer(forms.CANCELLED)
+    elif verb == "expire":
+        request.expire()
+    elif verb == "answer":
+        request.answer(_answers_from_form(request, value, forms))
+    else:                                    # "unattended", or unrecognised
+        request.answer(forms.UNATTENDED)
+
+
+def _answers_from_form(request: Any, value: str, forms: Any) -> str:
+    """A real answer document, built from the form the model actually raised.
+
+    The question headers are the model's, so an answer must bind to them by
+    header rather than guess. A `value` naming an offered option picks it;
+    otherwise the value is written into the write-your-own row, which every
+    form carries.
+    """
+    questions = forms.decode(request.meta.get("questions") or [])
+    answers = []
+    for question in questions:
+        offered = [option.label for option in question.options if not option.free]
+        if value and value in offered:
+            chosen, written = [value], ""
+        elif value:
+            chosen, written = [], value
+        elif offered:
+            chosen, written = [offered[0]], ""
+        else:
+            chosen, written = [], ""
+        answers.append(forms.Answer(header=question.header,
+                                    prompt=question.prompt,
+                                    chosen=chosen, written=written))
+    return forms.encode_answers(answers)
+
+
 def run_headless(config: Config, args: argparse.Namespace) -> int:
     """One task, no TUI. Used by scripts, hooks and CI."""
     # Before anything can be printed. A Windows console is cp1252 by default,
@@ -304,6 +377,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     # first edit, or that nothing was ever read. The count was already
     # reported; the names cost nothing and are what makes it checkable.
     used: list[str] = []
+    interactions = _scripted_interactions(getattr(args, "interactions", ""))
 
     def observe(event: Any) -> None:
         if event.kind is Kind.TOOL_START:
@@ -311,10 +385,13 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
         elif event.kind is Kind.REQUEST:
             request = event.get("request")
             if request is not None and request.kind == "questions":
-                # Nobody is here. Said as that, not as a cancellation: the
-                # tool reports the decision as unattended and the run ends
-                # needing it, rather than carrying on without it.
-                request.answer(forms.UNATTENDED)
+                # Nobody is here. Unless the caller scripted what a person
+                # would do — answer, cancel, expire — the decision is reported
+                # as unattended and the run ends needing it, rather than
+                # carrying on without it. The scripted paths drive the same
+                # tool and lifecycle the interactive surfaces do.
+                action = interactions.pop(0) if interactions else "unattended"
+                _apply_interaction(request, action, forms)
 
     bus.subscribe(observe)
 
@@ -355,7 +432,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     memory.wait_for_reflection(timeout=20.0)
 
     if args.json:
-        print(json.dumps({
+        payload = {
             "text": result.text,
             "ok": result.ok,
             "stopped": result.stopped,
@@ -375,13 +452,23 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
             "elapsed": round(result.elapsed, 2),
             # The paired record: counts only, beside the outcome above.
             "measurement": result.measurement.as_dict(),
-        }, ensure_ascii=False, indent=2))
+        }
+        if result.clarification is not None:
+            # The structured clarification outcome rides its own block, so a
+            # dismissed question is never indistinguishable from the user
+            # cancelling the whole turn (contracts §C3; FR-123).
+            payload["clarification"] = result.clarification
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(result.text)
         if result.error:
             print(f"\nerror: {result.error}", file=sys.stderr)
 
     built.close()
+    if result.stopped == "clarification_required":
+        # A distinct code for "a decision is still needed": not success (0),
+        # not an error (1), and not a cancelled turn (130).
+        return 3
     return 0 if result.ok else 1
 
 

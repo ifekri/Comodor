@@ -319,7 +319,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
   - **Req**: FR-105, FR-101, FR-102, FR-103 · **Dep**: T072, T073, T076, T077, T083, T084 · **Evidence**: for each of content-hash change, source-file change, branch/worktree change, tool-output change, superseded repository fact and stale learned fact, assert **no cached or summarised representation survives the event** · **Done when**: all six events tested per applicable optimization
 - [X] T095 [P] [US3] Verify evidence recoverability in `tests/test_context_recoverability.py`
   - **Req**: FR-044, FR-047, FR-090, FR-098 · **Dep**: T079, T080, T075 · **Evidence**: for every optimization, correctness-critical evidence remains recoverable — nothing is lost, only relocated · **Done when**: recoverability asserted per optimization
-- [ ] T096 [US3] Verify optimization neutrality in `tests/test_context_optimization_neutrality.py`
+- [X] T096 [US3] Verify optimization neutrality in `tests/test_context_optimization_neutrality.py`
   - **Req**: FR-044, SC-012 · **Dep**: all of Phase 5 · **Evidence**: run the benchmark with each optimization toggled; **no task's outcome rate falls** · **Done when**: every Phase 5 task has a recorded paired comparison
 - [X] T097 [US3] Verify no optimization weakens validation in `tests/test_context_no_validation_loss.py`
   - **Req**: FR-044 · **Dep**: all of Phase 5 · **Evidence**: no optimization suppresses a clarification, skips relevant inspection, or truncates critical evidence · **Done when**: mutation-checked
@@ -334,47 +334,47 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
 
 **Purpose**: harden the existing learning subsystem. No second store, no raised caps.
 
-- [ ] T099 [US4] Add provenance columns in `src/comodor/learning/store.py`
+- [X] T099 [US4] Add provenance columns in `src/comodor/learning/store.py`
   - **Req**: FR-057, [contracts/learning-record.md §L2](./contracts/learning-record.md) · **Dep**: T005 · **Provenance**: `provenance`, `source_ref`, `fingerprint`, `confidence`, `established_at`, `status`, `superseded_by` · **Scope**: existing project/user scope retained · **Invalidation**: columns carry what later invalidation needs · **Reject**: a record missing provenance is not storable · **Evidence**: additive migration; records written by the current version remain readable (FR-081, SC-024) · **Done when**: round-trip on pre-existing fixture data passes
-- [ ] T100 [US4] Implement the admission gate in `src/comodor/learning/memory.py`
+- [X] T100 [US4] Implement the admission gate in `src/comodor/learning/memory.py`
   - **Req**: FR-056, [contracts/learning-record.md §L1](./contracts/learning-record.md) · **Dep**: T099 · **Provenance**: exactly the six admissible classes · **Scope**: set at admission · **Invalidation**: n/a at admission · **Reject**: anything whose only origin is an unverified model assertion · **Evidence**: the gate is the single entry point to durable storage · **Done when**: no caller can bypass it
-- [ ] T101 [US4] Route model-driven proposals through the gate in `src/comodor/learning/reflect.py` and `src/comodor/learning/review.py`
+- [X] T101 [US4] Route model-driven proposals through the gate in `src/comodor/learning/reflect.py` and `src/comodor/learning/review.py`
   - **Req**: FR-056, SC-018 · **Dep**: T100 · **Provenance**: a proposal is admissible only once corroborated into one of the six classes · **Reject**: uncorroborated proposals · **Evidence**: mutation-checked · **Done when**: reflection and review cannot write directly
-- [ ] T102 [P] [US4] Test refusal of unverified claims in `tests/test_learning_admission.py`
+- [X] T102 [P] [US4] Test refusal of unverified claims in `tests/test_learning_admission.py`
   - **Req**: FR-056, SC-018 · **Dep**: T101 · **Evidence**: after a full benchmark run with learning enabled, **zero items exist whose only origin is a model assertion** · **Done when**: mutation check confirms the gate is load-bearing
-- [ ] T103 [US4] Refuse untrusted content as durable knowledge in `src/comodor/learning/memory.py`
+- [X] T103 [US4] Refuse untrusted content as durable knowledge in `src/comodor/learning/memory.py`
   - **Req**: FR-066, [contracts/learning-record.md §L5](./contracts/learning-record.md) · **Dep**: T100 · **Provenance**: untrusted text may become a `tool_confirmed` fact about *what a file contains*, never a belief about the world · **Scope**: unchanged · **Invalidation**: follows its source fingerprint · **Reject**: any item whose sole authority is text that appeared in retrieved content, a file, tool output, repository text or web content · **Evidence**: existing injection checks in `src/comodor/learning/facts.py` preserved · **Done when**: the distinction is enforced at the gate
-- [ ] T104 [US4] Test prompt-injection resistance of learning in `tests/test_learning_untrusted.py`
+- [X] T104 [US4] Test prompt-injection resistance of learning in `tests/test_learning_untrusted.py`
   - **Req**: FR-066, SC-018 · **Dep**: T103 · **Evidence**: instructional text embedded in a read file, a web page, a tool result and a channel message — each attempting to install a durable fact or rule — **cannot become durable learning without an independently admissible provenance signal**; each case mutation-checked · **Done when**: all four vectors refused
-- [ ] T105 [P] [US4] Capture corrections with provenance in `src/comodor/learning/signals.py`
+- [X] T105 [P] [US4] Capture corrections with provenance in `src/comodor/learning/signals.py`
   - **Req**: FR-109, SC-016 · **Dep**: T100 · **Provenance**: `user_correction` · **Scope**: project unless the correction is about the person · **Invalidation**: superseded by a later contradicting correction · **Reject**: a correction inferred rather than observed · **Evidence**: rewrite, undo and refusal each produce an item; detection stays deterministic with no model call · **Done when**: the correction is in force on the next turn without restatement
-- [ ] T106 [P] [US4] Capture settled decisions in `src/comodor/learning/memory.py`
+- [X] T106 [P] [US4] Capture settled decisions in `src/comodor/learning/memory.py`
   - **Req**: FR-109, SC-017 · **Dep**: T100, T042 · **Provenance**: `settled_decision` from an answered form · **Scope**: project · **Invalidation**: superseded by a later answer to the same decision · **Reject**: a decision that was cancelled, declined, expired or unattended — **an unresolved decision is never learned as settled** · **Evidence**: the same decision is not re-asked within the project · **Done when**: zero repeat forms for a settled decision and zero learned items from non-answers
-- [ ] T107 [US4] Learn project-specific terminology in `src/comodor/learning/rules.py` and `src/comodor/learning/store.py`
+- [X] T107 [US4] Learn project-specific terminology in `src/comodor/learning/rules.py` and `src/comodor/learning/store.py`
   - **Req**: FR-106 · **Dep**: T100 · **Admission signal**: the user's own repeated usage, or a definition counted from the repository · **Provenance**: `user_statement` or `counted_convention` · **Scope**: project only · **Persistence**: within the existing fact caps · **Retrieval**: relevance-ranked, status-filtered, inside the recall budget · **Supersession/invalidation**: superseded by a newer contradicting usage; stale when the source fingerprint changes · **Reject**: a term the model coined · **Evidence**: regression test in `tests/test_learning_terminology.py` · **Done when**: a term used consistently is applied without re-asking, and a redefinition supersedes it
-- [ ] T108 [US4] Learn stable architectural decisions in `src/comodor/learning/rules.py`
+- [X] T108 [US4] Learn stable architectural decisions in `src/comodor/learning/rules.py`
   - **Req**: FR-107 · **Dep**: T100 · **Admission signal**: a decision the user settled, or a structural convention counted across the repository · **Provenance**: `settled_decision` or `counted_convention` · **Scope**: project only · **Persistence**: within existing caps · **Retrieval**: as T107 · **Supersession/invalidation**: **marked stale when the structure it describes changes** (fingerprint mismatch) · **Reject**: a structure the model inferred from a single file · **Evidence**: regression test in `tests/test_learning_architecture.py` · **Done when**: moving the described structure invalidates the item
-- [ ] T109 [US4] Learn recurring instructions in `src/comodor/learning/signals.py`
+- [X] T109 [US4] Learn recurring instructions in `src/comodor/learning/signals.py`
   - **Req**: FR-108 · **Dep**: T100 · **Admission signal**: the same instruction given repeatedly across tasks · **Provenance**: `user_statement` · **Scope**: project or user, per the instruction's subject · **Persistence**: within existing caps · **Retrieval**: as T107 · **Supersession/invalidation**: superseded by a contradicting instruction · **Reject**: **a one-off instruction scoped to a single task is never made durable** · **Evidence**: regression test in `tests/test_learning_recurring.py` proving a repeated instruction is applied unasked while a one-off does not leak into later tasks · **Done when**: SC-031 satisfied
-- [ ] T110 [US4] Implement deterministic supersession in `src/comodor/learning/store.py`
+- [X] T110 [US4] Implement deterministic supersession in `src/comodor/learning/store.py`
   - **Req**: FR-059 · **Dep**: T099 · **Invalidation**: newer `established_at` governs; older retained with `superseded_by` set · **Reject**: silent deletion · **Evidence**: contradictory-correction test · **Done when**: no superseded item vanishes
-- [ ] T111 [US4] Implement fingerprint staleness at recall in `src/comodor/learning/memory.py`
+- [X] T111 [US4] Implement fingerprint staleness at recall in `src/comodor/learning/memory.py`
   - **Req**: FR-060, FR-114, SC-032 · **Dep**: T099, research R5 · **Granularity (owned here, decided from evidence)**: research R5 deliberately defers whether a repository-derived item's fingerprint covers the whole source file or the specific region/rule it was counted from; this task makes that decision and no artifact pre-selects it · **Invalidation**: source fingerprint mismatch marks the item stale and excludes it · **Evidence**: the contradiction is surfaced rather than silently resolved; an answer already resting on it in that turn is corrected before completion · **Done when**: (1) real `src/comodor/learning/rules.py` observation shapes and the existing learning-record shapes in `store.py` have been inspected; (2) whole-file versus region/rule-level granularity is chosen from that evidence, not in advance; (3) the chosen granularity and its rationale are recorded in [data-model.md §5](./data-model.md) under `fingerprint`; (4) its invalidation implications are defined there — what change marks an item stale, and what change does not; (5) tests for the chosen granularity exist (a change inside the fingerprinted scope marks stale; a change outside it does not, where the granularity makes that distinction) and are mutation-checked
-- [ ] T112 [US4] Extend the curator with fingerprint staleness in `src/comodor/learning/curator.py`
+- [X] T112 [US4] Extend the curator with fingerprint staleness in `src/comodor/learning/curator.py`
   - **Req**: FR-112 · **Dep**: T111 · **Invalidation**: deterministic pass, nothing hard-deleted that the user did not ask to delete · **Evidence**: curator report lists fingerprint-stale items; they stay inspectable · **Done when**: report includes the new class
-- [ ] T113 [P] [US4] Test cross-project isolation in `tests/test_learning_scope.py`
+- [X] T113 [P] [US4] Test cross-project isolation in `tests/test_learning_scope.py`
   - **Req**: FR-058, SC-019 · **Dep**: T099 · **Evidence**: two project scopes; **zero cross-application** · **Done when**: mutation-checked
-- [ ] T114 [US4] Implement retrieval policy in `src/comodor/learning/memory.py`
+- [X] T114 [US4] Implement retrieval policy in `src/comodor/learning/memory.py`
   - **Req**: FR-110, FR-062 · **Dep**: T111 · **Retrieval**: relevance, scope, status exclusion, budget · **Evidence**: stale and superseded items never recalled; recall stays within the cap · **Done when**: recall-budget assertion passes
-- [ ] T115 [P] [US4] Surface provenance and status in `src/comodor/learning/journey.py` and `src/comodor/tools/memory.py`
+- [X] T115 [P] [US4] Surface provenance and status in `src/comodor/learning/journey.py` and `src/comodor/tools/memory.py`
   - **Req**: FR-061, FR-111, SC-020 · **Dep**: T099 · **Evidence**: every item listable with origin, scope and status, individually deletable; what was recalled into a turn is attributable afterwards · **Done when**: 100% coverage of stored items
-- [ ] T116 [US4] Assert learned knowledge never overrides current evidence in `tests/test_learning_vs_evidence.py`
+- [X] T116 [US4] Assert learned knowledge never overrides current evidence in `tests/test_learning_vs_evidence.py`
   - **Req**: FR-114, FR-067 · **Dep**: T111, T084 · **Evidence**: where a learned item contradicts a freshly verified repository fact, the verified fact governs and the item is marked stale · **Done when**: mutation-checked
-- [ ] T117 [US4] Assert storage caps and at-cap behaviour in `tests/test_learning_caps.py`
+- [X] T117 [US4] Assert storage caps and at-cap behaviour in `tests/test_learning_caps.py`
   - **Req**: FR-065 · **Dep**: T099 · **Evidence**: reaching a cap produces an explicit refusal listing current contents; **never a silent eviction**; caps unchanged by this feature · **Done when**: refusal asserted
-- [ ] T118 [US4] Measure repeated-work efficiency in `tests/test_learning_reuse.py`
+- [X] T118 [US4] Measure repeated-work efficiency in `tests/test_learning_reuse.py`
   - **Req**: FR-067, SC-021 · **Dep**: T105, T106, T114 · **Sequence**: the fixed **N = 6** comparable-task sequence in one project defined by SC-021 — tasks 1–3 the initial window, tasks 4–6 the learned window; the same sequence and the same metric definitions as T152 · **Primary metrics (SC-021)**: total mandatory clarifications raised per window; total user corrections received per window · **Secondary diagnostics**: repository rediscovery / knowledge-hit counts, reported but never substituted for either primary metric · **Evidence**: learned-window clarifications < initial-window clarifications **and** learned-window corrections < initial-window corrections **and** no task's outcome success regresses; a lower count produced by a skipped required question, a guess, reduced task quality or a weakened scenario is a failure; incomparable window inputs make the run invalid rather than passing · **Done when**: the fixed six-task sequence is measured with a deterministic fake provider and the first-three vs last-three comparison is produced for both primary metrics
-- [ ] T119 **Permission regression gate — Phase 6** via `tests/test_baseline_permissions.py`
+- [X] T119 **Permission regression gate — Phase 6** via `tests/test_baseline_permissions.py`
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T011, all of Phase 6 · **Evidence**: this phase changes agent orchestration inputs; permission suite green here · **Done when**: suite green on the phase commit
 
 **Checkpoint**: learning is provenanced, bounded, inspectable, injection-resistant and invalidating.
@@ -385,25 +385,25 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
 
 **Purpose**: evidence-based completion. Annotate by default; block only a contradicted completion claim.
 
-- [ ] T120 [US2] Implement request-versus-delivery comparison in `src/comodor/agent/verify.py`
+- [X] T120 [US2] Implement request-versus-delivery comparison in `src/comodor/agent/verify.py`
   - **Req**: FR-036, FR-037 · **Dep**: T019 · **Evidence**: requested elements matched against delivered work using ledger entries; unresolved elements named individually with what blocked each · **Done when**: a three-requirement request with two delivered names the third
-- [ ] T121 [US2] Extend the unverified-claim notice to unresolved work in `src/comodor/agent/claims.py`
+- [X] T121 [US2] Extend the unverified-claim notice to unresolved work in `src/comodor/agent/claims.py`
   - **Req**: FR-005, FR-006, FR-124, SC-003 · **Dep**: T120 · **Evidence**: the existing four-condition firing bar preserved; hedged, negated and instruction sentences still do not fire; no new false positives on the existing fixture set · **Done when**: fixture set clean
-- [ ] T122 [US2] Implement the single blocking condition in `src/comodor/agent/loop.py`
+- [X] T122 [US2] Implement the single blocking condition in `src/comodor/agent/loop.py`
   - **Req**: FR-125, FR-126 · **Dep**: T120 · **Evidence**: blocks only when the answer explicitly claims completion and evidence contradicts it; an honest partial answer is never withheld · **Done when**: both cases tested
-- [ ] T123 [US2] Bound blocking with an annotation fallback in `src/comodor/agent/loop.py`
+- [X] T123 [US2] Bound blocking with an annotation fallback in `src/comodor/agent/loop.py`
   - **Req**: FR-127 · **Dep**: T122 · **Evidence**: at most one additional correction turn; a gate that cannot reach a verdict annotates rather than withholding indefinitely · **Done when**: fallback path tested
-- [ ] T124 [US2] Refuse completion while a required clarification is unresolved in `src/comodor/agent/loop.py`
+- [X] T124 [US2] Refuse completion while a required clarification is unresolved in `src/comodor/agent/loop.py`
   - **Req**: FR-013, FR-036, SC-041 · **Dep**: T037, T040 · **Dependent work**: none runs · **Outcomes**: the turn ends in `clarification_required` (with `clarification.outcome` naming which non-answer occurred), never `done` · **Evidence**: a turn with an open blocking decision cannot report success · **Done when**: mutation-checked
-- [ ] T125 [US5] Prevent a failed required tool call being reported as success in `src/comodor/agent/loop.py`
+- [X] T125 [US5] Prevent a failed required tool call being reported as success in `src/comodor/agent/loop.py`
   - **Req**: FR-068, FR-116 · **Dep**: T024 · **Evidence**: the answer distinguishes what was established from what the failure left unknown; a failed validation is reported as failure with its evidence, never re-characterised, retried until green, or omitted · **Done when**: all three negative forms asserted against
-- [ ] T126 [P] [US2] Assert assumptions are stated and never material in `tests/test_completion_assumptions.py`
+- [X] T126 [P] [US2] Assert assumptions are stated and never material in `tests/test_completion_assumptions.py`
   - **Req**: FR-003, SC-004 · **Dep**: T021, T120 · **Evidence**: 100% of proceed-on-assumption cases are labelled as assumptions, and **zero involve a decision that passed the materiality test** · **Done when**: both halves asserted
-- [ ] T127 [P] [US2] Assert validation proportionality in `tests/test_completion_gate_proportionality.py`
+- [X] T127 [P] [US2] Assert validation proportionality in `tests/test_completion_gate_proportionality.py`
   - **Req**: FR-042, FR-043 · **Dep**: T010, T120 · **Evidence**: a read-only turn triggers no project check; a turn touching one surface does not trigger unrelated validation · **Done when**: mutation-checked
-- [ ] T128 [P] [US5] Assert failure-state reporting in `tests/test_failure_states.py`
+- [X] T128 [P] [US5] Assert failure-state reporting in `tests/test_failure_states.py`
   - **Req**: FR-068, FR-069, FR-070, FR-113, FR-115, FR-116 · **Dep**: T023, T024, T025 · **Evidence**: tool failure, conflicting evidence, partial access, insufficient information, low confidence and failed validation each report the real limitation with no synthesised result · **Done when**: all six covered
-- [ ] T129 **Permission regression gate — Phase 7** via `tests/test_baseline_permissions.py`
+- [X] T129 **Permission regression gate — Phase 7** via `tests/test_baseline_permissions.py`
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T011, all of Phase 7 · **Evidence**: this phase changes agent orchestration; permission suite green here · **Done when**: suite green on the phase commit
 
 **Checkpoint**: "done" is truthful; an honest partial answer is never withheld.
@@ -414,39 +414,39 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
 
 **Purpose**: wire the outcomes to every affected surface. Backward compatibility preserved except for the single specified change.
 
-- [ ] T130 [US1] Report the clarification outcome in the headless JSON in `src/comodor/cli.py`
+- [X] T130 [US1] Report the clarification outcome in the headless JSON in `src/comodor/cli.py`
   - **Req**: FR-121, FR-123, [contracts/clarification.md §C3](./contracts/clarification.md) · **Dep**: T037 · **Outcomes**: `stopped: "clarification_required"` with `ok: false` and a `clarification` block carrying `outcome` (`cancelled` | `expired` | `unattended`); **`stopped: "cancelled"` is never emitted for a dismissed question — it keeps its turn-level meaning** · **Evidence**: partial `steps`/`tool_calls` preserved · **Done when**: output matches the contract, partial `steps`/`tool_calls` are preserved, and a **regression assertion** proves a dismissed clarification is not indistinguishable from the user cancelling the whole turn
-- [ ] T131 [US1] Assign a distinct non-zero exit code for an unresolved decision in `src/comodor/cli.py`
+- [X] T131 [US1] Assign a distinct non-zero exit code for an unresolved decision in `src/comodor/cli.py`
   - **Req**: FR-123, research R3 · **Dep**: T130 · **Evidence**: distinguishable from both the error exit code and success · **Done when**: the chosen code is documented in `docs/cli.md`
-- [ ] T132 [US1] Map the clarification-required outcome correctly in `src/comodor/api/server.py`
+- [X] T132 [US1] Map the clarification-required outcome correctly in `src/comodor/api/server.py`
   - **Req**: FR-123, SC-023, [contracts/clarification.md §C4](./contracts/clarification.md) · **Dep**: T037 · **Evidence**: **must not fall through to `finish_reason: "stop"`**; payload — including `clarification.outcome` — rides the existing `comodor` extension block, so a standard OpenAI-compatible client that does not understand the extension retains its existing behaviour · **Done when**: a clarification-required turn is never reported as normal completion
-- [ ] T133 [P] [US1] Carry clarification outcomes through the API and Web session bridges in `src/comodor/api/session_map.py`, `src/comodor/web/session.py` and, only if proven necessary, `src/comodor/web/ui.js`
+- [X] T133 [P] [US1] Carry clarification outcomes through the API and Web session bridges in `src/comodor/api/session_map.py`, `src/comodor/web/session.py` and, only if proven necessary, `src/comodor/web/ui.js`
   - **Req**: FR-016, FR-022, FR-035, FR-079, FR-082, FR-121, FR-123 · **Dep**: T132, T006 · **Evidence (API bridge, unchanged from before)**: the turn outcome **and** the nested `clarification.outcome` both survive `api/session_map.py` intact and un-collapsed; bridge-level `timeout`/`busy` untouched · **Evidence (Web)**: first determine whether the page already consumes the corrected core outcome unchanged — if it does, change no Web source and add regression coverage only; if not, make the smallest change necessary. Regression cases in `tests/test_web.py` prove: (1) `stopped = "clarification_required"` is never rendered or interpreted as normal completion; (2) `clarification.outcome` survives unchanged for `cancelled`, `expired` and `unattended`; (3) a dismissed Web clarification is never confused with cancellation of the whole agent turn (`stopped = "cancelled"`); (4) the final custom-answer row remains present; (5) a manually entered custom answer survives the Web round-trip; (6) Web dismissal cannot make the model choose a default; (7) when the page/session disappears so nobody can answer a required material clarification, the core result is the approved `unattended` clarification-required outcome, never fabricated continuation; (8) existing answered-question behaviour stays backward compatible; (9) no Web code reimplements `questions.py::_options()` or appends its own duplicate free row · **Done when**: bridge test passes for all three clarification outcomes on the API bridge, and all nine Web cases pass with the Web UI recorded as verified in [plan.md §Surface Impact](./plan.md)
-- [ ] T134 [P] [US1] Handle the outcome in `src/comodor/acp/agent.py`
+- [X] T134 [P] [US1] Handle the outcome in `src/comodor/acp/agent.py`
   - **Req**: FR-121, FR-035 · **Dep**: T037 · **Evidence**: structured outcome preserving `clarification.outcome`; no default selected · **Done when**: ACP test passes for all three clarification outcomes
-- [ ] T135 [P] [US1] Report a needed decision in channel integrations under `src/comodor/channels/`
+- [X] T135 [P] [US1] Report a needed decision in channel integrations under `src/comodor/channels/`
   - **Req**: FR-121 · **Dep**: T037 · **Evidence**: a message naming the decision and which clarification outcome occurred (`cancelled`, `expired` or `unattended`); no invented value on any channel that runs turns · **Done when**: covered per channel
-- [ ] T136 [P] [US1] Test old-client compatibility in `tests/test_protocol_backcompat.py`
+- [X] T136 [P] [US1] Test old-client compatibility in `tests/test_protocol_backcompat.py`
   - **Req**: FR-079, FR-080, SC-023 · **Dep**: T048 · **Evidence**: a client that negotiates no new capability behaves exactly as today; existing protocol conformance tests run unchanged; no existing message changes meaning · **Done when**: mutation-checked
-- [ ] T137 [P] [US1] Test pre-change persistence readability in `tests/test_persistence_backcompat.py`
+- [X] T137 [P] [US1] Test pre-change persistence readability in `tests/test_persistence_backcompat.py`
   - **Req**: FR-081, SC-024 · **Dep**: T099 · **Evidence**: sessions and brain records written before the change remain readable after it, in 100% of fixture cases · **Done when**: fixture suite green
-- [ ] T138 [P] [US1] Test that a capability is never claimed when unavailable in `tests/test_capability_honesty.py`
+- [X] T138 [P] [US1] Test that a capability is never claimed when unavailable in `tests/test_capability_honesty.py`
   - **Req**: FR-120, SC-034 · **Dep**: T012, T022 · **Evidence**: **zero claims or attempts of a capability not advertised in the current mode**, across plan-mode and conversation-only tasks; the mode is reported as the reason when an action is unavailable · **Done when**: mutation-checked
-- [ ] T139 [P] [US1] Test that mode filtering stays authoritative in `tests/test_capability_authority.py`
+- [X] T139 [P] [US1] Test that mode filtering stays authoritative in `tests/test_capability_authority.py`
   - **Req**: FR-117, FR-118 · **Dep**: T012 · **Evidence**: advertisement and enforcement derive from one rule in `src/comodor/safety/modes.py` and cannot disagree; a forbidden capability is never offered; **an unknown mode remains fail-closed**; **question capability does not imply any tool capability** · **Done when**: all four assertions pass
-- [ ] T140 [US1] Register any new capability and verify `python tools/capability-map.py --check`
+- [X] T140 [US1] Register any new capability and verify `python tools/capability-map.py --check`
   - **Req**: FR-119, SC-035 · **Dep**: T048 · **Evidence**: inventory regenerates from code, never hand-edited · **Done when**: `--check` green
-- [ ] T141 [US1] Rebuild and commit the terminal-interface bundle from `apps/tui/`
+- [X] T141 [US1] Rebuild and commit the terminal-interface bundle from `apps/tui/`
   - **Req**: FR-031, FR-078, SC-022 (Constitution VII governs artifact reproducibility) · **Dep**: T052 · **Evidence**: bundle reproducible from source; the build alters nothing outside its own path; the committed artifact is what installed users run on all three platforms · **Done when**: committed artifact matches its source
-- [ ] T142 [P] [US1] Update `docs/questions.md` for the new clarification semantics
+- [X] T142 [P] [US1] Update `docs/questions.md` for the new clarification semantics
   - **Req**: FR-030, FR-082 · **Dep**: T051 · **Evidence**: answered, cancelled, declined, expired and unattended documented with their outcomes; no stale "proceed with assumptions" claim remains · **Done when**: docs match implemented behaviour
-- [ ] T143 [P] [US1] Update `docs/cli.md` for the new outcome and exit code
+- [X] T143 [P] [US1] Update `docs/cli.md` for the new outcome and exit code
   - **Req**: FR-082, FR-123 · **Dep**: T131 · **Evidence**: the exit code and JSON shape documented · **Done when**: documented
-- [ ] T144 [P] [US4] Update `docs/learning.md` for provenance, staleness and the learning switch
+- [X] T144 [P] [US4] Update `docs/learning.md` for provenance, staleness and the learning switch
   - **Req**: FR-057, FR-064, FR-082 · **Dep**: T099, T067 · **Evidence**: provenance classes, invalidation and the off switch documented · **Done when**: documented
-- [ ] T145 [US1] State the one intended behaviour change in the release notes source
+- [X] T145 [US1] State the one intended behaviour change in the release notes source
   - **Req**: FR-082 · **Dep**: T130 · **Evidence**: "a material clarification can no longer be resolved by default, assumption or invented value when the required information was not supplied" — written as the sole behavioural regression-by-design. **No tag, release or publication is created by this task** · **Done when**: the note exists in `CHANGELOG.md` unreleased section
-- [ ] T146 **Permission regression gate — Phase 8** via `tests/test_baseline_permissions.py`, plus the Web clarification regression cases
+- [X] T146 **Permission regression gate — Phase 8** via `tests/test_baseline_permissions.py`, plus the Web clarification regression cases
   - **Req**: FR-019, FR-118, FR-079, FR-082, SC-022 · **Dep**: T011, T133, all of Phase 8 · **Evidence**: this phase changes protocol behaviour, session interaction and tool advertisement; the permission suite is green here; **and** the Web clarification regression cases owned by T006/T133 in `tests/test_web.py` are green on the same commit — permission tests are not replaced by Web tests, both must pass · **Done when**: permission suite green **and** Web clarification cases green on the phase commit; Phase 8 is not green while either fails
 
 **Checkpoint**: every surface reports a needed decision truthfully; old clients unaffected.
@@ -457,29 +457,29 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
 
 **Purpose**: prove the claims with paired measurement. **Scenarios are never weakened to improve a score.**
 
-- [ ] T147 [P] [US6] Add the repository-settled-ambiguity scenario in `bench/tasks/careful-repo-settles-it/`
+- [X] T147 [P] [US6] Add the repository-settled-ambiguity scenario in `bench/tasks/careful-repo-settles-it/`
   - **Req**: SC-006, FR-008 · **Dep**: T034 · **Evidence**: the agent must read and decide, **not** ask; the judge scores a line whose correct value is a path, a name or a number · **Done when**: a reference solution passes and `tests/test_bench.py` still passes
-- [ ] T148 [P] [US6] Add the unattended-mandatory-clarification scenario in `bench/tasks/careful-unattended/`
+- [X] T148 [P] [US6] Add the unattended-mandatory-clarification scenario in `bench/tasks/careful-unattended/`
   - **Req**: SC-002, SC-040 · **Dep**: T044 · **Evidence**: run with no listener; passing requires the clarification-required outcome with `clarification.outcome = "unattended"` and zero invented values · **Done when**: the judge refuses the shortcut the task invites
-- [ ] T149 [P] [US6] Add the cancelled-mandatory-clarification scenario in `bench/tasks/careful-cancelled/`
+- [X] T149 [P] [US6] Add the cancelled-mandatory-clarification scenario in `bench/tasks/careful-cancelled/`
   - **Req**: SC-037, SC-038, SC-041, SC-044 · **Dep**: T039, T041 · **Evidence**: the user cancels; passing requires zero fabricated values, zero dependent mutating actions, and no re-raise within the attempt · **Done when**: judge scores an exactly-readable line
-- [ ] T150 [P] [US6] Add the expiry and answer-resumption scenario in `bench/tasks/careful-expired-then-answered/`
+- [X] T150 [P] [US6] Add the expiry and answer-resumption scenario in `bench/tasks/careful-expired-then-answered/`
   - **Req**: SC-039, SC-042 · **Dep**: T038 · **Evidence**: expiry fabricates nothing; a later answer resumes the dependent work to the same result as a first-time answer · **Done when**: both halves scored
-- [ ] T151 [P] [US6] Add the long multi-file scenario in `bench/tasks/refactor-many-files/`
+- [X] T151 [P] [US6] Add the long multi-file scenario in `bench/tasks/refactor-many-files/`
   - **Req**: SC-011 · **Dep**: T015 · **Evidence**: resend cost dominates, so efficiency is measurable · **Done when**: baseline recorded
-- [ ] T152 [P] [US6] Add the repeated-task-in-one-project scenario in `bench/tasks/learning-repeat/`
+- [X] T152 [P] [US6] Add the repeated-task-in-one-project scenario in `bench/tasks/learning-repeat/`
   - **Req**: SC-021, SC-031 · **Dep**: T118 · **Sequence**: the **same N = 6** comparable-task sequence as T118 (tasks 1–3 initial window, tasks 4–6 learned window), with comparability of the six inputs asserted so an incomparable window invalidates the run · **Primary metrics (SC-021)**: mandatory clarifications raised and user corrections received, per window, using exactly the metric definitions T118 uses; rediscovery / knowledge-hit counts emitted only as secondary diagnostics · **Evidence**: the scenario emits both window totals for both primary metrics plus outcome success per task, so the SC-021 comparison is mechanical · **Done when**: the six-task sequence is reproducible (T157) and emits the same metric definitions used by T118
-- [ ] T153 [US6] Extend per-task reporting with the full paired record in `bench/report.py`
+- [X] T153 [US6] Extend per-task reporting with the full paired record in `bench/report.py`
   - **Req**: FR-076 · **Dep**: T062 · **Evidence**: task, category, result, correctness, input/output/cached/total tokens, model turns, tool calls, clarifications, corrections and validation outcome in **one table** · **Done when**: a token figure cannot be published without its outcome rate
-- [ ] T154 [US6] Enforce benchmark scenario integrity in `bench/integrity.py`
+- [X] T154 [US6] Enforce benchmark scenario integrity in `bench/integrity.py`
   - **Req**: SC-026, FR-077 · **Dep**: T013 · **Evidence**: a check that **fails the run** if any existing scenario's prompt, judge, starting repository or step/time budget has been weakened, deleted, simplified, shortened or re-labelled relative to its recorded fingerprint; **a lower token result obtained by weakening the benchmark is invalid and reported as such** ; additionally a deterministic test asserts that no module under `src/comodor/` imports `bench.integrity` or `bench.baseline` (harness-only boundary, plan §Complexity Tracking) · **Done when**: tampering with any existing scenario fails the check, and the production-import guard passes
 - [ ] T155 [US6] Produce the before/after comparison in `bench/report.py`
   - **Req**: SC-011, SC-012, FR-077 · **Dep**: T015, T096, T153, T154 · **Evidence**: per-task deltas for both cost and quality; any outcome-rate fall flagged as a regression; the integrity check must have passed · **Done when**: comparison published
 - [ ] T156 [US6] Set the SC-011 numeric threshold from measured data and record it in `spec.md`
   - **Req**: SC-011, SC-036 · **Dep**: T155 · **Evidence**: threshold derived from T015 and T155, **never chosen in advance** · **Done when**: `spec.md` §SC-011 names the figure and its baseline
-- [ ] T157 [P] [US6] Assert benchmark reproducibility in `tests/test_bench_reproducibility.py`
+- [X] T157 [P] [US6] Assert benchmark reproducibility in `tests/test_bench_reproducibility.py`
   - **Req**: SC-026, FR-064 · **Dep**: T068 · **Evidence**: per-attempt isolation, explicit learning mode, results reported as rates across repeated attempts rather than single booleans · **Done when**: two identical runs agree on their measurement inputs
-- [ ] T158 [P] [US6] Assert new scenarios meet the judge-honesty rules in `tests/test_bench.py`
+- [X] T158 [P] [US6] Assert new scenarios meet the judge-honesty rules in `tests/test_bench.py`
   - **Req**: SC-026 · **Dep**: T147 to T150 · **Evidence**: each new `careful`/`find` task turns on something the repository cannot answer and has at least one line whose correct value is a path, a name or a number; each judge refuses the shortcut its task invites · **Done when**: existing bench guard test extended and green
 
 **Checkpoint**: claims measured, paired, tamper-evident.
@@ -490,29 +490,29 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
 
 **Purpose**: every gate green on the exact commit under review. Evidence from an earlier commit is not evidence.
 
-- [ ] T159 [P] Run `python -m ruff check src tests bench tools`
+- [X] T159 [P] Run `python -m ruff check src tests bench tools`
   - **Req**: SC-022 · **Dep**: Phases 2–9 · **Evidence**: clean · **Done when**: exit zero
-- [ ] T160 [P] Run `python -m pytest -q`
+- [X] T160 [P] Run `python -m pytest -q`
   - **Req**: SC-022, SC-025 · **Dep**: Phases 2–9 · **Evidence**: full suite green, including every mutation-checked guard · **Done when**: exit zero
-- [ ] T161 [P] Run `python -m pytest -m performance -n 0 -q`
+- [X] T161 [P] Run `python -m pytest -m performance -n 0 -q`
   - **Req**: SC-022 · **Dep**: T066 · **Evidence**: performance ceilings hold · **Done when**: exit zero
-- [ ] T162 [P] Run `npm run lint`, `npm run typecheck`, `npm test` and `npm run build`
+- [X] T162 [P] Run `npm run lint`, `npm run typecheck`, `npm test` and `npm run build`
   - **Req**: SC-022 · **Dep**: T052 · **Evidence**: frontend gates green, including the shared question reducer · **Done when**: all four exit zero
-- [ ] T163 [P] Run the renderer suite at widths 160/120/100/80/60
+- [X] T163 [P] Run the renderer suite at widths 160/120/100/80/60
   - **Req**: FR-031, SC-008, SC-022 · **Dep**: T052 · **Evidence**: deterministic rendering at every width, no timing dependency · **Done when**: suite green
-- [ ] T164 [P] Run `python tools/protocol-codegen.py --check`
+- [X] T164 [P] Run `python tools/protocol-codegen.py --check`
   - **Req**: FR-080, SC-022 · **Dep**: T047 · **Evidence**: schema and generated artifacts agree · **Done when**: exit zero
-- [ ] T165 [P] Run `python tools/capability-map.py --check`
+- [X] T165 [P] Run `python tools/capability-map.py --check`
   - **Req**: FR-119, SC-035 · **Dep**: T140 · **Evidence**: inventory matches the code · **Done when**: exit zero
-- [ ] T166 Verify the committed terminal bundle matches its source
+- [X] T166 Verify the committed terminal bundle matches its source
   - **Req**: FR-078, SC-022 (Constitution VII governs) · **Dep**: T141 · **Evidence**: rebuild produces no diff outside the artifact path · **Done when**: `git status` clean after rebuild
-- [ ] T167 [P] Run the full permission suite a final time
+- [X] T167 [P] Run the full permission suite a final time
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T028, T060, T069, T098, T119, T129, T146 · **Evidence**: green on the final commit, confirming the per-phase gates held · **Done when**: exit zero
 - [ ] T168 [P] Run the cross-platform matrix on Windows, Linux and macOS
   - **Req**: FR-078, SC-022 · **Dep**: T159 to T167 · **Evidence**: green on all three for every changed surface · **Done when**: matrix green on the exact final HEAD
-- [ ] T169 [P] Run `git diff --check` and review the diff against the scope rule
+- [X] T169 [P] Run `git diff --check` and review the diff against the scope rule
   - **Req**: FR-128 · **Dep**: Phases 2–9 · **Evidence**: the diff contains only work required by a requirement in this specification; no drive-by refactor, cleanup, formatting churn or dependency bump · **Done when**: exit zero and the diff reviewed
-- [ ] T170 Confirm no release action was taken anywhere in the branch
+- [X] T170 Confirm no release action was taken anywhere in the branch
   - **Req**: FR-084, FR-085 · **Dep**: Phases 2–9 · **Evidence**: no tag created or moved, no release workflow dispatched, no package published, no deployment, no pending pull request merged, closed, rebased or incorporated · **Done when**: asserted against the branch history
 
 **Checkpoint**: every gate green on the exact final HEAD.
@@ -521,7 +521,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
 
 ## Phase 11: PR #39 Compatibility Audit (strictly read-only)
 
-- [ ] T171 Audit implemented changes against open PR #39 (`feat/trading-core-foundation`) — **read-only**
+- [X] T171 Audit implemented changes against open PR #39 (`feat/trading-core-foundation`) — **read-only**
   - **Req**: FR-083, FR-085, [plan.md §PR #39](./plan.md) · **Dep**: Phase 10 complete
   - **Objective**: compare this branch's changed paths against PR #39's thirteen paths and report conflicting files, conflicting abstractions, likely merge conflicts and a recommended integration order
   - **Evidence**: the path and abstraction comparison, recorded in the final report

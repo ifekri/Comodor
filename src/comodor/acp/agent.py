@@ -300,7 +300,18 @@ class AcpSession:
             self.update({"sessionUpdate": "state_update", "state": "running"})
             stop = "end_turn"
             try:
-                self.loop.run(text)
+                result = self.loop.run(text)
+                if getattr(result, "stopped", "") == "clarification_required":
+                    # The turn stopped for a decision; that is not a normal
+                    # completion (contracts §C5, FR-121, FR-123). The
+                    # structured payload, including `clarification.outcome`,
+                    # is preserved and nothing is selected on the user's
+                    # behalf.
+                    stop = "refusal"
+                    payload = getattr(result, "clarification", None)
+                    if isinstance(payload, dict) and payload:
+                        self.update({"sessionUpdate": "clarification_required",
+                                     **payload})
             except Exception as error:
                 stop = "refusal"
                 self.agent.rpc.warn(f"acp: {type(error).__name__}: {error}")

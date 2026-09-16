@@ -244,9 +244,16 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
 
             finish = _finish_reason(outcome)
             usage = schema.usage_of(outcome.get("result"))
-            extra = {"comodor": {"session": talk.id, "steps": outcome.get("steps", 0),
-                                 "stopped": outcome.get("stopped", "done"),
-                                 "truncated": finish == "length"}}
+            comodor_block = {"session": talk.id, "steps": outcome.get("steps", 0),
+                             "stopped": outcome.get("stopped", "done"),
+                             "truncated": finish == "length"}
+            clarification = outcome.get("clarification")
+            if isinstance(clarification, dict) and clarification:
+                # The structured outcome (including `clarification.outcome`)
+                # rides the extension block, so a standard client keeps its
+                # existing behaviour (contracts §C4; FR-123).
+                comodor_block["clarification"] = clarification
+            extra = {"comodor": comodor_block}
 
             if stream:
                 self._stream_sse(created, wanted, request_id, outcome, usage,
@@ -350,10 +357,17 @@ def _finish_reason(outcome: dict[str, Any]) -> str:
     would try to answer them, and it cannot; the tools run on this machine.
     The note that the turn was cut is in the ``comodor`` block, where a
     frontend that cares can find it and a standard client is untouched.
+
+    A clarification-required turn is **not** a normal completion, so it does
+    not fall through to ``stop`` (contracts §C4; FR-123). The non-standard
+    value names the state, and the structured payload rides the ``comodor``
+    block for a client that understands it.
     """
     stopped = str(outcome.get("stopped") or "done")
     if stopped in ("max_steps", "budget", "timeout"):
         return "length"
+    if stopped == "clarification_required":
+        return "clarification_required"
     return "stop"
 
 

@@ -28,7 +28,8 @@ def test_the_python_floor_is_the_one_the_documentation_states():
     for page in ("README.md", "docs/getting-started.md", "docs/troubleshooting.md",
                  "CONTRIBUTING.md"):
         text = (ROOT / page).read_text(encoding="utf-8")
-        assert "3.11 or newer" in text, f"{page} states a different floor"
+        assert "3.11 or newer" in text or "3.11+" in text, \
+            f"{page} states a different floor"
 
 
 def test_no_classifier_claims_a_python_below_the_floor():

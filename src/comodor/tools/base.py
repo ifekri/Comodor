@@ -101,6 +101,10 @@ class ToolContext:
     #: loop at the start of every turn.
     request_text: str = ""
     recalled: list[str] = field(default_factory=list)
+    #: Earlier user messages of this conversation, most recent last, for
+    #: the memory tool to check a fact against what the person actually
+    #: said (FR-066). Set by the loop with the request text.
+    stated: list[str] = field(default_factory=list)
     #: Spill files this session's tool results point at. Pruning leaves
     #: these alone, so a pointer the model was given resolves for as long as
     #: the conversation that holds it (FR-089).

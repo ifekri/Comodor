@@ -104,7 +104,8 @@ class Talk:
                     steps += 1
                 elif kind == "turn_end":
                     return self._outcome(text_parts, steps,
-                                         str(event.get("stopped") or "done"))
+                                         str(event.get("stopped") or "done"),
+                                         event.get("clarification"))
                 elif kind == "cancelled":
                     return self._outcome(text_parts, steps, "cancelled")
 
@@ -112,9 +113,11 @@ class Talk:
                 "stopped": "timeout", "error": "the turn outlived its patience"}
 
     def _outcome(self, text_parts: list[str], steps: int,
-                 stopped: str) -> dict[str, Any]:
+                 stopped: str, clarification: Any = None) -> dict[str, Any]:
         """The answer plus what the loop charged, from the session's own
-        accounting. Usage lives on the conversation, not on the events."""
+        accounting. Usage lives on the conversation, not on the events. The
+        structured clarification payload (including `clarification.outcome`)
+        survives intact and un-collapsed (contracts §C4; FR-123)."""
         try:
             state = self.session.state() or {}
         except Exception:
@@ -132,8 +135,11 @@ class Talk:
         class _Result:
             usage = _Usage()
 
-        return {"text": "".join(text_parts), "steps": steps, "stopped": stopped,
+        body = {"text": "".join(text_parts), "steps": steps, "stopped": stopped,
                 "result": _Result()}
+        if isinstance(clarification, dict) and clarification:
+            body["clarification"] = clarification
+        return body
 
     def close(self) -> None:
         try:

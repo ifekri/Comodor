@@ -191,6 +191,36 @@ def test_a_run_that_used_nothing_says_so_rather_than_omitting_it(scripted):
     assert report["tools"] == [], "an empty list and a missing key are not the same"
 
 
+def test_the_headless_json_carries_the_clarification_outcome(scripted):
+    """A decision is still needed; the JSON says so, with the structured
+    outcome and the partial work, and the exit code is distinct from both
+    success and failure (T130, T131; FR-121, FR-123)."""
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()])])
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        code = cli.run_headless(config, run(config, json=True))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "clarification_required"
+    assert report["ok"] is False
+    assert report["clarification"]["outcome"] == "unattended"
+    assert report["clarification"]["decision"] == "Which framework?"
+    assert report["tool_calls"] == 1, "partial work is preserved"
+    assert code == 3, "distinct from success (0) and error (1)"
+
+
+def test_a_dismissed_question_is_not_a_cancelled_turn(scripted):
+    """`stopped: "cancelled"` keeps its turn-level meaning; a dismissed
+    question never emits it (contracts §C2; FR-035)."""
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()])])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(config, json=True))
+    report = json.loads(out.getvalue())
+    assert report["stopped"] != "cancelled"
+
+
 # --------------------------------------------------------------------------- #
 # the interface is not a cost the headless paths pay
 # --------------------------------------------------------------------------- #
@@ -271,3 +301,87 @@ def test_a_headless_run_does_not_load_the_interface(tmp_path):
     marker = [line for line in done.stdout.splitlines() if line.startswith("LOADED:")]
     assert marker, done.stdout
     assert marker[0] == "LOADED:", f"a headless run loaded {marker[0][7:]}"
+
+
+# --------------------------------------------------------------------------- #
+# scripted interactions: the user side of a clarification, automated (T149,
+# T150). The form, the lifecycle and the outcome are the product's; only the
+# person's reply is scripted.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_scripted_answer_resumes_the_work(scripted):
+    config = scripted([
+        Script(text="One thing first.", tool_calls=[a_question()]),
+        Script(text="Flask it is."),
+    ])
+
+    code = cli.run_headless(config, run(
+        config, interactions=json.dumps([{"action": "answer", "value": "Flask"}])))
+
+    assert code == 0
+    assert scripted.providers, "the run should have built a gateway"
+    replies = [message.content for call in scripted.providers[0].calls
+               for message in call]
+    assert any("Flask" in reply for reply in replies), "the answer never reached the model"
+
+
+def test_a_scripted_cancellation_needs_a_decision_not_a_cancelled_turn(scripted):
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()])])
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        code = cli.run_headless(config, run(
+            config, json=True, interactions=json.dumps(["cancel"])))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "clarification_required"
+    assert report["stopped"] != "cancelled"
+    assert report["clarification"]["outcome"] == "cancelled"
+    assert code == 3
+
+
+def test_a_scripted_expiry_is_distinct_from_cancellation(scripted):
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()])])
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(
+            config, json=True, interactions=json.dumps(["expire"])))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "clarification_required"
+    assert report["clarification"]["outcome"] == "expired"
+    assert report["clarification"]["outcome"] != "cancelled"
+
+
+def test_an_unscripted_form_is_still_unattended(scripted):
+    """The old behaviour is unchanged: no script means nobody is there."""
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()])])
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(config, json=True))
+
+    report = json.loads(out.getvalue())
+    assert report["clarification"]["outcome"] == "unattended"
+
+
+def test_a_cancelled_or_expired_run_invents_no_value(scripted):
+    """Neither dismissal nor expiry becomes a chosen default."""
+    for action in ("cancel", "expire", "unattended"):
+        config = scripted([
+            Script(text="One thing first.", tool_calls=[a_question()]),
+            Script(text="Flask it is."),
+        ])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = cli.run_headless(config, run(
+                config, json=True, interactions=json.dumps([action])))
+        report = json.loads(out.getvalue())
+        assert code == 3
+        assert report["ok"] is False
+        replies = [message.content for call in scripted.providers[0].calls
+                   for message in call]
+        assert not any("Flask it is" in reply for reply in replies), (
+            f"the second script ran under {action}: dependent work resumed")
