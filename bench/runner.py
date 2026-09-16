@@ -34,9 +34,10 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from . import baseline
-from .task import Attempt, Task, Verdict, fresh_copy
+from .task import Attempt, SequenceResult, Task, Verdict, fresh_copy
 
 #: What a run is given to spend before it is stopped, whatever the task's own
 #: step budget says. A ceiling on the bill, not on the work.
@@ -64,6 +65,8 @@ class Outcome:
     learning: bool = False
     #: Context optimizations switched off for these attempts, by name.
     without: tuple[str, ...] = ()
+    #: Whether this ran a same-project sequence rather than one prompt.
+    sequence: bool = False
 
     @property
     def passed(self) -> int:
@@ -97,6 +100,33 @@ class Outcome:
             return 0.0
         return sum(getattr(attempt, name) for attempt in self.attempts) / len(self.attempts)
 
+    @property
+    def clarifications(self) -> int:
+        """Mandatory clarifications raised across the attempts (SC-021)."""
+        return sum(attempt.clarifications_raised for attempt in self.attempts)
+
+    @property
+    def corrections(self) -> int:
+        """User corrections received across the attempts (SC-021)."""
+        return sum(attempt.corrections for attempt in self.attempts)
+
+    @property
+    def validations(self) -> dict[str, int]:
+        """How each attempt's completion gate concluded, tallied."""
+        tally: dict[str, int] = {}
+        for attempt in self.attempts:
+            state = attempt.validation_outcome
+            if state:
+                tally[state] = tally.get(state, 0) + 1
+        return tally
+
+    @property
+    def sequence_result(self) -> SequenceResult | None:
+        if not self.task.sequence:
+            return None
+        return SequenceResult(task=self.task, steps=list(self.task.sequence),
+                              attempts=self.attempts)
+
     def why(self) -> str:
         """The first reason it failed, which is the one worth reading."""
         for verdict in self.verdicts:
@@ -109,6 +139,10 @@ def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
              keep: Path | None = None, say=print,
              strategy: str = baseline.CURRENT, learning: bool = False,
              without: tuple[str, ...] = ()) -> Outcome:
+    if task.sequence:
+        return _run_sequence(task, provider=provider, model=model, keep=keep,
+                             say=say, strategy=strategy, learning=learning,
+                             without=without)
     outcome = Outcome(task=task, strategy=strategy)
     outcome.learning = learning
     outcome.without = tuple(without)
@@ -125,6 +159,111 @@ def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
             f"${attempt.cost_usd:.3f}"
             + (f"  — {verdict.reason}" if not verdict.passed else ""))
     return outcome
+
+
+def _run_sequence(task: Task, *, provider: str, model: str,
+                  keep: Path | None, say, strategy: str,
+                  learning: bool, without: tuple[str, ...]) -> Outcome:
+    """Run every step of a same-project sequence in one workspace and home.
+
+    The workspace is copied once and the home is created once, so the durable
+    brain carries from the first task to the sixth while each `comodor run`
+    process brings a fresh conversation. A step's scripted correction is
+    applied to the workspace *after* it, so the next step's own correction
+    detector — the real learning path — notices it. Nothing is written into the
+    brain directly.
+    """
+    outcome = Outcome(task=task, strategy=strategy)
+    outcome.learning = learning
+    outcome.without = tuple(without)
+    outcome.sequence = True
+
+    root = Path(tempfile.mkdtemp(prefix=f"comodor-bench-{task.name}-"))
+    workspace = root / "work"
+    home = root / "home"
+    fresh_copy(task.repo, workspace)
+    home.mkdir()
+    # `learning` is the explicit mode the sequence asks for; the brain starts
+    # empty in this home and accumulates only what the six steps teach it.
+    _settings(home, task, strategy, learning, without)
+
+    for index, step in enumerate(task.sequence):
+        attempt = _invoke(task, workspace, home, provider, model,
+                          prompt=step.prompt, interaction=step.interaction)
+        attempt.success = _step_met(workspace, step.expect)
+        outcome.attempts.append(attempt)
+        say(f"    {index + 1}/{len(task.sequence)}  "
+            f"{'pass' if attempt.ok else 'FAIL'}  {attempt.steps} steps  "
+            f"{attempt.elapsed:.0f}s  "
+            f"clarif={attempt.clarifications_raised} "
+            f"corr={attempt.corrections}"
+            + (f"  — {attempt.error}" if attempt.error else ""))
+        if task.correct is not None and index < len(task.sequence) - 1:
+            try:
+                if task.correct(index, attempt, workspace):
+                    say(f"         (a correction was made after step {index + 1})")
+            except Exception as problem:              # noqa: BLE001 - harness
+                say(f"         (correction hook failed: {problem})")
+
+    result = SequenceResult(task=task, steps=list(task.sequence),
+                            attempts=list(outcome.attempts))
+    try:
+        verdict = task.check_sequence(result)
+    except Exception as problem:
+        verdict = Verdict.no(f"the judge raised {type(problem).__name__}: {problem}")
+    outcome.verdicts.append(verdict)
+    say(f"    sequence  {'pass' if verdict.passed else 'FAIL'}  — {verdict.reason}")
+
+    if verdict.passed:
+        shutil.rmtree(root, ignore_errors=True)
+    else:
+        outcome.kept.append(str(root))
+        _keep_sequence(root, task, result, verdict)
+        if keep is not None:
+            keep.mkdir(parents=True, exist_ok=True)
+            moved = keep / f"{task.name}-{int(time.time())}"
+            shutil.move(str(root), str(moved))
+            outcome.kept = [str(moved)]
+    return outcome
+
+
+def _step_met(workspace: Path, expect: dict[str, str]) -> bool:
+    """Whether a sequence step produced the artifact its `expect` names."""
+    path = str(expect.get("path") or "")
+    marker = str(expect.get("marker") or "")
+    if not path or not marker:
+        return False
+    try:
+        text = (workspace / path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return marker in text
+
+
+def _keep_sequence(root: Path, task: Task, result: SequenceResult,
+                   verdict: Verdict) -> None:
+    """The per-step transcript beside a failed sequence's workspace."""
+    try:
+        (root / "sequence.json").write_text(json.dumps({
+            "task": task.name,
+            "verdict": verdict.reason,
+            "windows": result.windows(),
+            "comparable": result.comparable,
+            "steps": [
+                {"prompt": step.prompt,
+                 "stopped": attempt.stopped,
+                 "outcome": attempt.outcome,
+                 "tools": attempt.tools,
+                 "answer": attempt.text,
+                 "clarifications": attempt.clarifications_raised,
+                 "corrections": attempt.corrections,
+                 "error": attempt.error}
+                for step, attempt in zip(result.steps, result.attempts,
+                                         strict=True)
+            ],
+        }, indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _one(task: Task, provider: str, model: str,
@@ -224,8 +363,15 @@ def _settings(home: Path, task: Task, strategy: str = baseline.CURRENT,
 
 
 def _invoke(task: Task, workspace: Path, home: Path,
-            provider: str, model: str) -> Attempt:
-    """One `comodor run`, in its own process with its own everything."""
+            provider: str, model: str, prompt: str = "",
+            interaction: tuple[Any, ...] = ()) -> Attempt:
+    """One `comodor run`, in its own process with its own everything.
+
+    `prompt` and `interaction` default to the task's own; a sequence passes
+    the step's instead, against the same workspace and home.
+    """
+    prompt = prompt or task.prompt
+    interaction = interaction or task.interaction
     environment = dict(os.environ)
     environment.update({
         "COMODOR_HOME": str(home),
@@ -244,10 +390,14 @@ def _invoke(task: Task, workspace: Path, home: Path,
         "NO_COLOR": "1",
     })
 
-    command = [sys.executable, "-m", "comodor", "run", task.prompt, "--json",
+    command = [sys.executable, "-m", "comodor", "run", prompt, "--json",
                "--max-steps", str(task.max_steps)]
     if task.writes:
         command.append("--yes")
+    if interaction:
+        # What a person would do with each form. The scripted run drives the
+        # real ask tool, ledger and loop; only the user side is automated.
+        command += ["--interactions", json.dumps(list(interaction))]
 
     started = time.monotonic()
     try:
@@ -268,6 +418,8 @@ def _invoke(task: Task, workspace: Path, home: Path,
                        error=(finished.stderr or "no JSON on stdout")[-2000:])
 
     usage = report.get("usage") or {}
+    clarification = report.get("clarification")
+    measurement = report.get("measurement")
     return Attempt(
         workspace=workspace,
         ok=bool(report.get("ok")),
@@ -282,6 +434,8 @@ def _invoke(task: Task, workspace: Path, home: Path,
         output_tokens=int(usage.get("output_tokens", 0) or 0),
         cached_tokens=int(usage.get("cached_tokens", 0) or 0),
         tool_calls=int(report.get("tool_calls", 0) or 0),
+        clarification=clarification if isinstance(clarification, dict) else {},
+        measurement=measurement if isinstance(measurement, dict) else {},
     )
 
 
@@ -306,3 +460,232 @@ def _parse(stdout: str) -> dict | None:
         except ValueError:
             start = text.find("{", start + 1)
     return None
+
+
+# --------------------------------------------------------------------------- #
+# the blocked single-optimization experiment (T096)
+# --------------------------------------------------------------------------- #
+#
+# Running CURRENT in full, then each ablation in full, confounds the switch
+# with the time it ran: the provider's cache warmth, its load and the model's
+# own drift all move between two 48-attempt runs, and the difference read as
+# the switch's effect is mostly the difference between two hours. The
+# experiment below runs every configuration **in the same (task, try) block**,
+# in a counterbalanced order, so a pair differs by the switch and little else.
+
+@dataclass
+class BlockedAttempt:
+    """One attempt in the blocked experiment, with where it sat in its block."""
+
+    block: int
+    task: str
+    attempt_index: int          # 1..tries, the pairing identity within the task
+    config: str                 # a name from `baseline.CONFIGURATIONS`
+    position: int               # 0..n-1, the order it ran within the block
+    attempt: Attempt
+    passed: bool = False
+
+
+@dataclass
+class BlockedRun:
+    """Every attempt of one blocked experiment, and how to regroup them."""
+
+    provider: str
+    model: str
+    tries: int
+    cohort: list[str]
+    configurations: tuple[str, ...] = baseline.CONFIGURATIONS
+    attempts: list[BlockedAttempt] = field(default_factory=list)
+    #: Set once the run begins, so a stored report records the scheme.
+    scheme: str = "counterbalanced: position = (config_index + block_index) % n"
+
+    def blocks(self) -> dict[tuple[str, int], dict[str, BlockedAttempt]]:
+        """Attempts grouped by `(task, attempt_index)`, then by configuration."""
+        grouped: dict[tuple[str, int], dict[str, BlockedAttempt]] = {}
+        for entry in self.attempts:
+            grouped.setdefault((entry.task, entry.attempt_index), {})[entry.config] = entry
+        return grouped
+
+    @property
+    def planned_attempts(self) -> int:
+        return len(self.cohort) * self.tries * len(self.configurations)
+
+
+def run_blocked(tasks: list[Task], *, provider: str, model: str, tries: int = 3,
+                keep: Path | None = None, say=print, learning: bool = False,
+                checkpoint: Path | None = None) -> BlockedRun:
+    """Run every configuration in every `(task, try)` block, counterbalanced.
+
+    Each attempt is a fresh process, workspace and home — the same isolation
+    the ordinary runner gives — so a block is seven independent attempts that
+    differ only by the switch. Sequence tasks are refused: the experiment's
+    unit is a single turn, and a six-turn sequence does not have one.
+
+    `checkpoint` is a JSONL file appended after every attempt, so a run of
+    hundreds of paid calls does not repeat its completed blocks after an
+    interruption. The first line is a header naming the cohort, configurations
+    and scenario fingerprints; a resume whose header or fingerprints no longer
+    match is refused rather than silently mixed.
+    """
+    if any(task.sequence for task in tasks):
+        raise ValueError("the blocked experiment does not take sequence tasks")
+
+    run = BlockedRun(provider=provider, model=model, tries=tries,
+                     cohort=[task.name for task in tasks])
+    done: dict[tuple[int, str], BlockedAttempt] = {}
+    if checkpoint is not None:
+        header, entries = _read_checkpoint(checkpoint)
+        if header is None:
+            _write_checkpoint(checkpoint, _header_record(run))
+        else:
+            _verify_checkpoint(header, run)
+            for entry in entries:
+                done[(entry.block, entry.config)] = entry
+                run.attempts.append(entry)
+            say(f"resuming from {checkpoint}: {len(done)} attempt(s) already "
+                f"recorded")
+
+    size = len(run.configurations)
+    block = 0
+    for task in tasks:
+        for attempt_index in range(1, tries + 1):
+            order = baseline.block_order(block, run.configurations)
+            order_text = " -> ".join(run.configurations[index] for index in order)
+            say(f"[block {block + 1}/{run.planned_attempts // size}] {task.name} "
+                f"try {attempt_index}: {order_text}")
+            for config_index in order:
+                config = run.configurations[config_index]
+                position = (config_index + block) % size
+                if (block, config) in done:
+                    say(f"    pos {position}  {config:<20} already recorded")
+                    continue
+                attempt, verdict, workspace = _one(
+                    task, provider, model, keep, baseline.CURRENT, learning,
+                    baseline.switch_of(config))
+                entry = BlockedAttempt(
+                    block=block, task=task.name, attempt_index=attempt_index,
+                    config=config, position=position, attempt=attempt,
+                    passed=verdict.passed)
+                run.attempts.append(entry)
+                if checkpoint is not None:
+                    _write_checkpoint(checkpoint, _attempt_record(entry))
+                say(f"    pos {position}  {config:<20} "
+                    f"{'pass' if verdict.passed else 'FAIL'}  "
+                    f"{attempt.steps} steps  {attempt.elapsed:.0f}s  "
+                    f"in={attempt.input_tokens} cached={attempt.cached_tokens} "
+                    f"out={attempt.output_tokens}"
+                    + (f"  — {verdict.reason}" if not verdict.passed else ""))
+            block += 1
+    # Canonical order, so a resumed run is byte-for-byte the run it resumes.
+    run.attempts.sort(key=lambda entry: (entry.block, entry.position))
+    return run
+
+
+#: The fields of an attempt the checkpoint keeps: everything the paired metrics
+#: read, and nothing that is not reproducible (no prompt body, no file content).
+def _header_record(run: BlockedRun) -> dict:
+    from . import integrity
+
+    fingerprints = integrity.fingerprint_all()
+    return {
+        "kind": "header",
+        "provider": run.provider,
+        "model": run.model,
+        "tries": run.tries,
+        "cohort": list(run.cohort),
+        "configurations": list(run.configurations),
+        "scheme": run.scheme,
+        "fingerprints": {name: fingerprints.get(name) for name in run.cohort},
+    }
+
+
+def _verify_checkpoint(header: dict, run: BlockedRun) -> None:
+    expected = _header_record(run)
+    for key in ("provider", "model", "tries", "cohort", "configurations", "scheme"):
+        if header.get(key) != expected[key]:
+            raise ValueError(
+                f"checkpoint {key} does not match this run; refusing to mix "
+                f"two experiments")
+    if header.get("fingerprints") != expected["fingerprints"]:
+        raise ValueError(
+            "scenario fingerprints changed since the checkpoint; refusing to "
+            "resume a different benchmark")
+
+
+def _attempt_record(entry: BlockedAttempt) -> dict:
+    attempt = entry.attempt
+    return {
+        "kind": "attempt",
+        "block": entry.block,
+        "task": entry.task,
+        "attempt_index": entry.attempt_index,
+        "config": entry.config,
+        "position": entry.position,
+        "passed": entry.passed,
+        "attempt": {
+            "ok": attempt.ok,
+            "stopped": attempt.stopped,
+            "steps": attempt.steps,
+            "elapsed": attempt.elapsed,
+            "input_tokens": attempt.input_tokens,
+            "output_tokens": attempt.output_tokens,
+            "cached_tokens": attempt.cached_tokens,
+            "cost_usd": attempt.cost_usd,
+            "tool_calls": attempt.tool_calls,
+            "error": attempt.error,
+            "measurement": attempt.measurement,
+        },
+    }
+
+
+def _entry_from_record(record: dict) -> BlockedAttempt:
+    saved = record["attempt"]
+    attempt = Attempt(
+        workspace=Path("."), ok=bool(saved["ok"]), stopped=str(saved["stopped"]),
+        text="", steps=int(saved["steps"]), cost_usd=float(saved["cost_usd"]),
+        elapsed=float(saved["elapsed"]), error=str(saved.get("error", "")),
+        input_tokens=int(saved["input_tokens"]),
+        output_tokens=int(saved["output_tokens"]),
+        cached_tokens=int(saved["cached_tokens"]),
+        tool_calls=int(saved.get("tool_calls", 0)),
+        measurement=dict(saved.get("measurement") or {}),
+    )
+    return BlockedAttempt(
+        block=int(record["block"]), task=str(record["task"]),
+        attempt_index=int(record["attempt_index"]), config=str(record["config"]),
+        position=int(record["position"]), attempt=attempt,
+        passed=bool(record["passed"]))
+
+
+def _write_checkpoint(path: Path, record: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _read_checkpoint(path: Path) -> tuple[dict | None, list[BlockedAttempt]]:
+    """The header and every complete attempt line. A torn last line is dropped."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None, []
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None, []
+    try:
+        header = json.loads(lines[0])
+    except ValueError:
+        return None, []
+    if header.get("kind") != "header":
+        return None, []
+    entries: list[BlockedAttempt] = []
+    for line in lines[1:]:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            break                       # an interrupted write: keep what is whole
+        if record.get("kind") == "attempt":
+            entries.append(_entry_from_record(record))
+    return header, entries

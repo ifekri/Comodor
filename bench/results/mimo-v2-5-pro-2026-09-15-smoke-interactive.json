@@ -1,0 +1,329 @@
+{
+  "model": "mimo-v2.5-pro",
+  "provider": "xiaomi",
+  "date": "2026-09-15",
+  "tries_per_task": 1,
+  "platform": "Windows 11",
+  "python": "3.13.14",
+  "totals": {
+    "tasks": 3,
+    "passed": 3,
+    "partial": 0,
+    "failed": 0,
+    "attempts_passed": 3,
+    "attempts": 3,
+    "cost_usd": 0.0,
+    "seconds": 466.3
+  },
+  "tasks": [
+    {
+      "name": "careful-cancelled",
+      "category": "careful",
+      "result": "1/1",
+      "correctness": 1.0,
+      "passed": 1,
+      "tries": 1,
+      "mean_steps": 3.0,
+      "mean_tool_calls": 6.0,
+      "mean_input_tokens": 6093,
+      "mean_output_tokens": 683,
+      "mean_cached_tokens": 11392,
+      "mean_total_tokens": 18168,
+      "clarifications": 0,
+      "corrections": 0,
+      "validation": {
+        "clarification_required": 1
+      },
+      "cost_usd": 0.0,
+      "seconds": 48.4,
+      "why": ""
+    },
+    {
+      "name": "careful-expired",
+      "category": "careful",
+      "result": "1/1",
+      "correctness": 1.0,
+      "passed": 1,
+      "tries": 1,
+      "mean_steps": 3.0,
+      "mean_tool_calls": 6.0,
+      "mean_input_tokens": 17544,
+      "mean_output_tokens": 1057,
+      "mean_cached_tokens": 11264,
+      "mean_total_tokens": 29865,
+      "clarifications": 0,
+      "corrections": 0,
+      "validation": {
+        "clarification_required": 1
+      },
+      "cost_usd": 0.0,
+      "seconds": 54.7,
+      "why": ""
+    },
+    {
+      "name": "learning-repeat",
+      "category": "careful",
+      "result": "1/1",
+      "correctness": 1.0,
+      "passed": 1,
+      "tries": 1,
+      "mean_steps": 5.5,
+      "mean_tool_calls": 6.0,
+      "mean_input_tokens": 3337,
+      "mean_output_tokens": 1249,
+      "mean_cached_tokens": 64981,
+      "mean_total_tokens": 69568,
+      "clarifications": 2,
+      "corrections": 1,
+      "validation": {
+        "annotate": 3,
+        "no_intervention": 3
+      },
+      "cost_usd": 0.0,
+      "seconds": 363.3,
+      "why": "",
+      "sequence": {
+        "comparable": true,
+        "invalid_reason": "",
+        "windows": {
+          "initial": {
+            "clarifications": 2,
+            "corrections": 1,
+            "success": 3,
+            "tasks": 3
+          },
+          "learned": {
+            "clarifications": 0,
+            "corrections": 0,
+            "success": 3,
+            "tasks": 3
+          }
+        },
+        "verdict": "pass",
+        "reason": "clarifications 2->0, corrections 1->0, success 3->3 of 3",
+        "steps": [
+          {
+            "index": 1,
+            "prompt": "Add the setting K1 with value alpha to items.py, and record which environment it applies to.",
+            "stopped": "done",
+            "outcome": "done",
+            "success": true,
+            "tools": [
+              "glob",
+              "list_dir",
+              "read_file",
+              "read_file",
+              "ask",
+              "edit_file",
+              "read_file",
+              "run_python",
+              "run_shell"
+            ],
+            "clarifications": 1,
+            "corrections": 0,
+            "input_tokens": 12312,
+            "output_tokens": 2434,
+            "diagnostics": {
+              "input_tokens": 12312,
+              "output_tokens": 2434,
+              "cached_tokens": 89600,
+              "context_size": 14244,
+              "model_turns": 8,
+              "tool_calls": 9,
+              "retries": 1,
+              "clarifications_raised": 1,
+              "clarifications_answered": 1,
+              "corrections": 0,
+              "knowledge_hits": 0,
+              "knowledge_stale": 0,
+              "outcome": "done",
+              "validation_outcome": "annotate",
+              "estimated_turns": 0
+            }
+          },
+          {
+            "index": 2,
+            "prompt": "Add the setting K2 with value beta to items.py, and record which environment it applies to.",
+            "stopped": "done",
+            "outcome": "done",
+            "success": true,
+            "tools": [
+              "glob",
+              "glob",
+              "read_file",
+              "read_file",
+              "ask",
+              "edit_file",
+              "read_file"
+            ],
+            "clarifications": 1,
+            "corrections": 1,
+            "input_tokens": 1868,
+            "output_tokens": 1614,
+            "diagnostics": {
+              "input_tokens": 1868,
+              "output_tokens": 1614,
+              "cached_tokens": 75008,
+              "context_size": 13950,
+              "model_turns": 6,
+              "tool_calls": 7,
+              "retries": 0,
+              "clarifications_raised": 1,
+              "clarifications_answered": 1,
+              "corrections": 1,
+              "knowledge_hits": 1,
+              "knowledge_stale": 0,
+              "outcome": "done",
+              "validation_outcome": "no_intervention",
+              "estimated_turns": 0
+            }
+          },
+          {
+            "index": 3,
+            "prompt": "Add the setting K3 with value gamma to items.py, and record which environment it applies to.",
+            "stopped": "done",
+            "outcome": "done",
+            "success": true,
+            "tools": [
+              "glob",
+              "glob",
+              "read_file",
+              "read_file",
+              "edit_file",
+              "read_file",
+              "memory"
+            ],
+            "clarifications": 0,
+            "corrections": 0,
+            "input_tokens": 1886,
+            "output_tokens": 1174,
+            "diagnostics": {
+              "input_tokens": 1886,
+              "output_tokens": 1174,
+              "cached_tokens": 71936,
+              "context_size": 13212,
+              "model_turns": 6,
+              "tool_calls": 7,
+              "retries": 1,
+              "clarifications_raised": 0,
+              "clarifications_answered": 0,
+              "corrections": 0,
+              "knowledge_hits": 2,
+              "knowledge_stale": 0,
+              "outcome": "done",
+              "validation_outcome": "annotate",
+              "estimated_turns": 0
+            }
+          },
+          {
+            "index": 4,
+            "prompt": "Add the setting K4 with value delta to items.py, and record which environment it applies to.",
+            "stopped": "done",
+            "outcome": "done",
+            "success": true,
+            "tools": [
+              "glob",
+              "glob",
+              "read_file",
+              "read_file",
+              "edit_file",
+              "read_file"
+            ],
+            "clarifications": 0,
+            "corrections": 0,
+            "input_tokens": 1694,
+            "output_tokens": 996,
+            "diagnostics": {
+              "input_tokens": 1694,
+              "output_tokens": 996,
+              "cached_tokens": 59392,
+              "context_size": 13112,
+              "model_turns": 5,
+              "tool_calls": 6,
+              "retries": 0,
+              "clarifications_raised": 0,
+              "clarifications_answered": 0,
+              "corrections": 0,
+              "knowledge_hits": 2,
+              "knowledge_stale": 0,
+              "outcome": "done",
+              "validation_outcome": "no_intervention",
+              "estimated_turns": 0
+            }
+          },
+          {
+            "index": 5,
+            "prompt": "Add the setting K5 with value epsilon to items.py, and record which environment it applies to.",
+            "stopped": "done",
+            "outcome": "done",
+            "success": true,
+            "tools": [
+              "read_file",
+              "edit_file"
+            ],
+            "clarifications": 0,
+            "corrections": 0,
+            "input_tokens": 838,
+            "output_tokens": 530,
+            "diagnostics": {
+              "input_tokens": 838,
+              "output_tokens": 530,
+              "cached_tokens": 34560,
+              "context_size": 12146,
+              "model_turns": 3,
+              "tool_calls": 2,
+              "retries": 0,
+              "clarifications_raised": 0,
+              "clarifications_answered": 0,
+              "corrections": 0,
+              "knowledge_hits": 2,
+              "knowledge_stale": 0,
+              "outcome": "done",
+              "validation_outcome": "no_intervention",
+              "estimated_turns": 0
+            }
+          },
+          {
+            "index": 6,
+            "prompt": "Add the setting K6 with value zeta to items.py, and record which environment it applies to.",
+            "stopped": "done",
+            "outcome": "done",
+            "success": true,
+            "tools": [
+              "read_file",
+              "list_dir",
+              "edit_file",
+              "run_python",
+              "run_shell"
+            ],
+            "clarifications": 0,
+            "corrections": 0,
+            "input_tokens": 1424,
+            "output_tokens": 748,
+            "diagnostics": {
+              "input_tokens": 1424,
+              "output_tokens": 748,
+              "cached_tokens": 59392,
+              "context_size": 12716,
+              "model_turns": 5,
+              "tool_calls": 5,
+              "retries": 1,
+              "clarifications_raised": 0,
+              "clarifications_answered": 0,
+              "corrections": 0,
+              "knowledge_hits": 2,
+              "knowledge_stale": 0,
+              "outcome": "done",
+              "validation_outcome": "annotate",
+              "estimated_turns": 0
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "commit": "dbe6b1e",
+  "label": "smoke-interactive",
+  "strategy": "current",
+  "learning": true
+}

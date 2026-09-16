@@ -140,3 +140,26 @@ def test_the_runtime_never_imports_the_benchmark_helpers():
                 or "from bench" in text or "import bench" in text:
             offenders.append(path.relative_to(source).as_posix())
     assert offenders == []
+
+
+def test_a_fingerprint_does_not_depend_on_line_endings(tmp_path):
+    """The record is committed once and read on every platform.
+
+    A working tree on Windows can hand a file back with CRLF before the next
+    checkout normalises it, and the repository stores LF. If line endings were
+    part of the hash, the same scenario would fingerprint differently on two
+    platforms and the committed record would only be true where it was written.
+    """
+    scenario = tmp_path / "s"
+    (scenario / "repo").mkdir(parents=True)
+    (scenario / "task.md").write_bytes(b"do the thing\r\non two lines\r\n")
+    (scenario / "check.py").write_bytes(b"CATEGORY = 'fix'\r\n")
+    (scenario / "repo" / "a.py").write_bytes(b"x = 1\r\ny = 2\r\n")
+    with_crlf = integrity.fingerprint(scenario)
+
+    (scenario / "task.md").write_bytes(b"do the thing\non two lines\n")
+    (scenario / "check.py").write_bytes(b"CATEGORY = 'fix'\n")
+    (scenario / "repo" / "a.py").write_bytes(b"x = 1\ny = 2\n")
+    with_lf = integrity.fingerprint(scenario)
+
+    assert with_crlf == with_lf

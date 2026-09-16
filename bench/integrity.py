@@ -41,7 +41,15 @@ PARTS = ("task.md", "check.py", "repo", "hidden")
 
 
 def _sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+    """A content hash that does not depend on the checkout's line endings.
+
+    The repository stores LF, but a working tree on Windows can hand a file
+    back with CRLF before the next checkout normalises it. Line endings are not
+    part of what a scenario measures, so they are normalised here — otherwise
+    the same scenario would fingerprint differently on two platforms and the
+    committed record would only be true on the machine that wrote it.
+    """
+    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
 
 
 def _tree(root: Path) -> dict[str, str]:

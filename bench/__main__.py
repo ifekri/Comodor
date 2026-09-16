@@ -14,8 +14,8 @@ import time
 from pathlib import Path
 
 from . import baseline
-from .report import write, write_paired
-from .runner import run_task
+from .report import write, write_blocked, write_paired
+from .runner import run_blocked, run_task
 from .task import TaskError, load_tasks
 
 HERE = Path(__file__).resolve().parent
@@ -44,6 +44,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--paired", action="store_true",
                         help="run every task under both strategies and write the "
                              "paired baseline report")
+    parser.add_argument("--blocked", action="store_true",
+                        help="run the single-optimization experiment: every "
+                             "configuration in every (task, try) block, in a "
+                             "counterbalanced order (T096); requires --only")
+    parser.add_argument("--checkpoint", default="",
+                        help="with --blocked: the JSONL file to append each "
+                             "attempt to and resume from (default: the label)")
     parser.add_argument("--learning", action="store_true",
                         help="switch the learning engine on for every attempt (off "
                              "by default; each attempt still starts with an empty brain)")
@@ -80,6 +87,25 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     keep = Path(args.keep).resolve() if args.keep else None
+
+    if args.blocked:
+        if not args.only:
+            print("bench: --blocked needs an explicit --only cohort so the "
+                  "workload is stated, not inferred", file=sys.stderr)
+            return 2
+        started = time.monotonic()
+        checkpoint = (Path(args.checkpoint) if args.checkpoint
+                      else HERE / "results" / f"{args.label or 'blocked'}.checkpoint.jsonl")
+        run = run_blocked(tasks, provider=args.provider, model=args.model,
+                          tries=args.tries, keep=keep, learning=args.learning,
+                          checkpoint=checkpoint)
+        _, markdown_file = write_blocked(run, HERE / "results", label=args.label)
+        passed = sum(1 for entry in run.attempts if entry.passed)
+        print(f"\n{passed}/{len(run.attempts)} attempts passed "
+              f"({len(run.blocks())} blocks of {len(run.configurations)}) "
+              f"in {(time.monotonic() - started) / 60:.0f} minutes")
+        print(f"{markdown_file}")
+        return 0
 
     strategies = list(baseline.STRATEGIES) if args.paired else [args.strategy]
     print(f"{len(tasks)} tasks, {args.tries} attempts each, "

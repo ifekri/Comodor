@@ -1,0 +1,47 @@
+{
+  "model": "mimo-v2.5-pro",
+  "provider": "xiaomi",
+  "date": "2026-09-15",
+  "tries_per_task": 3,
+  "platform": "Windows 11",
+  "python": "3.13.14",
+  "totals": {
+    "tasks": 1,
+    "passed": 1,
+    "partial": 0,
+    "failed": 0,
+    "attempts_passed": 3,
+    "attempts": 3,
+    "cost_usd": 0.0,
+    "seconds": 159.0
+  },
+  "tasks": [
+    {
+      "name": "refactor-many-files",
+      "category": "refactor",
+      "result": "3/3",
+      "correctness": 1.0,
+      "passed": 3,
+      "tries": 3,
+      "mean_steps": 7.7,
+      "mean_tool_calls": 20.3,
+      "mean_input_tokens": 16819,
+      "mean_output_tokens": 3111,
+      "mean_cached_tokens": 97621,
+      "mean_total_tokens": 117552,
+      "clarifications": 0,
+      "corrections": 0,
+      "validation": {
+        "no_intervention": 2,
+        "annotate": 1
+      },
+      "cost_usd": 0.0,
+      "seconds": 159.0,
+      "why": ""
+    }
+  ],
+  "commit": "dbe6b1e",
+  "label": "t151-baseline-corrected",
+  "strategy": "current",
+  "learning": false
+}

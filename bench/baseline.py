@@ -62,3 +62,44 @@ def describe(strategy: str) -> str:
         CURRENT: "the product as shipped",
         NAIVE: "full history, full files and full tool output re-sent every turn",
     }[strategy]
+
+
+# --------------------------------------------------------------------------- #
+# the single-optimization experiment (T096)
+# --------------------------------------------------------------------------- #
+#
+# One configuration is the product as shipped (`current`); each other names the
+# one context optimization switched off under it. They are measured against
+# each other *within a block*, so the only thing that differs between two
+# attempts in a block is the switch — not the time of day, not the model's
+# mood, not the provider's cache warmth.
+
+CURRENT_CONFIG = "current"
+
+#: The optimizations that can be switched off, in report order. `log_summary`
+#: lives in `tools/overflow`, the rest in `agent/context.py`; both are read
+#: from the same `agent.optimizations_off` setting.
+ABLATIONS: tuple[str, ...] = ("dedup", "delta", "budget", "ranking",
+                              "summary_provenance", "log_summary")
+
+#: Every configuration of the experiment: the product, then one per ablation.
+CONFIGURATIONS: tuple[str, ...] = (CURRENT_CONFIG,) + ABLATIONS
+
+
+def switch_of(config: str) -> tuple[str, ...]:
+    """The `optimizations_off` value for a configuration, or empty for current."""
+    return () if config == CURRENT_CONFIG else (config,)
+
+
+def block_order(block_index: int,
+                configurations: tuple[str, ...] = CONFIGURATIONS) -> list[int]:
+    """The order to run the configurations in one block, counterbalanced.
+
+    Position is `(config_index + block_index) mod n`, and the block runs in
+    position order, so over a run each configuration lands in each position
+    about equally. A fixed order would confound the configuration with the
+    time it ran and with whatever the provider had cached just before it.
+    Deterministic: the same block index always gives the same order.
+    """
+    size = len(configurations)
+    return sorted(range(size), key=lambda index: (index + block_index) % size)
