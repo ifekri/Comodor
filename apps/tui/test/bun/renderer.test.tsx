@@ -19,13 +19,44 @@
  * and by `orphan.test.ts` beside this file.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
 
 import { CoreClient, type Transport } from "@comodor/client";
 import { PROTOCOL_VERSION, response, event } from "@comodor/protocol";
 
 import { App } from "../../src/App.tsx";
+
+// --------------------------------------------------------------------------- //
+// One renderer per test, and every one of them is torn down.
+//
+// `testRender` starts a real `CliRenderer` with its own render loop and native
+// resources. A test that walks away from it leaves that loop running, and the
+// leaked renderers accumulate across the suite — by the last workbench tests
+// the event loop is busy enough that the final projection has not painted when
+// `waitForFrame` returns, so a test that is correct on its own fails under a
+// loaded runner. The teardown below is what keeps the suite's cost flat.
+// --------------------------------------------------------------------------- //
+
+const liveRenderers: Array<{
+  renderer: { destroy: () => void };
+  client: { close: () => Promise<void> | void };
+}> = [];
+
+afterEach(() => {
+  for (const made of liveRenderers.splice(0)) {
+    try {
+      void made.client.close();
+    } catch {
+      /* already closed */
+    }
+    try {
+      made.renderer.destroy();
+    } catch {
+      /* already destroyed */
+    }
+  }
+});
 
 // --------------------------------------------------------------------------- //
 // a core, in memory
@@ -323,6 +354,10 @@ async function screen(width = 100, height = 30,
   // — its floor notice is the readiness sign there.
   await rendered.waitForFrame((frame) =>
     frame.includes("project") || frame.includes("Too small"));
+
+  // Torn down by the `afterEach` above; registered here so every exit path —
+  // including a failing assertion — still destroys the renderer.
+  liveRenderers.push({ renderer: rendered.renderer, client });
 
   return {
     ...rendered,
