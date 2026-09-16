@@ -131,12 +131,12 @@ def test_resume_sends_the_stored_conversation_and_re_derives_nothing(config):
         handle = service.session(session)
         handle.assembly.agent.gateway = Gateway(config, scripts=[Script(text="First answer.")])
         service.send(session, "the first question")
-        import threading
-        ready = threading.Event()
-        for _ in range(500):
-            if not handle.busy:
-                break
-            ready.wait(0.01)
+        # Wait on the worker itself: `busy` now clears only after the turn is
+        # persisted, but joining is the explicit synchronisation that does not
+        # depend on how the scheduler interleaves two threads.
+        assert handle._worker is not None
+        handle._worker.join(timeout=10)
+        assert not handle.busy, "the turn never finished"
         stored_id = handle.store_id
         assert stored_id
         stored = service._store().load(stored_id)
@@ -155,10 +155,10 @@ def test_resume_sends_the_stored_conversation_and_re_derives_nothing(config):
             again.session(reopened).assembly.agent.gateway = Gateway(
                 config, scripts=[Script(text="Second answer.")])
             again.send(reopened, "and then?")
-            for _ in range(500):
-                if not again.session(reopened).busy:
-                    break
-                ready.wait(0.01)
+            resumed_handle = again.session(reopened)
+            assert resumed_handle._worker is not None
+            resumed_handle._worker.join(timeout=10)
+            assert not resumed_handle.busy, "the resumed turn never finished"
             payload = again.session(reopened).assembly.agent.gateway.provider("fake").calls[0]
             sent = [m.content for m in payload if m.role is not Role.SYSTEM]
             assert sent[:2] == ["the first question", "First answer."]

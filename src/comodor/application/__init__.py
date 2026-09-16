@@ -610,15 +610,19 @@ class CoreService:
                     "session_id": handle.id, "level": "error",
                     "text": f"the turn stopped: {problem}"})
             finally:
+                # The turn is made durable before it reads as idle. A client
+                # that sees `busy` false and then asks for the transcript must
+                # find the turn it just watched; clearing the flag first left a
+                # window in which the session looked finished and the store did
+                # not yet hold its last message.
+                try:
+                    self._persist(handle)
+                except Exception:      # pragma: no cover - a failed save is not a hung session
+                    pass
                 with handle._lock:
                     handle.busy = False
                 self._emit(handle, "session.updated",
                            {"session": handle.describe()})
-            # One turn past its end is the turn boundary: the same moment
-            # the terminal saves on, so a session opened from the protocol
-            # and one opened from the terminal both survive a crash with at
-            # most the last line missing.
-            self._persist(handle)
             # And the delivery of any finished background delegates waits
             # for exactly this boundary too.
             try:
