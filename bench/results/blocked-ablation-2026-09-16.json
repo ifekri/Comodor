@@ -1,7 +1,7 @@
 {
   "kind": "blocked-ablation",
-  "provider": "xiaomi",
-  "model": "mimo-v2.5-pro",
+  "provider": "benchmark-provider",
+  "model": "benchmark-model",
   "date": "2026-09-16",
   "commit": "dbe6b1e",
   "platform": "Windows 11",

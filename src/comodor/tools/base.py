@@ -84,6 +84,15 @@ class ToolContext:
     #: against, in a run that was otherwise correct.
     seen: set[str] = field(default_factory=set)
 
+    #: What this turn read, text included, by resolved path.
+    #:
+    #: `seen` outlives the turn on purpose, so a write can tell whether it is
+    #: replacing known contents. Grounding must not: an option is backed by a
+    #: source only when *this* turn's read of it supports the candidate, and a
+    #: file read two turns ago is not evidence for what is being asserted now.
+    #: Cleared with the ledger, and holds no more than the reads of one turn.
+    read_this_turn: dict[str, str] = field(default_factory=dict)
+
     #: The learning brain's store, when one exists. Tools that count things
     #: against the user — the daily image-generation fuse — share this one
     #: metadata table, so a delegate cannot quietly sidestep the count.
@@ -121,9 +130,17 @@ class ToolContext:
     def reset_evidence(self) -> None:
         """A new turn, a new ledger. The old one is simply dropped."""
         self._evidence = None
+        # What the last turn read does not ground this one: the sources of a
+        # grounding claim are the ones consulted since it started.
+        self.read_this_turn.clear()
 
     def note_read(self, path: Path, material: str | bytes = "") -> None:
-        self.seen.add(self._key(path))
+        key = self._key(path)
+        self.seen.add(key)
+        if material:
+            text = material.decode("utf-8", errors="replace") \
+                if isinstance(material, bytes) else str(material)
+            self.read_this_turn[key] = text
         # A whole-file read is an observation: the ledger records that the
         # file was seen, from where, and a fingerprint of what was there —
         # never the contents. Bookkeeping must not be the reason a read fails.

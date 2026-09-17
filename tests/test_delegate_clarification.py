@@ -165,6 +165,49 @@ def test_the_parents_turn_carries_the_delegates_decision_as_open(config):
     assert decision.what == "Which database?" and decision.state == "blocked"
 
 
+def test_every_unresolved_delegate_decision_is_carried(config):
+    """A delegate can leave several decisions open at once.
+
+    The payload lists them; importing only the top-level first one would drop
+    the rest, so the parent would report a single decision where the delegate
+    raised two — and the regenerated form would ask one of them.
+    """
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+
+    bus = EventBus()
+    agent = AgentLoop(config, Gateway(config, scripts=[
+        Script(text="Writing anyway.", tool_calls=[ToolCall(
+            id="w", name="write_file", arguments={"path": "db.py", "content": "x"})]),
+        Script(text="never")]),
+        ToolRegistry(), bus, PermissionEngine(config, bus), Conversation())
+    carried = {
+        "kind": "clarification_required", "decision": "Which database?",
+        "candidates": [{"label": "SQLite"}], "evidence_consulted": [],
+        "reason": "architecture", "outcome": "unattended",
+        "decisions": [
+            {"id": "d1", "decision": "Which database?",
+             "candidates": ["SQLite", "PostgreSQL"], "evidence_consulted": [],
+             "reason": "architecture"},
+            {"id": "d2", "decision": "Which cache?",
+             "candidates": ["Redis"], "evidence_consulted": ["README.md"],
+             "reason": "interface_behaviour"},
+        ],
+    }
+    result = agent.run(completion_turn({"id": "d2", "state": "done",
+                                        "answer": "Stopped: needs a decision",
+                                        "clarification": carried}),
+                       decisions=[carried])
+
+    assert result.stopped == "clarification_required"
+    whats = [decision.what for decision in agent.tool_context.evidence.decisions]
+    assert whats == ["Which database?", "Which cache?"]
+    assert [item["decision"] for item in result.clarification["decisions"]] \
+        == ["Which database?", "Which cache?"], "the complete set, in stable order"
+    assert not (config.paths.project / "db.py").exists()
+
+
 # --------------------------------------------------------------------------- #
 # T056 — only the dependent delegate pauses
 # --------------------------------------------------------------------------- #

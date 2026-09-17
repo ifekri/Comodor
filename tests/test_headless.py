@@ -396,3 +396,68 @@ def test_the_json_usage_reports_cache_creation_tokens(scripted):
         cli.run_headless(config, run(config, json=True))
     report = json.loads(out.getvalue())
     assert "written_tokens" in report["usage"]
+
+
+# --------------------------------------------------------------------------- #
+# the completion annotation reaches the headless result (FR-037)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_headless_json_carries_the_completion_annotation(scripted):
+    """An honest partial answer is qualified for automation, not only drawn
+    for a person: `stopped` alone must not read as an unqualified completion
+    while the gate has unresolved work."""
+    config = scripted([Script(text="I started on the config file.")])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(
+            config, json=True, task="- add a config file\n- write the tests"))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "done"
+    assert report["annotation"], "the unresolved work rides the result"
+    assert "config file" in report["annotation"]
+
+
+def test_the_plain_headless_output_shows_the_annotation(scripted):
+    config = scripted([Script(text="I started on the config file.")])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(
+            config, task="- add a config file\n- write the tests"))
+
+    printed = out.getvalue()
+    assert "I started on the config file." in printed
+    assert "Not everything the request asked for was delivered" in printed
+
+
+def test_a_completion_claim_is_annotated_after_the_correction_turn(scripted):
+    """The block costs one correction turn; if the corrected answer still
+    does not show the work, the fallback is to annotate, and that annotation
+    is on the result too."""
+    config = scripted([Script(text="Everything is complete."),
+                       Script(text="Everything is complete.")])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(
+            config, json=True, task="- add a config file\n- write the tests"))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "done"
+    assert report["annotation"], "the fallback after one correction still annotates"
+
+
+def test_a_fully_delivered_answer_carries_no_annotation(scripted):
+    config = scripted([
+        Script(text="Writing the notes now.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "notes.md", "content": "hi"})]),
+        Script(text="Added notes.md."),
+    ])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(config, json=True, task="- add notes.md"))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "done"
+    assert report["annotation"] == ""

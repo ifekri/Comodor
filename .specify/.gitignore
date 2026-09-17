@@ -7,3 +7,7 @@ feature.json
 
 # Per-machine extension config overrides.
 extensions/*/local-config.yml
+
+# Install bookkeeping for whichever integration `specify init` wired up.
+# Per-checkout state, like `feature.json`; the file itself stays on disk.
+integrations/*.manifest.json

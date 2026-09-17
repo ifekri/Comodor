@@ -1,6 +1,6 @@
-# Comodor benchmark — mimo-v2.5-pro
+# Comodor benchmark — benchmark-model
 
-`xiaomi` · 2026-09-15 · 3 attempts per task · Windows 11, Python 3.13.14
+`benchmark-provider` · 2026-09-15 · 3 attempts per task · Windows 11, Python 3.13.14
 
 **1 of 1 tasks passed every attempt**, 0 passed some, 0 passed none — 3/3 attempts (100%).
 

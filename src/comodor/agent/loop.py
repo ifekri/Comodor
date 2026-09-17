@@ -69,6 +69,23 @@ def _brief_failure(content: str) -> str:
     return text[:160]
 
 
+def _carried_decisions(carried: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every open decision a carried clarification payload names, in order.
+
+    The structured payload (`tools/ask.py::payload_for`) describes the first
+    decision at the top level and lists all of them under `decisions` when
+    there is more than one. Both shapes have to reach the parent ledger; a
+    payload that lists several and has them read as one loses the rest.
+    """
+    nested = carried.get("decisions")
+    if isinstance(nested, list):
+        entries = [entry for entry in nested if isinstance(entry, dict)
+                   and str(entry.get("decision") or "").strip()]
+        if entries:
+            return entries
+    return [carried]
+
+
 
 @dataclass
 class TurnResult:
@@ -89,6 +106,12 @@ class TurnResult:
     #: question ended without an answer: the decision, its candidates, what
     #: was consulted, and `outcome` — cancelled, expired or unattended.
     clarification: dict[str, Any] | None = None
+    #: The completion gate's annotation when the turn delivered less than the
+    #: request asked for (FR-037). It rides the result, not only the display
+    #: events, so `comodor run` — and its JSON — tells automation the same
+    #: thing the terminal shows: a partial answer is never an unqualified
+    #: `stopped="done"`.
+    annotation: str = ""
     #: What the turn cost beside how it went — counts only (FR-072).
     measurement: TaskMeasurement = field(default_factory=TaskMeasurement)
     #: Why a turn was cancelled, when it was ("stop" — the human pressed stop
@@ -357,7 +380,10 @@ class AgentLoop:
                     self.conversation.add(Message.user(verify.as_incomplete(assessment)))
                     continue
                 if assessment.unresolved:
-                    self._note(assessment.annotation())
+                    # Beside the answer for a person watching, and on the
+                    # result for a caller who is not (FR-037).
+                    result.annotation = assessment.annotation()
+                    self._note(result.annotation)
 
                 result.stopped = "done"
                 return result
@@ -734,19 +760,29 @@ class AgentLoop:
                 f"marked stale — rely on the observation, not on it:\n{lines}]")
 
     def _carry_open_decision(self, context: ToolContext, carried: dict[str, Any]) -> None:
-        """A decision another piece of work left open enters this ledger open too."""
-        what = str(carried.get("decision") or "")
-        if not what:
-            return
+        """Every decision another piece of work left open enters this ledger.
+
+        A payload for one decision carries its fields at the top level; a
+        payload for several also lists them under `decisions`. Reading only
+        the top level kept the first and silently dropped the rest, so the
+        parent reported one decision where the delegate had raised three.
+        """
         book = context.evidence
-        decision = book.open_decision(
-            what, affects=[str(carried.get("reason") or "behaviour")],
-            candidates=[entry.get("label", entry) if isinstance(entry, dict) else entry
-                        for entry in carried.get("candidates") or []],
-            evidence_consulted=list(carried.get("evidence_consulted") or []))
         outcome = str(carried.get("outcome") or "cancelled")
-        book.asked(decision.id)
-        book.ended_without_answer(decision.id, outcome)
+        for entry in _carried_decisions(carried):
+            what = str(entry.get("decision") or "")
+            if not what:
+                continue
+            decision = book.open_decision(
+                what, affects=[str(entry.get("reason")
+                                   or carried.get("reason") or "behaviour")],
+                candidates=[option.get("label", option)
+                            if isinstance(option, dict) else option
+                            for option in entry.get("candidates") or []],
+                evidence_consulted=list(entry.get("evidence_consulted")
+                                        or carried.get("evidence_consulted") or []))
+            book.asked(decision.id)
+            book.ended_without_answer(decision.id, outcome)
 
     def _clarification_outcome(self) -> dict[str, Any] | None:
         """The payload for the decisions this turn left open, or None."""

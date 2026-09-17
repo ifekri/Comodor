@@ -1,7 +1,7 @@
 {
   "kind": "paired-baseline",
-  "model": "mimo-v2.5-pro",
-  "provider": "xiaomi",
+  "model": "benchmark-model",
+  "provider": "benchmark-provider",
   "date": "2026-09-14",
   "commit": "5b611e4",
   "note": "Measured against the tasks Phase 1 state (commit 5b611e4): characterization and benchmark plumbing only, before the evidence ledger and clarification enforcement. This is the pre-change baseline SC-036 requires; SC-011 is set from it.",

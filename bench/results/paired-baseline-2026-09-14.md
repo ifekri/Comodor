@@ -1,6 +1,6 @@
-# Comodor paired baseline — mimo-v2.5-pro
+# Comodor paired baseline — benchmark-model
 
-`xiaomi` · 2026-09-14 · 3 attempts per task per strategy · Windows 11, Python 3.13.14 · commit `5b611e4` (tasks Phase 1 state, before the ledger and clarification changes)
+`benchmark-provider` · 2026-09-14 · 3 attempts per task per strategy · Windows 11, Python 3.13.14 · commit `5b611e4` (tasks Phase 1 state, before the ledger and clarification changes)
 
 `current` is the product as shipped. `naive` re-sends full history, full files and full tool output every turn with no sweep, pruning or optimization. Every token figure is a per-attempt mean and travels with the outcome rate it was measured beside.
 

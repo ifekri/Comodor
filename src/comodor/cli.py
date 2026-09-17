@@ -440,6 +440,11 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
             "tool_calls": result.tool_calls,
             "tools": used,
             "error": result.error,
+            # What the completion gate could not see delivered (FR-037). A
+            # partial answer is qualified here rather than only on the
+            # terminal, so a script that reads `stopped` sees the same thing
+            # a person would.
+            "annotation": result.annotation,
             "usage": {
                 "input_tokens": result.usage.input_tokens,
                 "output_tokens": result.usage.output_tokens,
@@ -466,6 +471,8 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(result.text)
+        if result.annotation:
+            print(f"\n{result.annotation}")
         if result.error:
             print(f"\nerror: {result.error}", file=sys.stderr)
 

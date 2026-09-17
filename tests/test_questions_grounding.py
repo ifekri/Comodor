@@ -83,6 +83,56 @@ def test_an_option_from_a_file_nobody_read_is_not_grounded(context):
     assert _labels(seen[0]) == [forms.WRITE_YOUR_OWN]
 
 
+def test_a_source_that_does_not_establish_the_candidate_does_not_ground_it(context):
+    """A file being read is not evidence that it names the candidate.
+
+    The path was read this turn, but nothing in it supports the option; a
+    candidate that merely shares a turn with an unrelated file is not
+    grounded, and must not be shown as if it were.
+    """
+    target = context.config.paths.project / "README.md"
+    target.write_text("# Project\n\nA small caching service.\n", encoding="utf-8")
+    context.note_read(target, material=target.read_text(encoding="utf-8"))
+
+    kept = ground([forms.Option(label="PostgreSQL", source="repository",
+                                evidence="README.md")], context)
+    assert kept == [], "README.md never mentions PostgreSQL"
+
+
+def test_a_source_that_establishes_the_candidate_grounds_it(context):
+    target = context.config.paths.project / "README.md"
+    target.write_text("Everything is stored in PostgreSQL.\n", encoding="utf-8")
+    context.note_read(target, material=target.read_text(encoding="utf-8"))
+
+    kept = ground([forms.Option(label="PostgreSQL", source="repository",
+                                evidence="README.md")], context)
+    assert [option.label for option in kept] == ["PostgreSQL"]
+
+
+def test_a_read_from_an_earlier_turn_does_not_ground_this_one(context):
+    """`seen` outlives the turn on purpose; grounding does not use it."""
+    target = context.config.paths.project / "README.md"
+    target.write_text("Everything is stored in PostgreSQL.\n", encoding="utf-8")
+    context.note_read(target, material=target.read_text(encoding="utf-8"))
+    assert context.was_read(target) is True
+
+    context.reset_evidence()             # the next turn starts here
+
+    kept = ground([forms.Option(label="PostgreSQL", source="repository",
+                                evidence="README.md")], context)
+    assert kept == [], "a previous turn's read is not this turn's evidence"
+
+
+def test_a_verified_claim_that_establishes_the_candidate_grounds_it(context):
+    """A claim this turn established backs a candidate the same way a read does."""
+    context.evidence.verified("deployments run PostgreSQL 16",
+                              source="grep:deploy")
+
+    kept = ground([forms.Option(label="PostgreSQL", source="repository",
+                                evidence="deployments run PostgreSQL 16")], context)
+    assert [option.label for option in kept] == ["PostgreSQL"]
+
+
 def test_an_option_from_recalled_knowledge_is_grounded(context):
     context.recalled = ["deployments: this project always caches in Redis"]
     seen = _seen_form(context)

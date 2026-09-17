@@ -1,6 +1,6 @@
-# Comodor blocked optimization experiment — mimo-v2.5-pro
+# Comodor blocked optimization experiment — benchmark-model
 
-`xiaomi` · 2026-09-16 · 48 blocks · 336 attempts · Windows 11, Python 3.13.14
+`benchmark-provider` · 2026-09-16 · 48 blocks · 336 attempts · Windows 11, Python 3.13.14
 
 Every `(task, try)` block ran all seven configurations in a counterbalanced order, so a CURRENT-vs-ablation pair differs by the switch and little else.
 

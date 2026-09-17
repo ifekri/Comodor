@@ -485,6 +485,51 @@ def test_a_permission_nobody_answers_is_a_refusal(driven, tmp_path, monkeypatch)
     assert request.wait(timeout=3) == "no"
 
 
+def test_a_question_form_is_not_shown_as_a_yes_no_permission_prompt(driven, tmp_path):
+    """ACP has no request shape for a structured question form.
+
+    The only thing an agent may ask a client is a permission prompt, whose
+    options are allow/reject choices. A form put there, or answered with
+    "yes"/"no", would be a lie about what was asked and what was chosen, so
+    the form fails honestly: the request resolves as unattended and the turn
+    reports the decision as still needed.
+    """
+    from comodor import questions as forms
+    from comodor.events import Request
+
+    agent, out = driven
+    project = tmp_path / "p"
+    project.mkdir()
+    session = agent.sessions[agent.session_new({"cwd": str(project)})["sessionId"]]
+
+    request = Request(id="q-1", kind="questions", prompt="Which database?",
+                      options=[], meta={"questions": [{"header": "DB",
+                      "prompt": "Which database?", "options": []}]})
+    session._ask(request)
+
+    asked = [m for m in out.messages
+             if m.get("method") == "session/request_permission"]
+    assert asked == [], "a form is not a permission prompt"
+    assert request.wait(timeout=3) == forms.UNATTENDED
+
+
+def test_closing_a_session_leaves_a_question_form_open_not_answered(driven, tmp_path):
+    """A question nobody answered is unattended, never an invented "no"."""
+    from comodor import questions as forms
+    from comodor.events import Request
+
+    agent, _ = driven
+    project = tmp_path / "p"
+    project.mkdir()
+    session = agent.sessions[agent.session_new({"cwd": str(project)})["sessionId"]]
+    request = Request(id="q-2", kind="questions", prompt="?", options=[])
+    session._pending[request.id] = request
+
+    session.close()
+
+    assert request.wait(timeout=3) == forms.UNATTENDED
+
+
 def test_closing_a_session_answers_anything_still_waiting(driven, tmp_path):
     """A worker blocked on a prompt nobody will ever answer is a process that
     does not exit."""

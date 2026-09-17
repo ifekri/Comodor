@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .. import questions as forms
 from .._version import __version__
 from ..application import assemble
 from ..config import Config
@@ -232,6 +233,24 @@ class AcpSession:
     def _ask(self, request: Request) -> None:
         """Put a permission prompt to the editor and answer the worker."""
         self._pending[request.id] = request
+        if request.kind == "questions":
+            # A structured question form is not a permission prompt, and ACP
+            # has no request shape for one: the only thing the agent may ask a
+            # client is `session/request_permission`, whose options are
+            # allow/reject choices. Putting a form there would show the editor
+            # a yes/no question with no answer that means the options — and
+            # answering it with "yes" or "no" would invent a choice nobody
+            # made. There is nothing to transport, so this fails honestly:
+            # the request is resolved as unattended and the turn reports the
+            # decision as still needed (FR-033), rather than cancelled or
+            # silently answered.
+            self.agent.rpc.warn(
+                "acp: a question form has no ACP request shape — reporting it "
+                "as unattended rather than showing a yes/no prompt")
+            self._pending.pop(request.id, None)
+            if not request.answered:
+                request.answer(forms.UNATTENDED)
+            return
         if request.kind == "mode":
             # A proposed mode change: the modes are the options, labelled as
             # themselves. Every choice is "other" to ACP — none of them is an
@@ -278,7 +297,14 @@ class AcpSession:
     def refuse_everything_waiting(self) -> None:
         """Answer every open prompt, so no worker is left blocked."""
         for request in list(self._pending.values()):
-            if not request.answered:
+            if request.answered:
+                continue
+            # A question form answered with its last option would be a real
+            # answer to something nobody answered. Unattended is the honest
+            # resolution, and the only one that leaves the decision open.
+            if request.kind == "questions":
+                request.answer(forms.UNATTENDED)
+            else:
                 request.answer(request.options[-1] if request.options else "no")
         self._pending.clear()
 

@@ -402,7 +402,7 @@ def _grounded(option: forms.Option, ctx: ToolContext) -> bool:
         request = str(getattr(ctx, "request_text", "") or "")
         return _mentioned(evidence, request) or _mentioned(option.label, request)
     if source in ("repository", "configuration", "derivation"):
-        return _observed(evidence, ctx)
+        return _observed(evidence, option, ctx)
     if source == "knowledge":
         recalled = [str(item) for item in (getattr(ctx, "recalled", None) or [])]
         return any(_mentioned(evidence, item) or _mentioned(option.label, item)
@@ -426,14 +426,44 @@ def _mentioned(needle: str, haystack: str) -> bool:
                      haystack) is not None
 
 
-def _observed(reference: str, ctx: ToolContext) -> bool:
-    """Whether `reference` names something this turn read or observed."""
-    wanted = reference.replace("\\", "/").strip().lower()
-    try:
-        if ctx.was_read(ctx.resolve(reference)):
+def _establishes(option: forms.Option, text: str) -> bool:
+    """Whether this source's words actually back the candidate.
+
+    Being read is not being evidence. A file that was read establishes the
+    candidate only if it names it — "PostgreSQL" is not grounded by a README
+    that never mentions it — so the check is on what the source says, not on
+    the fact that it was consulted. A parenthetical on the label is the
+    model's own aside ("redis (as settings.py has)"); the words before it are
+    the candidate.
+    """
+    if not text:
+        return False
+    if _mentioned(option.label, text):
+        return True
+    core = re.sub(r"\([^)]*\)", " ", option.label).strip()
+    return bool(core) and core != option.label and _mentioned(core, text)
+
+
+def _observed(evidence: str, option: forms.Option, ctx: ToolContext) -> bool:
+    """Whether a source this turn consulted establishes the candidate.
+
+    Two things qualify, and both are about this turn. A source the turn read
+    whose text backs the candidate; or a claim the turn verified that backs
+    it. `ToolContext.seen` deliberately does not: it remembers every read of
+    the session so a write can tell what it is replacing, and reading it here
+    would let a file read in an earlier turn keep grounding an option in this
+    one — an unrelated path from the past is not evidence for the present.
+    """
+    if not evidence:
+        return False
+    wanted = evidence.replace("\\", "/").strip().lower()
+    if not wanted:
+        return False
+    for path, text in ctx.read_this_turn.items():
+        name = path.replace("\\", "/").lower()
+        if (name == wanted or name.endswith("/" + wanted)) \
+                and _establishes(option, text):
             return True
-    except Exception:
-        pass
     try:
         from ..agent.evidence import EvidenceState
 
@@ -443,7 +473,8 @@ def _observed(reference: str, ctx: ToolContext) -> bool:
             source = entry.source.replace("\\", "/").lower()
             if source == wanted or source.endswith("/" + wanted) \
                     or wanted in entry.claim.lower():
-                return True
+                if _establishes(option, entry.claim):
+                    return True
     except Exception:
         pass
     return False

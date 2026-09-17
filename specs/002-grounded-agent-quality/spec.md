@@ -999,12 +999,13 @@ the benchmark, and each is independently mutation-checked.
   tool calls and outcome rate for both strategies. The reduction target for
   SC-011 is then set from that data and recorded in this specification, and no
   efficiency work is accepted against a target that predates the baseline.
-  **Published (T015)**: `bench/results/baseline-mimo-v2-5-pro-2026-09-14.json`
+  **Published (T015)**: `bench/results/paired-baseline-2026-09-14.json`
   and `.md`, measured at commit `5b611e4` (the tasks Phase 1 state) with
-  `python -m bench --paired --provider xiaomi --model mimo-v2.5-pro --tries 3`
-  — 13 tasks × 3 attempts × 2 strategies; current 31/39 attempts at a mean of
-  62,673 total tokens per attempt, naive 32/39 at 53,480. This file is the
-  threshold source for SC-011 (T156).
+  `python -m bench --paired --provider <provider> --model <model> --tries 3`
+  (the provider/model the run was configured with; the artifact is sanitized
+  rather than naming it) — 13 tasks × 3 attempts × 2 strategies; current 31/39
+  attempts at a mean of 62,673 total tokens per attempt, naive 32/39 at 53,480.
+  This file is the threshold source for SC-011 (T156).
 - **SC-012**: No benchmark task's outcome rate falls relative to the immediately
   preceding published baseline as a result of an efficiency change; any fall is
   reported as a regression and blocks the change.
