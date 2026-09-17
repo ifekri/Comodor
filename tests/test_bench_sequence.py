@@ -191,3 +191,57 @@ def test_the_report_includes_the_sequence_record(tmp_path):
     assert record["verdict"] == "pass"
     assert len(record["steps"]) == 6
     assert record["steps"][0]["clarifications"] == 1
+
+
+def _step_fake(calls):
+    """A stand-in for the per-step `comodor run`, so no process starts."""
+    def fake(task, workspace, home, provider, model, prompt="", interaction=()):
+        calls.append(prompt)
+        return Attempt(workspace=workspace, ok=True, stopped="done", text="",
+                       steps=1, input_tokens=100, output_tokens=10, cached_tokens=50)
+    return fake
+
+
+def test_a_sequence_honours_the_requested_tries(monkeypatch, tmp_path):
+    """`--tries 3` means three whole sequences, not one."""
+    task = _sequence_task(tmp_path)
+    calls: list = []
+    monkeypatch.setattr(runner, "_invoke", _step_fake(calls))
+    outcome = runner.run_task(task, provider="fake", model="m", tries=3,
+                              say=lambda *a, **k: None)
+
+    assert len(calls) == 18, "three runs of six steps"
+    assert len(outcome.verdicts) == 3
+    assert len(outcome.sequence_runs()) == 3
+    assert [run.attempts[0].sequence_run for run in outcome.sequence_runs()] == [1, 2, 3]
+
+
+def test_sequence_totals_are_per_run_not_per_step(monkeypatch, tmp_path):
+    task = _sequence_task(tmp_path)
+    monkeypatch.setattr(runner, "_invoke", _step_fake([]))
+    outcome = runner.run_task(task, provider="fake", model="m", tries=2,
+                              say=lambda *a, **k: None)
+
+    row = report.as_json([outcome], provider="fake", model="m", tries=2)["tasks"][0]
+    # Each step totals 160 tokens (100+50+10); a run of six steps is 960.
+    assert row["mean_total_tokens"] == 960
+    assert row["sequence"]["runs"] == 2
+
+
+def test_a_sequence_step_reports_artifact_success_not_exit(monkeypatch, tmp_path):
+    """The step's success is whether it produced its artifact, not that the
+    process exited cleanly."""
+    repo = tmp_path / "repo2"
+    repo.mkdir()
+    steps = tuple(SequenceStep(prompt=f"add setting K{index + 1}",
+                               expect={"path": "items.py",
+                                       "marker": f"K{index + 1}"})
+                  for index in range(6))
+    task = Task(name="seq-artifact", category="careful", prompt="p", repo=repo,
+                check=lambda attempt: Verdict.ok(), sequence=steps,
+                check_sequence=lambda result: Verdict.ok())
+    monkeypatch.setattr(runner, "_invoke", _step_fake([]))
+    outcome = runner.run_task(task, provider="fake", model="m", tries=1,
+                              say=lambda *a, **k: None)
+    row = report.as_json([outcome], provider="fake", model="m", tries=1)["tasks"][0]
+    assert row["sequence"]["steps"][0]["success"] is False

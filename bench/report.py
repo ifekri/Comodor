@@ -74,11 +74,32 @@ def _task_record(one: Outcome) -> dict:
     }
     sequence = one.sequence_result
     if sequence is not None:
-        record["sequence"] = _sequence_record(sequence, one)
+        runs = one.sequence_runs()
+        # A sequence's attempts are its steps, so the per-try figures are per
+        # whole sequence run, not per step.
+        record["result"] = one.rate
+        record["correctness"] = round(one.passed / one.tries, 3) if one.tries else 0.0
+        for key, attribute in (("mean_steps", "steps"),
+                               ("mean_tool_calls", "tool_calls"),
+                               ("mean_input_tokens", "input_tokens"),
+                               ("mean_output_tokens", "output_tokens"),
+                               ("mean_cached_tokens", "cached_tokens"),
+                               ("mean_written_tokens", "written_tokens"),
+                               ("mean_total_tokens", "total_tokens")):
+            record[key] = round(_mean_over_runs(runs, attribute), 1)
+        record["sequence"] = _sequence_record(sequence, one, runs=len(runs))
     return record
 
 
-def _sequence_record(sequence, one: Outcome) -> dict:
+def _mean_over_runs(runs, attribute: str) -> float:
+    """The per-run mean of one attempt field, summed over each run's steps."""
+    if not runs:
+        return 0.0
+    return (sum(sum(getattr(step, attribute) for step in run.attempts)
+                for run in runs) / len(runs))
+
+
+def _sequence_record(sequence, one: Outcome, runs: int = 1) -> dict:
     """The six-task sequence's record: per-step rows, windows, SC-021 verdict.
 
     The two primary metrics are the clarification and correction totals; the
@@ -93,17 +114,21 @@ def _sequence_record(sequence, one: Outcome) -> dict:
         "windows": sequence.windows(),
         "verdict": "pass" if one.passed else "fail",
         "reason": reason,
+        "runs": runs,
         "steps": [
             {"index": index + 1,
              "prompt": step.prompt,
              "stopped": attempt.stopped,
              "outcome": attempt.outcome,
-             "success": attempt.ok,
+             # Whether the step produced the artifact it had to, not merely
+             # whether its process exited cleanly.
+             "success": attempt.success,
              "tools": attempt.tools,
              "clarifications": attempt.clarifications_raised,
              "corrections": attempt.corrections,
              "input_tokens": attempt.input_tokens,
              "output_tokens": attempt.output_tokens,
+             "written_tokens": attempt.written_tokens,
              "diagnostics": attempt.measurement}
             for index, (step, attempt) in enumerate(
                 zip(sequence.steps, sequence.attempts, strict=True))

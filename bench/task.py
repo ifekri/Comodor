@@ -85,6 +85,10 @@ class Attempt:
     #: `expect`). Checked while the workspace exists; the report reads this
     #: rather than the removed workspace.
     success: bool = False
+    #: For a sequence step, which sequence run it belongs to (1-based). A
+    #: sequence task honours `tries`, so steps from different runs must not be
+    #: averaged together as if they were one sequence.
+    sequence_run: int = 0
 
     @property
     def outcome(self) -> str:

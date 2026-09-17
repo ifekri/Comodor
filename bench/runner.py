@@ -120,12 +120,27 @@ class Outcome:
                 tally[state] = tally.get(state, 0) + 1
         return tally
 
+    def sequence_runs(self) -> list[SequenceResult]:
+        """One `SequenceResult` per sequence run (`tries` honours the flag).
+
+        A sequence's attempts are its steps, so averaging them as if each were
+        an independent try would report per-step figures. Grouping by run keeps
+        the window totals a statement about whole sequences.
+        """
+        if not self.task.sequence:
+            return []
+        runs: dict[int, list[Attempt]] = {}
+        for attempt in self.attempts:
+            runs.setdefault(attempt.sequence_run or 1, []).append(attempt)
+        return [SequenceResult(task=self.task, steps=list(self.task.sequence),
+                               attempts=grouped)
+                for _, grouped in sorted(runs.items())]
+
     @property
     def sequence_result(self) -> SequenceResult | None:
-        if not self.task.sequence:
-            return None
-        return SequenceResult(task=self.task, steps=list(self.task.sequence),
-                              attempts=self.attempts)
+        """The first sequence run, for the per-step block of the report."""
+        runs = self.sequence_runs()
+        return runs[0] if runs else None
 
     def why(self) -> str:
         """The first reason it failed, which is the one worth reading."""
@@ -140,9 +155,22 @@ def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
              strategy: str = baseline.CURRENT, learning: bool = False,
              without: tuple[str, ...] = ()) -> Outcome:
     if task.sequence:
-        return _run_sequence(task, provider=provider, model=model, keep=keep,
-                             say=say, strategy=strategy, learning=learning,
-                             without=without)
+        outcome = Outcome(task=task, strategy=strategy)
+        outcome.learning = learning
+        outcome.without = tuple(without)
+        outcome.sequence = True
+        for attempt_number in range(1, tries + 1):
+            say(f"  sequence run {attempt_number}/{tries}")
+            attempts, verdict, kept = _run_sequence_once(
+                task, provider=provider, model=model, keep=keep, say=say,
+                strategy=strategy, learning=learning, without=without)
+            for step_attempt in attempts:
+                step_attempt.sequence_run = attempt_number
+            outcome.attempts.extend(attempts)
+            outcome.verdicts.append(verdict)
+            if not verdict.passed:
+                outcome.kept.append(kept)
+        return outcome
     outcome = Outcome(task=task, strategy=strategy)
     outcome.learning = learning
     outcome.without = tuple(without)
@@ -161,9 +189,10 @@ def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
     return outcome
 
 
-def _run_sequence(task: Task, *, provider: str, model: str,
-                  keep: Path | None, say, strategy: str,
-                  learning: bool, without: tuple[str, ...]) -> Outcome:
+def _run_sequence_once(task: Task, *, provider: str, model: str,
+                       keep: Path | None, say, strategy: str,
+                       learning: bool, without: tuple[str, ...]
+                       ) -> tuple[list[Attempt], Verdict, str]:
     """Run every step of a same-project sequence in one workspace and home.
 
     The workspace is copied once and the home is created once, so the durable
@@ -173,11 +202,7 @@ def _run_sequence(task: Task, *, provider: str, model: str,
     detector — the real learning path — notices it. Nothing is written into the
     brain directly.
     """
-    outcome = Outcome(task=task, strategy=strategy)
-    outcome.learning = learning
-    outcome.without = tuple(without)
-    outcome.sequence = True
-
+    attempts: list[Attempt] = []
     root = Path(tempfile.mkdtemp(prefix=f"comodor-bench-{task.name}-"))
     workspace = root / "work"
     home = root / "home"
@@ -191,7 +216,7 @@ def _run_sequence(task: Task, *, provider: str, model: str,
         attempt = _invoke(task, workspace, home, provider, model,
                           prompt=step.prompt, interaction=step.interaction)
         attempt.success = _step_met(workspace, step.expect)
-        outcome.attempts.append(attempt)
+        attempts.append(attempt)
         say(f"    {index + 1}/{len(task.sequence)}  "
             f"{'pass' if attempt.ok else 'FAIL'}  {attempt.steps} steps  "
             f"{attempt.elapsed:.0f}s  "
@@ -206,25 +231,23 @@ def _run_sequence(task: Task, *, provider: str, model: str,
                 say(f"         (correction hook failed: {problem})")
 
     result = SequenceResult(task=task, steps=list(task.sequence),
-                            attempts=list(outcome.attempts))
+                            attempts=list(attempts))
     try:
         verdict = task.check_sequence(result)
     except Exception as problem:
         verdict = Verdict.no(f"the judge raised {type(problem).__name__}: {problem}")
-    outcome.verdicts.append(verdict)
     say(f"    sequence  {'pass' if verdict.passed else 'FAIL'}  — {verdict.reason}")
 
     if verdict.passed:
         shutil.rmtree(root, ignore_errors=True)
-    else:
-        outcome.kept.append(str(root))
-        _keep_sequence(root, task, result, verdict)
-        if keep is not None:
-            keep.mkdir(parents=True, exist_ok=True)
-            moved = keep / f"{task.name}-{int(time.time())}"
-            shutil.move(str(root), str(moved))
-            outcome.kept = [str(moved)]
-    return outcome
+        return attempts, verdict, ""
+    _keep_sequence(root, task, result, verdict)
+    if keep is not None:
+        keep.mkdir(parents=True, exist_ok=True)
+        moved = keep / f"{task.name}-{int(time.time())}"
+        shutil.move(str(root), str(moved))
+        return attempts, verdict, str(moved)
+    return attempts, verdict, str(root)
 
 
 def _step_met(workspace: Path, expect: dict[str, str]) -> bool:
