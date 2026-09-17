@@ -424,3 +424,21 @@ def test_a_normal_turn_has_no_clarification_block():
     bridge.session = _Session()
     body = bridge._outcome(["done"], 1, "done", None)
     assert "clarification" not in body
+
+
+def test_the_api_session_bridge_carries_the_completion_annotation():
+    """The gate's annotation survives `session_map._outcome` so an API client
+    cannot read a partial answer as an unqualified completion (FR-037)."""
+    from comodor.api.session_map import Talk
+
+    class _Session:
+        def state(self):
+            return {}
+
+    bridge = object.__new__(Talk)
+    bridge.session = _Session()
+    annotation = "Not everything the request asked for was delivered:\n  - a config file"
+    body = bridge._outcome(["partial"], 1, "done", None, annotation)
+
+    assert body["annotation"] == annotation
+    assert "annotation" not in bridge._outcome(["done"], 1, "done", None, "")

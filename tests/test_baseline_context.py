@@ -181,3 +181,21 @@ def test_a_reference_dependency_survives_a_session_round_trip(tmp_path):
     assert restored[0].meta.get("reference") == "c1"
     assert restored[1].meta.get("delta_base") == "c2"
     assert restored[1].meta.get("delta") is True
+
+
+def test_a_tool_source_survives_a_session_round_trip(tmp_path):
+    """A resumed observation keeps the file it was about and the fingerprint
+    of what was there, or a learned item resting on it can never be
+    invalidated when that file changes (FR-060, FR-114)."""
+    from comodor.session.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    read = Message.tool(call_id="c1", name="read_file", content="runs-on: ubuntu-latest")
+    read.meta["path"] = "ci.yml"
+    read.meta["fingerprint"] = "0123456789abcdef"
+    store.append("s1", read)
+
+    [restored] = store.load("s1")
+
+    assert restored.meta.get("path") == "ci.yml"
+    assert restored.meta.get("fingerprint") == "0123456789abcdef"

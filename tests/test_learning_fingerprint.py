@@ -196,3 +196,26 @@ def test_recount_compares_the_prevailing_convention_not_the_first_file(tmp_path)
                                 "Use single quotes for string literals.") is True
     assert rules_module.recount(files, "quotes.style", root,
                                 "Use double quotes for string literals.") is False
+
+
+def test_a_tool_confirmed_lesson_goes_stale_when_its_file_changes(brain, tmp_path):
+    """A reflection can admit a lesson corroborated by a tool observation,
+    with the same source_ref and fingerprint a fact gets; a lesson still
+    describing a changed file must not stay active (FR-060, FR-114)."""
+    root = tmp_path / "project"
+    root.mkdir()
+    target = root / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    lesson = brain.add_lesson(Lesson(
+        provenance="tool_confirmed", scope="project:p",
+        trigger="editing ci.yml", guidance="the CI runner is Linux only",
+        source_ref="read_file:ci.yml",
+        fingerprint=rules_module.file_fingerprint(target)))
+
+    assert stale_by_fingerprint(brain, root, ["project:p"]) == []
+
+    target.write_text("runs-on: windows-latest\n", encoding="utf-8")
+    marked = stale_by_fingerprint(brain, root, ["project:p"])
+
+    assert any(item["table"] == "lessons" and item["id"] == lesson.id for item in marked)
+    assert brain.all_lessons(["project:p"])[0].status == "stale"

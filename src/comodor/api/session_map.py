@@ -105,7 +105,8 @@ class Talk:
                 elif kind == "turn_end":
                     return self._outcome(text_parts, steps,
                                          str(event.get("stopped") or "done"),
-                                         event.get("clarification"))
+                                         event.get("clarification"),
+                                         event.get("annotation"))
                 elif kind == "cancelled":
                     return self._outcome(text_parts, steps, "cancelled")
 
@@ -113,7 +114,8 @@ class Talk:
                 "stopped": "timeout", "error": "the turn outlived its patience"}
 
     def _outcome(self, text_parts: list[str], steps: int,
-                 stopped: str, clarification: Any = None) -> dict[str, Any]:
+                 stopped: str, clarification: Any = None,
+                 annotation: Any = None) -> dict[str, Any]:
         """The answer plus what the loop charged, from the session's own
         accounting. Usage lives on the conversation, not on the events. The
         structured clarification payload (including `clarification.outcome`)
@@ -139,6 +141,11 @@ class Talk:
                 "result": _Result()}
         if isinstance(clarification, dict) and clarification:
             body["clarification"] = clarification
+        if isinstance(annotation, str) and annotation:
+            # The completion gate's unresolved work rides the outcome too, so
+            # an API client cannot read a partial answer as an unqualified
+            # completion (FR-037).
+            body["annotation"] = annotation
         return body
 
     def close(self) -> None:

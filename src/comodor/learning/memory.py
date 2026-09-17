@@ -206,7 +206,8 @@ def _content(message: Any) -> str:
 
 def stale_by_fingerprint(store: BrainStore, root: Path, scopes: list[str],
                          paths: Iterable[str] | None = None,
-                         tables: tuple[str, ...] = ("rules", "facts")) -> list[dict[str, Any]]:
+                         tables: tuple[str, ...] = ("rules", "facts",
+                                                    "lessons")) -> list[dict[str, Any]]:
     """Mark what a changed source no longer supports. Returns what was marked.
 
     `paths` narrows the check to items whose source includes one of them —
@@ -258,6 +259,27 @@ def stale_by_fingerprint(store: BrainStore, root: Path, scopes: list[str],
                 continue
             store.mark_stale("facts", fact.id)
             marked.append({"table": "facts", "id": fact.id, "text": fact.text,
+                           "why": f"{path} changed since it was read"})
+
+    if "lessons" in tables:
+        # A reflection can admit a lesson corroborated by a tool observation,
+        # with the same source_ref and fingerprint a fact gets. Checked the
+        # same way: a lesson that still describes a file which has changed is
+        # injected into the playbook as if it were true (FR-060, FR-114).
+        for lesson in store.all_lessons(scopes):
+            if lesson.status != "active" or lesson.provenance != "tool_confirmed" \
+                    or not lesson.fingerprint:
+                continue
+            path = _path_of(lesson.source_ref)
+            if not path:
+                continue
+            if touched and _under(root, path) not in touched:
+                continue
+            current = rules_module.file_fingerprint(root / path)
+            if current == lesson.fingerprint:
+                continue
+            store.mark_stale("lessons", lesson.id)
+            marked.append({"table": "lessons", "id": lesson.id, "text": lesson.text,
                            "why": f"{path} changed since it was read"})
     return marked
 

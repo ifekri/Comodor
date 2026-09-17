@@ -285,7 +285,8 @@ class AgentLoop:
         self._say_if_unverified(result)
         self.bus.emit(Kind.TURN_END, stopped=result.stopped, steps=result.steps,
                       elapsed=result.elapsed, error=result.error,
-                      clarification=result.clarification)
+                      clarification=result.clarification,
+                      annotation=result.annotation)
 
         self._learn(user_text, result)
         return result

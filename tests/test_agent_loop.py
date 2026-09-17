@@ -329,3 +329,19 @@ def test_an_ordinary_answer_is_untouched(config, bus):
 
     assert result.text == "All done."
     assert result.steps == 1
+
+
+def test_the_turn_end_event_carries_the_completion_annotation(config, bus):
+    """The completion gate's unresolved work rides the turn-end event, so a
+    surface that rebuilds the answer from events is not left with an
+    unqualified `done` (FR-037)."""
+    events = []
+    bus.subscribe(lambda event: events.append(event)
+                  if event.kind is Kind.TURN_END else None)
+    agent = make_agent(config, bus, [Script(text="I started on it.")])
+
+    result = agent.run("- add a config file\n- write the tests")
+
+    assert result.annotation
+    [end] = events
+    assert end.get("annotation") == result.annotation

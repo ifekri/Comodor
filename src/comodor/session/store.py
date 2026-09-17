@@ -135,6 +135,14 @@ class SessionStore:
                 record[key] = value
         if message.meta.get("delta"):
             record["delta"] = True
+        # The source a tool message observed: the file it was about and the
+        # fingerprint of what was there. Without them a resumed observation
+        # cannot be tied to a file, so a learned item resting on it could
+        # never be invalidated when that file changes (FR-060, FR-114).
+        for key in ("path", "fingerprint"):
+            value = message.meta.get(key) if message.meta else None
+            if isinstance(value, str) and value:
+                record[key] = value
         with self.path_for(session_id).open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -166,6 +174,9 @@ class SessionStore:
                         meta[key] = record[key]
                 if record.get("delta"):
                     meta["delta"] = True
+                for key in ("path", "fingerprint"):
+                    if isinstance(record.get(key), str) and record[key]:
+                        meta[key] = record[key]
                 messages.append(Message(
                     role=Role(record.get("role", "user")),
                     content=record.get("content", ""),

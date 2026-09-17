@@ -253,6 +253,11 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
                 # rides the extension block, so a standard client keeps its
                 # existing behaviour (contracts §C4; FR-123).
                 comodor_block["clarification"] = clarification
+            annotation = outcome.get("annotation")
+            if isinstance(annotation, str) and annotation:
+                # The completion gate's unresolved work, so an API client can
+                # tell a partial answer from a complete one (FR-037).
+                comodor_block["annotation"] = annotation
             extra = {"comodor": comodor_block}
 
             if stream:
