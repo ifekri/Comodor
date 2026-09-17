@@ -95,7 +95,16 @@ class Outcome:
         return sum(attempt.steps for attempt in self.attempts) / len(self.attempts)
 
     def mean(self, name: str) -> float:
-        """The per-attempt mean of one numeric attempt field."""
+        """The per-attempt mean of one numeric attempt field.
+
+        For a sequence, an "attempt" is a whole run of its steps, so this is
+        the mean of each run's total — not the mean of its steps, which would
+        report a six-turn sequence at a sixth of its cost.
+        """
+        runs = self.sequence_runs()
+        if runs:
+            return (sum(sum(getattr(step, name) for step in run.attempts)
+                        for run in runs) / len(runs))
         if not self.attempts:
             return 0.0
         return sum(getattr(attempt, name) for attempt in self.attempts) / len(self.attempts)

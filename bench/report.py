@@ -106,15 +106,18 @@ def _sequence_record(sequence, one: Outcome, runs: int = 1) -> dict:
     window comparison and the comparability flag decide the verdict, and an
     incomparable run says so rather than passing or failing.
     """
-    reason = one.verdicts[0].reason if one.verdicts else ""
+    # This block describes the first run; the task-level `result` carries the
+    # aggregate over runs, so a mixed set of runs is not reported as a pass.
+    first = one.verdicts[0] if one.verdicts else None
     return {
         "comparable": sequence.comparable,
         "invalid_reason": "" if sequence.comparable else
                           "the task inputs are not comparable — the run is invalid",
         "windows": sequence.windows(),
-        "verdict": "pass" if one.passed else "fail",
-        "reason": reason,
+        "verdict": "pass" if (first is not None and first.passed) else "fail",
+        "reason": first.reason if first is not None else "",
         "runs": runs,
+        "passed_runs": one.passed,
         "steps": [
             {"index": index + 1,
              "prompt": step.prompt,

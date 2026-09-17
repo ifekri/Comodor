@@ -245,3 +245,34 @@ def test_a_sequence_step_reports_artifact_success_not_exit(monkeypatch, tmp_path
                               say=lambda *a, **k: None)
     row = report.as_json([outcome], provider="fake", model="m", tries=1)["tasks"][0]
     assert row["sequence"]["steps"][0]["success"] is False
+
+
+def test_a_sequence_mean_is_per_run(monkeypatch, tmp_path):
+    """A six-step sequence is a whole attempt, not six of them."""
+    task = _sequence_task(tmp_path)
+    monkeypatch.setattr(runner, "_invoke", _step_fake([]))
+    outcome = runner.run_task(task, provider="fake", model="m", tries=2,
+                              say=lambda *a, **k: None)
+
+    assert outcome.mean("total_tokens") == 960
+
+
+def test_a_mixed_sequence_verdict_is_the_first_runs():
+    """The per-step block describes the first run; the aggregate is at the task
+    level, so a partly-passing sequence is not labelled `pass`."""
+    from bench.runner import Outcome
+    from bench.task import SequenceStep, Verdict
+
+    steps = [SequenceStep(prompt="add", expect={"path": "items.py", "marker": "K"})]
+    task = Task(name="s", category="careful", prompt="p", repo=Path("."),
+                check=lambda a: Verdict.ok(), sequence=tuple(steps),
+                check_sequence=lambda r: Verdict.ok())
+    attempt = Attempt(workspace=Path("."), ok=True, stopped="done", text="",
+                      steps=1, sequence_run=1)
+    outcome = Outcome(task=task, verdicts=[Verdict.no("the first run failed"),
+                                           Verdict.ok()], attempts=[attempt])
+    record = report._sequence_record(outcome.sequence_result, outcome, runs=2)
+
+    assert record["verdict"] == "fail"
+    assert record["passed_runs"] == 1
+    assert record["runs"] == 2

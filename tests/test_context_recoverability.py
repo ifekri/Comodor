@@ -260,3 +260,38 @@ def test_an_unreferenced_full_result_is_still_withheld(tool_context):
     moved, _ = conversation.withhold(1)
     assert moved >= 1
     assert base.meta.get("withheld") is True
+
+
+def test_a_tool_results_own_metadata_rides_with_its_message(config, bus):
+    """The spill path a command's overflow recorded must reach the message the
+    budget manager reads, or a withheld command cannot be retrieved safely."""
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import Role, ToolCall
+    from comodor.providers.fake import Script
+    from comodor.providers.gateway import Gateway
+    from comodor.safety import PermissionEngine, Risk
+    from comodor.tools import ToolRegistry
+    from comodor.tools.base import Tool, ToolResult
+
+    class Spilly(Tool):
+        name = "spilly"
+        risk = Risk.SAFE
+        parameters = {"type": "object", "properties": {}, "required": []}
+
+        def run(self, ctx, **args):
+            return ToolResult.success("done", display="done",
+                                      spill="/tmp/spill.txt", overflowed=True)
+
+    registry = ToolRegistry()
+    registry.add(Spilly())
+    agent = AgentLoop(
+        config,
+        Gateway(config, scripts=[
+            Script(text="go", tool_calls=[ToolCall(id="s1", name="spilly", arguments={})]),
+            Script(text="done")]),
+        registry, bus, PermissionEngine(config, bus), Conversation())
+    agent.run("do it")
+
+    tool_message = next(m for m in agent.conversation.messages if m.role is Role.TOOL)
+    assert tool_message.meta.get("spill") == "/tmp/spill.txt"
+    assert tool_message.meta.get("overflowed") is True

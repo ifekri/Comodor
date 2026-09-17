@@ -170,3 +170,29 @@ def test_mutation_without_the_fingerprint_check_the_fact_stays_live(brain, tmp_p
     target.write_text("runs-on: windows-latest\n", encoding="utf-8")
     assert stale_by_fingerprint(brain, root, ["project:p"]) != [], (
         "the changed file is what marks the fact stale")
+
+
+def test_recount_compares_the_prevailing_convention_not_the_first_file(tmp_path):
+    """A mixed sample is judged by its prevailing weighted statement.
+
+    With two single-quote files and one double-quote file, the convention is
+    single regardless of which file is scanned first; comparing the first
+    file's statement would mark a correct, unchanged rule stale.
+    """
+    from comodor.learning import rules as rules_module
+
+    root = tmp_path / "project"
+    root.mkdir()
+    files = []
+    for index in range(2):
+        path = root / f"single{index}.py"
+        path.write_text("\n".join(f"v{n} = 't'" for n in range(10)), encoding="utf-8")
+        files.append(path)
+    double = root / "double.py"
+    double.write_text("\n".join(f'v{n} = "t"' for n in range(10)), encoding="utf-8")
+    files.append(double)
+
+    assert rules_module.recount(files, "quotes.style", root,
+                                "Use single quotes for string literals.") is True
+    assert rules_module.recount(files, "quotes.style", root,
+                                "Use double quotes for string literals.") is False

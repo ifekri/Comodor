@@ -519,6 +519,13 @@ class AgentLoop:
             # untrue can be found and dropped. The tools already know; nothing
             # was carrying it across.
             staleness.note(message, str(result.meta.get("path") or ""))
+            # The result's own metadata rides with it: a spill path is what
+            # makes an overflowed command safely retrievable later, and the
+            # budget manager reads it from the message, not from the tool
+            # result that no longer exists by then.
+            for key in ("spill", "overflowed", "full_chars", "log", "diff"):
+                if key in result.meta:
+                    message.meta.setdefault(key, result.meta[key])
             # A learned item that this file no longer supports is marked
             # stale now, and the model is told, so an answer resting on it
             # is corrected before the turn ends (FR-114).

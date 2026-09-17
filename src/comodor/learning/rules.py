@@ -369,7 +369,7 @@ def recount(files: list[Path], key: str, root: Path, statement: str = "") -> boo
     is what "the source no longer supports it" means.
     """
     support = against = 0
-    current = ""
+    tallies: dict[str, int] = {}
     observations: list[Observation] = []
     for path in files:
         try:
@@ -383,14 +383,19 @@ def recount(files: list[Path], key: str, root: Path, statement: str = "") -> boo
             continue
         if observation.agrees:
             support += observation.weight
-            if not current:
-                current = observation.statement
+            normalised = _normalise(observation.statement)
+            tallies[normalised] = tallies.get(normalised, 0) + observation.weight
         else:
             against += observation.weight
     if support <= 0 or support < against:
         return False
-    if statement and current and _normalise(current) != _normalise(statement):
-        return False
+    if statement and tallies:
+        # The prevailing convention, not the first file's: a sample with both
+        # sides present is judged by the weighted majority, so a mixed sample
+        # does not read as a flip while the counts are unchanged.
+        prevailing = max(tallies.items(), key=lambda item: (item[1], item[0]))[0]
+        if prevailing != _normalise(statement):
+            return False
     return True
 
 
