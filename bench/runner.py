@@ -631,6 +631,7 @@ def _attempt_record(entry: BlockedAttempt) -> dict:
             "input_tokens": attempt.input_tokens,
             "output_tokens": attempt.output_tokens,
             "cached_tokens": attempt.cached_tokens,
+            "written_tokens": attempt.written_tokens,
             "cost_usd": attempt.cost_usd,
             "tool_calls": attempt.tool_calls,
             "error": attempt.error,
@@ -648,6 +649,7 @@ def _entry_from_record(record: dict) -> BlockedAttempt:
         input_tokens=int(saved["input_tokens"]),
         output_tokens=int(saved["output_tokens"]),
         cached_tokens=int(saved["cached_tokens"]),
+        written_tokens=int(saved.get("written_tokens", 0)),
         tool_calls=int(saved.get("tool_calls", 0)),
         measurement=dict(saved.get("measurement") or {}),
     )

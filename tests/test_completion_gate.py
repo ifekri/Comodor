@@ -258,3 +258,50 @@ def test_an_unrecovered_failure_still_blocks_a_completion_claim(config, bus):
     assert result.stopped == "done"
     assert len(agent.gateway.provider("fake").calls) == 3
     assert "not complete" in result.text.lower()
+
+
+def test_a_carried_decision_ends_a_prose_only_turn(config, bus):
+    """A decision a delegate left open is not lost when the model answers in prose.
+
+    The turn was handed an unresolved mandatory decision; the model answers
+    without calling a tool, so nothing else would ever report it and the client
+    would be told the turn finished normally.
+    """
+    from comodor.providers.fake import Script
+
+    agent = _agent(config, bus, [Script(text="Here is what I think about it.")])
+    decision = {"kind": "clarification_required", "decision": "Which database?",
+                "candidates": [], "evidence_consulted": [], "reason": "behaviour",
+                "outcome": "cancelled"}
+
+    result = agent.run("continue", decisions=[decision])
+
+    assert result.stopped == "clarification_required"
+    assert result.clarification is not None
+    assert result.clarification["outcome"] == "cancelled"
+
+
+def test_cancelling_the_turn_outranks_an_unanswered_form(config, bus):
+    """`stopped = "cancelled"` is the turn; a resolved form does not override it."""
+    from comodor import questions as forms
+    from comodor.events import Kind
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+
+    question = ToolCall(id="q1", name="ask", arguments={"questions": [{
+        "question": "Which database should we use?", "header": "Database",
+        "affects": ["persistence"],
+        "options": [{"label": "SQLite", "source": "request", "evidence": "SQLite"},
+                    {"label": "PostgreSQL", "source": "request", "evidence": "PostgreSQL"}]}]})
+
+    def stop_the_turn(event):
+        if event.kind is Kind.REQUEST:
+            agent.interrupt("stop")
+            event.payload["request"].answer(forms.CANCELLED)
+
+    bus.subscribe(stop_the_turn)
+    agent = _agent(config, bus, [Script(text="Asking.", tool_calls=[question])])
+    result = agent.run("SQLite or PostgreSQL?")
+
+    assert result.stopped == "cancelled"
+    assert result.stopped != "clarification_required"

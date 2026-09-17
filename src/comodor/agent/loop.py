@@ -324,6 +324,15 @@ class AgentLoop:
                 else:
                     result.text = assistant.content
 
+                # A decision this turn was handed — a delegate's carried form —
+                # is still open when the model answers without calling a tool.
+                # The turn reports it rather than finishing normally, and a
+                # cancelled turn outranks it (FR-018, contracts §C5).
+                carried_decision = self._clarification_outcome()
+                if carried_decision is not None:
+                    self.cancel.raise_if_cancelled()
+                    return self._end_for_clarification(result, carried_decision)
+
                 # The project's own check, once, before the turn is called
                 # finished. Only when something was changed — a turn that read
                 # files and answered a question has nothing to verify — and
@@ -364,17 +373,12 @@ class AgentLoop:
             # needed (FR-018, FR-033, FR-035).
             needed = self._clarification_outcome()
             if needed is not None:
-                result.stopped = "clarification_required"
-                result.clarification = needed
-                result.measurement.validation_outcome = "clarification_required"
-                result.text = self._needs_a_decision(needed)
-                # Every surface — terminal, browser, and every messaging
-                # channel that drives the shared session — must show which
-                # decision is needed and how the clarification ended. Emitted
-                # as the turn's closing assistant message; nothing is invented
-                # and no dependent work runs (FR-121).
-                self._announce_decision(result.text)
-                return result
+                # A cancelled turn outranks an unanswered form: the transport
+                # resolved the pending request to unblock this worker, and the
+                # thing the user stopped is the turn, not the question
+                # (contracts §C5).
+                self.cancel.raise_if_cancelled()
+                return self._end_for_clarification(result, needed)
 
             if not agent.loop:
                 # Loop off: run the tools the model asked for, then stop and
@@ -1084,6 +1088,22 @@ class AgentLoop:
 
     def _note(self, text: str) -> None:
         self.bus.emit(Kind.NOTICE, text=text)
+
+    def _end_for_clarification(self, result: TurnResult,
+                               needed: dict[str, Any]) -> TurnResult:
+        """End the turn reporting a decision that is still needed.
+
+        One place, so every path that stops for an unanswered mandatory form
+        reports it the same way: the outcome, the payload, the validation
+        state, the visible message, and no dependent work (FR-018, FR-035,
+        FR-121).
+        """
+        result.stopped = "clarification_required"
+        result.clarification = needed
+        result.measurement.validation_outcome = "clarification_required"
+        result.text = self._needs_a_decision(needed)
+        self._announce_decision(result.text)
+        return result
 
     def _announce_decision(self, text: str) -> None:
         """Close the turn with the needed decision as a visible message.

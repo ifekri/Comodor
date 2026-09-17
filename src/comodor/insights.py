@@ -244,6 +244,22 @@ def render(result: Insights) -> str:
         listed = " · ".join(f"**{model}** {share:.0%}"
                             for model, share in result.models[:3])
         lines.append(f"- workhorse models: {listed}")
+    if result.episodes:
+        # The per-task measurement the paired work records, surfaced here so a
+        # person can read it rather than only a benchmark report.
+        lines.append(
+            f"- tasks: {result.episodes:,} · tool calls: {result.tool_calls:,} · "
+            f"questions: {result.clarifications_raised:,} asked, "
+            f"{result.clarifications_answered:,} answered · "
+            f"knowledge: {result.knowledge_hits:,} recalled, "
+            f"{result.knowledge_stale:,} stale")
+    if result.measured_episodes:
+        lines.append(
+            f"- measured tasks: {result.measured_episodes:,} · tokens "
+            f"in/out/cached: {result.task_input_tokens:,}/"
+            f"{result.task_output_tokens:,}/{result.task_cached_tokens:,} · "
+            f"model turns: {result.model_turns:,} · validation failures: "
+            f"{result.validation_failures:,}")
     lines.append("")
     if result.episodes >= MIN_SESSIONS:
         verdict = {True: "fewer corrections per task than before — improving",
@@ -281,6 +297,19 @@ def to_json(result: Insights) -> dict:
         "recent_corrections_per_ten_steps":
             round(result.recent_corrections_per_ten, 3),
         "brain_improving": result.brain_improving,
+        # The per-task measurement the product records, exposed for scripts.
+        "measured_episodes": result.measured_episodes,
+        "task_input_tokens": result.task_input_tokens,
+        "task_output_tokens": result.task_output_tokens,
+        "task_cached_tokens": result.task_cached_tokens,
+        "model_turns": result.model_turns,
+        "tool_calls": result.tool_calls,
+        "clarifications_raised": result.clarifications_raised,
+        "clarifications_answered": result.clarifications_answered,
+        "knowledge_hits": result.knowledge_hits,
+        "knowledge_stale": result.knowledge_stale,
+        "knowledge_stale_rate": round(result.knowledge_stale_rate, 4),
+        "validation_failures": result.validation_failures,
         "cron_jobs": result.cron_runs,
         "cron_failures": result.cron_failures,
     }

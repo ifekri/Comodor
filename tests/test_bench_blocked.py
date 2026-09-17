@@ -367,3 +367,30 @@ def test_a_torn_last_line_is_dropped(monkeypatch, tmp_path):
                                  say=lambda *a, **k: None, checkpoint=checkpoint)
     assert len(calls) == 1, "only the torn line's attempt is repeated"
     assert len(resumed.attempts) == 14
+
+
+def test_written_tokens_survive_a_resume(monkeypatch, tmp_path):
+    """A checkpointed attempt keeps its cache-creation tokens on resume.
+
+    The field is part of `total_tokens`; without it a resumed run would
+    disagree with an uninterrupted one for a provider that bills cache
+    creation.
+    """
+    cohort = [_task("w0", tmp_path)]
+
+    def fake(task, provider, model, keep, strategy, learning, without):
+        attempt = Attempt(workspace=Path("."), ok=True, stopped="done", text="",
+                          steps=1, input_tokens=10, output_tokens=5,
+                          cached_tokens=20, written_tokens=7)
+        return attempt, Verdict.ok(), Path(".")
+
+    monkeypatch.setattr(runner, "_one", fake)
+    checkpoint = tmp_path / "run.checkpoint.jsonl"
+    runner.run_blocked(cohort, provider="fake", model="m", tries=1,
+                       say=lambda *a, **k: None, checkpoint=checkpoint)
+    resumed = runner.run_blocked(cohort, provider="fake", model="m", tries=1,
+                                 say=lambda *a, **k: None, checkpoint=checkpoint)
+
+    assert [entry.attempt.written_tokens for entry in resumed.attempts] == [7] * 7
+    assert all(entry.attempt.total_tokens == 10 + 20 + 7 + 5
+               for entry in resumed.attempts)
