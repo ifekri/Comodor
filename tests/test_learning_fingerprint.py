@@ -44,7 +44,7 @@ def _counted_rule(brain, root, quote):
         source="observation", weight=10,
         provenance="counted_convention",
         source_ref=rules_module.manifest_ref(root, files),
-        fingerprint=rules_module.manifest_fingerprint(files))
+        fingerprint=rules_module.manifest_fingerprint(files, root))
     return rule, files
 
 
@@ -78,7 +78,7 @@ def test_a_change_that_does_not_flip_the_count_refreshes_the_fingerprint(brain, 
     refreshed = brain.all_rules(["project:p"])[0]
     assert refreshed.lifecycle == "active"
     assert refreshed.fingerprint != old and refreshed.fingerprint
-    assert refreshed.fingerprint == rules_module.manifest_fingerprint(files)
+    assert refreshed.fingerprint == rules_module.manifest_fingerprint(files, root)
 
 
 # --------------------------------------------------------------------------- #
@@ -248,3 +248,111 @@ def test_the_production_staleness_check_keeps_lessons_current(config, bus, brain
         assert brain.all_lessons([scope])[0].status == "stale"
     finally:
         engine.close()
+
+
+def _quote_files(root, name, quote, count=3, lines=10):
+    made = []
+    for index in range(count):
+        path = root / f"{name}{index}.py"
+        path.write_text("\n".join(f"v = {quote}text{n}{quote}" for n in range(lines)),
+                        encoding="utf-8")
+        made.append(path)
+    return made
+
+
+def test_an_unchanged_repository_keeps_the_manifest_and_the_rule(brain, tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    rule, _ = _counted_rule(brain, root, "'")
+
+    assert stale_by_fingerprint(brain, root, ["project:p"]) == []
+    assert brain.all_rules(["project:p"])[0].fingerprint == rule.fingerprint
+
+
+def test_a_new_file_that_reverses_the_convention_marks_the_rule_stale(brain, tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    _counted_rule(brain, root, "'")
+
+    _quote_files(root, "n", '"', count=4)      # 40 double vs 30 single
+
+    marked = stale_by_fingerprint(brain, root, ["project:p"])
+    assert any(item["table"] == "rules" for item in marked)
+    assert brain.all_rules(["project:p"])[0].lifecycle == "stale"
+
+
+def test_a_new_file_that_keeps_the_convention_refreshes_the_manifest(brain, tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    rule, _ = _counted_rule(brain, root, "'")
+    old = rule.fingerprint
+
+    _quote_files(root, "n", "'", count=1)      # 30 single vs 0 double
+
+    assert stale_by_fingerprint(brain, root, ["project:p"]) == []
+    refreshed = brain.all_rules(["project:p"])[0]
+    assert refreshed.lifecycle == "active"
+    assert refreshed.fingerprint != old
+    assert refreshed.fingerprint == rules_module.manifest_fingerprint(
+        rules_module.sampled_files(root), root)
+
+
+def test_an_excluded_file_does_not_change_the_manifest(brain, tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    rule, _ = _counted_rule(brain, root, "'")
+
+    (root / "notes.md").write_text('"not a sampled source"\n', encoding="utf-8")
+    (root / "node_modules").mkdir()
+    (root / "node_modules" / "dep.py").write_text('x = "double"\n', encoding="utf-8")
+
+    assert stale_by_fingerprint(brain, root, ["project:p"]) == []
+    assert brain.all_rules(["project:p"])[0].fingerprint == rule.fingerprint
+
+
+def test_deleting_a_sampled_file_refreshes_without_staling_the_rule(brain, tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    rule, files = _counted_rule(brain, root, "'")
+
+    files[0].unlink()
+
+    assert stale_by_fingerprint(brain, root, ["project:p"]) == []
+    refreshed = brain.all_rules(["project:p"])[0]
+    assert refreshed.lifecycle == "active"
+    assert refreshed.fingerprint != rule.fingerprint
+
+
+def test_renaming_a_sampled_file_refreshes_the_manifest(brain, tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    rule, files = _counted_rule(brain, root, "'")
+
+    files[0].rename(root / "renamed.py")
+
+    assert stale_by_fingerprint(brain, root, ["project:p"]) == []
+    assert brain.all_rules(["project:p"])[0].fingerprint != rule.fingerprint
+
+
+def test_the_manifest_is_independent_of_enumeration_order(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    files = _quote_files(root, "m", "'")
+
+    forward = rules_module.manifest_fingerprint(files, root)
+    backward = rules_module.manifest_fingerprint(list(reversed(files)), root)
+    assert forward == backward
+
+
+def test_a_path_narrowed_check_sees_a_new_relevant_file(brain, tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    _counted_rule(brain, root, "'")
+
+    added = [root / f"brand_new{n}.py" for n in range(4)]
+    for path in added:
+        path.write_text("\n".join(f'v = "t{n}"' for n in range(10)), encoding="utf-8")
+
+    marked = stale_by_fingerprint(brain, root, ["project:p"], paths=["brand_new0.py"])
+    assert any(item["table"] == "rules" for item in marked), \
+        "a newly added path is not in the old source_ref but is relevant"

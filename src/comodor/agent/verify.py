@@ -220,6 +220,11 @@ _SHELL_MUTATION = re.compile(
 _PATH_ISH = re.compile(r"(?:[\w.-]*[/\\][\w./\\-]*)|\b[\w-]+\.[A-Za-z0-9]{1,8}\b")
 
 
+def command_mutates(command: str) -> bool:
+    """Whether a shell command changes the filesystem."""
+    return bool(_SHELL_MUTATION.search(command or ""))
+
+
 def _file_operation(element: str, verb: re.Pattern[str]) -> bool:
     """Whether `element` asks to operate on a file, not on prose.
 

@@ -258,3 +258,40 @@ Rules:
 | Reconnect restores | An outstanding form returns via the snapshot's pending interaction (FR-023) |
 | Delegates attribute | A clarification from background work is origin-tagged and never injected mid-turn (FR-029) |
 | Mode-aware | Every real mode may ask; a conversation-only mode must not claim it inspected the repository (FR-010) |
+
+---
+
+## C6. Late discovery — a decision that becomes known after work was done
+
+A material unknown can surface only after investigation, and the investigation
+may already have changed files. The temporal boundary is therefore explicit:
+
+- **From the moment the dependency is open**, no further mutation that may
+  depend on it runs. The withheld check and the turn stop are unchanged
+  (FR-018).
+- **Mutations completed before the dependency became known are not
+  retroactively claimed to have never happened.** They stay in place. Feature
+  002 does not roll them back: some operations are not perfectly reversible,
+  and an automatic rollback could itself destroy valid work or create new side
+  effects. A future transaction/checkpoint feature may offer stronger
+  semantics; it is out of scope here.
+- The turn reports `stopped = "clarification_required"` with the usual
+  `clarification.outcome`, and it **MUST NOT** say or imply that the workspace
+  is unchanged, or that "nothing dependent was done", when a mutation actually
+  occurred earlier in the turn.
+
+**Structured disclosure.** The clarification payload gains an optional,
+additive `prior_changes` array: files a writer changed, and bounded names of
+shell operations that changed the filesystem, deduplicated and in stable
+order. It is absent when nothing was changed before the decision. It carries a
+bounded description only — never file contents, command text or credentials —
+and it does **not** claim an earlier change was decision-dependent, only that
+it happened before the decision became known.
+
+`prior_changes` rides the existing clarification capability and the existing
+`comodor` extension; it is additive and needs no protocol version change. A
+client that does not know the field ignores it.
+
+This applies to every way the clarification can end — answered later,
+cancelled, expired or unattended. Only a valid answer permits dependent work to
+resume.

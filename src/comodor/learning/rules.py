@@ -321,23 +321,42 @@ def manifest_ref(root: Path, files: list[Path]) -> str:
     return "sample:" + ",".join(names)
 
 
-def manifest_fingerprint(files: list[Path]) -> str:
-    """One fingerprint over the contents of the sampled files.
+def manifest_fingerprint(files: list[Path], root: Path | None = None) -> str:
+    """One fingerprint over the sampled files: membership *and* contents.
 
-    A change to any of them changes this — which is the cue to re-count,
-    not the verdict: a rule is stale only when re-counting flips what it
-    says (see `learning/memory.py::LearningEngine.check_rule_staleness`).
+    A counted convention's evidence identity is the sample itself, so a new,
+    removed, renamed or changed file must change this. The paths are included,
+    in sorted order, so the identity does not depend on the order the
+    filesystem happened to enumerate them in — a new relevant path is a
+    manifest change even when no existing file changed (T111).
+
+    A mismatch is the cue to re-count, not the verdict: a rule is stale only
+    when re-counting over the *current* sample flips what it says (see
+    `learning/memory.py::stale_by_fingerprint`).
     """
     import hashlib
 
-    digest = hashlib.sha256()
+    digest = hashlib.sha256(b"comodor-counted-manifest-v2\0")
+    entries: list[tuple[str, str]] = []
     for path in files:
-        try:
-            digest.update(path.read_bytes())
-        except OSError:
-            continue
+        name = _sample_name(path, root)
+        entries.append((name, file_fingerprint(path)))
+    for name, fingerprint in sorted(entries):
+        digest.update(name.encode("utf-8", "replace"))
+        digest.update(b"\0")
+        digest.update(fingerprint.encode("ascii"))
         digest.update(b"\0")
     return digest.hexdigest()[:16]
+
+
+def _sample_name(path: Path, root: Path | None) -> str:
+    """A sampled file's stable name within the manifest."""
+    if root is not None:
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            pass
+    return path.name
 
 
 def files_of(ref: str, root: Path) -> list[Path]:
@@ -601,7 +620,7 @@ def _walk(root: Path):
             entries = list(current.iterdir())
         except (OSError, PermissionError):
             continue
-        for entry in entries:
+        for entry in sorted(entries, key=lambda item: item.name):
             if entry.name in SKIP_DIRS or entry.name.startswith("."):
                 continue
             if entry.is_dir():

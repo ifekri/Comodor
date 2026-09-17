@@ -291,6 +291,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "reason": ("str", True),
         "outcome": ("str", False),
         "decisions": ("list", False),
+        "prior_changes": ("list", False),
     },
     "AnswerParams": {
         "id": ("str", True),
@@ -796,6 +797,7 @@ class ClarificationRequired(_ClarificationRequiredRequired, total=False):
 
     outcome: str
     decisions: list[ClarificationDecision]
+    prior_changes: list[str]
 
 
 class _AnswerParamsRequired(TypedDict):

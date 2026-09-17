@@ -439,6 +439,7 @@ export interface ClarificationRequired {
   reason: string;
   outcome?: ClarificationOutcome;
   decisions?: Array<ClarificationDecision>;
+  prior_changes?: Array<string>;
 }
 
 export interface AnswerParams {

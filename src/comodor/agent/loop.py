@@ -213,6 +213,10 @@ class AgentLoop:
         #: FR-036).
         self._failed: list[tuple[str, str, str]] = []
         self._written_paths: list[str] = []
+        #: Shell tools this turn that changed the filesystem (a bounded
+        #: operation name, never the command text). Reported with the files a
+        #: mutation touched when a decision turns up after the change.
+        self._mutating_commands: list[str] = []
         #: The request this turn is answering, for the gate's element list.
         self._request_text = ""
         #: What the user said not to do this turn, in their own words.
@@ -246,6 +250,7 @@ class AgentLoop:
         self._used = []
         self._failed = []
         self._written_paths = []
+        self._mutating_commands = []
         self._request_text = user_text
         result = TurnResult()
         self._measurement = result.measurement
@@ -579,6 +584,15 @@ class AgentLoop:
                     for applied_path in result.meta.get("files") or []:
                         if applied_path:
                             self._written_paths.append(str(applied_path))
+                if call.name in ("run_shell", "run_python"):
+                    from . import verify as _verify
+
+                    command = str(call.arguments.get("command")
+                                  or call.arguments.get("code") or "")
+                    if _verify.command_mutates(command):
+                        # A bounded operation name, never the command text: the
+                        # report says a change happened, not what was typed.
+                        self._mutating_commands.append(call.name)
             if call.name == "ask":
                 self._measurement.clarifications_raised += int(result.meta.get("asked", 0) or 0)
                 self._measurement.clarifications_answered += int(result.meta.get("given", 0) or 0)
@@ -878,6 +892,28 @@ class AgentLoop:
             book.asked(decision.id)
             book.ended_without_answer(decision.id, outcome)
 
+    def _prior_changes(self) -> list[str]:
+        """Work this turn already did before a decision became known.
+
+        Files a writer changed, plus the shell tools that changed something,
+        deduplicated and in stable order. Paths are shown relative to the
+        workspace, so the payload carries no local filesystem path; a bounded
+        description only, never file contents or command text. Empty when
+        nothing was changed.
+        """
+        context = self.tool_context
+
+        def shown(item: str) -> str:
+            if context is not None and ("/" in item or "\\" in item):
+                try:
+                    return context.relative(Path(item))
+                except Exception:
+                    return item
+            return item
+
+        return sorted({shown(item) for item in (*self._written_paths,
+                                                 *self._mutating_commands)})
+
     def _clarification_outcome(self) -> dict[str, Any] | None:
         """The payload for the decisions this turn left open, or None."""
         try:
@@ -890,7 +926,13 @@ class AgentLoop:
                 return None
             from ..tools.ask import payload_for
 
-            return payload_for(ended, ended[0].outcome or "cancelled")
+            payload = payload_for(ended, ended[0].outcome or "cancelled")
+            prior = self._prior_changes()
+            if prior:
+                # A mutation that happened before the decision became known is
+                # preserved, not rolled back, and is disclosed (contracts §C6).
+                payload["prior_changes"] = prior
+            return payload
         except Exception:
             return None
 
@@ -903,9 +945,18 @@ class AgentLoop:
         names = [entry.get("decision", "") for entry in payload.get("decisions", [])] \
             or [payload.get("decision", "")]
         listed = "\n".join(f"- {name}" for name in names if name)
+        prior = [str(item) for item in payload.get("prior_changes") or [] if str(item)]
+        if prior:
+            changed = "\n".join(f"- {item}" for item in prior)
+            tail = ("Work already completed earlier in this turn, before the "
+                    f"decision became known, is preserved:\n{changed}\n"
+                    "No further work depending on the decision was done, and no "
+                    "default was chosen.")
+        else:
+            tail = "Nothing depending on it was done, and no default was chosen."
         return (f"Stopped: a decision is needed before this can continue "
                 f"({ended.get(payload.get('outcome', ''), 'no answer was given')}).\n"
-                f"{listed}\nNothing depending on it was done, and no default was chosen.")
+                f"{listed}\n{tail}")
 
     def _advance_ledger(self, step: int) -> None:
         try:

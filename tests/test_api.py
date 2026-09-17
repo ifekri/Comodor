@@ -496,3 +496,21 @@ def test_the_api_session_bridge_carries_the_completion_annotation():
 
     assert body["annotation"] == annotation
     assert "annotation" not in bridge._outcome(["done"], 1, "done", None, "")
+
+
+def test_the_api_session_bridge_carries_prior_changes():
+    """`prior_changes` survives `session_map._outcome` with the clarification
+    payload, so an API client sees work done before the decision (contracts §C6)."""
+    from comodor.api.session_map import Talk
+
+    class _Session:
+        def state(self):
+            return {}
+
+    bridge = object.__new__(Talk)
+    bridge.session = _Session()
+    body = bridge._outcome(["stopped"], 2, "clarification_required",
+                           {"kind": "clarification_required", "decision": "Which database?",
+                            "outcome": "cancelled", "prior_changes": ["db.py"]})
+
+    assert body["clarification"]["prior_changes"] == ["db.py"]

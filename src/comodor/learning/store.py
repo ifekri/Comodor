@@ -1046,15 +1046,26 @@ class BrainStore:
     def mark_stale(self, table: str, record_id: int) -> bool:
         return self.set_lifecycle(table, record_id, "stale")
 
-    def refresh_fingerprint(self, table: str, record_id: int, fingerprint: str) -> bool:
+    def refresh_fingerprint(self, table: str, record_id: int, fingerprint: str,
+                            source_ref: str = "") -> bool:
         """The source changed and a re-count still agrees: the item stays,
-        and now describes the source as it is (T111)."""
+        and now describes the source as it is (T111).
+
+        `source_ref` refreshes the recorded sample membership too, when the
+        item's evidence identity includes it (a counted convention).
+        """
         if table not in ("lessons", "rules", "facts"):
             raise ValueError(f"no durable table named {table!r}")
         with self._lock, self.connection as connection:
-            cursor = connection.execute(
-                f"UPDATE {table} SET fingerprint = ?, updated_at = ? WHERE id = ?",
-                (fingerprint, time.time(), record_id))
+            if source_ref:
+                cursor = connection.execute(
+                    f"UPDATE {table} SET fingerprint = ?, source_ref = ?, "
+                    f"updated_at = ? WHERE id = ?",
+                    (fingerprint, source_ref, time.time(), record_id))
+            else:
+                cursor = connection.execute(
+                    f"UPDATE {table} SET fingerprint = ?, updated_at = ? WHERE id = ?",
+                    (fingerprint, time.time(), record_id))
         return bool(cursor.rowcount)
 
     def confident_rules(self, scopes: list[str] | None = None) -> list[Rule]:

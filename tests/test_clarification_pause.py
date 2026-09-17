@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from comodor import questions as forms
 from comodor.agent import AgentLoop, Conversation
 from comodor.events import EventBus, Kind
@@ -18,6 +20,7 @@ from comodor.providers.fake import Script
 from comodor.providers.gateway import Gateway
 from comodor.safety import PermissionEngine
 from comodor.tools import ToolRegistry
+from comodor.tools import ask as ask_tool
 
 REQUEST = "SQLite or PostgreSQL? Then write db.py and list the directory."
 
@@ -175,3 +178,89 @@ def test_the_guard_is_the_withheld_check(config, bus, monkeypatch):
     ])
     agent.run(REQUEST)
     assert not (config.paths.project / "db.py").exists()
+
+
+def test_a_mutation_before_a_material_question_is_preserved_and_reported(config, bus):
+    """A write in an earlier step is kept when a material question turns up
+    later, and the stop discloses it rather than claiming nothing was done."""
+    bus.subscribe(dismiss_forms)
+    agent = make_agent(config, bus, [
+        Script(text="Writing.", tool_calls=[a_write()]),
+        Script(text="One thing first.", tool_calls=[a_question()]),
+        Script(text="never"),
+    ])
+
+    result = agent.run(REQUEST)
+
+    assert result.stopped == "clarification_required"
+    assert (config.paths.project / "db.py").exists(), "the earlier write is preserved"
+    assert result.clarification["prior_changes"] == ["db.py"]
+    assert "Nothing depending on it was done" not in result.text
+    assert "preserved" in result.text
+
+
+def test_a_clarification_with_no_prior_change_reports_none(config, bus):
+    bus.subscribe(dismiss_forms)
+    agent = make_agent(config, bus, [
+        Script(text="Asking.", tool_calls=[a_question()]),
+        Script(text="never"),
+    ])
+
+    result = agent.run(REQUEST)
+
+    assert result.stopped == "clarification_required"
+    assert "prior_changes" not in result.clarification
+    assert "Nothing depending on it was done" in result.text
+
+
+def test_a_shell_mutation_is_reported_as_a_prior_change(config, bus, monkeypatch):
+    from comodor.providers.base import ToolCall
+    from comodor.tools.base import ToolResult
+
+    agent = make_agent(config, bus, [Script(text="never")])
+    call = ToolCall(id="s1", name="run_shell", arguments={"command": "rm db.py"})
+    monkeypatch.setattr(agent, "_run_one",
+                        lambda c, ctx: ToolResult.success("done", exit_code=0))
+
+    agent._execute([call])
+
+    assert agent._prior_changes() == ["run_shell"]
+
+
+def test_a_writing_delegate_is_reported_as_a_prior_change(config, bus, monkeypatch):
+    from comodor.providers.base import ToolCall
+    from comodor.tools.base import ToolResult
+
+    agent = make_agent(config, bus, [Script(text="never")])
+    call = ToolCall(id="d1", name="delegate", arguments={"task": "x"})
+    monkeypatch.setattr(agent, "_run_one",
+                        lambda c, ctx: ToolResult.success("applied", applied=True,
+                                                          files=["a.py"]))
+
+    agent._execute([call])
+
+    assert agent._prior_changes() == ["a.py"]
+
+
+@pytest.mark.parametrize("ending", ["cancelled", "expired", "unattended"])
+def test_a_prior_mutation_is_preserved_across_every_ending(
+        config, bus, monkeypatch, ending):
+    if ending == "cancelled":
+        bus.subscribe(dismiss_forms)
+    elif ending == "expired":
+        bus.subscribe(lambda event: None)
+        monkeypatch.setattr(ask_tool, "WAIT_FOR", 0.0)
+    # unattended: nobody is subscribed at all.
+
+    agent = make_agent(config, bus, [
+        Script(text="Writing.", tool_calls=[a_write()]),
+        Script(text="One thing first.", tool_calls=[a_question()]),
+        Script(text="never"),
+    ])
+
+    result = agent.run(REQUEST)
+
+    assert result.stopped == "clarification_required"
+    assert result.clarification["outcome"] == ending
+    assert (config.paths.project / "db.py").exists()
+    assert result.clarification["prior_changes"] == ["db.py"]

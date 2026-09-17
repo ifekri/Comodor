@@ -240,13 +240,26 @@ def stale_by_fingerprint(store: BrainStore, root: Path, scopes: list[str],
             if rule.provenance != "counted_convention" or not rule.fingerprint:
                 continue
             if rule.source_ref.startswith("sample:"):
-                files = rules_module.files_of(rule.source_ref, root)
-                if touched and not ({_under(root, str(f)) for f in files} & touched):
-                    continue
-                current = rules_module.manifest_fingerprint(files)
+                # The sample is the evidence identity: a new, removed, renamed
+                # or changed eligible file can move a repository-wide
+                # convention, so the current bounded sample is rebuilt rather
+                # than assuming the recorded file set is still representative
+                # (T111).
+                historical = rules_module.files_of(rule.source_ref, root)
+                sample = rules_module.sampled_files(root)
+                if touched:
+                    # Relevant when the requested path is in the current
+                    # sample or was in the recorded one: a newly added path is
+                    # not in the old source_ref, so membership alone cannot be
+                    # the test.
+                    domain = {_under(root, str(f)) for f in sample} \
+                        | {_under(root, str(f)) for f in historical}
+                    if not (domain & touched):
+                        continue
+                current = rules_module.manifest_fingerprint(sample, root)
                 if current == rule.fingerprint:
                     continue
-                holds = rules_module.recount(files, rule.key, root, rule.statement)
+                holds = rules_module.recount(sample, rule.key, root, rule.statement)
             elif rule.source_ref.startswith("layout:"):
                 current = rules_module.structure_fingerprint(root)
                 if current == rule.fingerprint:
@@ -256,7 +269,10 @@ def stale_by_fingerprint(store: BrainStore, root: Path, scopes: list[str],
             else:
                 continue
             if holds:
-                store.refresh_fingerprint("rules", rule.id, current)
+                source_ref = (rules_module.manifest_ref(root, sample)
+                              if rule.source_ref.startswith("sample:") else "")
+                store.refresh_fingerprint("rules", rule.id, current,
+                                          source_ref=source_ref)
                 continue
             store.mark_stale("rules", rule.id)
             marked.append({"table": "rules", "id": rule.id, "text": rule.statement,

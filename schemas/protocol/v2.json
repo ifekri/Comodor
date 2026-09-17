@@ -968,6 +968,13 @@
           "items": {
             "$ref": "#/$defs/ClarificationDecision"
           }
+        },
+        "prior_changes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional and additive. Work this turn completed before the decision became known: files a writer changed and bounded names of shell operations that changed the filesystem. Those changes are preserved rather than rolled back, and disclosed so a caller never reads the stop as 'the workspace is unchanged'. Absent when nothing was changed before the decision. A bounded description only — never file contents, command text or credentials."
         }
       }
     },
