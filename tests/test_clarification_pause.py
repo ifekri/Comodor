@@ -138,6 +138,20 @@ def test_only_read_only_tools_are_exempt_while_a_decision_is_open(config, bus):
         assert reason(name) == "", f"{name} is read-only and may still run"
 
 
+def test_a_batch_with_ask_is_never_run_in_parallel(config, bus):
+    """`ask` opens the decision; a SAFE call beside it must not be evaluated
+    before the decision exists, or it persists state the answer may forbid."""
+    agent = make_agent(config, bus, [Script(text="never")])
+    agent._model_profile = lambda: type("P", (), {"parallel_tools": True})()
+    agent.config.safety.auto_approve_safe = True
+
+    def call(name):
+        return ToolCall(id=name, name=name, arguments={})
+
+    assert agent._can_parallelise([call("read_file"), call("list_dir")]) is True
+    assert agent._can_parallelise([call("ask"), call("list_dir")]) is False
+
+
 def test_the_guard_is_the_withheld_check(config, bus, monkeypatch):
     """Mutation check (T040): remove the check and the write runs."""
     bus.subscribe(dismiss_forms)

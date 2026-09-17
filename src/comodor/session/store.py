@@ -115,6 +115,15 @@ class SessionStore:
         spill = message.meta.get("spill") if message.meta else None
         if isinstance(spill, str) and spill:
             record["spill"] = spill
+        # Where a USER-role message came from. The loop's own prompts
+        # (compaction brief, completion correction, plan restatement) are
+        # marked; without the mark surviving the round trip a resumed session
+        # would treat model-written text as something the person said, and the
+        # memory tool could persist it as a `user_statement` (FR-066).
+        if message.meta.get("synthetic"):
+            record["synthetic"] = True
+        if message.meta.get("compacted"):
+            record["compacted"] = True
         with self.path_for(session_id).open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -137,6 +146,10 @@ class SessionStore:
                     meta["question"] = record["question"]
                 if isinstance(record.get("spill"), str) and record["spill"]:
                     meta["spill"] = record["spill"]
+                if record.get("synthetic"):
+                    meta["synthetic"] = True
+                if record.get("compacted"):
+                    meta["compacted"] = True
                 messages.append(Message(
                     role=Role(record.get("role", "user")),
                     content=record.get("content", ""),

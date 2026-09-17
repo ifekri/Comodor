@@ -656,6 +656,12 @@ class AgentLoop:
         A model with no known support for it that emits a batch anyway is
         usually emitting something malformed; running those concurrently turns
         one wasted turn into several.
+
+        A batch containing `ask` runs in order, always. `ask` is the call that
+        opens the decision, and the withheld check runs when each call starts:
+        run concurrently, a `memory`/`todo_write`/`delegate` beside it would be
+        evaluated before the decision existed, and would persist state or
+        start work the answer may have forbidden.
         """
         if not self.config.safety.auto_approve_safe:
             return False
@@ -664,7 +670,7 @@ class AgentLoop:
             return False
         for call in calls:
             tool = self.tools.get(call.name)
-            if tool is None or tool.risk is not Risk.SAFE:
+            if tool is None or tool.risk is not Risk.SAFE or call.name == "ask":
                 return False
         return True
 

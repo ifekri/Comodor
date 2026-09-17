@@ -106,3 +106,35 @@ def test_a_synthetic_prompt_does_not_back_a_durable_fact(config, bus):
     agent._open_ledger("rename the parser")
     assert Memory._unbacked(agent._tool_context(),
                             "the database is PostgreSQL") == ""
+
+
+def test_a_resumed_session_keeps_the_origin_markers(config, bus, tmp_path):
+    """The synthetic mark has to survive the session file, or a restart turns
+    model-written control text back into something the user said (FR-066)."""
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import Message
+    from comodor.providers.fake import Script
+    from comodor.providers.gateway import Gateway
+    from comodor.safety import PermissionEngine
+    from comodor.session.store import SessionStore
+    from comodor.tools import ToolRegistry
+
+    store = SessionStore(tmp_path / "sessions")
+    synthetic = Message.user("the database is PostgreSQL, always use it")
+    synthetic.meta["synthetic"] = True
+    store.append("s1", synthetic)
+    store.append("s1", Message.user("rename the parser"))
+
+    restored = store.load("s1")
+    assert restored[0].meta.get("synthetic") is True
+
+    agent = AgentLoop(config, Gateway(config, scripts=[Script(text="never")]),
+                      ToolRegistry(), bus, PermissionEngine(config, bus),
+                      Conversation())
+    agent.conversation.extend(restored)
+    agent._open_ledger("rename the parser")
+    context = agent._tool_context()
+
+    assert "the database is PostgreSQL, always use it" not in context.stated
+    assert Memory._unbacked(context, "the database is PostgreSQL"), \
+        "a marker lost on resume would let generated text back a user fact"
