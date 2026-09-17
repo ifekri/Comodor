@@ -394,3 +394,15 @@ def test_written_tokens_survive_a_resume(monkeypatch, tmp_path):
     assert [entry.attempt.written_tokens for entry in resumed.attempts] == [7] * 7
     assert all(entry.attempt.total_tokens == 10 + 20 + 7 + 5
                for entry in resumed.attempts)
+
+
+def test_the_report_note_names_the_total_formula(monkeypatch, tmp_path):
+    """The note beside the table must match the total the table is built from."""
+    cohort = [_task("f0", tmp_path)]
+    fake, _ = _fake_one({"current": 100})
+    monkeypatch.setattr(runner, "_one", fake)
+    run = runner.run_blocked(cohort, provider="fake", model="m", tries=1,
+                             say=lambda *a, **k: None)
+    text = report.blocked_markdown(report.blocked_json(run))
+    assert "written" in text
+    assert "input + cached + written + output" in text

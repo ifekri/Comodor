@@ -147,3 +147,18 @@ def test_the_form_carries_why_and_what_was_checked(context):
     assert question["reason"] == "architecture"
     assert "settings.py" in question["evidence_consulted"]
     assert question["decision_ref"].startswith("d")
+
+
+def test_grounding_matches_words_not_substrings():
+    """A candidate is grounded by the words that were said, not by a substring.
+
+    "Go" is inside "Django"; a substring test would present an unmentioned
+    option as grounded by the request.
+    """
+    from comodor.tools.ask import _mentioned
+
+    assert not _mentioned("Go", "Use Django for the server")
+    assert not _mentioned("Go", "the cargo toolchain")
+    assert _mentioned("Django", "Use Django for the server")
+    assert _mentioned("SQLite", "we could use sqlite here")
+    assert _mentioned("PostgreSQL", "Postgres, but not PostgreSQL yet")

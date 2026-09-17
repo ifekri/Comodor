@@ -190,7 +190,7 @@ def _measured(rows, result: Insights) -> None:
         result.clarifications_answered += int(record.get("clarifications_answered", 0) or 0)
         result.knowledge_hits += int(record.get("knowledge_hits", 0) or 0)
         result.knowledge_stale += int(record.get("knowledge_stale", 0) or 0)
-        if str(record.get("validation_outcome", "")) in ("failed", "contradicted"):
+        if str(record.get("validation_outcome", "")) in ("block", "failed", "contradicted"):
             result.validation_failures += 1
 
 

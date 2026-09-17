@@ -584,8 +584,9 @@ def blocked_markdown(report: dict) -> str:
             f"| {total.get('lower', 0)}/{total.get('equal', 0)}/{total.get('higher', 0)} |")
     lines += [
         "",
-        "`total_tokens = input + cached + output` (what the model read plus "
-        "what it wrote; cached is additive, not a subset of input). "
+        "`total_tokens = input + cached + written + output` (what the model "
+        "read plus what it wrote; cached and written are additive, not subsets "
+        "of input). "
         "`cost_usd` is 0.00 for a model with no price mapping — it is not "
         "evidence of equal cost.",
         "",

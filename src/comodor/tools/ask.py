@@ -411,8 +411,19 @@ def _grounded(option: forms.Option, ctx: ToolContext) -> bool:
 
 
 def _mentioned(needle: str, haystack: str) -> bool:
+    """Whether `needle` appears in `haystack` as words, not as a substring.
+
+    A plain substring test grounds an option that was never mentioned: "Go"
+    is inside "Django", and a short evidence string is inside longer prose.
+    The boundaries make a candidate grounded only by the words that were
+    actually said.
+    """
     needle = " ".join(needle.lower().split())
-    return bool(needle) and needle in " ".join(haystack.lower().split())
+    if not needle:
+        return False
+    haystack = " ".join(haystack.lower().split())
+    return re.search(r"(?<![a-z0-9_])" + re.escape(needle) + r"(?![a-z0-9_])",
+                     haystack) is not None
 
 
 def _observed(reference: str, ctx: ToolContext) -> bool:

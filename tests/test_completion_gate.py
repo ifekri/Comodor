@@ -346,3 +346,14 @@ def test_stale_knowledge_is_recorded_in_the_measurement(config, bus):
 
     assert "contradicted" in note.lower()
     assert agent._measurement.knowledge_stale == 1
+
+
+def test_data_lines_are_not_requested_work():
+    """A pasted log or an expected/actual table is not a work checklist."""
+    from comodor.agent.verify import requested_elements
+
+    assert requested_elements(
+        "- fix the parser\n- Expected: 200\n- Actual: 500") == ["fix the parser"]
+    assert requested_elements("- 42\n- 200") == []
+    assert requested_elements("- add the regression test\n- Update the docs") == [
+        "add the regression test", "Update the docs"]

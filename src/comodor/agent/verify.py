@@ -217,14 +217,29 @@ class Assessment:
                 + "\n".join(lines))
 
 
+#: A list line that is data rather than work: a labelled value ("Expected:
+#: 200", "Actual: 500", "status: failed") or a line with no word in it. A
+#: pasted log or a table of numbers becomes bullets when a request is quoted,
+#: and treating those as requested work forces a correction turn for something
+#: nobody asked for.
+_DATA_BULLET = re.compile(r"^[A-Za-z][A-Za-z ]{0,24}:\s*\S+$")
+
+
+def _looks_like_data(what: str) -> bool:
+    if _DATA_BULLET.match(what):
+        return True
+    return not re.search(r"[A-Za-z]{3,}", what)
+
+
 def requested_elements(request: str) -> list[str]:
     """The explicitly enumerated things a request asked for.
 
-    Only items the person actually wrote as a list are taken; prose is not
-    parsed into a checklist, because guessing the elements of a sentence would
-    invent work the user never asked for. A request with no list has no
-    elements, and the gate then acts only on a failed tool or an open
-    decision.
+    Only items the person actually wrote as a work list are taken; prose is
+    not parsed into a checklist, because guessing the elements of a sentence
+    would invent work the user never asked for. Lines that are data — a
+    labelled expected/actual value, a bare number, pasted log rows — are not
+    requested work. A request with no list has no elements, and the gate then
+    acts only on a failed tool or an open decision.
     """
     found: list[str] = []
     for line in (request or "").splitlines():
@@ -232,7 +247,7 @@ def requested_elements(request: str) -> list[str]:
         if not match:
             continue
         what = " ".join(match.group("what").split())
-        if what and what not in found:
+        if what and not _looks_like_data(what) and what not in found:
             found.append(what[:200])
     return found
 

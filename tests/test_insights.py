@@ -196,3 +196,18 @@ def test_the_task_measurements_are_surfaced():
     assert body["knowledge_hits"] == 7 and body["knowledge_stale"] == 1
     assert body["validation_failures"] == 1
     assert body["task_cached_tokens"] == 500 and body["model_turns"] == 12
+
+
+def test_a_blocking_gate_counts_as_a_validation_failure():
+    """The gate's blocking verdict is `block`; only `failed`/`contradicted`
+    would leave the count at zero for every real block."""
+    import json
+
+    from comodor.insights import Insights, _measured
+
+    result = Insights(days=30)
+    _measured([{"measurement": json.dumps({"validation_outcome": "block"})}], result)
+    assert result.validation_failures == 1
+
+    _measured([{"measurement": json.dumps({"validation_outcome": "annotate"})}], result)
+    assert result.validation_failures == 1
