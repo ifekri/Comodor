@@ -138,11 +138,19 @@ def contain(result: ToolResult, ctx: ToolContext, tool: str,
 
 
 #: Commands whose output is a validation/build/test run — the only ones the
-#: passing/failing summary is written for (FR-090).
+#: passing/failing summary is written for (FR-090). The executable alone is not
+#: enough: `go run dump.go` prints data, `go test ./...` is a run, so the
+#: subcommand is part of the match.
 _VALIDATION_COMMAND = re.compile(
-    r"(?i)\b(pytest|unittest|nose|tox|ruff|flake8|pylint|mypy|black|isort|"
-    r"eslint|tsc|jest|vitest|mocha|test|tests|build|lint|check|coverage|"
-    r"cargo|gradle|mvn|make|npm|yarn|pnpm|go)\b")
+    r"(?i)("
+    r"\b(?:pytest|unittest|nose|tox|ruff|flake8|pylint|mypy|black|isort|"
+    r"eslint|tsc|jest|vitest|mocha|coverage)\b"
+    r"|\b(?:npm|yarn|pnpm)\s+(?:run\s+)?(?:test|tests|lint|build|check|typecheck)\b"
+    r"|\b(?:cargo|go)\s+(?:test|check|build|vet|clippy)\b"
+    r"|\b(?:gradle|mvn|maven)\b.*\b(?:test|check|build|verify|package)\b"
+    r"|\bmake\s+(?:test|tests|check|build|lint|all)\b"
+    r"|\bpython[0-9.]*\s+-m\s+(?:pytest|unittest)\b"
+    r")")
 
 #: Output that reads as a validation run even without the command: a line that
 #: says a case passed or failed, or a run summary naming its counts.

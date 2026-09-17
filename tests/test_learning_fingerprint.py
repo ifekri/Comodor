@@ -356,3 +356,25 @@ def test_a_path_narrowed_check_sees_a_new_relevant_file(brain, tmp_path):
     marked = stale_by_fingerprint(brain, root, ["project:p"], paths=["brand_new0.py"])
     assert any(item["table"] == "rules" for item in marked), \
         "a newly added path is not in the old source_ref but is relevant"
+
+
+def test_a_changed_file_stales_a_lesson_at_session_start(config, bus, brain):
+    """The session-start staleness pass covers lessons, not only facts, so the
+    first recall does not serve an obsolete tool-confirmed lesson (FR-060)."""
+    from comodor.learning import LearningEngine
+
+    config.learning.enabled = True
+    target = config.paths.project / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    brain.add_lesson(Lesson(
+        provenance="tool_confirmed", scope="global",
+        trigger="editing ci.yml", guidance="the CI runner is Linux only",
+        source_ref="read_file:ci.yml",
+        fingerprint=rules_module.file_fingerprint(target)))
+    target.write_text("runs-on: windows-latest\n", encoding="utf-8")
+
+    engine = LearningEngine(config, bus, store=brain)
+    try:
+        assert brain.all_lessons(["global"])[0].status == "stale"
+    finally:
+        engine.close()

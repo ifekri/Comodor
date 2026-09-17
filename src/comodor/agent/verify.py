@@ -216,6 +216,15 @@ _SHELL_MUTATION = re.compile(
     r"(?i)(\brm\b|\brmdir\b|\bdel\b|\berase\b|\bunlink\b|\bmv\b|\bmove\b|"
     r"\brename\b|\btee\b|\btruncate\b|\btouch\b|\bsed\s+-i|>>?\s)")
 
+#: A Python statement that writes. `run_python` is not a shell, so the shell
+#: operators do not describe it.
+_PYTHON_MUTATION = re.compile(
+    r"(?i)(\.write_text\s*\(|\.write_bytes\s*\(|\.writelines\s*\(|"
+    r"\.unlink\s*\(|\.rename\s*\(|\.replace\s*\(|\.touch\s*\(|\.mkdir\s*\(|"
+    r"\bopen\s*\([^)]*['\"][wax]['\"]|"
+    r"\bos\.(remove|unlink|rename|replace|rmdir|mkdir|makedirs)\s*\(|"
+    r"\bshutil\.(move|copy|copy2|copyfile|rmtree|make_archive)\s*\()")
+
 #: A path-looking target: a token with a file extension or a path separator.
 _PATH_ISH = re.compile(r"(?:[\w.-]*[/\\][\w./\\-]*)|\b[\w-]+\.[A-Za-z0-9]{1,8}\b")
 
@@ -229,9 +238,18 @@ def _unquoted(command: str) -> str:
     return re.sub(r"'[^']*'|\"[^\"]*\"", " ", command or "")
 
 
-def command_mutates(command: str) -> bool:
-    """Whether a shell command changes the filesystem."""
+def command_mutates(command: str, tool: str = "run_shell") -> bool:
+    """Whether a shell or Python command changes the filesystem."""
+    if tool == "run_python":
+        return bool(_PYTHON_MUTATION.search(command or ""))
     return bool(_SHELL_MUTATION.search(_unquoted(command)))
+
+
+def _command_writes(tool: str, command: str) -> bool:
+    """Whether this command tool's command actually writes."""
+    if tool == "run_python":
+        return bool(_PYTHON_MUTATION.search(command))
+    return bool(_SHELL_MUTATION.search(command))
 
 
 def _file_operation(element: str, verb: re.Pattern[str]) -> bool:
@@ -357,7 +375,7 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
             continue
         if mutation and not destructive and not move \
                 and tool not in _WRITER_TOOLS \
-                and not (tool in _COMMAND_TOOLS and _SHELL_MUTATION.search(command)):
+                and not (tool in _COMMAND_TOOLS and _command_writes(tool, command)):
             # An ordinary mutation (write/create/update) needs writer evidence
             # or a shell command that actually writes; a read-only command
             # that merely names the file is not a change (FR-036).

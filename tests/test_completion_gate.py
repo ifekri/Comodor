@@ -444,3 +444,16 @@ def test_a_quoted_redirection_token_is_not_a_mutation():
                                changed_paths=[], answer="Updated foo.py.")
 
     assert "update foo.py" in assessment.unresolved
+
+
+def test_a_python_write_delivers_an_update():
+    """`run_python` writes are not shell commands; a `write_text` call is a
+    change (FR-036)."""
+    ledger = Ledger()
+    ledger.verified('run_python from pathlib import Path\nPath("foo.py").write_text("new")',
+                    source="run_python:code", material="")
+
+    assessment = verify.assess("- update foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Updated foo.py.")
+
+    assert assessment.unresolved == []

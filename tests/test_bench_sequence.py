@@ -351,3 +351,43 @@ def test_an_invalid_sequence_run_is_excluded_from_aggregation(tmp_path, monkeypa
     assert outcome.invalid == ["hook failed", "hook failed"]
     assert outcome.attempts == [], \
         "an invalid run's steps are not scored in the token/cost aggregates"
+
+
+def test_a_raising_sequence_judge_is_an_invalid_run(tmp_path, monkeypatch):
+    """A judge that cannot inspect its fixture is a broken experiment, not an
+    agent failure."""
+    monkeypatch.setattr(runner, "fresh_copy",
+                        lambda repo, workspace: workspace.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(runner, "_settings", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "_invoke", lambda *args, **kwargs: _attempt(tmp_path))
+
+    def boom(result):
+        raise RuntimeError("judge broken")
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok(),
+                sequence=tuple(_steps(2)), check_sequence=boom)
+
+    _, verdict, _ = runner._run_sequence_once(
+        task, provider="p", model="m", keep=None, say=lambda *args, **kwargs: None,
+        strategy="current", learning=True, without=())
+
+    assert verdict.invalid is True
+    assert "invalid" in verdict.reason.lower()
+
+
+def test_an_all_invalid_task_is_neither_passed_nor_failed(tmp_path):
+    from bench import report
+    from bench.runner import Outcome
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok())
+    outcome = Outcome(task=task)
+    outcome.invalid.append("hook failed")
+
+    totals = report.as_json([outcome], provider="p", model="m", tries=3)["totals"]
+
+    assert totals["passed"] == 0
+    assert totals["failed"] == 0
+    assert totals["invalid"] == 1
+    assert totals["tasks"] == 0

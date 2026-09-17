@@ -422,11 +422,12 @@ class LearningEngine:
         Called once at construction. Everything the briefing says for the
         rest of this session was true when it was taken, which is exactly
         what keeps the head of every request byte-identical. Before it is
-        taken, facts whose source file changed are marked stale, so the
-        snapshot never carries what the repository no longer says (FR-060).
+        taken, facts and tool-confirmed lessons whose source file changed are
+        marked stale, so neither the snapshot nor recall carries what the
+        repository no longer says (FR-060).
         """
         try:
-            self.check_staleness(tables=("facts",))
+            self.check_staleness(tables=("facts", "lessons"))
         except Exception:
             pass
         try:

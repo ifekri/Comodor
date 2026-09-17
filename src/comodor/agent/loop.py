@@ -589,7 +589,7 @@ class AgentLoop:
 
                     command = str(call.arguments.get("command")
                                   or call.arguments.get("code") or "")
-                    if _verify.command_mutates(command):
+                    if _verify.command_mutates(command, call.name):
                         # A bounded operation name, never the command text: the
                         # report says a change happened, not what was typed.
                         self._mutating_commands.append(call.name)

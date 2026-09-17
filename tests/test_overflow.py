@@ -366,3 +366,17 @@ def test_a_validation_command_is_still_collapsed(tool_context):
     carried = overflow.contain(result, tool_context, "run_shell", "python -m pytest -q")
 
     assert carried.meta.get("log") == "passed"
+
+
+def test_a_toolchain_run_command_is_not_treated_as_validation(tool_context):
+    """`go run dump.go` prints data; only a validation subcommand is a run
+    (FR-090)."""
+    from comodor.tools.base import ToolResult
+
+    body = "data line\n" * 400
+    result = ToolResult.success(body, exit_code=0)
+
+    carried = overflow.contain(result, tool_context, "run_shell", "go run dump.go")
+
+    assert carried.meta.get("log") is None
+    assert "Passing run" not in carried.content

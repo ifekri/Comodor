@@ -263,7 +263,10 @@ def _run_sequence_once(task: Task, *, provider: str, model: str,
         try:
             verdict = task.check_sequence(result)
         except Exception as problem:
-            verdict = Verdict.no(f"the judge raised {type(problem).__name__}: {problem}")
+            # A judge that cannot inspect its own fixture is a broken
+            # experiment, not an agent failure: the run is invalid.
+            verdict = Verdict.invalid_run(
+                f"invalid run — the judge raised {type(problem).__name__}: {problem}")
     say(f"    sequence  {'pass' if verdict.passed else 'FAIL'}  — {verdict.reason}")
 
     if verdict.passed:

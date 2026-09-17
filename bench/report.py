@@ -22,6 +22,10 @@ from .runner import Outcome
 
 def as_json(outcomes: list[Outcome], *, provider: str, model: str,
             tries: int) -> dict:
+    # A task with no valid run (`tries == 0`, every attempt invalid) is neither
+    # a pass nor a fail: it is excluded from both classifications, or it would
+    # count as `passed == tries` and `passed == 0` at once.
+    valid = [one for one in outcomes if one.tries > 0]
     return {
         "model": model,
         "provider": provider,
@@ -30,15 +34,16 @@ def as_json(outcomes: list[Outcome], *, provider: str, model: str,
         "platform": f"{platform.system()} {platform.release()}",
         "python": platform.python_version(),
         "totals": {
-            "tasks": len(outcomes),
-            "passed": sum(1 for one in outcomes if one.passed == one.tries),
-            "partial": sum(1 for one in outcomes
+            "tasks": len(valid),
+            "invalid": sum(1 for one in outcomes if one.tries == 0),
+            "passed": sum(1 for one in valid if one.passed == one.tries),
+            "partial": sum(1 for one in valid
                            if 0 < one.passed < one.tries),
-            "failed": sum(1 for one in outcomes if one.passed == 0),
-            "attempts_passed": sum(one.passed for one in outcomes),
-            "attempts": sum(one.tries for one in outcomes),
-            "cost_usd": round(sum(one.cost for one in outcomes), 4),
-            "seconds": round(sum(one.seconds for one in outcomes), 1),
+            "failed": sum(1 for one in valid if one.passed == 0),
+            "attempts_passed": sum(one.passed for one in valid),
+            "attempts": sum(one.tries for one in valid),
+            "cost_usd": round(sum(one.cost for one in valid), 4),
+            "seconds": round(sum(one.seconds for one in valid), 1),
         },
         "tasks": [_task_record(one) for one in outcomes],
     }
