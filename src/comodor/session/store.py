@@ -124,6 +124,17 @@ class SessionStore:
             record["synthetic"] = True
         if message.meta.get("compacted"):
             record["compacted"] = True
+        # A deduplicated reference or a delta names the earlier full result it
+        # was written against. That link is a promise the content is still in
+        # the conversation, and it is what compaction and the budget manager
+        # protect; without it a resumed session could summarise the base away
+        # and leave the pointer standing for nothing (FR-100, FR-101).
+        for key in ("reference", "delta_base"):
+            value = message.meta.get(key) if message.meta else None
+            if isinstance(value, str) and value:
+                record[key] = value
+        if message.meta.get("delta"):
+            record["delta"] = True
         with self.path_for(session_id).open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -150,6 +161,11 @@ class SessionStore:
                     meta["synthetic"] = True
                 if record.get("compacted"):
                     meta["compacted"] = True
+                for key in ("reference", "delta_base"):
+                    if isinstance(record.get(key), str) and record[key]:
+                        meta[key] = record[key]
+                if record.get("delta"):
+                    meta["delta"] = True
                 messages.append(Message(
                     role=Role(record.get("role", "user")),
                     content=record.get("content", ""),

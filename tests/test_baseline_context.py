@@ -159,3 +159,25 @@ def test_compaction_keeps_a_base_a_surviving_reference_points_at():
     base = next((m for m in conversation.messages if m.tool_call_id == "c1"), None)
     assert base is not None, "the base a live reference names stays verbatim"
     assert base.content == big
+
+
+def test_a_reference_dependency_survives_a_session_round_trip(tmp_path):
+    """The link from a reference or delta to its base is a promise that has to
+    survive a resume, or compaction can summarise the base away (FR-101)."""
+    from comodor.session.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    reference = Message.tool(call_id="c2", name="read_file",
+                             content="[unchanged since call c1 above]")
+    reference.meta["reference"] = "c1"
+    store.append("s1", reference)
+    delta = Message.tool(call_id="c3", name="read_file", content="[changed]")
+    delta.meta["delta_base"] = "c2"
+    delta.meta["delta"] = True
+    store.append("s1", delta)
+
+    restored = store.load("s1")
+
+    assert restored[0].meta.get("reference") == "c1"
+    assert restored[1].meta.get("delta_base") == "c2"
+    assert restored[1].meta.get("delta") is True
