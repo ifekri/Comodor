@@ -67,6 +67,10 @@ class Attempt:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
+    #: Prompt tokens the provider stored for next time — a separate,
+    #: non-overlapping part of the prompt that some providers bill for cache
+    #: creation and that the headless JSON reports.
+    written_tokens: int = 0
     tool_calls: int = 0
     #: The structured clarification outcome, when the turn stopped needing a
     #: decision (`stopped: "clarification_required"`). Carries
@@ -101,7 +105,8 @@ class Attempt:
 
     @property
     def total_tokens(self) -> int:
-        return self.input_tokens + self.cached_tokens + self.output_tokens
+        return (self.input_tokens + self.cached_tokens + self.written_tokens
+                + self.output_tokens)
 
     def used(self, name: str) -> bool:
         return name in self.tools

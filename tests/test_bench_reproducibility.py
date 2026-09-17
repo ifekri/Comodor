@@ -99,3 +99,33 @@ def test_the_paired_record_carries_the_quality_counts(tmp_path):
     assert row["clarifications"] == 1
     assert row["corrections"] == 1
     assert row["validation"] == {"annotate": 1}
+
+
+def test_written_tokens_are_carried_and_counted(monkeypatch, tmp_path):
+    """Cache-creation tokens are part of the prompt and of the total.
+
+    A provider that bills cache creation reports it separately from input and
+    cached; a total that omits it understates what the model read.
+    """
+    payload = {
+        "ok": True, "stopped": "done", "text": "done", "steps": 1,
+        "tools": [], "tool_calls": 0,
+        "usage": {"input_tokens": 10, "output_tokens": 5, "cached_tokens": 20,
+                  "written_tokens": 7, "cost_usd": 0.0},
+    }
+
+    class Finished:
+        returncode = 0
+        stdout = json.dumps(payload)
+        stderr = ""
+
+    monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: Finished())
+
+    task = _task(tmp_path)
+    attempt = runner._invoke(task, tmp_path / "ws", tmp_path / "home", "fake", "m")
+    assert attempt.written_tokens == 7
+    assert attempt.total_tokens == 10 + 20 + 7 + 5
+
+    outcome = Outcome(task=task, verdicts=[Verdict.ok()], attempts=[attempt])
+    row = report.as_json([outcome], provider="fake", model="m", tries=1)["tasks"][0]
+    assert row["mean_written_tokens"] == 7

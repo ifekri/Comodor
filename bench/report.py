@@ -63,6 +63,7 @@ def _task_record(one: Outcome) -> dict:
         "mean_input_tokens": round(one.mean("input_tokens")),
         "mean_output_tokens": round(one.mean("output_tokens")),
         "mean_cached_tokens": round(one.mean("cached_tokens")),
+        "mean_written_tokens": round(one.mean("written_tokens")),
         "mean_total_tokens": round(one.mean("total_tokens")),
         "clarifications": one.clarifications,
         "corrections": one.corrections,
@@ -265,6 +266,7 @@ def _strategy_totals(outcomes: list[Outcome]) -> dict:
         "mean_input_tokens": _mean_over(outcomes, "input_tokens"),
         "mean_output_tokens": _mean_over(outcomes, "output_tokens"),
         "mean_cached_tokens": _mean_over(outcomes, "cached_tokens"),
+        "mean_written_tokens": _mean_over(outcomes, "written_tokens"),
         "cost_usd": round(sum(one.cost for one in outcomes), 4),
         "seconds": round(sum(one.seconds for one in outcomes), 1),
     }
@@ -444,6 +446,7 @@ def blocked_metrics(run) -> dict:
         "input_tokens": "input",
         "output_tokens": "output",
         "cached_tokens": "cached",
+        "written_tokens": "written",
         "total_tokens": "total",
         "cost_usd": "cost",
     }
@@ -510,6 +513,7 @@ def _block_record(key: tuple[str, int], grouped: dict, configurations) -> dict:
             "input_tokens": entry.attempt.input_tokens,
             "output_tokens": entry.attempt.output_tokens,
             "cached_tokens": entry.attempt.cached_tokens,
+            "written_tokens": entry.attempt.written_tokens,
             "total_tokens": entry.attempt.total_tokens,
             "cost_usd": round(entry.attempt.cost_usd, 6),
             "validation": entry.attempt.validation_outcome,

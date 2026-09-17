@@ -108,8 +108,11 @@ def test_today_the_json_report_has_exactly_these_fields(scripted):
     # `cached_tokens` is the one addition Phase 1 makes (T015 needs it for the
     # paired baseline); everything a pre-change caller read is still there.
     assert {"input_tokens", "output_tokens", "cost_usd"} <= set(report["usage"])
+    # `written_tokens` is a later additive field: cache-creation tokens are a
+    # separate, non-overlapping part of the prompt for the providers that bill
+    # them, so a benchmark total that omits it understates what was read.
     assert set(report["usage"]) == {"input_tokens", "output_tokens",
-                                    "cached_tokens", "cost_usd"}
+                                    "cached_tokens", "written_tokens", "cost_usd"}
 
 
 def test_today_stopped_takes_only_the_loops_own_values(scripted):

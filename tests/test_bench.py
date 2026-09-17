@@ -1092,3 +1092,22 @@ def test_settles_it_prose_does_not_change_correctness(copy_of):
               "from config.py, so the effective port is 8080."))
     verdict = task.check(attempt)
     assert verdict.passed, verdict.reason
+
+
+def test_the_benchmark_refuses_a_drifted_suite(monkeypatch, capsys):
+    """A run against a changed scenario is not a result about the agent."""
+    from bench import __main__ as entry
+    from bench import integrity
+
+    monkeypatch.setattr(
+        integrity, "check",
+        lambda: integrity.Drift(changed={"fix-off-by-one": ["task.md"]}))
+    called: list[int] = []
+    monkeypatch.setattr(entry, "run_task", lambda *a, **k: called.append(1))
+
+    code = entry.main(["--provider", "fake", "--model", "m", "--tries", "1",
+                       "--only", "fix-off-by-one"])
+
+    assert code == 2
+    assert called == [], "no attempt should run against a drifted suite"
+    assert "drifted" in capsys.readouterr().err

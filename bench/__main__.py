@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import baseline
+from . import baseline, integrity
 from .report import write, write_blocked, write_paired
 from .runner import run_blocked, run_task
 from .task import TaskError, load_tasks
@@ -87,6 +87,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     keep = Path(args.keep).resolve() if args.keep else None
+
+    # A scenario that has been weakened, shortened or re-labelled compared with
+    # its recorded fingerprint changes what the number means, and a run against
+    # a drifted suite is not a result about the agent. Refuse it here, before
+    # anything is measured, rather than let it reach a report.
+    drift = integrity.check()
+    if not drift.clean:
+        print("bench: benchmark scenarios have drifted from their record:\n"
+              + drift.describe()
+              + "\nRun `python -m bench.integrity record` only after reviewing "
+                "the change.", file=sys.stderr)
+        return 2
 
     if args.blocked:
         if not args.only:

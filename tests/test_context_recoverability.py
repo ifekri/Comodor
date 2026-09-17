@@ -211,3 +211,52 @@ def test_a_command_with_no_saved_output_is_never_withheld(tool_context):
     conversation.withhold(1)
     untouched = next(m for m in conversation.messages if m.tool_call_id == "c1")
     assert "withheld" not in untouched.meta
+
+
+def test_a_referenced_base_is_never_withheld(tool_context):
+    """A full result a live reference points at must stay resident.
+
+    Only the dependent message carries the reference; the base it names is
+    unmarked, so withholding it would leave the reference pointing at a
+    retrieval pointer instead of the content it promised.
+    """
+    from comodor.agent import Conversation
+    from comodor.agent.context import KEEP_RECENT_RESULTS
+    from comodor.providers.base import Message
+
+    conversation = Conversation()
+    conversation.add(Message.user("read the file"))
+    base = Message.tool(call_id="base", name="read_file", content="x" * 1000)
+    base.meta["path"] = "big.py"
+    base.meta["fingerprint"] = "fp"
+    conversation.add(base)
+    reference = Message.tool(call_id="ref", name="read_file",
+                             content="unchanged since the result of call base above")
+    reference.meta["reference"] = "base"
+    conversation.add(reference)
+    for index in range(KEEP_RECENT_RESULTS + 1):
+        conversation.add(Message.tool(call_id=f"r{index}", name="read_file",
+                                      content="short result"))
+
+    conversation.withhold(1)
+    assert "withheld" not in base.meta, "a referenced base was moved aside"
+
+
+def test_an_unreferenced_full_result_is_still_withheld(tool_context):
+    from comodor.agent import Conversation
+    from comodor.agent.context import KEEP_RECENT_RESULTS
+    from comodor.providers.base import Message
+
+    conversation = Conversation()
+    conversation.add(Message.user("read the file"))
+    base = Message.tool(call_id="base", name="read_file", content="x" * 1000)
+    base.meta["path"] = "big.py"
+    base.meta["fingerprint"] = "fp"
+    conversation.add(base)
+    for index in range(KEEP_RECENT_RESULTS + 1):
+        conversation.add(Message.tool(call_id=f"r{index}", name="read_file",
+                                      content="short result"))
+
+    moved, _ = conversation.withhold(1)
+    assert moved >= 1
+    assert base.meta.get("withheld") is True

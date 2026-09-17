@@ -285,17 +285,38 @@ class Conversation:
                                           reason="over budget, retrievable"))
         return len(self.withheld), freed
 
+    def _referenced_bases(self) -> set[str]:
+        """Call ids a live reference or delta points at.
+
+        A later message may name an earlier full result as the base it is
+        written against. That base is not itself marked in any way, so
+        withholding it would leave the reference pointing at a retrieval
+        pointer instead of the content it promised.
+        """
+        bases: set[str] = set()
+        for message in self.messages:
+            for key in ("reference", "delta_base"):
+                base = message.meta.get(key)
+                if base:
+                    bases.add(str(base))
+        return bases
+
     def _withholdable(self) -> list[int]:
         """Indexes of results that may be moved aside: resident in full,
         retrievable, not among the most recent, not the request itself."""
         found: list[int] = []
         recent = len(self.messages) - KEEP_RECENT_RESULTS
+        bases = self._referenced_bases()
         for index, message in enumerate(self.messages):
             if index == 0 or index >= recent or message.role is not Role.TOOL:
                 continue
             if message.is_error or message.name in PROTECTED_TOOLS:
                 continue
             if any(key in message.meta for key in ("withheld", "reference", "superseded")):
+                continue
+            if message.tool_call_id in bases:
+                # A live reference or delta depends on this content; moving it
+                # aside would break the promise the reference made.
                 continue
             path = str(message.meta.get("path") or "")
             spill = str(message.meta.get("spill") or "")

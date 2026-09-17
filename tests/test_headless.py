@@ -385,3 +385,14 @@ def test_a_cancelled_or_expired_run_invents_no_value(scripted):
                    for message in call]
         assert not any("Flask it is" in reply for reply in replies), (
             f"the second script ran under {action}: dependent work resumed")
+
+
+def test_the_json_usage_reports_cache_creation_tokens(scripted):
+    """A provider that bills cache creation reports it; the payload carries it
+    so a benchmark total does not understate what the model read."""
+    config = scripted([Script(text="Done.")])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(config, json=True))
+    report = json.loads(out.getvalue())
+    assert "written_tokens" in report["usage"]
