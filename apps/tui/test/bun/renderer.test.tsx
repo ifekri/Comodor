@@ -2081,9 +2081,9 @@ describe("permissions", () => {
         detail: Array.from({ length: 12 }, (_each, at) => `output line ${at}`).join("\n"),
       });
       // One macrotask is not a paint: on a slow macOS runner the frame was
-      // captured with the card still on its way. Wait for it, with the pass
-      // budget the mode waits use, as the other permission tests do.
-      await view.waitForFrame((frame) => frame.includes("[Deny]"), MODE_PASSES);
+      // captured with the card still on its way. The wall-clock wait is the
+      // tool this file uses for a card arriving from an event.
+      await waitForText(view, "[Deny]");
 
       const frame = view.frame();
       for (const row of frame.split("\n")) {
@@ -2127,12 +2127,11 @@ describe("permissions", () => {
       detail: "$ npm test — پوشهٔ build",
     });
 
-    // The card is waited for, not assumed after one yield: on a loaded
-    // runner the frame was captured with the card still on its way. The pass
-    // budget is the same one the mode waits use, because twenty passes is a
-    // scheduling difference reported as a missing card.
-    const frame = await view.waitForFrame((frame) => frame.includes("[Deny]"),
-                                          MODE_PASSES);
+    // The card is waited for, not assumed after one yield. `waitForFrame` ends
+    // as soon as the renderer goes quiet, which a card arriving from an event
+    // can do before React has committed it; the wall-clock wait is the tool
+    // this file uses for that flow, and the assertion is the same.
+    const frame = await waitForText(view, "[Deny]");
     expect(frame).toContain("اجازه");
     expect(frame).toContain("[Deny]");
     view.client.close();
