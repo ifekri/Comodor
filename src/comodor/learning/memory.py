@@ -58,6 +58,16 @@ _SHELL_MUTATION = re.compile(
     r"(?i)(\brm\b|\brmdir\b|\bdel\b|\berase\b|\bunlink\b|\bmv\b|\bmove\b|"
     r"\brename\b|\btee\b|\btruncate\b|\btouch\b|sed\s+-i|>>?\s)")
 
+#: A Python statement that changes a file. `run_python` is not a shell, so the
+#: shell operators do not describe it: `Path("foo.py").write_text(...)` is a
+#: write even though it matches none of them.
+_PYTHON_MUTATION = re.compile(
+    r"(?i)(\.write_text\s*\(|\.write_bytes\s*\(|\.writelines\s*\(|"
+    r"\.unlink\s*\(|\.rename\s*\(|\.replace\s*\(|\.touch\s*\(|\.mkdir\s*\(|"
+    r"\bopen\s*\([^)]*['\"][wax]['\"]|"
+    r"\bos\.(remove|unlink|rename|replace|rmdir|mkdir|makedirs)\s*\(|"
+    r"\bshutil\.(move|copy|copy2|copyfile|rmtree|make_archive)\s*\()")
+
 #: How much of a proposal's wording a single message must contain to count
 #: as having said it. Word overlap, not meaning: the check is deterministic
 #: and says only that the words came from there.
@@ -193,8 +203,12 @@ def _written_later(messages: list[Any], index: int, path: str) -> bool:
                     return True
                 if name in ("run_shell", "run_python"):
                     command = str(args.get("command") or args.get("code") or "")
-                    if _names_file(command, path) \
-                            and _SHELL_MUTATION.search(_unquoted(command)):
+                    if not _names_file(command, path):
+                        continue
+                    if name == "run_python":
+                        if _PYTHON_MUTATION.search(command):
+                            return True
+                    elif _SHELL_MUTATION.search(_unquoted(command)):
                         return True
         elif role == "tool" and str(getattr(later, "name", "") or "") in _WRITER_TOOLS:
             meta = getattr(later, "meta", None) or {}

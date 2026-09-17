@@ -176,13 +176,15 @@ def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
             attempts, verdict, kept = _run_sequence_once(
                 task, provider=provider, model=model, keep=keep, say=say,
                 strategy=strategy, learning=learning, without=without)
+            if verdict.invalid:
+                # A harness failure is not agent quality: its steps are not
+                # scored, so they never reach the token, cost or clarification
+                # aggregates (SC-021). The transcript is kept by the runner.
+                outcome.invalid.append(verdict.reason)
+                continue
             for step_attempt in attempts:
                 step_attempt.sequence_run = attempt_number
             outcome.attempts.extend(attempts)
-            if verdict.invalid:
-                # A harness failure is not agent quality: recorded, not counted.
-                outcome.invalid.append(verdict.reason)
-                continue
             outcome.verdicts.append(verdict)
             if not verdict.passed:
                 outcome.kept.append(kept)

@@ -349,3 +349,5 @@ def test_an_invalid_sequence_run_is_excluded_from_aggregation(tmp_path, monkeypa
     assert outcome.tries == 0
     assert outcome.passed == 0
     assert outcome.invalid == ["hook failed", "hook failed"]
+    assert outcome.attempts == [], \
+        "an invalid run's steps are not scored in the token/cost aggregates"

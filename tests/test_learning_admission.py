@@ -309,3 +309,21 @@ def test_a_relative_shell_write_supersedes_an_absolute_read(tmp_path):
 
     assert memory_module.corroborate(
         "the CI runner is Linux only", [shown, edited]) == ("", "", "")
+
+
+def test_a_python_write_supersedes_an_observation(tmp_path):
+    """`run_python` is not a shell: a `write_text` call is a write even though
+    it matches no shell operator (FR-114)."""
+    from comodor.providers.base import ToolCall
+
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    wrote = Message.assistant("", [ToolCall(
+        id="c2", name="run_python",
+        arguments={"code": f'from pathlib import Path\nPath("{target}").write_text("new")'})])
+
+    assert memory_module.corroborate(
+        "the CI runner is Linux only", [shown, wrote]) == ("", "", "")
