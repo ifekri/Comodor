@@ -1238,6 +1238,11 @@ def _relay_clarification(service: CoreService, handle: SessionHandle,
         for entry in payload.get("decisions") or [] if isinstance(entry, dict)]
     if decisions:
         body["decisions"] = decisions
+    prior = [str(item) for item in payload.get("prior_changes") or [] if str(item)]
+    if prior:
+        # Work done before the decision became known, so a protocol client is
+        # never told the workspace is unchanged (contracts §C6).
+        body["prior_changes"] = prior
     service._emit(handle, "clarification.required", body)
     ended = {"cancelled": "the question was cancelled",
              "expired": "the question expired unanswered",

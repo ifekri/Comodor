@@ -158,6 +158,22 @@ def _internal(message: Any) -> bool:
     return bool(meta.get("synthetic") or meta.get("compacted"))
 
 
+def _unquoted(command: str) -> str:
+    """A command with quoted spans removed, so a quoted `>` is not redirection."""
+    return re.sub(r"'[^']*'|\"[^\"]*\"", " ", command or "")
+
+
+def _names_file(command: str, path: str) -> bool:
+    """Whether a shell command names the file, absolute or by basename.
+
+    A read records the absolute path; a later command commonly names the same
+    file relatively (`sed -i … foo.py`), so the basename counts too.
+    """
+    if not command:
+        return False
+    return path in command or Path(path).name in command
+
+
 def _written_later(messages: list[Any], index: int, path: str) -> bool:
     """Whether a write to `path` follows the observation at `index`.
 
@@ -177,7 +193,8 @@ def _written_later(messages: list[Any], index: int, path: str) -> bool:
                     return True
                 if name in ("run_shell", "run_python"):
                     command = str(args.get("command") or args.get("code") or "")
-                    if path in command and _SHELL_MUTATION.search(command):
+                    if _names_file(command, path) \
+                            and _SHELL_MUTATION.search(_unquoted(command)):
                         return True
         elif role == "tool" and str(getattr(later, "name", "") or "") in _WRITER_TOOLS:
             meta = getattr(later, "meta", None) or {}

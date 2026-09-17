@@ -432,3 +432,15 @@ def test_a_changed_absolute_path_matches_the_requested_basename():
                                answer="Added notes.md.")
 
     assert assessment.unresolved == []
+
+
+def test_a_quoted_redirection_token_is_not_a_mutation():
+    """`grep '> ' foo.py` searches for a string; the `>` is not redirection."""
+    ledger = Ledger()
+    ledger.verified("run_shell run: grep '> ' foo.py",
+                    source="run_shell:grep", material="")
+
+    assessment = verify.assess("- update foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Updated foo.py.")
+
+    assert "update foo.py" in assessment.unresolved

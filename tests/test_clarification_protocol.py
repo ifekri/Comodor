@@ -244,3 +244,26 @@ def test_the_relay_never_sends_an_outcome_outside_the_enum(config):
         assert "outcome" not in body
     finally:
         service.close()
+
+
+def test_the_relay_carries_prior_changes(config):
+    """A negotiated protocol client is told what changed before the decision
+    became known (contracts §C6)."""
+    from comodor.application import _relay_clarification
+    from comodor.events import Event, Kind
+
+    service = CoreService(config)
+    try:
+        session = service.create_session()["id"]
+        handle = service.session(session)
+        sent = []
+        service.on_event = lambda _s, name, params, _q: sent.append((name, params))
+        _relay_clarification(service, handle, Event(kind=Kind.TURN_END, payload={
+            "stopped": "clarification_required",
+            "clarification": {"decision": "d", "candidates": [], "evidence_consulted": [],
+                              "reason": "behaviour", "outcome": "cancelled",
+                              "prior_changes": ["db.py"]}}))
+        body = next(params for name, params in sent if name == "clarification.required")
+        assert body["prior_changes"] == ["db.py"]
+    finally:
+        service.close()

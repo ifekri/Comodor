@@ -291,3 +291,21 @@ def test_an_observation_a_shell_write_superseded_is_not_tool_confirmed(tmp_path)
 
     assert memory_module.corroborate(
         "the CI runner is Linux only", [shown, removed]) == ("", "", "")
+
+
+def test_a_relative_shell_write_supersedes_an_absolute_read(tmp_path):
+    """A read records the absolute path; a later command commonly names the
+    same file relatively, so the basename counts too (FR-114)."""
+    from comodor.providers.base import ToolCall
+
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    edited = Message.assistant("", [ToolCall(
+        id="c2", name="run_shell",
+        arguments={"command": "sed -i s/ubuntu/debian/ ci.yml"})])
+
+    assert memory_module.corroborate(
+        "the CI runner is Linux only", [shown, edited]) == ("", "", "")

@@ -264,3 +264,21 @@ def test_a_prior_mutation_is_preserved_across_every_ending(
     assert result.clarification["outcome"] == ending
     assert (config.paths.project / "db.py").exists()
     assert result.clarification["prior_changes"] == ["db.py"]
+
+
+def test_a_long_shell_command_is_recorded_in_full_for_the_gate(config, bus, monkeypatch):
+    """The display summary truncates at 120 characters; the evidence identity
+    keeps the whole command, so a write past the cut is still proof."""
+    from comodor.providers.base import ToolCall
+    from comodor.tools.base import ToolResult
+
+    agent = make_agent(config, bus, [Script(text="never")])
+    command = "echo " + "x" * 200 + " > foo.py"
+    call = ToolCall(id="s1", name="run_shell", arguments={"command": command})
+    monkeypatch.setattr(agent, "_run_one",
+                        lambda c, ctx: ToolResult.success("done", exit_code=0))
+
+    agent._execute([call])
+
+    claims = [entry.claim for entry in agent._tool_context().evidence.entries]
+    assert any("> foo.py" in claim for claim in claims)

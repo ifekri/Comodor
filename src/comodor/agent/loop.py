@@ -986,7 +986,18 @@ class AgentLoop:
             book = context.evidence
             path = str(result.meta.get("path") or call.arguments.get("path") or "")
             subject = path or self._describe(call)
-            claim = f"{call.name} {subject}".strip()
+            claim_subject = subject
+            if call.name in ("run_shell", "run_python"):
+                full = str(call.arguments.get("command")
+                           or call.arguments.get("code") or "")
+                if full:
+                    # The internal evidence identity needs the whole command: a
+                    # write operator or path past the display summary's cut
+                    # still proves the change (FR-036). `source` keeps the
+                    # bounded description, and the ledger is per-turn and never
+                    # persisted.
+                    claim_subject = full[:2000]
+            claim = f"{call.name} {claim_subject}".strip()
             if not result.ok:
                 if book.find(claim) is None:
                     book.unknown(claim)

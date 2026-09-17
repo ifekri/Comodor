@@ -220,9 +220,18 @@ _SHELL_MUTATION = re.compile(
 _PATH_ISH = re.compile(r"(?:[\w.-]*[/\\][\w./\\-]*)|\b[\w-]+\.[A-Za-z0-9]{1,8}\b")
 
 
+def _unquoted(command: str) -> str:
+    """The command with quoted spans removed, for operator detection.
+
+    `grep '> ' foo.py` searches for a string; the `>` is not redirection. Only
+    a `>` outside quotes is a shell operator.
+    """
+    return re.sub(r"'[^']*'|\"[^\"]*\"", " ", command or "")
+
+
 def command_mutates(command: str) -> bool:
     """Whether a shell command changes the filesystem."""
-    return bool(_SHELL_MUTATION.search(command or ""))
+    return bool(_SHELL_MUTATION.search(_unquoted(command)))
 
 
 def _file_operation(element: str, verb: re.Pattern[str]) -> bool:
@@ -334,20 +343,21 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
             continue
         claim = str(getattr(entry, "claim", "") or "")
         tool = claim.split(" ", 1)[0].strip().lower()
+        command = _unquoted(claim)
         if mutation and tool in _READ_ONLY_TOOLS:
             # The file was read, not changed. Only a change to the artifact —
             # or verified resulting state — delivers a mutation request.
             continue
         if destructive and (tool not in _COMMAND_TOOLS
-                            or not _DESTRUCTIVE_COMMAND.search(claim)):
+                            or not _DESTRUCTIVE_COMMAND.search(command)):
             # An edit to `foo.py` is not a delete of it.
             continue
         if move and (tool not in _COMMAND_TOOLS
-                     or not _MOVE_COMMAND.search(claim)):
+                     or not _MOVE_COMMAND.search(command)):
             continue
         if mutation and not destructive and not move \
                 and tool not in _WRITER_TOOLS \
-                and not (tool in _COMMAND_TOOLS and _SHELL_MUTATION.search(claim)):
+                and not (tool in _COMMAND_TOOLS and _SHELL_MUTATION.search(command)):
             # An ordinary mutation (write/create/update) needs writer evidence
             # or a shell command that actually writes; a read-only command
             # that merely names the file is not a change (FR-036).
