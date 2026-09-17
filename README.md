@@ -51,7 +51,7 @@ It inspects the repository before making material decisions, distinguishes verif
 
 <div align="center">
 
-<img src="/.github/Chart-Request.svg" alt="Requst Chart - Comodor Chart Map."/>
+<img src="/.github/charts/Chart-Request.svg" alt="Requst Chart - Comodor Chart Map."/>
 
 </div>
 
