@@ -138,13 +138,17 @@ class TurnRecord:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
+    #: Cache-creation tokens: a separate, non-overlapping part of the prompt
+    #: for the providers that bill it, so it is kept apart rather than folded
+    #: into input or cached.
+    written_tokens: int = 0
     context_size: int = 0
     estimated: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens,
-                "cached_tokens": self.cached_tokens, "context_size": self.context_size,
-                "estimated": self.estimated}
+                "cached_tokens": self.cached_tokens, "written_tokens": self.written_tokens,
+                "context_size": self.context_size, "estimated": self.estimated}
 
 
 @dataclass
@@ -174,6 +178,7 @@ class TaskMeasurement:
             input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
             output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
             cached_tokens=int(getattr(usage, "cached_tokens", 0) or 0),
+            written_tokens=int(getattr(usage, "written_tokens", 0) or 0),
             context_size=prompt if prompt else int(context_estimate or 0),
             estimated=not prompt,
         )
@@ -197,6 +202,10 @@ class TaskMeasurement:
         return sum(turn.cached_tokens for turn in self.turns)
 
     @property
+    def written_tokens(self) -> int:
+        return sum(turn.written_tokens for turn in self.turns)
+
+    @property
     def context_size(self) -> int:
         """The last request's size — what the model read most recently."""
         return self.turns[-1].context_size if self.turns else 0
@@ -206,6 +215,7 @@ class TaskMeasurement:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "cached_tokens": self.cached_tokens,
+            "written_tokens": self.written_tokens,
             "context_size": self.context_size,
             "model_turns": self.model_turns,
             "tool_calls": self.tool_calls,

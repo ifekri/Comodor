@@ -118,8 +118,11 @@ def test_the_budget_can_be_switched_off():
 
 def test_the_least_relevant_result_goes_first_and_the_relevant_one_stays():
     conversation = a_history()
+    # The request is named, so this is about relevance and not about which way
+    # ties break; tie order is asserted on its own below.
     conversation.withhold(sum(estimate_text(m.content) for m in conversation.messages)
-                          - estimate_text(big("dat")) - 10)
+                          - estimate_text(big("dat")) - 10,
+                          query="Fix the pricing bug in pricing.py")
     withheld = {entry.path for entry in conversation.withheld}
     assert "pricing.py" not in withheld, "what the request is about stays"
     assert withheld <= {"database.py", "auth.py", "cache.py"}
@@ -196,3 +199,23 @@ def test_no_cut_ever_orphans_a_tool_call_after_withholding():
         elif message.role is Role.TOOL:
             pending.discard(message.tool_call_id)
     assert not pending
+
+
+def test_equal_relevance_candidates_are_evicted_oldest_first():
+    """With no query overlap the BM25 scores tie; the order is then age,
+    older first, so the older observation is the one moved aside."""
+    from comodor.agent import Conversation
+    from comodor.providers.base import Message
+
+    conversation = Conversation()
+    conversation.add(Message.user("nothing in here matches the query"))
+    first = Message.tool(call_id="c1", name="read_file", content="alpha alpha alpha")
+    first.meta["path"] = "a.py"
+    second = Message.tool(call_id="c2", name="read_file", content="beta beta beta")
+    second.meta["path"] = "b.py"
+    conversation.add(first)
+    conversation.add(second)
+
+    order = conversation._rank([1, 2], "zzzzz unmatched")
+
+    assert order == [1, 2]

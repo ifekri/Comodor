@@ -89,3 +89,22 @@ def test_mutation_without_the_definition_pattern_nothing_is_learned(engine, monk
     monkeypatch.setattr(rules_module, "analyse_terminology", lambda text: [])
     engine.before_turn('the "smoke test" means the deploy check we run first')
     assert _memory_facts(engine) == []
+
+
+def test_redefining_a_term_back_revives_the_earlier_definition(engine):
+    """A -> B -> A must revive A, not collide with its superseded row.
+
+    The unique (scope, kind, text) index refuses a second copy of A, so
+    defining the term back to A has to reactivate the row that already says it
+    and supersede the one that governed meanwhile.
+    """
+    engine.before_turn('the "smoke test" means the deploy check we run first')
+    engine.before_turn('the "smoke test" means the post-deploy sanity check')
+    engine.before_turn('the "smoke test" means the deploy check we run first')
+
+    facts = _memory_facts(engine)
+    assert len(facts) == 2, "no duplicate row was inserted"
+    first = next(f for f in facts if "deploy check" in f.text)
+    second = next(f for f in facts if "sanity check" in f.text)
+    assert first.lifecycle == "active"
+    assert second.lifecycle == "superseded" and second.superseded_by == first.id

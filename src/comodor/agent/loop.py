@@ -719,6 +719,9 @@ class AgentLoop:
             return ""
         if not marked:
             return ""
+        # Recorded, so the per-task measurement and `comodor insights` show the
+        # stale knowledge this turn detected rather than always zero.
+        self._measurement.knowledge_stale += len(marked)
         lines = "\n".join(f"- {item['text']} ({item['why']})" for item in marked)
         return ("[Learned knowledge contradicted by what was just observed and "
                 f"marked stale — rely on the observation, not on it:\n{lines}]")

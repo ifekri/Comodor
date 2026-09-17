@@ -89,3 +89,24 @@ def test_mutation_without_the_recurrence_guard_one_message_makes_a_rule(engine, 
     engine.before_turn("always run the linter before committing")
     assert len(_instruction_rules(engine)) == 1, (
         "with the recurrence guard removed, a single message would land")
+
+
+def test_restating_the_original_instruction_revives_its_rule(engine):
+    """always X -> never X -> always X leaves `always X` active, not neither.
+
+    The re-stated instruction updates its superseded row; if that row stayed
+    superseded, superseding the contrary one would leave no rule applying.
+    """
+    engine.before_turn("always run the linter before committing")
+    engine.before_turn("always run the linter before committing")
+    engine.before_turn("never run the linter before committing")
+    engine.before_turn("never run the linter before committing")
+    engine.before_turn("always run the linter before committing")
+
+    rules = _instruction_rules(engine)
+    always = next(rule for rule in rules if rule.key.startswith("instruction.always."))
+    never = next(rule for rule in rules if rule.key.startswith("instruction.never."))
+    assert always.applies, "the re-stated instruction must apply again"
+    assert not never.applies, "the contrary rule was superseded"
+    active_keys = {rule.key for rule in engine.active_rules()}
+    assert always.key in active_keys and never.key not in active_keys

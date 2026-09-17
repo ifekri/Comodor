@@ -266,13 +266,28 @@ class SignalDetector:
             return
         for observation in rules_module.analyse_terminology(text):
             term = observation.key[len("term."):]
-            older = [fact for fact in self.facts.entries("memory")
-                     if fact.text.lower().startswith(f'"{term}" means ')]
-            if any(fact.text.lower() == observation.statement.lower() for fact in older):
+            prefix = f'"{term}" means '
+            # Every row for the term, superseded ones included: defining a term
+            # back to something it said before must revive that row, not insert
+            # a duplicate the unique `(scope, kind, text)` index would refuse.
+            known = [fact for fact in self.store.all_facts(
+                        self.facts.scopes, kinds=["memory"], settled_only=False)
+                     if fact.text.lower().startswith(prefix)]
+            active = [fact for fact in known if fact.lifecycle == "active"]
+            wanted = observation.statement.lower()
+            revived = next((fact for fact in known if fact.text.lower() == wanted), None)
+            if revived is not None:
+                if revived.lifecycle != "active":
+                    self.store.set_lifecycle("facts", revived.id, "active")
+                for fact in active:
+                    if fact.id != revived.id:
+                        self.store.supersede("facts", fact.id, revived.id)
+                        outcome.superseded.append((fact, revived))
                 continue
-            # Set the older aside first so the replacement is not refused by
-            # a cap the older one is holding; put it back if nothing lands.
-            for fact in older:
+            # A new definition: the active ones step aside first so the
+            # replacement is not refused by a cap an older one is holding; put
+            # them back if nothing lands.
+            for fact in active:
                 self.store.set_lifecycle("facts", fact.id, "superseded")
             try:
                 stored = self.facts.add(
@@ -280,11 +295,11 @@ class SignalDetector:
                     provenance="user_statement",
                     source_ref=f"user message (turn {self._turn})")
             except ValueError as refused:
-                for fact in older:
+                for fact in active:
                     self.store.set_lifecycle("facts", fact.id, "active")
                 outcome.refused.append(f"{observation.statement}: {refused}")
                 continue
-            for fact in older:
+            for fact in active:
                 self.store.supersede("facts", fact.id, stored.id)
                 outcome.superseded.append((fact, stored))
             outcome.new_facts.append(stored)

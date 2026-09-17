@@ -530,7 +530,7 @@ def _unresolved(decisions: list[Any], outcome: str, repeated: bool = False) -> T
             "these decisions are still needed.")
         result = ToolResult.success(
             content, display=f"Questions not answered ({outcome}).",
-            answered=False, outcome=outcome,
+            answered=False, outcome=outcome, asked=len(material), given=0,
             clarification=payload_for(material, outcome))
         return result
     # Nothing material was asked: the model may settle these itself and say so.
@@ -539,4 +539,5 @@ def _unresolved(decisions: list[Any], outcome: str, repeated: bool = False) -> T
         f"outcome materially, so decide these yourself and say which way you "
         f"went:\n{named}")
     return ToolResult.success(content, display=f"Questions not answered ({outcome}).",
-                              answered=False, outcome=outcome)
+                              answered=False, outcome=outcome,
+                              asked=len(decisions), given=0)

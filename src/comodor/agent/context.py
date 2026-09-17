@@ -350,7 +350,10 @@ class Conversation:
             index.add(str(position), f"{message.name} {message.meta.get('path', '')} "
                                      f"{message.content[:4000]}")
         scores = dict(index.search(f"{text} {recent_words}", limit=len(indexes)))
-        return sorted(indexes, key=lambda position: (scores.get(str(position), 0.0), -position))
+        # Ties break by age, older first: ascending position. Newest-first here
+        # would withhold the more recent observations while keeping the older
+        # ones, the opposite of what the docstring promises.
+        return sorted(indexes, key=lambda position: (scores.get(str(position), 0.0), position))
 
     def render(self, system_prompt: str,
                tools: list[ToolSpec] | None = None) -> list[Message]:

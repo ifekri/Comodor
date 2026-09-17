@@ -305,3 +305,44 @@ def test_cancelling_the_turn_outranks_an_unanswered_form(config, bus):
 
     assert result.stopped == "cancelled"
     assert result.stopped != "clarification_required"
+
+
+def test_an_unanswered_form_counts_as_a_raised_clarification(config, bus):
+    """The mandatory questions that stop a turn are the ones the metric needs."""
+    from comodor import questions as forms
+    from comodor.events import Kind
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+
+    def dismiss(event):
+        if event.kind is Kind.REQUEST:
+            event.payload["request"].answer(forms.CANCELLED)
+
+    bus.subscribe(dismiss)
+    question = ToolCall(id="q1", name="ask", arguments={"questions": [{
+        "question": "Which database should we use?", "header": "Database",
+        "affects": ["persistence"],
+        "options": [{"label": "SQLite", "source": "request", "evidence": "SQLite"},
+                    {"label": "PostgreSQL", "source": "request", "evidence": "PostgreSQL"}]}]})
+    agent = _agent(config, bus, [Script(text="Asking.", tool_calls=[question]),
+                                 Script(text="never")])
+    result = agent.run("SQLite or PostgreSQL?")
+
+    assert result.stopped == "clarification_required"
+    assert result.measurement.clarifications_raised == 1
+    assert result.measurement.clarifications_answered == 0
+
+
+def test_stale_knowledge_is_recorded_in_the_measurement(config, bus):
+    class Memory:
+        def check_staleness(self, paths=None, tables=None):
+            return [{"text": "a learned item", "why": "its source changed"}]
+
+    config.learning.enabled = True
+    agent = _agent(config, bus, [])
+    agent.memory = Memory()
+
+    note = agent._learning_contradicted("a.py")
+
+    assert "contradicted" in note.lower()
+    assert agent._measurement.knowledge_stale == 1

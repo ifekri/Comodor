@@ -212,3 +212,18 @@ def test_the_module_defines_no_field_that_could_hold_content():
     for cls in (tokens_module.TurnRecord, tokens_module.TaskMeasurement):
         for field in dataclasses.fields(cls):
             assert field.name not in FORBIDDEN_KEYS, field.name
+
+
+def test_cache_creation_tokens_are_measured():
+    """A cache-creation token is part of the prompt and of the task total."""
+    from comodor.agent.tokens import TaskMeasurement
+    from comodor.providers.base import Usage
+
+    measurement = TaskMeasurement()
+    measurement.record_turn(Usage(input_tokens=10, output_tokens=5,
+                                  cached_tokens=20, written_tokens=7, cost_usd=0.0))
+
+    assert measurement.written_tokens == 7
+    assert measurement.as_dict()["written_tokens"] == 7
+    assert measurement.as_dict()["input_tokens"] == 10
+    assert measurement.as_dict()["cached_tokens"] == 20

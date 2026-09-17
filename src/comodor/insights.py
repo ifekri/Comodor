@@ -54,6 +54,7 @@ class Insights:
     task_input_tokens: int = 0
     task_output_tokens: int = 0
     task_cached_tokens: int = 0
+    task_written_tokens: int = 0
     model_turns: int = 0
     tool_calls: int = 0
     clarifications_raised: int = 0
@@ -182,6 +183,7 @@ def _measured(rows, result: Insights) -> None:
         result.task_input_tokens += int(record.get("input_tokens", 0) or 0)
         result.task_output_tokens += int(record.get("output_tokens", 0) or 0)
         result.task_cached_tokens += int(record.get("cached_tokens", 0) or 0)
+        result.task_written_tokens += int(record.get("written_tokens", 0) or 0)
         result.model_turns += int(record.get("model_turns", 0) or 0)
         result.tool_calls += int(record.get("tool_calls", 0) or 0)
         result.clarifications_raised += int(record.get("clarifications_raised", 0) or 0)
@@ -256,8 +258,9 @@ def render(result: Insights) -> str:
     if result.measured_episodes:
         lines.append(
             f"- measured tasks: {result.measured_episodes:,} · tokens "
-            f"in/out/cached: {result.task_input_tokens:,}/"
-            f"{result.task_output_tokens:,}/{result.task_cached_tokens:,} · "
+            f"in/out/cached/written: {result.task_input_tokens:,}/"
+            f"{result.task_output_tokens:,}/{result.task_cached_tokens:,}/"
+            f"{result.task_written_tokens:,} · "
             f"model turns: {result.model_turns:,} · validation failures: "
             f"{result.validation_failures:,}")
     lines.append("")
@@ -302,6 +305,7 @@ def to_json(result: Insights) -> dict:
         "task_input_tokens": result.task_input_tokens,
         "task_output_tokens": result.task_output_tokens,
         "task_cached_tokens": result.task_cached_tokens,
+        "task_written_tokens": result.task_written_tokens,
         "model_turns": result.model_turns,
         "tool_calls": result.tool_calls,
         "clarifications_raised": result.clarifications_raised,

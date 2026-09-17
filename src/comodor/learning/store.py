@@ -980,12 +980,14 @@ class BrainStore:
                         provenance = CASE WHEN ? <> '' THEN ? ELSE provenance END,
                         source_ref = CASE WHEN ? <> '' THEN ? ELSE source_ref END,
                         fingerprint = CASE WHEN ? <> '' THEN ? ELSE fingerprint END,
-                        lifecycle = CASE WHEN ? AND lifecycle = 'stale' THEN 'active'
-                                         ELSE lifecycle END
+                        lifecycle = CASE WHEN ? AND lifecycle IN ('stale', 'superseded')
+                                         THEN 'active' ELSE lifecycle END,
+                        superseded_by = CASE WHEN ? AND lifecycle IN ('stale', 'superseded')
+                                             THEN 0 ELSE superseded_by END
                     WHERE key = ? AND scope = ?""",
                 (weight, now, statement, statement, detail, detail,
                  source, source, provenance, provenance, source_ref, source_ref,
-                 fingerprint, fingerprint, int(agrees), key, scope),
+                 fingerprint, fingerprint, int(agrees), int(agrees), key, scope),
             )
             row = connection.execute(
                 "SELECT * FROM rules WHERE key = ? AND scope = ?", (key, scope)
