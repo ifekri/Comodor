@@ -354,6 +354,9 @@ def test_a_carried_decision_the_project_settled_does_not_stop_the_turn(config, m
 
     assert result.stopped == "done"
     assert not [d for d in agent.tool_context.evidence.decisions if d.withholds]
+    assert all(d.state != "unresolved"
+               for d in agent.tool_context.evidence.decisions), \
+        "a settled carried decision is not reopened as unresolved"
 
 
 def test_the_delegate_tool_hands_a_clarification_back(config, bus, tool_context):
@@ -403,3 +406,21 @@ def test_a_delegate_clarification_in_a_tool_result_ends_the_parent_turn(config, 
 
     assert [d.what for d in context.evidence.decisions] == ["Which database?"]
     assert context.evidence.withheld(), "dependent work is withheld"
+
+
+def test_applied_delegate_files_are_mutation_evidence(config, bus, monkeypatch):
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import ToolCall
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+    from comodor.tools.base import ToolResult
+
+    agent = AgentLoop(config, Gateway(config, scripts=[Script(text="done")]),
+                      ToolRegistry(), bus, PermissionEngine(config, bus), Conversation())
+    call = ToolCall(id="d1", name="delegate", arguments={"task": "x"})
+    result = ToolResult.success("applied", applied=True, files=["foo.py"])
+    monkeypatch.setattr(agent, "_run_one", lambda c, ctx: result)
+
+    agent._execute([call])
+
+    assert "foo.py" in agent._written_paths

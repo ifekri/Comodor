@@ -53,6 +53,11 @@ OBSERVING_TOOLS = frozenset({"read_file", "list_dir", "glob", "grep", "run_shell
 #: since written to is out of date, whatever its words still say.
 _WRITER_TOOLS = frozenset({"write_file", "edit_file"})
 
+#: A shell command that changes a file, for the same staleness check.
+_SHELL_MUTATION = re.compile(
+    r"(?i)(\brm\b|\brmdir\b|\bdel\b|\berase\b|\bunlink\b|\bmv\b|\bmove\b|"
+    r"\brename\b|\btee\b|\btruncate\b|\btouch\b|sed\s+-i|>>?\s)")
+
 #: How much of a proposal's wording a single message must contain to count
 #: as having said it. Word overlap, not meaning: the check is deterministic
 #: and says only that the words came from there.
@@ -132,10 +137,15 @@ def corroborate(text: str, messages: Iterable[Any]) -> tuple[str, str, str]:
             continue
         meta = getattr(message, "meta", None) or {}
         path = str(meta.get("path") or "") if isinstance(meta, dict) else ""
-        if path and _written_later(messages, index, path):
+        if not path:
+            # A source with no re-observable identity — a web page, a pathless
+            # command — cannot be fingerprinted or invalidated later, so it
+            # must not become durable knowledge (FR-066, FR-114).
             continue
-        ref = f"{name}:{path}" if path else name
-        fingerprint = rules_module.file_fingerprint(Path(path)) if path else ""
+        if _written_later(messages, index, path):
+            continue
+        ref = f"{name}:{path}"
+        fingerprint = rules_module.file_fingerprint(Path(path))
         return "tool_confirmed", ref[:200], fingerprint
     return "", "", ""
 
@@ -153,15 +163,22 @@ def _written_later(messages: list[Any], index: int, path: str) -> bool:
 
     An observation the model has since edited over is no longer what the file
     says; storing the fact against the current file's fingerprint would keep
-    a contradicted fact active (FR-114).
+    a contradicted fact active (FR-114). A shell command that changes the file
+    counts too: `run_shell("rm foo.py")` leaves the observation just as stale
+    as an editor would.
     """
     for later in messages[index + 1:]:
         role = _role(later)
         if role == "assistant":
             for call in getattr(later, "tool_calls", None) or []:
-                if getattr(call, "name", "") in _WRITER_TOOLS \
-                        and str((getattr(call, "arguments", None) or {}).get("path") or "") == path:
+                name = str(getattr(call, "name", "") or "")
+                args = getattr(call, "arguments", None) or {}
+                if name in _WRITER_TOOLS and str(args.get("path") or "") == path:
                     return True
+                if name in ("run_shell", "run_python"):
+                    command = str(args.get("command") or args.get("code") or "")
+                    if path in command and _SHELL_MUTATION.search(command):
+                        return True
         elif role == "tool" and str(getattr(later, "name", "") or "") in _WRITER_TOOLS:
             meta = getattr(later, "meta", None) or {}
             if isinstance(meta, dict) and str(meta.get("path") or "") == path:

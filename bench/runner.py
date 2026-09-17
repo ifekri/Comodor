@@ -67,6 +67,9 @@ class Outcome:
     without: tuple[str, ...] = ()
     #: Whether this ran a same-project sequence rather than one prompt.
     sequence: bool = False
+    #: Sequence runs the harness could not measure (a correction hook that
+    #: raised). Kept for the report, excluded from pass/fail aggregation.
+    invalid: list[str] = field(default_factory=list)
 
     @property
     def passed(self) -> int:
@@ -176,6 +179,10 @@ def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
             for step_attempt in attempts:
                 step_attempt.sequence_run = attempt_number
             outcome.attempts.extend(attempts)
+            if verdict.invalid:
+                # A harness failure is not agent quality: recorded, not counted.
+                outcome.invalid.append(verdict.reason)
+                continue
             outcome.verdicts.append(verdict)
             if not verdict.passed:
                 outcome.kept.append(kept)
@@ -249,7 +256,7 @@ def _run_sequence_once(task: Task, *, provider: str, model: str,
     result = SequenceResult(task=task, steps=list(task.sequence),
                             attempts=list(attempts), invalid_reason=broken)
     if broken:
-        verdict = Verdict.no(f"invalid run — {broken}")
+        verdict = Verdict.invalid_run(f"invalid run — {broken}")
     else:
         try:
             verdict = task.check_sequence(result)

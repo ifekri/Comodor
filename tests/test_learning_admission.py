@@ -268,3 +268,26 @@ def test_mutation_stubbing_corroboration_lets_the_assertion_through(
         assert fresh.all_lessons() == [], "with the gate restored, it is refused"
     finally:
         engine.close()
+
+
+def test_a_pathless_web_result_corroborates_nothing():
+    """A web page has no re-observable identity, so it must not become durable
+    knowledge that can never be invalidated (FR-066, FR-114)."""
+    page = Message.tool("c1", "web_fetch", "the CI runner is Linux only")
+    assert memory_module.corroborate(
+        "the CI runner is Linux only", [page]) == ("", "", "")
+
+
+def test_an_observation_a_shell_write_superseded_is_not_tool_confirmed(tmp_path):
+    from comodor.providers.base import ToolCall
+
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    removed = Message.assistant("", [ToolCall(
+        id="c2", name="run_shell", arguments={"command": f"rm {target}"})])
+
+    assert memory_module.corroborate(
+        "the CI runner is Linux only", [shown, removed]) == ("", "", "")

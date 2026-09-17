@@ -330,3 +330,22 @@ def test_a_truncated_invalid_sequence_is_reported_without_crashing(tmp_path):
     assert record["comparable"] is False
     assert record["invalid_reason"]
     assert len(record["steps"]) == 1
+
+
+def test_an_invalid_sequence_run_is_excluded_from_aggregation(tmp_path, monkeypatch):
+    """A harness failure is recorded but not counted as a pass or a fail."""
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok(),
+                sequence=tuple(_steps(2)),
+                check_sequence=lambda result: Verdict.ok())
+    monkeypatch.setattr(
+        runner, "_run_sequence_once",
+        lambda *args, **kwargs: ([_attempt(tmp_path)],
+                                 Verdict.invalid_run("hook failed"), ""))
+
+    outcome = runner.run_task(task, provider="p", model="m", tries=2,
+                              say=lambda *args, **kwargs: None)
+
+    assert outcome.tries == 0
+    assert outcome.passed == 0
+    assert outcome.invalid == ["hook failed", "hook failed"]

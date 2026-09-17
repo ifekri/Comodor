@@ -38,10 +38,15 @@ class Verdict:
     The reason is not optional and is not decoration: a failing task whose
     report says only `False` tells you the number moved and nothing about what
     to do next, which is the state this whole exercise exists to get out of.
+
+    `invalid` marks a run the harness could not measure — a correction hook
+    that raised, so the simulated correction never happened. It is not a pass
+    or a fail, and it is excluded from pass/fail aggregation (SC-021).
     """
 
     passed: bool
     reason: str
+    invalid: bool = False
 
     @classmethod
     def ok(cls, reason: str = "") -> Verdict:
@@ -50,6 +55,10 @@ class Verdict:
     @classmethod
     def no(cls, reason: str) -> Verdict:
         return cls(False, reason)
+
+    @classmethod
+    def invalid_run(cls, reason: str) -> Verdict:
+        return cls(False, reason, invalid=True)
 
 
 @dataclass

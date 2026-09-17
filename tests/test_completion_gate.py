@@ -399,3 +399,26 @@ def test_a_destructive_command_delivers_a_delete_request():
                                changed_paths=[], answer="Deleted foo.py.")
 
     assert assessment.unresolved == []
+
+
+def test_a_read_only_shell_command_does_not_deliver_an_update():
+    """`cat README.md` is not updating it (FR-036, FR-116)."""
+    ledger = Ledger()
+    ledger.verified("run_shell run: cat README.md",
+                    source="run_shell:cat README.md", material="")
+
+    assessment = verify.assess("- update README.md", entries=ledger.entries,
+                               changed_paths=[], answer="Updated README.md.")
+
+    assert "update README.md" in assessment.unresolved
+
+
+def test_a_writing_shell_command_delivers_an_update():
+    ledger = Ledger()
+    ledger.verified("run_shell run: echo hi > README.md",
+                    source="run_shell:echo", material="")
+
+    assessment = verify.assess("- update README.md", entries=ledger.entries,
+                               changed_paths=[], answer="Updated README.md.")
+
+    assert assessment.unresolved == []

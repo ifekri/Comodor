@@ -149,7 +149,8 @@ def test_a_batch_with_ask_is_never_run_in_parallel(config, bus):
         return ToolCall(id=name, name=name, arguments={})
 
     assert agent._can_parallelise([call("read_file"), call("list_dir")]) is True
-    assert agent._can_parallelise([call("ask"), call("list_dir")]) is False
+    for name in ("ask", "delegate"):
+        assert agent._can_parallelise([call(name), call("list_dir")]) is False, name
 
 
 def test_the_guard_is_the_withheld_check(config, bus, monkeypatch):

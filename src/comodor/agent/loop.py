@@ -75,6 +75,10 @@ READ_ONLY_TOOLS = frozenset({
     "read_skill_file", "mcp_read_resource",
 })
 
+#: Calls that can open or hand back a mandatory decision. A batch containing
+#: one runs in order, so the decision is recorded before a sibling could act.
+_DECISION_RAISERS = frozenset({"ask", "delegate"})
+
 
 def _brief_failure(content: str) -> str:
     text = " ".join((content or "").split())
@@ -569,6 +573,12 @@ class AgentLoop:
                     path = str(result.meta.get("path") or "")
                     if path:
                         self._written_paths.append(path)
+                if result.meta.get("applied"):
+                    # A writing delegate applied its patch here: those files are
+                    # this turn's mutation evidence too (FR-036).
+                    for applied_path in result.meta.get("files") or []:
+                        if applied_path:
+                            self._written_paths.append(str(applied_path))
             if call.name == "ask":
                 self._measurement.clarifications_raised += int(result.meta.get("asked", 0) or 0)
                 self._measurement.clarifications_answered += int(result.meta.get("given", 0) or 0)
@@ -689,11 +699,12 @@ class AgentLoop:
         usually emitting something malformed; running those concurrently turns
         one wasted turn into several.
 
-        A batch containing `ask` runs in order, always. `ask` is the call that
-        opens the decision, and the withheld check runs when each call starts:
-        run concurrently, a `memory`/`todo_write`/`delegate` beside it would be
-        evaluated before the decision existed, and would persist state or
-        start work the answer may have forbidden.
+        A batch containing a call that can raise a decision — `ask`, or a
+        foreground `delegate` whose child can — runs in order, always. The
+        withheld check runs when each call starts, and a decision payload is
+        imported only after the batch finishes: run concurrently, a SAFE
+        `memory`/`todo_write` beside them could persist state the decision
+        forbids.
         """
         if not self.config.safety.auto_approve_safe:
             return False
@@ -702,7 +713,8 @@ class AgentLoop:
             return False
         for call in calls:
             tool = self.tools.get(call.name)
-            if tool is None or tool.risk is not Risk.SAFE or call.name == "ask":
+            if tool is None or tool.risk is not Risk.SAFE \
+                    or call.name in _DECISION_RAISERS:
                 return False
         return True
 
@@ -858,6 +870,11 @@ class AgentLoop:
                             for option in entry.get("candidates") or []],
                 evidence_consulted=list(entry.get("evidence_consulted")
                                         or carried.get("evidence_consulted") or []))
+            if decision.resolved:
+                # The ledger already answered this (a settled decision seeded
+                # first); do not reopen it as unresolved and make the gate
+                # annotate work the project already settled (FR-008).
+                continue
             book.asked(decision.id)
             book.ended_without_answer(decision.id, outcome)
 

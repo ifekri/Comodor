@@ -208,6 +208,14 @@ _READ_ONLY_TOOLS = frozenset({
 #: Commands that change the filesystem, for destructive and move evidence.
 _COMMAND_TOOLS = frozenset({"run_shell", "run_python"})
 
+#: Tools whose result is a change to a file.
+_WRITER_TOOLS = frozenset({"write_file", "edit_file"})
+
+#: A shell command that writes: a read-only `cat README.md` is not an update.
+_SHELL_MUTATION = re.compile(
+    r"(?i)(\brm\b|\brmdir\b|\bdel\b|\berase\b|\bunlink\b|\bmv\b|\bmove\b|"
+    r"\brename\b|\btee\b|\btruncate\b|\btouch\b|\bsed\s+-i|>>?\s)")
+
 #: A path-looking target: a token with a file extension or a path separator.
 _PATH_ISH = re.compile(r"(?:[\w.-]*[/\\][\w./\\-]*)|\b[\w-]+\.[A-Za-z0-9]{1,8}\b")
 
@@ -321,6 +329,13 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
             continue
         if move and (tool not in _COMMAND_TOOLS
                      or not _MOVE_COMMAND.search(claim)):
+            continue
+        if mutation and not destructive and not move \
+                and tool not in _WRITER_TOOLS \
+                and not (tool in _COMMAND_TOOLS and _SHELL_MUTATION.search(claim)):
+            # An ordinary mutation (write/create/update) needs writer evidence
+            # or a shell command that actually writes; a read-only command
+            # that merely names the file is not a change (FR-036).
             continue
         if wanted & _keywords(claim):
             ref = str(getattr(entry, "fingerprint", "") or getattr(entry, "source", ""))

@@ -61,6 +61,7 @@ def test_a_plain_statement_about_a_file_is_still_tool_confirmed():
     """The distinction is enforced, not a blanket refusal of tool text: a fact
     about what the file contains is admissible."""
     shown = Message.tool("c1", "read_file", "runs-on: ubuntu-latest")
+    shown.meta["path"] = "ci.yml"
     assert memory_module.corroborate("runs-on ubuntu-latest", [shown])[0] == "tool_confirmed"
 
 
@@ -112,6 +113,7 @@ def test_the_store_refuses_an_injected_fact_even_by_hand(store):
 def test_mutation_stubbing_the_instruction_check_lets_the_order_through(monkeypatch):
     name, text = VECTORS["file"]
     shown = Message.tool("c1", name, text)
+    shown.meta["path"] = "ci.yml"
     assert memory_module.corroborate(text, [shown]) == ("", "", "")
 
     monkeypatch.setattr(memory_module, "instruction_shaped", lambda _text: False)
