@@ -304,6 +304,16 @@ def _keywords(text: str) -> set[str]:
     return {word for word in words if word not in _UNINFORMATIVE and len(word) > 2}
 
 
+def _path_keywords(path: str) -> set[str]:
+    """Keywords for a changed path, with its basename too.
+
+    An absolute POSIX path is one token (`/tmp/x/notes.md`), so the element's
+    `notes.md` would never match it; the basename is what the request names.
+    """
+    text = str(path or "")
+    return _keywords(text) | _keywords(Path(text).name)
+
+
 def _delivered(element: str, entries, changed_paths) -> list[str]:
     """Evidence refs showing `element` was done, or empty."""
     wanted = _keywords(element)
@@ -345,7 +355,7 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
         # A changed path is delivery for a write, a create or an edit, and not
         # for an operation whose evidence has to match the operation.
         for path in changed_paths or []:
-            if wanted & _keywords(str(path)):
+            if wanted & _path_keywords(str(path)):
                 refs.append(str(path))
     return refs
 

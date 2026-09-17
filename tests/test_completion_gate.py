@@ -422,3 +422,13 @@ def test_a_writing_shell_command_delivers_an_update():
                                changed_paths=[], answer="Updated README.md.")
 
     assert assessment.unresolved == []
+
+
+def test_a_changed_absolute_path_matches_the_requested_basename():
+    """An absolute POSIX path is one keyword token, so the changed-path check
+    must also look at the basename the request names (regression: CI Linux)."""
+    assessment = verify.assess("- add notes.md", entries=[],
+                               changed_paths=["/tmp/pytest-of-x/notes.md"],
+                               answer="Added notes.md.")
+
+    assert assessment.unresolved == []
