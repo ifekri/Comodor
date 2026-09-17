@@ -155,3 +155,59 @@ def test_a_window_names_what_it_withheld_and_another_read_fetches_it(tool_contex
     rest = ReadFile().run(tool_context, path="long.py", offset=200, limit=5)
     assert "line200 = 200" in rest.content
     assert not tool_context.was_read(target), "a window is not knowing the file"
+
+
+def test_a_withheld_command_points_at_its_saved_output_not_a_rerun(tool_context):
+    """A command's output that was spilled is named where it went.
+
+    Replacing a withheld command result with "re-run the command" would repeat
+    a side effect — a commit, a migration, a deploy. The spill file the result
+    already points at is the safe way back.
+    """
+    from comodor.agent import Conversation
+    from comodor.agent.context import KEEP_RECENT_RESULTS
+    from comodor.providers.base import Message
+    from comodor.tools import overflow
+
+    body = "exit 0 in 2s\n" + "\n".join(f"line {n}: doing work" for n in range(4000))
+    carried = overflow.contain(ToolResult.success(body, exit_code=0),
+                               tool_context, "run_shell")
+    spill = str(carried.meta.get("spill") or "")
+    assert spill, "the command output should have been spilled"
+
+    conversation = Conversation()
+    conversation.add(Message.user("run the migration"))
+    message = Message.tool(call_id="c1", name="run_shell", content=carried.content)
+    message.meta.update(carried.meta)
+    conversation.add(message)
+    for index in range(KEEP_RECENT_RESULTS + 1):
+        conversation.add(Message.tool(call_id=f"r{index}", name="read_file",
+                                      content="short result"))
+
+    moved, _ = conversation.withhold(1)
+    assert moved >= 1
+    withheld = next(m for m in conversation.messages if m.tool_call_id == "c1")
+    assert withheld.meta.get("withheld") is True
+    assert spill in withheld.content, "the pointer must name the saved output"
+    assert "re-run" not in withheld.content, "a command must not be replayed"
+
+
+def test_a_command_with_no_saved_output_is_never_withheld(tool_context):
+    """With nothing on disk to point at, withholding would invite a replay."""
+    from comodor.agent import Conversation
+    from comodor.agent.context import KEEP_RECENT_RESULTS
+    from comodor.providers.base import Message
+
+    conversation = Conversation()
+    conversation.add(Message.user("run the migration"))
+    message = Message.tool(
+        call_id="c1", name="run_shell",
+        content="exit 0 in 2s\n" + "\n".join(f"line {n}: work" for n in range(4000)))
+    conversation.add(message)
+    for index in range(KEEP_RECENT_RESULTS + 1):
+        conversation.add(Message.tool(call_id=f"r{index}", name="read_file",
+                                      content="short result"))
+
+    conversation.withhold(1)
+    untouched = next(m for m in conversation.messages if m.tool_call_id == "c1")
+    assert "withheld" not in untouched.meta

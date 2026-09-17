@@ -231,3 +231,33 @@ def test_two_results_in_the_same_second_do_not_overwrite_each_other(tool_context
     second = overflow.contain(ToolResult.success("2" * 9_000), tool_context, "grep")
 
     assert spilled_path(first.content) != spilled_path(second.content)
+
+
+def test_a_passing_run_that_reports_zero_errors_is_not_a_failure(tool_context):
+    """A summary line naming zero failures is not a failing line.
+
+    A successful build prints "0 errors" or "error(s): 0"; matching the word
+    "error" in one would carry a passing run as a failing one and invite a
+    fix for a problem that does not exist.
+    """
+    from comodor.tools.base import ToolResult
+
+    for summary in ("0 errors", "0 error(s)", "errors: 0", "0 failures",
+                    "failures: 0"):
+        body = "exit 0 in 2s\n" + "\n".join(
+            f"case {n} ok" for n in range(400)) + f"\n{summary}\n"
+        result = ToolResult.success(body, exit_code=0)
+        carried = overflow.contain(result, tool_context, "run_shell")
+        assert carried.meta.get("log") == "passed", summary
+        assert "Failing run" not in carried.content, summary
+
+
+def test_a_real_failure_is_still_a_failure_with_a_zero_elsewhere(tool_context):
+    from comodor.tools.base import ToolResult
+
+    body = ("exit 1 in 2s\n" + "\n".join(f"case {n} ok" for n in range(400))
+            + "\nFAILED tests/test_x.py::test_y\n0 warnings\n1 failed, 400 passed\n")
+    result = ToolResult.success(body, exit_code=1)
+    carried = overflow.contain(result, tool_context, "run_shell")
+    assert carried.meta.get("log") == "failed"
+    assert "test_y" in carried.content

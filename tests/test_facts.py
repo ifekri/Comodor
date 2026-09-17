@@ -563,3 +563,36 @@ def test_a_turn_recorded_during_a_wait_is_covered_by_that_wait(tmp_path):
     finally:
         gateway.released.set()
         engine.close()
+
+
+def test_a_review_corroborates_against_its_own_transcript(store, service):
+    """Each pass judges its own transcript, not the most recent one set.
+
+    A newer review may replace an in-flight one; a shared transcript field
+    would let the older pass overwrite the newer pass's transcript and store
+    its facts against the wrong turn.
+    """
+    from comodor.learning.review import Reviewer, ReviewResult
+    from comodor.learning.store import Fact
+    from comodor.providers.base import Message
+
+    reviewer = Reviewer(service, FakeGateway(["{}"]))
+    assert not hasattr(reviewer, "_messages"), (
+        "the transcript must not be shared state on the reviewer")
+
+    said = ReviewResult()
+    said.facts = [Fact(kind="memory", text="the build uses bazel")]
+    assert reviewer._absorb(said, 0, [Message.user("the build uses bazel")]) == 1
+
+def test_a_fact_absent_from_the_passed_transcript_is_refused(store, service):
+    from comodor.learning.review import Reviewer, ReviewResult
+    from comodor.learning.store import Fact
+    from comodor.providers.base import Message
+
+    reviewer = Reviewer(service, FakeGateway(["{}"]))
+    unbacked = ReviewResult()
+    unbacked.facts = [Fact(kind="memory", text="the build uses bazel")]
+
+    assert reviewer._absorb(
+        unbacked, 0, [Message.user("the tests use pytest")]) == 0
+    assert service.entries() == []

@@ -51,6 +51,17 @@ _FAILING = re.compile(
     r"|\bAssertionError\b|\bpanic\b|\bfatal\b|\bnot ok\b|\bFAIL:|^E\s{2,}"
     r"|^\s+File \".+\", line \d+|\berror\[E\d+\]|\berror:)", re.I | re.M)
 
+#: A summary that names *zero* failures — "0 errors", "error(s): 0". A
+#: successful build or test run prints these, and matching the word "error"
+#: in one would carry a passing run as a failing one and invite a pointless
+#: fix. A line that only says there were none is not a failing line.
+_ZERO = re.compile(r"\b0\s+(?:errors?|failures?|warnings?)\b"
+                   r"|\b(?:errors?|failures?)\s*[:=]\s*0\b", re.I)
+
+
+def _failing_line(line: str) -> bool:
+    return bool(_FAILING.search(line)) and not _ZERO.search(line)
+
 #: How many lines around a failing line travel with it.
 _AROUND = 3
 
@@ -104,17 +115,19 @@ def contain(result: ToolResult, ctx: ToolContext, tool: str) -> ToolResult:
         return result
 
     source = result.meta.get("path")
+    spill = ""
     if source and _is_a_readable_file(source, len(content)):
         pointer = _point_at_the_original(result, Path(source), ctx)
     else:
-        pointer = _point_at_a_copy(content, ctx, tool)
+        pointer, spill = _point_at_a_copy(content, ctx, tool)
 
     kept = _head_and_tail(content, budget - len(pointer))
     return ToolResult(
         ok=result.ok,
         content=f"{kept}\n\n{pointer}",
         display=_for_the_pane(result.display or content),
-        meta={**result.meta, "overflowed": True, "full_chars": len(content)},
+        meta={**result.meta, "overflowed": True, "full_chars": len(content),
+              **({"spill": spill} if spill else {})},
         elapsed=result.elapsed,
     )
 
@@ -135,9 +148,10 @@ def _summarise_log(result: ToolResult, content: str, ctx: ToolContext,
     is, what it said — the tail, and the pointer. A failing run is never a
     flag: if nothing in it reads as a failure, it is carried as it was.
     """
-    passed = _exit_code(result) == 0 and not _FAILING.search(content)
+    passed = _exit_code(result) == 0 and not any(
+        _failing_line(line) for line in content.splitlines())
     lines = content.splitlines()
-    pointer = _point_at_a_copy(content, ctx, tool)
+    pointer, spill = _point_at_a_copy(content, ctx, tool)
     if passed:
         kept = lines[:2] + [line for line in lines[2:] if _PASSED.search(line)][-6:]
         if len(kept) < 2:
@@ -149,9 +163,9 @@ def _summarise_log(result: ToolResult, content: str, ctx: ToolContext,
             ok=result.ok, content=f"{body}\n\n{note}",
             display=_for_the_pane(result.display or content),
             meta={**result.meta, "overflowed": True, "log": "passed",
-                  "full_chars": len(content)},
+                  "full_chars": len(content), **({"spill": spill} if spill else {})},
             elapsed=result.elapsed)
-    failing = [index for index, line in enumerate(lines) if _FAILING.search(line)]
+    failing = [index for index, line in enumerate(lines) if _failing_line(line)]
     if not failing:
         return None
     keep: set[int] = set(range(min(2, len(lines))))
@@ -175,7 +189,7 @@ def _summarise_log(result: ToolResult, content: str, ctx: ToolContext,
         ok=result.ok, content=f"{body}\n\n{note}",
         display=_for_the_pane(result.display or content),
         meta={**result.meta, "overflowed": True, "log": "failed",
-              "full_chars": len(content)},
+              "full_chars": len(content), **({"spill": spill} if spill else {})},
         elapsed=result.elapsed)
 
 
@@ -226,15 +240,21 @@ def _point_at_the_original(result: ToolResult, path: Path, ctx: ToolContext) -> 
             f"limit, or find what you need in it with grep.]")
 
 
-def _point_at_a_copy(content: str, ctx: ToolContext, tool: str) -> str:
-    """Output that existed nowhere else, written down so it still exists."""
+def _point_at_a_copy(content: str, ctx: ToolContext, tool: str) -> tuple[str, str]:
+    """Output that existed nowhere else, written down so it still exists.
+
+    Returns the pointer and the file it names, so the path survives when the
+    pointer text itself is later replaced (a withheld result must say where the
+    output went, never "run the command again" — a commit or a migration is not
+    safe to repeat).
+    """
     target = _write(content, ctx, tool)
     if target is None:
         return ("[This is the head and tail only. The rest could not be saved, "
-                "so re-run the command if you need it.]")
+                "so re-run the command if you need it.]", "")
     return (f"[This is the head and tail of {len(content):,} characters. All of "
             f"it is at {target} — read it with read_file using offset and "
-            f"limit, or search it with grep.]")
+            f"limit, or search it with grep.]", str(target))
 
 
 def _write(content: str, ctx: ToolContext, tool: str) -> Path | None:

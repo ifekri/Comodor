@@ -149,7 +149,7 @@ class AgentLoop:
         #: Tool calls that failed this turn, `(tool, reason)`, and the paths a
         #: successful write touched. Both feed the completion gate (FR-116,
         #: FR-036).
-        self._failed: list[tuple[str, str]] = []
+        self._failed: list[tuple[str, str, str]] = []
         self._written_paths: list[str] = []
         #: The request this turn is answering, for the gate's element list.
         self._request_text = ""
@@ -487,13 +487,22 @@ class AgentLoop:
 
         self._measurement.tool_calls += len(calls)
         for call, result in zip(calls, results, strict=True):
+            # The thing the call was about, from the model's own argument, so a
+            # failure and a later retry of the same operation share a key.
+            key = str(call.arguments.get("path") or call.arguments.get("command") or "")
             if not result.ok:
                 self._measurement.retries += 1
-                self._failed.append((call.name, _brief_failure(result.content)))
-            elif call.name in _WRITE_TOOLS:
-                path = str(result.meta.get("path") or "")
-                if path:
-                    self._written_paths.append(path)
+                self._failed.append((call.name, key, _brief_failure(result.content)))
+            else:
+                # A failure this same operation has since recovered is no longer
+                # unresolved: a transient mismatch followed by a successful
+                # retry must not make a finished turn read as incomplete.
+                self._failed = [entry for entry in self._failed
+                                if not (entry[0] == call.name and entry[1] == key)]
+                if call.name in _WRITE_TOOLS:
+                    path = str(result.meta.get("path") or "")
+                    if path:
+                        self._written_paths.append(path)
             if call.name == "ask":
                 self._measurement.clarifications_raised += int(result.meta.get("asked", 0) or 0)
                 self._measurement.clarifications_answered += int(result.meta.get("given", 0) or 0)
@@ -1065,7 +1074,7 @@ class AgentLoop:
                 self._request_text,
                 entries=getattr(ledger, "entries", []) or [],
                 changed_paths=self._written_paths,
-                failures=self._failed,
+                failures=[(tool, reason) for tool, _key, reason in self._failed],
                 pending=pending,
                 answer=result.text)
         except Exception:

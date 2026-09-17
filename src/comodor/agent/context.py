@@ -261,10 +261,20 @@ class Conversation:
             message = self.messages[index]
             before = estimate(message.content)
             path = str(message.meta.get("path") or "")
-            how = (f"read {path} again with read_file, or grep it" if path
-                   else f"re-run {message.name} if you need it")
-            what = f"the result of {message.name} ({path})" if path else \
-                f"the result of {message.name}"
+            spill = str(message.meta.get("spill") or "")
+            if path:
+                how = f"read {path} again with read_file, or grep it"
+                what = f"the result of {message.name} ({path})"
+            elif spill:
+                # The output was saved before it was moved aside, so point at
+                # the saved copy: a command is not safe to replay — a commit or
+                # a migration would happen twice.
+                how = (f"read {spill} with read_file using offset and limit, "
+                       f"or grep it")
+                what = f"the result of {message.name}"
+            else:
+                how = f"re-run {message.name} if you need it"
+                what = f"the result of {message.name}"
             message.content = WITHHELD_NOTE.format(what=what, how=how)
             message.meta["withheld"] = True
             after = estimate(message.content)
@@ -288,8 +298,14 @@ class Conversation:
             if any(key in message.meta for key in ("withheld", "reference", "superseded")):
                 continue
             path = str(message.meta.get("path") or "")
-            retrievable = bool(path) or message.meta.get("overflowed") is True \
-                or message.name in ("run_shell", "run_python", "grep", "glob", "list_dir")
+            spill = str(message.meta.get("spill") or "")
+            # Retrievable means it can be got back without repeating a side
+            # effect: a file the agent can read again, output saved to a spill
+            # file, or a read-only listing/search. A command whose output was
+            # not saved is not a candidate — "run it again" is not safe for a
+            # commit, a migration or a deployment.
+            retrievable = bool(path) or bool(spill) or message.name in (
+                "grep", "glob", "list_dir", "web_search", "web_fetch")
             if not retrievable or len(message.content) < WORTH_REFERENCING:
                 continue
             found.append(index)

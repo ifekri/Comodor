@@ -210,3 +210,51 @@ def test_an_open_decision_ends_the_turn_not_a_false_success(config, bus):
 
     assert result.stopped == "clarification_required"
     assert result.stopped != "done"
+
+
+def test_a_recovered_tool_failure_does_not_block_a_completion_claim(config, bus):
+    """A transient failure the same operation recovered is not unresolved work.
+
+    A failed edit followed by a successful retry is a normal way to finish; the
+    turn must not be forced to describe completed work as incomplete because
+    the first attempt is still being remembered.
+    """
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+
+    (config.paths.project / "a.py").write_text("x = 1\n", encoding="utf-8")
+    scripts = [
+        Script(text="Editing.", tool_calls=[ToolCall(
+            id="e1", name="edit_file",
+            arguments={"path": "a.py", "old_string": "nope", "new_string": "y"})]),
+        Script(text="Retrying.", tool_calls=[ToolCall(
+            id="e2", name="edit_file",
+            arguments={"path": "a.py", "old_string": "x = 1", "new_string": "x = 2"})]),
+        Script(text="The task is complete."),
+    ]
+    agent = _agent(config, bus, scripts)
+    result = agent.run("update a.py")
+
+    assert result.stopped == "done"
+    assert len(agent.gateway.provider("fake").calls) == 3, (
+        "a recovered failure must not trigger a correction turn")
+
+
+def test_an_unrecovered_failure_still_blocks_a_completion_claim(config, bus):
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+
+    (config.paths.project / "a.py").write_text("x = 1\n", encoding="utf-8")
+    scripts = [
+        Script(text="Editing.", tool_calls=[ToolCall(
+            id="e1", name="edit_file",
+            arguments={"path": "a.py", "old_string": "nope", "new_string": "y"})]),
+        Script(text="The task is complete."),
+        Script(text="Correction: the work is not complete — the edit never applied."),
+    ]
+    agent = _agent(config, bus, scripts)
+    result = agent.run("update a.py")
+
+    assert result.stopped == "done"
+    assert len(agent.gateway.provider("fake").calls) == 3
+    assert "not complete" in result.text.lower()
