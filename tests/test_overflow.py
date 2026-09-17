@@ -261,3 +261,46 @@ def test_a_real_failure_is_still_a_failure_with_a_zero_elsewhere(tool_context):
     carried = overflow.contain(result, tool_context, "run_shell")
     assert carried.meta.get("log") == "failed"
     assert "test_y" in carried.content
+
+
+# --------------------------------------------------------------------------- #
+# the pointer survives a resume (FR-089)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_spilled_pointer_survives_a_session_round_trip(tmp_path):
+    """The path a withheld result names is kept with the message, so a
+    reopened session can still protect the file from pruning."""
+    from comodor.providers.base import Message
+    from comodor.session.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    message = Message.tool("c1", "run_shell", "head and tail only")
+    message.meta["spill"] = str(tmp_path / "spill" / "run_shell-abc.txt")
+    store.append("s1", message)
+
+    restored = store.load("s1")
+    assert restored[0].meta["spill"] == str(tmp_path / "spill" / "run_shell-abc.txt")
+
+
+def test_a_resumed_pointer_is_registered_with_the_tool_context(config, bus, tmp_path):
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import Message
+    from comodor.providers.fake import Script
+    from comodor.providers.gateway import Gateway
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+
+    spill = str(tmp_path / "spill" / "run_shell-abc.txt")
+    conversation = Conversation()
+    message = Message.tool("c1", "run_shell", "head and tail only")
+    message.meta["spill"] = spill
+    conversation.add(message)
+    agent = AgentLoop(config, Gateway(config, scripts=[Script(text="never")]),
+                      ToolRegistry(), bus, PermissionEngine(config, bus),
+                      conversation)
+
+    agent._open_ledger("carry on")
+
+    assert spill in agent._tool_context().spilled, \
+        "a restored pointer is what keeps its file from being pruned"

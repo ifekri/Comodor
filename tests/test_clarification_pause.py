@@ -115,6 +115,29 @@ def test_after_a_non_answer_the_turn_ends_so_nothing_dependent_can_follow(config
     assert not (config.paths.project / "db.py").exists()
 
 
+def test_only_read_only_tools_are_exempt_while_a_decision_is_open(config, bus):
+    """`SAFE` is not read-only.
+
+    `memory`, `todo_write` and `delegate` are all SAFE yet persist state or
+    start work, so they wait with everything else; only tools that just look
+    may still run (FR-018).
+    """
+    agent = make_agent(config, bus, [Script(text="never")])
+    context = agent._tool_context()
+    decision = context.evidence.open_decision("Which database?",
+                                              affects=["architecture"])
+    context.evidence.asked(decision.id)
+
+    def reason(name):
+        return AgentLoop._withheld_by(agent, context,
+                                      ToolCall(id="c", name=name, arguments={}))
+
+    for name in ("memory", "todo_write", "delegate", "propose_mode", "write_file"):
+        assert reason(name), f"{name} must wait for the decision"
+    for name in ("read_file", "list_dir", "glob", "grep"):
+        assert reason(name) == "", f"{name} is read-only and may still run"
+
+
 def test_the_guard_is_the_withheld_check(config, bus, monkeypatch):
     """Mutation check (T040): remove the check and the write runs."""
     bus.subscribe(dismiss_forms)

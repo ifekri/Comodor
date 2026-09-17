@@ -63,6 +63,18 @@ SECTION_GAP = "\n\n"
 #: recorded for the completion gate's delivery evidence (FR-036).
 _WRITE_TOOLS = frozenset({"write_file", "edit_file"})
 
+#: Tools that may still run while a mandatory decision is open, because all
+#: they do is look (FR-018). `Risk.SAFE` is deliberately not the test: `memory`
+#: persists durable facts, `todo_write` writes the plan, `delegate` starts
+#: background work and `ask`/`propose_mode` raise requests — all SAFE, none of
+#: them reading. Nothing here changes state or starts work, so exempting these
+#: and withholding the rest keeps decision-dependent work behind the ledger
+#: without stopping the model from gathering what it can.
+READ_ONLY_TOOLS = frozenset({
+    "read_file", "list_dir", "glob", "grep", "search_history",
+    "read_skill_file", "mcp_read_resource",
+})
+
 
 def _brief_failure(content: str) -> str:
     text = " ".join((content or "").split())
@@ -340,7 +352,7 @@ class AgentLoop:
                         # message with another one would otherwise be asked
                         # forever.
                         asked_to_speak = True
-                        self.conversation.add(Message.user(SAY_WHAT_HAPPENED))
+                        self._say_internally(SAY_WHAT_HAPPENED)
                         continue
                     else:
                         result.text = ""
@@ -377,7 +389,7 @@ class AgentLoop:
                     result.text = ""          # this answer is replaced, not kept
                     from . import verify
 
-                    self.conversation.add(Message.user(verify.as_incomplete(assessment)))
+                    self._say_internally(verify.as_incomplete(assessment))
                     continue
                 if assessment.unresolved:
                     # Beside the answer for a person watching, and on the
@@ -615,15 +627,17 @@ class AgentLoop:
         return tool.summary(call.arguments) if tool else call.name
 
     def _withheld_by(self, context: ToolContext, call: ToolCall) -> str:
-        """Why a mutating call may not run now, or an empty string.
+        """Why a call may not run now, or an empty string.
 
-        Read-only tools stay available — they are how the agent gathers what
-        it can without the answer. Anything that changes the project, runs a
-        command or reaches outside waits for the decision.
+        Only explicitly read-only tools stay available — they are how the
+        agent gathers what it can without the answer. Everything else waits
+        for the decision, including the SAFE tools that persist state or
+        start work: `memory`, `todo_write`, `delegate`, `ask`, `propose_mode`
+        are not read-only, and "SAFE" is a statement about risk, not about
+        whether a call depends on an open decision (FR-018).
         """
         try:
-            tool = self.tools.get(call.name)
-            if tool is None or tool.risk is Risk.SAFE:
+            if call.name in READ_ONLY_TOOLS:
                 return ""
             open_decisions = [decision for decision in context.evidence.withheld()
                               if decision.state in ("unresolved", "blocked", "asked")]
@@ -679,6 +693,18 @@ class AgentLoop:
     # method here is wrapped the way `_say_if_unverified` is: a fault in the
     # record must never be the reason a turn fails.
 
+    def _say_internally(self, content: str) -> None:
+        """A USER-role prompt the loop writes to itself, not the person's words.
+
+        The provider's alternation needs the user role, but the transcript must
+        not pretend the person said a compaction brief, a completion correction
+        or a plan restatement. Marked, so `context.stated` — and with it the
+        memory tool's "the user stated this" check (FR-066) — leaves it out.
+        """
+        message = Message.user(content)
+        message.meta["synthetic"] = True
+        self.conversation.add(message)
+
     def _open_ledger(self, user_text: str,
                      decisions: list[dict[str, Any]] | None = None) -> None:
         """A fresh ledger for the turn, seeded with what the user stated.
@@ -695,7 +721,16 @@ class AgentLoop:
             context.stated = [
                 message.content for message in self.conversation.messages
                 if getattr(message.role, "value", "") == "user"
+                and not message.meta.get("synthetic")
+                and not message.meta.get("compacted")
                 and isinstance(message.content, str) and message.content][-20:]
+            # A spill file this conversation already points at stays protected
+            # across a resume: the pointer in the restored message is only
+            # worth something while the file it names is still there (FR-089).
+            for message in self.conversation.messages:
+                path = message.meta.get("spill") if message.meta else None
+                if isinstance(path, str) and path:
+                    context.spilled.add(path)
             context.recalled = [
                 getattr(item, "text", "") or str(item) for item in self._recalled]
             context.evidence.known("the request, as the user stated it",
@@ -978,7 +1013,7 @@ class AgentLoop:
         except Exception:
             return
         if block:
-            self.conversation.add(Message.user(block))
+            self._say_internally(block)
 
     def _summarise(self, messages: list[Message]) -> str:
         """Ask the model to write the brief that replaces old history."""
@@ -1086,8 +1121,7 @@ class AgentLoop:
             return False
 
         self._note(f"{command} fails — giving it one turn to fix that.")
-        self.conversation.add(
-            Message.user(project.as_correction(command, outcome)))
+        self._say_internally(project.as_correction(command, outcome))
         return True
 
     def _say_if_unverified(self, result: TurnResult) -> None:

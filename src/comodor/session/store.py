@@ -108,6 +108,13 @@ class SessionStore:
         form = message.meta.get("question") if message.meta else None
         if isinstance(form, dict):
             record["question"] = form
+        # A spill path the conversation was given. Additive, like `question`:
+        # a record written before this key existed reads back unchanged. Kept
+        # so a resumed session still protects the file its pointer names from
+        # pruning (FR-089).
+        spill = message.meta.get("spill") if message.meta else None
+        if isinstance(spill, str) and spill:
+            record["spill"] = spill
         with self.path_for(session_id).open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -125,6 +132,11 @@ class SessionStore:
         messages: list[Message] = []
         for record in _read_jsonl(path):
             try:
+                meta: dict[str, Any] = {}
+                if isinstance(record.get("question"), dict):
+                    meta["question"] = record["question"]
+                if isinstance(record.get("spill"), str) and record["spill"]:
+                    meta["spill"] = record["spill"]
                 messages.append(Message(
                     role=Role(record.get("role", "user")),
                     content=record.get("content", ""),
@@ -135,8 +147,7 @@ class SessionStore:
                     tool_calls=[ToolCall(id=call.get("id", ""), name=call.get("name", ""),
                                          arguments=call.get("arguments") or {})
                                 for call in record.get("tool_calls") or []],
-                    meta={"question": record["question"]}
-                    if isinstance(record.get("question"), dict) else {},
+                    meta=meta,
                 ))
             except (ValueError, TypeError):
                 continue
