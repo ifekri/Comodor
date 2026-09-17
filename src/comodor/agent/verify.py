@@ -191,12 +191,37 @@ _MUTATION = re.compile(
     r"(?i)\b(create|write|add|change|replace|rename|move|delete|remove|update|"
     r"fix|implement|refactor|migrate|generate)\b")
 
+#: Verbs whose evidence has to match the operation, not just the path: an edit
+#: to `foo.py` is not a delete of it, and a write is not a rename.
+_DESTRUCTIVE = re.compile(r"(?i)\b(delete|remove)\b")
+_MOVE = re.compile(r"(?i)\b(rename|move)\b")
+_DESTRUCTIVE_COMMAND = re.compile(r"(?i)\b(rm|rmdir|del|erase|unlink|trash)\b")
+_MOVE_COMMAND = re.compile(r"(?i)\b(mv|move|rename|git mv)\b")
+
 #: Tools that only look. Their output cannot satisfy a mutation request, so
 #: it is not counted as delivery for one.
 _READ_ONLY_TOOLS = frozenset({
     "read_file", "list_dir", "glob", "grep", "web_fetch", "web_search",
     "browse", "search_history", "read_skill_file", "mcp_read_resource",
 })
+
+#: Commands that change the filesystem, for destructive and move evidence.
+_COMMAND_TOOLS = frozenset({"run_shell", "run_python"})
+
+#: A path-looking target: a token with a file extension or a path separator.
+_PATH_ISH = re.compile(r"(?:[\w.-]*[/\\][\w./\\-]*)|\b[\w-]+\.[A-Za-z0-9]{1,8}\b")
+
+
+def _file_operation(element: str, verb: re.Pattern[str]) -> bool:
+    """Whether `element` asks to operate on a file, not on prose.
+
+    "Delete foo.py" is a filesystem operation and needs filesystem evidence;
+    "remove the unused import" is an edit, and a write delivers it.
+    """
+    match = verb.search(element)
+    if match is None:
+        return False
+    return bool(_PATH_ISH.search(element[match.end():]))
 
 
 @dataclass
@@ -277,23 +302,36 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
     if not wanted:
         return []
     mutation = bool(_MUTATION.search(element))
+    destructive = _file_operation(element, _DESTRUCTIVE)
+    move = _file_operation(element, _MOVE)
     refs: list[str] = []
     for entry in entries or []:
         state = getattr(getattr(entry, "state", None), "value", "")
         if state not in ("verified", "known", "derived"):
             continue
         claim = str(getattr(entry, "claim", "") or "")
-        if mutation and claim.split(" ", 1)[0].strip().lower() in _READ_ONLY_TOOLS:
+        tool = claim.split(" ", 1)[0].strip().lower()
+        if mutation and tool in _READ_ONLY_TOOLS:
             # The file was read, not changed. Only a change to the artifact —
             # or verified resulting state — delivers a mutation request.
+            continue
+        if destructive and (tool not in _COMMAND_TOOLS
+                            or not _DESTRUCTIVE_COMMAND.search(claim)):
+            # An edit to `foo.py` is not a delete of it.
+            continue
+        if move and (tool not in _COMMAND_TOOLS
+                     or not _MOVE_COMMAND.search(claim)):
             continue
         if wanted & _keywords(claim):
             ref = str(getattr(entry, "fingerprint", "") or getattr(entry, "source", ""))
             if ref and ref not in refs:
                 refs.append(ref)
-    for path in changed_paths or []:
-        if wanted & _keywords(str(path)):
-            refs.append(str(path))
+    if not destructive and not move:
+        # A changed path is delivery for a write, a create or an edit, and not
+        # for an operation whose evidence has to match the operation.
+        for path in changed_paths or []:
+            if wanted & _keywords(str(path)):
+                refs.append(str(path))
     return refs
 
 

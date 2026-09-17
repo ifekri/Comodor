@@ -241,3 +241,22 @@ def test_a_withheld_listing_points_back_to_list_dir():
     note = conversation.messages[1].content
     assert "list_dir" in note
     assert "read_file" not in note
+
+
+def test_a_volatile_web_result_is_not_withheld_for_a_rerun():
+    """Web content can change or disappear, so without a durable copy it is not
+    'retrievable by re-running' (FR-097)."""
+    from comodor.agent.context import Conversation
+    from comodor.providers.base import Message
+
+    conversation = Conversation()
+    conversation.add(Message.user("start"))
+    page = Message.tool(call_id="c1", name="web_fetch",
+                        content="page body line\n" * 200)
+    conversation.add(page)
+    for index in range(6):
+        conversation.add(Message.user(f"and then {index}"))
+
+    conversation.withhold(budget_tokens=1, estimate=lambda text: len(text))
+
+    assert "re-run web_fetch" not in conversation.messages[1].content

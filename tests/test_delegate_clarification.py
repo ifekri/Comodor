@@ -354,3 +354,52 @@ def test_a_carried_decision_the_project_settled_does_not_stop_the_turn(config, m
 
     assert result.stopped == "done"
     assert not [d for d in agent.tool_context.evidence.decisions if d.withholds]
+
+
+def test_the_delegate_tool_hands_a_clarification_back(config, bus, tool_context):
+    """A synchronous delegate that stops for a decision returns the structured
+    payload, so the parent can import it (FR-018, FR-029)."""
+    from comodor.agent.loop import TurnResult
+    from comodor.tools.delegate import Delegate
+
+    class FakeLoop:
+        def run(self, brief):
+            result = TurnResult()
+            result.stopped = "clarification_required"
+            result.text = "Stopped: a decision is needed."
+            result.clarification = {"kind": "clarification_required",
+                                    "decision": "Which database?",
+                                    "candidates": [], "evidence_consulted": [],
+                                    "reason": "architecture", "outcome": "unattended"}
+            return result
+
+    tool = Delegate(lambda **_: FakeLoop())
+    result = tool.run(tool_context, task="look into the schema")
+
+    assert result.ok
+    assert result.meta["clarification"]["decision"] == "Which database?"
+    assert result.meta["outcome"] == "unattended"
+
+
+def test_a_delegate_clarification_in_a_tool_result_ends_the_parent_turn(config, bus, monkeypatch):
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import ToolCall
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+    from comodor.tools.base import ToolResult
+
+    agent = AgentLoop(config, Gateway(config, scripts=[Script(text="done")]),
+                      ToolRegistry(), bus, PermissionEngine(config, bus), Conversation())
+    context = agent._tool_context()
+    call = ToolCall(id="d1", name="delegate", arguments={"task": "x"})
+    result = ToolResult.success(
+        "Stopped: a decision is needed.",
+        clarification={"kind": "clarification_required", "decision": "Which database?",
+                       "candidates": [], "evidence_consulted": [],
+                       "reason": "architecture", "outcome": "unattended"})
+    monkeypatch.setattr(agent, "_run_one", lambda c, ctx: result)
+
+    agent._execute([call])
+
+    assert [d.what for d in context.evidence.decisions] == ["Which database?"]
+    assert context.evidence.withheld(), "dependent work is withheld"

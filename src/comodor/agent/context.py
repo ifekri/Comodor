@@ -329,11 +329,14 @@ class Conversation:
             spill = str(message.meta.get("spill") or "")
             # Retrievable means it can be got back without repeating a side
             # effect: a file the agent can read again, output saved to a spill
-            # file, or a read-only listing/search. A command whose output was
-            # not saved is not a candidate — "run it again" is not safe for a
-            # commit, a migration or a deployment.
+            # file, or a read-only listing/search whose result is a function of
+            # the repository. A command whose output was not saved is not a
+            # candidate — "run it again" is not safe for a commit, a migration
+            # or a deployment — and neither is web content, which can change or
+            # disappear and may not be fetchable again: without a spill there
+            # is no durable copy, so it stays.
             retrievable = bool(path) or bool(spill) or message.name in (
-                "grep", "glob", "list_dir", "web_search", "web_fetch")
+                "grep", "glob", "list_dir")
             if not retrievable or len(message.content) < WORTH_REFERENCING:
                 continue
             found.append(index)

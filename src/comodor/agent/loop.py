@@ -600,6 +600,13 @@ class AgentLoop:
             form = result.meta.get("form")
             if isinstance(form, dict):
                 message.meta["question"] = form
+            # A child that stopped for a decision (a synchronous delegate) hands
+            # its payload back through the tool result. Import it into this
+            # ledger so the post-batch check ends the turn instead of letting
+            # dependent work run (FR-018, FR-029).
+            carried = result.meta.get("clarification")
+            if isinstance(carried, dict) and carried:
+                self._carry_open_decision(context, carried)
 
             # What the user said not to do, while the model is still deciding.
             #

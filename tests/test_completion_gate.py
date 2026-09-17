@@ -371,8 +371,31 @@ def test_a_read_does_not_deliver_a_mutation_request():
     assert "delete foo.py" in assessment.unresolved
 
 
-def test_a_changed_path_delivers_a_mutation_request():
-    assessment = verify.assess("- delete foo.py", entries=[],
+def test_a_changed_path_delivers_a_write_request():
+    assessment = verify.assess("- write foo.py", entries=[],
+                               changed_paths=["foo.py"], answer="Wrote foo.py.")
+
+    assert assessment.unresolved == []
+
+
+def test_a_write_does_not_deliver_a_delete_request():
+    """Editing `foo.py` is not deleting it: destructive requests need
+    destructive or resulting-filesystem evidence (FR-036, FR-116)."""
+    ledger = Ledger()
+    ledger.verified("write_file foo.py", source="foo.py", material="x = 1")
+
+    assessment = verify.assess("- delete foo.py", entries=ledger.entries,
                                changed_paths=["foo.py"], answer="Deleted foo.py.")
+
+    assert "delete foo.py" in assessment.unresolved
+
+
+def test_a_destructive_command_delivers_a_delete_request():
+    ledger = Ledger()
+    ledger.verified("run_shell run: rm foo.py", source="run_shell:rm foo.py",
+                    material="")
+
+    assessment = verify.assess("- delete foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted foo.py.")
 
     assert assessment.unresolved == []

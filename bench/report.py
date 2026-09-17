@@ -136,7 +136,7 @@ def _sequence_record(sequence, one: Outcome, runs: int = 1) -> dict:
              "written_tokens": attempt.written_tokens,
              "diagnostics": attempt.measurement}
             for index, (step, attempt) in enumerate(
-                zip(sequence.steps, sequence.attempts, strict=True))
+                zip(sequence.steps, sequence.attempts, strict=False))
         ],
     }
 

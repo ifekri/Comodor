@@ -309,3 +309,24 @@ def test_a_raising_correction_hook_makes_the_run_invalid(tmp_path, monkeypatch):
                              attempts=[_attempt(tmp_path), _attempt(tmp_path)],
                              invalid_reason="the correction hook failed")
     assert invalid.comparable is False, "an invalid run is not a measurement"
+
+
+def test_a_truncated_invalid_sequence_is_reported_without_crashing(tmp_path):
+    """An invalid run may stop before every step has an attempt; the report
+    must still be written (SC-021)."""
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok())
+
+    class One:
+        verdicts = [Verdict.ok()]
+        passed = 1
+
+    sequence = SequenceResult(task=task, steps=list(_steps(2)),
+                              attempts=[_attempt(tmp_path)],
+                              invalid_reason="the correction hook failed")
+
+    record = report._sequence_record(sequence, One(), runs=1)
+
+    assert record["comparable"] is False
+    assert record["invalid_reason"]
+    assert len(record["steps"]) == 1
