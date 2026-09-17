@@ -429,6 +429,9 @@ class Conversation:
         cut = self.safe_cut(keep_recent)
         if cut <= 1:
             return 0
+        cut = self._protect_reference_bases(cut)
+        if cut <= 1:
+            return 0
 
         head = self.messages[0]            # the original request stays verbatim
         middle = self.messages[1:cut]
@@ -454,6 +457,44 @@ class Conversation:
         self.messages = [head, marker, *tail]
         self.compactions += 1
         return len(middle)
+
+    def _protect_reference_bases(self, cut: int) -> int:
+        """Move `cut` back so a surviving reference keeps its base verbatim.
+
+        A reference or a delta among the messages that stay names an earlier
+        full result and promises it is still there. Summarising that base away
+        would leave the pointer referring to a lossy summary instead of the
+        content it named, so the cut moves back to the settled seam at or
+        before the earliest base a survivor depends on (FR-100, FR-101).
+        """
+        wanted: set[str] = set()
+        for message in self.messages[cut:]:
+            for key in ("reference", "delta_base"):
+                base = message.meta.get(key)
+                if base:
+                    wanted.add(str(base))
+        if not wanted:
+            return cut
+        earliest: int | None = None
+        for index, message in enumerate(self.messages[:cut]):
+            if message.tool_call_id and str(message.tool_call_id) in wanted:
+                earliest = index if earliest is None else min(earliest, index)
+        if earliest is None:
+            return cut
+        return self._seam_at_or_before(earliest)
+
+    def _seam_at_or_before(self, index: int) -> int:
+        """The largest settled user seam at or before `index`, or 0."""
+        pending: set[str] = set()
+        last = 0
+        for position, message in enumerate(self.messages[:index + 1]):
+            if message.role is Role.ASSISTANT and message.tool_calls:
+                pending.update(call.id for call in message.tool_calls)
+            elif message.role is Role.TOOL:
+                pending.discard(message.tool_call_id)
+            if position > 0 and not pending and message.role is Role.USER:
+                last = position
+        return last
 
     def _provenance(self, middle: list[Message]) -> str:
         """What a summary replaced, so every summary names its sources (FR-102).

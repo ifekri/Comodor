@@ -126,3 +126,36 @@ def test_needs_compaction_is_measured_against_the_rendered_payload():
     assert conversation.needs_compaction(limit=with_head, threshold=1.0, system_prompt="H" * 4000)
     assert not conversation.needs_compaction(limit=with_head * 10, threshold=0.75,
                                              system_prompt="H" * 4000)
+
+
+def test_compaction_keeps_a_base_a_surviving_reference_points_at():
+    """A reference promises its base is still in the conversation.
+
+    Summarising that base away would leave the pointer standing for a lossy
+    summary instead of the content it named, so the cut moves back to keep
+    the base verbatim (FR-100, FR-101).
+    """
+    conversation = Conversation()
+    conversation.add(Message.user("start"))
+    big = "A" * 600
+    first = Message.tool(call_id="c1", name="read_file", content=big)
+    first.meta["path"] = "f.py"
+    conversation.admit(first, path="f.py")
+
+    # The base ages into the summarised middle while a later, identical read
+    # stays in the tail as a reference to it.
+    for index in range(10):
+        conversation.add(Message.user(f"turn {index}"))
+        conversation.add(Message.assistant("ok"))
+    second = Message.tool(call_id="c2", name="read_file", content=big)
+    second.meta["path"] = "f.py"
+    conversation.admit(second, path="f.py")
+    assert second.meta.get("reference") == "c1", "the second read points at the first"
+    conversation.add(Message.user("last"))
+    conversation.add(Message.assistant("ok"))
+
+    conversation.compact(lambda _middle: "a brief", keep_recent=4)
+
+    base = next((m for m in conversation.messages if m.tool_call_id == "c1"), None)
+    assert base is not None, "the base a live reference names stays verbatim"
+    assert base.content == big

@@ -49,6 +49,10 @@ observation and say so."""
 OBSERVING_TOOLS = frozenset({"read_file", "list_dir", "glob", "grep", "run_shell",
                              "run_python", "web_fetch", "web_search", "browse"})
 
+#: Tools that change a file. An observation of a file that one of these has
+#: since written to is out of date, whatever its words still say.
+_WRITER_TOOLS = frozenset({"write_file", "edit_file"})
+
 #: How much of a proposal's wording a single message must contain to count
 #: as having said it. Word overlap, not meaning: the check is deterministic
 #: and says only that the words came from there.
@@ -102,17 +106,25 @@ def corroborate(text: str, messages: Iterable[Any]) -> tuple[str, str, str]:
     invalidate it — unless the text is instruction-shaped, in which case it
     is refused outright (FR-066). Assistant text backs nothing: a proposal
     corroborated only by the model's own prose is still a model assertion.
+
+    Two things that look like corroboration but are not. A USER-role message
+    the loop wrote to itself — a compaction brief, a completion correction, a
+    plan restatement — is not the person's words (`meta["synthetic"]` /
+    `meta["compacted"]`), and neither is an observation of a file something
+    has written to since: its words may still match while the file does not
+    (FR-066, FR-114).
     """
     words = _content_words(text)
     if not words:
         return "", "", ""
     messages = list(messages)
     for message in messages:
-        if _role(message) == "user" and covers(words, _content(message)):
+        if _role(message) == "user" and not _internal(message) \
+                and covers(words, _content(message)):
             return "user_statement", "user message", ""
     if instruction_shaped(text):
         return "", "", ""
-    for message in messages:
+    for index, message in enumerate(messages):
         if _role(message) != "tool" or getattr(message, "is_error", False):
             continue
         name = str(getattr(message, "name", "") or "")
@@ -120,10 +132,41 @@ def corroborate(text: str, messages: Iterable[Any]) -> tuple[str, str, str]:
             continue
         meta = getattr(message, "meta", None) or {}
         path = str(meta.get("path") or "") if isinstance(meta, dict) else ""
+        if path and _written_later(messages, index, path):
+            continue
         ref = f"{name}:{path}" if path else name
         fingerprint = rules_module.file_fingerprint(Path(path)) if path else ""
         return "tool_confirmed", ref[:200], fingerprint
     return "", "", ""
+
+
+def _internal(message: Any) -> bool:
+    """Whether a USER-role message is the loop's own text, not the person's."""
+    meta = getattr(message, "meta", None)
+    if not isinstance(meta, dict):
+        return False
+    return bool(meta.get("synthetic") or meta.get("compacted"))
+
+
+def _written_later(messages: list[Any], index: int, path: str) -> bool:
+    """Whether a write to `path` follows the observation at `index`.
+
+    An observation the model has since edited over is no longer what the file
+    says; storing the fact against the current file's fingerprint would keep
+    a contradicted fact active (FR-114).
+    """
+    for later in messages[index + 1:]:
+        role = _role(later)
+        if role == "assistant":
+            for call in getattr(later, "tool_calls", None) or []:
+                if getattr(call, "name", "") in _WRITER_TOOLS \
+                        and str((getattr(call, "arguments", None) or {}).get("path") or "") == path:
+                    return True
+        elif role == "tool" and str(getattr(later, "name", "") or "") in _WRITER_TOOLS:
+            meta = getattr(later, "meta", None) or {}
+            if isinstance(meta, dict) and str(meta.get("path") or "") == path:
+                return True
+    return False
 
 
 def _role(message: Any) -> str:

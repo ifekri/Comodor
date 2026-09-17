@@ -58,6 +58,13 @@ def build_transcript(messages: list[Any], goal: str, outcome: str) -> str:
             if calls:
                 lines.append(f"[assistant calls] {calls}")
         elif role == "user":
+            meta = getattr(message, "meta", None) or {}
+            if isinstance(meta, dict) and (meta.get("synthetic") or meta.get("compacted")):
+                # A compaction brief, a completion correction or a plan
+                # restatement is the loop's own text. Shown as `[user]` the
+                # model would read it as something the person said and could
+                # propose it as a durable fact (FR-066).
+                continue
             lines.append(f"[user] {content[:700]}")
 
     text = "\n".join(lines)

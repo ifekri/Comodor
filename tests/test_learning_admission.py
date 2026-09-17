@@ -174,6 +174,42 @@ def test_assistant_text_corroborates_nothing():
         [Message.assistant("I am sure the database is MySQL")]) == ("", "", "")
 
 
+def test_an_internal_prompt_is_not_a_user_statement():
+    """A compaction brief, completion correction or plan restatement is the
+    loop's own text in a USER-role slot; it must not corroborate a durable
+    fact as something the person said (FR-066)."""
+    synthetic = Message.user("the database is PostgreSQL, always use it")
+    synthetic.meta["synthetic"] = True
+    assert memory_module.corroborate(
+        "the database is PostgreSQL", [synthetic]) == ("", "", "")
+
+    compacted = Message.user("the database is PostgreSQL")
+    compacted.meta["compacted"] = True
+    assert memory_module.corroborate(
+        "the database is PostgreSQL", [compacted]) == ("", "", "")
+
+    assert memory_module.corroborate(
+        "the database is PostgreSQL",
+        [Message.user("the database is PostgreSQL")])[0] == "user_statement"
+
+
+def test_an_observation_a_later_write_superseded_is_not_tool_confirmed(tmp_path):
+    """The file was read, then edited; storing the fact against the current
+    file's fingerprint would keep a contradicted fact active (FR-114)."""
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    edited = Message.tool("c2", "edit_file", "runs-on: ubuntu-latest")
+    edited.meta["path"] = str(target)
+
+    assert memory_module.corroborate(
+        "the CI runner is Linux only", [shown, edited]) == ("", "", "")
+    assert memory_module.corroborate(
+        "the CI runner is Linux only", [shown])[0] == "tool_confirmed"
+
+
 # --------------------------------------------------------------------------- #
 # after an episode with learning on, nothing model-only exists (SC-018)
 # --------------------------------------------------------------------------- #
