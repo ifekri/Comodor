@@ -479,7 +479,8 @@ class LearningEngine:
         return self.store.confident_rules(self.scopes)
 
     def check_staleness(self, paths: Iterable[str] | None = None,
-                        tables: tuple[str, ...] = ("rules", "facts")) -> list[dict[str, Any]]:
+                        tables: tuple[str, ...] = ("rules", "facts",
+                                                   "lessons")) -> list[dict[str, Any]]:
         """Mark what the repository no longer supports; say what was marked.
 
         `paths` narrows it to items derived from those files — called by

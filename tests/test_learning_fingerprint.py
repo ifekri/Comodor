@@ -219,3 +219,32 @@ def test_a_tool_confirmed_lesson_goes_stale_when_its_file_changes(brain, tmp_pat
 
     assert any(item["table"] == "lessons" and item["id"] == lesson.id for item in marked)
     assert brain.all_lessons(["project:p"])[0].status == "stale"
+
+
+def test_the_production_staleness_check_keeps_lessons_current(config, bus, brain):
+    """The loop's own check (`check_staleness`) must include lessons, or a
+    tool-confirmed lesson from a changed file keeps being applied (FR-060)."""
+    from comodor.learning import LearningEngine
+
+    config.learning.enabled = True
+    target = config.paths.project / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    engine = LearningEngine(config, bus, store=brain)
+    try:
+        scope = engine.project_scope
+        lesson = brain.add_lesson(Lesson(
+            provenance="tool_confirmed", scope=scope,
+            trigger="editing ci.yml", guidance="the CI runner is Linux only",
+            source_ref="read_file:ci.yml",
+            fingerprint=rules_module.file_fingerprint(target)))
+
+        assert engine.check_staleness(["ci.yml"]) == []
+
+        target.write_text("runs-on: windows-latest\n", encoding="utf-8")
+        marked = engine.check_staleness(["ci.yml"])
+
+        assert any(item["table"] == "lessons" and item["id"] == lesson.id
+                   for item in marked)
+        assert brain.all_lessons([scope])[0].status == "stale"
+    finally:
+        engine.close()

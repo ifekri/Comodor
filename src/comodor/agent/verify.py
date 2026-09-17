@@ -184,6 +184,20 @@ please should so that the their them then there these this to up us use used wit
 you your add added fix fixed change changed update updated new
 """.split())
 
+#: Verbs that ask for an artifact to change. An observation of the file is not
+#: evidence that the change happened: reading `foo.py` does not delete it
+#: (FR-036, FR-116).
+_MUTATION = re.compile(
+    r"(?i)\b(create|write|add|change|replace|rename|move|delete|remove|update|"
+    r"fix|implement|refactor|migrate|generate)\b")
+
+#: Tools that only look. Their output cannot satisfy a mutation request, so
+#: it is not counted as delivery for one.
+_READ_ONLY_TOOLS = frozenset({
+    "read_file", "list_dir", "glob", "grep", "web_fetch", "web_search",
+    "browse", "search_history", "read_skill_file", "mcp_read_resource",
+})
+
 
 @dataclass
 class Element:
@@ -262,12 +276,17 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
     wanted = _keywords(element)
     if not wanted:
         return []
+    mutation = bool(_MUTATION.search(element))
     refs: list[str] = []
     for entry in entries or []:
         state = getattr(getattr(entry, "state", None), "value", "")
         if state not in ("verified", "known", "derived"):
             continue
         claim = str(getattr(entry, "claim", "") or "")
+        if mutation and claim.split(" ", 1)[0].strip().lower() in _READ_ONLY_TOOLS:
+            # The file was read, not changed. Only a change to the artifact —
+            # or verified resulting state — delivers a mutation request.
+            continue
         if wanted & _keywords(claim):
             ref = str(getattr(entry, "fingerprint", "") or getattr(entry, "source", ""))
             if ref and ref not in refs:

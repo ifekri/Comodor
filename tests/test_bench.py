@@ -1111,3 +1111,16 @@ def test_the_benchmark_refuses_a_drifted_suite(monkeypatch, capsys):
     assert code == 2
     assert called == [], "no attempt should run against a drifted suite"
     assert "drifted" in capsys.readouterr().err
+
+
+def test_an_unknown_interaction_action_is_refused_at_load():
+    """A typo is a malformed scenario, not a silent absence (T149/T150)."""
+    from bench.task import TaskError, _interactions
+
+    with pytest.raises(TaskError):
+        _interactions(["anwser"])
+    with pytest.raises(TaskError):
+        _interactions([{"action": "canel"}])
+
+    assert _interactions(["cancel"]) == ("cancel",)
+    assert _interactions([{"action": "answer", "value": "Flask"}])

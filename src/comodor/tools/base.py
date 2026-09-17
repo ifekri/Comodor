@@ -154,6 +154,20 @@ class ToolContext:
     def was_read(self, path: Path) -> bool:
         return self._key(path) in self.seen
 
+    def note_window(self, path: Path, material: str | bytes = "") -> None:
+        """Record the bounded window this turn actually saw.
+
+        A partial read is not the whole file, so it is not `seen` — a write
+        must still warn that it is replacing something only partly known. But
+        the window *was* observed this turn, and a candidate found inside it is
+        grounded by it; recordings are cleared with the ledger.
+        """
+        if not material:
+            return
+        text = material.decode("utf-8", errors="replace") \
+            if isinstance(material, bytes) else str(material)
+        self.read_this_turn[self._key(path)] = text
+
     @staticmethod
     def _key(path: Path) -> str:
         try:

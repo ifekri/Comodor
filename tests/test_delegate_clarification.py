@@ -327,3 +327,30 @@ def test_a_crashed_delegate_is_reported_lost_never_alive(config, tmp_path):
     finally:
         manager.stop_all()
         manager.wait(5.0)
+
+
+def test_a_carried_decision_the_project_settled_does_not_stop_the_turn(config, monkeypatch):
+    """A carried question the ledger can already answer settles: the known
+    evidence is applied before the imported decision is opened (FR-008)."""
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+
+    bus = EventBus()
+    agent = AgentLoop(config, Gateway(config, scripts=[Script(text="Done.")]),
+                      ToolRegistry(), bus, PermissionEngine(config, bus), Conversation())
+
+    class Settled:
+        id = "lesson-1"
+        trigger = "Which database?"
+        guidance = "SQLite"
+
+    monkeypatch.setattr(agent, "_settled_decisions", lambda: [Settled()])
+    carried = {"kind": "clarification_required", "decision": "Which database?",
+               "candidates": [], "evidence_consulted": [],
+               "reason": "architecture", "outcome": "unattended"}
+
+    result = agent.run("carry on", decisions=[carried])
+
+    assert result.stopped == "done"
+    assert not [d for d in agent.tool_context.evidence.decisions if d.withholds]

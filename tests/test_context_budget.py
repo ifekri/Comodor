@@ -219,3 +219,25 @@ def test_equal_relevance_candidates_are_evicted_oldest_first():
     order = conversation._rank([1, 2], "zzzzz unmatched")
 
     assert order == [1, 2]
+
+
+def test_a_withheld_listing_points_back_to_list_dir():
+    """A directory listing is not a file: the retrieval note must name
+    `list_dir`, which can reproduce it."""
+    from comodor.agent.context import Conversation
+    from comodor.providers.base import Message
+
+    conversation = Conversation()
+    conversation.add(Message.user("start"))
+    message = Message.tool(call_id="c1", name="list_dir",
+                           content="\n".join(f"file_{n}.py" for n in range(200)))
+    message.meta["path"] = "src"
+    conversation.add(message)
+    for index in range(6):
+        conversation.add(Message.user(f"and then {index}"))
+
+    conversation.withhold(budget_tokens=1, estimate=lambda text: len(text))
+
+    note = conversation.messages[1].content
+    assert "list_dir" in note
+    assert "read_file" not in note

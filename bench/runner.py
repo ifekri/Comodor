@@ -221,6 +221,7 @@ def _run_sequence_once(task: Task, *, provider: str, model: str,
     # empty in this home and accumulates only what the six steps teach it.
     _settings(home, task, strategy, learning, without)
 
+    broken = ""
     for index, step in enumerate(task.sequence):
         attempt = _invoke(task, workspace, home, provider, model,
                           prompt=step.prompt, interaction=step.interaction)
@@ -237,14 +238,23 @@ def _run_sequence_once(task: Task, *, provider: str, model: str,
                 if task.correct(index, attempt, workspace):
                     say(f"         (a correction was made after step {index + 1})")
             except Exception as problem:              # noqa: BLE001 - harness
-                say(f"         (correction hook failed: {problem})")
+                # The simulated correction never happened, so the premise of
+                # the steps that follow is gone. Not an ordinary agent failure:
+                # the run is invalid and is not counted as a pass or a fail.
+                broken = (f"the correction hook failed after step {index + 1}: "
+                          f"{type(problem).__name__}: {problem}")
+                say(f"         (invalid run — {broken})")
+                break
 
     result = SequenceResult(task=task, steps=list(task.sequence),
-                            attempts=list(attempts))
-    try:
-        verdict = task.check_sequence(result)
-    except Exception as problem:
-        verdict = Verdict.no(f"the judge raised {type(problem).__name__}: {problem}")
+                            attempts=list(attempts), invalid_reason=broken)
+    if broken:
+        verdict = Verdict.no(f"invalid run — {broken}")
+    else:
+        try:
+            verdict = task.check_sequence(result)
+        except Exception as problem:
+            verdict = Verdict.no(f"the judge raised {type(problem).__name__}: {problem}")
     say(f"    sequence  {'pass' if verdict.passed else 'FAIL'}  — {verdict.reason}")
 
     if verdict.passed:
@@ -281,6 +291,7 @@ def _keep_sequence(root: Path, task: Task, result: SequenceResult,
             "verdict": verdict.reason,
             "windows": result.windows(),
             "comparable": result.comparable,
+            "invalid_reason": result.invalid_reason,
             "steps": [
                 {"prompt": step.prompt,
                  "stopped": attempt.stopped,
@@ -290,8 +301,9 @@ def _keep_sequence(root: Path, task: Task, result: SequenceResult,
                  "clarifications": attempt.clarifications_raised,
                  "corrections": attempt.corrections,
                  "error": attempt.error}
-                for step, attempt in zip(result.steps, result.attempts,
-                                         strict=True)
+                # An invalid run can stop before every step has an attempt;
+                # the steps that did run are still worth keeping.
+                for step, attempt in zip(result.steps, result.attempts, strict=False)
             ],
         }, indent=2, ensure_ascii=False), encoding="utf-8")
     except OSError:

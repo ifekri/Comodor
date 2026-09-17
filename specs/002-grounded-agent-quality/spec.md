@@ -583,7 +583,13 @@ there; the desktop application is planned, not built, and is NOT APPLICABLE.
 - **FR-123**: A run that ends in the clarification-required outcome MUST
   terminate with a distinct, machine-readable outcome that a caller can tell
   apart from both success and failure, so a scheduler or integration can route
-  it for an answer rather than retrying it as an error.
+  it for an answer rather than retrying it as an error. On every surface that
+  speaks a protocol with its own enum, the distinct outcome is carried in
+  Comodor's own extension (`stopped = "clarification_required"` and the
+  structured `clarification` block) rather than by inventing a value in the
+  foreign enum; on the OpenAI-compatible envelope that means
+  `finish_reason = "stop"` plus `comodor.stopped` and `comodor.clarification`
+  (contracts §C4).
 
 ### Completion gate
 

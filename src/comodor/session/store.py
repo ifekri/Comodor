@@ -143,6 +143,12 @@ class SessionStore:
             value = message.meta.get(key) if message.meta else None
             if isinstance(value, str) and value:
                 record[key] = value
+        # A withheld result keeps its path and fingerprint but its content is a
+        # retrieval pointer, not the full result. The mark has to survive the
+        # round trip or `_resident()` mistakes the note for a full copy and a
+        # reread is replaced with a reference to content that is not there.
+        if message.meta.get("withheld"):
+            record["withheld"] = True
         with self.path_for(session_id).open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -177,6 +183,8 @@ class SessionStore:
                 for key in ("path", "fingerprint"):
                     if isinstance(record.get(key), str) and record[key]:
                         meta[key] = record[key]
+                if record.get("withheld"):
+                    meta["withheld"] = True
                 messages.append(Message(
                     role=Role(record.get("role", "user")),
                     content=record.get("content", ""),

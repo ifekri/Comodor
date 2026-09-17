@@ -276,3 +276,36 @@ def test_a_mixed_sequence_verdict_is_the_first_runs():
     assert record["verdict"] == "fail"
     assert record["passed_runs"] == 1
     assert record["runs"] == 2
+
+
+def test_a_raising_correction_hook_makes_the_run_invalid(tmp_path, monkeypatch):
+    """The simulated correction never happened, so the run is not a
+    measurement — never an ordinary agent failure (SC-021)."""
+    monkeypatch.setattr(runner, "fresh_copy",
+                        lambda repo, workspace: workspace.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(runner, "_settings", lambda *args, **kwargs: None)
+
+    def fake_invoke(task, workspace, home, provider, model, *, prompt, interaction):
+        return _attempt(workspace)
+
+    monkeypatch.setattr(runner, "_invoke", fake_invoke)
+
+    def boom(index, attempt, workspace):
+        raise OSError("disk gone")
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok(),
+                sequence=tuple(_steps(2)), correct=boom,
+                check_sequence=lambda result: Verdict.ok())
+
+    attempts, verdict, _ = runner._run_sequence_once(
+        task, provider="p", model="m", keep=None, say=lambda *args, **kwargs: None,
+        strategy="current", learning=True, without=())
+
+    assert verdict.passed is False
+    assert "invalid" in verdict.reason.lower()
+
+    invalid = SequenceResult(task=task, steps=list(_steps(2)),
+                             attempts=[_attempt(tmp_path), _attempt(tmp_path)],
+                             invalid_reason="the correction hook failed")
+    assert invalid.comparable is False, "an invalid run is not a measurement"

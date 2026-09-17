@@ -94,7 +94,8 @@ def directory(ctx: ToolContext) -> Path:
     return Path(ctx.config.paths.user) / "output"
 
 
-def contain(result: ToolResult, ctx: ToolContext, tool: str) -> ToolResult:
+def contain(result: ToolResult, ctx: ToolContext, tool: str,
+            command: str = "") -> ToolResult:
     """Bound what one call adds to the conversation, losing nothing.
 
     Applied centrally rather than in each tool, so a tool added tomorrow — or
@@ -102,11 +103,14 @@ def contain(result: ToolResult, ctx: ToolContext, tool: str) -> ToolResult:
     the same rule as the ones that exist today.
     """
     content = result.content or ""
-    if tool in COMMANDS and len(content) > _LOG_WORTH and _log_summaries_on(ctx):
-        # A log first: a passing run collapses to its outcome, a failing run
-        # to its failing cases — before the size rule, which would otherwise
-        # keep an arbitrary head and tail of a log whose useful part is the
-        # failure in the middle (FR-090).
+    if tool in COMMANDS and len(content) > _LOG_WORTH and _log_summaries_on(ctx) \
+            and _is_validation(tool, command, content):
+        # A validation log first: a passing run collapses to its outcome, a
+        # failing run to its failing cases — before the size rule, which would
+        # otherwise keep an arbitrary head and tail of a log whose useful part
+        # is the failure in the middle (FR-090). Only validation output is
+        # collapsed this way: a large `git diff`, a JSON query or a source
+        # dump is data, not a run, and its body matters.
         summarised = _summarise_log(result, content, ctx, tool)
         if summarised is not None:
             return summarised
@@ -127,9 +131,51 @@ def contain(result: ToolResult, ctx: ToolContext, tool: str) -> ToolResult:
         content=f"{kept}\n\n{pointer}",
         display=_for_the_pane(result.display or content),
         meta={**result.meta, "overflowed": True, "full_chars": len(content),
+              "content_fingerprint": _full_fingerprint(content),
               **({"spill": spill} if spill else {})},
         elapsed=result.elapsed,
     )
+
+
+#: Commands whose output is a validation/build/test run — the only ones the
+#: passing/failing summary is written for (FR-090).
+_VALIDATION_COMMAND = re.compile(
+    r"(?i)\b(pytest|unittest|nose|tox|ruff|flake8|pylint|mypy|black|isort|"
+    r"eslint|tsc|jest|vitest|mocha|test|tests|build|lint|check|coverage|"
+    r"cargo|gradle|mvn|make|npm|yarn|pnpm|go)\b")
+
+#: Output that reads as a validation run even without the command: a line that
+#: says a case passed or failed, or a run summary naming its counts.
+_VALIDATION_OUTPUT = re.compile(
+    r"(?i)(\b\d+\s+(?:passed|failed|errors?|failures?|skipped)\b"
+    r"|\b(?:passed|failed)\b.*\bin \d|\ball tests passed\b|\bbuild succeeded\b"
+    r"|\bcompiled successfully\b|\bFAILED?\b|\bTraceback\b|\bAssertionError\b"
+    r"|\b(?:errors?|failures?|warnings?)\s*[:=]\s*\d+\b)")
+
+
+def _is_validation(tool: str, command: str, content: str) -> bool:
+    """Whether this output is a validation run rather than arbitrary data.
+
+    The command decides when it is known — a `git diff` or a JSON query is
+    not a run. When the caller passes no command (a direct containment call),
+    the output's own shape decides.
+    """
+    if command:
+        return bool(_VALIDATION_COMMAND.search(command))
+    return bool(_VALIDATION_OUTPUT.search(content))
+
+
+def _full_fingerprint(content: str) -> str:
+    """The identity of the whole observed content, before it was shortened.
+
+    The conversation keeps only a head and tail, but deduplication must
+    compare the *original* bytes: a change confined to the omitted middle
+    leaves the visible head and tail identical, and a fingerprint of the
+    shortened form would call the reread unchanged (FR-101).
+    """
+    import hashlib
+
+    return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
 def _log_summaries_on(ctx: ToolContext) -> bool:
@@ -163,7 +209,9 @@ def _summarise_log(result: ToolResult, content: str, ctx: ToolContext,
             ok=result.ok, content=f"{body}\n\n{note}",
             display=_for_the_pane(result.display or content),
             meta={**result.meta, "overflowed": True, "log": "passed",
-                  "full_chars": len(content), **({"spill": spill} if spill else {})},
+                  "full_chars": len(content),
+                  "content_fingerprint": _full_fingerprint(content),
+                  **({"spill": spill} if spill else {})},
             elapsed=result.elapsed)
     failing = [index for index, line in enumerate(lines) if _failing_line(line)]
     if not failing:
@@ -189,7 +237,9 @@ def _summarise_log(result: ToolResult, content: str, ctx: ToolContext,
         ok=result.ok, content=f"{body}\n\n{note}",
         display=_for_the_pane(result.display or content),
         meta={**result.meta, "overflowed": True, "log": "failed",
-              "full_chars": len(content), **({"spill": spill} if spill else {})},
+              "full_chars": len(content),
+              "content_fingerprint": _full_fingerprint(content),
+              **({"spill": spill} if spill else {})},
         elapsed=result.elapsed)
 
 

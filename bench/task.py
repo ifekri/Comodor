@@ -26,6 +26,10 @@ from typing import Any, Callable
 #: after the four that measure work.
 CATEGORIES = ("fix", "feature", "find", "refactor", "careful")
 
+#: The actions a scripted interaction may take, exactly. Anything else is a
+#: malformed scenario and is refused at load, not quietly treated as absence.
+ACTIONS = frozenset({"answer", "cancel", "expire", "unattended"})
+
 
 @dataclass(frozen=True)
 class Verdict:
@@ -147,6 +151,10 @@ class SequenceResult:
     task: "Task"
     steps: list[SequenceStep]
     attempts: list[Attempt]
+    #: Set when the harness itself failed — a correction hook that raised, so
+    #: the simulated correction never happened. An invalid run is neither a
+    #: pass nor a fail (SC-021).
+    invalid_reason: str = ""
 
     @property
     def comparable(self) -> bool:
@@ -157,6 +165,8 @@ class SequenceResult:
         incomparable sequence is not a pass or a fail — it is not a
         measurement (SC-021).
         """
+        if self.invalid_reason:
+            return False
         if len(self.steps) != len(self.attempts) or len(self.steps) < 2:
             return False
         paths = {step.expect.get("path", "") for step in self.steps}
@@ -228,18 +238,24 @@ def _interactions(value: Any) -> tuple[Any, ...]:
     """A scenario's scripted interactions, normalised to a tuple.
 
     A single action string is one interaction; a list or tuple is used as
-    written. Each entry must be a string or an object with an `action`, so a
-    typo is caught when the task loads rather than mid-run.
+    written. Each entry must name one of the four actions a form can end with,
+    so a typo is caught when the task loads rather than silently mapped to
+    `unattended` mid-run.
     """
     if not value:
         return ()
     entries = (value,) if isinstance(value, str) else tuple(value)
     for entry in entries:
         if isinstance(entry, str):
-            continue
-        if isinstance(entry, dict) and entry.get("action"):
-            continue
-        raise TaskError(f"INTERACTION entry {entry!r} is not an action")
+            action = entry
+        elif isinstance(entry, dict) and entry.get("action"):
+            action = str(entry.get("action"))
+        else:
+            raise TaskError(f"INTERACTION entry {entry!r} is not an action")
+        if action not in ACTIONS:
+            raise TaskError(
+                f"INTERACTION action {action!r} is not one of "
+                f"{', '.join(sorted(ACTIONS))}")
     return entries
 
 

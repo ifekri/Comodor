@@ -357,3 +357,22 @@ def test_data_lines_are_not_requested_work():
     assert requested_elements("- 42\n- 200") == []
     assert requested_elements("- add the regression test\n- Update the docs") == [
         "add the regression test", "Update the docs"]
+
+
+def test_a_read_does_not_deliver_a_mutation_request():
+    """Reading `foo.py` is not deleting it: an observation cannot satisfy a
+    change/delete/create element (FR-036, FR-116)."""
+    ledger = Ledger()
+    ledger.verified("read_file foo.py", source="foo.py", material="x = 1")
+
+    assessment = verify.assess("- delete foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted foo.py.")
+
+    assert "delete foo.py" in assessment.unresolved
+
+
+def test_a_changed_path_delivers_a_mutation_request():
+    assessment = verify.assess("- delete foo.py", entries=[],
+                               changed_paths=["foo.py"], answer="Deleted foo.py.")
+
+    assert assessment.unresolved == []

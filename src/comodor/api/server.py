@@ -356,23 +356,21 @@ def _pieces(text: str) -> list[str]:
 def _finish_reason(outcome: dict[str, Any]) -> str:
     """``stop`` or ``length``, in OpenAI's vocabulary.
 
-    ``length`` is "there was more to say": a turn the step cap stopped
-    before it finished. The loop's tool calls are never handed to the
-    client even then — a chat client that received a ``tool_calls`` answer
-    would try to answer them, and it cannot; the tools run on this machine.
-    The note that the turn was cut is in the ``comodor`` block, where a
-    frontend that cares can find it and a standard client is untouched.
+    The OpenAI-compatible envelope uses only standard values. ``length`` is
+    "there was more to say": a turn the step cap stopped before it finished.
+    The loop's tool calls are never handed to the client even then — a chat
+    client that received a ``tool_calls`` answer would try to answer them, and
+    it cannot; the tools run on this machine.
 
-    A clarification-required turn is **not** a normal completion, so it does
-    not fall through to ``stop`` (contracts §C4; FR-123). The non-standard
-    value names the state, and the structured payload rides the ``comodor``
-    block for a client that understands it.
+    A clarification-required turn maps to ``stop`` on the envelope, and its
+    distinct state travels in the ``comodor`` extension block
+    (``comodor.stopped = "clarification_required"`` and
+    ``comodor.clarification``) — where non-standard information already goes
+    so that a standard client is untouched (contracts §C4; FR-123).
     """
     stopped = str(outcome.get("stopped") or "done")
     if stopped in ("max_steps", "budget", "timeout"):
         return "length"
-    if stopped == "clarification_required":
-        return "clarification_required"
     return "stop"
 
 

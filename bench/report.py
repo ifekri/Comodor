@@ -109,10 +109,12 @@ def _sequence_record(sequence, one: Outcome, runs: int = 1) -> dict:
     # This block describes the first run; the task-level `result` carries the
     # aggregate over runs, so a mixed set of runs is not reported as a pass.
     first = one.verdicts[0] if one.verdicts else None
+    invalid = ("" if sequence.comparable
+               else sequence.invalid_reason
+               or "the task inputs are not comparable — the run is invalid")
     return {
         "comparable": sequence.comparable,
-        "invalid_reason": "" if sequence.comparable else
-                          "the task inputs are not comparable — the run is invalid",
+        "invalid_reason": invalid,
         "windows": sequence.windows(),
         "verdict": "pass" if (first is not None and first.passed) else "fail",
         "reason": first.reason if first is not None else "",

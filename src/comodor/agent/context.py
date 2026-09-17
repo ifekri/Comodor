@@ -168,7 +168,8 @@ class Conversation:
         if message.role is not Role.TOOL or not content or message.is_error \
                 or message.name in PROTECTED_TOOLS:
             return self.add(message)
-        fingerprint = _fingerprint(content)
+        fingerprint = str(message.meta.get("content_fingerprint") or "") \
+            or _fingerprint(content)
         message.meta.setdefault("fingerprint", fingerprint)
         if len(content) < WORTH_REFERENCING:
             return self.add(message)
@@ -262,16 +263,22 @@ class Conversation:
             before = estimate(message.content)
             path = str(message.meta.get("path") or "")
             spill = str(message.meta.get("spill") or "")
-            if path:
-                how = f"read {path} again with read_file, or grep it"
-                what = f"the result of {message.name} ({path})"
-            elif spill:
+            if spill:
                 # The output was saved before it was moved aside, so point at
                 # the saved copy: a command is not safe to replay — a commit or
                 # a migration would happen twice.
                 how = (f"read {spill} with read_file using offset and limit, "
                        f"or grep it")
                 what = f"the result of {message.name}"
+            elif path and message.name == "list_dir":
+                # A directory listing is not a file: `read_file` refuses a
+                # directory, so the pointer has to name the tool that produced
+                # it.
+                how = f"list {path} again with list_dir"
+                what = f"the result of {message.name} ({path})"
+            elif path:
+                how = f"read {path} again with read_file, or grep it"
+                what = f"the result of {message.name} ({path})"
             else:
                 how = f"re-run {message.name} if you need it"
                 what = f"the result of {message.name}"

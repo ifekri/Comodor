@@ -206,6 +206,11 @@ class ReadFile(Tool):
         # thousand-line file is not knowing the file.
         if start == 1 and len(window) >= total:
             ctx.note_read(target, material="\n".join(window))
+        else:
+            # A bounded window is still something this turn observed: a
+            # candidate found inside it is grounded by it. Only the window is
+            # recorded — never the unread parts.
+            ctx.note_window(target, material="\n".join(window))
 
         # Not padded to a fixed width. The padding was six characters on every
         # line whatever the number, and a file read is the largest new thing

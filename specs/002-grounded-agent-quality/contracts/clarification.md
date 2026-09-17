@@ -198,14 +198,43 @@ payload field that surfaces the distinction to callers.
 
 ## C4. API bridge
 
-`api/server.py` maps `stopped` to an OpenAI `finish_reason`. Today anything
-unrecognised falls through to `"stop"`, which would report a
-clarification-required turn as a normal completion.
+`api/server.py` maps the core `stopped` value to an OpenAI-compatible
+`finish_reason`. The OpenAI-compatible envelope uses **only standard
+`finish_reason` values**; Comodor never invents a value in a field whose enum
+belongs to the OpenAI protocol.
 
-**Required change**: `clarification_required` must not map to `"stop"`. The
-clarification payload rides the existing `comodor` extension block, which is
-where non-standard information already goes so that a standard client is
-untouched.
+**Required mapping.** A clarification-required turn maps to
+`finish_reason = "stop"`. The distinct core state is not lost: it travels in
+the existing `comodor` extension block, which is where non-standard
+information already goes so that a standard client is untouched:
+
+```jsonc
+{
+  "choices": [ { "finish_reason": "stop", /* … */ } ],
+  "comodor": {
+    "stopped": "clarification_required",
+    "clarification": { "kind": "clarification_required", /* … */ }
+  }
+}
+```
+
+Rules:
+
+- The core `TurnResult.stopped = "clarification_required"` is unchanged and
+  remains authoritative inside Comodor; only the compatibility envelope is
+  remapped.
+- A standard client that does not read the `comodor` block sees an ordinary
+  `stop` and is unaffected.
+- A Comodor-aware client **MUST** read `comodor.stopped` (and
+  `comodor.clarification`) to tell an ordinary completion from a
+  clarification-required stop. `finish_reason` alone does not carry that
+  distinction.
+- No OpenAI-compatible response Comodor emits contains a custom
+  `finish_reason` value.
+- The same mapping applies to non-streaming responses, streaming final
+  chunks and the session/API bridge path.
+- `max_steps`/`budget`/`timeout` continue to map to `"length"`; a normal
+  completion continues to map to `"stop"`.
 
 ---
 

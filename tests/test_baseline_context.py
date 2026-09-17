@@ -199,3 +199,27 @@ def test_a_tool_source_survives_a_session_round_trip(tmp_path):
 
     assert restored.meta.get("path") == "ci.yml"
     assert restored.meta.get("fingerprint") == "0123456789abcdef"
+
+
+def test_a_withheld_marker_survives_a_session_round_trip(tmp_path):
+    """A withheld message keeps its path and fingerprint; without the mark a
+    resumed session reads the retrieval note as a resident full copy and a
+    reread is replaced by a reference to content that is not there (FR-101)."""
+    from comodor.agent.context import Conversation
+    from comodor.session.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    withheld = Message.tool(call_id="c1", name="read_file",
+                            content="[read x.py again with read_file]")
+    withheld.meta["path"] = "x.py"
+    withheld.meta["fingerprint"] = "0123456789abcdef"
+    withheld.meta["withheld"] = True
+    store.append("s1", withheld)
+
+    [restored] = store.load("s1")
+    assert restored.meta.get("withheld") is True
+
+    conversation = Conversation()
+    conversation.extend([restored])
+    assert conversation._resident("x.py") is None, \
+        "a retrieval pointer is not a resident full copy"

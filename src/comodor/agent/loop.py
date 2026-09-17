@@ -81,6 +81,29 @@ def _brief_failure(content: str) -> str:
     return text[:160]
 
 
+#: Argument names that identify the operation a call performs. Ordered so the
+#: key is deterministic; the values are the model's own call arguments.
+_TARGET_ARGS = ("path", "command", "url", "query", "pattern", "resource",
+                "name", "selector", "skill")
+
+
+def _operation_key(call: ToolCall) -> str:
+    """A deterministic identity for the operation a call performs.
+
+    `path`/`command` alone left every url/query/pattern tool with an empty key,
+    so a successful call for one target cleared an unrelated failure and the
+    completion gate could accept a claim while a requested operation was still
+    failing. The key is the tool plus the arguments that determine its target;
+    it is used for matching only and is never shown or stored.
+    """
+    parts = [call.name]
+    for name in _TARGET_ARGS:
+        value = call.arguments.get(name)
+        if value:
+            parts.append(f"{name}={value}")
+    return "|".join(parts)
+
+
 def _carried_decisions(carried: dict[str, Any]) -> list[dict[str, Any]]:
     """Every open decision a carried clarification payload names, in order.
 
@@ -530,9 +553,9 @@ class AgentLoop:
 
         self._measurement.tool_calls += len(calls)
         for call, result in zip(calls, results, strict=True):
-            # The thing the call was about, from the model's own argument, so a
-            # failure and a later retry of the same operation share a key.
-            key = str(call.arguments.get("path") or call.arguments.get("command") or "")
+            # The thing the call was about, so a failure and a later retry of
+            # the same operation share a key and two different targets do not.
+            key = _operation_key(call)
             if not result.ok:
                 self._measurement.retries += 1
                 self._failed.append((call.name, key, _brief_failure(result.content)))
@@ -562,7 +585,8 @@ class AgentLoop:
             # makes an overflowed command safely retrievable later, and the
             # budget manager reads it from the message, not from the tool
             # result that no longer exists by then.
-            for key in ("spill", "overflowed", "full_chars", "log", "diff"):
+            for key in ("spill", "overflowed", "full_chars", "log", "diff",
+                        "content_fingerprint"):
                 if key in result.meta:
                     message.meta.setdefault(key, result.meta[key])
             # A learned item that this file no longer supports is marked
@@ -742,11 +766,15 @@ class AgentLoop:
                 getattr(item, "text", "") or str(item) for item in self._recalled]
             context.evidence.known("the request, as the user stated it",
                                    material=user_text)
-            for carried in decisions or []:
-                self._carry_open_decision(context, carried)
+            # What the project already settled goes in before the imported
+            # decisions: a carried question the ledger can already answer
+            # settles rather than reopening and stopping the turn (FR-008,
+            # FR-109).
             for decision in self._settled_decisions():
                 context.evidence.knowledge(decision.trigger, f"lesson:{decision.id}",
                                            answer=decision.guidance)
+            for carried in decisions or []:
+                self._carry_open_decision(context, carried)
         except Exception:
             pass
 

@@ -345,3 +345,20 @@ def test_the_turn_end_event_carries_the_completion_annotation(config, bus):
     assert result.annotation
     [end] = events
     assert end.get("annotation") == result.annotation
+
+
+def test_a_failure_key_distinguishes_two_targets():
+    """A recovered failure is cleared only by the same operation. Keying on
+    `path`/`command` alone left url/query tools with an empty key, so a
+    success for one target cleared an unrelated failure."""
+    from comodor.agent.loop import _operation_key
+
+    first = ToolCall(id="1", name="web_fetch", arguments={"url": "https://a.example"})
+    same = ToolCall(id="2", name="web_fetch", arguments={"url": "https://a.example"})
+    other = ToolCall(id="3", name="web_fetch", arguments={"url": "https://b.example"})
+    assert _operation_key(first) == _operation_key(same)
+    assert _operation_key(first) != _operation_key(other)
+
+    one = ToolCall(id="4", name="web_search", arguments={"query": "alpha"})
+    two = ToolCall(id="5", name="web_search", arguments={"query": "beta"})
+    assert _operation_key(one) != _operation_key(two)

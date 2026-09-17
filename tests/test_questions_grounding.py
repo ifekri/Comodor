@@ -212,3 +212,45 @@ def test_grounding_matches_words_not_substrings():
     assert _mentioned("Django", "Use Django for the server")
     assert _mentioned("SQLite", "we could use sqlite here")
     assert _mentioned("PostgreSQL", "Postgres, but not PostgreSQL yet")
+
+
+def test_a_bounded_window_this_turn_read_grounds_a_candidate(context):
+    """A partial read is an observation of its window: a candidate inside it is
+    grounded; one outside it is not (FR-015, FR-016)."""
+    target = context.config.paths.project / "big.py"
+    target.write_text("first line\nUSE_POSTGRES = True\nlast line\n", encoding="utf-8")
+    context.note_window(target, material="first line\nUSE_POSTGRES = True\n")
+
+    inside = ground([forms.Option(label="USE_POSTGRES", source="repository",
+                                  evidence="big.py")], context)
+    outside = ground([forms.Option(label="Redis", source="repository",
+                                   evidence="big.py")], context)
+
+    assert [option.label for option in inside] == ["USE_POSTGRES"]
+    assert outside == []
+
+
+def test_a_partial_read_from_an_earlier_turn_does_not_ground(context):
+    target = context.config.paths.project / "big.py"
+    target.write_text("USE_POSTGRES = True\n", encoding="utf-8")
+    context.note_window(target, material="USE_POSTGRES = True\n")
+
+    context.reset_evidence()
+
+    kept = ground([forms.Option(label="USE_POSTGRES", source="repository",
+                                evidence="big.py")], context)
+    assert kept == []
+
+
+def test_a_partial_read_records_the_window_it_saw(tools, tool_context):
+    """The read tool's bounded window is what grounds a candidate found in it;
+    removing that recording drops the option (FR-015, FR-016)."""
+    target = tool_context.config.paths.project / "big.py"
+    target.write_text("USE_POSTGRES = True\n"
+                      + "\n".join(f"line {n}" for n in range(80)), encoding="utf-8")
+
+    tools.invoke("read_file", tool_context, {"path": "big.py", "offset": 1, "limit": 2})
+
+    kept = ground([forms.Option(label="USE_POSTGRES", source="repository",
+                                evidence="big.py")], tool_context)
+    assert [option.label for option in kept] == ["USE_POSTGRES"]
