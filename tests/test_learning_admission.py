@@ -327,3 +327,20 @@ def test_a_python_write_supersedes_an_observation(tmp_path):
 
     assert memory_module.corroborate(
         "the CI runner is Linux only", [shown, wrote]) == ("", "", "")
+
+
+def test_a_commented_out_python_write_does_not_supersede(tmp_path):
+    """A commented-out write is not a write, so the observation stands."""
+    from comodor.providers.base import ToolCall
+
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    commented = Message.assistant("", [ToolCall(
+        id="c2", name="run_python",
+        arguments={"code": f'# Path("{target}").write_text("new")'})])
+
+    assert memory_module.corroborate(
+        "the CI runner is Linux only", [shown, commented])[0] == "tool_confirmed"

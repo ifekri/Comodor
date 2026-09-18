@@ -310,15 +310,28 @@ def sampled_files(root: Path, max_files: int = MAX_FILES) -> list[Path]:
     return found
 
 
-def manifest_ref(root: Path, files: list[Path]) -> str:
-    """What a counted convention was counted over: the sampled paths, relative."""
+def manifest_ref(root: Path, files: list[Path], max_files: int = 0) -> str:
+    """What a counted convention was counted over: the sampled paths, relative.
+
+    `max_files` records the sampler bound, so a later staleness check rebuilds
+    the sample with the same limit rather than a different default.
+    """
     names = []
     for path in files:
         try:
             names.append(path.relative_to(root).as_posix())
         except ValueError:
             names.append(str(path))
-    return "sample:" + ",".join(names)
+    prefix = f"sample:{max_files}:" if max_files else "sample:"
+    return prefix + ",".join(names)
+
+
+def sample_bound(ref: str) -> int:
+    """The sampler bound recorded in a `sample:` reference, or 0 (default)."""
+    if not ref.startswith("sample:"):
+        return 0
+    head, sep, _ = ref[len("sample:"):].partition(":")
+    return int(head) if sep and head.isdigit() else 0
 
 
 def manifest_fingerprint(files: list[Path], root: Path | None = None) -> str:
@@ -363,7 +376,10 @@ def files_of(ref: str, root: Path) -> list[Path]:
     """The sampled files named by a `sample:` reference, resolved under `root`."""
     if not ref.startswith("sample:"):
         return []
-    return [root / name for name in ref[len("sample:"):].split(",") if name]
+    body = ref[len("sample:"):]
+    head, sep, rest = body.partition(":")
+    names = rest if sep and head.isdigit() else body
+    return [root / name for name in names.split(",") if name]
 
 
 def file_fingerprint(path: Path) -> str:

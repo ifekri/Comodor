@@ -238,17 +238,39 @@ def _unquoted(command: str) -> str:
     return re.sub(r"'[^']*'|\"[^\"]*\"", " ", command or "")
 
 
+def _python_code(code: str) -> str:
+    """Python source with comments removed, for mutation detection.
+
+    A commented-out write (`# Path("foo.py").write_text(...)`) is not a write.
+    Quotes are tracked per line so a `#` inside a string is not a comment.
+    """
+    kept: list[str] = []
+    for line in (code or "").splitlines():
+        single = double = False
+        cut = len(line)
+        for index, char in enumerate(line):
+            if char == "'" and not double:
+                single = not single
+            elif char == '"' and not single:
+                double = not double
+            elif char == "#" and not single and not double:
+                cut = index
+                break
+        kept.append(line[:cut])
+    return "\n".join(kept)
+
+
 def command_mutates(command: str, tool: str = "run_shell") -> bool:
     """Whether a shell or Python command changes the filesystem."""
     if tool == "run_python":
-        return bool(_PYTHON_MUTATION.search(command or ""))
+        return bool(_PYTHON_MUTATION.search(_python_code(command)))
     return bool(_SHELL_MUTATION.search(_unquoted(command)))
 
 
 def _command_writes(tool: str, command: str) -> bool:
     """Whether this command tool's command actually writes."""
     if tool == "run_python":
-        return bool(_PYTHON_MUTATION.search(command))
+        return bool(_PYTHON_MUTATION.search(_python_code(command)))
     return bool(_SHELL_MUTATION.search(command))
 
 

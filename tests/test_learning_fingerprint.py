@@ -378,3 +378,34 @@ def test_a_changed_file_stales_a_lesson_at_session_start(config, bus, brain):
         assert brain.all_lessons(["global"])[0].status == "stale"
     finally:
         engine.close()
+
+
+def test_a_bounded_sample_ref_round_trips(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    files = _quote_files(root, "m", "'", count=2)
+
+    ref = rules_module.manifest_ref(root, files, max_files=7)
+
+    assert rules_module.sample_bound(ref) == 7
+    assert rules_module.files_of(ref, root) == files
+
+
+def test_a_rule_reuses_its_recorded_sample_bound(brain, tmp_path):
+    """A rule counted over a bounded sample is revalidated over the same
+    bound, so files outside it cannot invalidate the rule (T111)."""
+    root = tmp_path / "project"
+    root.mkdir()
+    files = _quote_files(root, "m", "'", count=2)
+    rule = brain.observe_rule(
+        key="quotes.style", scope="project:p", agrees=True, category="style",
+        statement="Use single quotes for string literals.", detail="counted",
+        source="observation", weight=10, provenance="counted_convention",
+        source_ref=rules_module.manifest_ref(root, files, max_files=2),
+        fingerprint=rules_module.manifest_fingerprint(files, root))
+    assert rules_module.sample_bound(rule.source_ref) == 2
+
+    _quote_files(root, "n", '"', count=3)      # outside the recorded bound
+
+    assert stale_by_fingerprint(brain, root, ["project:p"]) == []
+    assert brain.all_rules(["project:p"])[0].fingerprint == rule.fingerprint

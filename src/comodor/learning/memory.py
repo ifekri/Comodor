@@ -173,6 +173,24 @@ def _unquoted(command: str) -> str:
     return re.sub(r"'[^']*'|\"[^\"]*\"", " ", command or "")
 
 
+def _python_code(code: str) -> str:
+    """Python source with comments removed, for mutation detection."""
+    kept: list[str] = []
+    for line in (code or "").splitlines():
+        single = double = False
+        cut = len(line)
+        for index, char in enumerate(line):
+            if char == "'" and not double:
+                single = not single
+            elif char == '"' and not single:
+                double = not double
+            elif char == "#" and not single and not double:
+                cut = index
+                break
+        kept.append(line[:cut])
+    return "\n".join(kept)
+
+
 def _names_file(command: str, path: str) -> bool:
     """Whether a shell command names the file, absolute or by basename.
 
@@ -206,7 +224,7 @@ def _written_later(messages: list[Any], index: int, path: str) -> bool:
                     if not _names_file(command, path):
                         continue
                     if name == "run_python":
-                        if _PYTHON_MUTATION.search(command):
+                        if _PYTHON_MUTATION.search(_python_code(command)):
                             return True
                     elif _SHELL_MUTATION.search(_unquoted(command)):
                         return True
@@ -277,7 +295,9 @@ def stale_by_fingerprint(store: BrainStore, root: Path, scopes: list[str],
                 # than assuming the recorded file set is still representative
                 # (T111).
                 historical = rules_module.files_of(rule.source_ref, root)
-                sample = rules_module.sampled_files(root)
+                bound = rules_module.sample_bound(rule.source_ref)
+                sample = (rules_module.sampled_files(root, max_files=bound)
+                          if bound else rules_module.sampled_files(root))
                 if touched:
                     # Relevant when the requested path is in the current
                     # sample or was in the recorded one: a newly added path is
@@ -300,7 +320,7 @@ def stale_by_fingerprint(store: BrainStore, root: Path, scopes: list[str],
             else:
                 continue
             if holds:
-                source_ref = (rules_module.manifest_ref(root, sample)
+                source_ref = (rules_module.manifest_ref(root, sample, max_files=bound)
                               if rule.source_ref.startswith("sample:") else "")
                 store.refresh_fingerprint("rules", rule.id, current,
                                           source_ref=source_ref)

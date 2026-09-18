@@ -396,8 +396,9 @@ class SignalDetector:
         # sample can be checked against the verdict (T111).
         self._apply(observations, source="observation", outcome=outcome,
                     provenance="counted_convention",
-                    source_ref=rules_module.manifest_ref(root, sample),
-                    fingerprint=rules_module.manifest_fingerprint(sample))
+                    source_ref=rules_module.manifest_ref(root, sample,
+                                                         max_files=max_files),
+                    fingerprint=rules_module.manifest_fingerprint(sample, root))
         return outcome
 
     # -- shared ----------------------------------------------------------- #
