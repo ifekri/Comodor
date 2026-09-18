@@ -567,8 +567,11 @@ class AgentLoop:
                 result = self._run_one(call, context)
                 # A child that stopped for a decision is imported before the
                 # next call starts, so a sibling write in the same batch is
-                # withheld rather than run without the answer (FR-018).
-                self._import_clarification(context, result)
+                # withheld rather than run without the answer (FR-018). `ask`
+                # is native: it recorded the decision in this same ledger, so
+                # its payload is not imported again.
+                self._import_clarification(context, result,
+                                           native=call.name == "ask")
                 results.append(result)
 
         self._measurement.tool_calls += len(calls)
@@ -648,7 +651,8 @@ class AgentLoop:
             # never holds a call that can raise one — imports it here, so
             # the post-batch check ends the turn either way (FR-018, FR-029).
             if parallel and len(calls) > 1:
-                self._import_clarification(context, result)
+                self._import_clarification(context, result,
+                                           native=call.name == "ask")
 
             # What the user said not to do, while the model is still deciding.
             #
@@ -880,7 +884,8 @@ class AgentLoop:
         return ("[Learned knowledge contradicted by what was just observed and "
                 f"marked stale — rely on the observation, not on it:\n{lines}]")
 
-    def _import_clarification(self, context: ToolContext, result: ToolResult) -> None:
+    def _import_clarification(self, context: ToolContext, result: ToolResult,
+                              *, native: bool = False) -> None:
         """A child's clarification payload, into this turn's ledger, once.
 
         The open decision enters the ledger so dependent calls are withheld
@@ -888,7 +893,14 @@ class AgentLoop:
         joins this turn's prior work. A worktree child's changes also arrive
         as an applied patch (`files`); an in-place child's arrive only here,
         already relative and bounded (contracts §C6).
+
+        `native` marks a payload the `ask` tool raised in *this* ledger: the
+        decision is already recorded, so importing the payload again would
+        open a second decision for one question. A child's payload was
+        recorded in the child's own ledger and is not native.
         """
+        if native:
+            return
         carried = result.meta.get("clarification")
         if not isinstance(carried, dict) or not carried:
             return

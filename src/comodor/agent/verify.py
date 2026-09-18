@@ -290,10 +290,10 @@ def _python_code(code: str) -> str:
 
 
 #: Method calls that write, whatever the receiver: `Path("x").write_text`,
-#: `handle.writelines`, `Path("x").unlink`.
+#: `handle.writelines`, `Path("x").unlink`, `Path("x").rmdir`.
 _WRITING_METHODS = frozenset({
     "write_text", "write_bytes", "writelines", "unlink", "rename", "replace",
-    "touch", "mkdir",
+    "touch", "mkdir", "rmdir",
 })
 #: Module functions that write, by module and name.
 _WRITING_FUNCTIONS = {
@@ -348,6 +348,52 @@ def _opens_for_writing(call: ast.Call) -> bool:
         and bool(_WRITABLE_MODE.match(mode.value))
 
 
+#: Method calls that delete a filesystem entry, whatever the receiver:
+#: `Path("x").unlink`, `Path("x").rmdir`. A delete is also a write, so these
+#: are a subset of `_WRITING_METHODS`; the destructive check needs the
+#: narrower set, because an ordinary write must not satisfy a delete request.
+_DELETING_METHODS = frozenset({"unlink", "rmdir"})
+#: Module functions that delete, by module and name.
+_DELETING_FUNCTIONS = {
+    "os": frozenset({"remove", "unlink", "rmdir"}),
+    "shutil": frozenset({"rmtree"}),
+}
+#: The delete forms, as text, for source that does not parse. Deliberately
+#: narrower than `_PYTHON_MUTATION`: only the calls that actually delete.
+_PYTHON_DELETE_TEXT = re.compile(
+    r"(?i)(\.unlink\s*\(|\.rmdir\s*\(|"
+    r"\bos\.(remove|unlink|rmdir)\s*\(|"
+    r"\bshutil\.rmtree\s*\()")
+
+
+def python_deletes(code: str) -> bool:
+    """Whether Python source, as it would execute, deletes a filesystem entry.
+
+    Read from the syntax tree for the same reason `python_writes` is: a
+    `print('os.remove("foo.py")')` mentions the call and performs nothing, so
+    only an executable call node counts. `shutil.rmtree` and the `Path`
+    methods (`unlink`, `rmdir`) are deletes; an ordinary write is not. Source
+    that does not parse could not have run, and is read by the delete text
+    pattern as a last resort.
+    """
+    try:
+        tree = ast.parse(code or "")
+    except (SyntaxError, ValueError):
+        return bool(_PYTHON_DELETE_TEXT.search(_python_code(code)))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        target = node.func
+        if isinstance(target, ast.Attribute):
+            if target.attr in _DELETING_METHODS:
+                return True
+            owner = target.value
+            if isinstance(owner, ast.Name) and target.attr in _DELETING_FUNCTIONS.get(
+                    owner.id, ()):
+                return True
+    return False
+
+
 def command_mutates(command: str, tool: str = "run_shell") -> bool:
     """Whether a shell or Python command changes the filesystem."""
     if tool == "run_python":
@@ -367,6 +413,23 @@ def _command_writes(tool: str, claim: str) -> bool:
         _, _, code = claim.partition(" ")
         return python_writes(code)
     return bool(_SHELL_MUTATION.search(_unquoted(claim)))
+
+
+def _command_deletes(tool: str, claim: str) -> bool:
+    """Whether this command tool's command actually deletes.
+
+    Shell gets the quote- and comment-stripped text pattern; Python gets the
+    syntax tree, so `print('os.remove("foo.py")')` is not a delete. Only a
+    command tool can delete: a `write_file` of `unlink.py` names the word and
+    changes nothing.
+    """
+    if tool not in _COMMAND_TOOLS:
+        return False
+    if tool == "run_python":
+        # The claim is "run_python <code>"; the code is what is parsed.
+        _, _, code = claim.partition(" ")
+        return python_deletes(code)
+    return bool(_DESTRUCTIVE_COMMAND.search(_unquoted(claim)))
 
 
 def _file_operation(element: str, verb: re.Pattern[str]) -> bool:
@@ -483,9 +546,9 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
             # The file was read, not changed. Only a change to the artifact —
             # or verified resulting state — delivers a mutation request.
             continue
-        if destructive and (tool not in _COMMAND_TOOLS
-                            or not _DESTRUCTIVE_COMMAND.search(command)):
-            # An edit to `foo.py` is not a delete of it.
+        if destructive and not _command_deletes(tool, claim):
+            # An edit to `foo.py` is not a delete of it; a Python delete is
+            # read as code, not as shell text.
             continue
         if move and (tool not in _COMMAND_TOOLS
                      or not _MOVE_COMMAND.search(command)):

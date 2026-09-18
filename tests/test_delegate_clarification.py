@@ -426,6 +426,37 @@ def test_applied_delegate_files_are_mutation_evidence(config, bus, monkeypatch):
     assert "foo.py" in agent._written_paths
 
 
+def test_a_delegate_clarification_is_imported_exactly_once(config, bus, monkeypatch):
+    """A child's decision enters the parent ledger once. The native-`ask`
+    guard added for the duplicate-decision fix must not suppress a genuine
+    child import, and the child's payload must not be imported twice."""
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import ToolCall
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+    from comodor.tools.base import ToolResult
+
+    agent = AgentLoop(config, Gateway(config, scripts=[Script(text="done")]),
+                      ToolRegistry(), bus, PermissionEngine(config, bus), Conversation())
+    real_invoke = agent.tools.invoke
+
+    def invoke(name, context, arguments):
+        if name == "delegate":
+            return ToolResult.success(
+                "Stopped: a decision is needed.",
+                clarification={"kind": "clarification_required",
+                               "decision": "Which database?", "candidates": [],
+                               "evidence_consulted": [], "reason": "architecture",
+                               "outcome": "unattended"})
+        return real_invoke(name, context, arguments)
+
+    monkeypatch.setattr(agent.tools, "invoke", invoke)
+    agent._execute([ToolCall(id="d1", name="delegate", arguments={"task": "x"})])
+
+    ledger = agent._tool_context().evidence
+    assert [d.what for d in ledger.decisions] == ["Which database?"]
+
+
 def test_a_sibling_write_after_a_delegates_decision_is_withheld_in_the_same_batch(
         config, bus, monkeypatch):
     """A foreground delegate that stops for a decision and a write in the
@@ -494,7 +525,7 @@ def test_mutation_importing_after_the_batch_lets_the_sibling_write_run(
     real_import = agent._import_clarification
     deferred = []
     monkeypatch.setattr(agent, "_import_clarification",
-                        lambda context, result: deferred.append((context, result)))
+                        lambda context, result, **_: deferred.append((context, result)))
     calls = [ToolCall(id="d1", name="delegate", arguments={"task": "x"}),
              ToolCall(id="w1", name="write_file",
                       arguments={"path": "db.py", "content": "ENGINE = 'sqlite'\n"})]

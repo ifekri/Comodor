@@ -401,6 +401,98 @@ def test_a_destructive_command_delivers_a_delete_request():
     assert assessment.unresolved == []
 
 
+def test_a_python_remove_delivers_a_delete_request():
+    """`run_python` is read as code, so `os.remove` is delete evidence
+    (review fix; FR-036, FR-116)."""
+    ledger = Ledger()
+    ledger.verified("run_python os.remove('foo.py')", source="run_python:code",
+                    material="")
+
+    assessment = verify.assess("- delete foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted foo.py.")
+
+    assert assessment.unresolved == []
+
+
+def test_a_python_path_unlink_delivers_a_delete_request():
+    ledger = Ledger()
+    ledger.verified('run_python Path("foo.py").unlink()', source="run_python:code",
+                    material="")
+
+    assessment = verify.assess("- delete foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted foo.py.")
+
+    assert assessment.unresolved == []
+
+
+def test_a_python_path_rmdir_delivers_a_delete_request():
+    ledger = Ledger()
+    ledger.verified('run_python Path("build/cache").rmdir()',
+                    source="run_python:code", material="")
+
+    assessment = verify.assess("- delete build/cache", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted build/cache.")
+
+    assert assessment.unresolved == []
+
+
+def test_a_python_rmtree_delivers_a_delete_request():
+    ledger = Ledger()
+    ledger.verified('run_python shutil.rmtree("build/cache")',
+                    source="run_python:code", material="")
+
+    assessment = verify.assess("- delete build/cache", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted build/cache.")
+
+    assert assessment.unresolved == []
+
+
+def test_an_ordinary_python_write_does_not_deliver_a_delete_request():
+    """A write is not a delete, even read as code (review fix)."""
+    ledger = Ledger()
+    ledger.verified('run_python Path("foo.py").write_text("x")',
+                    source="run_python:code", material="")
+
+    assessment = verify.assess("- delete foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted foo.py.")
+
+    assert "delete foo.py" in assessment.unresolved
+
+
+def test_a_python_delete_inside_a_string_does_not_deliver_a_delete_request():
+    """`print('os.remove("foo.py")')` prints; nothing is deleted. The AST
+    reading introduced in e46df9a is what makes this true."""
+    ledger = Ledger()
+    ledger.verified('run_python print(\'os.remove("foo.py")\')',
+                    source="run_python:code", material="")
+
+    assessment = verify.assess("- delete foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted foo.py.")
+
+    assert "delete foo.py" in assessment.unresolved
+    assert not verify.python_deletes('print(\'os.remove("foo.py")\')')
+    assert not verify.python_deletes('# os.remove("foo.py")')
+    assert not verify.python_deletes('x = "Path(\\"foo.py\\").unlink()"')
+
+
+@pytest.mark.parametrize("code", [
+    'import os\nos.remove("foo.py")',
+    'import os\nos.unlink("foo.py")',
+    'import os\nos.rmdir("build/cache")',
+    'from pathlib import Path\nPath("foo.py").unlink()',
+    'from pathlib import Path\nPath("build/cache").rmdir()',
+    'import shutil\nshutil.rmtree("build/cache")',
+])
+def test_python_deletes_recognises_executable_deletes(code):
+    assert verify.python_deletes(code)
+
+
+def test_python_rmdir_is_also_a_mutation():
+    """`Path.rmdir()` deletes, so it is a write too — mutation tracking and
+    delete evidence agree (review fix)."""
+    assert verify.command_mutates('Path("build/cache").rmdir()', "run_python")
+
+
 def test_a_read_only_shell_command_does_not_deliver_an_update():
     """`cat README.md` is not updating it (FR-036, FR-116)."""
     ledger = Ledger()

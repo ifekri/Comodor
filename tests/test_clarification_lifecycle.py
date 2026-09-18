@@ -199,6 +199,77 @@ def test_8_duplicate_answers_resolve_to_exactly_one_through_the_claim(config, bu
 
 
 # --------------------------------------------------------------------------- #
+# one question is one decision — a native `ask` payload is not imported twice
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("reply", [forms.CANCELLED, "deny", forms.UNATTENDED])
+def test_a_native_ask_ending_without_an_answer_records_exactly_one_decision(
+        config, bus, reply):
+    """`ask` records its decision in this turn's own ledger. The loop must not
+    import that same payload again and open a second decision for one
+    question (review fix; FR-014, contracts §C2)."""
+    Answerer(bus, reply)
+    agent = make_agent(config, bus, scripts_that_ask_then_write())
+    result = agent.run(REQUEST)
+
+    assert result.stopped == "clarification_required"
+    decisions = result.clarification["decisions"]
+    assert len(decisions) == 1, "one question is one decision"
+    assert decisions[0]["decision"] == "Which database should this use?"
+    ledger = agent.tool_context.evidence
+    assert [d.what for d in ledger.decisions] == ["Which database should this use?"]
+
+
+def test_an_unattended_native_ask_records_exactly_one_decision(config):
+    """The same cardinality with nobody listening at all (unattended)."""
+    bus = EventBus()
+    agent = make_agent(config, bus, scripts_that_ask_then_write())
+    result = agent.run(REQUEST)
+
+    assert result.stopped == "clarification_required"
+    assert result.clarification["outcome"] == "unattended"
+    assert len(result.clarification["decisions"]) == 1
+    assert [d.what for d in agent.tool_context.evidence.decisions] \
+        == ["Which database should this use?"]
+
+
+def a_two_question_form():
+    return ToolCall(id="q1", name="ask", arguments={"questions": [
+        {"question": "Which database should this use?", "header": "Database",
+         "affects": ["architecture"],
+         "options": [{"label": "SQLite", "source": "request", "evidence": "SQLite"},
+                     {"label": "PostgreSQL", "source": "request", "evidence": "PostgreSQL"}]},
+        {"question": "Should the pool be shared?", "header": "Pool",
+         "affects": ["behaviour"],
+         "options": [{"label": "Shared", "source": "request", "evidence": "shared"},
+                     {"label": "Per-request", "source": "request",
+                      "evidence": "per request"}]},
+    ]})
+
+
+def test_a_partially_answered_form_reports_the_open_question_once(config, bus):
+    """One material question answered, one left blank: the blank one stays
+    open and is reported exactly once (review fix; FR-014, FR-022)."""
+    Answerer(bus, json.dumps([
+        {"header": "Database", "prompt": "", "chosen": ["SQLite"], "written": ""},
+        {"header": "Pool", "prompt": "", "chosen": [], "written": ""},
+    ]))
+    agent = make_agent(config, bus, [
+        Script(text="Two questions.", tool_calls=[a_two_question_form()]),
+        Script(text="never")])
+    result = agent.run(REQUEST)
+
+    assert result.stopped == "clarification_required"
+    assert [d["decision"] for d in result.clarification["decisions"]] \
+        == ["Should the pool be shared?"]
+    ledger = agent.tool_context.evidence
+    assert [d.what for d in ledger.decisions
+            if d.material and d.state in ("unresolved", "blocked")] \
+        == ["Should the pool be shared?"]
+
+
+# --------------------------------------------------------------------------- #
 # turn cancellation stays what it was
 # --------------------------------------------------------------------------- #
 
