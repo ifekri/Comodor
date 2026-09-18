@@ -461,3 +461,79 @@ def test_a_fully_delivered_answer_carries_no_annotation(scripted):
     report = json.loads(out.getvalue())
     assert report["stopped"] == "done"
     assert report["annotation"] == ""
+
+
+def a_two_question_form() -> ToolCall:
+    return ToolCall(id="call-2", name="ask", arguments={"questions": [
+        {"question": "Which framework?", "header": "Framework", "multiSelect": False,
+         "options": [{"label": "Flask", "description": "small"},
+                     {"label": "Django", "description": "large"}]},
+        {"question": "Which database?", "header": "Database", "multiSelect": False,
+         "options": [{"label": "SQLite", "description": "file"},
+                     {"label": "PostgreSQL", "description": "server"}]},
+    ]})
+
+
+class _Form:
+    def __init__(self, call: ToolCall) -> None:
+        self.meta = {"questions": call.arguments["questions"]}
+
+
+def _decoded(document: str) -> dict:
+    from comodor import questions as forms
+
+    return {answer.header: (answer.chosen, answer.written)
+            for answer in forms.decode_answers(document)}
+
+
+def test_a_lone_value_answers_the_questions_that_offer_it_and_no_other():
+    """One scripted `value` is one answer: it picks the option it names where
+    offered and does not spill into an unrelated question (review 4045469373)."""
+    from comodor import questions as forms
+
+    answers = _decoded(cli._answers_from_form(_Form(a_two_question_form()), "Flask", forms))
+    assert answers["Framework"] == (["Flask"], "")
+    assert answers["Database"] == (["SQLite"], ""), "the default, not the framework answer"
+
+
+def test_a_lone_free_text_value_lands_in_the_first_question_only():
+    from comodor import questions as forms
+
+    answers = _decoded(cli._answers_from_form(_Form(a_two_question_form()), "FastAPI", forms))
+    assert answers["Framework"] == ([], "FastAPI")
+    assert answers["Database"] == (["SQLite"], "")
+
+
+def test_values_keyed_by_header_answer_each_question():
+    from comodor import questions as forms
+
+    answers = _decoded(cli._answers_from_form(
+        _Form(a_two_question_form()), "", forms,
+        values={"Framework": "Django", "Database": "DuckDB"}))
+    assert answers["Framework"] == (["Django"], "")
+    assert answers["Database"] == ([], "DuckDB")
+
+
+def test_a_keyed_interaction_reaches_the_form(scripted):
+    config = scripted([
+        Script(text="Two things first.", tool_calls=[a_two_question_form()]),
+        Script(text="Django and DuckDB it is."),
+    ])
+
+    code = cli.run_headless(config, run(config, interactions=json.dumps([
+        {"action": "answer", "values": {"Framework": "Django", "Database": "DuckDB"}}])))
+
+    assert code == 0
+    replies = [message.content for call in scripted.providers[0].calls
+               for message in call]
+    assert any("DuckDB" in reply and "Django" in reply for reply in replies)
+
+
+def test_a_malformed_values_map_is_refused_when_the_scenario_loads():
+    from bench.task import TaskError, _interactions
+
+    with pytest.raises(TaskError):
+        _interactions([{"action": "answer", "values": ["Flask"]}])
+    with pytest.raises(TaskError):
+        _interactions([{"action": "answer", "values": {"Framework": 3}}])
+    assert _interactions([{"action": "answer", "values": {"Framework": "Flask"}}])

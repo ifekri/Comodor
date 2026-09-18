@@ -265,6 +265,12 @@ def _interactions(value: Any) -> tuple[Any, ...]:
             raise TaskError(
                 f"INTERACTION action {action!r} is not one of "
                 f"{', '.join(sorted(ACTIONS))}")
+        keyed = entry.get("values") if isinstance(entry, dict) else None
+        if keyed is not None and not (
+                isinstance(keyed, dict)
+                and all(isinstance(k, str) and isinstance(v, str) for k, v in keyed.items())):
+            raise TaskError(
+                f"INTERACTION values {keyed!r} must map question headers to answers")
     return entries
 
 

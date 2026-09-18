@@ -344,3 +344,21 @@ def test_a_commented_out_python_write_does_not_supersede(tmp_path):
 
     assert memory_module.corroborate(
         "the CI runner is Linux only", [shown, commented])[0] == "tool_confirmed"
+
+
+def test_a_commented_shell_redirection_does_not_supersede_an_observation(tmp_path):
+    """`cat ci.yml # > backup` reads the file; the `>` is in a comment, so the
+    observation still stands (review 4045469341)."""
+    from comodor.providers.base import ToolCall
+
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    read_again = Message.assistant("", [ToolCall(
+        id="c2", name="run_shell", arguments={"command": f"cat {target} # > backup"})])
+
+    provenance, ref, _ = memory_module.corroborate(
+        "the CI runner is Linux only", [shown, read_again])
+    assert (provenance, ref) == ("tool_confirmed", f"read_file:{target}")

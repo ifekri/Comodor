@@ -77,8 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--interactions", default="",
         help="JSON list of answers to script for question forms, applied in "
-             "order: \"answer\" (with an optional value), \"cancel\", "
-             "\"expire\" or \"unattended\". Nothing is scripted without it.")
+             "order: \"answer\" (with an optional value, or values keyed by "
+             "question header), \"cancel\", \"expire\" or \"unattended\". "
+             "Nothing is scripted without it.")
 
     written = sub.add_parser(
         "help", help="what this is and how to use it, in full")
@@ -284,9 +285,13 @@ def _apply_interaction(request: Any, action: Any, forms: Any) -> None:
     tool, the ledger and the loop produce the same lifecycle they do for a
     real answer, a real dismissal, a real expiry or a real absence.
     """
+    values: dict[str, str] = {}
     if isinstance(action, dict):
         verb = str(action.get("action", "")).strip().lower()
         value = str(action.get("value", "") or "")
+        keyed = action.get("values")
+        if isinstance(keyed, dict):
+            values = {str(header): str(answer or "") for header, answer in keyed.items()}
     else:
         verb, value = str(action).strip().lower(), ""
 
@@ -295,26 +300,44 @@ def _apply_interaction(request: Any, action: Any, forms: Any) -> None:
     elif verb == "expire":
         request.expire()
     elif verb == "answer":
-        request.answer(_answers_from_form(request, value, forms))
+        request.answer(_answers_from_form(request, value, forms, values=values))
     else:                                    # "unattended", or unrecognised
         request.answer(forms.UNATTENDED)
 
 
-def _answers_from_form(request: Any, value: str, forms: Any) -> str:
+def _answers_from_form(request: Any, value: str, forms: Any,
+                       values: dict[str, str] | None = None) -> str:
     """A real answer document, built from the form the model actually raised.
 
     The question headers are the model's, so an answer must bind to them by
-    header rather than guess. A `value` naming an offered option picks it;
-    otherwise the value is written into the write-your-own row, which every
-    form carries.
+    header rather than guess. `values` answers each question by its header.
+    A lone `value` is one answer, not one answer per question: it picks the
+    option it names on every question that offers it, and otherwise is
+    written into the first question's write-your-own row only — a framework
+    answer must not also land in an unrelated database question. A question
+    left with nothing takes its first offered option, or stays unanswered.
     """
     questions = forms.decode(request.meta.get("questions") or [])
+    keyed = dict(values or {})
     answers = []
+    # A lone value that names an option somewhere is that choice, and only
+    # that; one that names nothing is free text for the first question.
+    free_text_for = (
+        questions[0].header
+        if value and not keyed and questions and not any(
+            value in [option.label for option in question.options if not option.free]
+            for question in questions)
+        else None)
     for question in questions:
         offered = [option.label for option in question.options if not option.free]
-        if value and value in offered:
+        given = keyed.get(question.header, "")
+        if given and given in offered:
+            chosen, written = [given], ""
+        elif given:
+            chosen, written = [], given
+        elif value and value in offered:
             chosen, written = [value], ""
-        elif value:
+        elif question.header == free_text_for:
             chosen, written = [], value
         elif offered:
             chosen, written = [offered[0]], ""

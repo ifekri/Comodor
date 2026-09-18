@@ -155,11 +155,16 @@ class Outcome:
         return runs[0] if runs else None
 
     def why(self) -> str:
-        """The first reason it failed, which is the one worth reading."""
+        """The first reason it failed, which is the one worth reading.
+
+        With no valid failure, the first invalid run's reason: a task whose
+        every attempt the harness could not measure has to say which hook or
+        judge broke, or the published report cannot be acted on.
+        """
         for verdict in self.verdicts:
             if not verdict.passed:
                 return verdict.reason
-        return ""
+        return self.invalid[0] if self.invalid else ""
 
 
 def run_task(task: Task, *, provider: str, model: str, tries: int = 3,

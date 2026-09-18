@@ -81,7 +81,7 @@ comodor run "refactor the parser" --max-steps 40
 | `--yes` | approve writes and commands automatically |
 | `--json` | a machine-readable result on stdout |
 | `--max-steps N` | override the step limit for this run |
-| `--interactions JSON` | script answers to question forms, in order: `"answer"` (or `{"action":"answer","value":"…"}`), `"cancel"`, `"expire"`, `"unattended"`. Without it, a form nobody can answer is `unattended` |
+| `--interactions JSON` | script answers to question forms, in order: `"answer"` (or `{"action":"answer","value":"…"}`, or `{"action":"answer","values":{"<header>":"…"}}` for a form with several questions), `"cancel"`, `"expire"`, `"unattended"`. A lone `value` picks the option it names wherever it is offered and otherwise answers the first question only. Without it, a form nobody can answer is `unattended` |
 
 Without `--yes` it will ask, on stderr, and refuse rather than assume if nothing
 can answer. That is deliberate: a script that silently self-approves is a script

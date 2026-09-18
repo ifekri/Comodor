@@ -76,8 +76,27 @@ def _task_record(one: Outcome) -> dict:
         "cost_usd": round(one.cost, 4),
         "seconds": round(one.seconds, 1),
         "why": one.why(),
+        # Runs the harness could not measure, kept beside the scored ones:
+        # excluded from every rate and mean, never from the record.
+        "invalid_runs": len(one.invalid),
+        "invalid_reasons": list(one.invalid),
     }
     sequence = one.sequence_result
+    if sequence is None and one.invalid and (one.sequence or one.task.sequence):
+        # Every run was invalid: no steps to describe, but the block still
+        # says so rather than vanishing with the diagnosis.
+        record["sequence"] = {
+            "comparable": False,
+            "invalid_reason": one.invalid[0],
+            "windows": {},
+            "verdict": "invalid",
+            "reason": one.invalid[0],
+            "runs": 0,
+            "invalid_runs": len(one.invalid),
+            "invalid_reasons": list(one.invalid),
+            "passed_runs": 0,
+            "steps": [],
+        }
     if sequence is not None:
         runs = one.sequence_runs()
         # A sequence's attempts are its steps, so the per-try figures are per
@@ -124,6 +143,8 @@ def _sequence_record(sequence, one: Outcome, runs: int = 1) -> dict:
         "verdict": "pass" if (first is not None and first.passed) else "fail",
         "reason": first.reason if first is not None else "",
         "runs": runs,
+        "invalid_runs": len(one.invalid),
+        "invalid_reasons": list(one.invalid),
         "passed_runs": one.passed,
         "steps": [
             {"index": index + 1,
@@ -172,9 +193,11 @@ def as_markdown(report: dict) -> str:
     for task in report["tasks"]:
         why = task["why"].replace("|", "\\|").replace("\n", " ")
         tokens = f"{task['mean_input_tokens']}/{task['mean_output_tokens']}"
+        invalid = int(task.get("invalid_runs", 0) or 0)
+        result = task["result"] + (f" (+{invalid} invalid)" if invalid else "")
         lines.append(
             f"| {task['name']} | {task['category']} | "
-            f"{task['result']} | {tokens} | {task['mean_steps']} | "
+            f"{result} | {tokens} | {task['mean_steps']} | "
             f"{task.get('clarifications', 0)} | {task.get('corrections', 0)} | "
             f"{_cell(task['cost_usd'])} | {why[:120]} |")
 

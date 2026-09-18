@@ -230,12 +230,35 @@ _PATH_ISH = re.compile(r"(?:[\w.-]*[/\\][\w./\\-]*)|\b[\w-]+\.[A-Za-z0-9]{1,8}\b
 
 
 def _unquoted(command: str) -> str:
-    """The command with quoted spans removed, for operator detection.
+    """The command with quoted spans and comments removed, for operator detection.
 
-    `grep '> ' foo.py` searches for a string; the `>` is not redirection. Only
-    a `>` outside quotes is a shell operator.
+    `grep '> ' foo.py` searches for a string, and `cat foo.py # > backup`
+    never redirects: a `>` counts only outside quotes and outside a comment.
+    A comment starts at a `#` that begins a word (after whitespace or an
+    operator) outside quotes — `$#` and `foo#bar` are not comments.
     """
-    return re.sub(r"'[^']*'|\"[^\"]*\"", " ", command or "")
+    kept: list[str] = []
+    for line in (command or "").splitlines(keepends=True):
+        single = double = False
+        previous = " "
+        out: list[str] = []
+        for char in line:
+            if char == "'" and not double:
+                single = not single
+                out.append(" ")
+            elif char == '"' and not single:
+                double = not double
+                out.append(" ")
+            elif single or double:
+                out.append(" ")
+            elif char == "#" and previous in " \t;|&(":
+                out.append("\n" if line.endswith("\n") else "")
+                break
+            else:
+                out.append(char)
+            previous = char
+        kept.append("".join(out))
+    return "".join(kept)
 
 
 def _python_code(code: str) -> str:

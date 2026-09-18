@@ -320,6 +320,7 @@ def test_a_truncated_invalid_sequence_is_reported_without_crashing(tmp_path):
     class One:
         verdicts = [Verdict.ok()]
         passed = 1
+        invalid: list[str] = []
 
     sequence = SequenceResult(task=task, steps=list(_steps(2)),
                               attempts=[_attempt(tmp_path)],
@@ -391,3 +392,68 @@ def test_an_all_invalid_task_is_neither_passed_nor_failed(tmp_path):
     assert totals["failed"] == 0
     assert totals["invalid"] == 1
     assert totals["tasks"] == 0
+
+
+def test_an_all_invalid_task_keeps_its_diagnosis_in_the_report(tmp_path):
+    """Every run invalid: the row still says which hook or judge broke, and
+    the sequence block says the run is invalid rather than vanishing
+    (review 4045469362)."""
+    from bench.runner import Outcome
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok(), sequence=tuple(_steps(2)))
+    outcome = Outcome(task=task, sequence=True)
+    outcome.invalid.extend(["invalid run — the correction hook failed after step 1: "
+                            "KeyError: 'K1'"] * 2)
+
+    record = report.as_json([outcome], provider="p", model="m", tries=2)["tasks"][0]
+    assert record["result"] == "0/0"
+    assert record["invalid_runs"] == 2
+    assert "correction hook failed" in record["why"]
+    assert record["invalid_reasons"][0].startswith("invalid run")
+    assert record["sequence"]["comparable"] is False
+    assert record["sequence"]["verdict"] == "invalid"
+    assert "correction hook failed" in record["sequence"]["invalid_reason"]
+    assert record["sequence"]["runs"] == 0 and record["sequence"]["invalid_runs"] == 2
+
+    markdown = report.as_markdown(report.as_json([outcome], provider="p", model="m", tries=2))
+    assert "0/0 (+2 invalid)" in markdown
+    assert "correction hook failed" in markdown
+
+
+def test_a_partially_invalid_task_lists_the_invalid_tries(tmp_path):
+    """Two valid passes and one invalid run: the rate is 2/2 and the invalid
+    try is listed beside it, not dropped."""
+    from bench.runner import Outcome
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok(), sequence=tuple(_steps(2)))
+    outcome = Outcome(task=task, sequence=True)
+    for run in (1, 2):
+        for _ in range(2):
+            attempt = _attempt(tmp_path)
+            attempt.sequence_run = run
+            outcome.attempts.append(attempt)
+        outcome.verdicts.append(Verdict.ok())
+    outcome.invalid.append("invalid run — the judge raised OSError: gone")
+
+    record = report.as_json([outcome], provider="p", model="m", tries=3)["tasks"][0]
+    assert record["result"] == "2/2"
+    assert record["invalid_runs"] == 1
+    assert record["invalid_reasons"] == ["invalid run — the judge raised OSError: gone"]
+    assert record["sequence"]["runs"] == 2
+    assert record["sequence"]["invalid_runs"] == 1
+    assert "judge raised" in record["why"], "nothing valid failed, so the invalid run is the why"
+    assert "2/2 (+1 invalid)" in report.as_markdown(
+        report.as_json([outcome], provider="p", model="m", tries=3))
+
+
+def test_a_valid_failure_outranks_an_invalid_run_as_the_why(tmp_path):
+    from bench.runner import Outcome
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok())
+    outcome = Outcome(task=task)
+    outcome.verdicts.append(Verdict(False, "the marker is missing"))
+    outcome.invalid.append("invalid run — hook failed")
+    assert outcome.why() == "the marker is missing"

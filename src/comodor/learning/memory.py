@@ -169,8 +169,11 @@ def _internal(message: Any) -> bool:
 
 
 def _unquoted(command: str) -> str:
-    """A command with quoted spans removed, so a quoted `>` is not redirection."""
-    return re.sub(r"'[^']*'|\"[^\"]*\"", " ", command or "")
+    """A command with quoted spans and comments removed, so neither a quoted
+    nor a commented `>` reads as redirection (one reading: `agent/verify.py`)."""
+    from ..agent.verify import _unquoted as unquoted
+
+    return unquoted(command)
 
 
 def _python_code(code: str) -> str:

@@ -482,3 +482,47 @@ def test_a_python_open_write_delivers_an_update():
                                changed_paths=[], answer="Updated foo.py.")
 
     assert assessment.unresolved == []
+
+
+def test_a_commented_redirection_is_not_a_mutation():
+    """`cat foo.py # > backup` reads: the `>` is inside a shell comment
+    (review 4045469341)."""
+    ledger = Ledger()
+    ledger.verified("run_shell run: cat foo.py # > backup",
+                    source="run_shell:cat", material="")
+
+    assessment = verify.assess("- update foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Updated foo.py.")
+
+    assert "update foo.py" in assessment.unresolved
+
+
+def test_a_hash_inside_a_word_or_quotes_is_not_a_comment():
+    """`$#`, `a#b` and a quoted `#` do not start a comment, so the redirection
+    after them is real."""
+    assert verify.command_mutates("echo $# > out.txt")
+    assert verify.command_mutates("cat a#b > c")
+    assert verify.command_mutates("echo '#' > out.txt")
+    assert not verify.command_mutates("cat foo.py # > backup")
+    assert not verify.command_mutates("ls; # rm foo.py")
+    assert not verify.command_mutates("grep '> ' foo.py")
+
+
+def test_mutation_keeping_comments_accepts_a_commented_write(monkeypatch):
+    """With comment stripping removed, the commented `>` is read as
+    redirection and the read-only command delivers an update."""
+    import re
+
+    monkeypatch.setattr(verify, "_unquoted",
+                        lambda command: re.sub(r"'[^']*'|\"[^\"]*\"", " ", command or ""))
+    ledger = Ledger()
+    ledger.verified("run_shell run: cat foo.py # > backup",
+                    source="run_shell:cat", material="")
+    mutated = verify.assess("- update foo.py", entries=ledger.entries,
+                            changed_paths=[], answer="Updated foo.py.")
+    assert mutated.unresolved == [], "the mutation: a comment delivers"
+
+    monkeypatch.undo()
+    restored = verify.assess("- update foo.py", entries=ledger.entries,
+                             changed_paths=[], answer="Updated foo.py.")
+    assert "update foo.py" in restored.unresolved
