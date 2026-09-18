@@ -308,9 +308,13 @@ def _strategy_record(one: Outcome) -> dict:
 
 
 def _mean_over(outcomes: list[Outcome], name: str) -> int:
-    if not outcomes:
+    """The per-task mean of one attempt figure, over the tasks that were
+    measured: an outcome with no valid run has no figure, and counting it as
+    zero would halve the mean of a strategy the harness failed once."""
+    measured = [one for one in outcomes if one.tries]
+    if not measured:
         return 0
-    return round(sum(one.mean(name) for one in outcomes) / len(outcomes))
+    return round(sum(one.mean(name) for one in measured) / len(measured))
 
 
 def _strategy_totals(outcomes: list[Outcome]) -> dict:

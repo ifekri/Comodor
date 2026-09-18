@@ -550,3 +550,43 @@ def test_a_binary_python_write_delivers_an_update():
                                changed_paths=[], answer="Updated foo.bin.")
 
     assert assessment.unresolved == []
+
+
+def test_a_copy_request_is_not_delivered_by_reading_the_destination():
+    """`- Copy config.example to config.ini` is a mutation; a read of
+    config.ini names the path and changes nothing (review 4045800935)."""
+    ledger = Ledger()
+    ledger.verified("read_file config.ini", source="read_file:config.ini", material="")
+
+    assessment = verify.assess("- Copy config.example to config.ini",
+                               entries=ledger.entries, changed_paths=[],
+                               answer="Copied config.example to config.ini.")
+
+    assert assessment.unresolved == ["Copy config.example to config.ini"]
+
+
+def test_a_copy_request_is_delivered_by_a_copy_command_or_a_changed_path():
+    ledger = Ledger()
+    ledger.verified("run_shell run: cp config.example config.ini",
+                    source="run_shell:cp", material="")
+    by_command = verify.assess("- Copy config.example to config.ini",
+                               entries=ledger.entries, changed_paths=[],
+                               answer="Copied config.example to config.ini.")
+    assert by_command.unresolved == []
+
+    by_path = verify.assess("- Copy config.example to config.ini", entries=[],
+                            changed_paths=["config.ini"],
+                            answer="Copied config.example to config.ini.")
+    assert by_path.unresolved == []
+
+
+@pytest.mark.parametrize("command", ["cp a b", "copy a b", "xcopy a b /E", "robocopy a b"])
+def test_copy_commands_are_mutations(command):
+    assert verify.command_mutates(command)
+
+
+def test_the_learning_staleness_check_reads_commands_as_the_gate_does():
+    from comodor.learning import memory as memory_module
+
+    assert memory_module._SHELL_MUTATION is verify._SHELL_MUTATION
+    assert memory_module._PYTHON_MUTATION is verify._PYTHON_MUTATION

@@ -188,8 +188,8 @@ you your add added fix fixed change changed update updated new
 #: evidence that the change happened: reading `foo.py` does not delete it
 #: (FR-036, FR-116).
 _MUTATION = re.compile(
-    r"(?i)\b(create|write|add|change|replace|rename|move|delete|remove|update|"
-    r"fix|implement|refactor|migrate|generate)\b")
+    r"(?i)\b(create|write|add|change|replace|rename|move|copy|duplicate|delete|"
+    r"remove|update|fix|implement|refactor|migrate|generate)\b")
 
 #: Verbs whose evidence has to match the operation, not just the path: an edit
 #: to `foo.py` is not a delete of it, and a write is not a rename.
@@ -212,9 +212,13 @@ _COMMAND_TOOLS = frozenset({"run_shell", "run_python"})
 _WRITER_TOOLS = frozenset({"write_file", "edit_file"})
 
 #: A shell command that writes: a read-only `cat README.md` is not an update.
+#: A copy writes its destination, so `cp`, `copy`, `xcopy` and `robocopy`
+#: are writes too. The learning staleness check reads commands the same way
+#: (`learning/memory.py` imports these), so the two never drift apart.
 _SHELL_MUTATION = re.compile(
     r"(?i)(\brm\b|\brmdir\b|\bdel\b|\berase\b|\bunlink\b|\bmv\b|\bmove\b|"
-    r"\brename\b|\btee\b|\btruncate\b|\btouch\b|\bsed\s+-i|>>?\s)")
+    r"\brename\b|\bcp\b|\bcopy\b|\bxcopy\b|\brobocopy\b|"
+    r"\btee\b|\btruncate\b|\btouch\b|\bsed\s+-i|>>?\s)")
 
 #: A Python statement that writes. `run_python` is not a shell, so the shell
 #: operators do not describe it. An `open()` writes in any mode that can

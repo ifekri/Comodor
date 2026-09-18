@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
+from ..agent.verify import _PYTHON_MUTATION, _SHELL_MUTATION, _python_code, _unquoted
 from ..config import Config
 from ..events import EventBus, Kind
 from ..paths import project_key
@@ -53,20 +54,9 @@ OBSERVING_TOOLS = frozenset({"read_file", "list_dir", "glob", "grep", "run_shell
 #: since written to is out of date, whatever its words still say.
 _WRITER_TOOLS = frozenset({"write_file", "edit_file"})
 
-#: A shell command that changes a file, for the same staleness check.
-_SHELL_MUTATION = re.compile(
-    r"(?i)(\brm\b|\brmdir\b|\bdel\b|\berase\b|\bunlink\b|\bmv\b|\bmove\b|"
-    r"\brename\b|\btee\b|\btruncate\b|\btouch\b|sed\s+-i|>>?\s)")
-
-#: A Python statement that changes a file. `run_python` is not a shell, so the
-#: shell operators do not describe it: `Path("foo.py").write_text(...)` is a
-#: write even though it matches none of them.
-_PYTHON_MUTATION = re.compile(
-    r"(?i)(\.write_text\s*\(|\.write_bytes\s*\(|\.writelines\s*\(|"
-    r"\.unlink\s*\(|\.rename\s*\(|\.replace\s*\(|\.touch\s*\(|\.mkdir\s*\(|"
-    r"\bopen\s*\([^)]*['\"](?:[wax][bt+]*|r[bt]*\+[bt]*)['\"]|"
-    r"\bos\.(remove|unlink|rename|replace|rmdir|mkdir|makedirs)\s*\(|"
-    r"\bshutil\.(move|copy|copy2|copyfile|rmtree|make_archive)\s*\()")
+#: What a shell or Python command writes is decided in one place — the
+#: completion gate's reading (`agent/verify.py`, imported above) — so the
+#: staleness check here and the gate never disagree about a command.
 
 #: How much of a proposal's wording a single message must contain to count
 #: as having said it. Word overlap, not meaning: the check is deterministic
@@ -168,32 +158,6 @@ def _internal(message: Any) -> bool:
     return bool(meta.get("synthetic") or meta.get("compacted"))
 
 
-def _unquoted(command: str) -> str:
-    """A command with quoted spans and comments removed, so neither a quoted
-    nor a commented `>` reads as redirection (one reading: `agent/verify.py`)."""
-    from ..agent.verify import _unquoted as unquoted
-
-    return unquoted(command)
-
-
-def _python_code(code: str) -> str:
-    """Python source with comments removed, for mutation detection."""
-    kept: list[str] = []
-    for line in (code or "").splitlines():
-        single = double = False
-        cut = len(line)
-        for index, char in enumerate(line):
-            if char == "'" and not double:
-                single = not single
-            elif char == '"' and not single:
-                double = not double
-            elif char == "#" and not single and not double:
-                cut = index
-                break
-        kept.append(line[:cut])
-    return "\n".join(kept)
-
-
 def _names_file(command: str, path: str) -> bool:
     """Whether a shell command names the file, absolute or by basename.
 
@@ -212,10 +176,21 @@ def _written_later(messages: list[Any], index: int, path: str) -> bool:
     says; storing the fact against the current file's fingerprint would keep
     a contradicted fact active (FR-114). A shell command that changes the file
     counts too: `run_shell("rm foo.py")` leaves the observation just as stale
-    as an editor would.
+    as an editor would. So does a writing delegate: one whose applied patch
+    lists the file, or one that worked in place — which names no files, so
+    every earlier observation is treated as superseded by it.
     """
     for later in messages[index + 1:]:
         role = _role(later)
+        if role == "tool" and str(getattr(later, "name", "") or "") == "delegate":
+            meta = getattr(later, "meta", None) or {}
+            if isinstance(meta, dict) and not getattr(later, "is_error", False):
+                if meta.get("isolated") is False:
+                    return True
+                if meta.get("applied") and any(
+                        _names_file(str(changed), path)
+                        for changed in meta.get("files") or []):
+                    return True
         if role == "assistant":
             for call in getattr(later, "tool_calls", None) or []:
                 name = str(getattr(call, "name", "") or "")

@@ -628,6 +628,13 @@ class AgentLoop:
             form = result.meta.get("form")
             if isinstance(form, dict):
                 message.meta["question"] = form
+            # What a writing delegate changed, so a read of one of those files
+            # earlier in the conversation is known to be superseded (FR-114).
+            if result.meta.get("applied"):
+                message.meta["applied"] = True
+                message.meta["files"] = [str(f) for f in result.meta.get("files") or []]
+            if result.meta.get("isolated") is False:
+                message.meta["isolated"] = False
             # A child that stopped for a decision (a synchronous delegate) hands
             # its payload back through the tool result. Import it into this
             # ledger so the post-batch check ends the turn instead of letting

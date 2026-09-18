@@ -362,3 +362,89 @@ def test_a_commented_shell_redirection_does_not_supersede_an_observation(tmp_pat
     provenance, ref, _ = memory_module.corroborate(
         "the CI runner is Linux only", [shown, read_again])
     assert (provenance, ref) == ("tool_confirmed", f"read_file:{target}")
+
+
+def _delegate_result(**meta):
+    done = Message.tool("d1", "delegate", "Its changes are applied here: ci.yml.")
+    done.meta.update(meta)
+    return done
+
+
+def test_a_writing_delegates_applied_patch_supersedes_an_observation(tmp_path):
+    """A foreground `delegate(write=true)` that applied a patch listing the
+    file changed it after the read: the observation is stale (review
+    4045800929)."""
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+
+    assert memory_module.corroborate(
+        "the CI runner is Linux only",
+        [shown, _delegate_result(applied=True, files=["ci.yml"])]) == ("", "", "")
+    provenance, _, _ = memory_module.corroborate(
+        "the CI runner is Linux only",
+        [shown, _delegate_result(applied=True, files=["other.py"])])
+    assert provenance == "tool_confirmed", "a patch that left the file alone changes nothing"
+
+
+def test_an_in_place_writing_delegate_supersedes_every_earlier_observation(tmp_path):
+    """An in-place writer names no files, so nothing it may have touched can
+    be fingerprinted as current: every earlier observation is superseded."""
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+
+    assert memory_module.corroborate(
+        "the CI runner is Linux only",
+        [shown, _delegate_result(isolated=False)]) == ("", "", "")
+    provenance, _, _ = memory_module.corroborate(
+        "the CI runner is Linux only", [shown, _delegate_result()])
+    assert provenance == "tool_confirmed", "a read-only delegate changes nothing"
+
+
+def test_the_loop_puts_a_delegates_changes_on_its_tool_message(config, bus, monkeypatch):
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+    from comodor.providers.gateway import Gateway
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+    from comodor.tools.base import ToolResult
+
+    agent = AgentLoop(config, Gateway(config, scripts=[Script(text="done")]),
+                      ToolRegistry(), bus, PermissionEngine(config, bus), Conversation())
+    call = ToolCall(id="d1", name="delegate", arguments={"task": "x", "write": True})
+    monkeypatch.setattr(agent, "_run_one", lambda c, ctx: ToolResult.success(
+        "applied", applied=True, files=["ci.yml"]))
+    agent._execute([call])
+    monkeypatch.setattr(agent, "_run_one", lambda c, ctx: ToolResult.success(
+        "in place", isolated=False))
+    agent._execute([call])
+
+    tool_messages = [m for m in agent.conversation.messages if m.name == "delegate"]
+    assert tool_messages[0].meta["applied"] is True
+    assert tool_messages[0].meta["files"] == ["ci.yml"]
+    assert tool_messages[1].meta["isolated"] is False
+
+
+def test_mutation_ignoring_delegates_keeps_a_superseded_observation(tmp_path, monkeypatch):
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    transcript = [shown, _delegate_result(applied=True, files=["ci.yml"])]
+
+    real = memory_module._written_later
+    monkeypatch.setattr(memory_module, "_written_later",
+                        lambda messages, index, path: real(
+                            [m for m in messages if m.name != "delegate"], index, path))
+    provenance, _, _ = memory_module.corroborate("the CI runner is Linux only", transcript)
+    assert provenance == "tool_confirmed", "the mutation: the delegate's write is unseen"
+
+    monkeypatch.setattr(memory_module, "_written_later", real)
+    assert memory_module.corroborate("the CI runner is Linux only", transcript) == ("", "", "")

@@ -201,3 +201,31 @@ def test_the_paired_files_are_named_as_a_baseline(tmp_path):
     assert json_file.name.startswith("baseline-fake-1-")
     assert md_file.suffix == ".md"
     assert json.loads(json_file.read_text(encoding="utf-8"))["kind"] == "paired-baseline"
+
+
+def test_an_all_invalid_outcome_does_not_drag_the_paired_mean_down():
+    """A task whose every run the harness could not measure has no token
+    figure; averaging it in as zero halves the strategy mean (review
+    4045800942)."""
+    task = a_task()
+    broken = Outcome(task=a_task(name="broken"), strategy="current")
+    broken.invalid.append("invalid run — the judge raised OSError: gone")
+
+    document = report.as_paired_json(
+        [_outcome(task, "current", 3, 10_000), broken],
+        [_outcome(task, "naive", 3, 40_000)],
+        provider="fake", model="fake-1", tries=3)
+
+    totals = document["totals"]["current"]
+    assert totals["attempts"] == 3
+    assert totals["mean_input_tokens"] == 10_000, "one measured task, not two"
+    assert totals["mean_total_tokens"] == 10_000 + 1_000 + 5_000
+    assert document["tasks"][1]["current"]["invalid_runs"] == 1
+
+
+def test_a_strategy_with_nothing_measured_reports_zero_not_an_error():
+    broken = Outcome(task=a_task(name="broken"), strategy="current")
+    broken.invalid.append("invalid run — hook failed")
+    document = report.as_paired_json([broken], [], provider="fake", model="fake-1", tries=3)
+    assert document["totals"]["current"]["mean_total_tokens"] == 0
+    assert document["totals"]["current"]["attempts"] == 0
