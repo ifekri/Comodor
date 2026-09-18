@@ -138,7 +138,7 @@ Already in `learning/store.py` as `Lesson` / `Fact` / `Rule` / `Skill` with
 | --- | --- | --- |
 | `provenance` | enum | `user_correction`, `user_statement`, `settled_decision`, `counted_convention`, `validated_outcome`, `tool_confirmed`. **No other value is admissible** (FR-056) |
 | `source_ref` | text | What it was derived from |
-| `fingerprint` | opaque | Of the derivation source. Its **granularity is per provenance class**, decided in T111 from the real shapes in `rules.py` and `store.py` (revised by the repository owner after review): a `counted_convention` rule is a tally over a *sample*, so its fingerprint is a **deterministic bounded sample manifest whose membership is part of the identity** — normalized sampled paths plus a per-file fingerprint, in stable order (`rules.manifest_fingerprint(files, root)`) — and staleness rebuilds the **current** manifest with the same sampler rather than assuming the recorded file set is still representative, so a new, removed, renamed or changed eligible file is a manifest change; a mismatch is the cue to **re-count**, not the verdict — the rule goes stale only when `rules.recount` over the current sample no longer supports it; a `layout.*` structural rule is fingerprinted over the directory structure (names only, two levels), so moving what it describes invalidates it and editing a file inside does not; a `tool_confirmed` fact is whole-file, because nothing records which region of the file backed it, so any change to that file marks it stale; a `user_correction` carries the corrected file's fingerprint for the record only and is displaced by a later contradicting correction, never by an edit (research R5) |
+| `fingerprint` | opaque | Of the derivation source. Its **granularity is per provenance class**, decided in T111 from the real shapes in `rules.py` and `store.py` (revised by the repository owner after review): a `counted_convention` rule is a tally over a *sample*, so its fingerprint is a **deterministic bounded sample manifest whose membership is part of the identity** — normalized sampled paths plus a per-file fingerprint, in stable order (`rules.manifest_fingerprint(files, root)`) — and staleness rebuilds the **current** manifest with the same sampler rather than assuming the recorded file set is still representative, so a new, removed, renamed or changed eligible file is a manifest change; a mismatch is the cue to **re-count**, not the verdict — the rule goes stale only when `rules.recount` over the current sample no longer supports it; a `layout.*` structural rule is fingerprinted over the directory structure (names only, two levels), so moving what it describes invalidates it and editing a file inside does not; a **configuration-derived** rule (`python.tests`, `python.lint`, `python.format`, `js.*`, `build.make` — a value read from project configuration rather than counted from prevailing source style) has a **distinct evidence identity** (repository-owner decision on review 4042406579): its fingerprint is a **detector-specific configuration-source manifest** — the detector, a manifest version, the bounded candidate configuration paths that detector actually reads (`rules.CONFIGURATION_SOURCES`; repository-relative, sorted), which of them are present, and a content fingerprint of each — recorded as `source_ref = configuration:<detector>:<version>:<present members>` and `fingerprint = rules.configuration_manifest(root, detector).fingerprint`; membership is part of the identity, so a relevant source changing, appearing or disappearing changes it, and an unrelated file the detector does not read never does; a mismatch re-runs the detector (`rules.configuration_holds`), the rule is refreshed through the canonical update path when the same observation is still made, and marked `stale` when it is not; **configuration files are never folded into the counted-convention source sample to obtain invalidation, and the source sample never enters a configuration manifest** — the two identities are kept separate in implementation (`rules.Observation.evidence`: `sample` \| `layout` \| `configuration`), in staleness and in tests; a path-narrowed check routes a changed path to every identity whose domain contains it, so a configuration-derived rule is re-evaluated when its configuration source changes even though that path is outside the source sample; a rule persisted before this identity existed (carrying the source sample's manifest under a configuration key) is routed to its detector on the next check and migrated or staled, so existing learning data stays readable and correct; a `tool_confirmed` fact is whole-file, because nothing records which region of the file backed it, so any change to that file marks it stale; a `user_correction` carries the corrected file's fingerprint for the record only and is displaced by a later contradicting correction, never by an edit (research R5) |
 | `confidence` | float | Where meaningful |
 | `established_at` | timestamp | For supersession ordering |
 | `status` | enum | `active` \| `superseded` \| `stale` \| `removed` |
@@ -167,10 +167,21 @@ active --user deletes--------------------> removed
   contents (FR-065).
 - Fingerprint invalidation is per class (see the `fingerprint` row): a counted
   convention is invalidated by its sample changing *and* a re-count flipping it;
-  a layout convention by the structure moving; a `tool_confirmed` fact by its
-  file changing; a user correction only by a later contradicting correction.
+  a layout convention by the structure moving; a configuration-derived rule by
+  its detector-specific configuration manifest changing *and* the detector no
+  longer making the same observation; a `tool_confirmed` fact by its file
+  changing; a user correction only by a later contradicting correction.
   A stale item returns to `UNKNOWN` rather than being relied on (FR-060,
   FR-114, SC-029, SC-032).
+- Learning evidence has **distinct provenance identities** under the one
+  FR-056 admission class `counted_convention` (both are deterministic counts
+  of the repository, admitted through the same gate): (1) **counted-convention
+  provenance** — a bounded deterministic source-code sample manifest
+  (membership + per-file fingerprints, prevailing-convention re-count);
+  (2) **configuration-derived provenance** — a detector-specific
+  configuration-source manifest (detector + version + sorted candidate
+  membership + per-source fingerprints, deterministic re-observation). The
+  identities never share a manifest.
 
 ---
 

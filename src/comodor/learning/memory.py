@@ -263,6 +263,15 @@ def _content(message: Any) -> str:
 # * A structural convention (`layout.*`) is fingerprinted over the directory
 #   structure, names only: moving what it describes invalidates it; editing
 #   a file inside does not.
+# * A configuration-derived rule (`python.tests`, `js.jest`, `build.make`…)
+#   is read from the configuration sources its detector considers, and its
+#   fingerprint is that detector's *configuration manifest*
+#   (`rules.configuration_manifest`): the bounded candidate paths, which are
+#   present, and a fingerprint of each. A source changing, appearing or
+#   disappearing changes it; the detector is then re-run, and the rule is
+#   stale only when it no longer makes the same observation. Configuration
+#   files are not part of the source sample, and the sample is not part of
+#   this — the two identities are separate (review 4042406579).
 # * A `tool_confirmed` fact is about what one source contained. Its
 #   fingerprint is whole-file: any change to that file marks it stale,
 #   because nothing records which part of the file backed it.
@@ -288,7 +297,27 @@ def stale_by_fingerprint(store: BrainStore, root: Path, scopes: list[str],
         for rule in store.all_rules(scopes, active_only=True):
             if rule.provenance != "counted_convention" or not rule.fingerprint:
                 continue
-            if rule.source_ref.startswith("sample:"):
+            kind = rules_module.evidence_kind(rule.source_ref)
+            detector = rules_module.configuration_detector(rule.key)
+            if kind == rules_module.EVIDENCE_CONFIGURATION or (
+                    kind == rules_module.EVIDENCE_SAMPLE and detector):
+                # Configuration-derived — including a rule recorded before
+                # configuration evidence had its own identity, which carried
+                # the source sample's manifest and could never see its
+                # configuration change. Such a rule is re-evaluated now and,
+                # if it still holds, migrated to the configuration manifest.
+                detector = rules_module.detector_of(rule.source_ref) or detector
+                domain = rules_module.configuration_domain(root, detector)
+                if touched and not ({_under(root, str(p)) for p in domain} & touched):
+                    continue
+                manifest = rules_module.configuration_manifest(root, detector)
+                if kind == rules_module.EVIDENCE_CONFIGURATION \
+                        and manifest.fingerprint == rule.fingerprint:
+                    continue
+                current, source_ref = manifest.fingerprint, manifest.ref
+                holds = rules_module.configuration_holds(root, detector, rule.key,
+                                                         rule.statement)
+            elif kind == rules_module.EVIDENCE_SAMPLE:
                 # The sample is the evidence identity: a new, removed, renamed
                 # or changed eligible file can move a repository-wide
                 # convention, so the current bounded sample is rebuilt rather
@@ -310,18 +339,18 @@ def stale_by_fingerprint(store: BrainStore, root: Path, scopes: list[str],
                 current = rules_module.manifest_fingerprint(sample, root)
                 if current == rule.fingerprint:
                     continue
+                source_ref = rules_module.manifest_ref(root, sample, max_files=bound)
                 holds = rules_module.recount(sample, rule.key, root, rule.statement)
-            elif rule.source_ref.startswith("layout:"):
+            elif kind == rules_module.EVIDENCE_LAYOUT:
                 current = rules_module.structure_fingerprint(root)
                 if current == rule.fingerprint:
                     continue
+                source_ref = ""
                 holds = rule.key in {observation.key
                                      for observation in rules_module.layout_signals(root)}
             else:
                 continue
             if holds:
-                source_ref = (rules_module.manifest_ref(root, sample, max_files=bound)
-                              if rule.source_ref.startswith("sample:") else "")
                 store.refresh_fingerprint("rules", rule.id, current,
                                           source_ref=source_ref)
                 continue

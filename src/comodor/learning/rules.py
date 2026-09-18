@@ -29,6 +29,16 @@ SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist",
              "build", ".comodor", ".mypy_cache", ".pytest_cache", "target"}
 
 
+#: The evidence identities an observation can carry (T111). Each is
+#: fingerprinted and invalidated on its own terms, and none is folded into
+#: another to obtain invalidation: a configuration file is not part of the
+#: source-code sample, and a source file is not part of a configuration
+#: manifest.
+EVIDENCE_SAMPLE = "sample"                 # the bounded source-code sample
+EVIDENCE_LAYOUT = "layout"                 # the directory structure
+EVIDENCE_CONFIGURATION = "configuration"   # detector-specific configuration sources
+
+
 @dataclass(slots=True)
 class Observation:
     """One counted vote for or against a convention."""
@@ -39,9 +49,12 @@ class Observation:
     category: str = "style"
     agrees: bool = True
     weight: int = 1
-    #: What this particular observation was counted over, when it is not the
-    #: sampled files as a whole — a layout observation names the directory
-    #: structure it read, and is invalidated by that structure changing.
+    #: Which evidence identity this observation carries, and — when it is
+    #: not the sampled files as a whole — the reference and fingerprint of
+    #: what it was read from: a layout observation names the directory
+    #: structure, a configuration observation the configuration sources its
+    #: detector considers. Invalidated by that evidence changing.
+    evidence: str = EVIDENCE_SAMPLE
     source_ref: str = ""
     fingerprint: str = ""
 
@@ -290,7 +303,7 @@ def scan_project(root: Path, max_files: int = MAX_FILES) -> list[Observation]:
         seen += 1
         observations.extend(analyse_text(str(path), text))
 
-    observations.extend(_project_signals(root))
+    observations.extend(configuration_signals(root))
     observations.extend(layout_signals(root))
     return observations
 
@@ -412,7 +425,9 @@ def recount(files: list[Path], key: str, root: Path, statement: str = "") -> boo
                 str(path), path.read_text(encoding="utf-8", errors="replace")))
         except OSError:
             continue
-    observations.extend(_project_signals(root))
+    # Configuration-derived observations are not part of the sample: they
+    # have their own evidence identity and are re-evaluated by
+    # `configuration_holds`, never by a source re-count.
     for observation in observations:
         if observation.key != key:
             continue
@@ -499,7 +514,7 @@ def layout_signals(root: Path) -> list[Observation]:
     def structural(key: str, statement: str, detail: str) -> None:
         observations.append(Observation(
             key=key, category="workflow", statement=statement, detail=detail,
-            weight=3, source_ref=ref, fingerprint=fingerprint))
+            weight=3, evidence=EVIDENCE_LAYOUT, source_ref=ref, fingerprint=fingerprint))
 
     src = root / "src"
     packages = [child for child in _children(src)
@@ -646,58 +661,213 @@ def _walk(root: Path):
                 yield entry
 
 
-def _project_signals(root: Path) -> list[Observation]:
-    """Facts from the project's own configuration — cheap and highly reliable."""
+# --------------------------------------------------------------------------- #
+# configuration: what the project's own configuration establishes
+# --------------------------------------------------------------------------- #
+#
+# A configuration-derived rule — "tests run with pytest", "keep eslint clean"
+# — is read from one or two configuration files, not counted over the
+# source sample. Its evidence identity is a *configuration manifest*: the
+# detector, the bounded set of configuration sources that detector actually
+# reads, which of them are present, and a fingerprint of each. It changes
+# when one of those files changes, appears or disappears, and when it does
+# the detector is re-run — the rule stays only if the same observation is
+# still made. Source files are not part of it, and it is not part of the
+# source sample (T111, review 4042406579).
+
+#: The configuration sources each detector reads, relative to the project
+#: root, in the order it consults them. Bounded and detector-specific on
+#: purpose: a Python test-runner observation is not evidence about
+#: `package.json`, and a Jest observation is not evidence about
+#: `pyproject.toml`. Only what the detector below actually reads belongs here.
+CONFIGURATION_SOURCES: dict[str, tuple[str, ...]] = {
+    "python": ("pyproject.toml",),
+    "js": ("package.json",),
+    "make": ("Makefile",),
+}
+
+#: Bumped when the manifest's shape or a detector's reading changes, so a
+#: manifest recorded by an earlier version never compares equal by accident.
+CONFIGURATION_MANIFEST_VERSION = 1
+
+#: Which detector owns a rule key — the reverse of the keys the detectors
+#: below emit — so a persisted rule can be routed to its detector.
+_CONFIGURATION_KEYS: dict[str, str] = {
+    "python.tests": "python", "python.lint": "python", "python.format": "python",
+    "js.vitest": "js", "js.jest": "js", "js.eslint": "js", "js.prettier": "js",
+    "build.make": "make",
+}
+
+
+@dataclass(slots=True)
+class ConfigurationManifest:
+    """The configuration evidence one detector read, as an identity.
+
+    `sources` lists every candidate the detector considers, in stable
+    (sorted) order, with the fingerprint of each — "" for one that is
+    absent or unreadable. Membership is part of the identity: a candidate
+    appearing or disappearing changes the fingerprint even when no present
+    file changed. Paths are repository-relative; no machine path and no
+    configuration value enters the manifest, only content fingerprints.
+    """
+
+    detector: str
+    version: int
+    sources: list[tuple[str, str]]
+
+    @property
+    def present(self) -> list[str]:
+        return [name for name, fingerprint in self.sources if fingerprint]
+
+    @property
+    def ref(self) -> str:
+        """The reference a rule records: detector, version, present members."""
+        members = ",".join(self.present) or "-"
+        return f"{EVIDENCE_CONFIGURATION}:{self.detector}:{self.version}:{members}"
+
+    @property
+    def fingerprint(self) -> str:
+        import hashlib
+
+        digest = hashlib.sha256(b"comodor-configuration-manifest-v1\0")
+        digest.update(f"{self.detector}\0{self.version}\0".encode("utf-8"))
+        for name, fingerprint in sorted(self.sources):
+            digest.update(name.encode("utf-8", "replace"))
+            digest.update(b"\0")
+            digest.update((fingerprint or "absent").encode("ascii"))
+            digest.update(b"\0")
+        return digest.hexdigest()[:16]
+
+
+def configuration_domain(root: Path, detector: str) -> list[Path]:
+    """Every configuration path `detector` considers, present or not."""
+    return [Path(root) / name for name in CONFIGURATION_SOURCES.get(detector, ())]
+
+
+def configuration_manifest(root: Path, detector: str) -> ConfigurationManifest:
+    """The manifest for `detector` over the repository as it is now."""
+    sources = [(name, file_fingerprint(Path(root) / name))
+               for name in sorted(CONFIGURATION_SOURCES.get(detector, ()))]
+    return ConfigurationManifest(detector=detector,
+                                 version=CONFIGURATION_MANIFEST_VERSION, sources=sources)
+
+
+def configuration_detector(key: str) -> str:
+    """The detector that owns a configuration-derived rule key, or ""."""
+    return _CONFIGURATION_KEYS.get(key, "")
+
+
+def evidence_kind(ref: str) -> str:
+    """Which evidence identity a recorded source reference carries, or ""."""
+    for kind in (EVIDENCE_SAMPLE, EVIDENCE_LAYOUT, EVIDENCE_CONFIGURATION):
+        if ref.startswith(kind + ":"):
+            return kind
+    return ""
+
+
+def detector_of(ref: str) -> str:
+    """The detector named by a `configuration:` reference, or ""."""
+    if evidence_kind(ref) != EVIDENCE_CONFIGURATION:
+        return ""
+    return ref.split(":", 3)[1] if ref.count(":") >= 3 else ""
+
+
+def configuration_signals(root: Path, detector: str = "") -> list[Observation]:
+    """What the project's configuration establishes — cheap and reliable.
+
+    One detector, or all of them. Every observation carries the manifest of
+    the sources its detector read as its evidence identity.
+    """
+    root = Path(root)
     observations: list[Observation] = []
-
-    def exists(name: str) -> bool:
-        try:
-            return (root / name).exists()
-        except OSError:
-            return False
-
-    if exists("pyproject.toml"):
-        try:
-            text = (root / "pyproject.toml").read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            text = ""
-        if "[tool.pytest" in text or "pytest" in text:
-            observations.append(Observation(
-                key="python.tests", category="workflow",
-                statement="Write tests with pytest and run them with `pytest -q`.",
-                detail="pytest configured in pyproject.toml", weight=3))
-        if "[tool.ruff" in text:
-            observations.append(Observation(
-                key="python.lint", category="workflow",
-                statement="Lint with ruff before finishing.",
-                detail="ruff configured in pyproject.toml", weight=3))
-        if "[tool.black" in text:
-            observations.append(Observation(
-                key="python.format", category="workflow",
-                statement="Format with black; do not hand-align code.",
-                detail="black configured in pyproject.toml", weight=3))
-    if exists("package.json"):
-        try:
-            text = (root / "package.json").read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            text = ""
-        for marker, statement in (
-            ("vitest", "Write tests with vitest."),
-            ("jest", "Write tests with jest."),
-            ("eslint", "Keep eslint clean."),
-            ("prettier", "Format with prettier; do not hand-align code."),
-        ):
-            if marker in text:
-                observations.append(Observation(
-                    key=f"js.{marker}", category="workflow", statement=statement,
-                    detail=f"{marker} listed in package.json", weight=3))
-    if exists("Makefile"):
-        observations.append(Observation(
-            key="build.make", category="workflow",
-            statement="This project has a Makefile — prefer its targets over ad-hoc commands.",
-            detail="Makefile in the project root", weight=2))
-
+    for name, reader in (("python", _python_configuration),
+                         ("js", _js_configuration),
+                         ("make", _make_configuration)):
+        if detector and name != detector:
+            continue
+        manifest = configuration_manifest(root, name)
+        for observation in reader(root):
+            observation.evidence = EVIDENCE_CONFIGURATION
+            observation.source_ref = manifest.ref
+            observation.fingerprint = manifest.fingerprint
+            observations.append(observation)
     return observations
+
+
+def configuration_holds(root: Path, detector: str, key: str, statement: str = "") -> bool:
+    """Whether `detector` still makes the observation `key` says, read afresh.
+
+    The re-evaluation behind configuration staleness: a changed manifest
+    says the sources moved, and only re-running the detector says whether
+    the observation moved with them. The statement is compared too, so a
+    detector that now reads a different value for the same key is a change.
+    """
+    wanted = _normalise(statement)
+    for observation in configuration_signals(root, detector):
+        if observation.key != key or not observation.agrees:
+            continue
+        if wanted and _normalise(observation.statement) != wanted:
+            continue
+        return True
+    return False
+
+
+def _read_configuration(root: Path, name: str) -> str | None:
+    """A configuration file's text, or None when it is not there to read."""
+    try:
+        return (root / name).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _python_configuration(root: Path) -> list[Observation]:
+    text = _read_configuration(root, "pyproject.toml")
+    if text is None:
+        return []
+    observations: list[Observation] = []
+    if "[tool.pytest" in text or "pytest" in text:
+        observations.append(Observation(
+            key="python.tests", category="workflow",
+            statement="Write tests with pytest and run them with `pytest -q`.",
+            detail="pytest configured in pyproject.toml", weight=3))
+    if "[tool.ruff" in text:
+        observations.append(Observation(
+            key="python.lint", category="workflow",
+            statement="Lint with ruff before finishing.",
+            detail="ruff configured in pyproject.toml", weight=3))
+    if "[tool.black" in text:
+        observations.append(Observation(
+            key="python.format", category="workflow",
+            statement="Format with black; do not hand-align code.",
+            detail="black configured in pyproject.toml", weight=3))
+    return observations
+
+
+def _js_configuration(root: Path) -> list[Observation]:
+    text = _read_configuration(root, "package.json")
+    if text is None:
+        return []
+    observations: list[Observation] = []
+    for marker, statement in (
+        ("vitest", "Write tests with vitest."),
+        ("jest", "Write tests with jest."),
+        ("eslint", "Keep eslint clean."),
+        ("prettier", "Format with prettier; do not hand-align code."),
+    ):
+        if marker in text:
+            observations.append(Observation(
+                key=f"js.{marker}", category="workflow", statement=statement,
+                detail=f"{marker} listed in package.json", weight=3))
+    return observations
+
+
+def _make_configuration(root: Path) -> list[Observation]:
+    if _read_configuration(root, "Makefile") is None:
+        return []
+    return [Observation(
+        key="build.make", category="workflow",
+        statement="This project has a Makefile — prefer its targets over ad-hoc commands.",
+        detail="Makefile in the project root", weight=2)]
 
 
 # --------------------------------------------------------------------------- #
