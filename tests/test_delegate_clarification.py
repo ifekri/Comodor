@@ -424,3 +424,87 @@ def test_applied_delegate_files_are_mutation_evidence(config, bus, monkeypatch):
     agent._execute([call])
 
     assert "foo.py" in agent._written_paths
+
+
+def test_a_sibling_write_after_a_delegates_decision_is_withheld_in_the_same_batch(
+        config, bus, monkeypatch):
+    """A foreground delegate that stops for a decision and a write in the
+    same model response: the decision is imported before the write starts,
+    so the write is withheld rather than run without the answer (FR-018;
+    review 4045928900)."""
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import ToolCall
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+    from comodor.tools.base import ToolResult
+
+    agent = AgentLoop(config, Gateway(config, scripts=[Script(text="done")]),
+                      ToolRegistry(), bus, PermissionEngine(config, bus), Conversation())
+    real_invoke = agent.tools.invoke
+
+    def invoke(name, context, arguments):
+        if name == "delegate":
+            return ToolResult.success(
+                "Stopped: a decision is needed.",
+                clarification={"kind": "clarification_required",
+                               "decision": "Which database?", "candidates": [],
+                               "evidence_consulted": [], "reason": "architecture",
+                               "outcome": "unattended"})
+        return real_invoke(name, context, arguments)
+
+    monkeypatch.setattr(agent.tools, "invoke", invoke)
+    seen = []
+    bus.subscribe(lambda event: seen.append(event.payload)
+                  if event.kind is Kind.TOOL_END else None)
+
+    agent._execute([
+        ToolCall(id="d1", name="delegate", arguments={"task": "x"}),
+        ToolCall(id="w1", name="write_file",
+                 arguments={"path": "db.py", "content": "ENGINE = 'sqlite'\n"}),
+    ])
+
+    write = next(payload for payload in seen if payload["name"] == "write_file")
+    assert write["ok"] is False and write["meta"].get("withheld") is True
+    assert not (config.paths.project / "db.py").exists(), "the write did not run"
+    assert [d.what for d in agent._tool_context().evidence.decisions] == ["Which database?"]
+
+
+def test_mutation_importing_after_the_batch_lets_the_sibling_write_run(
+        config, bus, monkeypatch):
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import ToolCall
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+    from comodor.tools.base import ToolResult
+
+    agent = AgentLoop(config, Gateway(config, scripts=[Script(text="done")]),
+                      ToolRegistry(), bus, PermissionEngine(config, bus), Conversation())
+    real_invoke = agent.tools.invoke
+
+    def invoke(name, context, arguments):
+        if name == "delegate":
+            return ToolResult.success(
+                "Stopped.", clarification={"kind": "clarification_required",
+                                           "decision": "Which database?", "candidates": [],
+                                           "evidence_consulted": [], "reason": "architecture",
+                                           "outcome": "unattended"})
+        return real_invoke(name, context, arguments)
+
+    monkeypatch.setattr(agent.tools, "invoke", invoke)
+    real_import = agent._import_clarification
+    deferred = []
+    monkeypatch.setattr(agent, "_import_clarification",
+                        lambda context, result: deferred.append((context, result)))
+    calls = [ToolCall(id="d1", name="delegate", arguments={"task": "x"}),
+             ToolCall(id="w1", name="write_file",
+                      arguments={"path": "db.py", "content": "ENGINE = 'sqlite'\n"})]
+
+    agent._execute(calls)
+    assert (config.paths.project / "db.py").exists(), "the mutation: the write ran"
+
+    (config.paths.project / "db.py").unlink()
+    monkeypatch.setattr(agent, "_import_clarification", real_import)
+    agent.run("start over")                     # a fresh ledger
+    monkeypatch.setattr(agent.tools, "invoke", invoke)
+    agent._execute(calls)
+    assert not (config.paths.project / "db.py").exists()

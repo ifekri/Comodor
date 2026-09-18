@@ -31,6 +31,7 @@ switch off.
 
 from __future__ import annotations
 
+import ast
 import os
 import re
 import signal
@@ -288,22 +289,83 @@ def _python_code(code: str) -> str:
     return "\n".join(kept)
 
 
+#: Method calls that write, whatever the receiver: `Path("x").write_text`,
+#: `handle.writelines`, `Path("x").unlink`.
+_WRITING_METHODS = frozenset({
+    "write_text", "write_bytes", "writelines", "unlink", "rename", "replace",
+    "touch", "mkdir",
+})
+#: Module functions that write, by module and name.
+_WRITING_FUNCTIONS = {
+    "os": frozenset({"remove", "unlink", "rename", "replace", "rmdir", "mkdir",
+                     "makedirs"}),
+    "shutil": frozenset({"move", "copy", "copy2", "copyfile", "rmtree",
+                         "make_archive"}),
+}
+#: An `open()` mode that can write.
+_WRITABLE_MODE = re.compile(r"^(?:[wax][bt+]*|r[bt]*\+[bt]*)$")
+
+
+def python_writes(code: str) -> bool:
+    """Whether Python source, as it would execute, changes the filesystem.
+
+    The calls are read from the syntax tree, so a write mentioned inside a
+    string or a comment — `print('Path("foo.py").write_text("new")')` — is
+    not a write: only an executable call node counts. `open()` writes when
+    its mode is a literal that can write; a mode that is not a literal is
+    not evidence of a write. Source that does not parse could not have run,
+    and is read by the text pattern as a last resort.
+    """
+    try:
+        tree = ast.parse(code or "")
+    except (SyntaxError, ValueError):
+        return bool(_PYTHON_MUTATION.search(_python_code(code)))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        target = node.func
+        if isinstance(target, ast.Attribute):
+            if target.attr in _WRITING_METHODS:
+                return True
+            owner = target.value
+            if isinstance(owner, ast.Name) and target.attr in _WRITING_FUNCTIONS.get(
+                    owner.id, ()):
+                return True
+        elif isinstance(target, ast.Name) and target.id == "open":
+            if _opens_for_writing(node):
+                return True
+    return False
+
+
+def _opens_for_writing(call: ast.Call) -> bool:
+    mode: ast.expr | None = call.args[1] if len(call.args) > 1 else None
+    for keyword in call.keywords:
+        if keyword.arg == "mode":
+            mode = keyword.value
+    if mode is None:
+        return False
+    return isinstance(mode, ast.Constant) and isinstance(mode.value, str) \
+        and bool(_WRITABLE_MODE.match(mode.value))
+
+
 def command_mutates(command: str, tool: str = "run_shell") -> bool:
     """Whether a shell or Python command changes the filesystem."""
     if tool == "run_python":
-        return bool(_PYTHON_MUTATION.search(_python_code(command)))
+        return python_writes(command)
     return bool(_SHELL_MUTATION.search(_unquoted(command)))
 
 
 def _command_writes(tool: str, claim: str) -> bool:
     """Whether this command tool's command actually writes.
 
-    Python gets comment-stripped source (its literals are meaningful, e.g.
-    `open("foo.py", "w")`); shell gets quote-stripped text (a quoted `>` is
-    not redirection).
+    Python is read as a syntax tree (a write inside a string literal is not
+    a write); shell gets quote- and comment-stripped text (a quoted or
+    commented `>` is not redirection).
     """
     if tool == "run_python":
-        return bool(_PYTHON_MUTATION.search(_python_code(claim)))
+        # The claim is "run_python <code>"; the code is what is parsed.
+        _, _, code = claim.partition(" ")
+        return python_writes(code)
     return bool(_SHELL_MUTATION.search(_unquoted(claim)))
 
 

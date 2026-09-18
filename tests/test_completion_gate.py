@@ -589,4 +589,59 @@ def test_the_learning_staleness_check_reads_commands_as_the_gate_does():
     from comodor.learning import memory as memory_module
 
     assert memory_module._SHELL_MUTATION is verify._SHELL_MUTATION
-    assert memory_module._PYTHON_MUTATION is verify._PYTHON_MUTATION
+    assert memory_module.python_writes is verify.python_writes
+
+
+def test_a_write_inside_a_python_string_is_not_a_mutation():
+    """`print('Path("foo.py").write_text("new")')` prints; nothing is written
+    (review 4045928907)."""
+    code = 'print(\'Path("foo.py").write_text("new")\')'
+    assert not verify.command_mutates(code, "run_python")
+    assert not verify.command_mutates('x = "os.remove(\'foo.py\')"', "run_python")
+    assert not verify.command_mutates('"""open("foo.py", "w")"""', "run_python")
+
+    ledger = Ledger()
+    ledger.verified(f"run_python {code}", source="run_python:code", material="")
+    assessment = verify.assess("- update foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Updated foo.py.")
+    assert "update foo.py" in assessment.unresolved
+
+
+@pytest.mark.parametrize("code", [
+    'from pathlib import Path\nPath("foo.py").write_text("new")',
+    'import os\nos.remove("foo.py")',
+    'import shutil\nshutil.copy("a", "foo.py")',
+    'with open("foo.py", "w") as handle:\n    handle.write("x")',
+    'open("foo.py", mode="a+").write("x")',
+    'target.unlink()',
+])
+def test_an_executable_python_write_is_a_mutation(code):
+    assert verify.command_mutates(code, "run_python")
+
+
+def test_a_non_literal_open_mode_is_not_evidence_of_a_write():
+    assert not verify.command_mutates('open("foo.py", mode).read()', "run_python")
+
+
+def test_unparseable_python_falls_back_to_the_text_reading():
+    assert verify.command_mutates('Path("foo.py").write_text("x"', "run_python")
+    assert not verify.command_mutates('print("hello"', "run_python")
+
+
+def test_mutation_reading_python_as_text_accepts_a_printed_write(monkeypatch):
+    import re
+
+    monkeypatch.setattr(verify, "python_writes", lambda code: bool(
+        verify._PYTHON_MUTATION.search(verify._python_code(code))))
+    code = 'print(\'Path("foo.py").write_text("new")\')'
+    ledger = Ledger()
+    ledger.verified(f"run_python {code}", source="run_python:code", material="")
+    mutated = verify.assess("- update foo.py", entries=ledger.entries,
+                            changed_paths=[], answer="Updated foo.py.")
+    assert mutated.unresolved == [], "the mutation: a printed write delivers"
+    assert re.search(r"write_text", code)
+
+    monkeypatch.undo()
+    restored = verify.assess("- update foo.py", entries=ledger.entries,
+                             changed_paths=[], answer="Updated foo.py.")
+    assert "update foo.py" in restored.unresolved
