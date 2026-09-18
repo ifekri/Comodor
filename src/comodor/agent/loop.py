@@ -213,6 +213,9 @@ class AgentLoop:
         #: FR-036).
         self._failed: list[tuple[str, str, str]] = []
         self._written_paths: list[str] = []
+        #: Changes a delegate reported having made before it stopped for a
+        #: decision — an in-place writer's, which no patch application lists.
+        self._carried_changes: list[str] = []
         #: Shell tools this turn that changed the filesystem (a bounded
         #: operation name, never the command text). Reported with the files a
         #: mutation touched when a decision turns up after the change.
@@ -250,6 +253,7 @@ class AgentLoop:
         self._used = []
         self._failed = []
         self._written_paths = []
+        self._carried_changes = []
         self._mutating_commands = []
         self._request_text = user_text
         result = TurnResult()
@@ -631,6 +635,12 @@ class AgentLoop:
             carried = result.meta.get("clarification")
             if isinstance(carried, dict) and carried:
                 self._carry_open_decision(context, carried)
+                # What the child changed before it stopped is this turn's
+                # prior work too. A worktree child's changes arrive as an
+                # applied patch (`files`); an in-place child's arrive only
+                # here, already relative and bounded (contracts §C6).
+                self._carried_changes.extend(
+                    str(item) for item in carried.get("prior_changes") or [] if str(item))
 
             # What the user said not to do, while the model is still deciding.
             #
@@ -912,7 +922,8 @@ class AgentLoop:
             return item
 
         return sorted({shown(item) for item in (*self._written_paths,
-                                                 *self._mutating_commands)})
+                                                 *self._mutating_commands,
+                                                 *self._carried_changes)})
 
     def _clarification_outcome(self) -> dict[str, Any] | None:
         """The payload for the decisions this turn left open, or None."""

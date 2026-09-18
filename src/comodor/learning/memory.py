@@ -64,7 +64,7 @@ _SHELL_MUTATION = re.compile(
 _PYTHON_MUTATION = re.compile(
     r"(?i)(\.write_text\s*\(|\.write_bytes\s*\(|\.writelines\s*\(|"
     r"\.unlink\s*\(|\.rename\s*\(|\.replace\s*\(|\.touch\s*\(|\.mkdir\s*\(|"
-    r"\bopen\s*\([^)]*['\"][wax]['\"]|"
+    r"\bopen\s*\([^)]*['\"](?:[wax][bt+]*|r[bt]*\+[bt]*)['\"]|"
     r"\bos\.(remove|unlink|rename|replace|rmdir|mkdir|makedirs)\s*\(|"
     r"\bshutil\.(move|copy|copy2|copyfile|rmtree|make_archive)\s*\()")
 

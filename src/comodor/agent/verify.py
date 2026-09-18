@@ -217,11 +217,12 @@ _SHELL_MUTATION = re.compile(
     r"\brename\b|\btee\b|\btruncate\b|\btouch\b|\bsed\s+-i|>>?\s)")
 
 #: A Python statement that writes. `run_python` is not a shell, so the shell
-#: operators do not describe it.
+#: operators do not describe it. An `open()` writes in any mode that can
+#: write: `w`, `a`, `x` with their `b`, `t` and `+` suffixes, and `r+`.
 _PYTHON_MUTATION = re.compile(
     r"(?i)(\.write_text\s*\(|\.write_bytes\s*\(|\.writelines\s*\(|"
     r"\.unlink\s*\(|\.rename\s*\(|\.replace\s*\(|\.touch\s*\(|\.mkdir\s*\(|"
-    r"\bopen\s*\([^)]*['\"][wax]['\"]|"
+    r"\bopen\s*\([^)]*['\"](?:[wax][bt+]*|r[bt]*\+[bt]*)['\"]|"
     r"\bos\.(remove|unlink|rename|replace|rmdir|mkdir|makedirs)\s*\(|"
     r"\bshutil\.(move|copy|copy2|copyfile|rmtree|make_archive)\s*\()")
 

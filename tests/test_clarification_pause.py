@@ -282,3 +282,68 @@ def test_a_long_shell_command_is_recorded_in_full_for_the_gate(config, bus, monk
 
     claims = [entry.claim for entry in agent._tool_context().evidence.entries]
     assert any("> foo.py" in claim for claim in claims)
+
+
+def test_an_in_place_delegates_prior_changes_are_carried(config, bus, monkeypatch):
+    """A writing delegate that could not isolate itself works in the parent
+    workspace; when it stops for a decision, the changes it reports having
+    made are the parent's prior work too (review 4045639914)."""
+    from comodor.providers.base import ToolCall
+    from comodor.tools.base import ToolResult
+
+    agent = make_agent(config, bus, [Script(text="never")])
+    call = ToolCall(id="d1", name="delegate", arguments={"task": "x", "write": True})
+    monkeypatch.setattr(agent, "_run_one", lambda c, ctx: ToolResult.success(
+        "Stopped: a decision is needed.", isolated=False,
+        clarification={"kind": "clarification_required", "decision": "Which database?",
+                       "candidates": [], "evidence_consulted": [],
+                       "reason": "architecture", "outcome": "unattended",
+                       "prior_changes": ["models.py", "run_shell"]}))
+
+    agent._execute([call])
+
+    assert agent._prior_changes() == ["models.py", "run_shell"]
+    payload = agent._clarification_outcome()
+    assert payload["prior_changes"] == ["models.py", "run_shell"]
+    assert "preserved" in agent._needs_a_decision(payload)
+
+
+def test_a_new_turn_forgets_a_carried_delegates_changes(config, bus, monkeypatch):
+    from comodor.providers.base import ToolCall
+    from comodor.tools.base import ToolResult
+
+    agent = make_agent(config, bus, [Script(text="never")])
+    call = ToolCall(id="d1", name="delegate", arguments={"task": "x", "write": True})
+    monkeypatch.setattr(agent, "_run_one", lambda c, ctx: ToolResult.success(
+        "Stopped.", clarification={"kind": "clarification_required",
+                                   "decision": "Which database?", "candidates": [],
+                                   "evidence_consulted": [], "reason": "architecture",
+                                   "outcome": "unattended", "prior_changes": ["models.py"]}))
+    agent._execute([call])
+    assert agent._prior_changes() == ["models.py"]
+
+    monkeypatch.undo()
+    agent.run("say hi")
+    assert agent._prior_changes() == []
+
+
+def test_mutation_dropping_carried_changes_claims_nothing_was_done(
+        config, bus, monkeypatch):
+    from comodor.providers.base import ToolCall
+    from comodor.tools.base import ToolResult
+
+    agent = make_agent(config, bus, [Script(text="never")])
+    call = ToolCall(id="d1", name="delegate", arguments={"task": "x", "write": True})
+    monkeypatch.setattr(agent, "_run_one", lambda c, ctx: ToolResult.success(
+        "Stopped.", clarification={"kind": "clarification_required",
+                                   "decision": "Which database?", "candidates": [],
+                                   "evidence_consulted": [], "reason": "architecture",
+                                   "outcome": "unattended", "prior_changes": ["models.py"]}))
+    agent._execute([call])
+    agent._carried_changes.clear()                # the mutation: not carried
+    assert "prior_changes" not in agent._clarification_outcome()
+    assert "Nothing depending on it was done" in agent._needs_a_decision(
+        agent._clarification_outcome())
+
+    agent._execute([call])                        # carried again
+    assert agent._clarification_outcome()["prior_changes"] == ["models.py"]

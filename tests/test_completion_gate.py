@@ -526,3 +526,27 @@ def test_mutation_keeping_comments_accepts_a_commented_write(monkeypatch):
     restored = verify.assess("- update foo.py", entries=ledger.entries,
                              changed_paths=[], answer="Updated foo.py.")
     assert "update foo.py" in restored.unresolved
+
+
+@pytest.mark.parametrize("mode", ["wb", "w+", "wt", "ab", "a+", "xb", "r+", "rb+"])
+def test_every_writable_python_open_mode_is_a_mutation(mode):
+    """`open(..., "wb")`, `"w+"` and `"r+"` write as surely as `"w"` does
+    (review 4045639927)."""
+    assert verify.command_mutates(f'open("foo.bin", "{mode}").write(b"x")', "run_python")
+    assert verify.command_mutates(f'open("foo.bin", mode="{mode}")', "run_python")
+
+
+@pytest.mark.parametrize("mode", ["r", "rb", "rt"])
+def test_a_read_only_python_open_is_not_a_mutation(mode):
+    assert not verify.command_mutates(f'open("foo.bin", "{mode}").read()', "run_python")
+
+
+def test_a_binary_python_write_delivers_an_update():
+    ledger = Ledger()
+    ledger.verified('run_python open("foo.bin", "wb").write(b"new")',
+                    source="run_python:code", material="")
+
+    assessment = verify.assess("- update foo.bin", entries=ledger.entries,
+                               changed_paths=[], answer="Updated foo.bin.")
+
+    assert assessment.unresolved == []

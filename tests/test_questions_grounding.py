@@ -271,3 +271,47 @@ def test_a_non_material_question_is_not_put_to_the_person(context):
     assert seen == [], "no form is raised for an immaterial decision"
     assert result.meta.get("answered") is False
     assert "yours to decide" in result.content
+
+
+def test_a_mixed_batch_names_the_discretion_question_after_the_form(context):
+    """One material and one immaterial question: the form shows only the
+    material one, and the result still names the other as the model's to
+    decide and report (review 4045639923)."""
+    seen = _seen_form(context)
+
+    result = Ask().run(context, questions=[
+        {"question": "Which cache?", "header": "Cache", "affects": ["architecture"],
+         "options": [{"label": "Redis", "source": "request", "evidence": "Redis"},
+                     {"label": "In memory", "source": "request", "evidence": "in memory"}]},
+        {"question": "Which helper name?", "header": "Name", "affects": [],
+         "options": [{"label": "Redis", "source": "request", "evidence": "Redis"},
+                     {"label": "In memory", "source": "request", "evidence": "in memory"}]},
+    ])
+
+    assert len(seen) == 1
+    assert [q["header"] for q in seen[0].meta["questions"]] == ["Cache"]
+    assert "yours to decide" in result.content
+    assert "Which helper name?" in result.content
+    assert result.meta["discretion"] == ["Which helper name?"]
+
+
+def test_a_mixed_batch_answered_still_names_the_discretion_question(context):
+    from comodor import questions as forms_module
+
+    def answer(event):
+        if event.kind is Kind.REQUEST:
+            event.payload["request"].answer(forms_module.encode_answers([
+                forms_module.Answer(header="Cache", prompt="", chosen=["Redis"])]))
+
+    context.bus.subscribe(answer)
+    result = Ask().run(context, questions=[
+        {"question": "Which cache?", "header": "Cache", "affects": ["architecture"],
+         "options": [{"label": "Redis", "source": "request", "evidence": "Redis"},
+                     {"label": "In memory", "source": "request", "evidence": "in memory"}]},
+        {"question": "Which helper name?", "header": "Name", "affects": [],
+         "options": [{"label": "Redis", "source": "request", "evidence": "Redis"},
+                     {"label": "In memory", "source": "request", "evidence": "in memory"}]},
+    ])
+
+    assert result.meta["given"] == 1
+    assert "Which helper name?" in result.content and "yours to decide" in result.content

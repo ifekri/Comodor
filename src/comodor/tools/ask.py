@@ -285,7 +285,7 @@ class Ask(Tool):
                 book.ended_without_answer(decision.id, "unattended")
             result = _unresolved([decision for _, decision in pending], "unattended")
             result.meta["form"] = form_record(asked, [], "unattended")
-            return result
+            return _with_discretion(result, discretion)
 
         request = Request(
             id=f"ask-{uuid.uuid4().hex[:8]}",
@@ -315,7 +315,7 @@ class Ask(Tool):
                 book.ended_without_answer(decision.id, outcome)
             result = _unresolved([decision for _, decision in pending], outcome)
             result.meta["form"] = form_record(asked, [], outcome)
-            return result
+            return _with_discretion(result, discretion)
 
         by_header = {answer.header: answer for answer in answers}
         left_open = []
@@ -344,7 +344,7 @@ class Ask(Tool):
         if left_open:
             result.meta["outcome"] = "cancelled"
             result.meta["clarification"] = payload_for(left_open, "cancelled")
-        return result
+        return _with_discretion(result, discretion)
 
 
 # --------------------------------------------------------------------------- #
@@ -565,6 +565,22 @@ _ENDED = {
     "expired": "The form expired before anyone answered",
     "unattended": "Nobody was there to answer",
 }
+
+
+def _with_discretion(result: ToolResult, discretion: list[str]) -> ToolResult:
+    """The questions a mixed batch did not put to the person, named back.
+
+    A form with one material and one immaterial question shows only the
+    material one. The immaterial one is still the model's to decide and to
+    report (FR-003), so it rides on the same result rather than vanishing.
+    """
+    if not discretion:
+        return result
+    listed = "\n".join(f"  - {prompt}" for prompt in discretion)
+    result.content = (f"{result.content}\n\nNot asked — these are yours to decide, "
+                      f"and you must say which way you went:\n{listed}")
+    result.meta["discretion"] = list(discretion)
+    return result
 
 
 def _unresolved(decisions: list[Any], outcome: str, repeated: bool = False) -> ToolResult:
