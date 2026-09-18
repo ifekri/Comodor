@@ -254,3 +254,20 @@ def test_a_partial_read_records_the_window_it_saw(tools, tool_context):
     kept = ground([forms.Option(label="USE_POSTGRES", source="repository",
                                 evidence="big.py")], tool_context)
     assert [option.label for option in kept] == ["USE_POSTGRES"]
+
+
+def test_a_non_material_question_is_not_put_to_the_person(context):
+    """`affects: []` is the ledger's own statement that nothing material is
+    at stake, so it is the agent's to decide and never interrupts the user
+    (FR-003, FR-011)."""
+    seen = _seen_form(context)
+
+    result = Ask().run(context, questions=[{
+        "question": "Which helper name?", "header": "Name", "affects": [],
+        "options": [{"label": "Redis", "source": "request", "evidence": "Redis"},
+                    {"label": "In memory", "source": "request", "evidence": "in memory"}]}])
+
+
+    assert seen == [], "no form is raised for an immaterial decision"
+    assert result.meta.get("answered") is False
+    assert "yours to decide" in result.content

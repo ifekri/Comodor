@@ -243,6 +243,7 @@ class Ask(Tool):
         consulted = consulted_sources(ctx)
         pending: list[tuple[forms.Question, Any]] = []
         settled: list[str] = []
+        discretion: list[str] = []
         for question in questions:
             decision = book.open_decision(
                 question.prompt, affects=question.affects,
@@ -252,12 +253,25 @@ class Ask(Tool):
             if decision.state == "answered":
                 settled.append(f"{question.prompt} — {decision.answer}")
                 continue
+            if not decision.material:
+                # The ledger says this is the agent's own discretion, not a
+                # decision the person has to make: do not interrupt them with
+                # it (FR-003, FR-011). It is named back so the model says
+                # which way it went.
+                discretion.append(question.prompt)
+                continue
             question.reason = decision.materiality
             question.evidence_consulted = list(decision.evidence_consulted)
             question.decision_ref = decision.id
             pending.append((question, decision))
 
         if not pending:
+            if discretion:
+                listed = "\n".join(f"  - {prompt}" for prompt in discretion)
+                return ToolResult.success(
+                    "Nothing here needs the person — these are yours to decide, "
+                    "and you must say which way you went:\n" + listed,
+                    display="Decided here.", answered=False, given=0, asked=0)
             return ToolResult.success(
                 "No question was needed — every one is already settled by what "
                 "this turn read or was told:\n" + "\n".join(f"  - {line}" for line in settled),

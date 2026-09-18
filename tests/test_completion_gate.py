@@ -469,3 +469,16 @@ def test_a_commented_out_python_write_is_not_a_mutation():
                                changed_paths=[], answer="Updated foo.py.")
 
     assert "update foo.py" in assessment.unresolved
+
+
+def test_a_python_open_write_delivers_an_update():
+    """`open("foo.py", "w").write(...)` keeps its mode literal, so the Python
+    detector still sees the write (FR-036)."""
+    ledger = Ledger()
+    ledger.verified('run_python open("foo.py", "w").write("new")',
+                    source="run_python:code", material="")
+
+    assessment = verify.assess("- update foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Updated foo.py.")
+
+    assert assessment.unresolved == []

@@ -267,11 +267,16 @@ def command_mutates(command: str, tool: str = "run_shell") -> bool:
     return bool(_SHELL_MUTATION.search(_unquoted(command)))
 
 
-def _command_writes(tool: str, command: str) -> bool:
-    """Whether this command tool's command actually writes."""
+def _command_writes(tool: str, claim: str) -> bool:
+    """Whether this command tool's command actually writes.
+
+    Python gets comment-stripped source (its literals are meaningful, e.g.
+    `open("foo.py", "w")`); shell gets quote-stripped text (a quoted `>` is
+    not redirection).
+    """
     if tool == "run_python":
-        return bool(_PYTHON_MUTATION.search(_python_code(command)))
-    return bool(_SHELL_MUTATION.search(command))
+        return bool(_PYTHON_MUTATION.search(_python_code(claim)))
+    return bool(_SHELL_MUTATION.search(_unquoted(claim)))
 
 
 def _file_operation(element: str, verb: re.Pattern[str]) -> bool:
@@ -397,7 +402,7 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
             continue
         if mutation and not destructive and not move \
                 and tool not in _WRITER_TOOLS \
-                and not (tool in _COMMAND_TOOLS and _command_writes(tool, command)):
+                and not (tool in _COMMAND_TOOLS and _command_writes(tool, claim)):
             # An ordinary mutation (write/create/update) needs writer evidence
             # or a shell command that actually writes; a read-only command
             # that merely names the file is not a change (FR-036).
