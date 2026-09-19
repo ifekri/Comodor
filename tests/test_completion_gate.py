@@ -493,6 +493,98 @@ def test_python_rmdir_is_also_a_mutation():
     assert verify.command_mutates('Path("build/cache").rmdir()', "run_python")
 
 
+@pytest.mark.parametrize("code", [
+    'from os import remove\nremove("foo.py")',
+    'from os import remove as rmfile\nrmfile("foo.py")',
+    'from os import unlink\nunlink("foo.py")',
+    'from os import rmdir\nrmdir("build/cache")',
+    'import os as o\no.remove("foo.py")',
+    'import os as o\no.rmdir("build/cache")',
+    'from shutil import rmtree\nrmtree("build/cache")',
+    'from shutil import rmtree as remove_tree\nremove_tree("build/cache")',
+    'import shutil as sh\nsh.rmtree("build/cache")',
+    'from pathlib import Path as P\nP("foo.py").unlink()',
+    'import pathlib as pl\npl.Path("build/cache").rmdir()',
+    'import pathlib\npathlib.Path("foo.py").unlink()',
+])
+def test_python_deletes_resolves_aliases_and_from_imports(code):
+    """An aliased or from-imported call is the function it names, not a
+    different operation (review fix; FR-036, FR-116)."""
+    assert verify.python_deletes(code)
+
+
+def test_a_simple_path_binding_is_followed_to_a_delete():
+    """`p = Path("foo"); p.unlink()` is a delete: the bounded binding analysis
+    follows a name assigned exactly once to a path (review fix)."""
+    code = 'from pathlib import Path\np = Path("foo.py")\np.unlink()'
+    assert verify.python_deletes(code)
+    assert verify.command_mutates(code, "run_python")
+
+
+@pytest.mark.parametrize("code", [
+    'from os import remove as rmfile\nrmfile("foo.py")',
+    'import os as o\no.remove("foo.py")',
+    'from shutil import rmtree as remove_tree\nremove_tree("build/cache")',
+    'import shutil as sh\nsh.rmtree("build/cache")',
+    'from pathlib import Path as P\nP("foo.py").unlink()',
+    'import pathlib as pl\npl.Path("build/cache").rmdir()',
+])
+def test_an_aliased_python_mutation_is_tracked(code):
+    """Mutation tracking resolves the same aliases the delete check does: a
+    recognised delete must also count as a write (review fix; FR-036)."""
+    assert verify.command_mutates(code, "run_python")
+
+
+def test_an_ordinary_path_write_is_a_mutation_but_not_a_delete():
+    """`Path.write_text` is a write and not a delete (review fix)."""
+    assert verify.python_writes('Path("foo.py").write_text("x")')
+    assert not verify.python_deletes('Path("foo.py").write_text("x")')
+
+
+@pytest.mark.parametrize("code", [
+    'from multiprocessing.shared_memory import SharedMemory\n'
+    'SharedMemory(name="foo.py").unlink()',
+    'class Cache:\n'
+    '    def unlink(self, value):\n'
+    '        pass\n'
+    'Cache().unlink("foo.py")',
+    'print(\'os.remove("foo.py")\')',
+    'x = \'Path("foo.py").unlink()\'',
+    '# os.remove("foo.py")',
+])
+def test_a_non_filesystem_unlink_is_not_a_delete(code):
+    """A method is a filesystem delete only when its receiver is a path: an
+    arbitrary `.unlink()` deletes no file (review fix; FR-116)."""
+    assert not verify.python_deletes(code)
+
+
+def test_an_aliased_python_delete_delivers_a_delete_request():
+    """`run_python` read from the syntax tree: a from-imported delete is
+    delivery for the delete request (review fix; FR-036)."""
+    ledger = Ledger()
+    ledger.verified('run_python from os import remove\nremove("foo.py")',
+                    source="run_python:code", material="")
+
+    assessment = verify.assess("- delete foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted foo.py.")
+
+    assert assessment.unresolved == []
+
+
+def test_a_non_filesystem_unlink_does_not_deliver_a_delete_request():
+    """`SharedMemory(...).unlink()` names the path and deletes no file, so a
+    `delete foo.py` request stays unresolved (review fix; FR-116)."""
+    ledger = Ledger()
+    ledger.verified('run_python from multiprocessing.shared_memory import SharedMemory\n'
+                    'SharedMemory(name="foo.py").unlink()',
+                    source="run_python:code", material="")
+
+    assessment = verify.assess("- delete foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted foo.py.")
+
+    assert "delete foo.py" in assessment.unresolved
+
+
 def test_a_read_only_shell_command_does_not_deliver_an_update():
     """`cat README.md` is not updating it (FR-036, FR-116)."""
     ledger = Ledger()

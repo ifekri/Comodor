@@ -289,52 +289,40 @@ def _python_code(code: str) -> str:
     return "\n".join(kept)
 
 
-#: Method calls that write, whatever the receiver: `Path("x").write_text`,
-#: `handle.writelines`, `Path("x").unlink`, `Path("x").rmdir`.
-_WRITING_METHODS = frozenset({
-    "write_text", "write_bytes", "writelines", "unlink", "rename", "replace",
-    "touch", "mkdir", "rmdir",
+#: The pathlib classes that build a filesystem path. A path delete is a method
+#: call on a value built from one of these; a method of the same name on any
+#: other receiver — `SharedMemory(...).unlink()` — deletes no file.
+_PATH_CLASSES = frozenset({
+    "Path", "PurePath", "PosixPath", "WindowsPath",
+    "PurePosixPath", "PureWindowsPath",
 })
-#: Module functions that write, by module and name.
-_WRITING_FUNCTIONS = {
-    "os": frozenset({"remove", "unlink", "rename", "replace", "rmdir", "mkdir",
-                     "makedirs"}),
-    "shutil": frozenset({"move", "copy", "copy2", "copyfile", "rmtree",
-                         "make_archive"}),
-}
+#: os functions that write, and the subset that deletes. A delete is also a
+#: write; the destructive check needs the narrower set, because an ordinary
+#: write must not satisfy a delete request.
+_OS_WRITES = frozenset({"remove", "unlink", "rename", "replace", "rmdir",
+                        "mkdir", "makedirs"})
+_OS_DELETES = frozenset({"remove", "unlink", "rmdir"})
+#: shutil functions that write, and the subset that deletes.
+_SHUTIL_WRITES = frozenset({"move", "copy", "copy2", "copyfile", "rmtree",
+                            "make_archive"})
+_SHUTIL_DELETES = frozenset({"rmtree"})
+#: pathlib methods that write, and the subset that deletes. The delete set is
+#: deliberately narrower: `write_text` is a write and not a delete.
+_PATHLIB_WRITES = frozenset({"write_text", "write_bytes", "unlink", "rename",
+                             "replace", "touch", "mkdir", "rmdir"})
+_PATHLIB_DELETES = frozenset({"unlink", "rmdir"})
+#: A method on an open file handle that writes. Receiver-blind, as it always
+#: was: `writelines` is a write whatever it is called on, and it is not a
+#: delete, so it needs no receiver resolution.
+_HANDLE_WRITES = frozenset({"writelines"})
 #: An `open()` mode that can write.
 _WRITABLE_MODE = re.compile(r"^(?:[wax][bt+]*|r[bt]*\+[bt]*)$")
-
-
-def python_writes(code: str) -> bool:
-    """Whether Python source, as it would execute, changes the filesystem.
-
-    The calls are read from the syntax tree, so a write mentioned inside a
-    string or a comment — `print('Path("foo.py").write_text("new")')` — is
-    not a write: only an executable call node counts. `open()` writes when
-    its mode is a literal that can write; a mode that is not a literal is
-    not evidence of a write. Source that does not parse could not have run,
-    and is read by the text pattern as a last resort.
-    """
-    try:
-        tree = ast.parse(code or "")
-    except (SyntaxError, ValueError):
-        return bool(_PYTHON_MUTATION.search(_python_code(code)))
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        target = node.func
-        if isinstance(target, ast.Attribute):
-            if target.attr in _WRITING_METHODS:
-                return True
-            owner = target.value
-            if isinstance(owner, ast.Name) and target.attr in _WRITING_FUNCTIONS.get(
-                    owner.id, ()):
-                return True
-        elif isinstance(target, ast.Name) and target.id == "open":
-            if _opens_for_writing(node):
-                return True
-    return False
+#: The delete forms, as text, for source that does not parse. Deliberately
+#: narrower than `_PYTHON_MUTATION`: only the calls that actually delete.
+_PYTHON_DELETE_TEXT = re.compile(
+    r"(?i)(\.unlink\s*\(|\.rmdir\s*\(|"
+    r"\bos\.(remove|unlink|rmdir)\s*\(|"
+    r"\bshutil\.rmtree\s*\()")
 
 
 def _opens_for_writing(call: ast.Call) -> bool:
@@ -348,22 +336,179 @@ def _opens_for_writing(call: ast.Call) -> bool:
         and bool(_WRITABLE_MODE.match(mode.value))
 
 
-#: Method calls that delete a filesystem entry, whatever the receiver:
-#: `Path("x").unlink`, `Path("x").rmdir`. A delete is also a write, so these
-#: are a subset of `_WRITING_METHODS`; the destructive check needs the
-#: narrower set, because an ordinary write must not satisfy a delete request.
-_DELETING_METHODS = frozenset({"unlink", "rmdir"})
-#: Module functions that delete, by module and name.
-_DELETING_FUNCTIONS = {
-    "os": frozenset({"remove", "unlink", "rmdir"}),
-    "shutil": frozenset({"rmtree"}),
-}
-#: The delete forms, as text, for source that does not parse. Deliberately
-#: narrower than `_PYTHON_MUTATION`: only the calls that actually delete.
-_PYTHON_DELETE_TEXT = re.compile(
-    r"(?i)(\.unlink\s*\(|\.rmdir\s*\(|"
-    r"\bos\.(remove|unlink|rmdir)\s*\(|"
-    r"\bshutil\.rmtree\s*\()")
+class _PythonScan:
+    """What Python source, as it would execute, writes and deletes.
+
+    One bounded resolution shared by `python_writes` and `python_deletes`, so
+    the two agree that a recognised delete is a recognised write.
+
+    Imports are resolved so an aliased or from-imported name is the module
+    function it names (`from os import remove as rmfile` is `os.remove`). A
+    pathlib *delete* counts only when the receiver is a pathlib path, built
+    directly (`Path("x").unlink()`) or through a simple `p = Path("x")`
+    binding; `SharedMemory(...).unlink()` deletes no file. A binding is
+    followed only when the name is assigned exactly once, so a name reused for
+    two things is left unknown and fails conservatively.
+    """
+
+    def __init__(self, tree: ast.AST) -> None:
+        self._modules: dict[str, str] = {}
+        self._imported: dict[str, tuple[str, str]] = {}
+        self._paths: set[str] = set()
+        self.writes = False
+        self.deletes = False
+        self._collect_bindings(tree)
+        self._collect_calls(tree)
+
+    # -- imports and simple bindings -------------------------------------- #
+
+    def _collect_bindings(self, tree: ast.AST) -> None:
+        assignments: dict[str, list[ast.expr]] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    top = alias.name.split(".")[0]
+                    self._modules[alias.asname or top] = top
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    self._imported[alias.asname or alias.name] = (module, alias.name)
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        assignments.setdefault(target.id, []).append(node.value)
+            elif isinstance(node, ast.AnnAssign) \
+                    and isinstance(node.target, ast.Name) and node.value is not None:
+                assignments.setdefault(node.target.id, []).append(node.value)
+        for name, values in assignments.items():
+            if len(values) != 1:
+                continue                      # reused: unknown, so not a path
+            if self._is_path_call(values[0]):
+                self._paths.add(name)
+
+    def _module(self, name: str) -> str:
+        """The canonical module a name refers to, or "" if it is not one.
+
+        `os`, `shutil` and `pathlib` are recognised by their own names without
+        an import, as the detector always did; an alias resolves through the
+        import that bound it.
+        """
+        if name in self._modules:
+            return self._modules[name]
+        if name in ("os", "shutil", "pathlib"):
+            return name
+        return ""
+
+    def _is_path_call(self, node: ast.expr) -> bool:
+        """Whether `node` builds a pathlib path: `Path("x")`, `P("x")`,
+        `pathlib.Path("x")`, `pl.Path("x")`."""
+        if not isinstance(node, ast.Call):
+            return False
+        target = node.func
+        if isinstance(target, ast.Name):
+            if target.id in _PATH_CLASSES:
+                return True
+            imported = self._imported.get(target.id)
+            return bool(imported and imported[0] == "pathlib"
+                        and imported[1] in _PATH_CLASSES)
+        if isinstance(target, ast.Attribute):
+            return target.attr in _PATH_CLASSES \
+                and isinstance(target.value, ast.Name) \
+                and self._module(target.value.id) == "pathlib"
+        return False
+
+    def _receiver_is_path(self, node: ast.expr) -> bool:
+        if isinstance(node, ast.Name):
+            return node.id in self._paths
+        return self._is_path_call(node)
+
+    # -- calls ------------------------------------------------------------ #
+
+    def _collect_calls(self, tree: ast.AST) -> None:
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            target = node.func
+            if isinstance(target, ast.Name):
+                if target.id == "open" and _opens_for_writing(node):
+                    self.writes = True
+                else:
+                    self._from_import_call(target.id)
+            elif isinstance(target, ast.Attribute):
+                self._method_call(target)
+
+    def _from_import_call(self, name: str) -> None:
+        """A bare name bound by `from os import remove`: the function itself."""
+        imported = self._imported.get(name)
+        if imported is None:
+            return
+        module, original = imported
+        if module == "os" and original in _OS_WRITES:
+            self.writes = True
+            self.deletes = self.deletes or original in _OS_DELETES
+        elif module == "shutil" and original in _SHUTIL_WRITES:
+            self.writes = True
+            self.deletes = self.deletes or original in _SHUTIL_DELETES
+
+    def _method_call(self, target: ast.Attribute) -> None:
+        attr = target.attr
+        receiver = target.value
+        if isinstance(receiver, ast.Name):
+            module = self._module(receiver.id)
+            if module == "os" and attr in _OS_WRITES:
+                self.writes = True
+                self.deletes = self.deletes or attr in _OS_DELETES
+                return
+            if module == "shutil" and attr in _SHUTIL_WRITES:
+                self.writes = True
+                self.deletes = self.deletes or attr in _SHUTIL_DELETES
+                return
+            if module == "pathlib" and attr in _PATH_CLASSES:
+                return                        # `pathlib.Path(...)`, a constructor
+        if attr in _HANDLE_WRITES:
+            self.writes = True                # `handle.writelines(...)`
+            return
+        if attr in _PATHLIB_WRITES:
+            # A path method name is a write, as the detector always read it;
+            # it is a delete only when the receiver is established as a path,
+            # so `SharedMemory(...).unlink()` deletes no file. A recognised
+            # delete is always a recognised write.
+            self.writes = True
+            if attr in _PATHLIB_DELETES and self._receiver_is_path(receiver):
+                self.deletes = True
+
+
+def _python_operations(code: str) -> tuple[bool, bool]:
+    """(writes, deletes) that Python source performs, as it would execute.
+
+    Source that does not parse could not have run, and is read by the text
+    patterns as a last resort.
+    """
+    try:
+        tree = ast.parse(code or "")
+    except (SyntaxError, ValueError):
+        text = _python_code(code)
+        return (bool(_PYTHON_MUTATION.search(text)),
+                bool(_PYTHON_DELETE_TEXT.search(text)))
+    scan = _PythonScan(tree)
+    return scan.writes, scan.deletes
+
+
+def python_writes(code: str) -> bool:
+    """Whether Python source, as it would execute, changes the filesystem.
+
+    The calls are read from the syntax tree, so a write mentioned inside a
+    string or a comment — `print('Path("foo.py").write_text("new")')` — is
+    not a write: only an executable call node counts. An aliased or
+    from-imported os/shutil function resolves to what it names; a pathlib
+    method counts only when its receiver is a path. `open()` writes when its
+    mode is a literal that can write; a mode that is not a literal is not
+    evidence of a write. Source that does not parse could not have run, and is
+    read by the text pattern as a last resort.
+    """
+    return _python_operations(code)[0]
 
 
 def python_deletes(code: str) -> bool:
@@ -371,27 +516,14 @@ def python_deletes(code: str) -> bool:
 
     Read from the syntax tree for the same reason `python_writes` is: a
     `print('os.remove("foo.py")')` mentions the call and performs nothing, so
-    only an executable call node counts. `shutil.rmtree` and the `Path`
-    methods (`unlink`, `rmdir`) are deletes; an ordinary write is not. Source
-    that does not parse could not have run, and is read by the delete text
-    pattern as a last resort.
+    only an executable call node counts. `os.remove`, `shutil.rmtree` and the
+    pathlib methods (`unlink`, `rmdir`) are deletes, through an alias or a
+    from-import as well as a literal name; an ordinary write is not. A method
+    of the same name on a receiver that is not a path — a `SharedMemory` — is
+    not a delete. Source that does not parse could not have run, and is read
+    by the delete text pattern as a last resort.
     """
-    try:
-        tree = ast.parse(code or "")
-    except (SyntaxError, ValueError):
-        return bool(_PYTHON_DELETE_TEXT.search(_python_code(code)))
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        target = node.func
-        if isinstance(target, ast.Attribute):
-            if target.attr in _DELETING_METHODS:
-                return True
-            owner = target.value
-            if isinstance(owner, ast.Name) and target.attr in _DELETING_FUNCTIONS.get(
-                    owner.id, ()):
-                return True
-    return False
+    return _python_operations(code)[1]
 
 
 def command_mutates(command: str, tool: str = "run_shell") -> bool:
