@@ -336,127 +336,392 @@ def _opens_for_writing(call: ast.Call) -> bool:
         and bool(_WRITABLE_MODE.match(mode.value))
 
 
+#: A binding event that may be relied upon: a filesystem module, a
+#: from-imported filesystem function, a pathlib class, or a path value.
+_FS_EVENTS = frozenset({"module", "from", "path_class", "path"})
+
+#: The name is bound in the scope, but not to a filesystem binding: the search
+#: for what it names stops here instead of looking outward.
+_SHADOWED = object()
+
+
+def _parameter_names(args: ast.arguments) -> list[str]:
+    """Every name a function or lambda binds as a parameter."""
+    names = [arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+    if args.vararg is not None:
+        names.append(args.vararg.arg)
+    if args.kwarg is not None:
+        names.append(args.kwarg.arg)
+    return names
+
+
+def _pattern_names(node: ast.AST) -> list[str]:
+    """Names a `match` pattern binds, for the binding forms that name one."""
+    if isinstance(node, ast.MatchAs) and node.name:
+        return [node.name]
+    if isinstance(node, ast.MatchStar) and node.name:
+        return [node.name]
+    if isinstance(node, ast.MatchMapping) and node.rest:
+        return [node.rest]
+    return []
+
+
+class _Scope:
+    """One lexical scope's names, and what each is bound to.
+
+    Bindings are order-insensitive and conservative. A name bound more than
+    once to different things — an import rebound by an assignment, a parameter
+    or a `def` of the same name — is treated as unknown, so the filesystem
+    operation the import named is never the one a later call is taken to be.
+    """
+
+    __slots__ = ("parent", "kind", "events", "_assignments")
+
+    def __init__(self, parent: "_Scope | None", kind: str) -> None:
+        self.parent = parent
+        self.kind = kind
+        self.events: dict[str, set[tuple]] = {}
+        self._assignments: list[tuple[str, ast.expr | None]] = []
+
+    def add(self, name: str, event: tuple) -> None:
+        self.events.setdefault(name, set()).add(event)
+
+    def assign(self, name: str, value: ast.expr | None) -> None:
+        """Record an assignment target; classified once every binding is in."""
+        self._assignments.append((name, value))
+
+    def function_parent(self) -> "_Scope | None":
+        """The scope a function or lambda defined here closes over.
+
+        A class body is not an enclosing scope for the functions defined in
+        it, so a method closes over the class's parent, not the class.
+        """
+        scope: "_Scope | None" = self
+        while scope is not None and scope.kind == "class":
+            scope = scope.parent
+        return scope
+
+    def resolve(self, name: str):
+        """What `name` is bound to here or outward.
+
+        The filesystem event when the nearest binding is one; `_SHADOWED` when
+        the nearest binding is anything else, or is ambiguous; None when no
+        scope on the chain binds it.
+        """
+        scope: "_Scope | None" = self
+        while scope is not None:
+            events = scope.events.get(name)
+            if events is not None:
+                if len(events) == 1:
+                    event = next(iter(events))
+                    if event[0] in _FS_EVENTS:
+                        return event
+                return _SHADOWED
+            scope = scope.parent
+        return None
+
+    def classify(self, scanner: "_PythonScan") -> None:
+        """Turn recorded assignment targets into binding events."""
+        for name, value in self._assignments:
+            if value is not None and scanner._is_path_call(value, self):
+                self.add(name, ("path",))
+            else:
+                self.add(name, ("other",))
+
+
 class _PythonScan:
     """What Python source, as it would execute, writes and deletes.
 
-    One bounded resolution shared by `python_writes` and `python_deletes`, so
-    the two agree that a recognised delete is a recognised write.
+    One bounded, lexical-scope-aware resolution shared by `python_writes` and
+    `python_deletes`, so the two agree that a recognised delete is a recognised
+    write.
 
-    Imports are resolved so an aliased or from-imported name is the module
-    function it names (`from os import remove as rmfile` is `os.remove`). A
-    pathlib *delete* counts only when the receiver is a pathlib path, built
-    directly (`Path("x").unlink()`) or through a simple `p = Path("x")`
-    binding; `SharedMemory(...).unlink()` deletes no file. A binding is
-    followed only when the name is assigned exactly once, so a name reused for
-    two things is left unknown and fails conservatively.
+    Imports resolve to the module function they name (`from os import remove as
+    rmfile` is `os.remove`), and a binding is used only where it is in scope: a
+    parameter named `os`, a `def remove`, an assignment that rebinds an alias,
+    or an import in a sibling function never makes a call filesystem evidence.
+    A pathlib delete counts only when the receiver is established as a path —
+    built directly (`Path("x").unlink()`) or through a simple `p = Path("x")`
+    binding. A name bound to two different things is left unknown and fails
+    conservatively.
     """
 
     def __init__(self, tree: ast.AST) -> None:
-        self._modules: dict[str, str] = {}
-        self._imported: dict[str, tuple[str, str]] = {}
-        self._paths: set[str] = set()
         self.writes = False
         self.deletes = False
-        self._collect_bindings(tree)
-        self._collect_calls(tree)
+        self._scopes: dict[int, _Scope] = {}
+        self._all_scopes: list[_Scope] = []
+        root = self._new_scope(None, "module")
+        self._collect(tree, root)
+        for scope in self._all_scopes:
+            scope.classify(self)
+        self._calls(tree, root)
 
-    # -- imports and simple bindings -------------------------------------- #
+    # -- scope construction ----------------------------------------------- #
 
-    def _collect_bindings(self, tree: ast.AST) -> None:
-        assignments: dict[str, list[ast.expr]] = {}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    top = alias.name.split(".")[0]
-                    self._modules[alias.asname or top] = top
-            elif isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                for alias in node.names:
-                    if alias.name == "*":
-                        continue
-                    self._imported[alias.asname or alias.name] = (module, alias.name)
-            elif isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        assignments.setdefault(target.id, []).append(node.value)
-            elif isinstance(node, ast.AnnAssign) \
-                    and isinstance(node.target, ast.Name) and node.value is not None:
-                assignments.setdefault(node.target.id, []).append(node.value)
-        for name, values in assignments.items():
-            if len(values) != 1:
-                continue                      # reused: unknown, so not a path
-            if self._is_path_call(values[0]):
-                self._paths.add(name)
+    def _new_scope(self, parent: "_Scope | None", kind: str) -> _Scope:
+        scope = _Scope(parent, kind)
+        self._all_scopes.append(scope)
+        return scope
 
-    def _module(self, name: str) -> str:
-        """The canonical module a name refers to, or "" if it is not one.
+    def _collect(self, node, scope: _Scope) -> None:
+        """Record every name `scope` binds and build its child scopes."""
+        if isinstance(node, list):
+            for item in node:
+                self._collect(item, scope)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope.add(node.name, ("other",))
+            self._collect(node.decorator_list, scope)
+            self._collect_defaults(node.args, scope)
+            child = self._new_scope(scope.function_parent(), "function")
+            for name in _parameter_names(node.args):
+                child.add(name, ("other",))
+            self._collect(node.body, child)
+            self._scopes[id(node)] = child
+            return
+        if isinstance(node, ast.Lambda):
+            self._collect_defaults(node.args, scope)
+            child = self._new_scope(scope.function_parent(), "lambda")
+            for name in _parameter_names(node.args):
+                child.add(name, ("other",))
+            self._collect(node.body, child)
+            self._scopes[id(node)] = child
+            return
+        if isinstance(node, ast.ClassDef):
+            scope.add(node.name, ("other",))
+            self._collect(node.decorator_list, scope)
+            self._collect(node.bases, scope)
+            self._collect([keyword.value for keyword in node.keywords], scope)
+            child = self._new_scope(scope, "class")
+            self._collect(node.body, child)
+            self._scopes[id(node)] = child
+            return
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                scope.add(alias.asname or top, ("module", top))
+            return
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                local = alias.asname or alias.name
+                if module == "pathlib" and alias.name in _PATH_CLASSES:
+                    scope.add(local, ("path_class", module, alias.name))
+                else:
+                    scope.add(local, ("from", module, alias.name))
+            return
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                self._bind_target(target, node.value, scope)
+            self._collect(node.value, scope)
+            return
+        if isinstance(node, ast.AnnAssign):
+            if node.value is not None:
+                self._bind_target(node.target, node.value, scope)
+                self._collect(node.value, scope)
+            return
+        if isinstance(node, ast.AugAssign):
+            self._bind_target(node.target, None, scope)
+            self._collect(node.value, scope)
+            return
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            self._bind_target(node.target, None, scope)
+            self._collect(node.iter, scope)
+            self._collect(node.body, scope)
+            self._collect(node.orelse, scope)
+            return
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                self._collect(item.context_expr, scope)
+                if item.optional_vars is not None:
+                    self._bind_target(item.optional_vars, None, scope)
+            self._collect(node.body, scope)
+            return
+        if isinstance(node, ast.ExceptHandler):
+            if node.name:
+                scope.add(node.name, ("other",))
+            self._collect(node.body, scope)
+            return
+        if isinstance(node, ast.NamedExpr):
+            self._bind_target(node.target, node.value, scope)
+            self._collect(node.value, scope)
+            return
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            # A name declared global/nonlocal is not this scope's to resolve
+            # from an import here; treat it as unknown, the safe side.
+            for name in node.names:
+                scope.add(name, ("other",))
+            return
+        if isinstance(node, ast.Delete):
+            for target in node.targets:
+                self._bind_target(target, None, scope)
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp,
+                             ast.DictComp)):
+            self._collect_comprehension(node, scope)
+            return
+        for name in _pattern_names(node):
+            scope.add(name, ("other",))
+        for child in ast.iter_child_nodes(node):
+            self._collect(child, scope)
 
-        `os`, `shutil` and `pathlib` are recognised by their own names without
-        an import, as the detector always did; an alias resolves through the
-        import that bound it.
+    def _collect_defaults(self, args: ast.arguments, scope: _Scope) -> None:
+        self._collect(args.defaults, scope)
+        self._collect([d for d in args.kw_defaults if d is not None], scope)
+
+    def _collect_comprehension(self, node, scope: _Scope) -> None:
+        child = self._new_scope(scope.function_parent(), "comprehension")
+        for generator in node.generators:
+            self._bind_target(generator.target, None, child)
+            self._collect(generator.iter, child)
+            for condition in generator.ifs:
+                self._collect(condition, child)
+        if isinstance(node, ast.DictComp):
+            self._collect(node.key, child)
+            self._collect(node.value, child)
+        else:
+            self._collect(node.elt, child)
+        self._scopes[id(node)] = child
+
+    def _bind_target(self, target: ast.expr, value: ast.expr | None,
+                     scope: _Scope) -> None:
+        if isinstance(target, ast.Name):
+            scope.assign(target.id, value)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for element in target.elts:
+                self._bind_target(element, None, scope)
+        elif isinstance(target, ast.Starred):
+            self._bind_target(target.value, None, scope)
+
+    # -- call classification ---------------------------------------------- #
+
+    def _calls(self, node, scope: _Scope) -> None:
+        if isinstance(node, list):
+            for item in node:
+                self._calls(item, scope)
+            return
+        if isinstance(node, ast.Call):
+            self._classify_call(node, scope)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            self._calls(node.decorator_list, scope)
+            self._calls_defaults(node.args, scope)
+            self._calls(node.body, self._scopes[id(node)])
+            return
+        if isinstance(node, ast.Lambda):
+            self._calls_defaults(node.args, scope)
+            self._calls(node.body, self._scopes[id(node)])
+            return
+        if isinstance(node, ast.ClassDef):
+            self._calls(node.decorator_list, scope)
+            self._calls(node.bases, scope)
+            self._calls([keyword.value for keyword in node.keywords], scope)
+            self._calls(node.body, self._scopes[id(node)])
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp,
+                             ast.DictComp)):
+            self._calls_comprehension(node, scope)
+            return
+        for child in ast.iter_child_nodes(node):
+            self._calls(child, scope)
+
+    def _calls_defaults(self, args: ast.arguments, scope: _Scope) -> None:
+        self._calls(args.defaults, scope)
+        self._calls([d for d in args.kw_defaults if d is not None], scope)
+
+    def _calls_comprehension(self, node, scope: _Scope) -> None:
+        child = self._scopes[id(node)]
+        generators = node.generators
+        if generators:
+            # The first iterable is evaluated in the enclosing scope.
+            self._calls(generators[0].iter, scope)
+        for generator in generators[1:]:
+            self._calls(generator.iter, child)
+        for generator in generators:
+            for condition in generator.ifs:
+                self._calls(condition, child)
+        if isinstance(node, ast.DictComp):
+            self._calls(node.key, child)
+            self._calls(node.value, child)
+        else:
+            self._calls(node.elt, child)
+
+    def _classify_call(self, node: ast.Call, scope: _Scope) -> None:
+        target = node.func
+        if isinstance(target, ast.Name):
+            if target.id == "open" and scope.resolve("open") is None \
+                    and _opens_for_writing(node):
+                self.writes = True
+                return
+            imported = self._from_import_of(target.id, scope)
+            if imported is not None:
+                module, original = imported
+                if module == "os" and original in _OS_WRITES:
+                    self.writes = True
+                    self.deletes = self.deletes or original in _OS_DELETES
+                elif module == "shutil" and original in _SHUTIL_WRITES:
+                    self.writes = True
+                    self.deletes = self.deletes or original in _SHUTIL_DELETES
+            return
+        if isinstance(target, ast.Attribute):
+            self._method_call(target, scope)
+
+    def _from_import_of(self, name: str, scope: _Scope):
+        """The (module, function) a from-imported name stands for, or None."""
+        binding = scope.resolve(name)
+        if binding is None or binding is _SHADOWED:
+            return None
+        return (binding[1], binding[2]) if binding[0] == "from" else None
+
+    def _module_of(self, name: str, scope: _Scope) -> str:
+        """The canonical module a name stands for, or "" if it is not one.
+
+        `os`, `shutil` and `pathlib` are recognised by their own names when no
+        scope binds them, as the detector always did; an alias resolves through
+        the import that bound it, and a shadowing binding stops the search.
         """
-        if name in self._modules:
-            return self._modules[name]
-        if name in ("os", "shutil", "pathlib"):
-            return name
-        return ""
+        binding = scope.resolve(name)
+        if binding is None:
+            return name if name in ("os", "shutil", "pathlib") else ""
+        if binding is _SHADOWED:
+            return ""
+        return binding[1] if binding[0] == "module" else ""
 
-    def _is_path_call(self, node: ast.expr) -> bool:
+    def _path_class_of(self, name: str, scope: _Scope):
+        """The (module, class) a pathlib class name stands for, or None."""
+        binding = scope.resolve(name)
+        if binding is None:
+            return ("pathlib", name) if name in _PATH_CLASSES else None
+        if binding is _SHADOWED:
+            return None
+        return (binding[1], binding[2]) if binding[0] == "path_class" else None
+
+    def _is_path_call(self, node: ast.expr, scope: _Scope) -> bool:
         """Whether `node` builds a pathlib path: `Path("x")`, `P("x")`,
         `pathlib.Path("x")`, `pl.Path("x")`."""
         if not isinstance(node, ast.Call):
             return False
         target = node.func
         if isinstance(target, ast.Name):
-            if target.id in _PATH_CLASSES:
-                return True
-            imported = self._imported.get(target.id)
-            return bool(imported and imported[0] == "pathlib"
-                        and imported[1] in _PATH_CLASSES)
+            return self._path_class_of(target.id, scope) is not None
         if isinstance(target, ast.Attribute):
             return target.attr in _PATH_CLASSES \
                 and isinstance(target.value, ast.Name) \
-                and self._module(target.value.id) == "pathlib"
+                and self._module_of(target.value.id, scope) == "pathlib"
         return False
 
-    def _receiver_is_path(self, node: ast.expr) -> bool:
+    def _receiver_is_path(self, node: ast.expr, scope: _Scope) -> bool:
         if isinstance(node, ast.Name):
-            return node.id in self._paths
-        return self._is_path_call(node)
+            return scope.resolve(node.id) == ("path",)
+        return self._is_path_call(node, scope)
 
-    # -- calls ------------------------------------------------------------ #
-
-    def _collect_calls(self, tree: ast.AST) -> None:
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            target = node.func
-            if isinstance(target, ast.Name):
-                if target.id == "open" and _opens_for_writing(node):
-                    self.writes = True
-                else:
-                    self._from_import_call(target.id)
-            elif isinstance(target, ast.Attribute):
-                self._method_call(target)
-
-    def _from_import_call(self, name: str) -> None:
-        """A bare name bound by `from os import remove`: the function itself."""
-        imported = self._imported.get(name)
-        if imported is None:
-            return
-        module, original = imported
-        if module == "os" and original in _OS_WRITES:
-            self.writes = True
-            self.deletes = self.deletes or original in _OS_DELETES
-        elif module == "shutil" and original in _SHUTIL_WRITES:
-            self.writes = True
-            self.deletes = self.deletes or original in _SHUTIL_DELETES
-
-    def _method_call(self, target: ast.Attribute) -> None:
+    def _method_call(self, target: ast.Attribute, scope: _Scope) -> None:
         attr = target.attr
         receiver = target.value
         if isinstance(receiver, ast.Name):
-            module = self._module(receiver.id)
+            module = self._module_of(receiver.id, scope)
             if module == "os" and attr in _OS_WRITES:
                 self.writes = True
                 self.deletes = self.deletes or attr in _OS_DELETES
@@ -476,7 +741,7 @@ class _PythonScan:
             # so `SharedMemory(...).unlink()` deletes no file. A recognised
             # delete is always a recognised write.
             self.writes = True
-            if attr in _PATHLIB_DELETES and self._receiver_is_path(receiver):
+            if attr in _PATHLIB_DELETES and self._receiver_is_path(receiver, scope):
                 self.deletes = True
 
 
@@ -502,11 +767,12 @@ def python_writes(code: str) -> bool:
     The calls are read from the syntax tree, so a write mentioned inside a
     string or a comment — `print('Path("foo.py").write_text("new")')` — is
     not a write: only an executable call node counts. An aliased or
-    from-imported os/shutil function resolves to what it names; a pathlib
-    method counts only when its receiver is a path. `open()` writes when its
-    mode is a literal that can write; a mode that is not a literal is not
-    evidence of a write. Source that does not parse could not have run, and is
-    read by the text pattern as a last resort.
+    from-imported os/shutil function resolves to what it names, in the lexical
+    scope that binds it, so a shadowing parameter, `def` or assignment is not
+    read as the import. `open()` writes when its mode is a literal that can
+    write; a mode that is not a literal is not evidence of a write. Source that
+    does not parse could not have run, and is read by the text pattern as a
+    last resort.
     """
     return _python_operations(code)[0]
 
@@ -518,10 +784,11 @@ def python_deletes(code: str) -> bool:
     `print('os.remove("foo.py")')` mentions the call and performs nothing, so
     only an executable call node counts. `os.remove`, `shutil.rmtree` and the
     pathlib methods (`unlink`, `rmdir`) are deletes, through an alias or a
-    from-import as well as a literal name; an ordinary write is not. A method
-    of the same name on a receiver that is not a path — a `SharedMemory` — is
-    not a delete. Source that does not parse could not have run, and is read
-    by the delete text pattern as a last resort.
+    from-import as well as a literal name, and only in the lexical scope that
+    binds them; an ordinary write is not. A method of the same name on a
+    receiver that is not an established path — a `SharedMemory`, or a name
+    bound in another scope — is not a delete. Source that does not parse could
+    not have run, and is read by the delete text pattern as a last resort.
     """
     return _python_operations(code)[1]
 

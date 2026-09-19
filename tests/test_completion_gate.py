@@ -585,6 +585,137 @@ def test_a_non_filesystem_unlink_does_not_deliver_a_delete_request():
     assert "delete foo.py" in assessment.unresolved
 
 
+@pytest.mark.parametrize("code", [
+    # A module alias rebound to a non-filesystem object.
+    'import os as o\n'
+    'class Dummy:\n'
+    '    def remove(self, path):\n'
+    '        pass\n'
+    'o = Dummy()\n'
+    'o.remove("foo.py")',
+    # A from-imported function rebound by a `def` of the same name.
+    'from os import remove\n'
+    'def remove(path):\n'
+    '    pass\n'
+    'remove("foo.py")',
+    # ... and by an assignment or a lambda.
+    'import os as o\n'
+    'o = object()\n'
+    'o.remove("foo.py")',
+    'from os import remove\n'
+    'remove = lambda path: None\n'
+    'remove("foo.py")',
+    # A parameter shadows the module name inside the function.
+    'import os\n'
+    'def execute(os):\n'
+    '    os.remove("foo.py")\n'
+    'execute(object())',
+    # An import in a sibling function does not reach this one.
+    'def first():\n'
+    '    import os as o\n'
+    'def second(o):\n'
+    '    o.remove("foo.py")',
+    'def first():\n'
+    '    import os as o\n'
+    'def second():\n'
+    '    o.remove("foo.py")',
+    # A comprehension target shadows the alias in its own scope.
+    'import os as o\n'
+    '[o.remove("x") for o in items]',
+])
+def test_shadowed_or_rebound_imports_are_not_filesystem_deletes(code):
+    """A binding is filesystem evidence only in the scope that holds it: a
+    parameter, `def`, assignment, comprehension target or sibling scope that
+    rebinds the name is not the import it shadows (review fix; FR-036,
+    FR-116)."""
+    assert not verify.python_deletes(code)
+    assert not verify.command_mutates(code, "run_python")
+
+
+@pytest.mark.parametrize("code", [
+    # A path binding in one function does not reach a sibling function.
+    'def first():\n'
+    '    p = Path("foo.py")\n'
+    'def second():\n'
+    '    p.unlink()',
+    # A parameter shadows a module-level path binding.
+    'from pathlib import Path\n'
+    'p = Path("foo.py")\n'
+    'def f(p):\n'
+    '    p.unlink()',
+])
+def test_a_scope_leaked_or_shadowed_path_is_not_a_delete(code):
+    """A pathlib delete needs a receiver established as a path in *its* scope
+    (review fix; FR-116)."""
+    assert not verify.python_deletes(code)
+
+
+def test_a_function_local_import_alias_is_a_delete():
+    """The scope correction keeps the legitimate form: an import inside the
+    function that uses it is still the module function (review fix)."""
+    code = ('def f():\n'
+            '    import os as o\n'
+            '    o.remove("foo.py")')
+    assert verify.python_deletes(code)
+    assert verify.command_mutates(code, "run_python")
+
+
+def test_a_function_local_path_binding_is_a_delete():
+    """`p = Path(...)` inside the function that calls `p.unlink()` (review
+    fix)."""
+    code = ('from pathlib import Path\n'
+            'def f():\n'
+            '    p = Path("foo.py")\n'
+            '    p.unlink()')
+    assert verify.python_deletes(code)
+    assert verify.command_mutates(code, "run_python")
+
+
+@pytest.mark.parametrize("code", [
+    'import os as o\n'
+    'class Dummy:\n'
+    '    def remove(self, path):\n'
+    '        pass\n'
+    'o = Dummy()\n'
+    'o.remove("foo.py")',
+    'from os import remove\n'
+    'def remove(path):\n'
+    '    pass\n'
+    'remove("foo.py")',
+    'import os\n'
+    'def execute(os):\n'
+    '    os.remove("foo.py")\n'
+    'execute(object())',
+    'def first():\n'
+    '    import os as o\n'
+    'def second(o):\n'
+    '    o.remove("foo.py")',
+])
+def test_a_shadowed_delete_does_not_deliver_a_delete_request(code):
+    """The completion gate must not accept a shadowed call as delete evidence
+    (review fix; FR-036, FR-116, FR-125)."""
+    ledger = Ledger()
+    ledger.verified(f"run_python {code}", source="run_python:code", material="")
+
+    assessment = verify.assess("- delete foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted foo.py.")
+
+    assert "delete foo.py" in assessment.unresolved
+
+
+def test_a_function_local_import_delete_delivers_a_delete_request():
+    """A legitimate function-local import alias still satisfies the gate
+    (review fix; FR-036)."""
+    ledger = Ledger()
+    ledger.verified('run_python def f():\n    import os as o\n    o.remove("foo.py")',
+                    source="run_python:code", material="")
+
+    assessment = verify.assess("- delete foo.py", entries=ledger.entries,
+                               changed_paths=[], answer="Deleted foo.py.")
+
+    assert assessment.unresolved == []
+
+
 def test_a_read_only_shell_command_does_not_deliver_an_update():
     """`cat README.md` is not updating it (FR-036, FR-116)."""
     ledger = Ledger()
