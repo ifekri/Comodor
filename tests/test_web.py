@@ -1329,7 +1329,7 @@ def test_what_you_wrote_sorts_above_what_it_inferred(served):
     """Burying an instruction under forty inferences reads as the agent having
     opinions of its own."""
     for _ in range(20):
-        served.session.memory.store.observe_rule(
+        served.session.memory.store.observe_rule(provenance="counted_convention",
             key="python.quotes", scope="global", category="style",
             statement="Use single quotes", detail="most literals",
             source="observation", weight=1)
@@ -1345,7 +1345,7 @@ def test_an_inferred_rule_carries_its_evidence(served):
     """A claim about how somebody works should be checkable rather than
     asserted, which is the whole difference between a rule and a guess."""
     for _ in range(6):
-        served.session.memory.store.observe_rule(
+        served.session.memory.store.observe_rule(provenance="counted_convention",
             key="git.messages", scope="global", category="style",
             statement="Imperative commit subjects", detail="22 of 24 commits",
             source="observation", weight=1)
@@ -1455,7 +1455,7 @@ def test_the_rule_count_is_the_rules_this_folder_has(served):
     elsewhere = "project:somewhere-else-entirely"
     for key in ("other.style", "other.tests"):
         for _ in range(6):
-            served.session.memory.store.observe_rule(
+            served.session.memory.store.observe_rule(provenance="counted_convention",
                 key=key, scope=elsewhere, category="style",
                 statement=f"Learned somewhere else ({key})", detail="",
                 source="observation", weight=1)
@@ -1830,3 +1830,210 @@ def test_closing_a_web_session_closes_its_delegates_first(config):
     session.close()
 
     assert order[:4] == ["closing", "stop_all", "wait", "tools"], order
+
+
+
+# --------------------------------------------------------------------------- #
+# the question form, characterized (spec 002, T006)
+# --------------------------------------------------------------------------- #
+#
+# The browser is a live question surface: `Session._as_json` carries the form
+# on the request frame and `answer()` hands the page's reply to the tool that
+# is blocked waiting for it. These pin the round trip as it works *today*,
+# against the unmodified implementation, so that the one behaviour change the
+# feature makes — what a no-answer produces — is measurable against them. No
+# behaviour is changed by these tests.
+
+
+def _ask_from_the_worker(served, questions):
+    """The real `ask` tool, on a thread, against the served session's bus."""
+    from comodor.events import Cancellation
+    from comodor.safety import CheckpointStore, PermissionEngine, Redactor
+    from comodor.tools.ask import Ask
+    from comodor.tools.base import ToolContext
+
+    config = served.config
+    context = ToolContext(
+        config=config, permissions=PermissionEngine(config, served.session.bus),
+        checkpoints=CheckpointStore(config.paths.checkpoints),
+        bus=served.session.bus, redact=Redactor([]), cancel=Cancellation(),
+        cwd=config.paths.project,
+        # The request names every candidate, so the options are grounded.
+        request_text="SQLite, PostgreSQL or MySQL? Python or Go?")
+    out: dict = {}
+    worker = threading.Thread(
+        target=lambda: out.update(result=Ask().run(context, questions=questions)),
+        daemon=True)
+    worker.start()
+    return worker, out
+
+
+def _the_request_frame(served, cursor=0):
+    """Poll the event log until the form's request frame arrives."""
+    for _ in range(100):
+        _, data = call(served, f"/api/events?cursor={cursor}", token=served.token)
+        for event in data["events"]:
+            if event["kind"] == "request" and event.get("about") == "questions":
+                return event
+        cursor = data["cursor"]
+    raise AssertionError("the form never reached the page")
+
+
+def _wait(worker, out):
+    worker.join(10.0)
+    assert not worker.is_alive(), "the tool is still waiting"
+    return out["result"]
+
+
+def _two_questions():
+    return [
+        {"question": "Which database should this use?", "header": "Database",
+         "options": [{"label": "SQLite", "description": "one file"},
+                     {"label": "PostgreSQL", "description": "a server"},
+                     {"label": "MySQL"}]},
+        {"question": "Which languages?", "header": "Languages", "multi": True,
+         "options": [{"label": "Python"}, {"label": "Go"}]},
+    ]
+
+
+def test_a_core_question_reaches_the_page_intact_and_in_order(served):
+    worker, out = _ask_from_the_worker(served, _two_questions())
+    frame = _the_request_frame(served)
+
+    assert frame["id"].startswith("ask-")
+    assert frame["options"] == [], "a form carries no fixed options"
+    headers = [question["header"] for question in frame["questions"]]
+    assert headers == ["Database", "Languages"]
+    first = frame["questions"][0]
+    assert first["prompt"] == "Which database should this use?"
+    assert [option["label"] for option in first["options"]] == \
+        ["SQLite", "PostgreSQL", "MySQL", "Something else"]
+    assert first["options"][1]["description"] == "a server"
+    assert frame["questions"][1]["multi"] is True
+
+    call(served, "/api/answer", method="POST", token=served.token,
+         body={"id": frame["id"], "choice": "cancelled"})
+    _wait(worker, out)
+
+
+def test_the_centrally_appended_free_row_reaches_the_page_exactly_once(served):
+    """The page draws `free` rows from the payload; it never adds its own."""
+    worker, out = _ask_from_the_worker(served, _two_questions())
+    frame = _the_request_frame(served)
+
+    for question in frame["questions"]:
+        free = [option for option in question["options"] if option.get("free")]
+        assert len(free) == 1
+        assert question["options"][-1]["free"] is True
+        assert question["options"][-1]["label"] == "Something else"
+
+    ui = (Path(__file__).resolve().parents[1] / "src/comodor/web/ui.js").read_text(
+        encoding="utf-8")
+    assert "free: !!o.free" in ui, "the page reads the row from the payload"
+    assert "Something else" not in ui, "the page authors no row of its own"
+
+    call(served, "/api/answer", method="POST", token=served.token,
+         body={"id": frame["id"], "choice": "cancelled"})
+    _wait(worker, out)
+
+
+def test_single_and_multi_choice_answers_round_trip_from_the_page(served):
+    worker, out = _ask_from_the_worker(served, _two_questions())
+    frame = _the_request_frame(served)
+
+    # Exactly what `sendForm` in ui.js posts: labels, matched by header.
+    answers = [
+        {"header": "Database", "prompt": "Which database should this use?",
+         "chosen": ["PostgreSQL"], "written": ""},
+        {"header": "Languages", "prompt": "Which languages?",
+         "chosen": ["Python", "Go"], "written": ""},
+    ]
+    status, body = call(served, "/api/answer", method="POST", token=served.token,
+                        body={"id": frame["id"], "choice": json.dumps(answers)})
+    assert status == 200 and body["answered"] is True
+
+    result = _wait(worker, out)
+    assert result.ok and result.meta["answered"] is True
+    assert "Which database should this use?\n  -> PostgreSQL" in result.content
+    assert "Which languages?\n  -> Python, Go" in result.content
+
+
+def test_a_written_answer_from_the_page_reaches_the_model(served):
+    worker, out = _ask_from_the_worker(served, _two_questions()[:1])
+    frame = _the_request_frame(served)
+
+    answers = [{"header": "Database", "prompt": "Which database should this use?",
+                "chosen": [], "written": "DuckDB, actually"}]
+    call(served, "/api/answer", method="POST", token=served.token,
+         body={"id": frame["id"], "choice": json.dumps(answers)})
+
+    result = _wait(worker, out)
+    assert "DuckDB, actually" in result.content
+
+
+def test_answers_from_the_page_bind_by_header_not_position(served):
+    worker, out = _ask_from_the_worker(served, _two_questions())
+    frame = _the_request_frame(served)
+
+    answers = [
+        {"header": "Languages", "prompt": "", "chosen": ["Go"], "written": ""},
+        {"header": "Database", "prompt": "", "chosen": ["SQLite"], "written": ""},
+    ]
+    call(served, "/api/answer", method="POST", token=served.token,
+         body={"id": frame["id"], "choice": json.dumps(answers)})
+
+    result = _wait(worker, out)
+    assert "Which database should this use?\n  -> SQLite" in result.content
+    assert "Which languages?\n  -> Go" in result.content
+
+
+def test_an_unreadable_answer_is_refused_and_the_worker_keeps_waiting(served):
+    worker, out = _ask_from_the_worker(served, _two_questions()[:1])
+    frame = _the_request_frame(served)
+
+    status, body = call(served, "/api/answer", method="POST", token=served.token,
+                        body={"id": frame["id"], "choice": "PostgreSQL"})
+    assert status == 409 and body["answered"] is False
+    assert "could not be read" in body["error"]
+    assert worker.is_alive()
+
+    call(served, "/api/answer", method="POST", token=served.token,
+         body={"id": frame["id"], "choice": "cancelled"})
+    _wait(worker, out)
+
+
+def test_a_dismissal_from_the_page_leaves_the_decision_open(served):
+    """The page's `closeForm(true)` posts `cancelled`. Before spec 002 the
+    tool then told the model to choose sensible defaults — the behaviour
+    FR-082 removes. Now the decision stays unresolved."""
+    worker, out = _ask_from_the_worker(served, _two_questions()[:1])
+    frame = _the_request_frame(served)
+
+    status, body = call(served, "/api/answer", method="POST", token=served.token,
+                        body={"id": frame["id"], "choice": "cancelled"})
+    assert status == 200 and body["answered"] is True
+
+    result = _wait(worker, out)
+    assert result.ok
+    assert result.meta["answered"] is False
+    assert result.meta["outcome"] == "cancelled"
+    assert "sensible defaults" not in result.content.lower()
+    assert result.meta["clarification"]["outcome"] == "cancelled"
+
+
+def test_a_dismissed_question_is_not_a_cancelled_turn_on_the_page(served):
+    """The page's `cancelled` event is the *turn* stopping; a dismissed form
+    is answered through `/api/answer` and never produces that event."""
+    worker, out = _ask_from_the_worker(served, _two_questions()[:1])
+    frame = _the_request_frame(served)
+
+    call(served, "/api/answer", method="POST", token=served.token,
+         body={"id": frame["id"], "choice": "cancelled"})
+    _wait(worker, out)
+
+    # Read from the start rather than from the tail: a cursor at the end
+    # long-polls for events that are not coming.
+    _, log = call(served, "/api/events?cursor=0", token=served.token)
+    kinds = [event["kind"] for event in log["events"]]
+    assert "request" in kinds
+    assert "cancelled" not in kinds

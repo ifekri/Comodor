@@ -88,3 +88,33 @@ def _find(answer: str) -> str:
         trimmed = sentence.strip().rstrip(".!?")
         return trimmed if len(trimmed) <= 90 else trimmed[:87] + "…"
     return ""
+
+
+#: Plain statements that the whole task is finished. The completion gate acts
+#: only on one of these (FR-125); an honest partial answer is never blocked.
+COMPLETION = (
+    "task is complete", "task is done", "task is now complete", "task complete",
+    "is now complete", "is complete.", "is done.", "all done", "all complete",
+    "everything is done", "everything is complete", "i have completed",
+    "i've completed", "i have finished", "i've finished", "work is complete",
+    "completed the task", "finished the task", "that's everything",
+    "that is everything", "all requests have been addressed",
+)
+
+
+def claims_completion(answer: str) -> bool:
+    """Whether the answer explicitly claims the task is complete.
+
+    The same high bar as the unverified-claim notice: a hedged, negated or
+    instructional sentence is not a claim. The completion gate blocks only a
+    claim that its evidence contradicts — never incompleteness itself
+    (FR-125, FR-126).
+    """
+    for sentence in _SENTENCE.findall(answer or ""):
+        lowered = sentence.lower()
+        if not any(phrase in lowered for phrase in COMPLETION):
+            continue
+        if any(word in lowered for word in NOT_A_CLAIM):
+            continue
+        return True
+    return False

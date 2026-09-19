@@ -42,8 +42,9 @@ from ..providers.gateway import Gateway
 from ..safety import PermissionEngine, Risk
 from ..tools import ToolContext, ToolRegistry, ToolResult
 from . import plan, staleness
-from .context import Conversation
-from .prompts import COMPACT_PROMPT, build_system_prompt
+from .context import Conversation, Optimizer
+from .prompts import COMPACT_PROMPT, build_system_prompt, project_instructions
+from .tokens import TaskMeasurement
 
 MAX_PARALLEL_TOOLS = 6
 
@@ -58,6 +59,72 @@ SAY_WHAT_HAPPENED = (
 #: Blank line between the skill block and the playbook block.
 SECTION_GAP = "\n\n"
 
+#: Tools that change the project. Kept here so a successful write can be
+#: recorded for the completion gate's delivery evidence (FR-036).
+_WRITE_TOOLS = frozenset({"write_file", "edit_file"})
+
+#: Tools that may still run while a mandatory decision is open, because all
+#: they do is look (FR-018). `Risk.SAFE` is deliberately not the test: `memory`
+#: persists durable facts, `todo_write` writes the plan, `delegate` starts
+#: background work and `ask`/`propose_mode` raise requests — all SAFE, none of
+#: them reading. Nothing here changes state or starts work, so exempting these
+#: and withholding the rest keeps decision-dependent work behind the ledger
+#: without stopping the model from gathering what it can.
+READ_ONLY_TOOLS = frozenset({
+    "read_file", "list_dir", "glob", "grep", "search_history",
+    "read_skill_file", "mcp_read_resource",
+})
+
+#: Calls that can open or hand back a mandatory decision. A batch containing
+#: one runs in order, so the decision is recorded before a sibling could act.
+_DECISION_RAISERS = frozenset({"ask", "delegate"})
+
+
+def _brief_failure(content: str) -> str:
+    text = " ".join((content or "").split())
+    return text[:160]
+
+
+#: Argument names that identify the operation a call performs. Ordered so the
+#: key is deterministic; the values are the model's own call arguments.
+_TARGET_ARGS = ("path", "command", "url", "query", "pattern", "resource",
+                "name", "selector", "skill")
+
+
+def _operation_key(call: ToolCall) -> str:
+    """A deterministic identity for the operation a call performs.
+
+    `path`/`command` alone left every url/query/pattern tool with an empty key,
+    so a successful call for one target cleared an unrelated failure and the
+    completion gate could accept a claim while a requested operation was still
+    failing. The key is the tool plus the arguments that determine its target;
+    it is used for matching only and is never shown or stored.
+    """
+    parts = [call.name]
+    for name in _TARGET_ARGS:
+        value = call.arguments.get(name)
+        if value:
+            parts.append(f"{name}={value}")
+    return "|".join(parts)
+
+
+def _carried_decisions(carried: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every open decision a carried clarification payload names, in order.
+
+    The structured payload (`tools/ask.py::payload_for`) describes the first
+    decision at the top level and lists all of them under `decisions` when
+    there is more than one. Both shapes have to reach the parent ledger; a
+    payload that lists several and has them read as one loses the rest.
+    """
+    nested = carried.get("decisions")
+    if isinstance(nested, list):
+        entries = [entry for entry in nested if isinstance(entry, dict)
+                   and str(entry.get("decision") or "").strip()]
+        if entries:
+            return entries
+    return [carried]
+
+
 
 @dataclass
 class TurnResult:
@@ -67,9 +134,25 @@ class TurnResult:
     steps: int = 0
     tool_calls: int = 0
     usage: Usage = field(default_factory=Usage)
-    stopped: str = "done"        # done | max_steps | budget | cancelled | error
+    #: done | max_steps | budget | cancelled | error | clarification_required.
+    #: `cancelled` means the whole turn was cancelled or interrupted, and
+    #: nothing else: a question the person dismissed ends the turn as
+    #: `clarification_required` with the dismissal inside `clarification`.
+    stopped: str = "done"
     error: str = ""
     elapsed: float = 0.0
+    #: The structured clarification-required payload, when a mandatory
+    #: question ended without an answer: the decision, its candidates, what
+    #: was consulted, and `outcome` — cancelled, expired or unattended.
+    clarification: dict[str, Any] | None = None
+    #: The completion gate's annotation when the turn delivered less than the
+    #: request asked for (FR-037). It rides the result, not only the display
+    #: events, so `comodor run` — and its JSON — tells automation the same
+    #: thing the terminal shows: a partial answer is never an unqualified
+    #: `stopped="done"`.
+    annotation: str = ""
+    #: What the turn cost beside how it went — counts only (FR-072).
+    measurement: TaskMeasurement = field(default_factory=TaskMeasurement)
     #: Why a turn was cancelled, when it was ("stop" — the human pressed stop
     #: — or "interrupt" — a new message took over under the interrupt busy
     #: mode). The learn step reads this so the review knows which kind of
@@ -94,6 +177,10 @@ class AgentLoop:
         self.bus = bus
         self.permissions = permissions
         self.conversation = conversation or Conversation()
+        # Which context optimizations run, from the settings — all of them
+        # unless switched off by name, none under the benchmark's naive
+        # strategy (`agent/context.py::OPTIMIZATIONS`).
+        self.conversation.optimizer = Optimizer.from_config(config)
         self.memory = memory                     # LearningEngine, or None
         self.skills = skills                     # SkillRegistry, or None
         #: The background-delegate manager, when this session has one. Read at
@@ -121,6 +208,20 @@ class AgentLoop:
         #: turn to tell "it says the tests pass and ran them" from "it says the
         #: tests pass".
         self._used: list[str] = []
+        #: Tool calls that failed this turn, `(tool, reason)`, and the paths a
+        #: successful write touched. Both feed the completion gate (FR-116,
+        #: FR-036).
+        self._failed: list[tuple[str, str, str]] = []
+        self._written_paths: list[str] = []
+        #: Changes a delegate reported having made before it stopped for a
+        #: decision — an in-place writer's, which no patch application lists.
+        self._carried_changes: list[str] = []
+        #: Shell tools this turn that changed the filesystem (a bounded
+        #: operation name, never the command text). Reported with the files a
+        #: mutation touched when a decision turns up after the change.
+        self._mutating_commands: list[str] = []
+        #: The request this turn is answering, for the gate's element list.
+        self._request_text = ""
         #: What the user said not to do this turn, in their own words.
         self._rules: list[str] = []
         #: Worked out once per model. The model does not change mid-turn, and
@@ -130,16 +231,40 @@ class AgentLoop:
         #: remembers which model it describes and is rebuilt for another.
         self._profile: Any = None
         self._profile_for: tuple[str, str] = ("", "")
+        #: The turn's paired record; replaced at the start of every turn.
+        self._measurement = TaskMeasurement()
+        #: The project-instructions block for the current turn.
+        self._instructions: str | None = None
 
     # -- public API ------------------------------------------------------- #
 
-    def run(self, user_text: str, images: list[str] | None = None) -> TurnResult:
-        """Handle one user message from start to finish."""
+    def run(self, user_text: str, images: list[str] | None = None,
+            decisions: list[dict[str, Any]] | None = None) -> TurnResult:
+        """Handle one user message from start to finish.
+
+        `decisions` are clarification payloads left open by work that this
+        turn is reporting on — a delegate that stopped for an answer. They
+        enter the turn's ledger as unresolved, so nothing that depends on
+        them runs here either.
+        """
         started = time.monotonic()
         self.cancel.reset()
         self._cancel_reason = ""
         self._used = []
+        self._failed = []
+        self._written_paths = []
+        self._carried_changes = []
+        self._mutating_commands = []
+        self._request_text = user_text
         result = TurnResult()
+        self._measurement = result.measurement
+        # The project's instructions, read once for the turn. Every step's
+        # head is built from this same string, so the stable portion stays
+        # byte-identical for the whole task (FR-050, FR-091).
+        try:
+            self._instructions = project_instructions(self.config)
+        except Exception:
+            self._instructions = ""
 
         # What the user said not to do, pulled out once. Patterns over their
         # own words — no model call, and nothing that could cost a request.
@@ -159,6 +284,7 @@ class AgentLoop:
         self.conversation.add(
             Message.user(user_text, images=images or [], briefing=playbook))
         self.bus.emit(Kind.TURN_START, text=user_text)
+        self._open_ledger(user_text, decisions or [])
 
         deadline = started + self.config.agent.max_seconds
 
@@ -190,9 +316,13 @@ class AgentLoop:
 
         result.elapsed = time.monotonic() - started
         result.usage = self.conversation.usage
+        result.measurement.outcome = result.stopped
+        result.measurement.knowledge_hits = len(self._recalled)
         self._say_if_unverified(result)
         self.bus.emit(Kind.TURN_END, stopped=result.stopped, steps=result.steps,
-                      elapsed=result.elapsed, error=result.error)
+                      elapsed=result.elapsed, error=result.error,
+                      clarification=result.clarification,
+                      annotation=result.annotation)
 
         self._learn(user_text, result)
         return result
@@ -225,6 +355,7 @@ class AgentLoop:
         spoken = ""
         asked_to_speak = False
         checked = False
+        corrected = False
 
         while True:
             self.cancel.raise_if_cancelled()
@@ -233,7 +364,8 @@ class AgentLoop:
             specs = self.tools.specs(agent.mode)
             system_prompt = build_system_prompt(
                 self.config, profile=self._model_profile(),
-                tool_bridge=self._tool_bridge_live())
+                tool_bridge=self._tool_bridge_live(),
+                instructions=self._instructions)
             self._maybe_compact(system_prompt, specs)
 
             completion = self._stream_once(system_prompt, specs)
@@ -257,12 +389,21 @@ class AgentLoop:
                         # message with another one would otherwise be asked
                         # forever.
                         asked_to_speak = True
-                        self.conversation.add(Message.user(SAY_WHAT_HAPPENED))
+                        self._say_internally(SAY_WHAT_HAPPENED)
                         continue
                     else:
                         result.text = ""
                 else:
                     result.text = assistant.content
+
+                # A decision this turn was handed — a delegate's carried form —
+                # is still open when the model answers without calling a tool.
+                # The turn reports it rather than finishing normally, and a
+                # cancelled turn outranks it (FR-018, contracts §C5).
+                carried_decision = self._clarification_outcome()
+                if carried_decision is not None:
+                    self.cancel.raise_if_cancelled()
+                    return self._end_for_clarification(result, carried_decision)
 
                 # The project's own check, once, before the turn is called
                 # finished. Only when something was changed — a turn that read
@@ -274,12 +415,45 @@ class AgentLoop:
                     if self._project_check_failed():
                         continue
 
+                # The completion gate. Annotate unresolved work beside the
+                # answer; block only an explicit completion claim the evidence
+                # contradicts, and only once — the fallback is to annotate
+                # (FR-124 to FR-127).
+                assessment = self._completion_gate(result)
+                result.measurement.validation_outcome = assessment.verdict
+                if assessment.verdict == "block" and not corrected:
+                    corrected = True
+                    result.text = ""          # this answer is replaced, not kept
+                    from . import verify
+
+                    self._say_internally(verify.as_incomplete(assessment))
+                    continue
+                if assessment.unresolved:
+                    # Beside the answer for a person watching, and on the
+                    # result for a caller who is not (FR-037).
+                    result.annotation = assessment.annotation()
+                    self._note(result.annotation)
+
                 result.stopped = "done"
                 return result
 
             result.tool_calls += len(calls)
             self._execute(calls)
             self.bus.emit(Kind.STEP, step=result.steps, tool_calls=len(calls))
+            self._advance_ledger(result.steps)
+
+            # A mandatory question ended without an answer. The decision is
+            # open, nothing that depends on it may run, and the model is not
+            # the one to fill it in — so the turn ends here, saying what is
+            # needed (FR-018, FR-033, FR-035).
+            needed = self._clarification_outcome()
+            if needed is not None:
+                # A cancelled turn outranks an unanswered form: the transport
+                # resolved the pending request to unblock this worker, and the
+                # thing the user stopped is the turn, not the question
+                # (contracts §C5).
+                self.cancel.raise_if_cancelled()
+                return self._end_for_clarification(result, needed)
 
             if not agent.loop:
                 # Loop off: run the tools the model asked for, then stop and
@@ -317,7 +491,7 @@ class AgentLoop:
 
     def _stream_once(self, system_prompt: str, specs: list[ToolSpec]) -> dict[str, Any]:
         """One streamed assistant response, surfaced to the UI as it arrives."""
-        payload = self.conversation.render(system_prompt)
+        payload = self.conversation.render(system_prompt, specs)
         agent = self.config.agent
 
         self._message_id = uuid.uuid4().hex[:12]
@@ -357,6 +531,7 @@ class AgentLoop:
                       tool_calls=[call.name for call in tool_calls])
 
         self.conversation.record_usage(usage)
+        self._measurement.record_turn(usage, self.conversation.last_request_tokens)
         if usage.prompt_tokens:
             # What the model *read*, not what it was billed for. With caching on
             # those differ by an order of magnitude, and it is the former the
@@ -387,9 +562,55 @@ class AgentLoop:
                 futures = [pool.submit(self._run_one, call, context) for call in calls]
                 results = [future.result() for future in futures]
         else:
-            results = [self._run_one(call, context) for call in calls]
+            results = []
+            for call in calls:
+                result = self._run_one(call, context)
+                # A child that stopped for a decision is imported before the
+                # next call starts, so a sibling write in the same batch is
+                # withheld rather than run without the answer (FR-018). `ask`
+                # is native: it recorded the decision in this same ledger, so
+                # its payload is not imported again.
+                self._import_clarification(context, result,
+                                           native=call.name == "ask")
+                results.append(result)
 
+        self._measurement.tool_calls += len(calls)
         for call, result in zip(calls, results, strict=True):
+            # The thing the call was about, so a failure and a later retry of
+            # the same operation share a key and two different targets do not.
+            key = _operation_key(call)
+            if not result.ok:
+                self._measurement.retries += 1
+                self._failed.append((call.name, key, _brief_failure(result.content)))
+            else:
+                # A failure this same operation has since recovered is no longer
+                # unresolved: a transient mismatch followed by a successful
+                # retry must not make a finished turn read as incomplete.
+                self._failed = [entry for entry in self._failed
+                                if not (entry[0] == call.name and entry[1] == key)]
+                if call.name in _WRITE_TOOLS:
+                    path = str(result.meta.get("path") or "")
+                    if path:
+                        self._written_paths.append(path)
+                if result.meta.get("applied"):
+                    # A writing delegate applied its patch here: those files are
+                    # this turn's mutation evidence too (FR-036).
+                    for applied_path in result.meta.get("files") or []:
+                        if applied_path:
+                            self._written_paths.append(str(applied_path))
+                if call.name in ("run_shell", "run_python"):
+                    from . import verify as _verify
+
+                    command = str(call.arguments.get("command")
+                                  or call.arguments.get("code") or "")
+                    if _verify.command_mutates(command, call.name):
+                        # A bounded operation name, never the command text: the
+                        # report says a change happened, not what was typed.
+                        self._mutating_commands.append(call.name)
+            if call.name == "ask":
+                self._measurement.clarifications_raised += int(result.meta.get("asked", 0) or 0)
+                self._measurement.clarifications_answered += int(result.meta.get("given", 0) or 0)
+                self._learn_decisions(result)
             message = Message.tool(
                 call_id=call.id, name=call.name,
                 content=result.content, is_error=not result.ok,
@@ -398,6 +619,40 @@ class AgentLoop:
             # untrue can be found and dropped. The tools already know; nothing
             # was carrying it across.
             staleness.note(message, str(result.meta.get("path") or ""))
+            # The result's own metadata rides with it: a spill path is what
+            # makes an overflowed command safely retrievable later, and the
+            # budget manager reads it from the message, not from the tool
+            # result that no longer exists by then.
+            for key in ("spill", "overflowed", "full_chars", "log", "diff",
+                        "content_fingerprint"):
+                if key in result.meta:
+                    message.meta.setdefault(key, result.meta[key])
+            # A learned item that this file no longer supports is marked
+            # stale now, and the model is told, so an answer resting on it
+            # is corrected before the turn ends (FR-114).
+            contradicted = self._learning_contradicted(str(result.meta.get("path") or ""))
+            if contradicted:
+                message.content = f"{message.content}\n\n{contradicted}"
+            # A form, as it was shown and how it ended, so the transcript and
+            # an export can say what was asked and what came back (FR-030).
+            form = result.meta.get("form")
+            if isinstance(form, dict):
+                message.meta["question"] = form
+            # What a writing delegate changed, so a read of one of those files
+            # earlier in the conversation is known to be superseded (FR-114).
+            if result.meta.get("applied"):
+                message.meta["applied"] = True
+                message.meta["files"] = [str(f) for f in result.meta.get("files") or []]
+            if result.meta.get("isolated") is False:
+                message.meta["isolated"] = False
+            # A child that stopped for a decision (a synchronous delegate) hands
+            # its payload back through the tool result. A sequential batch
+            # imported it as each result arrived; a parallel batch — which
+            # never holds a call that can raise one — imports it here, so
+            # the post-batch check ends the turn either way (FR-018, FR-029).
+            if parallel and len(calls) > 1:
+                self._import_clarification(context, result,
+                                           native=call.name == "ask")
 
             # What the user said not to do, while the model is still deciding.
             #
@@ -410,13 +665,17 @@ class AgentLoop:
             said = self._what_was_asked(context, call.name)
             if said:
                 message.content = f"{message.content}\n\n{said}"
+            self._record_evidence(context, call, result)
             # A tool that produced a picture — a screenshot of a page — sends
             # it as one. Where the dialect allows an image beside a tool result
             # it goes there; where it does not, the adapter moves it.
             picture = result.meta.get("image")
             if isinstance(picture, str) and picture:
                 message.images = [picture]
-            self.conversation.add(message)
+            # Through the funnel: identical material already resident is
+            # admitted as a reference, a changed file as a delta (FR-099,
+            # FR-100, FR-101). The earlier copy is never rewritten.
+            self.conversation.admit(message, path=str(result.meta.get("path") or ""))
 
     def _run_one(self, call: ToolCall, context: ToolContext) -> ToolResult:
         self._used.append(call.name)
@@ -425,6 +684,11 @@ class AgentLoop:
                       summary=self._describe(call))
         if self.cancel.cancelled:
             result = ToolResult.failure("cancelled before the tool ran")
+        elif self._withheld_by(context, call):
+            # A mutating action after a mandatory question went unanswered.
+            # Whether it depends on the open decision cannot be known from
+            # here, and uncertain dependency is treated as dependent (FR-018).
+            result = ToolResult.failure(self._withheld_by(context, call), withheld=True)
         else:
             # The tool is handed a view of the context that knows which call
             # it is, so anything it streams is tagged where it is produced
@@ -440,6 +704,29 @@ class AgentLoop:
         tool = self.tools.get(call.name)
         return tool.summary(call.arguments) if tool else call.name
 
+    def _withheld_by(self, context: ToolContext, call: ToolCall) -> str:
+        """Why a call may not run now, or an empty string.
+
+        Only explicitly read-only tools stay available — they are how the
+        agent gathers what it can without the answer. Everything else waits
+        for the decision, including the SAFE tools that persist state or
+        start work: `memory`, `todo_write`, `delegate`, `ask`, `propose_mode`
+        are not read-only, and "SAFE" is a statement about risk, not about
+        whether a call depends on an open decision (FR-018).
+        """
+        try:
+            if call.name in READ_ONLY_TOOLS:
+                return ""
+            open_decisions = [decision for decision in context.evidence.withheld()
+                              if decision.state in ("unresolved", "blocked", "asked")]
+            if not open_decisions:
+                return ""
+            named = "; ".join(decision.what for decision in open_decisions)
+            return (f"not run: a required decision is still open ({named}). "
+                    f"Nothing that may depend on it runs until it is answered.")
+        except Exception:
+            return ""
+
     def _can_parallelise(self, calls: list[ToolCall]) -> bool:
         """Only when nothing in the batch could stop to ask a question.
 
@@ -447,6 +734,13 @@ class AgentLoop:
         A model with no known support for it that emits a batch anyway is
         usually emitting something malformed; running those concurrently turns
         one wasted turn into several.
+
+        A batch containing a call that can raise a decision — `ask`, or a
+        foreground `delegate` whose child can — runs in order, always. The
+        withheld check runs when each call starts, and a decision payload is
+        imported only after the batch finishes: run concurrently, a SAFE
+        `memory`/`todo_write` beside them could persist state the decision
+        forbids.
         """
         if not self.config.safety.auto_approve_safe:
             return False
@@ -455,7 +749,8 @@ class AgentLoop:
             return False
         for call in calls:
             tool = self.tools.get(call.name)
-            if tool is None or tool.risk is not Risk.SAFE:
+            if tool is None or tool.risk is not Risk.SAFE \
+                    or call.name in _DECISION_RAISERS:
                 return False
         return True
 
@@ -477,6 +772,290 @@ class AgentLoop:
             return ""
         context.rules_shown += 1
         return reminder(context.rules)
+
+    # -- the evidence ledger ----------------------------------------------- #
+    #
+    # Bookkeeping about what this turn has been told and has seen. Every
+    # method here is wrapped the way `_say_if_unverified` is: a fault in the
+    # record must never be the reason a turn fails.
+
+    def _say_internally(self, content: str) -> None:
+        """A USER-role prompt the loop writes to itself, not the person's words.
+
+        The provider's alternation needs the user role, but the transcript must
+        not pretend the person said a compaction brief, a completion correction
+        or a plan restatement. Marked, so `context.stated` — and with it the
+        memory tool's "the user stated this" check (FR-066) — leaves it out.
+        """
+        message = Message.user(content)
+        message.meta["synthetic"] = True
+        self.conversation.add(message)
+
+    def _open_ledger(self, user_text: str,
+                     decisions: list[dict[str, Any]] | None = None) -> None:
+        """A fresh ledger for the turn, seeded with what the user stated.
+
+        The request text and what recall brought ride on the context too,
+        so a candidate answer can be grounded against them. Decisions the
+        project has already settled enter as KNOWN, so the same question
+        is answered from the record rather than asked again (FR-109).
+        """
+        try:
+            context = self._tool_context()
+            context.reset_evidence()
+            context.request_text = user_text
+            context.stated = [
+                message.content for message in self.conversation.messages
+                if getattr(message.role, "value", "") == "user"
+                and not message.meta.get("synthetic")
+                and not message.meta.get("compacted")
+                and isinstance(message.content, str) and message.content][-20:]
+            # A spill file this conversation already points at stays protected
+            # across a resume: the pointer in the restored message is only
+            # worth something while the file it names is still there (FR-089).
+            for message in self.conversation.messages:
+                path = message.meta.get("spill") if message.meta else None
+                if isinstance(path, str) and path:
+                    context.spilled.add(path)
+            context.recalled = [
+                getattr(item, "text", "") or str(item) for item in self._recalled]
+            context.evidence.known("the request, as the user stated it",
+                                   material=user_text)
+            # What the project already settled goes in before the imported
+            # decisions: a carried question the ledger can already answer
+            # settles rather than reopening and stopping the turn (FR-008,
+            # FR-109).
+            for decision in self._settled_decisions():
+                context.evidence.knowledge(decision.trigger, f"lesson:{decision.id}",
+                                           answer=decision.guidance)
+            for carried in decisions or []:
+                self._carry_open_decision(context, carried)
+        except Exception:
+            pass
+
+    def _settled_decisions(self) -> list[Any]:
+        if self.memory is None or not self.config.learning.enabled:
+            return []
+        try:
+            return list(self.memory.settled_decisions())[:50]
+        except Exception:
+            return []
+
+    def _learn_decisions(self, result: ToolResult) -> None:
+        """What an answered form settled, kept for the project (T106).
+
+        Only answers: a question left blank, and a form that was cancelled,
+        expired or found nobody to answer, teach nothing.
+        """
+        if self.memory is None or not self.config.learning.enabled:
+            return
+        form = result.meta.get("form")
+        if not isinstance(form, dict):
+            return
+        prompts = {str(question.get("header") or ""): str(question.get("prompt") or "")
+                   for question in form.get("questions") or [] if isinstance(question, dict)}
+        for answer in form.get("answers") or []:
+            if not isinstance(answer, dict):
+                continue
+            text = str(answer.get("written") or "").strip() or ", ".join(
+                str(choice) for choice in answer.get("chosen") or [] if str(choice).strip())
+            prompt = prompts.get(str(answer.get("header") or ""), "")
+            if not text or not prompt:
+                continue
+            try:
+                self.memory.settle_decision(prompt, text)
+            except Exception:
+                continue
+
+    def _learning_contradicted(self, path: str) -> str:
+        """Learned items this file no longer supports, marked stale — or ""."""
+        if not path or self.memory is None or not self.config.learning.enabled:
+            return ""
+        try:
+            marked = self.memory.check_staleness([path])
+        except Exception:
+            return ""
+        if not marked:
+            return ""
+        # Recorded, so the per-task measurement and `comodor insights` show the
+        # stale knowledge this turn detected rather than always zero.
+        self._measurement.knowledge_stale += len(marked)
+        lines = "\n".join(f"- {item['text']} ({item['why']})" for item in marked)
+        return ("[Learned knowledge contradicted by what was just observed and "
+                f"marked stale — rely on the observation, not on it:\n{lines}]")
+
+    def _import_clarification(self, context: ToolContext, result: ToolResult,
+                              *, native: bool = False) -> None:
+        """A child's clarification payload, into this turn's ledger, once.
+
+        The open decision enters the ledger so dependent calls are withheld
+        and the turn ends for it; what the child changed before it stopped
+        joins this turn's prior work. A worktree child's changes also arrive
+        as an applied patch (`files`); an in-place child's arrive only here,
+        already relative and bounded (contracts §C6).
+
+        `native` marks a payload the `ask` tool raised in *this* ledger: the
+        decision is already recorded, so importing the payload again would
+        open a second decision for one question. A child's payload was
+        recorded in the child's own ledger and is not native.
+        """
+        if native:
+            return
+        carried = result.meta.get("clarification")
+        if not isinstance(carried, dict) or not carried:
+            return
+        self._carry_open_decision(context, carried)
+        self._carried_changes.extend(
+            str(item) for item in carried.get("prior_changes") or [] if str(item))
+
+    def _carry_open_decision(self, context: ToolContext, carried: dict[str, Any]) -> None:
+        """Every decision another piece of work left open enters this ledger.
+
+        A payload for one decision carries its fields at the top level; a
+        payload for several also lists them under `decisions`. Reading only
+        the top level kept the first and silently dropped the rest, so the
+        parent reported one decision where the delegate had raised three.
+        """
+        book = context.evidence
+        outcome = str(carried.get("outcome") or "cancelled")
+        for entry in _carried_decisions(carried):
+            what = str(entry.get("decision") or "")
+            if not what:
+                continue
+            decision = book.open_decision(
+                what, affects=[str(entry.get("reason")
+                                   or carried.get("reason") or "behaviour")],
+                candidates=[option.get("label", option)
+                            if isinstance(option, dict) else option
+                            for option in entry.get("candidates") or []],
+                evidence_consulted=list(entry.get("evidence_consulted")
+                                        or carried.get("evidence_consulted") or []))
+            if decision.resolved:
+                # The ledger already answered this (a settled decision seeded
+                # first); do not reopen it as unresolved and make the gate
+                # annotate work the project already settled (FR-008).
+                continue
+            book.asked(decision.id)
+            book.ended_without_answer(decision.id, outcome)
+
+    def _prior_changes(self) -> list[str]:
+        """Work this turn already did before a decision became known.
+
+        Files a writer changed, plus the shell tools that changed something,
+        deduplicated and in stable order. Paths are shown relative to the
+        workspace, so the payload carries no local filesystem path; a bounded
+        description only, never file contents or command text. Empty when
+        nothing was changed.
+        """
+        context = self.tool_context
+
+        def shown(item: str) -> str:
+            if context is not None and ("/" in item or "\\" in item):
+                try:
+                    return context.relative(Path(item))
+                except Exception:
+                    return item
+            return item
+
+        return sorted({shown(item) for item in (*self._written_paths,
+                                                 *self._mutating_commands,
+                                                 *self._carried_changes)})
+
+    def _clarification_outcome(self) -> dict[str, Any] | None:
+        """The payload for the decisions this turn left open, or None."""
+        try:
+            context = self.tool_context
+            if context is None:
+                return None
+            ended = [decision for decision in context.evidence.withheld()
+                     if decision.state in ("unresolved", "blocked")]
+            if not ended:
+                return None
+            from ..tools.ask import payload_for
+
+            payload = payload_for(ended, ended[0].outcome or "cancelled")
+            prior = self._prior_changes()
+            if prior:
+                # A mutation that happened before the decision became known is
+                # preserved, not rolled back, and is disclosed (contracts §C6).
+                payload["prior_changes"] = prior
+            return payload
+        except Exception:
+            return None
+
+    @staticmethod
+    def _needs_a_decision(payload: dict[str, Any]) -> str:
+        """The answer of a turn that stopped for a decision — nothing invented."""
+        ended = {"cancelled": "the question was cancelled",
+                 "expired": "the question expired unanswered",
+                 "unattended": "nobody was there to answer"}
+        names = [entry.get("decision", "") for entry in payload.get("decisions", [])] \
+            or [payload.get("decision", "")]
+        listed = "\n".join(f"- {name}" for name in names if name)
+        prior = [str(item) for item in payload.get("prior_changes") or [] if str(item)]
+        if prior:
+            changed = "\n".join(f"- {item}" for item in prior)
+            tail = ("Work already completed earlier in this turn, before the "
+                    f"decision became known, is preserved:\n{changed}\n"
+                    "No further work depending on the decision was done, and no "
+                    "default was chosen.")
+        else:
+            tail = "Nothing depending on it was done, and no default was chosen."
+        return (f"Stopped: a decision is needed before this can continue "
+                f"({ended.get(payload.get('outcome', ''), 'no answer was given')}).\n"
+                f"{listed}\n{tail}")
+
+    def _advance_ledger(self, step: int) -> None:
+        try:
+            if self.tool_context is not None:
+                self.tool_context.evidence.step = step
+        except Exception:
+            pass
+
+    #: Tools whose result is an observation of the repository or the machine.
+    OBSERVERS = frozenset({"read_file", "list_dir", "glob", "grep", "run_shell",
+                           "run_python", "web_fetch", "web_search", "browse"})
+
+    def _record_evidence(self, context: ToolContext, call: ToolCall,
+                         result: ToolResult) -> None:
+        """What one tool result establishes, as the ledger sees it.
+
+        A read, search or command that succeeded is `VERIFIED`, with the
+        path or the command as its source and a fingerprint of what came
+        back. A result that failed, or one the table cannot place, stays
+        `UNKNOWN`: the safe state, because nothing may rest on it. Writes are
+        recorded by the tools themselves through `note_read`; questions and
+        plans are not observations and record nothing here.
+        """
+        try:
+            if call.name in staleness.WRITERS or call.name not in self.OBSERVERS:
+                return
+            book = context.evidence
+            path = str(result.meta.get("path") or call.arguments.get("path") or "")
+            subject = path or self._describe(call)
+            claim_subject = subject
+            if call.name in ("run_shell", "run_python"):
+                full = str(call.arguments.get("command")
+                           or call.arguments.get("code") or "")
+                if full:
+                    # The internal evidence identity needs the whole command: a
+                    # write operator or path past the display summary's cut
+                    # still proves the change (FR-036). `source` keeps the
+                    # bounded description, and the ledger is per-turn and never
+                    # persisted.
+                    claim_subject = full[:2000]
+            claim = f"{call.name} {claim_subject}".strip()
+            if not result.ok:
+                if book.find(claim) is None:
+                    book.unknown(claim)
+                return
+            if path and call.name == "read_file" and context.was_read(context.resolve(path)):
+                return                     # the whole-file read is already recorded
+            source = path if call.name == "read_file" and path else f"{call.name}:{subject}"
+            book.verified(claim, source=source, material=result.content,
+                          reference=f"call {call.id}")
+        except Exception:
+            pass
 
     def _tool_context(self) -> ToolContext:
         # The context is built once and kept — it holds the checkpoint store,
@@ -514,12 +1093,18 @@ class AgentLoop:
 
     def _maybe_compact(self, system_prompt: str, specs: list[ToolSpec]) -> None:
         agent = self.config.agent
+        # The benchmark's comparison strategy: everything is re-sent as it
+        # was, so the cost of the product's context work can be measured
+        # against it. Compaction stays — a request larger than the window is
+        # refused by every provider, and a baseline that cannot finish a task
+        # measures nothing — but nothing below it runs.
+        naive = getattr(agent, "context_strategy", "current") == "naive"
 
         # Before measuring anything. Screenshots are the largest thing in a
         # desktop run's history and the fastest to go stale, and dropping them
         # is exact and free - where compaction is a model call. Doing it first
         # also means the measurement below is of what will actually be sent.
-        gone = self.conversation.forget_old_pictures(
+        gone = 0 if naive else self.conversation.forget_old_pictures(
             getattr(agent, "keep_screenshots", 2))
         if gone:
             self._emit_usage(system_prompt, specs)
@@ -542,7 +1127,7 @@ class AgentLoop:
         # every step would have spent more than it saved. Doing it at the point
         # compaction would happen anyway costs nothing extra, because
         # compaction busts the same cache and pays a model call on top.
-        stale, freed = self.conversation.forget_superseded_reads()
+        stale, freed = (0, 0) if naive else self.conversation.forget_superseded_reads()
         if stale:
             self._note(f"Dropped {stale} file read{'s' if stale > 1 else ''} "
                        f"that later edits had already made out of date "
@@ -553,6 +1138,23 @@ class AgentLoop:
                 # Enough. The history is smaller *and* more accurate, and
                 # nothing was summarised away to get there.
                 return
+
+        # Still under pressure. Before a model call summarises history away,
+        # the budget manager moves retrievable, low-relevance tool results
+        # aside — exact pointers, no summary, nothing lost (FR-096, FR-097).
+        if not naive:
+            head = self.conversation.counter.count(
+                [Message.system(system_prompt)], specs)
+            budget = max(0, int(limit * agent.compact_at) - head)
+            moved, freed = self.conversation.withhold(budget, self.conversation.last_user_text)
+            if moved:
+                self._note(f"Moved {moved} tool result{'s' if moved > 1 else ''} out "
+                           f"of the conversation to stay within the context budget "
+                           f"({freed:,} tokens); each is retrievable.")
+                self._emit_usage(system_prompt, specs)
+                if not self.conversation.needs_compaction(limit, agent.compact_at,
+                                                          system_prompt, specs):
+                    return
 
         removed = self.conversation.compact(self._summarise)
         if removed:
@@ -579,7 +1181,7 @@ class AgentLoop:
         except Exception:
             return
         if block:
-            self.conversation.add(Message.user(block))
+            self._say_internally(block)
 
     def _summarise(self, messages: list[Message]) -> str:
         """Ask the model to write the brief that replaces old history."""
@@ -636,7 +1238,11 @@ class AgentLoop:
 
     def _emit_usage(self, system_prompt: str, specs: list[ToolSpec]) -> None:
         limit = self._window()
-        used = self.conversation.used_tokens(system_prompt, specs)
+        # What the last request actually carried, counted where it was
+        # rendered; a fresh count only when nothing has been sent yet or the
+        # history moved since (compaction, a sweep).
+        used = (self.conversation.last_request_tokens
+                or self.conversation.used_tokens(system_prompt, specs))
         usage = self.conversation.usage
         self.bus.emit(
             Kind.USAGE,
@@ -683,8 +1289,7 @@ class AgentLoop:
             return False
 
         self._note(f"{command} fails — giving it one turn to fix that.")
-        self.conversation.add(
-            Message.user(project.as_correction(command, outcome)))
+        self._say_internally(project.as_correction(command, outcome))
         return True
 
     def _say_if_unverified(self, result: TurnResult) -> None:
@@ -703,8 +1308,65 @@ class AgentLoop:
         if notice:
             self._note(notice)
 
+    def _completion_gate(self, result: TurnResult) -> Any:
+        """Compare the request against what the turn delivered (IP-4).
+
+        Annotate by default; the one blocking case is an explicit completion
+        claim the evidence contradicts. Never persisted.
+        """
+        from . import verify
+
+        try:
+            context = self._tool_context()
+            ledger = context.evidence
+            decisions = getattr(ledger, "decisions", []) or []
+            pending = [decision for decision in decisions
+                       if str(getattr(decision, "state", "")) in ("unresolved", "blocked")]
+            return verify.assess(
+                self._request_text,
+                entries=getattr(ledger, "entries", []) or [],
+                changed_paths=self._written_paths,
+                failures=[(tool, reason) for tool, _key, reason in self._failed],
+                pending=pending,
+                answer=result.text)
+        except Exception:
+            # A gate that cannot reach a verdict annotates nothing and blocks
+            # nothing: it falls back to delivering the answer (FR-127).
+            return verify.Assessment()
+
     def _note(self, text: str) -> None:
         self.bus.emit(Kind.NOTICE, text=text)
+
+    def _end_for_clarification(self, result: TurnResult,
+                               needed: dict[str, Any]) -> TurnResult:
+        """End the turn reporting a decision that is still needed.
+
+        One place, so every path that stops for an unanswered mandatory form
+        reports it the same way: the outcome, the payload, the validation
+        state, the visible message, and no dependent work (FR-018, FR-035,
+        FR-121).
+        """
+        result.stopped = "clarification_required"
+        result.clarification = needed
+        result.measurement.validation_outcome = "clarification_required"
+        result.text = self._needs_a_decision(needed)
+        self._announce_decision(result.text)
+        return result
+
+    def _announce_decision(self, text: str) -> None:
+        """Close the turn with the needed decision as a visible message.
+
+        A clarification-required turn produces no streamed answer of its own,
+        so without this a channel would draw only whatever the model said
+        before it asked and never the decision that stopped it. The message is
+        the turn's own closing text; it adds nothing to the model's history.
+        """
+        if not text:
+            return
+        self._message_id = uuid.uuid4().hex[:12]
+        self.bus.emit(Kind.ASSISTANT_START, id=self._message_id)
+        self.bus.emit(Kind.ASSISTANT_END, text=text, id=self._message_id,
+                      tool_calls=[])
 
     # -- learning --------------------------------------------------------- #
 
@@ -730,7 +1392,8 @@ class AgentLoop:
             return ""
 
         try:
-            self.memory.before_turn(user_text)
+            noticed = self.memory.before_turn(user_text)
+            self._measurement.corrections += len(getattr(noticed, "corrections", []) or [])
         except Exception:
             pass
 
@@ -821,6 +1484,7 @@ class AgentLoop:
                 approvals=approvals,
                 tokens=self.conversation.usage.total,
                 cost_usd=self.conversation.usage.cost_usd,
+                measurement=result.measurement.as_dict(),
             )
         except Exception:
             # Learning is a background nicety; it must never break a turn.

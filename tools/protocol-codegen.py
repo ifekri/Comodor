@@ -214,7 +214,7 @@ def python_source(schema: dict[str, Any]) -> str:
         required = set(node.get("required", []))
         add(f'    "{name}": {{')
         for field, spec in node.get("properties", {}).items():
-            add(f'        "{field}": ({json.dumps(_shape_kind(spec))}, '
+            add(f'        "{field}": ({json.dumps(_shape_kind(spec, defs))}, '
                 f'{field in required}),')
         add("    },")
     add("}")
@@ -229,12 +229,18 @@ def python_source(schema: dict[str, Any]) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def _shape_kind(node: dict[str, Any]) -> str:
+def _shape_kind(node: dict[str, Any], defs: dict[str, Any] | None = None) -> str:
     """A one-word type name the runtime validator understands."""
     if "$ref" in node:
         target = ref_name(node)
-        # An enum behind a reference is still a string on the wire.
-        return "str" if target == "Mode" else target
+        # An enum behind a reference is still a string on the wire — every
+        # one of them, not only `Mode`: a validator told `MessageStatus` or
+        # `ClarificationOutcome` is an object refuses every valid value.
+        referenced = (defs or {}).get(target, {})
+        if target == "Mode" or (referenced.get("type") == "string"
+                                and "enum" in referenced):
+            return "str"
+        return target
     kind = node.get("type")
     return {"string": "str", "integer": "int", "number": "float",
             "boolean": "bool", "array": "list", "object": "dict"}[kind]

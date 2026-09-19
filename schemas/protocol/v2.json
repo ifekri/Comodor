@@ -47,7 +47,7 @@
     "internal_error": "A fault in the core. The message is safe to show; details go to stderr."
   },
   "x-capabilities": {
-    "description": "What each side can do, exchanged at the handshake. A name absent from the list means not supported; a name present that the other side does not know is ignored. Neither side may assume a capability it did not see.",
+    "description": "What each side can do, exchanged at the handshake. A name absent from the list means not supported; a name present that the other side does not know is ignored. Neither side may assume a capability it did not see. `clarification_required` must be advertised by both sides for the `clarification.required` event to be sent: it changes what a finished turn means, and a client that did not ask for it keeps the older meaning.",
     "core": [
       "streaming",
       "questions",
@@ -56,11 +56,13 @@
       "tool_events",
       "tasks",
       "delegates",
-      "usage"
+      "usage",
+      "clarification_required"
     ],
     "client": [
       "questions",
-      "permissions"
+      "permissions",
+      "clarification_required"
     ]
   },
   "x-methods": {
@@ -169,6 +171,7 @@
     "delegate.updated": "DelegateUpdated",
     "question.requested": "QuestionRequest",
     "question.resolved": "QuestionResolved",
+    "clarification.required": "ClarificationRequired",
     "permission.requested": "PermissionRequest",
     "permission.resolved": "PermissionResolved",
     "mode.changed": "ModeChanged",
@@ -827,6 +830,10 @@
           "items": {
             "$ref": "#/$defs/QuestionField"
           }
+        },
+        "origin": {
+          "type": "string",
+          "description": "Where the question came from when it was not the session's own turn — `delegate:<id>` for a background delegate. Optional; a form from the session's own turn carries none."
         }
       },
       "description": "A form the agent is waiting on, as a protocol primitive rather than a numbered list in prose. It carries *several* questions because the agent asks several at once — one round trip rather than four — so a client renders a form, not a prompt."
@@ -852,6 +859,122 @@
         },
         "cancelled": {
           "type": "boolean"
+        }
+      }
+    },
+    "ClarificationOutcome": {
+      "description": "How a mandatory clarification ended without an answer. `cancelled` is an explicit cancellation, decline or dismissal; `expired` is the form's wait running out; `unattended` is nobody being there to answer. This is the clarification lifecycle, carried inside the clarification payload — never a turn outcome, and never the reason a whole turn was cancelled. An answered clarification produces no payload at all.",
+      "type": "string",
+      "enum": [
+        "cancelled",
+        "expired",
+        "unattended"
+      ]
+    },
+    "ClarificationCandidate": {
+      "type": "object",
+      "required": [
+        "label"
+      ],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "description": "One grounded candidate answer to an open decision. Never invented: each traces to the request, the repository or established knowledge."
+    },
+    "ClarificationDecision": {
+      "type": "object",
+      "required": [
+        "id",
+        "decision"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_consulted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "description": "One decision the turn left open."
+    },
+    "ClarificationRequired": {
+      "description": "A turn stopped because a mandatory clarification ended without an answer. `decision`, `candidates`, `evidence_consulted` and `reason` describe the first open decision — enough for the caller to answer it in a later invocation; `decisions` lists every one. `outcome` says how the clarification ended. Sent only to a client that negotiated the `clarification_required` capability: a client that misread it would report a blocked run as a completed one, so an older client never receives it and keeps its existing behaviour.",
+      "type": "object",
+      "required": [
+        "session_id",
+        "turn_id",
+        "kind",
+        "decision",
+        "candidates",
+        "evidence_consulted",
+        "reason"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "clarification_required"
+          ]
+        },
+        "decision": {
+          "type": "string"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ClarificationCandidate"
+          }
+        },
+        "evidence_consulted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ClarificationOutcome"
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ClarificationDecision"
+          }
+        },
+        "prior_changes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional and additive. Work this turn completed before the decision became known: files a writer changed and bounded names of shell operations that changed the filesystem. Those changes are preserved rather than rolled back, and disclosed so a caller never reads the stop as 'the workspace is unchanged'. Absent when nothing was changed before the decision. A bounded description only — never file contents, command text or credentials."
         }
       }
     },
@@ -1233,9 +1356,24 @@
         },
         "multiple": {
           "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Which materiality class required this question — one of the FR-007 classes the decision can change. Optional: a client that does not read it renders exactly as before."
+        },
+        "evidence_consulted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "What the agent already checked before asking — paths read, searches run — so the person is never asked to repeat the agent's own inspection. Optional."
+        },
+        "decision_ref": {
+          "type": "string",
+          "description": "The open decision this question belongs to, stable for the turn. Optional."
         }
       },
-      "description": "One question within a form. `header` is its stable name and is what an answer is matched on — not the position, which would silently reattach every answer if a question were reordered."
+      "description": "One question within a form. `header` is its stable name and is what an answer is matched on — not the position, which would silently reattach every answer if a question were reordered. `reason`, `evidence_consulted` and `decision_ref` are optional and additive: absent, the form is exactly the form an earlier core sent."
     },
     "QuestionAnswer": {
       "type": "object",

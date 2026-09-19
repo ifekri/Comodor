@@ -48,8 +48,10 @@ from .journal import Journal
 __all__ = ["Assembly", "assemble", "CoreService", "Journal", "SessionHandle"]
 
 #: What a client may say it can do. A capability it does not claim is one the
-#: core answers on its behalf rather than waiting on.
-CLIENT_CAPABILITIES = ("questions", "permissions")
+#: core answers on its behalf rather than waiting on — or, for the
+#: clarification-required outcome, one the core does not send, so a client
+#: that never asked for it keeps the older meaning of a finished turn.
+CLIENT_CAPABILITIES = ("questions", "permissions", "clarification_required")
 
 #: The risk tiers by the names a client shows. The engine stores them as an
 #: ordered integer; the wire carries the word, so no client has to know the
@@ -608,15 +610,19 @@ class CoreService:
                     "session_id": handle.id, "level": "error",
                     "text": f"the turn stopped: {problem}"})
             finally:
+                # The turn is made durable before it reads as idle. A client
+                # that sees `busy` false and then asks for the transcript must
+                # find the turn it just watched; clearing the flag first left a
+                # window in which the session looked finished and the store did
+                # not yet hold its last message.
+                try:
+                    self._persist(handle)
+                except Exception:      # pragma: no cover - a failed save is not a hung session
+                    pass
                 with handle._lock:
                     handle.busy = False
                 self._emit(handle, "session.updated",
                            {"session": handle.describe()})
-            # One turn past its end is the turn boundary: the same moment
-            # the terminal saves on, so a session opened from the protocol
-            # and one opened from the terminal both survive a crash with at
-            # most the last line missing.
-            self._persist(handle)
             # And the delivery of any finished background delegates waits
             # for exactly this boundary too.
             try:
@@ -746,8 +752,12 @@ class CoreService:
                             f"{record.get('state', 'done')}"})
             self._emit(handle, "session.updated",
                        {"session": handle.describe()})
+            # A delegate that stopped for a decision hands that decision to
+            # this turn as an open one, so nothing depending on it runs here.
+            carried = [record["clarification"] for record in records
+                       if isinstance(record.get("clarification"), dict)]
             try:
-                handle.assembly.agent.run(text)
+                handle.assembly.agent.run(text, decisions=carried or None)
             except Exception as problem:  # pragma: no cover - defensive
                 self._emit(handle, "notification.created", {
                     "session_id": handle.id, "level": "error",
@@ -840,7 +850,8 @@ class CoreService:
 
     def answer_question(self, request_id: str,
                         answers: list[dict[str, Any]] | None = None,
-                        cancelled: bool = False) -> dict[str, Any]:
+                        cancelled: bool = False,
+                        unattended: bool = False) -> dict[str, Any]:
         handle, request = self._pending(request_id)
         from .. import questions as forms
 
@@ -848,13 +859,23 @@ class CoreService:
         # by a `session.cancel` a moment ago, has already been acted on. Saying
         # "ok" to a second answer would tell a client its reply landed when the
         # agent moved on without it.
-        if not request.answer(forms.CANCELLED if cancelled
-                              else _encode_answer(answers or [])):
+        if not cancelled and not unattended:
+            # Rejected whole, and the form keeps waiting: an unknown option
+            # is never coerced into a known one (FR-026).
+            problem = forms.invalid_answers(
+                forms.decode(request.meta.get("questions") or []),
+                forms.decode_answers(_encode_answer(answers or [])) or [])
+            if problem:
+                raise Refused(problem)
+        reply = (forms.UNATTENDED if unattended
+                 else forms.CANCELLED if cancelled
+                 else _encode_answer(answers or []))
+        if not request.answer(reply):
             handle._pending.pop(request_id, None)
             raise UnknownRequest(request_id)
         handle._pending.pop(request_id, None)
         resolved: dict[str, Any] = {"id": request_id, "session_id": handle.id}
-        if cancelled:
+        if cancelled or unattended:
             resolved["cancelled"] = True
         else:
             resolved["answers"] = list(answers or [])
@@ -966,15 +987,23 @@ class CoreService:
         and a client watching for holes would resynchronise over nothing.
         """
         needed = {"question.requested": "questions",
-                  "permission.requested": "permissions"}.get(name)
+                  "permission.requested": "permissions",
+                  "clarification.required": "clarification_required"}.get(name)
         if needed is None or needed in self.client_capabilities:
             return False
+        if needed == "clarification_required":
+            # Nothing to answer on the client's behalf: the turn has already
+            # stopped. The event is simply not sent to a client that did not
+            # negotiate it, and its `message.completed` stands as before.
+            return True
         request_id = str(params.get("id", ""))
         if not request_id:
             return False
         try:
             if needed == "questions":
-                self.answer_question(request_id, cancelled=True)
+                # Not a cancellation: nobody can answer. The tool reports the
+                # decision as unattended and the turn stops needing it.
+                self.answer_question(request_id, unattended=True)
             else:
                 # The request's own last option, not a hardcoded "deny".
                 #
@@ -1166,8 +1195,61 @@ def _relay(service: CoreService, handle: SessionHandle):
         elif kind is Kind.NOTICE:
             service._emit(handle, "notification.created", {
                 "session_id": session_id, "level": "info", "text": event.text})
+        elif kind is Kind.TURN_END and event.get("stopped") == "clarification_required":
+            _relay_clarification(service, handle, event)
 
     return relay
+
+
+def _relay_clarification(service: CoreService, handle: SessionHandle,
+                         event: Event) -> None:
+    """A turn that stopped for a decision, as the protocol's own primitive.
+
+    Sent under the negotiated `clarification_required` capability (see
+    `_declined`). It carries what a caller needs to answer in a later turn —
+    the decision, its grounded candidates, what was already checked — and
+    `outcome`, which says how the clarification ended. A notification goes
+    out as well, so a client without the capability still sees a sentence.
+    """
+    payload = event.get("clarification")
+    if not isinstance(payload, dict):
+        return
+    body: dict[str, Any] = {
+        "session_id": handle.id,
+        "turn_id": handle.turn_id or handle.id,
+        "kind": "clarification_required",
+        "decision": str(payload.get("decision", "")),
+        "candidates": [
+            {"label": str(entry.get("label", "")),
+             **({"description": str(entry["description"])}
+                if entry.get("description") else {})}
+            for entry in payload.get("candidates") or [] if isinstance(entry, dict)],
+        "evidence_consulted": [str(item) for item in payload.get("evidence_consulted") or []],
+        "reason": str(payload.get("reason", "")),
+    }
+    outcome = str(payload.get("outcome", ""))
+    if outcome in ("cancelled", "expired", "unattended"):
+        body["outcome"] = outcome
+    decisions = [
+        {"id": str(entry.get("id", "")), "decision": str(entry.get("decision", "")),
+         "candidates": [str(c) for c in entry.get("candidates") or []],
+         "evidence_consulted": [str(e) for e in entry.get("evidence_consulted") or []],
+         "reason": str(entry.get("reason", ""))}
+        for entry in payload.get("decisions") or [] if isinstance(entry, dict)]
+    if decisions:
+        body["decisions"] = decisions
+    prior = [str(item) for item in payload.get("prior_changes") or [] if str(item)]
+    if prior:
+        # Work done before the decision became known, so a protocol client is
+        # never told the workspace is unchanged (contracts §C6).
+        body["prior_changes"] = prior
+    service._emit(handle, "clarification.required", body)
+    ended = {"cancelled": "the question was cancelled",
+             "expired": "the question expired unanswered",
+             "unattended": "nobody was there to answer"}.get(outcome, "no answer was given")
+    service._emit(handle, "notification.created", {
+        "session_id": handle.id, "level": "warning",
+        "text": f"Stopped: a decision is needed — {body['decision']} ({ended})."})
 
 
 def _stop_reason(event: Event) -> str:
@@ -1327,8 +1409,12 @@ def _relay_request(service: CoreService, handle: SessionHandle,
     handle._pending[request.id] = request
 
     if request.kind == "questions":
-        service._emit(handle, "question.requested",
-                      _question_shape(handle.id, request))
+        shape = _question_shape(handle.id, request)
+        origin = str(event.get("origin") or "")
+        if origin:
+            # Raised by background work: said so, and named (FR-029).
+            shape["origin"] = origin
+        service._emit(handle, "question.requested", shape)
         return
 
     service._emit(handle, "permission.requested",
@@ -1410,6 +1496,13 @@ def _question_shape(session_id: str, request: Request) -> dict[str, Any]:
                     }
                     for option in question.options
                 ],
+                # Optional and additive (contracts §C1): present only when the
+                # tool set them, so an older form reads back unchanged.
+                **({"reason": question.reason} if question.reason else {}),
+                **({"evidence_consulted": list(question.evidence_consulted)}
+                   if question.evidence_consulted else {}),
+                **({"decision_ref": question.decision_ref}
+                   if question.decision_ref else {}),
             }
             for question in questions
         ],

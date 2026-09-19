@@ -13,8 +13,9 @@ import sys
 import time
 from pathlib import Path
 
-from .report import write
-from .runner import run_task
+from . import baseline, integrity
+from .report import write, write_blocked, write_paired
+from .runner import run_blocked, run_task
 from .task import TaskError, load_tasks
 
 HERE = Path(__file__).resolve().parent
@@ -37,6 +38,27 @@ def main(argv: list[str] | None = None) -> int:
                         help="directory to move failed workspaces into")
     parser.add_argument("--dry-run", action="store_true",
                         help="load every task and print the suite, run nothing")
+    parser.add_argument("--strategy", choices=baseline.STRATEGIES,
+                        default=baseline.CURRENT,
+                        help="the context strategy to measure (default: current)")
+    parser.add_argument("--paired", action="store_true",
+                        help="run every task under both strategies and write the "
+                             "paired baseline report")
+    parser.add_argument("--blocked", action="store_true",
+                        help="run the single-optimization experiment: every "
+                             "configuration in every (task, try) block, in a "
+                             "counterbalanced order (T096); requires --only")
+    parser.add_argument("--checkpoint", default="",
+                        help="with --blocked: the JSONL file to append each "
+                             "attempt to and resume from (default: the label)")
+    parser.add_argument("--learning", action="store_true",
+                        help="switch the learning engine on for every attempt (off "
+                             "by default; each attempt still starts with an empty brain)")
+    parser.add_argument("--without", nargs="*", default=[],
+                        help="context optimizations to switch off, by name "
+                             "(dedup delta budget ranking summary_provenance log_summary)")
+    parser.add_argument("--label", default="",
+                        help="a name for this run, carried into the result files")
     args = parser.parse_args(argv)
 
     _load_env(ROOT / "src" / ".env")
@@ -66,18 +88,63 @@ def main(argv: list[str] | None = None) -> int:
 
     keep = Path(args.keep).resolve() if args.keep else None
 
-    print(f"{len(tasks)} tasks, {args.tries} attempts each, "
-          f"against {args.model} via {args.provider}\n")
-    started = time.monotonic()
-    outcomes = []
-    for index, task in enumerate(tasks, start=1):
-        print(f"[{index}/{len(tasks)}] {task.category}/{task.name}")
-        outcomes.append(run_task(task, provider=args.provider, model=args.model,
-                                 tries=args.tries, keep=keep))
+    # A scenario that has been weakened, shortened or re-labelled compared with
+    # its recorded fingerprint changes what the number means, and a run against
+    # a drifted suite is not a result about the agent. Refuse it here, before
+    # anything is measured, rather than let it reach a report.
+    drift = integrity.check()
+    if not drift.clean:
+        print("bench: benchmark scenarios have drifted from their record:\n"
+              + drift.describe()
+              + "\nRun `python -m bench.integrity record` only after reviewing "
+                "the change.", file=sys.stderr)
+        return 2
 
-    json_file, markdown_file = write(outcomes, HERE / "results",
-                                     provider=args.provider, model=args.model,
-                                     tries=args.tries)
+    if args.blocked:
+        if not args.only:
+            print("bench: --blocked needs an explicit --only cohort so the "
+                  "workload is stated, not inferred", file=sys.stderr)
+            return 2
+        started = time.monotonic()
+        checkpoint = (Path(args.checkpoint) if args.checkpoint
+                      else HERE / "results" / f"{args.label or 'blocked'}.checkpoint.jsonl")
+        run = run_blocked(tasks, provider=args.provider, model=args.model,
+                          tries=args.tries, keep=keep, learning=args.learning,
+                          checkpoint=checkpoint)
+        _, markdown_file = write_blocked(run, HERE / "results", label=args.label)
+        passed = sum(1 for entry in run.attempts if entry.passed)
+        print(f"\n{passed}/{len(run.attempts)} attempts passed "
+              f"({len(run.blocks())} blocks of {len(run.configurations)}) "
+              f"in {(time.monotonic() - started) / 60:.0f} minutes")
+        print(f"{markdown_file}")
+        return 0
+
+    strategies = list(baseline.STRATEGIES) if args.paired else [args.strategy]
+    print(f"{len(tasks)} tasks, {args.tries} attempts each, "
+          f"against {args.model} via {args.provider}, "
+          f"strategy {' and '.join(strategies)}\n")
+    started = time.monotonic()
+    by_strategy: dict[str, list] = {}
+    for strategy in strategies:
+        outcomes = by_strategy.setdefault(strategy, [])
+        for index, task in enumerate(tasks, start=1):
+            print(f"[{strategy}] [{index}/{len(tasks)}] {task.category}/{task.name}",
+                  flush=True)
+            outcomes.append(run_task(task, provider=args.provider, model=args.model,
+                                     tries=args.tries, keep=keep, strategy=strategy,
+                                     learning=args.learning,
+                                     without=tuple(args.without)))
+
+    outcomes = by_strategy[strategies[0]]
+    if args.paired:
+        json_file, markdown_file = write_paired(
+            by_strategy[baseline.CURRENT], by_strategy[baseline.NAIVE],
+            HERE / "results", provider=args.provider, model=args.model,
+            tries=args.tries)
+    else:
+        json_file, markdown_file = write(outcomes, HERE / "results",
+                                         provider=args.provider, model=args.model,
+                                         tries=args.tries, label=args.label)
 
     total = sum(one.passed for one in outcomes)
     of = sum(one.tries for one in outcomes)
@@ -87,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
           f"minutes")
     print(f"{markdown_file}")
 
-    kept = [path for one in outcomes for path in one.kept]
+    kept = [path for group in by_strategy.values() for one in group for path in one.kept]
     if kept:
         print(f"\n{len(kept)} failed workspace(s) kept:")
         for path in kept[:10]:

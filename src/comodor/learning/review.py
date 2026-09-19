@@ -43,15 +43,17 @@ LEARNABLE_STOPS = ("cancelled",)
 
 
 class ReviewResult:
-    """What one review pass produced."""
+    """What one review pass proposed, what stuck, and what was refused."""
 
-    __slots__ = ("facts", "raw", "usage", "accepted")
+    __slots__ = ("facts", "raw", "usage", "accepted", "refused")
 
     def __init__(self) -> None:
         self.facts: list[Fact] = []
         self.raw = ""
         self.usage: Any = None
         self.accepted = 0
+        #: Proposals nothing in the transcript corroborated (FR-056).
+        self.refused: list[Fact] = []
 
     @property
     def empty(self) -> bool:
@@ -155,7 +157,7 @@ class Reviewer:
         with self._lock:
             stale = (generation is not None and generation != self._generation)
         if not stale:
-            result.accepted = self._absorb(result, episode_id)
+            result.accepted = self._absorb(result, episode_id, messages)
         return result
 
     def reserve(self) -> int:
@@ -214,19 +216,39 @@ class Reviewer:
         except Exception:
             return
 
-    def _absorb(self, result: ReviewResult, episode_id: int) -> int:
+    @staticmethod
+    def corroborate(text: str, messages: list) -> tuple[str, str, str]:
+        """What in the transcript backs a proposed fact, or three empty strings."""
+        from .memory import corroborate
+
+        return corroborate(text, messages)
+
+    def _absorb(self, result: ReviewResult, episode_id: int, messages: list) -> int:
         """Offer each proposed fact to the service. Returns how many stuck.
 
         A proposed fact that already exists simply lands as the same fact —
         ``add`` treats a duplicate as a success that changed nothing. When
         staging is on, everything lands as ``staged`` and waits for the
         person; nothing important is written without a human's yes.
+
+        `messages` is this pass's own transcript, passed in rather than held on
+        the reviewer: a newer review may replace an in-flight one, and a shared
+        field would let the older pass overwrite the newer pass's transcript
+        and corroborate its facts against the wrong turn.
         """
         accepted: list[Fact] = []
         for fact in result.facts:
+            # The review's proposal is a model assertion. It is stored only
+            # once the transcript it reviewed corroborates it — the person
+            # said it, or a tool showed it — and refused otherwise (FR-056).
+            provenance, source_ref, fingerprint = self.corroborate(fact.text, messages)
+            if not provenance:
+                result.refused.append(fact)
+                continue
             try:
                 self.service.add(
-                    fact.text, kind=fact.kind, staged=self.staging, origin_episode=episode_id
+                    fact.text, kind=fact.kind, staged=self.staging, origin_episode=episode_id,
+                    provenance=provenance, source_ref=source_ref, fingerprint=fingerprint,
                 )
                 accepted.append(fact)
             except Exception:

@@ -179,7 +179,8 @@ def project_instructions(config: Config) -> str:
 
 
 def build_system_prompt(config: Config, playbook: str = "",
-                        profile: Any = None, tool_bridge: bool = False) -> str:
+                        profile: Any = None, tool_bridge: bool = False,
+                        instructions: str | None = None) -> str:
     """The complete system prompt for one turn.
 
     `profile` is what the model in front of us can actually do. Passing it
@@ -189,6 +190,10 @@ def build_system_prompt(config: Config, playbook: str = "",
     this function assume. `tool_bridge` adds the run_python(tools=true)
     paragraph: it is set by the loop only when its registry actually wired
     one, so the advice is never a promise the tool cannot keep.
+    `instructions` is the project-instructions block already read for this
+    turn: the loop reads the file once at the start of a turn and passes it
+    here every step, so the head cannot change mid-task because somebody
+    saved COMODOR.md while the agent was working (FR-091).
     """
     mode = (config.agent.mode or "act").lower()
     sections = [
@@ -204,7 +209,8 @@ def build_system_prompt(config: Config, playbook: str = "",
             guidance = guidance + "\n" + BRIDGE_ADVICE
         sections.append(guidance)
 
-    instructions = project_instructions(config)
+    if instructions is None:
+        instructions = project_instructions(config)
     if instructions:
         sections.append(instructions)
 

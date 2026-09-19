@@ -58,6 +58,13 @@ def build_transcript(messages: list[Any], goal: str, outcome: str) -> str:
             if calls:
                 lines.append(f"[assistant calls] {calls}")
         elif role == "user":
+            meta = getattr(message, "meta", None) or {}
+            if isinstance(meta, dict) and (meta.get("synthetic") or meta.get("compacted")):
+                # A compaction brief, a completion correction or a plan
+                # restatement is the loop's own text. Shown as `[user]` the
+                # model would read it as something the person said and could
+                # propose it as a durable fact (FR-066).
+                continue
             lines.append(f"[user] {content[:700]}")
 
     text = "\n".join(lines)
@@ -109,6 +116,9 @@ def parse_reflection(text: str, scope: str, source: str = "") -> Reflection:
             confidence = float(entry.get("confidence", 0.5))
         except (TypeError, ValueError):
             confidence = 0.5
+        # No provenance yet: a reflected lesson is the model's own assertion,
+        # and it becomes storable only once the engine corroborates it into
+        # one of the admissible classes (FR-056).
         reflection.lessons.append(Lesson(
             kind=kind,
             scope=scope,

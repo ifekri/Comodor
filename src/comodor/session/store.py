@@ -102,6 +102,53 @@ class SessionStore:
             ],
             "at": time.time(),
         }
+        # A question form, as it was shown and how it ended. Additive: a
+        # record written before this key existed reads back exactly as it
+        # did, and a reader that does not know the key ignores it.
+        form = message.meta.get("question") if message.meta else None
+        if isinstance(form, dict):
+            record["question"] = form
+        # A spill path the conversation was given. Additive, like `question`:
+        # a record written before this key existed reads back unchanged. Kept
+        # so a resumed session still protects the file its pointer names from
+        # pruning (FR-089).
+        spill = message.meta.get("spill") if message.meta else None
+        if isinstance(spill, str) and spill:
+            record["spill"] = spill
+        # Where a USER-role message came from. The loop's own prompts
+        # (compaction brief, completion correction, plan restatement) are
+        # marked; without the mark surviving the round trip a resumed session
+        # would treat model-written text as something the person said, and the
+        # memory tool could persist it as a `user_statement` (FR-066).
+        if message.meta.get("synthetic"):
+            record["synthetic"] = True
+        if message.meta.get("compacted"):
+            record["compacted"] = True
+        # A deduplicated reference or a delta names the earlier full result it
+        # was written against. That link is a promise the content is still in
+        # the conversation, and it is what compaction and the budget manager
+        # protect; without it a resumed session could summarise the base away
+        # and leave the pointer standing for nothing (FR-100, FR-101).
+        for key in ("reference", "delta_base"):
+            value = message.meta.get(key) if message.meta else None
+            if isinstance(value, str) and value:
+                record[key] = value
+        if message.meta.get("delta"):
+            record["delta"] = True
+        # The source a tool message observed: the file it was about and the
+        # fingerprint of what was there. Without them a resumed observation
+        # cannot be tied to a file, so a learned item resting on it could
+        # never be invalidated when that file changes (FR-060, FR-114).
+        for key in ("path", "fingerprint"):
+            value = message.meta.get(key) if message.meta else None
+            if isinstance(value, str) and value:
+                record[key] = value
+        # A withheld result keeps its path and fingerprint but its content is a
+        # retrieval pointer, not the full result. The mark has to survive the
+        # round trip or `_resident()` mistakes the note for a full copy and a
+        # reread is replaced with a reference to content that is not there.
+        if message.meta.get("withheld"):
+            record["withheld"] = True
         with self.path_for(session_id).open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -119,6 +166,25 @@ class SessionStore:
         messages: list[Message] = []
         for record in _read_jsonl(path):
             try:
+                meta: dict[str, Any] = {}
+                if isinstance(record.get("question"), dict):
+                    meta["question"] = record["question"]
+                if isinstance(record.get("spill"), str) and record["spill"]:
+                    meta["spill"] = record["spill"]
+                if record.get("synthetic"):
+                    meta["synthetic"] = True
+                if record.get("compacted"):
+                    meta["compacted"] = True
+                for key in ("reference", "delta_base"):
+                    if isinstance(record.get(key), str) and record[key]:
+                        meta[key] = record[key]
+                if record.get("delta"):
+                    meta["delta"] = True
+                for key in ("path", "fingerprint"):
+                    if isinstance(record.get(key), str) and record[key]:
+                        meta[key] = record[key]
+                if record.get("withheld"):
+                    meta["withheld"] = True
                 messages.append(Message(
                     role=Role(record.get("role", "user")),
                     content=record.get("content", ""),
@@ -129,6 +195,7 @@ class SessionStore:
                     tool_calls=[ToolCall(id=call.get("id", ""), name=call.get("name", ""),
                                          arguments=call.get("arguments") or {})
                                 for call in record.get("tool_calls") or []],
+                    meta=meta,
                 ))
             except (ValueError, TypeError):
                 continue
@@ -183,6 +250,9 @@ class SessionStore:
                     lines += [f"> **{call.name}** "
                               f"`{json.dumps(call.arguments, ensure_ascii=False)[:200]}`", ""]
             elif message.role is Role.TOOL:
+                form = message.meta.get("question") if message.meta else None
+                if isinstance(form, dict):
+                    lines += _question_lines(form)
                 status = "failed" if message.is_error else "ok"
                 body = message.content[:2000]
                 lines += [f"<details><summary>{message.name} ({status})</summary>", "",
@@ -203,6 +273,44 @@ class SessionStore:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
         return target
+
+
+def _question_lines(form: dict[str, Any]) -> list[str]:
+    """A question form in an export: what was asked, what was offered, what
+    came back, and how it ended — as it was, not as the model summarised it.
+
+    Every option the person saw is listed, the write-your-own row included,
+    and a question that was cancelled, expired or unattended says so rather
+    than reading as answered.
+    """
+    outcome = str(form.get("outcome", ""))
+    ended = {"answered": "answered", "cancelled": "cancelled — left unresolved",
+             "expired": "expired — left unresolved",
+             "unattended": "unattended — nobody could answer; left unresolved"}
+    lines = ["### Question", ""]
+    answers = {str(entry.get("header", "")): entry for entry in form.get("answers") or []
+               if isinstance(entry, dict)}
+    for question in form.get("questions") or []:
+        if not isinstance(question, dict):
+            continue
+        lines.append(f"**{question.get('header', '')}** — {question.get('prompt', '')}")
+        for option in question.get("options") or []:
+            if not isinstance(option, dict):
+                continue
+            label = str(option.get("label", ""))
+            note = " *(write your own)*" if option.get("free") else ""
+            lines.append(f"- {label}{note}")
+        given = answers.get(str(question.get("header", "")))
+        chosen = [str(c) for c in (given or {}).get("chosen") or []]
+        written = str((given or {}).get("written") or "").strip()
+        if chosen or written:
+            answer = ", ".join(chosen + ([written] if written else []))
+            lines.append(f"- **Answer:** {answer}")
+        else:
+            lines.append("- **Answer:** none")
+        lines.append("")
+    lines += [f"*Outcome: {ended.get(outcome, outcome or 'unknown')}*", ""]
+    return lines
 
 
 def _read_jsonl(path: Path) -> Iterator[dict[str, Any]]:

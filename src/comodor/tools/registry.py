@@ -289,8 +289,11 @@ class ToolRegistry:
 
         # Bounded here rather than in each tool, so a tool added tomorrow —
         # or one that arrived over MCP and was never written here at all — is
-        # covered by the same rule as the ones that exist today.
-        return overflow.contain(tool.invoke(ctx, args), ctx, name)
+        # covered by the same rule as the ones that exist today. The command
+        # travels too, so the validation-log summary only runs for validation
+        # output and not for a large `git diff` or JSON query (FR-090).
+        command = str(args.get("command") or "") if name in ("run_shell",) else ""
+        return overflow.contain(tool.invoke(ctx, args), ctx, name, command)
 
 
 def _teach(tool: Any, raw: str) -> str:

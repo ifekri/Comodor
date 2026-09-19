@@ -50,7 +50,8 @@ def test_a_decayed_lesson_goes_stale(tmp_path):
     config = _config(tmp_path)
     config.learning.min_confidence = 0.5
     store = _brain(tmp_path)
-    lesson = store.add_lesson(Lesson(trigger="old advice", guidance="do it",
+    lesson = store.add_lesson(Lesson(provenance="user_statement",
+                                     trigger="old advice", guidance="do it",
                                      confidence=0.1, updated_at=time.time() - 90 * 86400))
     report = curator.run(store, config)
     assert any(action.what == "lesson-stale" for action in report.actions)
@@ -61,7 +62,7 @@ def test_a_decayed_lesson_goes_stale(tmp_path):
 
 def test_a_stale_lesson_is_not_recalled(tmp_path):
     store = _brain(tmp_path)
-    lesson = store.add_lesson(Lesson(trigger="unique-widget-advice",
+    lesson = store.add_lesson(Lesson(provenance="user_statement", trigger="unique-widget-advice",
                                      guidance="use the flange"))
     store.connection.execute("UPDATE lessons SET status='stale' WHERE id=?",
                              (lesson.id,))
@@ -74,7 +75,8 @@ def test_a_pinned_lesson_is_never_marked_stale(tmp_path):
     config = _config(tmp_path)
     config.learning.min_confidence = 0.99
     store = _brain(tmp_path)
-    lesson = store.add_lesson(Lesson(trigger="the rule", guidance="keep it",
+    lesson = store.add_lesson(Lesson(provenance="user_statement",
+                                     trigger="the rule", guidance="keep it",
                                      confidence=0.1, pinned=True))
     report = curator.run(store, config)
     assert not any(action.what == "lesson-stale" for action in report.actions)
@@ -87,9 +89,9 @@ def test_a_pinned_lesson_is_never_marked_stale(tmp_path):
 
 def test_duplicate_facts_merge_into_the_older_one(tmp_path):
     store = _brain(tmp_path)
-    first = store.add_fact(Fact(kind="memory", scope="global",
+    first = store.add_fact(Fact(provenance="user_statement", kind="memory", scope="global",
                                 text="The build tool is Bazel.", status="settled"))
-    second = store.add_fact(Fact(kind="memory", scope="global",
+    second = store.add_fact(Fact(provenance="user_statement", kind="memory", scope="global",
                                  text="the build tool is bazel", status="settled"))
     report = curator.run(store, _config(tmp_path))
     assert any(action.what == "fact-merged" and action.target == second.text
@@ -100,9 +102,9 @@ def test_duplicate_facts_merge_into_the_older_one(tmp_path):
 
 def test_distinct_facts_are_left_alone(tmp_path):
     store = _brain(tmp_path)
-    one = store.add_fact(Fact(kind="memory", scope="global",
+    one = store.add_fact(Fact(provenance="user_statement", kind="memory", scope="global",
                               text="The build tool is Bazel.", status="settled"))
-    two = store.add_fact(Fact(kind="memory", scope="global",
+    two = store.add_fact(Fact(provenance="user_statement", kind="memory", scope="global",
                               text="Tests run with pytest.", status="settled"))
     curator.run(store, _config(tmp_path))
     remaining = {fact.id for fact in store.all_facts()}
@@ -111,9 +113,10 @@ def test_distinct_facts_are_left_alone(tmp_path):
 
 def test_a_pinned_fact_is_never_merged_away(tmp_path):
     store = _brain(tmp_path)
-    store.add_fact(Fact(kind="memory", scope="global", text="same words",
+    store.add_fact(Fact(provenance="user_statement",
+                        kind="memory", scope="global", text="same words",
                         status="settled"))
-    pinned = store.add_fact(Fact(kind="memory", scope="global",
+    pinned = store.add_fact(Fact(provenance="user_statement", kind="memory", scope="global",
                                  text="same words again", status="settled",
                                  pinned=True))
     curator.run(store, _config(tmp_path))
@@ -273,7 +276,7 @@ def test_the_report_names_every_transition_with_its_reason(tmp_path):
     usage = UsageStore(skills)
     usage.record_use("deploy")
     store = _brain(tmp_path)
-    store.add_lesson(Lesson(trigger="t", guidance="g", confidence=0.0,
+    store.add_lesson(Lesson(provenance="user_statement", trigger="t", guidance="g", confidence=0.0,
                             updated_at=time.time() - 90 * 86400))
 
     curator.run(store, config, skills_root=skills, cron_prompts=[])

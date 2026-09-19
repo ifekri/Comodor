@@ -231,3 +231,152 @@ def test_two_results_in_the_same_second_do_not_overwrite_each_other(tool_context
     second = overflow.contain(ToolResult.success("2" * 9_000), tool_context, "grep")
 
     assert spilled_path(first.content) != spilled_path(second.content)
+
+
+def test_a_passing_run_that_reports_zero_errors_is_not_a_failure(tool_context):
+    """A summary line naming zero failures is not a failing line.
+
+    A successful build prints "0 errors" or "error(s): 0"; matching the word
+    "error" in one would carry a passing run as a failing one and invite a
+    fix for a problem that does not exist.
+    """
+    from comodor.tools.base import ToolResult
+
+    for summary in ("0 errors", "0 error(s)", "errors: 0", "0 failures",
+                    "failures: 0"):
+        body = "exit 0 in 2s\n" + "\n".join(
+            f"case {n} ok" for n in range(400)) + f"\n{summary}\n"
+        result = ToolResult.success(body, exit_code=0)
+        carried = overflow.contain(result, tool_context, "run_shell")
+        assert carried.meta.get("log") == "passed", summary
+        assert "Failing run" not in carried.content, summary
+
+
+def test_a_real_failure_is_still_a_failure_with_a_zero_elsewhere(tool_context):
+    from comodor.tools.base import ToolResult
+
+    body = ("exit 1 in 2s\n" + "\n".join(f"case {n} ok" for n in range(400))
+            + "\nFAILED tests/test_x.py::test_y\n0 warnings\n1 failed, 400 passed\n")
+    result = ToolResult.success(body, exit_code=1)
+    carried = overflow.contain(result, tool_context, "run_shell")
+    assert carried.meta.get("log") == "failed"
+    assert "test_y" in carried.content
+
+
+# --------------------------------------------------------------------------- #
+# the pointer survives a resume (FR-089)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_spilled_pointer_survives_a_session_round_trip(tmp_path):
+    """The path a withheld result names is kept with the message, so a
+    reopened session can still protect the file from pruning."""
+    from comodor.providers.base import Message
+    from comodor.session.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    message = Message.tool("c1", "run_shell", "head and tail only")
+    message.meta["spill"] = str(tmp_path / "spill" / "run_shell-abc.txt")
+    store.append("s1", message)
+
+    restored = store.load("s1")
+    assert restored[0].meta["spill"] == str(tmp_path / "spill" / "run_shell-abc.txt")
+
+
+def test_a_resumed_pointer_is_registered_with_the_tool_context(config, bus, tmp_path):
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.providers.base import Message
+    from comodor.providers.fake import Script
+    from comodor.providers.gateway import Gateway
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+
+    spill = str(tmp_path / "spill" / "run_shell-abc.txt")
+    conversation = Conversation()
+    message = Message.tool("c1", "run_shell", "head and tail only")
+    message.meta["spill"] = spill
+    conversation.add(message)
+    agent = AgentLoop(config, Gateway(config, scripts=[Script(text="never")]),
+                      ToolRegistry(), bus, PermissionEngine(config, bus),
+                      conversation)
+
+    agent._open_ledger("carry on")
+
+    assert spill in agent._tool_context().spilled, \
+        "a restored pointer is what keeps its file from being pruned"
+
+
+def test_a_change_only_in_the_omitted_middle_is_not_an_unchanged_reread(tool_context):
+    """Deduplication compares the *whole* observed content, not the shortened
+    head and tail it kept: a change in the omitted middle must invalidate the
+    old copy (FR-101)."""
+    from comodor.agent.context import Conversation
+    from comodor.providers.base import Message
+    from comodor.tools.base import ToolResult
+
+    target = tool_context.config.paths.project / "big.py"
+
+    def carried(middle: str):
+        content = "H" * 7000 + middle * 5000 + "T" * 7000
+        target.write_text(content, encoding="utf-8")
+        return overflow.contain(
+            ToolResult.success(content, path=str(target)),
+            tool_context, "read_file")
+
+    first, second = carried("A"), carried("B")
+    assert first.content == second.content, \
+        "same visible head and tail, and the same pointer to the original"
+    assert first.meta["content_fingerprint"] != second.meta["content_fingerprint"]
+
+    conversation = Conversation()
+    for index, result in enumerate((first, second), start=1):
+        message = Message.tool(call_id=f"c{index}", name="read_file",
+                               content=result.content)
+        message.meta["path"] = "big.py"
+        message.meta["content_fingerprint"] = result.meta["content_fingerprint"]
+        conversation.admit(message, path="big.py")
+
+    assert "reference" not in conversation.messages[-1].meta, \
+        "a middle-only change was misread as an unchanged reread"
+
+
+
+def test_a_large_data_command_is_not_collapsed_as_a_passing_run(tool_context):
+    """A big `git diff` is data, not a validation run: it is not reduced to
+    "Passing run" (FR-090)."""
+    from comodor.tools.base import ToolResult
+
+    body = "diff --git a/x b/x\n" + "\n".join(f"+line {n}" for n in range(2000))
+    result = ToolResult.success(body, exit_code=0)
+
+    carried = overflow.contain(result, tool_context, "run_shell", "git diff")
+
+    assert carried.meta.get("log") is None
+    assert "Passing run" not in carried.content
+
+
+def test_a_validation_command_is_still_collapsed(tool_context):
+    from comodor.tools.base import ToolResult
+
+    body = ("exit 0 in 2s\n"
+            + "\n".join(f"tests/t.py::test_{n} PASSED" for n in range(400))
+            + "\n400 passed in 3.2s\n")
+    result = ToolResult.success(body, exit_code=0)
+
+    carried = overflow.contain(result, tool_context, "run_shell", "python -m pytest -q")
+
+    assert carried.meta.get("log") == "passed"
+
+
+def test_a_toolchain_run_command_is_not_treated_as_validation(tool_context):
+    """`go run dump.go` prints data; only a validation subcommand is a run
+    (FR-090)."""
+    from comodor.tools.base import ToolResult
+
+    body = "data line\n" * 400
+    result = ToolResult.success(body, exit_code=0)
+
+    carried = overflow.contain(result, tool_context, "run_shell", "go run dump.go")
+
+    assert carried.meta.get("log") is None
+    assert "Passing run" not in carried.content

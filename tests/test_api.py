@@ -378,3 +378,139 @@ def test_a_user_step_cap_is_not_overridden(config):
     config.agent.max_steps = 40
     Server(config, host="127.0.0.1", port=0)
     assert config.agent.max_steps == 40
+
+
+# --------------------------------------------------------------------------- #
+# a clarification is not a normal completion (T132; contracts §C4)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_envelope_uses_only_standard_finish_reasons():
+    """A clarification-required turn is a standard `stop` on the
+    OpenAI-compatible envelope; the distinct state rides the extension block
+    (contracts §C4; FR-123)."""
+    from comodor.api.server import _finish_reason
+
+    assert _finish_reason({"stopped": "clarification_required"}) == "stop"
+    assert _finish_reason({"stopped": "done"}) == "stop"
+    assert _finish_reason({"stopped": "max_steps"}) == "length"
+    assert _finish_reason({"stopped": "budget"}) == "length"
+    assert _finish_reason({"stopped": "timeout"}) == "length"
+
+
+def _a_clarification_talk():
+    class FakeTalk:
+        id = "api-test"
+
+        def run(self, text, prior=None, mode="", patience=600.0):
+            return {"text": "A decision is needed.", "steps": 1,
+                    "stopped": "clarification_required", "result": None,
+                    "clarification": {"kind": "clarification_required",
+                                      "decision": "Which database?",
+                                      "outcome": "unattended"}}
+
+    return FakeTalk()
+
+
+def test_a_clarification_keeps_the_standard_envelope_and_the_extension(server, monkeypatch):
+    _setup(server.config)
+    monkeypatch.setattr(server.map, "for_session",
+                        lambda presented: _a_clarification_talk())
+    status, body = _post(f"http://127.0.0.1:{server.port}/v1/chat/completions",
+                         server.token,
+                         {"messages": [{"role": "user", "content": "go"}]})
+
+    assert status == 200
+    assert body["choices"][0]["finish_reason"] == "stop"
+    assert body["comodor"]["stopped"] == "clarification_required"
+    assert body["comodor"]["clarification"]["outcome"] == "unattended"
+
+
+def test_a_streaming_clarification_also_ends_on_a_standard_finish(server, monkeypatch):
+    import urllib.request
+
+    _setup(server.config)
+    monkeypatch.setattr(server.map, "for_session",
+                        lambda presented: _a_clarification_talk())
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{server.port}/v1/chat/completions",
+        data=json.dumps({"messages": [{"role": "user", "content": "go"}],
+                         "stream": True}).encode("utf-8"),
+        headers={"Authorization": f"Bearer {server.token}",
+                 "Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(request, timeout=10) as answer:
+        wire = answer.read().decode("utf-8")
+
+    frames = [line[6:] for line in wire.split("\n\n") if line.startswith("data: ")]
+    parsed = [json.loads(frame) for frame in frames[:-1]]
+    assert parsed[-1]["choices"][0]["finish_reason"] == "stop"
+    assert parsed[-1]["comodor"]["stopped"] == "clarification_required"
+
+
+def test_the_api_session_bridge_carries_the_clarification_outcome():
+    """The turn outcome and the nested `clarification.outcome` both survive
+    `session_map._outcome` intact and un-collapsed."""
+    from comodor.api.session_map import Talk
+
+    class _Session:
+        def state(self):
+            return {}
+
+    bridge = object.__new__(Talk)
+    bridge.session = _Session()
+    body = bridge._outcome(["", "Still needed."], 2, "clarification_required",
+                           {"kind": "clarification_required",
+                            "decision": "Which database?",
+                            "outcome": "expired"})
+    assert body["stopped"] == "clarification_required"
+    assert body["clarification"]["outcome"] == "expired"
+    assert body["steps"] == 2
+
+
+def test_a_normal_turn_has_no_clarification_block():
+    from comodor.api.session_map import Talk
+
+    class _Session:
+        def state(self):
+            return {}
+
+    bridge = object.__new__(Talk)
+    bridge.session = _Session()
+    body = bridge._outcome(["done"], 1, "done", None)
+    assert "clarification" not in body
+
+
+def test_the_api_session_bridge_carries_the_completion_annotation():
+    """The gate's annotation survives `session_map._outcome` so an API client
+    cannot read a partial answer as an unqualified completion (FR-037)."""
+    from comodor.api.session_map import Talk
+
+    class _Session:
+        def state(self):
+            return {}
+
+    bridge = object.__new__(Talk)
+    bridge.session = _Session()
+    annotation = "Not everything the request asked for was delivered:\n  - a config file"
+    body = bridge._outcome(["partial"], 1, "done", None, annotation)
+
+    assert body["annotation"] == annotation
+    assert "annotation" not in bridge._outcome(["done"], 1, "done", None, "")
+
+
+def test_the_api_session_bridge_carries_prior_changes():
+    """`prior_changes` survives `session_map._outcome` with the clarification
+    payload, so an API client sees work done before the decision (contracts §C6)."""
+    from comodor.api.session_map import Talk
+
+    class _Session:
+        def state(self):
+            return {}
+
+    bridge = object.__new__(Talk)
+    bridge.session = _Session()
+    body = bridge._outcome(["stopped"], 2, "clarification_required",
+                           {"kind": "clarification_required", "decision": "Which database?",
+                            "outcome": "cancelled", "prior_changes": ["db.py"]})
+
+    assert body["clarification"]["prior_changes"] == ["db.py"]

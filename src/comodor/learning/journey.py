@@ -93,6 +93,22 @@ class Journey:
         return tally
 
 
+def _origin(provenance: str, source_ref: str) -> str:
+    """How an item came to be known, for the row that shows it (FR-061)."""
+    if not provenance:
+        return " · origin unrecorded"
+    ref = _clip(source_ref, 40)
+    return f" · {provenance}" + (f" ({ref})" if ref else "")
+
+
+def _status(lifecycle: str, superseded_by: int) -> str:
+    if lifecycle in ("", "active"):
+        return ""
+    if lifecycle == "superseded" and superseded_by:
+        return f", superseded by #{superseded_by}"
+    return f", {lifecycle}"
+
+
 def _clip(text: str, limit: int = 90) -> str:
     text = " ".join((text or "").split())
     if len(text) <= limit:
@@ -110,7 +126,8 @@ def build(store: BrainStore, scope: str = "") -> Journey:
             text=_clip(lesson.text),
             detail=(f"{lesson.kind} · confidence {lesson.confidence:.2f}"
                     + (f", {lesson.wins} win(s)" if lesson.wins else "")
-                    + ("" if lesson.status == "active" else f", {lesson.status}")),
+                    + _origin(lesson.provenance, lesson.source_ref)
+                    + _status(lesson.status, lesson.superseded_by)),
             node_id=f"lesson:{lesson.id}"))
 
     for rule in store.all_rules():
@@ -119,7 +136,9 @@ def build(store: BrainStore, scope: str = "") -> Journey:
             text=_clip(rule.statement or rule.key),
             detail=(f"{rule.key} · {rule.support} agreeing observation(s)"
                     + (f", {rule.against} against" if rule.against else "")
-                    + ("" if rule.active else ", disabled")),
+                    + ("" if rule.active else ", disabled")
+                    + _origin(rule.provenance, rule.source_ref)
+                    + _status(rule.lifecycle, rule.superseded_by)),
             node_id=f"rule:{rule.id}"))
 
     for skill in store.all_skills():
@@ -136,7 +155,9 @@ def build(store: BrainStore, scope: str = "") -> Journey:
             text=_clip(fact.text),
             detail=(f"{fact.kind} · origin episode #{fact.origin_episode}"
                     if fact.origin_episode else f"{fact.kind}")
-            + ("" if fact.status == "settled" else f", {fact.status}"),
+            + ("" if fact.status == "settled" else f", {fact.status}")
+            + _origin(fact.provenance, fact.source_ref)
+            + _status(fact.lifecycle, fact.superseded_by),
             node_id=f"fact:{fact.id}"))
 
     events.sort(key=lambda event: event.when)

@@ -19,13 +19,44 @@
  * and by `orphan.test.ts` beside this file.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
 
 import { CoreClient, type Transport } from "@comodor/client";
 import { PROTOCOL_VERSION, response, event } from "@comodor/protocol";
 
 import { App } from "../../src/App.tsx";
+
+// --------------------------------------------------------------------------- //
+// One renderer per test, and every one of them is torn down.
+//
+// `testRender` starts a real `CliRenderer` with its own render loop and native
+// resources. A test that walks away from it leaves that loop running, and the
+// leaked renderers accumulate across the suite — by the last workbench tests
+// the event loop is busy enough that the final projection has not painted when
+// `waitForFrame` returns, so a test that is correct on its own fails under a
+// loaded runner. The teardown below is what keeps the suite's cost flat.
+// --------------------------------------------------------------------------- //
+
+const liveRenderers: Array<{
+  renderer: { destroy: () => void };
+  client: { close: () => Promise<void> | void };
+}> = [];
+
+afterEach(() => {
+  for (const made of liveRenderers.splice(0)) {
+    try {
+      void made.client.close();
+    } catch {
+      /* already closed */
+    }
+    try {
+      made.renderer.destroy();
+    } catch {
+      /* already destroyed */
+    }
+  }
+});
 
 // --------------------------------------------------------------------------- //
 // a core, in memory
@@ -323,6 +354,10 @@ async function screen(width = 100, height = 30,
   // — its floor notice is the readiness sign there.
   await rendered.waitForFrame((frame) =>
     frame.includes("project") || frame.includes("Too small"));
+
+  // Torn down by the `afterEach` above; registered here so every exit path —
+  // including a failing assertion — still destroys the renderer.
+  liveRenderers.push({ renderer: rendered.renderer, client });
 
   return {
     ...rendered,
@@ -2046,9 +2081,9 @@ describe("permissions", () => {
         detail: Array.from({ length: 12 }, (_each, at) => `output line ${at}`).join("\n"),
       });
       // One macrotask is not a paint: on a slow macOS runner the frame was
-      // captured with the card still on its way. Wait for it, as the other
-      // permission tests do.
-      await view.waitForFrame((frame) => frame.includes("[Deny]"));
+      // captured with the card still on its way. The wall-clock wait is the
+      // tool this file uses for a card arriving from an event.
+      await waitForText(view, "[Deny]");
 
       const frame = view.frame();
       for (const row of frame.split("\n")) {
@@ -2092,9 +2127,11 @@ describe("permissions", () => {
       detail: "$ npm test — پوشهٔ build",
     });
 
-    // The card is waited for, not assumed after one yield: on a loaded
-    // runner the frame was captured with the card still on its way.
-    const frame = await view.waitForFrame((frame) => frame.includes("[Deny]"));
+    // The card is waited for, not assumed after one yield. `waitForFrame` ends
+    // as soon as the renderer goes quiet, which a card arriving from an event
+    // can do before React has committed it; the wall-clock wait is the tool
+    // this file uses for that flow, and the assertion is the same.
+    const frame = await waitForText(view, "[Deny]");
     expect(frame).toContain("اجازه");
     expect(frame).toContain("[Deny]");
     view.client.close();
@@ -3504,4 +3541,135 @@ describe("what the conversation has cost", () => {
     expect(frame).toContain("$0.05");
     view.client.close();
   });
+});
+
+// -------------------------------------------------------------------------- //
+// the question overlay at every width, characterized (spec 002, T008)
+// -------------------------------------------------------------------------- //
+//
+// Pinned before the form gains optional `reason` / `evidence_consulted`
+// fields: at every width the suite cares about the free row is visible, the
+// position marker says which question is showing, nothing spills past the
+// edge, and the keyboard reaches every option including the free row
+// (FR-031, SC-008). No behaviour is changed here.
+
+describe("the question overlay at every width", () => {
+  const form = {
+    id: "ask-w",
+    session_id: "s1",
+    title: "2 questions before I start",
+    questions: [
+      { header: "Database", prompt: "Which database should this use?", multiple: false,
+        options: [
+          { id: "SQLite", label: "SQLite", description: "one file, no server" },
+          { id: "PostgreSQL", label: "PostgreSQL", description: "a server to run" },
+          { id: "Something else", label: "Something else", free: true },
+        ] },
+      { header: "Languages", prompt: "Which languages?", multiple: true,
+        options: [
+          { id: "Python", label: "Python" },
+          { id: "Go", label: "Go" },
+          { id: "Something else", label: "Something else", free: true },
+        ] },
+    ],
+  };
+
+  for (const width of [160, 120, 100, 80, 60]) {
+    test(`${width} columns: the free row and the position marker are visible`, async () => {
+      const view = await screen(width, 30);
+      view.core.push(event("question.requested", form as never));
+      await view.waitForFrame((frame) => frame.includes("Which database"));
+
+      const frame = view.frame();
+      expect(frame).toContain("Something else");
+      expect(frame).toContain("1 of 2");
+      for (const row of frame.split("\n")) {
+        expect(row.length).toBeLessThanOrEqual(width);
+      }
+      view.client.close();
+    });
+
+    test(`${width} columns: the keyboard reaches the free row`, async () => {
+      const view = await screen(width, 30);
+      view.core.push(event("question.requested", form as never));
+      await view.waitForFrame((frame) => frame.includes("Which database"));
+
+      // Down twice lands on the write-your-own row; space opens the field.
+      view.mockInput.pressArrow("down");
+      view.mockInput.pressArrow("down");
+      view.mockInput.pressKey(" ");
+      await view.waitForFrame((frame) => frame.includes("▌"));
+      expect(view.frame()).toContain("(*) Something else");
+      view.client.close();
+    });
+
+    test(`${width} columns: the keyboard walks to the second question`, async () => {
+      const view = await screen(width, 30);
+      view.core.push(event("question.requested", form as never));
+      await view.waitForFrame((frame) => frame.includes("Which database"));
+
+      view.mockInput.pressArrow("right");
+      await view.waitForFrame((frame) => frame.includes("Which languages?"));
+      expect(view.frame()).toContain("2 of 2");
+      expect(view.frame()).toContain("Something else");
+      view.client.close();
+    });
+  }
+});
+
+// -------------------------------------------------------------------------- //
+// why a question is asked, on the card (spec 002, T052; FR-031, FR-034)
+// -------------------------------------------------------------------------- //
+
+describe("the question card says why and what was checked", () => {
+  const explained = {
+    id: "ask-g",
+    session_id: "s1",
+    title: "One question",
+    questions: [
+      { header: "Database", prompt: "Which database should this use?", multiple: false,
+        reason: "architecture",
+        evidence_consulted: ["settings.py", "README.md"],
+        options: [
+          { id: "SQLite", label: "SQLite" },
+          { id: "PostgreSQL", label: "PostgreSQL" },
+          { id: "Something else", label: "Something else", free: true },
+        ] },
+    ],
+  };
+  const bare = {
+    ...explained, id: "ask-b",
+    questions: [{ header: "Database", prompt: "Which database should this use?",
+                  multiple: false, options: explained.questions[0]!.options }],
+  };
+
+  for (const width of [160, 120, 100, 80, 60]) {
+    test(`${width} columns: the grounds line is drawn and nothing spills`, async () => {
+      const view = await screen(width, 30);
+      view.core.push(event("question.requested", explained as never));
+      await view.waitForFrame((frame) => frame.includes("Which database"));
+      const frame = view.frame();
+      expect(frame).toContain("needed for: architecture");
+      expect(frame).toContain("checked: settings.py");
+      expect(frame).toContain("Something else");
+      for (const row of frame.split("\n")) {
+        expect(row.length).toBeLessThanOrEqual(width);
+      }
+      // The keyboard still reaches the options: down then space chooses.
+      view.mockInput.pressArrow("down");
+      view.mockInput.pressKey(" ");
+      await view.waitForFrame((f) => f.includes("(*) PostgreSQL"));
+      view.client.close();
+    });
+
+    test(`${width} columns: an older core's form draws no grounds line`, async () => {
+      const view = await screen(width, 30);
+      view.core.push(event("question.requested", bare as never));
+      await view.waitForFrame((frame) => frame.includes("Which database"));
+      const frame = view.frame();
+      expect(frame).not.toContain("needed for");
+      expect(frame).not.toContain("checked:");
+      view.client.close();
+    });
+  }
 });

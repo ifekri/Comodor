@@ -44,6 +44,7 @@ export const EVENTS = [
   "delegate.updated",
   "question.requested",
   "question.resolved",
+  "clarification.required",
   "permission.requested",
   "permission.resolved",
   "mode.changed",
@@ -78,10 +79,12 @@ export const CORE_CAPABILITIES = [
   "tasks",
   "delegates",
   "usage",
+  "clarification_required",
 ] as const;
 export const CLIENT_CAPABILITIES = [
   "questions",
   "permissions",
+  "clarification_required",
 ] as const;
 
 export const MODES = [
@@ -383,6 +386,7 @@ export interface QuestionRequest {
   session_id: string;
   title: string;
   questions: Array<QuestionField>;
+  origin?: string;
 }
 
 export interface QuestionResolved {
@@ -390,6 +394,52 @@ export interface QuestionResolved {
   session_id: string;
   answers?: Array<QuestionAnswer>;
   cancelled?: boolean;
+}
+
+/** How a mandatory clarification ended without an answer. `cancelled` is an explicit cancellation, decline or dismissal; `expired` is the form's wait running out; `unattended` is nobody being there to answer. This is the clarification lifecycle, carried inside the clarification payload — never a turn outcome, and never the reason a whole turn was cancelled. An answered clarification produces no payload at all. */
+export type ClarificationOutcome = "cancelled" | "expired" | "unattended";
+
+/**
+ * One grounded candidate answer to an open decision. Never invented: each
+ * traces to the request, the repository or established knowledge.
+ */
+export interface ClarificationCandidate {
+  label: string;
+  description?: string;
+}
+
+/**
+ * One decision the turn left open.
+ */
+export interface ClarificationDecision {
+  id: string;
+  decision: string;
+  candidates?: Array<string>;
+  evidence_consulted?: Array<string>;
+  reason?: string;
+}
+
+/**
+ * A turn stopped because a mandatory clarification ended without an answer.
+ * `decision`, `candidates`, `evidence_consulted` and `reason` describe the
+ * first open decision — enough for the caller to answer it in a later
+ * invocation; `decisions` lists every one. `outcome` says how the
+ * clarification ended. Sent only to a client that negotiated the
+ * `clarification_required` capability: a client that misread it would
+ * report a blocked run as a completed one, so an older client never
+ * receives it and keeps its existing behaviour.
+ */
+export interface ClarificationRequired {
+  session_id: string;
+  turn_id: string;
+  kind: "clarification_required";
+  decision: string;
+  candidates: Array<ClarificationCandidate>;
+  evidence_consulted: Array<string>;
+  reason: string;
+  outcome?: ClarificationOutcome;
+  decisions?: Array<ClarificationDecision>;
+  prior_changes?: Array<string>;
 }
 
 export interface AnswerParams {
@@ -535,13 +585,18 @@ export interface Error_ {
 /**
  * One question within a form. `header` is its stable name and is what an
  * answer is matched on — not the position, which would silently reattach
- * every answer if a question were reordered.
+ * every answer if a question were reordered. `reason`, `evidence_consulted`
+ * and `decision_ref` are optional and additive: absent, the form is exactly
+ * the form an earlier core sent.
  */
 export interface QuestionField {
   header: string;
   prompt: string;
   options: Array<QuestionOption>;
   multiple: boolean;
+  reason?: string;
+  evidence_consulted?: Array<string>;
+  decision_ref?: string;
 }
 
 /**
