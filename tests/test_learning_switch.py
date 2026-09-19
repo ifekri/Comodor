@@ -19,6 +19,7 @@ import pytest
 
 from comodor.agent import AgentLoop, Conversation
 from comodor.learning import LearningEngine
+from comodor.learning.store import Signal
 from comodor.providers.fake import Script
 from comodor.providers.gateway import Gateway
 from comodor.safety import PermissionEngine
@@ -62,12 +63,85 @@ def test_with_learning_off_no_durable_write_occurs_from_any_automatic_path(confi
         agent.run("no, I said tabs")
         engine.on_undo(["a.py"])
         engine.wait_for_reflection(timeout=5.0)
+        # The writer commits in batches; drain it so this asserts what was
+        # *queued*, not how quickly the background thread happened to run.
+        engine.store.flush()
         after = _row_counts(config.paths.brain_db)
         assert after == before, {k: (before.get(k), after.get(k))
                                  for k in after if after.get(k) != before.get(k)}
         assert engine.recall("indentation") == []
     finally:
         engine.close()
+
+
+def _signals(path: Path) -> int:
+    return _row_counts(path).get("signals", 0)
+
+
+def test_learning_off_on_undo_queues_no_signal(config, bus):
+    """The undo path is an automatic learning path, so the switch covers it:
+    with learning off, no undo signal is queued at all (FR-064)."""
+    config.learning.enabled = False
+    engine = LearningEngine(config, bus)
+    try:
+        before = _signals(config.paths.brain_db)
+        engine.on_undo(["a.py"])
+        engine.store.flush()                    # deterministic: drain the writer
+        assert _signals(config.paths.brain_db) == before
+        assert engine.store.recent_signals("undo") == []
+    finally:
+        engine.close()
+
+
+def test_corrections_off_on_undo_queues_no_signal(config, bus):
+    """The `corrections` switch governs the undo path too (FR-064)."""
+    config.learning.enabled = True
+    config.learning.corrections = False
+    engine = LearningEngine(config, bus)
+    try:
+        before = _signals(config.paths.brain_db)
+        engine.on_undo(["a.py"])
+        engine.store.flush()
+        assert _signals(config.paths.brain_db) == before
+        assert engine.store.recent_signals("undo") == []
+    finally:
+        engine.close()
+
+
+def test_an_enabled_undo_records_its_signal(config, bus):
+    """The guard is not a blanket refusal: with learning and corrections on, a
+    legitimate undo still records its signal (FR-109)."""
+    config.learning.enabled = True
+    config.learning.corrections = True
+    engine = LearningEngine(config, bus)
+    try:
+        before = _signals(config.paths.brain_db)
+        engine.on_undo(["a.py"])
+        engine.store.flush()
+        assert _signals(config.paths.brain_db) == before + 1
+        assert [signal.kind for signal in engine.store.recent_signals("undo")] \
+            == ["undo"]
+    finally:
+        engine.close()
+
+
+def test_learning_off_still_reads_what_was_learned_before(config, bus):
+    """Off stops automatic writes, not reads: what was learned before stays
+    inspectable, as the `LearningConfig.enabled` contract promises."""
+    writer = LearningEngine(config, bus)
+    try:
+        writer.store.add_signal(Signal(kind="undo", session_id="s", subject="a.py"))
+        writer.store.flush()
+    finally:
+        writer.close()
+
+    config.learning.enabled = False
+    reader = LearningEngine(config, bus)
+    try:
+        assert any(signal.subject == "a.py"
+                   for signal in reader.store.recent_signals("undo"))
+    finally:
+        reader.close()
 
 
 def test_with_learning_off_the_models_memory_tool_cannot_write(config, bus, tool_context):

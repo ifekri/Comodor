@@ -524,6 +524,14 @@ class LearningEngine:
         return outcome
 
     def on_undo(self, paths: list[str]) -> None:
+        """An undo the person made, folded in as a correction.
+
+        It is an automatic learning path like the others, so the switch governs
+        it exactly as it governs `before_turn` and `on_denied`: with learning
+        off, or corrections off, nothing is queued (FR-064).
+        """
+        if not self.config.learning.enabled or not self.config.learning.corrections:
+            return
         self.detector.record_undo(paths)
 
     def on_denied(self, tool: str, subject: str) -> Outcome:
