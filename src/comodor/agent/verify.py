@@ -196,7 +196,8 @@ _MUTATION = re.compile(
 #: to `foo.py` is not a delete of it, and a write is not a rename.
 _DESTRUCTIVE = re.compile(r"(?i)\b(delete|remove)\b")
 _MOVE = re.compile(r"(?i)\b(rename|move)\b")
-_DESTRUCTIVE_COMMAND = re.compile(r"(?i)\b(rm|rmdir|del|erase|unlink|trash)\b")
+#: A `run_python` rename/move, for move evidence. Shell moves go through the
+#: structured scanner below; Python keeps its reviewed text reading.
 _MOVE_COMMAND = re.compile(r"(?i)\b(mv|move|rename|git mv)\b")
 
 #: Tools that only look. Their output cannot satisfy a mutation request, so
@@ -212,14 +213,6 @@ _COMMAND_TOOLS = frozenset({"run_shell", "run_python"})
 #: Tools whose result is a change to a file.
 _WRITER_TOOLS = frozenset({"write_file", "edit_file"})
 
-#: A shell command that writes: a read-only `cat README.md` is not an update.
-#: A copy writes its destination, so `cp`, `copy`, `xcopy` and `robocopy`
-#: are writes too. The learning staleness check reads commands the same way
-#: (`learning/memory.py` imports these), so the two never drift apart.
-_SHELL_MUTATION = re.compile(
-    r"(?i)(\brm\b|\brmdir\b|\bdel\b|\berase\b|\bunlink\b|\bmv\b|\bmove\b|"
-    r"\brename\b|\bcp\b|\bcopy\b|\bxcopy\b|\brobocopy\b|"
-    r"\btee\b|\btruncate\b|\btouch\b|\bsed\s+-i|>>?\s)")
 
 #: A Python statement that writes. `run_python` is not a shell, so the shell
 #: operators do not describe it. An `open()` writes in any mode that can
@@ -265,6 +258,194 @@ def _unquoted(command: str) -> str:
             previous = char
         kept.append("".join(out))
     return "".join(kept)
+
+
+#: Command words that delete, move and write. Recognised only in command
+#: position — never as an argument, so `grep rm foo.py` reads.
+_DELETE_COMMANDS = frozenset({"rm", "rmdir", "del", "erase", "unlink", "trash"})
+_MOVE_COMMANDS = frozenset({"mv", "move", "rename"})
+_WRITE_COMMANDS = frozenset({"cp", "copy", "xcopy", "robocopy", "tee",
+                             "truncate", "touch"})
+#: Prefixes that run the command after them. A bounded set: the wrapper is
+#: skipped and the verb is the next non-option word. `command`/`builtin` are
+#: deliberately absent — `command -v rm` queries rather than deletes.
+_WRAPPERS = frozenset({"env", "sudo", "nohup", "time", "exec"})
+#: Wrapper options that take the following word as their value, by wrapper.
+_WRAPPER_VALUE_OPTIONS = {
+    "sudo": frozenset({"-u", "-g", "-p", "-C", "-D", "-r", "-t", "-U", "-T",
+                       "-R", "--user", "--group", "--prompt", "--chdir",
+                       "--unset", "--set-home"}),
+    "env": frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}),
+}
+#: git global options that take the following word as their value.
+_GIT_VALUE_OPTIONS = frozenset({"-C", "-c", "--git-dir", "--work-tree",
+                                "--namespace", "--exec-path"})
+#: A shell word that is an environment assignment (`KEY=value`).
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+#: The control operators that separate one command from the next.
+_SEGMENT = re.compile(r"[;&|(){}\n]+")
+
+
+@dataclass(frozen=True)
+class ShellOperations:
+    """What one raw shell command does to the filesystem, by operation."""
+
+    writes: bool = False
+    deletes: bool = False
+    moves: bool = False
+
+
+def _effective_command(tokens: list[str]) -> tuple[str, list[str]]:
+    """The command word of a segment, after assignments and simple wrappers.
+
+    `KEY=value rm foo.py`, `env -i rm foo.py` and `sudo -u user rm foo.py` all
+    name `rm`. The verb is taken by basename and lowercased, so `/bin/rm` is
+    `rm`. An unrecognised first word is the verb, whatever it is — the reader
+    does not guess through `xargs`, `find -exec` or nested interpreters.
+    """
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if _ASSIGNMENT.match(token):
+            index += 1
+            continue
+        base = token.rsplit("/", 1)[-1].lower()
+        if base not in _WRAPPERS:
+            return base, tokens[index + 1:]
+        values = _WRAPPER_VALUE_OPTIONS.get(base, frozenset())
+        index += 1
+        while index < len(tokens):
+            following = tokens[index]
+            if _ASSIGNMENT.match(following):
+                index += 1
+                continue
+            if following.startswith("-"):
+                index += 2 if following in values else 1
+                continue
+            break
+    return "", []
+
+
+def _git_subcommand(tokens: list[str]) -> tuple[str, list[str]]:
+    """The git subcommand, after git's own global options."""
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _GIT_VALUE_OPTIONS:
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return token.rsplit("/", 1)[-1].lower(), tokens[index + 1:]
+    return "", []
+
+
+def _is_in_place(token: str) -> bool:
+    """Whether a `sed` argument is the in-place flag (`-i`, `-i.bak`,
+    `--in-place`)."""
+    return token.startswith(("-i", "--in-place"))
+
+
+def _has_output_redirection(masked: str) -> bool:
+    """Whether quote/comment-stripped shell text redirects output to a file.
+
+    A `>` (or `>>`, or `>|`) with something after it that is not `&` is a
+    write: `>file`, `> file`, `2>errors.log`, `>>log`, `1>out`. Descriptor
+    duplication (`2>&1`, `>&2`) and a dangling `>` are not, and an escaped
+    `\\>` is a literal. Input `<`/`<<` never appears here, and quoting and
+    comments were already removed by `_unquoted`.
+    """
+    index = 0
+    length = len(masked)
+    while index < length:
+        if masked[index] != ">":
+            index += 1
+            continue
+        backslashes = 0
+        before = index - 1
+        while before >= 0 and masked[before] == "\\":
+            backslashes += 1
+            before -= 1
+        if backslashes % 2 == 1:          # `a\>b` is a literal `>`
+            index += 1
+            continue
+        after = index + 1
+        if after < length and masked[after] == ">":
+            after += 1
+        if after < length and masked[after] == "|":
+            after += 1
+        if after >= length:               # a dangling `>` redirects nothing
+            index = after
+            continue
+        if masked[after] == "&":          # `2>&1` duplicates a descriptor
+            index = after + 1
+            continue
+        return True
+    return False
+
+
+def shell_operations(command: str) -> ShellOperations:
+    """What a raw shell command does, read as a sequence of command words.
+
+    The command is split on the control operators that separate one command
+    from the next (`;`, `&&`, `||`, `|`, `&`, newlines, subshell brackets) and
+    each segment's effective verb is classified. An operation word in argument
+    position is not an operation: `grep rm foo.py` reads, `printf rename x`
+    prints. Output redirection is detected separately, from the same quote-
+    and comment-stripped text. A form this bounded reader cannot place is left
+    unknown — a false negative, never false evidence.
+    """
+    masked = _unquoted(command or "")
+    writes = deletes = moves = False
+    for segment in _SEGMENT.split(masked):
+        verb, rest = _effective_command(segment.split())
+        if not verb:
+            continue
+        if verb == "git":
+            verb, rest = _git_subcommand(rest)
+        if verb in _DELETE_COMMANDS:
+            deletes = writes = True
+        elif verb in _MOVE_COMMANDS:
+            moves = writes = True
+        elif verb in _WRITE_COMMANDS:
+            writes = True
+        elif verb == "sed" and any(_is_in_place(word) for word in rest):
+            writes = True
+    if _has_output_redirection(masked):
+        writes = True
+    return ShellOperations(writes=writes, deletes=deletes, moves=moves)
+
+
+def shell_writes(command: str) -> bool:
+    """Whether a raw shell command changes the filesystem."""
+    return shell_operations(command).writes
+
+
+def shell_deletes(command: str) -> bool:
+    """Whether a raw shell command deletes a filesystem entry."""
+    return shell_operations(command).deletes
+
+
+def shell_moves(command: str) -> bool:
+    """Whether a raw shell command moves or renames a filesystem entry."""
+    return shell_operations(command).moves
+
+
+def _shell_command(claim: str) -> str:
+    """The raw shell command inside an evidence claim.
+
+    A `run_shell` claim is `<tool> <command>`; some callers carry the display
+    summary instead (`run_shell run: <command>`). Both are stripped
+    deterministically, so `run_shell` and `run:` never take part in command
+    classification.
+    """
+    text = (claim or "").strip()
+    if text.startswith("run_shell"):
+        text = text[len("run_shell"):].lstrip()
+    if text.startswith("run:"):
+        text = text[len("run:"):].lstrip()
+    return text
 
 
 def _python_code(code: str) -> str:
@@ -797,30 +978,30 @@ def command_mutates(command: str, tool: str = "run_shell") -> bool:
     """Whether a shell or Python command changes the filesystem."""
     if tool == "run_python":
         return python_writes(command)
-    return bool(_SHELL_MUTATION.search(_unquoted(command)))
+    return shell_writes(command)
 
 
 def _command_writes(tool: str, claim: str) -> bool:
     """Whether this command tool's command actually writes.
 
-    Python is read as a syntax tree (a write inside a string literal is not
-    a write); shell gets quote- and comment-stripped text (a quoted or
-    commented `>` is not redirection).
+    Python is read as a syntax tree (a write inside a string literal is not a
+    write); shell is read by the shared operation scanner, so an operation word
+    in argument position — `grep rm foo.py` — is not a write.
     """
     if tool == "run_python":
         # The claim is "run_python <code>"; the code is what is parsed.
         _, _, code = claim.partition(" ")
         return python_writes(code)
-    return bool(_SHELL_MUTATION.search(_unquoted(claim)))
+    return shell_writes(_shell_command(claim))
 
 
 def _command_deletes(tool: str, claim: str) -> bool:
     """Whether this command tool's command actually deletes.
 
-    Shell gets the quote- and comment-stripped text pattern; Python gets the
-    syntax tree, so `print('os.remove("foo.py")')` is not a delete. Only a
-    command tool can delete: a `write_file` of `unlink.py` names the word and
-    changes nothing.
+    Python is read as a syntax tree, so `print('os.remove("foo.py")')` is not a
+    delete. Shell is read by the shared operation scanner, so a read-only
+    command that merely names a delete word is not a delete. Only a command
+    tool can delete: a `write_file` of `unlink.py` changes nothing.
     """
     if tool not in _COMMAND_TOOLS:
         return False
@@ -828,7 +1009,21 @@ def _command_deletes(tool: str, claim: str) -> bool:
         # The claim is "run_python <code>"; the code is what is parsed.
         _, _, code = claim.partition(" ")
         return python_deletes(code)
-    return bool(_DESTRUCTIVE_COMMAND.search(_unquoted(claim)))
+    return shell_deletes(_shell_command(claim))
+
+
+def _command_moves(tool: str, claim: str) -> bool:
+    """Whether this command tool's command actually moves or renames.
+
+    Shell moves go through the same operation scanner as writes and deletes,
+    so `grep mv foo.py` is not a move. Python keeps its reviewed text reading.
+    """
+    if tool not in _COMMAND_TOOLS:
+        return False
+    if tool == "run_python":
+        _, _, code = claim.partition(" ")
+        return bool(_MOVE_COMMAND.search(_unquoted(code)))
+    return shell_moves(_shell_command(claim))
 
 
 def _file_operation(element: str, verb: re.Pattern[str]) -> bool:
@@ -940,7 +1135,6 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
             continue
         claim = str(getattr(entry, "claim", "") or "")
         tool = claim.split(" ", 1)[0].strip().lower()
-        command = _unquoted(claim)
         if mutation and tool in _READ_ONLY_TOOLS:
             # The file was read, not changed. Only a change to the artifact —
             # or verified resulting state — delivers a mutation request.
@@ -949,8 +1143,8 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
             # An edit to `foo.py` is not a delete of it; a Python delete is
             # read as code, not as shell text.
             continue
-        if move and (tool not in _COMMAND_TOOLS
-                     or not _MOVE_COMMAND.search(command)):
+        if move and not _command_moves(tool, claim):
+            # A read-only command that merely names a move word is not a move.
             continue
         if mutation and not destructive and not move \
                 and tool not in _WRITER_TOOLS \

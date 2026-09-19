@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
-from ..agent.verify import _SHELL_MUTATION, _unquoted, python_writes
+from ..agent.verify import python_writes, shell_writes
 from ..config import Config
 from ..events import EventBus, Kind
 from ..paths import project_key
@@ -204,7 +204,7 @@ def _written_later(messages: list[Any], index: int, path: str) -> bool:
                     if name == "run_python":
                         if python_writes(command):
                             return True
-                    elif _SHELL_MUTATION.search(_unquoted(command)):
+                    elif shell_writes(command):
                         return True
         elif role == "tool" and str(getattr(later, "name", "") or "") in _WRITER_TOOLS:
             meta = getattr(later, "meta", None) or {}

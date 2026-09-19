@@ -401,6 +401,117 @@ def test_a_destructive_command_delivers_a_delete_request():
     assert assessment.unresolved == []
 
 
+def _shell_ledger(command: str) -> Ledger:
+    """A verified `run_shell` entry in the loop's own claim format."""
+    ledger = Ledger()
+    ledger.verified(f"run_shell {command}", source=f"run_shell:{command}",
+                    material="")
+    return ledger
+
+
+@pytest.mark.parametrize("command", [
+    "grep rm foo.py",
+    "grep -n unlink foo.py",
+    "cat rm foo.py",
+    "sed -n /unlink/p foo.py",
+])
+def test_a_read_only_shell_command_is_not_delete_evidence(command):
+    """An operation word in argument position is not an operation: `grep rm
+    foo.py` reads. False destructive evidence would let a false completion
+    claim pass (review fix; FR-036, FR-116, FR-125)."""
+    assert not verify.shell_deletes(command)
+    assert not verify.command_mutates(command)
+
+    assessment = verify.assess("- delete foo.py",
+                               entries=_shell_ledger(command).entries,
+                               changed_paths=[],
+                               answer="The task is complete. Deleted foo.py.")
+
+    assert assessment.unresolved == ["delete foo.py"]
+    assert assessment.contradicted
+    assert assessment.verdict == "block"
+
+
+@pytest.mark.parametrize("command", ["grep cp foo.py", "printf touch foo.py"])
+def test_a_read_only_shell_command_is_not_a_mutation(command):
+    """`grep cp foo.py` names a write word and writes nothing (review fix)."""
+    assert not verify.shell_writes(command)
+    assert not verify.command_mutates(command)
+
+    assessment = verify.assess("- update foo.py",
+                               entries=_shell_ledger(command).entries,
+                               changed_paths=[],
+                               answer="The task is complete. Updated foo.py.")
+
+    assert assessment.unresolved == ["update foo.py"]
+    assert assessment.verdict == "block"
+
+
+@pytest.mark.parametrize("command", ["grep mv foo.py", "printf rename foo.py"])
+def test_a_read_only_shell_command_is_not_move_evidence(command):
+    """A read-only command that names a move word moves nothing (review fix)."""
+    assert not verify.shell_moves(command)
+
+    assessment = verify.assess("- move foo.py to bar.py",
+                               entries=_shell_ledger(command).entries,
+                               changed_paths=[],
+                               answer="The task is complete. Moved foo.py to bar.py.")
+
+    assert assessment.unresolved == ["move foo.py to bar.py"]
+    assert assessment.verdict == "block"
+
+
+@pytest.mark.parametrize("command", [
+    "rm foo.py", "git rm foo.py", "rmdir build", "unlink foo.py",
+])
+def test_a_delete_command_is_delete_evidence(command):
+    assert verify.shell_deletes(command)
+    assert verify.command_mutates(command)
+
+
+@pytest.mark.parametrize("command", ["mv old.py new.py", "git mv old.py new.py"])
+def test_a_move_command_is_move_evidence(command):
+    assert verify.shell_moves(command)
+    assert verify.command_mutates(command)
+
+
+@pytest.mark.parametrize("command", [
+    "cp source.py target.py", "touch foo.py", "sed -i s/a/b/ foo.py",
+    "tee out.txt", "truncate -s 0 foo.py", "xcopy a b /E", "robocopy a b",
+])
+def test_a_write_command_is_mutation_evidence(command):
+    assert verify.shell_writes(command)
+    assert verify.command_mutates(command)
+
+
+@pytest.mark.parametrize("command", [
+    "echo hi > foo.txt", "echo hi>foo.txt", "echo hi >> foo.txt",
+    "echo hi>>foo.txt", "echo hi 1>foo.txt", "echo err 2>errors.log",
+    "echo err 2>>errors.log",
+])
+def test_an_output_redirection_is_a_mutation(command):
+    assert verify.shell_writes(command)
+    assert verify.command_mutates(command)
+
+
+@pytest.mark.parametrize("command", [
+    "echo hi 2>&1", "echo hi 1>&2", "echo hi >&2", "grep '> ' foo.py",
+    "cat foo.py # > backup", "cat <file", "cat <<EOF",
+])
+def test_a_descriptor_duplication_or_input_is_not_a_mutation(command):
+    assert not verify.shell_writes(command)
+    assert not verify.command_mutates(command)
+
+
+def test_shell_evidence_claim_prefixes_are_stripped():
+    """`run_shell run:` must not take part in command classification."""
+    assert verify._shell_command("run_shell rm foo.py") == "rm foo.py"
+    assert verify._shell_command("run_shell run: rm foo.py") == "rm foo.py"
+    assert verify.shell_deletes(verify._shell_command("run_shell run: rm foo.py"))
+    assert not verify.shell_deletes(
+        verify._shell_command("run_shell run: grep rm foo.py"))
+
+
 def test_a_python_remove_delivers_a_delete_request():
     """`run_python` is read as code, so `os.remove` is delete evidence
     (review fix; FR-036, FR-116)."""
@@ -903,7 +1014,7 @@ def test_copy_commands_are_mutations(command):
 def test_the_learning_staleness_check_reads_commands_as_the_gate_does():
     from comodor.learning import memory as memory_module
 
-    assert memory_module._SHELL_MUTATION is verify._SHELL_MUTATION
+    assert memory_module.shell_writes is verify.shell_writes
     assert memory_module.python_writes is verify.python_writes
 
 

@@ -364,6 +364,41 @@ def test_a_commented_shell_redirection_does_not_supersede_an_observation(tmp_pat
     assert (provenance, ref) == ("tool_confirmed", f"read_file:{target}")
 
 
+def test_a_read_only_shell_command_naming_rm_does_not_supersede(tmp_path):
+    """`grep rm ci.yml` reads the file; naming the word `rm` is not a write, so
+    the observation still stands (review fix; FR-114)."""
+    from comodor.providers.base import ToolCall
+
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    searched = Message.assistant("", [ToolCall(
+        id="c2", name="run_shell", arguments={"command": "grep rm ci.yml"})])
+
+    provenance, ref, _ = memory_module.corroborate(
+        "the CI runner is Linux only", [shown, searched])
+    assert (provenance, ref) == ("tool_confirmed", f"read_file:{target}")
+
+
+def test_a_shell_delete_still_supersedes_an_observation(tmp_path):
+    """`rm ci.yml` is a real write, so the observation is stale (review fix;
+    FR-114)."""
+    from comodor.providers.base import ToolCall
+
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    removed = Message.assistant("", [ToolCall(
+        id="c2", name="run_shell", arguments={"command": "rm ci.yml"})])
+
+    assert memory_module.corroborate(
+        "the CI runner is Linux only", [shown, removed]) == ("", "", "")
+
+
 def _delegate_result(**meta):
     done = Message.tool("d1", "delegate", "Its changes are applied here: ci.yml.")
     done.meta.update(meta)
