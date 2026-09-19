@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
-from ..agent.verify import python_writes, shell_writes
+from ..agent.verify import python_writes, shell_evidence_text, shell_writes
 from ..config import Config
 from ..events import EventBus, Kind
 from ..paths import project_key
@@ -199,13 +199,18 @@ def _written_later(messages: list[Any], index: int, path: str) -> bool:
                     return True
                 if name in ("run_shell", "run_python"):
                     command = str(args.get("command") or args.get("code") or "")
-                    if not _names_file(command, path):
-                        continue
-                    if name == "run_python":
+                    if name == "run_shell":
+                        # A path that appears only inside a heredoc body is
+                        # data, not the file this command mutated (FR-114).
+                        if not _names_file(shell_evidence_text(command), path):
+                            continue
+                        if shell_writes(command):
+                            return True
+                    else:
+                        if not _names_file(command, path):
+                            continue
                         if python_writes(command):
                             return True
-                    elif shell_writes(command):
-                        return True
         elif role == "tool" and str(getattr(later, "name", "") or "") in _WRITER_TOOLS:
             meta = getattr(later, "meta", None) or {}
             if isinstance(meta, dict) and str(meta.get("path") or "") == path:

@@ -399,6 +399,62 @@ def test_a_shell_delete_still_supersedes_an_observation(tmp_path):
         "the CI runner is Linux only", [shown, removed]) == ("", "", "")
 
 
+def test_a_heredoc_delete_body_does_not_supersede_an_observation(tmp_path):
+    """`cat <<EOF` … `rm ci.yml` … `EOF` sends the body to cat; ci.yml is not
+    touched, so the observation still stands (review fix; FR-114)."""
+    from comodor.providers.base import ToolCall
+
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    printed = Message.assistant("", [ToolCall(
+        id="c2", name="run_shell",
+        arguments={"command": "cat <<EOF\nrm ci.yml\nEOF"})])
+
+    provenance, ref, _ = memory_module.corroborate(
+        "the CI runner is Linux only", [shown, printed])
+    assert (provenance, ref) == ("tool_confirmed", f"read_file:{target}")
+
+
+def test_a_heredoc_body_path_does_not_supersede_on_an_unrelated_write(tmp_path):
+    """`cat > other.txt <<EOF` writes other.txt; `ci.yml` in the body is data,
+    not a write to ci.yml (review fix; FR-114)."""
+    from comodor.providers.base import ToolCall
+
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    printed = Message.assistant("", [ToolCall(
+        id="c2", name="run_shell",
+        arguments={"command": "cat > other.txt <<EOF\nci.yml\nEOF"})])
+
+    provenance, ref, _ = memory_module.corroborate(
+        "the CI runner is Linux only", [shown, printed])
+    assert (provenance, ref) == ("tool_confirmed", f"read_file:{target}")
+
+
+def test_a_real_header_delete_survives_its_heredoc_body(tmp_path):
+    """`rm ci.yml <<EOF` deletes ci.yml; the body is data, not the mutation
+    (review fix; FR-114)."""
+    from comodor.providers.base import ToolCall
+
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    removed = Message.assistant("", [ToolCall(
+        id="c2", name="run_shell",
+        arguments={"command": "rm ci.yml <<EOF\nthis is only data\nEOF"})])
+
+    assert memory_module.corroborate(
+        "the CI runner is Linux only", [shown, removed]) == ("", "", "")
+
+
 def _delegate_result(**meta):
     done = Message.tool("d1", "delegate", "Its changes are applied here: ci.yml.")
     done.meta.update(meta)

@@ -260,6 +260,110 @@ def _unquoted(command: str) -> str:
     return "".join(kept)
 
 
+def _heredoc_marker(line: str, start: int) -> tuple[str, bool, int] | None:
+    """`(delimiter, strip_tabs, end)` for the heredoc operator at `start`.
+
+    `start` is the first `<` of a `<<`; `end` is the index just past the
+    delimiter. The `-` form (`<<-`) is returned with `strip_tabs` true. A
+    delimiter that cannot be read — an expansion, a bare operator, a `<<<`
+    here-string — is `None`, so the caller leaves the form unplaced.
+    """
+    index = start + 2
+    strip_tabs = False
+    if index < len(line) and line[index] == "-":
+        strip_tabs = True
+        index += 1
+    while index < len(line) and line[index] in " \t":
+        index += 1
+    quote = ""
+    if index < len(line) and line[index] in "'\"":
+        quote = line[index]
+        index += 1
+    begin = index
+    while index < len(line) and (line[index].isalnum() or line[index] == "_"):
+        index += 1
+    delimiter = line[begin:index]
+    if not delimiter or not (delimiter[0].isalpha() or delimiter[0] == "_"):
+        return None
+    if quote:
+        if index >= len(line) or line[index] != quote:
+            return None
+        index += 1
+    return delimiter, strip_tabs, index
+
+
+def _heredoc_declarations(line: str) -> list[tuple[str, bool]]:
+    """The `(delimiter, strip_tabs)` of every heredoc declared on one line.
+
+    Scanned outside quotes and comments, so `echo "<<EOF"` and `# cat <<EOF`
+    declare nothing. A `<<` whose delimiter cannot be read is returned as
+    `("", False)`: an unplaceable declaration, whose body the caller discards
+    rather than reads as commands.
+    """
+    found: list[tuple[str, bool]] = []
+    index = 0
+    length = len(line)
+    previous = " "
+    while index < length:
+        char = line[index]
+        if char == "\\":
+            index += 2
+            previous = char
+            continue
+        if char in "'\"":
+            end = line.find(char, index + 1)
+            index = length if end < 0 else end + 1
+            previous = char
+            continue
+        if char == "#" and previous in " \t;|&(":
+            break
+        if char == "<" and line.startswith("<<", index) \
+                and not line.startswith("<<<", index):
+            parsed = _heredoc_marker(line, index)
+            if parsed is None:
+                return [*found, ("", False)]
+            delimiter, strip_tabs, index = parsed
+            found.append((delimiter, strip_tabs))
+            previous = " "
+            continue
+        previous = char
+        index += 1
+    return found
+
+
+def shell_evidence_text(command: str) -> str:
+    """Shell text with heredoc *bodies* removed and headers kept.
+
+    A heredoc body is stdin data, not commands: `cat <<EOF` followed by a line
+    `rm foo.py` deletes nothing, and a line `foo.py` inside the body is not a
+    path this command touched. The header line — including the `<<EOF` marker
+    and any real output redirection on it — is kept, so `cat > deploy.sh <<EOF`
+    still reads as a write of `deploy.sh`; the terminator is removed with the
+    body. A declaration whose delimiter cannot be read, or one that is never
+    terminated, discards the remaining text: an unplaceable form becomes a
+    false negative, never false evidence. Every consumer of shell command text
+    (operation classification, completion keyword evidence, learning
+    staleness) reads it through here, so the body cannot leak into one and not
+    another.
+    """
+    if not command or "<<" not in command:
+        return command
+    kept: list[str] = []
+    pending: list[tuple[str, bool]] = []
+    for line in command.splitlines(keepends=True):
+        if pending:
+            delimiter, strip_tabs = pending[0]
+            candidate = line.rstrip("\r\n")
+            if strip_tabs:
+                candidate = candidate.lstrip("\t")
+            if delimiter and candidate == delimiter:
+                pending.pop(0)
+            continue
+        kept.append(line)
+        pending.extend(_heredoc_declarations(line))
+    return "".join(kept)
+
+
 #: Command words that delete, move and write. Recognised only in command
 #: position — never as an argument, so `grep rm foo.py` reads.
 _DELETE_COMMANDS = frozenset({"rm", "rmdir", "del", "erase", "unlink", "trash"})
@@ -352,9 +456,9 @@ def _has_output_redirection(masked: str) -> bool:
 
     A `>` (or `>>`, or `>|`) with something after it that is not `&` is a
     write: `>file`, `> file`, `2>errors.log`, `>>log`, `1>out`. Descriptor
-    duplication (`2>&1`, `>&2`) and a dangling `>` are not, and an escaped
-    `\\>` is a literal. Input `<`/`<<` never appears here, and quoting and
-    comments were already removed by `_unquoted`.
+    duplication (`2>&1`, `>&2`), process substitution (`>(cmd)`) and a dangling
+    `>` are not, and an escaped `\\>` is a literal. Input `<`/`<<` never appears
+    here, and quoting and comments were already removed by `_unquoted`.
     """
     index = 0
     length = len(masked)
@@ -381,6 +485,9 @@ def _has_output_redirection(masked: str) -> bool:
         if masked[after] == "&":          # `2>&1` duplicates a descriptor
             index = after + 1
             continue
+        if masked[after] == "(":          # `>(cmd)` is process substitution
+            index = after + 1
+            continue
         return True
     return False
 
@@ -392,11 +499,13 @@ def shell_operations(command: str) -> ShellOperations:
     from the next (`;`, `&&`, `||`, `|`, `&`, newlines, subshell brackets) and
     each segment's effective verb is classified. An operation word in argument
     position is not an operation: `grep rm foo.py` reads, `printf rename x`
-    prints. Output redirection is detected separately, from the same quote-
-    and comment-stripped text. A form this bounded reader cannot place is left
-    unknown — a false negative, never false evidence.
+    prints. Heredoc bodies are removed first (`shell_evidence_text`), so a line
+    of stdin data is not read as a command. Output redirection is detected
+    separately, from the same quote- and comment-stripped text. A form this
+    bounded reader cannot place is left unknown — a false negative, never
+    false evidence.
     """
-    masked = _unquoted(command or "")
+    masked = _unquoted(shell_evidence_text(command or ""))
     writes = deletes = moves = False
     for segment in _SEGMENT.split(masked):
         verb, rest = _effective_command(segment.split())
@@ -1135,6 +1244,11 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
             continue
         claim = str(getattr(entry, "claim", "") or "")
         tool = claim.split(" ", 1)[0].strip().lower()
+        # A shell claim is matched on its executable text: a path or operation
+        # word that appears only inside a heredoc body is data, not evidence
+        # that this command touched it (FR-036, FR-116).
+        evidence = f"{tool} {shell_evidence_text(_shell_command(claim))}" \
+            if tool == "run_shell" else claim
         if mutation and tool in _READ_ONLY_TOOLS:
             # The file was read, not changed. Only a change to the artifact —
             # or verified resulting state — delivers a mutation request.
@@ -1153,7 +1267,7 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
             # or a shell command that actually writes; a read-only command
             # that merely names the file is not a change (FR-036).
             continue
-        if wanted & _keywords(claim):
+        if wanted & _keywords(evidence):
             ref = str(getattr(entry, "fingerprint", "") or getattr(entry, "source", ""))
             if ref and ref not in refs:
                 refs.append(ref)

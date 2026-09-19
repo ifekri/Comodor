@@ -512,6 +512,144 @@ def test_shell_evidence_claim_prefixes_are_stripped():
         verify._shell_command("run_shell run: grep rm foo.py"))
 
 
+@pytest.mark.parametrize("command", [
+    "cat <<'EOF'\nrm foo.py\nEOF",
+    "cat <<EOF\nrm foo.py\nEOF",
+    'cat <<"EOF"\nrm foo.py\nEOF',
+    "cat <<-EOF\n\trm foo.py\n\tEOF",
+    "cat <<-'EOF'\n\trm foo.py\n\tEOF",
+    "cat <<EOF\nmv a.py b.py\nEOF",
+    "cat <<EOF\ncp source.py target.py\nEOF",
+    "cat <<EOF\ntouch foo.py\nEOF",
+])
+def test_a_heredoc_body_is_not_a_shell_operation(command):
+    """A heredoc body is stdin data, not commands: `cat <<'EOF'` followed by
+    `rm foo.py` deletes nothing. Every heredoc form must leave the body
+    unread (review fix; FR-036, FR-116, FR-125)."""
+    assert not verify.shell_writes(command)
+    assert not verify.shell_deletes(command)
+    assert not verify.shell_moves(command)
+    assert not verify.command_mutates(command)
+
+
+def test_a_heredoc_delete_body_does_not_deliver_a_delete_request():
+    command = "cat <<'EOF'\nrm foo.py\nEOF"
+    assessment = verify.assess("- delete foo.py",
+                               entries=_shell_ledger(command).entries,
+                               changed_paths=[],
+                               answer="The task is complete. Deleted foo.py.")
+    assert assessment.unresolved == ["delete foo.py"]
+    assert assessment.contradicted
+    assert assessment.verdict == "block"
+
+
+def test_a_heredoc_move_body_does_not_deliver_a_move_request():
+    command = "cat <<EOF\nmv a.py b.py\nEOF"
+    assessment = verify.assess("- move a.py to b.py",
+                               entries=_shell_ledger(command).entries,
+                               changed_paths=[],
+                               answer="The task is complete. Moved a.py to b.py.")
+    assert assessment.unresolved == ["move a.py to b.py"]
+    assert assessment.verdict == "block"
+
+
+def test_a_heredoc_write_word_body_does_not_deliver_an_update_request():
+    command = "cat <<EOF\ntouch foo.py\nEOF"
+    assessment = verify.assess("- update foo.py",
+                               entries=_shell_ledger(command).entries,
+                               changed_paths=[],
+                               answer="The task is complete. Updated foo.py.")
+    assert assessment.unresolved == ["update foo.py"]
+    assert assessment.verdict == "block"
+
+
+def test_a_real_header_redirection_survives_its_heredoc():
+    """`cat > deploy.sh <<EOF` writes deploy.sh through the header redirect;
+    the body must not add a delete or move (review fix; FR-036)."""
+    command = "cat > deploy.sh <<EOF\nrm build\nEOF"
+    assert verify.shell_writes(command)
+    assert not verify.shell_deletes(command)
+    assert not verify.shell_moves(command)
+
+    updated = verify.assess("- update deploy.sh",
+                            entries=_shell_ledger(command).entries,
+                            changed_paths=[],
+                            answer="The task is complete. Updated deploy.sh.")
+    assert updated.unresolved == []
+
+    for request, answer in (("- update build", "Updated build."),
+                            ("- delete build", "Deleted build.")):
+        blocked = verify.assess(request, entries=_shell_ledger(command).entries,
+                                changed_paths=[],
+                                answer=f"The task is complete. {answer}")
+        assert blocked.unresolved == [request.removeprefix("- ")], request
+        assert blocked.verdict == "block", request
+
+
+def test_a_body_path_cannot_piggyback_on_an_unrelated_real_write():
+    """`cat > deploy.sh <<EOF` writes deploy.sh; `foo.py` in the body is data,
+    not evidence that foo.py changed (review fix; FR-036, FR-116)."""
+    command = "cat > deploy.sh <<EOF\nfoo.py\nEOF"
+    assert verify.shell_writes(command)
+
+    assessment = verify.assess("- update foo.py",
+                               entries=_shell_ledger(command).entries,
+                               changed_paths=[],
+                               answer="The task is complete. Updated foo.py.")
+    assert assessment.unresolved == ["update foo.py"]
+    assert assessment.verdict == "block"
+
+
+def test_a_real_header_operation_survives_its_heredoc():
+    """`rm actual.txt <<EOF` deletes actual.txt; the body must not become a
+    move of `fake.txt` (review fix; FR-036)."""
+    command = "rm actual.txt <<EOF\nmv fake.txt other.txt\nEOF"
+    assert verify.shell_deletes(command)
+    assert not verify.shell_moves(command)
+
+    deleted = verify.assess("- delete actual.txt",
+                            entries=_shell_ledger(command).entries,
+                            changed_paths=[],
+                            answer="The task is complete. Deleted actual.txt.")
+    assert deleted.unresolved == []
+
+    moved = verify.assess("- move fake.txt to other.txt",
+                          entries=_shell_ledger(command).entries,
+                          changed_paths=[],
+                          answer="The task is complete. Moved fake.txt to other.txt.")
+    assert moved.verdict == "block"
+
+
+def test_multiple_heredocs_on_one_line_are_each_removed():
+    command = "cat <<A <<B\nrm x.py\nA\nmv y.py z.py\nB"
+    assert not verify.shell_writes(command)
+    assert not verify.shell_deletes(command)
+    assert not verify.shell_moves(command)
+
+
+def test_a_commented_heredoc_declaration_does_not_swallow_the_next_command():
+    """`# cat <<EOF` is a comment, so the line after it is a real command and
+    `rm foo.py` still deletes."""
+    assert verify.shell_deletes("# cat <<EOF\nrm foo.py\nEOF")
+
+
+@pytest.mark.parametrize("command", [
+    "cat >(grep foo.py)", "echo hi >(cat)", "cat >(grep x) foo.py",
+])
+def test_process_substitution_is_not_output_redirection(command):
+    """`>(cmd)` is process substitution, not a file output redirection
+    (review fix)."""
+    assert not verify.shell_writes(command)
+
+
+@pytest.mark.parametrize("command", [
+    "echo hi > foo.txt", "echo hi >> foo.txt", "echo hi >|foo.txt",
+    "echo hi 1>foo.txt", "echo err 2>errors.log", "echo err 2>>errors.log",
+])
+def test_a_plain_output_redirection_is_still_a_mutation(command):
+    assert verify.shell_writes(command)
+
+
 def test_a_python_remove_delivers_a_delete_request():
     """`run_python` is read as code, so `os.remove` is delete evidence
     (review fix; FR-036, FR-116)."""
