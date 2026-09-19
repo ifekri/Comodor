@@ -650,6 +650,69 @@ def test_a_plain_output_redirection_is_still_a_mutation(command):
     assert verify.shell_writes(command)
 
 
+@pytest.mark.parametrize("command", [
+    "cat <<E-O-F\nrm foo.py\nE\nrm real.py\nE-O-F",
+    "cat <<END-MARK\nrm foo.py\nEND\nrm real.py\nEND-MARK",
+    "cat <<END.TAG\nrm foo.py\nEND\nrm real.py\nEND.TAG",
+    "cat <<-E-O-F\n\trm foo.py\n\tE\n\trm real.py\n\tE-O-F",
+])
+def test_a_heredoc_delimiter_is_not_truncated_to_a_prefix(command):
+    """`<<E-O-F` names the delimiter `E-O-F`; a body line `E` must not end the
+    heredoc early and expose the rest of the body as commands (review fix;
+    FR-036, FR-116, FR-125)."""
+    assert not verify.shell_writes(command)
+    assert not verify.shell_deletes(command)
+    assert not verify.shell_moves(command)
+
+
+def test_a_truncated_delimiter_body_does_not_deliver_a_delete_request():
+    command = "cat <<E-O-F\nrm foo.py\nE\nrm real.py\nE-O-F"
+    assessment = verify.assess("- delete real.py",
+                               entries=_shell_ledger(command).entries,
+                               changed_paths=[],
+                               answer="The task is complete. Deleted real.py.")
+    assert assessment.unresolved == ["delete real.py"]
+    assert assessment.contradicted
+    assert assessment.verdict == "block"
+
+
+@pytest.mark.parametrize("command", [
+    "cmd >(consumer)", "cmd > >(consumer)", "cmd >> >(consumer)",
+    "cmd 2> >(consumer)", "echo hi > >(cat)",
+])
+def test_a_redirect_to_process_substitution_is_not_a_file_write(command):
+    """`> >(cmd)` redirects to a process substitution, not a regular file
+    (review fix)."""
+    assert not verify.shell_writes(command)
+
+
+@pytest.mark.parametrize("command", [
+    "cmd > >(consumer) > out.txt",
+    "cmd > >(consumer > out.txt)",
+    "cmd > >(consumer) >> out.txt",
+])
+def test_a_real_redirect_beside_process_substitution_is_still_a_write(command):
+    """A real file redirect elsewhere, or one executed inside the substitution,
+    still counts (review fix; FR-036)."""
+    assert verify.shell_writes(command)
+
+
+@pytest.mark.parametrize("command", [
+    "echo hi 2> &1", "echo hi 1> &2", "echo hi > &2",
+])
+def test_a_whitespace_descriptor_duplication_is_not_a_write(command):
+    """`2> &1` duplicates a descriptor with a space, not a file write."""
+    assert not verify.shell_writes(command)
+
+
+@pytest.mark.parametrize("command", [
+    "echo hi > foo.txt", "echo hi >  foo.txt", "echo hi >> foo.txt",
+    "echo hi >| foo.txt", "echo hi 1> foo.txt", "echo err 2> errors.log",
+])
+def test_a_spaced_output_redirection_is_still_a_mutation(command):
+    assert verify.shell_writes(command)
+
+
 def test_a_python_remove_delivers_a_delete_request():
     """`run_python` is read as code, so `os.remove` is delete evidence
     (review fix; FR-036, FR-116)."""

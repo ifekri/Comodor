@@ -455,6 +455,25 @@ def test_a_real_header_delete_survives_its_heredoc_body(tmp_path):
         "the CI runner is Linux only", [shown, removed]) == ("", "", "")
 
 
+def test_a_truncated_heredoc_delimiter_body_does_not_supersede(tmp_path):
+    """`<<E-O-F` names the delimiter `E-O-F`; every `ci.yml` in the body is
+    data, so the observation still stands (review fix; FR-114)."""
+    from comodor.providers.base import ToolCall
+
+    target = tmp_path / "ci.yml"
+    target.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    shown = Message.tool("c1", "read_file",
+                         "runs-on: ubuntu-latest — the CI runner is Linux only")
+    shown.meta["path"] = str(target)
+    printed = Message.assistant("", [ToolCall(
+        id="c2", name="run_shell",
+        arguments={"command": "cat <<E-O-F\nrm ci.yml\nE\nrm ci.yml\nE-O-F"})])
+
+    provenance, ref, _ = memory_module.corroborate(
+        "the CI runner is Linux only", [shown, printed])
+    assert (provenance, ref) == ("tool_confirmed", f"read_file:{target}")
+
+
 def _delegate_result(**meta):
     done = Message.tool("d1", "delegate", "Its changes are applied here: ci.yml.")
     done.meta.update(meta)

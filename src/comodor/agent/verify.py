@@ -260,13 +260,21 @@ def _unquoted(command: str) -> str:
     return "".join(kept)
 
 
+#: Characters that may follow a heredoc delimiter word: end of line, whitespace
+#: or a shell separator. A character outside this set means the delimiter word
+#: continues past what this bounded reader parses — `<<E-O-F` is not `<<E` — so
+#: the declaration is left unplaced rather than truncated.
+_HEREDOC_BOUNDARY = frozenset(" \t\r\n\v\f;|&()<>")
+
+
 def _heredoc_marker(line: str, start: int) -> tuple[str, bool, int] | None:
     """`(delimiter, strip_tabs, end)` for the heredoc operator at `start`.
 
     `start` is the first `<` of a `<<`; `end` is the index just past the
     delimiter. The `-` form (`<<-`) is returned with `strip_tabs` true. A
     delimiter that cannot be read — an expansion, a bare operator, a `<<<`
-    here-string — is `None`, so the caller leaves the form unplaced.
+    here-string, or a word this bounded reader would have to truncate — is
+    `None`, so the caller leaves the form unplaced and discards its body.
     """
     index = start + 2
     strip_tabs = False
@@ -289,6 +297,11 @@ def _heredoc_marker(line: str, start: int) -> tuple[str, bool, int] | None:
         if index >= len(line) or line[index] != quote:
             return None
         index += 1
+    if index < len(line) and line[index] not in _HEREDOC_BOUNDARY:
+        # `<<E-O-F` continues with a character not read here. Accepting the
+        # prefix `E` would let a body line `E` end the heredoc early and expose
+        # the rest of the body as commands, so the declaration is unplaced.
+        return None
     return delimiter, strip_tabs, index
 
 
@@ -456,9 +469,10 @@ def _has_output_redirection(masked: str) -> bool:
 
     A `>` (or `>>`, or `>|`) with something after it that is not `&` is a
     write: `>file`, `> file`, `2>errors.log`, `>>log`, `1>out`. Descriptor
-    duplication (`2>&1`, `>&2`), process substitution (`>(cmd)`) and a dangling
-    `>` are not, and an escaped `\\>` is a literal. Input `<`/`<<` never appears
-    here, and quoting and comments were already removed by `_unquoted`.
+    duplication (`2>&1`, `2> &1`), process substitution (`>(cmd)`, `> >(cmd)`)
+    and a dangling `>` are not, and an escaped `\\>` is a literal. Input
+    `<`/`<<` never appears here, and quoting and comments were already removed
+    by `_unquoted`.
     """
     index = 0
     length = len(masked)
@@ -479,14 +493,20 @@ def _has_output_redirection(masked: str) -> bool:
             after += 1
         if after < length and masked[after] == "|":
             after += 1
+        while after < length and masked[after] in " \t":
+            after += 1                    # `> file` and `2> errors.log`
         if after >= length:               # a dangling `>` redirects nothing
             index = after
             continue
-        if masked[after] == "&":          # `2>&1` duplicates a descriptor
+        if masked[after] == "&":          # `2>&1` and `2> &1` duplicate a descriptor
             index = after + 1
             continue
         if masked[after] == "(":          # `>(cmd)` is process substitution
             index = after + 1
+            continue
+        if masked[after] == ">" and after + 1 < length \
+                and masked[after + 1] == "(":
+            index = after + 2             # `> >(cmd)` is process substitution
             continue
         return True
     return False
