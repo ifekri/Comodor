@@ -838,7 +838,11 @@ class AgentLoop:
         asked = preflight.question(self._request_text, self._rules, mutations, evidence)
         completion = collapse(self.gateway.stream(
             [Message.system(preflight.PROMPT), Message.user(asked)],
-            model=self.config.model, temperature=0.0, max_tokens=500,
+            model=self.config.model, temperature=0.0,
+            # The model's normal output budget, not a small cap: a reasoning
+            # model spends output tokens thinking before it answers, and a cap
+            # sized for the answer alone leaves no text and blocks everything.
+            max_tokens=getattr(self.config.agent, "max_output_tokens", 8192),
         ))
         self._measurement.preflight_calls += 1
         self._measurement.preflight_tokens += completion.usage.total
