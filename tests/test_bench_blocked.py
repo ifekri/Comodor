@@ -181,6 +181,7 @@ def test_the_report_carries_order_and_pairing_identity(monkeypatch, tmp_path, co
     body = report.blocked_json(run)
 
     assert body["kind"] == "blocked-ablation"
+    assert body["token_accounting_version"] == report.TOKEN_ACCOUNTING_VERSION
     assert body["counts"] == {"blocks": 48, "attempts": 336,
                               "planned_attempts": 336, "attempts_passed": 336}
     assert body["configurations"] == list(baseline.CONFIGURATIONS)

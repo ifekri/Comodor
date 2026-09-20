@@ -1184,7 +1184,14 @@ class AgentLoop:
             self._say_internally(block)
 
     def _summarise(self, messages: list[Message]) -> str:
-        """Ask the model to write the brief that replaces old history."""
+        """Ask the model to write the brief that replaces old history.
+
+        The summary is a real provider call, so its tokens are part of what
+        the turn cost and are recorded here exactly as the main call's are
+        recorded after its stream: one call, one contribution, no double
+        counting. A call that fails raises before its usage is recorded, the
+        same as the main path — a failed summary leaves no phantom usage.
+        """
         from ..providers.base import collapse
 
         transcript = "\n\n".join(
@@ -1195,6 +1202,10 @@ class AgentLoop:
             [Message.system(COMPACT_PROMPT), Message.user(transcript)],
             model=self.config.model, temperature=0.2, max_tokens=1500,
         ))
+        # Counted here rather than in `compact`: the call happened even if the
+        # caller later decides the brief is unusable, and the runtime owns the
+        # truth about what it spent. The benchmark consumes this.
+        self.conversation.record_usage(completion.usage)
         return completion.text
 
     def _model_profile(self):

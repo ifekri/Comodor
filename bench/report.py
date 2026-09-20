@@ -19,6 +19,29 @@ from pathlib import Path
 
 from .runner import Outcome
 
+#: The token-accounting contract these reports obey.
+#:
+#: A `total_tokens` figure is only comparable with another one that was
+#: counted the same way, and the counting changed. Bumping this number is how
+#: a reader tells a result from before the change from one after it, without
+#: rewriting any historical artifact.
+#:
+#: * **1 — historical.** The committed T015 (`paired-baseline-2026-09-14`) and
+#:   T096 (`blocked-ablation-2026-09-16`) artifacts predate this field, so a
+#:   document with no `token_accounting_version` is version 1. They counted
+#:   `input + cached + output` per attempt; `written_tokens` was not reported,
+#:   and the compaction-summary provider call was not counted at all. They are
+#:   historical evidence and are not retroactively altered.
+#: * **2 — end-to-end.** `total = input + cached + written + output`, and
+#:   every provider call the task made is counted, including the compaction
+#:   summary (`AgentLoop._summarise`). `written_tokens` is the prompt stored
+#:   for the next request — a separate, non-overlapping part of the prompt —
+#:   and is part of what the model read. `reasoning_tokens` is a subset of
+#:   `output_tokens` for the supported providers and is not added again.
+#:   `cost_usd` remains provider-reported and is `0.0` when the model has no
+#:   price mapping: unavailable pricing, never equal economic cost.
+TOKEN_ACCOUNTING_VERSION = 2
+
 
 def as_json(outcomes: list[Outcome], *, provider: str, model: str,
             tries: int) -> dict:
@@ -29,6 +52,7 @@ def as_json(outcomes: list[Outcome], *, provider: str, model: str,
     return {
         "model": model,
         "provider": provider,
+        "token_accounting_version": TOKEN_ACCOUNTING_VERSION,
         "date": date.today().isoformat(),
         "tries_per_task": tries,
         "platform": f"{platform.system()} {platform.release()}",
@@ -280,6 +304,7 @@ def as_paired_json(current: list[Outcome], naive: list[Outcome], *,
         "kind": "paired-baseline",
         "model": model,
         "provider": provider,
+        "token_accounting_version": TOKEN_ACCOUNTING_VERSION,
         "date": date.today().isoformat(),
         # Which code was measured. A baseline is a statement about one
         # commit; without this it is a statement about a date.
@@ -595,6 +620,7 @@ def blocked_json(run) -> dict:
         "kind": "blocked-ablation",
         "provider": run.provider,
         "model": run.model,
+        "token_accounting_version": TOKEN_ACCOUNTING_VERSION,
         "date": date.today().isoformat(),
         "commit": _commit(),
         "platform": f"{platform.system()} {platform.release()}",
