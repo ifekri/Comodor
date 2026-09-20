@@ -509,8 +509,9 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phase 
   - **Req**: FR-078, SC-022 (Constitution VII governs) · **Dep**: T141 · **Evidence**: rebuild produces no diff outside the artifact path · **Done when**: `git status` clean after rebuild
 - [X] T167 [P] Run the full permission suite a final time
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T028, T060, T069, T098, T119, T129, T146 · **Evidence**: green on the final commit, confirming the per-phase gates held · **Done when**: exit zero
-- [ ] T168 [P] Run the cross-platform matrix on Windows, Linux and macOS
+- [X] T168 [P] Run the cross-platform matrix on Windows, Linux and macOS
   - **Req**: FR-078, SC-022 · **Dep**: T159 to T167 · **Evidence**: green on all three for every changed surface · **Done when**: matrix green on the exact final HEAD
+  - **Matrix green**: the exact-HEAD CI at `971372e` passed Linux, Windows and macOS (py3.11/3.12/3.13, TUI renderer on all three, installed package on all three, Frontend, Lint, Capability Map, Surface Contract). The macOS renderer job hit the known frame-predicate flake once and passed on a single rerun; no code differs between that commit and the documentation-only closure that carries this line.
 - [X] T169 [P] Run `git diff --check` and review the diff against the scope rule
   - **Req**: FR-128 · **Dep**: Phases 2–9 · **Evidence**: the diff contains only work required by a requirement in this specification; no drive-by refactor, cleanup, formatting churn or dependency bump · **Done when**: exit zero and the diff reviewed
 - [X] T170 Confirm no release action was taken anywhere in the branch
