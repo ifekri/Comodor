@@ -2,37 +2,63 @@
 
 The clarification architecture registers a decision only when the model calls
 `ask`. A model that forgets can change the project first — the benchmark's
-`careful-unknowable` task found exactly that, an invented rate limit written
-without a question. These pin the Core's own check, run before the first call
-that can change anything: a missing material decision is registered and the
-mutation does not run; an implementation choice the request leaves to the agent
-is not a decision and the mutation runs.
+`careful-unknowable` task found exactly that, an invented rate written without a
+question. These pin the Core's own check: it sees the mutation's actual content
+and the turn's actual evidence, requires each material choice to name its
+source, withholds a missing one, and fails closed when it cannot decide.
 """
 
 from __future__ import annotations
 
-from comodor.agent import AgentLoop, Conversation
+from comodor.agent import AgentLoop, Conversation, preflight
 from comodor.providers.base import ToolCall
 from comodor.providers.fake import Script
 from comodor.providers.gateway import Gateway
 from comodor.safety import PermissionEngine
 from comodor.tools import ToolRegistry
 
-REQUIRES = (
+MISSING = (
     '{"status": "requires_clarification", '
     '"decisions": [{"what": "What rate limit should the client use?", '
-    '"affects": ["behaviour"]}], '
+    '"affects": ["behaviour"], "resolution": "missing", "source_refs": []}], '
     '"reason": "the quota belongs to the account, not the repository"}'
 )
 ALLOW = '{"status": "allow", "decisions": [], "reason": "implementation detail"}'
+REQUEST_GROUNDED = (
+    '{"status": "allow", '
+    '"decisions": [{"what": "Which rate to use", "affects": ["behaviour"], '
+    '"resolution": "grounded", "source_refs": ["request"]}], '
+    '"reason": "the user stated it"}'
+)
+REPO_GROUNDED = (
+    '{"status": "allow", '
+    '"decisions": [{"what": "Which rate to use", "affects": ["behaviour"], '
+    '"resolution": "grounded", "source_refs": ["settings.py"]}], '
+    '"reason": "the inspected config states it"}'
+)
+UNSOURCED = (
+    '{"status": "allow", '
+    '"decisions": [{"what": "Which rate to use", "affects": ["behaviour"], '
+    '"resolution": "grounded", "source_refs": []}], "reason": "x"}'
+)
+DISCRETION_MATERIAL = (
+    '{"status": "allow", '
+    '"decisions": [{"what": "Which rate to use", "affects": ["behaviour"], '
+    '"resolution": "agent_discretion", "source_refs": []}], "reason": "x"}'
+)
+ALLOW_WITH_MISSING = (
+    '{"status": "allow", '
+    '"decisions": [{"what": "Which rate to use", "affects": ["behaviour"], '
+    '"resolution": "missing", "source_refs": []}], "reason": "x"}'
+)
 GARBAGE = "I think it is probably fine?"
 
 
-def _agent(config, bus, scripts, *, preflight=None):
+def _agent(config, bus, scripts, *, answer=None):
     agent = AgentLoop(config, Gateway(config, scripts=scripts), ToolRegistry(),
                       bus, PermissionEngine(config, bus), Conversation())
-    if preflight is not None:
-        agent.gateway.provider("fake").preflight = preflight
+    if answer is not None:
+        agent.gateway.provider("fake").preflight = answer
     return agent
 
 
@@ -46,46 +72,95 @@ def _write_after_read(path: str, content: str) -> list[Script]:
     ]
 
 
-def test_a_missing_material_fact_blocks_the_dependent_write(config, bus, workspace):
-    """The careful-unknowable shape: the rate is nowhere in the repository."""
+def _question(agent) -> str:
+    return agent.gateway.provider("fake").preflight_questions[0]
+
+
+# --------------------------------------------------------------------------- #
+# the input the assessor is given
+# --------------------------------------------------------------------------- #
+
+
+def test_the_preflight_sees_the_value_the_mutation_introduces(config, bus, workspace):
+    """A path alone cannot say whether the change invents a value."""
+    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
+    agent = _agent(config, bus,
+                   _write_after_read("client.py", "RATE_LIMIT_RPS = 5\n"),
+                   answer=MISSING)
+
+    agent.run("add rate limiting to the client")
+
+    assert "RATE_LIMIT_RPS = 5" in _question(agent)
+
+
+def test_the_preflight_sees_what_the_turn_observed(config, bus, workspace):
+    """A source name alone cannot say what the file does or does not contain."""
     (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
     agent = _agent(config, bus, _write_after_read("client.py", "RATE = 5\n"),
-                   preflight=REQUIRES)
+                   answer=MISSING)
 
-    result = agent.run("add rate limiting to the client so we stop hitting 429s")
+    agent.run("add rate limiting to the client")
+
+    question = _question(agent)
+    assert "client.py" in question and "BASE = 1" in question
+
+
+def test_the_preflight_input_is_redacted(config, bus, workspace):
+    config.providers["fake"].api_key = "sk-secret-value-123456"
+    (workspace / "client.py").write_text("TOKEN = 'sk-secret-value-123456'\n",
+                                         encoding="utf-8")
+    agent = _agent(config, bus, _write_after_read("client.py", "X = 1\n"),
+                   answer=ALLOW)
+
+    agent.run("tidy client.py")
+
+    assert "sk-secret-value-123456" not in _question(agent)
+
+
+# --------------------------------------------------------------------------- #
+# enforcement
+# --------------------------------------------------------------------------- #
+
+
+def test_an_invented_value_is_blocked_and_never_reaches_disk(config, bus, workspace):
+    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
+    agent = _agent(config, bus,
+                   _write_after_read("client.py", "RATE_LIMIT_RPS = 5\n"),
+                   answer=MISSING)
+
+    result = agent.run("add rate limiting to the client")
 
     assert (workspace / "client.py").read_text(encoding="utf-8") == "BASE = 1\n", \
         "the invented rate reached disk"
     assert result.stopped == "clarification_required"
-    decisions = [d.what for d in agent.tool_context.evidence.decisions]
-    assert decisions == ["What rate limit should the client use?"]
-    assert "RATE" not in (workspace / "client.py").read_text(encoding="utf-8")
-
-
-def test_the_blocked_call_is_reported_as_withheld(config, bus, workspace):
-    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
-    agent = _agent(config, bus, _write_after_read("client.py", "RATE = 5\n"),
-                   preflight=REQUIRES)
-
-    agent.run("add rate limiting")
-
-    # The write never became a mutation the completion gate could count.
+    assert [d.what for d in agent.tool_context.evidence.decisions] == \
+        ["What rate limit should the client use?"]
     assert agent._written_paths == []
-    assert agent.tool_context.evidence.entries, "the ledger recorded the turn"
 
 
-def test_an_implementation_detail_is_not_a_material_decision(config, bus, workspace):
-    """FR-011/FR-012: a choice the request leaves to the agent may proceed."""
+def test_a_gate_fault_withholds_the_mutation(config, bus, workspace, monkeypatch):
+    """Fails closed: a fault in the guard is not permission to change."""
     (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
     agent = _agent(config, bus, _write_after_read("client.py", "RATE = 5\n"),
-                   preflight=ALLOW)
+                   answer=ALLOW)
 
-    result = agent.run("add rate limiting to the client")
+    def explode(*args, **kwargs):
+        raise RuntimeError("the preflight exploded")
 
-    assert (workspace / "client.py").read_text(encoding="utf-8") == "RATE = 5\n", \
-        "an allowed mutation was blocked"
-    assert result.stopped == "done"
-    assert agent.tool_context.evidence.decisions == []
+    monkeypatch.setattr(agent, "_assess_batch", explode)
+    agent.run("add rate limiting to the client")
+
+    assert (workspace / "client.py").read_text(encoding="utf-8") == "BASE = 1\n"
+
+
+def test_an_unreadable_assessment_does_not_become_allow(config, bus, workspace):
+    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
+    agent = _agent(config, bus, _write_after_read("client.py", "RATE = 5\n"),
+                   answer=GARBAGE)
+
+    agent.run("add rate limiting to the client")
+
+    assert (workspace / "client.py").read_text(encoding="utf-8") == "BASE = 1\n"
 
 
 def test_a_settled_decision_is_not_reopened(config, bus, tool_context):
@@ -93,7 +168,7 @@ def test_a_settled_decision_is_not_reopened(config, bus, tool_context):
     tool_context.request_text = "add rate limiting to the client"
     tool_context.evidence.known("What rate limit should the client use?",
                                 source="user", material="5 per second")
-    agent = _agent(config, bus, [], preflight=REQUIRES)
+    agent = _agent(config, bus, [], answer=MISSING)
     call = ToolCall(id="w1", name="write_file",
                     arguments={"path": "client.py", "content": "RATE = 5\n"})
 
@@ -102,27 +177,94 @@ def test_a_settled_decision_is_not_reopened(config, bus, tool_context):
     assert not tool_context.evidence.withheld()
 
 
-def test_a_malformed_assessment_does_not_become_allow(config, bus, workspace):
-    """An unreadable guard is not permission: the mutation is withheld."""
+# --------------------------------------------------------------------------- #
+# allow cases — over-asking is a failure too
+# --------------------------------------------------------------------------- #
+
+
+def test_an_implementation_detail_is_allowed(config, bus, workspace):
     (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
     agent = _agent(config, bus, _write_after_read("client.py", "RATE = 5\n"),
-                   preflight=GARBAGE)
+                   answer=ALLOW)
 
     result = agent.run("add rate limiting to the client")
 
-    assert (workspace / "client.py").read_text(encoding="utf-8") == "BASE = 1\n"
-    assert result.stopped != "done" or agent._written_paths == []
+    assert (workspace / "client.py").read_text(encoding="utf-8") == "RATE = 5\n"
+    assert result.stopped == "done"
+    assert agent.tool_context.evidence.decisions == []
 
 
-def test_the_preflight_runs_once_per_turn(config, bus, workspace):
+def test_a_value_the_user_stated_is_allowed(config, bus, workspace):
     (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
     agent = _agent(config, bus, _write_after_read("client.py", "RATE = 5\n"),
-                   preflight=ALLOW)
+                   answer=REQUEST_GROUNDED)
 
-    agent.run("add rate limiting to the client")
+    agent.run("add rate limiting at 5 per second")
 
-    assert agent._measurement.preflight_calls == 1
-    assert agent._measurement.preflight_tokens > 0
+    assert (workspace / "client.py").read_text(encoding="utf-8") == "RATE = 5\n"
+
+
+def test_a_value_the_configuration_states_is_allowed(config, bus, workspace):
+    (workspace / "settings.py").write_text("RATE = 5\n", encoding="utf-8")
+    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
+    scripts = [
+        Script(text="Reading settings.", tool_calls=[ToolCall(
+            id="r1", name="read_file", arguments={"path": "settings.py"})]),
+        Script(text="Writing.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "client.py", "content": "RATE = 5\n"})]),
+        Script(text="Done."),
+    ]
+    agent = _agent(config, bus, scripts, answer=REPO_GROUNDED)
+
+    agent.run("add rate limiting from the config")
+
+    assert (workspace / "client.py").read_text(encoding="utf-8") == "RATE = 5\n"
+
+
+# --------------------------------------------------------------------------- #
+# the grounding contract, mechanically
+# --------------------------------------------------------------------------- #
+
+
+def test_a_grounded_decision_must_name_a_source():
+    assert preflight.parse(UNSOURCED).status == "blocked"
+
+
+def test_discretion_may_not_stand_in_for_a_material_choice():
+    assert preflight.parse(DISCRETION_MATERIAL).status == "blocked"
+
+
+def test_an_allow_may_not_discard_a_missing_decision():
+    assessment = preflight.parse(ALLOW_WITH_MISSING)
+    assert assessment.status == "requires_clarification"
+    assert assessment.missing_decisions
+
+
+def test_a_malformed_answer_is_blocked():
+    assert preflight.parse(GARBAGE).status == "blocked"
+    assert preflight.parse("").status == "blocked"
+
+
+# --------------------------------------------------------------------------- #
+# scope and cost
+# --------------------------------------------------------------------------- #
+
+
+def test_the_preflight_runs_once_per_mutation_batch(config, bus, workspace):
+    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
+    scripts = [
+        Script(text="Writing.", tool_calls=[ToolCall(
+            id="w1", name="write_file", arguments={"path": "client.py", "content": "A = 1\n"})]),
+        Script(text="Writing again.", tool_calls=[ToolCall(
+            id="w2", name="write_file", arguments={"path": "client.py", "content": "A = 2\n"})]),
+        Script(text="Done."),
+    ]
+    agent = _agent(config, bus, scripts, answer=ALLOW)
+
+    agent.run("set A")
+
+    assert agent._measurement.preflight_calls == 2
 
 
 def test_a_read_only_turn_pays_no_preflight(config, bus, workspace):
@@ -135,3 +277,19 @@ def test_a_read_only_turn_pays_no_preflight(config, bus, workspace):
     agent.run("what is in client.py?")
 
     assert agent._measurement.preflight_calls == 0
+
+
+def test_the_preflight_trace_can_explain_an_allow(config, bus, workspace):
+    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
+    agent = _agent(config, bus, _write_after_read("client.py", "RATE = 5\n"),
+                   answer=MISSING)
+
+    agent.run("add rate limiting to the client")
+
+    traces = agent._preflight_traces
+    assert len(traces) == 1
+    trace = traces[0]
+    assert trace["assessment"]["status"] == "requires_clarification"
+    assert trace["assessment"]["decisions"][0]["resolution"] == "missing"
+    assert trace["withheld"] is True
+    assert trace["question_fingerprint"] and trace["mutation_fingerprint"]

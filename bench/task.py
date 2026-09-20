@@ -94,6 +94,9 @@ class Attempt:
     #: headless JSON reports it. `clarifications_raised`, `corrections` and
     #: `validation_outcome` feed the paired report (T153).
     measurement: dict[str, Any] = field(default_factory=dict)
+    #: The mutation preflight's sanitized trace, when the run reported one, so
+    #: a wrong `allow` can be explained from the kept artifact.
+    preflight_traces: list[dict[str, Any]] = field(default_factory=list)
     #: For a sequence step, whether the step produced what it had to (its
     #: `expect`). Checked while the workspace exists; the report reads this
     #: rather than the removed workspace.

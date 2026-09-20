@@ -58,6 +58,9 @@ class FakeProvider:
         self.model = model
         self.chunk = chunk
         self.calls: list[list[Message]] = []
+        #: The question each mutation preflight was asked, so a test can prove
+        #: what the assessor was actually shown.
+        self.preflight_questions: list[str] = []
         self._index = 0
         # Two background passes can ask at once; the queue must hand each
         # script to exactly one of them, in call order.
@@ -69,6 +72,8 @@ class FakeProvider:
         if _is_preflight(messages):
             # Answered here, and not recorded as a turn: it is the loop's own
             # guard, not part of the conversation a test is scripting.
+            self.preflight_questions.append(
+                next((m.content for m in messages if m.role is Role.USER), ""))
             script = Script(text=self.preflight)
         else:
             self.calls.append(list(messages))

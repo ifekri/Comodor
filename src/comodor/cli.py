@@ -485,6 +485,10 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
             "elapsed": round(result.elapsed, 2),
             # The paired record: counts only, beside the outcome above.
             "measurement": result.measurement.as_dict(),
+            # The mutation preflight's sanitized trace — fingerprints and
+            # bounded excerpts — so a wrong `allow` can be explained from the
+            # artifact without rerunning the model (spec 002, FR-013).
+            "preflight_traces": list(getattr(result, "preflight_traces", []) or []),
         }
         if result.clarification is not None:
             # The structured clarification outcome rides its own block, so a

@@ -539,6 +539,7 @@ def _keep_the_answer(root: Path, task: Task, attempt: Attempt,
             "tools": attempt.tools,
             "error": attempt.error,
             "answer": attempt.text,
+            "preflight_traces": attempt.preflight_traces,
         }, indent=2, ensure_ascii=False), encoding="utf-8")
     except OSError:
         pass
@@ -657,6 +658,7 @@ def _invoke(task: Task, workspace: Path, home: Path,
         tool_calls=int(report.get("tool_calls", 0) or 0),
         clarification=clarification if isinstance(clarification, dict) else {},
         measurement=measurement if isinstance(measurement, dict) else {},
+        preflight_traces=list(report.get("preflight_traces") or []),
     )
 
 

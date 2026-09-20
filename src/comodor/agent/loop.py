@@ -159,6 +159,11 @@ class TurnResult:
     annotation: str = ""
     #: What the turn cost beside how it went — counts only (FR-072).
     measurement: TaskMeasurement = field(default_factory=TaskMeasurement)
+    #: One sanitized record per mutation preflight: fingerprints and bounded
+    #: excerpts, never unrestricted source content. It rides the result, not
+    #: the counts-only measurement, so a wrong `allow` can be explained from a
+    #: benchmark/debug artifact without rerunning the model.
+    preflight_traces: list[dict[str, Any]] = field(default_factory=list)
     #: Why a turn was cancelled, when it was ("stop" — the human pressed stop
     #: — or "interrupt" — a new message took over under the interrupt busy
     #: mode). The learn step reads this so the review knows which kind of
@@ -231,7 +236,7 @@ class AgentLoop:
         #: The turn's mutation preflight, computed once before the first call
         #: that can change anything (FR-013). `None` until then; an assessment
         #: whose status is `allow` lets every mutating call this turn proceed.
-        self._preflight: preflight.MutationAssessment | None = None
+        self._batch_preflight: preflight.MutationAssessment | None = None
         #: What the user said not to do this turn, in their own words.
         self._rules: list[str] = []
         #: Worked out once per model. The model does not change mid-turn, and
@@ -266,8 +271,10 @@ class AgentLoop:
         self._carried_changes = []
         self._mutating_commands = []
         self._request_text = user_text
-        self._preflight = None
+        self._batch_preflight = None
+        self._preflight_traces: list[dict[str, Any]] = []
         result = TurnResult()
+        result.preflight_traces = self._preflight_traces
         self._measurement = result.measurement
         # The project's instructions, read once for the turn. Every step's
         # head is built from this same string, so the stable portion stays
@@ -757,110 +764,137 @@ class AgentLoop:
 
     def _preflight_for_batch(self, context: ToolContext,
                              calls: list[ToolCall]) -> None:
-        """Compute the turn's mutation preflight once, before the batch runs.
+        """Assess the whole batch of mutating calls once, before it runs.
 
-        Single-threaded here, so the shared assessment is written before any
-        parallel worker could read it. A batch with nothing that can change
-        anything costs no call.
+        One bounded call per batch — not per tool, and not one verdict for the
+        whole turn: the next model turn's mutations are a new batch and are
+        assessed again. A batch with nothing that can change anything costs no
+        call.
         """
-        if self._preflight is not None:
+        mutating = [call for call in calls if self._is_mutating(call)]
+        if not mutating:
+            self._batch_preflight = None
             return
-        for call in calls:
-            if self._is_mutating(call):
-                self._preflight = self._assess_mutation(context, call)
-                return
+        try:
+            self._batch_preflight = self._assess_batch(context, mutating)
+        except Exception as problem:
+            # Fails closed: a preflight that could not run is not permission.
+            self._note(f"The mutation preflight could not run ({problem}).")
+            self._batch_preflight = preflight.MutationAssessment(
+                status="blocked",
+                reason=f"the preflight could not run ({type(problem).__name__})")
 
     def _mutation_gate(self, context: ToolContext,
                        call: ToolCall) -> ToolResult | None:
         """The Core's pre-mutation check, or None when the call may run.
 
-        A material decision the model did not ask about is registered here and
-        the call does not run (FR-013, FR-018). An implementation choice the
-        request leaves to the agent is not a material decision, and the call
-        proceeds (FR-011, FR-012).
+        Fails closed: a fault anywhere in the guard withholds the mutation
+        rather than permitting it. A material decision the model did not ask
+        about is registered and the call does not run (FR-013, FR-018); an
+        implementation choice the request leaves to the agent is not a material
+        decision and the call proceeds (FR-011, FR-012).
         """
         if not self._is_mutating(call):
             return None
         try:
-            if self._preflight is None:
-                self._preflight = self._assess_mutation(context, call)
-            if self._preflight.allows:
-                return None
-            held = self._withhold_for_preflight(context, self._preflight)
-            if held is not None:
-                return held
-            if self._preflight.status == "blocked":
-                # An assessment nobody could read is not permission. There is
-                # no decision to register — only a check that did not clear.
-                return ToolResult.failure(
-                    "not run: the mutation preflight could not clear this change "
-                    f"({self._preflight.reason or 'unreadable assessment'}). "
-                    "Say plainly why the change is settled, or ask about what "
-                    "is unresolved.", withheld=True)
+            if self._batch_preflight is None:
+                self._batch_preflight = self._assess_batch(context, [call])
+            assessment = self._batch_preflight
+        except Exception as problem:
+            self._note(f"The mutation preflight could not run ({problem}).")
+            return ToolResult.failure(
+                "not run: the mutation preflight could not run, so this change "
+                "is not cleared. Fix the check or ask about what is unresolved.",
+                withheld=True)
+        if assessment.allows:
             return None
-        except Exception:
-            # A fault in the guard is not a reason to change how a turn works.
-            # An unreadable *assessment* is `blocked` and withholds; a fault in
-            # the guard's own code falls back to the pre-guard behaviour.
-            return None
+        try:
+            held = self._withhold_for_preflight(context, assessment)
+        except Exception as problem:
+            self._note(f"The mutation preflight could not register its decision ({problem}).")
+            return ToolResult.failure(
+                "not run: a material decision is unresolved and could not be "
+                "recorded, so this change is not cleared.", withheld=True)
+        if held is not None:
+            return held
+        if assessment.status == "blocked":
+            # An assessment nobody could read is not permission. There is no
+            # decision to register — only a check that did not clear.
+            return ToolResult.failure(
+                "not run: the mutation preflight could not clear this change "
+                f"({assessment.reason or 'unreadable assessment'}). Say plainly "
+                "why the change is settled, or ask about what is unresolved.",
+                withheld=True)
+        return None
 
-    def _assess_mutation(self, context: ToolContext,
-                         call: ToolCall) -> preflight.MutationAssessment:
-        """One bounded model call: does this change depend on a missing decision?"""
+    def _assess_batch(self, context: ToolContext,
+                      calls: list[ToolCall]) -> preflight.MutationAssessment:
+        """One bounded model call: does this batch depend on a missing decision?"""
         from ..providers.base import collapse
 
-        action = f"{call.name} {self._describe(call)}"
-        observed = self._preflight_sources(context)
-        constraints = "\n".join(f"- {rule}" for rule in self._rules) or "(none stated)"
-        evidence = "\n".join(f"- {source}" for source in observed[:20]) or "(nothing yet)"
-        question = (
-            f"REQUEST:\n{self._request_text}\n\n"
-            f"STATED CONSTRAINTS:\n{constraints}\n\n"
-            f"PROPOSED ACTION:\n{action}\n\n"
-            f"ALREADY OBSERVED:\n{evidence}")
+        mutations = preflight.mutation_payload(calls, context.redact)
+        evidence, refs = preflight.evidence_payload(self.conversation.messages,
+                                                    context.redact)
+        asked = preflight.question(self._request_text, self._rules, mutations, evidence)
         completion = collapse(self.gateway.stream(
-            [Message.system(preflight.PROMPT), Message.user(question)],
-            model=self.config.model, temperature=0.0, max_tokens=400,
+            [Message.system(preflight.PROMPT), Message.user(asked)],
+            model=self.config.model, temperature=0.0, max_tokens=500,
         ))
         self._measurement.preflight_calls += 1
         self._measurement.preflight_tokens += completion.usage.total
+        action = "; ".join(f"{call.name} {self._describe(call)}" for call in calls)
         assessment = preflight.parse(completion.text, proposed_action=action)
-        assessment.evidence_refs = observed[:20]
-        assessment.dependencies = [missing.what for missing in assessment.missing_decisions]
+        assessment.evidence_refs = refs
+        self._trace_preflight(calls, refs, asked, mutations, assessment,
+                              completion.usage)
         return assessment
 
-    def _preflight_sources(self, context: ToolContext) -> list[str]:
-        """What this turn has observed, as source names — never content."""
-        found: list[str] = []
+    def _trace_preflight(self, calls: list[ToolCall], refs: list[str], asked: str,
+                         mutations: str, assessment: preflight.MutationAssessment,
+                         usage: Usage) -> None:
+        """A safe trace, so a wrong `allow` can be explained without a rerun.
+
+        Fingerprints and bounded excerpts only: no unrestricted source content,
+        no secret. It rides the turn's measurement, which the benchmark and the
+        headless JSON already carry.
+        """
         try:
-            for entry in context.evidence.entries:
-                text = str(getattr(entry, "source", "") or "")
-                if text and text not in found:
-                    found.append(text)
+            self._preflight_traces.append({
+                "step": self._measurement.model_turns,
+                "tools": [call.name for call in calls],
+                "action": assessment.proposed_action[:400],
+                "evidence_refs": list(refs),
+                "question_fingerprint": preflight.fingerprint(asked),
+                "mutation_fingerprint": preflight.fingerprint(mutations),
+                "assessment": assessment.as_trace(),
+                "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+                "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+                "withheld": assessment.status != "allow",
+            })
         except Exception:
             pass
-        return found
 
     def _withhold_for_preflight(self, context: ToolContext,
                                 assessment: preflight.MutationAssessment) -> ToolResult | None:
-        """Register the missing decision and refuse the call (FR-013, FR-018).
+        """Register the missing decision and refuse the batch (FR-013, FR-018).
 
         A decision the ledger already settles is not a reason to withhold
-        anything: `open_decision` reports it answered, nothing is registered,
-        and the call is allowed (FR-008). Only a decision that is still open
-        when the preflight ends blocks the call.
+        anything (FR-008). A client with no listener is `unattended` — nobody
+        was there to answer. A listening client is *asked*, not cancelled: the
+        user cancelled nothing, and the turn outcome presents the decision
+        through the existing clarification mechanism.
         """
         book = context.evidence
-        outcome = "unattended" if not self.bus.listening else "cancelled"
-        sources = assessment.evidence_refs
         registered: list[str] = []
         for missing in assessment.missing_decisions:
             decision = book.open_decision(
-                missing.what, affects=missing.affects, evidence_consulted=sources)
+                missing.what, affects=missing.affects,
+                evidence_consulted=assessment.evidence_refs)
             if decision.resolved:
                 continue
             book.asked(decision.id)
-            book.ended_without_answer(decision.id, outcome)
+            if not self.bus.listening:
+                book.ended_without_answer(decision.id, "unattended")
             registered.append(decision.what)
         if not registered:
             return None
@@ -1105,18 +1139,26 @@ class AgentLoop:
                                                  *self._carried_changes)})
 
     def _clarification_outcome(self) -> dict[str, Any] | None:
-        """The payload for the decisions this turn left open, or None."""
+        """The payload for the decisions this turn left open, or None.
+
+        A preflight decision a listening client is being asked about is
+        `asked`, not `cancelled`: the user cancelled nothing, and the turn
+        outcome presents the question through the existing mechanism.
+        """
         try:
             context = self.tool_context
             if context is None:
                 return None
-            ended = [decision for decision in context.evidence.withheld()
-                     if decision.state in ("unresolved", "blocked")]
-            if not ended:
+            open_decisions = [decision for decision in context.evidence.withheld()
+                              if decision.state in ("unresolved", "blocked", "asked")]
+            if not open_decisions:
                 return None
             from ..tools.ask import payload_for
 
-            payload = payload_for(ended, ended[0].outcome or "cancelled")
+            outcome = open_decisions[0].outcome or (
+                "asked" if any(d.state == "asked" for d in open_decisions)
+                else "cancelled")
+            payload = payload_for(open_decisions, outcome)
             prior = self._prior_changes()
             if prior:
                 # A mutation that happened before the decision became known is

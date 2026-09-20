@@ -564,6 +564,7 @@ _ENDED = {
     "cancelled": "The user closed the form without answering",
     "expired": "The form expired before anyone answered",
     "unattended": "Nobody was there to answer",
+    "asked": "The question is waiting for an answer",
 }
 
 
