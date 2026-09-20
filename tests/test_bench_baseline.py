@@ -229,3 +229,28 @@ def test_a_strategy_with_nothing_measured_reports_zero_not_an_error():
     document = report.as_paired_json([broken], [], provider="fake", model="fake-1", tries=3)
     assert document["totals"]["current"]["mean_total_tokens"] == 0
     assert document["totals"]["current"]["attempts"] == 0
+
+
+def test_the_paired_markdown_flags_an_outcome_rate_fall_as_a_regression():
+    """FR-077: a change that reduces tokens while reducing any task's outcome
+    rate must be reportable as a regression, and the comparison says so."""
+    task = a_task()
+    document = report.as_paired_json(
+        [_outcome(task, "current", 2, 10_000)], [_outcome(task, "naive", 3, 40_000)],
+        provider="fake", model="fake-1", tries=3)
+
+    text = report.as_paired_markdown(document)
+
+    assert "Regression" in text
+    assert "**yes**" in text
+
+
+def test_the_paired_markdown_leaves_a_non_regression_blank():
+    task = a_task()
+    document = report.as_paired_json(
+        [_outcome(task, "current", 3, 10_000)], [_outcome(task, "naive", 2, 40_000)],
+        provider="fake", model="fake-1", tries=3)
+
+    text = report.as_paired_markdown(document)
+
+    assert "**yes**" not in text

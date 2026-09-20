@@ -376,8 +376,8 @@ def as_paired_markdown(report: dict) -> str:
         "| Task | Category | Passed (current) | Passed (naive) | Total tokens "
         "(current) | Total tokens (naive) | In / Out / Cached (current) | "
         "In / Out / Cached (naive) | Turns (current) | Turns (naive) | "
-        "Tool calls (current) | Tool calls (naive) |",
-        "| --- | --- | --- | --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |",
+        "Tool calls (current) | Tool calls (naive) | Regression |",
+        "| --- | --- | --- | --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for task in report["tasks"]:
         cur, nai = task["current"], task.get("naive")
@@ -387,7 +387,8 @@ def as_paired_markdown(report: dict) -> str:
             f"{cur['mean_total_tokens']:,} | {_num(nai, 'mean_total_tokens')} | "
             f"{_triple(cur)} | {_triple(nai)} | "
             f"{cur['mean_steps']} | {_num(nai, 'mean_steps')} | "
-            f"{cur['mean_tool_calls']} | {_num(nai, 'mean_tool_calls')} |")
+            f"{cur['mean_tool_calls']} | {_num(nai, 'mean_tool_calls')} | "
+            f"{_regression(cur, nai)} |")
     totals = report["totals"]
     lines += [
         "",
@@ -396,6 +397,11 @@ def as_paired_markdown(report: dict) -> str:
         f"{totals['current']['mean_total_tokens']:,} tokens per attempt; naive: "
         f"{totals['naive']['attempts_passed']}/{totals['naive']['attempts']} "
         f"attempts, mean {totals['naive']['mean_total_tokens']:,} tokens per attempt.",
+        "",
+        f"Token accounting version {report.get('token_accounting_version', 1)}. "
+        "A total from one accounting version is not directly comparable with a "
+        "total from another: version 2 adds `written_tokens` and every auxiliary "
+        "provider call, including the compaction summary.",
         "",
         "The SC-011 threshold is set from these figures and recorded in "
         "`specs/002-grounded-agent-quality/spec.md`; no efficiency work is "
@@ -421,6 +427,21 @@ def _triple(record: dict | None) -> str:
         return "—"
     return (f"{record['mean_input_tokens']:,} / {record['mean_output_tokens']:,} / "
             f"{record['mean_cached_tokens']:,}")
+
+
+def _regression(current: dict, naive: dict | None) -> str:
+    """`yes` when the current strategy's outcome rate falls below naive's.
+
+    FR-077: a change that reduces tokens while reducing any task's outcome rate
+    must be reportable as a regression. The two rates sit in adjacent columns
+    already; this names the fall so it cannot be read past. A task the naive
+    strategy never ran has nothing to fall against and is left blank.
+    """
+    if not naive or not current.get("tries") or not naive.get("tries"):
+        return ""
+    if current["passed"] / current["tries"] < naive["passed"] / naive["tries"]:
+        return "**yes**"
+    return ""
 
 
 def write_paired(current: list[Outcome], naive: list[Outcome], directory: Path, *,
