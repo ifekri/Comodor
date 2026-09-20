@@ -15,7 +15,7 @@ from pathlib import Path
 
 from . import baseline, integrity
 from .report import write, write_blocked, write_paired
-from .runner import run_blocked, run_task
+from .runner import run_blocked, run_paired, run_task
 from .task import TaskError, load_tasks
 
 HERE = Path(__file__).resolve().parent
@@ -119,29 +119,34 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{markdown_file}")
         return 0
 
-    strategies = list(baseline.STRATEGIES) if args.paired else [args.strategy]
-    print(f"{len(tasks)} tasks, {args.tries} attempts each, "
-          f"against {args.model} via {args.provider}, "
-          f"strategy {' and '.join(strategies)}\n")
-    started = time.monotonic()
-    by_strategy: dict[str, list] = {}
-    for strategy in strategies:
-        outcomes = by_strategy.setdefault(strategy, [])
+    if args.paired:
+        started = time.monotonic()
+        print(f"{len(tasks)} tasks, {args.tries} attempts each, "
+              f"against {args.model} via {args.provider}, "
+              f"strategy {' and '.join(baseline.STRATEGIES)}, "
+              f"counterbalanced in (task, try) blocks\n")
+        checkpoint = (Path(args.checkpoint) if args.checkpoint
+                      else HERE / "results" / f"paired-{args.label or 'paired'}.checkpoint.jsonl")
+        current, naive = run_paired(
+            tasks, provider=args.provider, model=args.model, tries=args.tries,
+            keep=keep, learning=args.learning, checkpoint=checkpoint)
+        json_file, markdown_file = write_paired(
+            current, naive, HERE / "results", provider=args.provider,
+            model=args.model, tries=args.tries)
+        outcomes = current
+    else:
+        started = time.monotonic()
+        print(f"{len(tasks)} tasks, {args.tries} attempts each, "
+              f"against {args.model} via {args.provider}, "
+              f"strategy {args.strategy}\n")
+        outcomes = []
         for index, task in enumerate(tasks, start=1):
-            print(f"[{strategy}] [{index}/{len(tasks)}] {task.category}/{task.name}",
+            print(f"[{args.strategy}] [{index}/{len(tasks)}] {task.category}/{task.name}",
                   flush=True)
             outcomes.append(run_task(task, provider=args.provider, model=args.model,
-                                     tries=args.tries, keep=keep, strategy=strategy,
-                                     learning=args.learning,
+                                     tries=args.tries, keep=keep,
+                                     strategy=args.strategy, learning=args.learning,
                                      without=tuple(args.without)))
-
-    outcomes = by_strategy[strategies[0]]
-    if args.paired:
-        json_file, markdown_file = write_paired(
-            by_strategy[baseline.CURRENT], by_strategy[baseline.NAIVE],
-            HERE / "results", provider=args.provider, model=args.model,
-            tries=args.tries)
-    else:
         json_file, markdown_file = write(outcomes, HERE / "results",
                                          provider=args.provider, model=args.model,
                                          tries=args.tries, label=args.label)
@@ -154,7 +159,8 @@ def main(argv: list[str] | None = None) -> int:
           f"minutes")
     print(f"{markdown_file}")
 
-    kept = [path for group in by_strategy.values() for one in group for path in one.kept]
+    groups = [current, naive] if args.paired else [outcomes]
+    kept = [path for group in groups for one in group for path in one.kept]
     if kept:
         print(f"\n{len(kept)} failed workspace(s) kept:")
         for path in kept[:10]:

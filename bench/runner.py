@@ -212,6 +212,165 @@ def run_task(task: Task, *, provider: str, model: str, tries: int = 3,
     return outcome
 
 
+def run_paired(tasks: list[Task], *, provider: str, model: str, tries: int = 3,
+               keep: Path | None = None, say=print, learning: bool = False,
+               checkpoint: Path | None = None
+               ) -> tuple[list[Outcome], list[Outcome]]:
+    """Both strategies, paired within each `(task, try)` block, counterbalanced.
+
+    Running all of `current` and then all of `naive` confounds the strategy
+    with the hour it ran: provider load, cache warmth and the model's own drift
+    all move between two long runs. Each block runs both strategies close
+    together, and which goes first alternates across blocks, so a pair differs
+    by the strategy and little else. Returns `(current, naive)` — the same two
+    lists the sequential mode produced, from a fairer experiment.
+    """
+    if any(task.sequence for task in tasks):
+        raise ValueError("the paired experiment does not take sequence tasks")
+
+    done: dict[tuple[str, int, str], tuple[Attempt, Verdict, str]] = {}
+    if checkpoint is not None:
+        header, saved = _read_paired_checkpoint(checkpoint)
+        if header is None:
+            _write_checkpoint(checkpoint, _paired_header(provider, model, tries, tasks))
+        else:
+            _verify_paired_checkpoint(header, provider, model, tries, tasks)
+            done = saved
+
+    current = [Outcome(task=task, strategy=baseline.CURRENT) for task in tasks]
+    naive = [Outcome(task=task, strategy=baseline.NAIVE) for task in tasks]
+    for outcome in (*current, *naive):
+        outcome.learning = learning
+
+    block = 0
+    for index, task in enumerate(tasks):
+        for attempt_number in range(1, tries + 1):
+            order = (baseline.CURRENT, baseline.NAIVE) if block % 2 == 0 \
+                else (baseline.NAIVE, baseline.CURRENT)
+            say(f"[block {block + 1}] {task.name} try {attempt_number}: "
+                f"{' -> '.join(order)}")
+            for strategy in order:
+                key = (task.name, attempt_number, strategy)
+                if key in done:
+                    attempt, verdict, workspace = done[key]
+                else:
+                    attempt, verdict, workspace = _one(
+                        task, provider, model, keep, strategy, learning, ())
+                    if checkpoint is not None:
+                        _write_checkpoint(checkpoint,
+                                          _paired_attempt_record(key, attempt, verdict))
+                target = current[index] if strategy == baseline.CURRENT else naive[index]
+                target.attempts.append(attempt)
+                target.verdicts.append(verdict)
+                if not verdict.passed:
+                    target.kept.append(str(workspace))
+                mark = "pass" if verdict.passed else "FAIL"
+                say(f"    {strategy:<7} {mark}  {attempt.steps} steps  "
+                    f"{attempt.elapsed:.0f}s  ${attempt.cost_usd:.3f}"
+                    + (f"  — {verdict.reason}" if not verdict.passed else ""))
+            block += 1
+    return current, naive
+
+
+def _paired_header(provider: str, model: str, tries: int, tasks: list[Task]) -> dict:
+    from . import integrity
+
+    fingerprints = integrity.fingerprint_all()
+    return {
+        "kind": "paired-header",
+        "provider": provider,
+        "model": model,
+        "tries": tries,
+        "cohort": [task.name for task in tasks],
+        "strategies": list(baseline.STRATEGIES),
+        "scheme": "counterbalanced: (task, try) blocks, current-first on even blocks",
+        "fingerprints": {task.name: fingerprints.get(task.name) for task in tasks},
+    }
+
+
+def _verify_paired_checkpoint(header: dict, provider: str, model: str, tries: int,
+                              tasks: list[Task]) -> None:
+    expected = _paired_header(provider, model, tries, tasks)
+    for key in ("provider", "model", "tries", "cohort", "strategies", "scheme"):
+        if header.get(key) != expected[key]:
+            raise ValueError(
+                f"checkpoint {key} does not match this run; refusing to mix "
+                f"two experiments")
+    if header.get("fingerprints") != expected["fingerprints"]:
+        raise ValueError(
+            "scenario fingerprints changed since the checkpoint; refusing to "
+            "resume a different benchmark")
+
+
+def _paired_attempt_record(key: tuple[str, int, str], attempt: Attempt,
+                           verdict: Verdict) -> dict:
+    task, attempt_index, strategy = key
+    return {
+        "kind": "paired-attempt",
+        "task": task,
+        "attempt_index": attempt_index,
+        "strategy": strategy,
+        "passed": bool(verdict.passed),
+        "reason": verdict.reason,
+        "attempt": {
+            "ok": attempt.ok,
+            "stopped": attempt.stopped,
+            "steps": attempt.steps,
+            "elapsed": attempt.elapsed,
+            "input_tokens": attempt.input_tokens,
+            "output_tokens": attempt.output_tokens,
+            "cached_tokens": attempt.cached_tokens,
+            "written_tokens": attempt.written_tokens,
+            "cost_usd": attempt.cost_usd,
+            "tool_calls": attempt.tool_calls,
+            "error": attempt.error,
+            "measurement": attempt.measurement,
+        },
+    }
+
+
+def _read_paired_checkpoint(path: Path) -> tuple[
+        dict | None, dict[tuple[str, int, str], tuple[Attempt, Verdict, str]]]:
+    """The header and every complete paired attempt. A torn last line is dropped."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None, {}
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None, {}
+    try:
+        header = json.loads(lines[0])
+    except ValueError:
+        return None, {}
+    if header.get("kind") != "paired-header":
+        return None, {}
+    saved: dict[tuple[str, int, str], tuple[Attempt, Verdict, str]] = {}
+    for line in lines[1:]:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            break                       # an interrupted write: keep what is whole
+        if record.get("kind") != "paired-attempt":
+            continue
+        values = record["attempt"]
+        attempt = Attempt(
+            workspace=Path("."), ok=bool(values["ok"]), stopped=str(values["stopped"]),
+            text="", steps=int(values["steps"]), cost_usd=float(values["cost_usd"]),
+            elapsed=float(values["elapsed"]), error=str(values.get("error", "")),
+            input_tokens=int(values["input_tokens"]),
+            output_tokens=int(values["output_tokens"]),
+            cached_tokens=int(values["cached_tokens"]),
+            written_tokens=int(values.get("written_tokens", 0)),
+            tool_calls=int(values.get("tool_calls", 0)),
+            measurement=dict(values.get("measurement") or {}),
+        )
+        verdict = Verdict.ok() if record["passed"] else Verdict.no(str(record.get("reason", "")))
+        saved[(str(record["task"]), int(record["attempt_index"]),
+               str(record["strategy"]))] = (attempt, verdict, "")
+    return header, saved
+
+
 def _run_sequence_once(task: Task, *, provider: str, model: str,
                        keep: Path | None, say, strategy: str,
                        learning: bool, without: tuple[str, ...]

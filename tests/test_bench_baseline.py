@@ -254,3 +254,28 @@ def test_the_paired_markdown_leaves_a_non_regression_blank():
     text = report.as_paired_markdown(document)
 
     assert "**yes**" not in text
+
+
+def test_the_paired_run_interleaves_and_counterbalances(monkeypatch):
+    """Both strategies run close together in a block, and which goes first
+    alternates, so the strategy is not confounded with the hour it ran."""
+    from bench import runner
+
+    order = []
+
+    def fake(task, provider, model, keep, strategy, learning, without):
+        order.append((task.name, strategy))
+        attempt = Attempt(workspace=Path("."), ok=True, stopped="done", text="",
+                          steps=1, input_tokens=10, output_tokens=1, cached_tokens=0)
+        return attempt, Verdict.ok(), Path(".")
+
+    monkeypatch.setattr(runner, "_one", fake)
+    tasks = [a_task(name="t1"), a_task(name="t2")]
+    current, naive = runner.run_paired(tasks, provider="fake", model="m", tries=2,
+                                       say=lambda *a, **k: None)
+
+    assert order[0] == ("t1", "current") and order[1] == ("t1", "naive")
+    assert order[2] == ("t1", "naive") and order[3] == ("t1", "current")
+    assert order[4] == ("t2", "current") and order[5] == ("t2", "naive")
+    assert len(current) == 2 and len(naive) == 2
+    assert current[0].task.name == "t1" and naive[0].strategy == "naive"
