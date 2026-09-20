@@ -168,6 +168,11 @@ class TaskMeasurement:
     corrections: int = 0
     knowledge_hits: int = 0
     knowledge_stale: int = 0
+    #: The mutation preflight's own cost, kept apart from the turn's: it is a
+    #: bounded check the Core makes, not part of answering the request, and
+    #: folding it into the task's figures would hide what the guard costs.
+    preflight_calls: int = 0
+    preflight_tokens: int = 0
     outcome: str = ""
     validation_outcome: str = ""
 
@@ -225,6 +230,8 @@ class TaskMeasurement:
             "corrections": self.corrections,
             "knowledge_hits": self.knowledge_hits,
             "knowledge_stale": self.knowledge_stale,
+            "preflight_calls": self.preflight_calls,
+            "preflight_tokens": self.preflight_tokens,
             "outcome": self.outcome,
             "validation_outcome": self.validation_outcome,
             "estimated_turns": sum(1 for turn in self.turns if turn.estimated),

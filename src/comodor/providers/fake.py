@@ -43,9 +43,14 @@ class Script:
 
 class FakeProvider:
     """Replays :class:`Script` objects, one per call, then repeats the last."""
-
     name = "fake"
     label = "Fake"
+
+    #: What the mutation preflight is answered with. The loop asks it once
+    #: before the first call that can change anything; a test that is not
+    #: about the guard must not have its script queue consumed by it, so the
+    #: preflight is answered here and never takes a `Script`.
+    preflight = '{"status": "allow", "decisions": [], "reason": "test default"}'
 
     def __init__(self, scripts: list[Script] | None = None, model: str = "fake-1",
                  chunk: int = 24) -> None:
@@ -61,8 +66,13 @@ class FakeProvider:
     def stream(self, messages: list[Message], *, tools: list[ToolSpec] | None = None,
                model: str = "", temperature: float = 0.3, max_tokens: int = 4096,
                **kwargs: Any) -> Iterator[StreamEvent]:
-        self.calls.append(list(messages))
-        script = self._next_script(messages)
+        if _is_preflight(messages):
+            # Answered here, and not recorded as a turn: it is the loop's own
+            # guard, not part of the conversation a test is scripting.
+            script = Script(text=self.preflight)
+        else:
+            self.calls.append(list(messages))
+            script = self._next_script(messages)
 
         for piece in _chunks(script.reasoning, self.chunk):
             yield StreamEvent(type=EventType.REASONING, text=piece)
@@ -108,6 +118,18 @@ class FakeProvider:
 def _chunks(text: str, size: int) -> Iterator[str]:
     for start in range(0, len(text), size):
         yield text[start:start + size]
+
+
+def _is_preflight(messages: list[Message]) -> bool:
+    """Whether this call is the mutation preflight rather than a turn.
+
+    The loop's guard is the only caller whose system prompt says so; every
+    other call is a turn and takes its script from the queue in order.
+    """
+    for message in messages:
+        if message.role is Role.SYSTEM:
+            return "mutation preflight" in (message.content or "")
+    return False
 
 
 def _echo(messages: list[Message]) -> str:

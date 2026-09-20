@@ -41,7 +41,7 @@ from ..providers.base import (
 from ..providers.gateway import Gateway
 from ..safety import PermissionEngine, Risk
 from ..tools import ToolContext, ToolRegistry, ToolResult
-from . import plan, staleness
+from . import plan, preflight, staleness
 from .context import Conversation, Optimizer
 from .prompts import COMPACT_PROMPT, build_system_prompt, project_instructions
 from .tokens import TaskMeasurement
@@ -74,6 +74,12 @@ READ_ONLY_TOOLS = frozenset({
     "read_file", "list_dir", "glob", "grep", "search_history",
     "read_skill_file", "mcp_read_resource",
 })
+
+#: Calls the mutation preflight does not gate: the ones that only look (above),
+#: and the ones whose whole purpose is to resolve a decision or ask for one.
+#: Gating `ask` would be a loop — the check would withhold the very call that
+#: answers it.
+_GATE_EXEMPT = frozenset({"ask", "propose_mode"})
 
 #: Calls that can open or hand back a mandatory decision. A batch containing
 #: one runs in order, so the decision is recorded before a sibling could act.
@@ -222,6 +228,10 @@ class AgentLoop:
         self._mutating_commands: list[str] = []
         #: The request this turn is answering, for the gate's element list.
         self._request_text = ""
+        #: The turn's mutation preflight, computed once before the first call
+        #: that can change anything (FR-013). `None` until then; an assessment
+        #: whose status is `allow` lets every mutating call this turn proceed.
+        self._preflight: preflight.MutationAssessment | None = None
         #: What the user said not to do this turn, in their own words.
         self._rules: list[str] = []
         #: Worked out once per model. The model does not change mid-turn, and
@@ -256,6 +266,7 @@ class AgentLoop:
         self._carried_changes = []
         self._mutating_commands = []
         self._request_text = user_text
+        self._preflight = None
         result = TurnResult()
         self._measurement = result.measurement
         # The project's instructions, read once for the turn. Every step's
@@ -556,6 +567,10 @@ class AgentLoop:
     def _execute(self, calls: list[ToolCall]) -> None:
         context = self._tool_context()
         parallel = self._can_parallelise(calls)
+        # Once, single-threaded, before any worker reads it: the turn's
+        # pre-mutation check (FR-013). A batch that cannot change anything
+        # costs no call.
+        self._preflight_for_batch(context, calls)
 
         if parallel and len(calls) > 1:
             with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_TOOLS, len(calls))) as pool:
@@ -690,11 +705,15 @@ class AgentLoop:
             # here, and uncertain dependency is treated as dependent (FR-018).
             result = ToolResult.failure(self._withheld_by(context, call), withheld=True)
         else:
-            # The tool is handed a view of the context that knows which call
-            # it is, so anything it streams is tagged where it is produced
-            # rather than guessed at by whoever receives it.
-            result = self.tools.invoke(call.name, context.for_call(call.id),
-                                       call.arguments)
+            gate = self._mutation_gate(context, call)
+            if gate is not None:
+                result = gate
+            else:
+                # The tool is handed a view of the context that knows which call
+                # it is, so anything it streams is tagged where it is produced
+                # rather than guessed at by whoever receives it.
+                result = self.tools.invoke(call.name, context.for_call(call.id),
+                                           call.arguments)
         self.bus.emit(Kind.TOOL_END, id=call.id, name=call.name, ok=result.ok,
                       content=result.content, display=result.rendered,
                       elapsed=result.elapsed, meta=result.meta)
@@ -726,6 +745,130 @@ class AgentLoop:
                     f"Nothing that may depend on it runs until it is answered.")
         except Exception:
             return ""
+
+    def _is_mutating(self, call: ToolCall) -> bool:
+        """Whether the preflight gates this call: anything that can change state.
+
+        Everything that is not a look and not the act of asking. The gate must
+        not protect only file writes: a shell command, a delegated child and a
+        persisted memory all change something the request did not settle.
+        """
+        return call.name not in READ_ONLY_TOOLS and call.name not in _GATE_EXEMPT
+
+    def _preflight_for_batch(self, context: ToolContext,
+                             calls: list[ToolCall]) -> None:
+        """Compute the turn's mutation preflight once, before the batch runs.
+
+        Single-threaded here, so the shared assessment is written before any
+        parallel worker could read it. A batch with nothing that can change
+        anything costs no call.
+        """
+        if self._preflight is not None:
+            return
+        for call in calls:
+            if self._is_mutating(call):
+                self._preflight = self._assess_mutation(context, call)
+                return
+
+    def _mutation_gate(self, context: ToolContext,
+                       call: ToolCall) -> ToolResult | None:
+        """The Core's pre-mutation check, or None when the call may run.
+
+        A material decision the model did not ask about is registered here and
+        the call does not run (FR-013, FR-018). An implementation choice the
+        request leaves to the agent is not a material decision, and the call
+        proceeds (FR-011, FR-012).
+        """
+        if not self._is_mutating(call):
+            return None
+        try:
+            if self._preflight is None:
+                self._preflight = self._assess_mutation(context, call)
+            if self._preflight.allows:
+                return None
+            held = self._withhold_for_preflight(context, self._preflight)
+            if held is not None:
+                return held
+            if self._preflight.status == "blocked":
+                # An assessment nobody could read is not permission. There is
+                # no decision to register — only a check that did not clear.
+                return ToolResult.failure(
+                    "not run: the mutation preflight could not clear this change "
+                    f"({self._preflight.reason or 'unreadable assessment'}). "
+                    "Say plainly why the change is settled, or ask about what "
+                    "is unresolved.", withheld=True)
+            return None
+        except Exception:
+            # A fault in the guard is not a reason to change how a turn works.
+            # An unreadable *assessment* is `blocked` and withholds; a fault in
+            # the guard's own code falls back to the pre-guard behaviour.
+            return None
+
+    def _assess_mutation(self, context: ToolContext,
+                         call: ToolCall) -> preflight.MutationAssessment:
+        """One bounded model call: does this change depend on a missing decision?"""
+        from ..providers.base import collapse
+
+        action = f"{call.name} {self._describe(call)}"
+        observed = self._preflight_sources(context)
+        constraints = "\n".join(f"- {rule}" for rule in self._rules) or "(none stated)"
+        evidence = "\n".join(f"- {source}" for source in observed[:20]) or "(nothing yet)"
+        question = (
+            f"REQUEST:\n{self._request_text}\n\n"
+            f"STATED CONSTRAINTS:\n{constraints}\n\n"
+            f"PROPOSED ACTION:\n{action}\n\n"
+            f"ALREADY OBSERVED:\n{evidence}")
+        completion = collapse(self.gateway.stream(
+            [Message.system(preflight.PROMPT), Message.user(question)],
+            model=self.config.model, temperature=0.0, max_tokens=400,
+        ))
+        self._measurement.preflight_calls += 1
+        self._measurement.preflight_tokens += completion.usage.total
+        assessment = preflight.parse(completion.text, proposed_action=action)
+        assessment.evidence_refs = observed[:20]
+        assessment.dependencies = [missing.what for missing in assessment.missing_decisions]
+        return assessment
+
+    def _preflight_sources(self, context: ToolContext) -> list[str]:
+        """What this turn has observed, as source names — never content."""
+        found: list[str] = []
+        try:
+            for entry in context.evidence.entries:
+                text = str(getattr(entry, "source", "") or "")
+                if text and text not in found:
+                    found.append(text)
+        except Exception:
+            pass
+        return found
+
+    def _withhold_for_preflight(self, context: ToolContext,
+                                assessment: preflight.MutationAssessment) -> ToolResult | None:
+        """Register the missing decision and refuse the call (FR-013, FR-018).
+
+        A decision the ledger already settles is not a reason to withhold
+        anything: `open_decision` reports it answered, nothing is registered,
+        and the call is allowed (FR-008). Only a decision that is still open
+        when the preflight ends blocks the call.
+        """
+        book = context.evidence
+        outcome = "unattended" if not self.bus.listening else "cancelled"
+        sources = assessment.evidence_refs
+        registered: list[str] = []
+        for missing in assessment.missing_decisions:
+            decision = book.open_decision(
+                missing.what, affects=missing.affects, evidence_consulted=sources)
+            if decision.resolved:
+                continue
+            book.asked(decision.id)
+            book.ended_without_answer(decision.id, outcome)
+            registered.append(decision.what)
+        if not registered:
+            return None
+        named = "; ".join(registered)
+        return ToolResult.failure(
+            f"not run: this change depends on a decision that is not settled "
+            f"({named}). Ask about it before changing anything; nothing that "
+            f"may depend on it runs until it is answered.", withheld=True)
 
     def _can_parallelise(self, calls: list[ToolCall]) -> bool:
         """Only when nothing in the batch could stop to ask a question.
