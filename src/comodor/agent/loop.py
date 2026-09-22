@@ -231,6 +231,10 @@ class AgentLoop:
         #: operation name, never the command text). Reported with the files a
         #: mutation touched when a decision turns up after the change.
         self._mutating_commands: list[str] = []
+        #: Validation runs this turn — a `pytest`, a build, a lint — so the
+        #: completion gate can compare the answer's claim about a check against
+        #: what actually ran. Transient; never persisted with command text.
+        self._validations: list[Any] = []
         #: The request this turn is answering, for the gate's element list.
         self._request_text = ""
         #: The turn's mutation preflight, computed once before the first call
@@ -270,6 +274,7 @@ class AgentLoop:
         self._written_paths = []
         self._carried_changes = []
         self._mutating_commands = []
+        self._validations = []
         self._request_text = user_text
         self._batch_preflight = None
         self._preflight_traces: list[dict[str, Any]] = []
@@ -602,6 +607,17 @@ class AgentLoop:
             # The thing the call was about, so a failure and a later retry of
             # the same operation share a key and two different targets do not.
             key = _operation_key(call)
+            if call.name in ("run_shell", "run_python") \
+                    and not result.meta.get("withheld"):
+                # A recognised validation run, so the completion gate can tell a
+                # test/build result from an unrelated tool error. A withheld
+                # command never ran and is not an observation (FR-036).
+                from . import verify as _verify
+
+                command = str(call.arguments.get("command")
+                              or call.arguments.get("code") or "")
+                self._validations = _verify.fold_validation(
+                    self._validations, command, result.ok)
             if not result.ok:
                 self._measurement.retries += 1
                 self._failed.append((call.name, key, _brief_failure(result.content)))
@@ -1548,7 +1564,8 @@ class AgentLoop:
                 changed_paths=self._written_paths,
                 failures=[(tool, reason) for tool, _key, reason in self._failed],
                 pending=pending,
-                answer=result.text)
+                answer=result.text,
+                validations=self._validations)
         except Exception:
             # A gate that cannot reach a verdict annotates nothing and blocks
             # nothing: it falls back to delivering the answer (FR-127).

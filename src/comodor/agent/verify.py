@@ -1110,6 +1110,102 @@ def command_mutates(command: str, tool: str = "run_shell") -> bool:
     return shell_writes(command)
 
 
+#: Commands whose primary purpose is validation, by kind. Classified from the
+#: command word, never from output — a `grep` that prints a line containing
+#: `fail` is not a failing test. Deliberately narrow: an unrecognised command is
+#: not validation, and a validation-reporting obligation is never satisfied or
+#: contradicted by one.
+_VALIDATION_KINDS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("tests", re.compile(
+        r"(?i)(^|[;&|(\s])(?:"
+        r"pytest|unittest|nose|tox|jest|vitest|mocha|"
+        r"npm\s+(?:run\s+)?tests?|pnpm\s+(?:run\s+)?tests?|"
+        r"yarn\s+(?:run\s+)?tests?|bun\s+tests?|"
+        r"cargo\s+test|go\s+test|dotnet\s+test|mvn\s+test|gradle\s+test|"
+        r"\./gradlew\s+test|make\s+tests?|"
+        r"python[0-9.]*\s+-m\s+(?:pytest|unittest)|"
+        r"python[0-9.]*\s+-m\s+pytest)(\s|$)")),
+    ("build", re.compile(
+        r"(?i)(^|[;&|(\s])(?:"
+        r"npm\s+run\s+build|pnpm\s+build|yarn\s+build|bun\s+build|"
+        r"cargo\s+build|dotnet\s+build|make\s+(?:build|all)|"
+        r"gradle\s+build|mvn\s+package|go\s+build)(\s|$)")),
+    ("lint", re.compile(
+        r"(?i)(^|[;&|(\s])(?:"
+        r"ruff\s+check|flake8|pylint|eslint|mypy|pyright|"
+        r"npm\s+run\s+lint|pnpm\s+lint|yarn\s+lint)(\s|$)")),
+    ("check", re.compile(
+        r"(?i)(^|[;&|(\s])(?:"
+        r"cargo\s+check|go\s+vet|tsc|make\s+check|"
+        r"python[0-9.]*\s+-m\s+compileall)(\s|$)")),
+)
+
+
+def validation_kind(command: str, tool: str = "run_shell") -> str:
+    """The kind of validation a command performs, or "" when it is not one.
+
+    Recognised only in command position and only for the explicit forms that
+    are a check: `pytest`, `cargo test`, `npm test`, `ruff check` and the like.
+    A command that merely mentions the word is not validation.
+    """
+    if tool not in ("run_shell",):
+        return ""
+    text = command or ""
+    for kind, pattern in _VALIDATION_KINDS:
+        if pattern.search(text):
+            return kind
+    return ""
+
+
+@dataclass(frozen=True)
+class ValidationObservation:
+    """One validation run this turn, and how it ended. Transient state."""
+
+    kind: str
+    command_summary: str
+    status: str                    # passed | failed | unavailable
+    evidence_ref: str = ""
+
+
+def _validation_target(command: str) -> str:
+    """A bounded identity for the thing a validation command checks.
+
+    A rerun of the same target supersedes an earlier result; two different
+    checks do not. The command word and its subcommand, redacted by the caller,
+    is enough — never the whole command line.
+    """
+    return " ".join((command or "").split())[:120]
+
+
+def fold_validation(observations: list[ValidationObservation],
+                    command: str, ok: bool) -> list[ValidationObservation]:
+    """Add one run, dropping an earlier run of the same target it supersedes."""
+    kind = validation_kind(command)
+    if not kind:
+        return observations
+    target = _validation_target(command)
+    kept = [one for one in observations
+            if not (one.kind == kind and one.command_summary == target)]
+    kept.append(ValidationObservation(
+        kind=kind, command_summary=target,
+        status="passed" if ok else "failed",
+        evidence_ref=f"{kind}:{target[:60]}"))
+    return kept
+
+
+def final_validation_status(observations: list[ValidationObservation]) -> str:
+    """The latest status per target, as one verdict for the turn.
+
+    Any target whose latest run failed makes the turn's validation `failed`;
+    otherwise, if anything ran, `passed`; with nothing run, "".
+    """
+    if not observations:
+        return ""
+    if any(one.status == "failed" for one in observations):
+        return "failed"
+    return "passed"
+
+
 def _command_writes(tool: str, claim: str) -> bool:
     """Whether this command tool's command actually writes.
 
@@ -1186,6 +1282,12 @@ class Assessment:
     claims_completion: bool = False
     contradicted: bool = False
     pending_clarification: str = ""
+    #: The user explicitly asked to be told how a check ended, and the turn's
+    #: latest validation status — `passed`, `failed`, `""` for none. The answer
+    #: must state it; a false pass is contradicted even without a completion
+    #: claim (FR-036, FR-125).
+    validation_obligation: bool = False
+    validation_status: str = ""
     verdict: str = "no_intervention"          # no_intervention | annotate | block
 
     def annotation(self) -> str:
@@ -1301,14 +1403,23 @@ def _delivered(element: str, entries, changed_paths) -> list[str]:
 
 
 def assess(request: str, *, entries=(), changed_paths=(), failures=(),
-           pending=(), answer: str = "") -> Assessment:
+           pending=(), answer: str = "", validations=()) -> Assessment:
     """Compare the request against the delivery and decide the gate's verdict.
 
     `failures` are `(tool, reason)` for tool calls that failed; `pending` are
     open decisions. Either names real unresolved work, so the gate can see a
     completion claim contradicted even when the request was not a list.
+    `validations` are this turn's `ValidationObservation`s: when the user asked
+    to be told how a check ended, the answer must state the latest status, and
+    a false pass is contradicted on its own.
     """
-    from .claims import claims_completion
+    from .claims import (
+        claims_completion,
+        claims_validation_pass,
+        reports_validation_failure,
+        reports_validation_unknown,
+        requests_validation_status,
+    )
 
     result = Assessment()
     result.requested = requested_elements(request)
@@ -1337,8 +1448,15 @@ def assess(request: str, *, entries=(), changed_paths=(), failures=(),
         if not result.pending_clarification:
             result.pending_clarification = str(getattr(decision, "id", "") or "")
 
+    result.validation_obligation = requests_validation_status(request)
+    result.validation_status = final_validation_status(list(validations))
+    if result.validation_obligation:
+        _check_validation_report(result, answer, claims_validation_pass,
+                                 reports_validation_failure, reports_validation_unknown)
+
     result.claims_completion = claims_completion(answer)
-    result.contradicted = bool(result.claims_completion and result.unresolved)
+    result.contradicted = result.contradicted \
+        or bool(result.claims_completion and result.unresolved)
 
     if result.contradicted:
         result.verdict = "block"
@@ -1347,13 +1465,77 @@ def assess(request: str, *, entries=(), changed_paths=(), failures=(),
     return result
 
 
+def _check_validation_report(result: Assessment, answer: str, claims_pass, reports_failure,
+                             reports_unknown) -> None:
+    """The user asked for the check's outcome; the answer must give it.
+
+    A false pass is contradicted whether or not the answer claims the task is
+    complete (FR-036, FR-125); an omitted status is a completion failure the
+    single correction turn is for. Only a recognised validation observation
+    moves `validation_status` — an unrelated tool error never does.
+    """
+    what = "the validation result"
+    status = result.validation_status
+    if status == "failed":
+        if claims_pass(answer):
+            result.unresolved.append(what)
+            result.unresolved_reasons[what] = (
+                "the latest validation run failed, but the answer says it passed")
+            result.contradicted = True
+        elif not reports_failure(answer):
+            result.unresolved.append(what)
+            result.unresolved_reasons[what] = (
+                "the user asked for the validation result, and the answer does not "
+                "state it")
+            result.contradicted = True
+    elif status == "passed":
+        if reports_failure(answer) and not claims_pass(answer):
+            result.unresolved.append(what)
+            result.unresolved_reasons[what] = (
+                "the latest validation run passed, but the answer says it failed")
+            result.contradicted = True
+    else:
+        if claims_pass(answer):
+            result.unresolved.append(what)
+            result.unresolved_reasons[what] = (
+                "no validation run was recorded, so the answer cannot say it passed")
+            result.contradicted = True
+        elif not reports_unknown(answer):
+            result.unresolved.append(what)
+            result.unresolved_reasons[what] = (
+                "the user asked for the validation result, and no run was recorded")
+            result.contradicted = True
+
+
 def as_incomplete(assessment: Assessment) -> str:
-    """What the model is told when a completion claim is contradicted (FR-125)."""
+    """What the model is told when an answer is contradicted (FR-125).
+
+    When the block came from a requested validation status rather than a
+    completion claim, say that instead of accusing the model of a claim it did
+    not make — the correction is to state the result, not to withdraw a claim.
+    """
     named = "\n".join(f"  - {what}" for what in assessment.unresolved)
+    if assessment.validation_obligation and not assessment.claims_completion:
+        status = assessment.validation_status
+        shown = (f"The latest relevant validation run {status}."
+                 if status else
+                 "No validation run was recorded, so the result is not known.")
+        return (
+            "The user explicitly asked for the final validation status, and your "
+            f"answer does not state it. {shown}\n"
+            f"These are still unresolved:\n{named}\n\n"
+            "Correct the answer to state plainly what the latest validation run "
+            "shows and name the blocking reason. Do not claim success, and do "
+            "not invent a result.")
+    extra = ""
+    if assessment.validation_obligation and assessment.validation_status:
+        extra = ("\nThe user explicitly asked for the validation result. The latest "
+                 f"validation run {assessment.validation_status}. State that plainly "
+                 "in your answer, with the reason; do not claim success.\n")
     return (
         "Your answer says the task is complete, but the evidence does not "
         "support that. These are still unresolved:\n"
-        f"{named}\n\n"
+        f"{named}\n{extra}\n"
         "Correct the answer to state the work as incomplete and name what is "
         "still needed. Do not claim completion for work the evidence does not "
         "show."

@@ -45,14 +45,21 @@ ASSERTIONS = (
     "builds cleanly", "compiles cleanly",
 )
 
-#: In the same sentence, any of these means it is not a claim about what
-#: happened. A hedge, a negation, or an instruction to the reader.
-NOT_A_CLAIM = (
-    "not ", "n't", "fail", "unable", "cannot", "can not", "still ",
+#: In the same sentence, any of these means it is not a report of what
+#: happened: a hypothetical, a condition, or an instruction to the reader.
+#: Shared by the positive and negative readings so both agree on what a report
+#: is not — "If the tests fail…" and "Make sure tests pass." are neither.
+_HEDGE_OR_INSTRUCTION = (
     "if ", "once ", "after ", "when ", "should ", "would ", "will ",
-    "make sure", "ensure", "check that", "verify that", "please ",
-    "so that", "to confirm", "expect", "assume", "presumably", "likely",
+    "make sure", "ensure", "check that", "verify that", "so that",
+    "to confirm", "expect", "assume", "presumably", "likely",
 )
+
+#: A positive claim additionally excludes a negation or an admission of
+#: failure: "the tests do not pass" is not a claim that they pass.
+NOT_A_CLAIM = (
+    "not ", "n't", "fail", "unable", "cannot", "can not", "still ", "please ",
+) + _HEDGE_OR_INSTRUCTION
 
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?\n]?")
 
@@ -118,3 +125,98 @@ def claims_completion(answer: str) -> bool:
             continue
         return True
     return False
+
+
+# --------------------------------------------------------------------------- #
+# the validation-reporting obligation (FR-036, FR-125)
+# --------------------------------------------------------------------------- #
+
+#: A request to be told a check's outcome: a reporting verb aimed at a
+#: whether/if/the/what clause. The words between them do not matter — "tell me
+#: plainly at the end whether the suite passes" is the same request as "tell me
+#: whether the suite passes" — because the sentence as a whole is the request.
+_REPORT_CUE = re.compile(
+    r"(?i)\b(?:tell\s+me|let\s+me\s+know|inform\s+me|report)\b"
+    r"[^.?!]*?\b(?:whether|if|the|what)\b")
+
+#: "say" and "state" report only when they head a whether/if clause; "say the
+#: word" and "state of the tests" are not requests for a result.
+_REPORT_SAY = re.compile(r"(?i)\b(?:say|state)\b[^.?!]*?\b(?:whether|if)\b")
+
+#: What such a report is about.
+_VALIDATION_SUBJECT = re.compile(
+    r"(?i)\b(test|tests|suite|build|check|checks|lint|validation|result|"
+    r"green|passes|passing|succeeds|fails|failing)\b")
+
+
+def requests_validation_status(request: str) -> bool:
+    """Whether the user asked, explicitly, to be told how a check ended.
+
+    A narrow reading: in one sentence, a reporting verb aimed at a whether/if/
+    the/what clause and a validation subject. "Run the tests" and "fix the
+    build" ask for work, not a report; a false negative here is better than
+    inventing an obligation.
+    """
+    for sentence in _SENTENCE.findall(request or ""):
+        lowered = sentence.lower()
+        if not _VALIDATION_SUBJECT.search(lowered):
+            continue
+        if _REPORT_CUE.search(lowered) or _REPORT_SAY.search(lowered):
+            return True
+    return False
+
+
+def claims_validation_pass(answer: str) -> bool:
+    """Whether the answer plainly asserts that a check passed.
+
+    The same high bar as `unverified`: a hedged, negated or instructional
+    sentence is not a claim about what happened.
+    """
+    return bool(_find(answer))
+
+
+#: Plain statements that a check failed or is not passing.
+FAILURES = (
+    "tests fail", "tests still fail", "tests are failing", "tests failed",
+    "test fails", "test failed", "the test fails", "suite does not pass",
+    "suite doesn't pass", "suite is not green", "suite is still red",
+    "suite still does not pass", "suite still fails", "build fails",
+    "build failed", "build does not pass", "check failed", "checks failed",
+    "validation failed", "validation fails", "pytest failed", "pytest fails",
+    "not passing", "does not pass", "doesn't pass", "cannot pass",
+    "can't pass", "unable to pass", "not green", "remains red", "still red",
+    "still fails", "could not make", "suite is red", "tests are red",
+    "does not currently pass", "cannot make the suite pass",
+)
+
+#: In the same sentence, these mean it is not a report of what happened: the
+#: shared hedges and instructions, plus an instruction not to say it at all.
+_NOT_A_FAILURE = _HEDGE_OR_INSTRUCTION + ("do not", "don't", "never ")
+
+
+def reports_validation_failure(answer: str) -> bool:
+    """Whether the answer plainly says a check failed or is not passing."""
+    for sentence in _SENTENCE.findall(answer or ""):
+        lowered = sentence.lower()
+        if not any(phrase in lowered for phrase in FAILURES):
+            continue
+        if any(word in lowered for word in _NOT_A_FAILURE):
+            continue
+        return True
+    return False
+
+
+#: Plain statements that no result was obtained.
+UNKNOWNS = (
+    "did not run", "did not obtain", "could not run", "could not obtain",
+    "cannot say", "can't say", "cannot determine", "could not determine",
+    "not verified", "unverified", "no test result", "no validation result",
+    "was not run", "not been run", "have not run", "haven't run",
+    "did not verify", "unable to verify", "not able to verify",
+)
+
+
+def reports_validation_unknown(answer: str) -> bool:
+    """Whether the answer plainly says the check's outcome is not known."""
+    lowered = " ".join((answer or "").lower().split())
+    return any(phrase in lowered for phrase in UNKNOWNS)

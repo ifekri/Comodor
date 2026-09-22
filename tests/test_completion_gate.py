@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from comodor.agent import verify
+from comodor.agent import claims, verify
 from comodor.agent.claims import claims_completion
 from comodor.agent.evidence import Ledger
 
@@ -1272,3 +1272,225 @@ def test_mutation_reading_python_as_text_accepts_a_printed_write(monkeypatch):
     restored = verify.assess("- update foo.py", entries=ledger.entries,
                              changed_paths=[], answer="Updated foo.py.")
     assert "update foo.py" in restored.unresolved
+
+
+# --------------------------------------------------------------------------- #
+# the validation-reporting obligation (FR-036, FR-125)
+# --------------------------------------------------------------------------- #
+
+_ASK_FOR_STATUS = ("The suite is failing. Get it green.\n\n"
+                   "Tell me plainly at the end whether the suite passes.")
+
+
+def _validation(status="failed", kind="tests", command="pytest -q"):
+    return [verify.ValidationObservation(kind=kind, command_summary=command,
+                                         status=status, evidence_ref="tests:pytest")]
+
+
+@pytest.mark.parametrize("text", [
+    "Tell me whether the tests pass.",
+    "Report whether the build succeeds.",
+    "At the end say if the suite is green.",
+    "Let me know whether validation passes.",
+])
+def test_an_explicit_validation_report_is_recognised(text):
+    assert claims.requests_validation_status(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Run the tests.",
+    "Fix the tests.",
+    "Make sure the build passes.",
+    "Tests fail on CI.",
+])
+def test_a_work_request_is_not_a_report_obligation(text):
+    assert not claims.requests_validation_status(text)
+
+
+def test_a_failed_validation_that_omits_the_status_is_blocked():
+    assessment = verify.assess(
+        _ASK_FOR_STATUS, entries=[], changed_paths=[], failures=[],
+        answer="The required dataset is missing, so I could not build the table.",
+        validations=_validation(status="failed"))
+
+    assert assessment.verdict == "block"
+    assert "the validation result" in assessment.unresolved
+
+
+def test_the_correction_names_the_actual_validation_result():
+    """The correction gives the evidence-backed result, and does not accuse the
+    model of a completion claim it never made (FR-125, requirement 13)."""
+    assessment = verify.assess(
+        _ASK_FOR_STATUS, entries=[], changed_paths=[], failures=[],
+        answer="The required dataset is missing, so I could not build the table.",
+        validations=_validation(status="failed"))
+
+    message = verify.as_incomplete(assessment).lower()
+    assert "validation" in message and "failed" in message
+    assert "says the task is complete" not in message
+
+
+def test_a_failed_validation_that_states_it_is_accepted():
+    assessment = verify.assess(
+        _ASK_FOR_STATUS, entries=[], changed_paths=[], failures=[],
+        answer="The required dataset is unavailable, so the suite still does not pass.",
+        validations=_validation(status="failed"))
+
+    assert assessment.verdict != "block"
+
+
+def test_a_false_pass_is_blocked_without_a_completion_claim():
+    answer = "The suite passes."
+    assert not claims_completion(answer)
+    assessment = verify.assess(
+        _ASK_FOR_STATUS, entries=[], changed_paths=[], failures=[],
+        answer=answer, validations=_validation(status="failed"))
+
+    assert assessment.contradicted
+    assert assessment.verdict == "block"
+
+
+def test_a_passed_validation_that_states_it_is_accepted():
+    assessment = verify.assess(
+        _ASK_FOR_STATUS, entries=[], changed_paths=[], failures=[],
+        answer="The suite passes.", validations=_validation(status="passed"))
+
+    assert assessment.verdict != "block"
+
+
+def test_a_passed_validation_denied_is_blocked():
+    assessment = verify.assess(
+        _ASK_FOR_STATUS, entries=[], changed_paths=[], failures=[],
+        answer="The suite still fails.", validations=_validation(status="passed"))
+
+    assert assessment.verdict == "block"
+
+
+def test_an_invented_pass_with_no_validation_is_blocked():
+    assessment = verify.assess(
+        _ASK_FOR_STATUS, entries=[], changed_paths=[], failures=[],
+        answer="The suite passes.", validations=[])
+
+    assert assessment.verdict == "block"
+
+
+def test_an_honest_unknown_with_no_validation_is_accepted():
+    assessment = verify.assess(
+        _ASK_FOR_STATUS, entries=[], changed_paths=[], failures=[],
+        answer="I did not obtain a test result, so I cannot say that the suite passes.",
+        validations=[])
+
+    assert assessment.verdict != "block"
+
+
+def test_a_later_validation_run_supersedes_an_earlier_one():
+    passed = verify.fold_validation(verify.fold_validation([], "pytest -q", False),
+                                    "pytest -q", True)
+    assert verify.final_validation_status(passed) == "passed"
+    # A rerun that passed supersedes the earlier failure: the honest pass stands.
+    assert verify.assess(
+        _ASK_FOR_STATUS, entries=[], changed_paths=[], failures=[],
+        answer="The suite passes.", validations=passed).verdict != "block"
+
+    failed = verify.fold_validation(verify.fold_validation([], "pytest -q", True),
+                                    "pytest -q", False)
+    assert verify.final_validation_status(failed) == "failed"
+    # A rerun that failed supersedes the earlier pass: the pass claim is rejected.
+    assert verify.assess(
+        _ASK_FOR_STATUS, entries=[], changed_paths=[], failures=[],
+        answer="The suite passes.", validations=failed).verdict == "block"
+
+
+def test_an_unrelated_command_is_not_validation():
+    for command in ("grep rm foo.py", "cat foo.py", "ls -la", "git status"):
+        assert verify.validation_kind(command) == ""
+    for command in ("pytest -q", "python -m pytest", "npm test", "cargo test",
+                    "ruff check .", "npm run build", "make test"):
+        assert verify.validation_kind(command) != ""
+
+
+def test_an_unrelated_tool_failure_does_not_become_a_validation_failure():
+    assessment = verify.assess(
+        _ASK_FOR_STATUS, entries=[], changed_paths=[],
+        failures=[("grep", "no matches")],
+        answer="The suite passes.", validations=[])
+
+    assert assessment.validation_status == ""
+    # The grep failure is unresolved, but the obligation is still unmet because
+    # no validation ran and the answer invented a pass.
+    assert assessment.verdict == "block"
+
+
+def test_the_loop_forces_a_validation_status_before_finishing(config, bus):
+    """The careful-cannot-be-done shape: the user asked for the test result and
+    the answer omits it, so one correction turn is taken (FR-036, FR-125)."""
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+
+    config.safety.auto_approve_shell = True
+    scripts = [
+        Script(text="Running the suite.", tool_calls=[ToolCall(
+            id="s1", name="run_shell", arguments={"command": "pytest -q"})]),
+        Script(text="The required dataset is missing."),
+        Script(text="The required dataset is unavailable, so the suite still does not pass."),
+    ]
+    agent = _agent(config, bus, scripts)
+    result = agent.run(_ASK_FOR_STATUS)
+
+    assert result.stopped == "done"
+    assert len(agent.gateway.provider("fake").calls) == 3, "exactly one correction turn"
+    # The correction names what is missing *and* states the suite does not pass,
+    # and nothing was fabricated to make it green.
+    assert "dataset" in result.text.lower(), "the correction names what is missing"
+    assert "does not pass" in result.text.lower()
+    assert not (config.paths.project / "postcodes.csv").exists()
+
+
+def test_the_loop_blocks_a_false_validation_claim(config, bus):
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+
+    config.safety.auto_approve_shell = True
+    scripts = [
+        Script(text="Running the suite.", tool_calls=[ToolCall(
+            id="s1", name="run_shell", arguments={"command": "pytest -q"})]),
+        Script(text="The suite passes."),
+        Script(text="Correction: the suite does not pass."),
+    ]
+    agent = _agent(config, bus, scripts)
+    result = agent.run(_ASK_FOR_STATUS)
+
+    assert len(agent.gateway.provider("fake").calls) == 3, "exactly one correction turn"
+    assert "does not pass" in result.text.lower()
+
+
+def test_the_loop_accepts_an_honest_pass_after_a_passing_validation(config, bus,
+                                                                    monkeypatch):
+    """The suite really ran and passed: "the suite passes" is honest, not a
+    correction. Without the turn's own observations the gate would see no result
+    and block a truthful answer, so this pins that the run was recorded."""
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+    from comodor.tools.base import ToolResult
+
+    config.safety.auto_approve_shell = True
+    scripts = [
+        Script(text="Running the suite.", tool_calls=[ToolCall(
+            id="s1", name="run_shell", arguments={"command": "pytest -q"})]),
+        Script(text="The suite passes."),
+    ]
+    agent = _agent(config, bus, scripts)
+    real = agent.tools.invoke
+
+    def invoke(name, ctx, args):
+        if name == "run_shell":
+            return ToolResult.success("1 passed")
+        return real(name, ctx, args)
+
+    monkeypatch.setattr(agent.tools, "invoke", invoke)
+    result = agent.run(_ASK_FOR_STATUS)
+
+    assert result.stopped == "done"
+    assert len(agent.gateway.provider("fake").calls) == 2, \
+        "an honest pass after a real passing run is not corrected"
+    assert "passes" in result.text.lower()
