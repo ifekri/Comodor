@@ -241,6 +241,10 @@ class AgentLoop:
         #: that can change anything (FR-013). `None` until then; an assessment
         #: whose status is `allow` lets every mutating call this turn proceed.
         self._batch_preflight: preflight.MutationAssessment | None = None
+        #: Whether this turn changed a validation artifact without a grounded
+        #: reason. A validation run after that is not authoritative: its oracle
+        #: no longer means what the task asked it to mean (FR-036, FR-125).
+        self._oracle_tainted = False
         #: What the user said not to do this turn, in their own words.
         self._rules: list[str] = []
         #: Worked out once per model. The model does not change mid-turn, and
@@ -277,6 +281,7 @@ class AgentLoop:
         self._validations = []
         self._request_text = user_text
         self._batch_preflight = None
+        self._oracle_tainted = False
         self._preflight_traces: list[dict[str, Any]] = []
         result = TurnResult()
         result.preflight_traces = self._preflight_traces
@@ -617,7 +622,8 @@ class AgentLoop:
                 command = str(call.arguments.get("command")
                               or call.arguments.get("code") or "")
                 self._validations = _verify.fold_validation(
-                    self._validations, command, result.ok)
+                    self._validations, command, result.ok,
+                    integrity="tainted" if self._oracle_tainted else "trusted")
             if not result.ok:
                 self._measurement.retries += 1
                 self._failed.append((call.name, key, _brief_failure(result.content)))
@@ -829,6 +835,7 @@ class AgentLoop:
                 "is not cleared. Fix the check or ask about what is unresolved.",
                 withheld=True)
         if assessment.allows:
+            self._note_oracle_change(call, assessment)
             return None
         if assessment.rejected:
             # The request or the evidence already forbids or contradicts this
@@ -875,6 +882,26 @@ class AgentLoop:
             "fabricate the missing value; report what is blocked and continue.",
             withheld=True)
 
+    def _note_oracle_change(self, call: ToolCall,
+                            assessment: preflight.MutationAssessment) -> None:
+        """Taint the turn's validation if a validator changed without grounding.
+
+        Defense in depth: the preflight rejects a high-confidence weakening, but
+        a validator change it allowed without grounding means a later green run
+        cannot be trusted as evidence of the requested behaviour. Only a
+        grounded correction (or a change that preserves the check) leaves the
+        oracle trustworthy (FR-036, FR-125).
+        """
+        try:
+            from . import verify as _verify
+
+            target, _signals = _verify.oracle_risk(call.name, call.arguments or {})
+        except Exception:
+            return
+        if not target or assessment.grounds_validator:
+            return
+        self._oracle_tainted = True
+
     def _assess_batch(self, context: ToolContext,
                       calls: list[ToolCall]) -> preflight.MutationAssessment:
         """One bounded model call: does this batch depend on a missing decision?"""
@@ -897,9 +924,47 @@ class AgentLoop:
         action = "; ".join(f"{call.name} {self._describe(call)}" for call in calls)
         assessment = preflight.parse(completion.text, proposed_action=action)
         assessment.evidence_refs = refs
+        self._enforce_oracle_integrity(assessment, calls)
         self._trace_preflight(calls, refs, asked, mutations, assessment,
                               completion.usage)
         return assessment
+
+    def _enforce_oracle_integrity(
+            self, assessment: preflight.MutationAssessment,
+            calls: list[ToolCall]) -> None:
+        """Reject a high-confidence validation bypass, whatever the assessor said.
+
+        The assessor reads the request and the evidence; this is the bounded
+        local reading that a mutation weakens the check that exposes the
+        problem — a skip, an xfail, a removed assertion, a deleted test. A
+        correction grounded in evidence is exempt; anything else that carries
+        one of those signals is a rejection. It is evidence for the assessment,
+        not a second policy engine (FR-013, FR-036).
+        """
+        from . import verify as _verify
+
+        touched = False
+        signals: list[str] = []
+        for call in calls:
+            try:
+                target, found = _verify.oracle_risk(call.name, call.arguments or {})
+            except Exception:
+                continue
+            touched = touched or target
+            signals.extend(found)
+        if not touched or not signals:
+            return
+        if assessment.validator_change == "grounded_validator_correction":
+            return
+        assessment.status = "reject"
+        assessment.decisions = []
+        assessment.blockers = [preflight.Blocker(
+            what="the change weakens the validation that exposes the problem",
+            kind="validation_bypass",
+            source_refs=["mutation", *sorted(set(signals))[:4]])]
+        assessment.reason = (
+            "an ungrounded validation bypass is not a fix; the check must keep "
+            "asserting the behaviour the request asked for")
 
     def _trace_preflight(self, calls: list[ToolCall], refs: list[str], asked: str,
                          mutations: str, assessment: preflight.MutationAssessment,

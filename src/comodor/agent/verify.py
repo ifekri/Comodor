@@ -1110,6 +1110,177 @@ def command_mutates(command: str, tool: str = "run_shell") -> bool:
     return shell_writes(command)
 
 
+# --------------------------------------------------------------------------- #
+# the validation oracle: which files are checks, and what weakens them
+# --------------------------------------------------------------------------- #
+#
+# A green suite is only evidence of the requested behaviour if the suite still
+# checks that behaviour. A model can make a failing check pass by fixing the
+# implementation (valid), by correcting a demonstrably wrong expectation
+# (valid), or by weakening the check until it stops failing (not valid). The
+# preflight is the primary defense against the third; this is the bounded,
+# deterministic reading of "this mutation changes the oracle" and "this change
+# weakens it", used both to gate the mutation and to mark a validation run as
+# not authoritative.
+
+#: Directory names that mark the files under them as checks, not product code.
+#: Deliberately narrow — a false positive here would make an ordinary source
+#: edit look like a validator change. `spec/` is not included: this repository
+#: keeps its own specification documents there, and a spec document is not a
+#: validator.
+_VALIDATION_DIRS = frozenset({"tests", "test", "__tests__"})
+#: Directory names whose contents are recorded expectations.
+_SNAPSHOT_DIRS = frozenset({"__snapshots__", "snapshots", "golden", "goldens"})
+
+#: Filename shapes that are a check by convention, across the languages the
+#: benchmark and the product actually use.
+_VALIDATION_FILE = re.compile(
+    r"(?i)^(?:"
+    r"test_.*\.(?:py|js|jsx|ts|tsx|mjs|cjs|rb|go|java|kt|cs|rs|php)|"
+    r".*_test\.(?:py|js|jsx|ts|tsx|mjs|cjs|rb|go|java|kt|cs|rs|php)|"
+    r".*\.(?:test|spec)\.(?:js|jsx|ts|tsx|mjs|cjs)|"
+    r".*\.snap|"
+    r".*\.golden"
+    r")$")
+
+#: Test-runner configuration and fixtures that are a check by name. A config
+#: file that merely happens to be `pyproject.toml` is only a validator when its
+#: content touches test configuration, which `oracle_risk` decides from the
+#: mutation text.
+_VALIDATION_NAMES = frozenset({
+    "conftest.py", "pytest.ini", "tox.ini", "nose.cfg", ".noserc",
+    "jest.config.js", "jest.config.ts", "jest.config.mjs", "jest.config.cjs",
+    "vitest.config.js", "vitest.config.ts", "vitest.config.mjs",
+    "karma.conf.js",
+})
+#: Files that carry test configuration among other things.
+_VALIDATION_CONFIG_NAMES = frozenset({"pyproject.toml", "setup.cfg"})
+#: Content that makes a general config file a validation config.
+_CONFIG_MARKERS = ("[tool.pytest", "[pytest]", "[tool.coverage", "[coverage:",
+                   "testpaths", "addopts")
+
+
+def validation_artifact(path: str) -> bool:
+    """Whether `path` names a validation artifact — a check, not product code.
+
+    A test directory, a `test_*`/`*_test`/`*.test.*`/`*.spec.*` file, a
+    snapshot or golden expectation, a test fixture or a known test-runner
+    config. General config (`pyproject.toml`) is only a validator when its
+    content carries test configuration; that is decided by `oracle_risk` from
+    the mutation text, so the path test alone does not classify it.
+    """
+    norm = str(path or "").replace("\\", "/").strip().lower()
+    if not norm:
+        return False
+    parts = [part for part in norm.split("/") if part and part not in (".", "..")]
+    if not parts:
+        return False
+    name = parts[-1]
+    directories = parts[:-1]
+    if any(part in _VALIDATION_DIRS for part in directories):
+        return True
+    if any(part in _SNAPSHOT_DIRS for part in directories):
+        return True
+    if name in _VALIDATION_NAMES:
+        return True
+    return bool(_VALIDATION_FILE.match(name))
+
+
+def _paths_in(text: str) -> list[str]:
+    """Path-looking tokens in a command or code string."""
+    return [match for match in _PATH_ISH.findall(text or "") if match]
+
+
+def mentions_validation_artifact(text: str) -> bool:
+    """Whether a command or code string names a validation artifact."""
+    for token in _paths_in(text):
+        if validation_artifact(token):
+            return True
+    return False
+
+
+#: Constructs that weaken a check: a skip, an expected failure, a collection
+#: exclusion. High-confidence and bounded — each is a deliberate way to stop a
+#: failing check from failing, and each is what the observed benchmark failure
+#: used. They are evidence for the preflight, not a complete policy engine.
+_WEAKENING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("skip", re.compile(r"(?i)\bpytest\s*\.\s*mark\s*\.\s*skip(?:if)?\b")),
+    ("skip", re.compile(r"(?i)\bpytestmark\s*=\s*[^\n]*\bpytest\s*\.\s*mark\s*\.\s*skip")),
+    ("skip", re.compile(r"(?i)\bpytest\s*\.\s*skip\s*\(")),
+    ("skip", re.compile(r"(?i)\bunittest\s*\.\s*skip(?:If|Unless)?\b")),
+    ("skip", re.compile(r"(?im)^\s*@\s*(?:unittest\s*\.\s*)?skip(?:If|Unless)?\b")),
+    ("xfail", re.compile(r"(?i)\bpytest\s*\.\s*mark\s*\.\s*xfail\b")),
+    ("xfail", re.compile(r"(?im)^\s*@\s*xfail\b")),
+    ("deselect", re.compile(r"(?i)--deselect\b|--ignore(?:=|\s)|collect_ignore\b")),
+)
+
+
+def weakening_signals(text: str) -> list[str]:
+    """The high-confidence weakening constructs in `text`, by name."""
+    found: list[str] = []
+    for name, pattern in _WEAKENING_PATTERNS:
+        if pattern.search(text or "") and name not in found:
+            found.append(name)
+    return found
+
+
+def _removal_signals(old: str, new: str) -> list[str]:
+    """Weakening implied by an edit's before/after: a test or assertion removed."""
+    found: list[str] = []
+    if "def test_" in (old or "") and "def test_" not in (new or ""):
+        found.append("deleted_test")
+    if (old or "").count("assert") > (new or "").count("assert"):
+        found.append("removed_assertion")
+    return found
+
+
+def oracle_risk(name: str, arguments: dict) -> tuple[bool, list[str]]:
+    """Whether one mutating call touches a validator, and how it weakens it.
+
+    Returns `(targets_a_validation_artifact, weakening_signals)`. A write or
+    edit is judged by its path and its content (and, for an edit, by what it
+    removes). A shell or Python command is judged by the validation artifacts
+    its text names and the weakening constructs it contains. A call that names
+    no validation artifact is not a validator change.
+    """
+    arguments = arguments or {}
+    if name in ("write_file", "edit_file"):
+        path = str(arguments.get("path") or "")
+        content = str(arguments.get("content")
+                      or arguments.get("new_string") or "")
+        old = str(arguments.get("old_string") or "")
+        target = validation_artifact(path)
+        config = path.replace("\\", "/").rsplit("/", 1)[-1].lower() \
+            in _VALIDATION_CONFIG_NAMES
+        if config:
+            # A general config file is a validator only when the change touches
+            # test configuration; an unrelated dependency edit is not.
+            target = target or any(marker in content.lower()
+                                   for marker in _CONFIG_MARKERS)
+        signals = weakening_signals(content)
+        if old:
+            signals += _removal_signals(old, content)
+        return target, signals
+    if name in ("run_shell", "run_python"):
+        text = str(arguments.get("command") or arguments.get("code") or "")
+        # Running the check is not changing it: only a command that actually
+        # writes (or deletes) a validation artifact changes the oracle. A
+        # command's text names many paths (an output file, an argument), so the
+        # write must also carry a weakening signal or delete the artifact —
+        # otherwise `pytest test_x.py > out.txt` would look like a change.
+        if not command_mutates(text, name):
+            return False, []
+        if not mentions_validation_artifact(text):
+            return False, []
+        signals = weakening_signals(text)
+        if name == "run_shell" and shell_deletes(text):
+            signals.append("delete")
+        if not signals:
+            return False, []
+        return True, signals
+    return False, []
+
+
 #: Commands whose primary purpose is validation, by kind. Classified from the
 #: command word, never from output — a `grep` that prints a line containing
 #: `fail` is not a failing test. Deliberately narrow: an unrecognised command is
@@ -1159,11 +1330,18 @@ def validation_kind(command: str, tool: str = "run_shell") -> str:
 
 @dataclass(frozen=True)
 class ValidationObservation:
-    """One validation run this turn, and how it ended. Transient state."""
+    """One validation run this turn, and how it ended. Transient state.
+
+    `status` is the process outcome; `integrity` says whether the oracle that
+    produced it still means what the task asked it to mean. A run whose
+    validation artifact was weakened beforehand is `tainted`: a green exit is
+    then not evidence that the requested behaviour passes.
+    """
 
     kind: str
     command_summary: str
     status: str                    # passed | failed | unavailable
+    integrity: str = "trusted"     # trusted | tainted | unknown
     evidence_ref: str = ""
 
 
@@ -1178,8 +1356,15 @@ def _validation_target(command: str) -> str:
 
 
 def fold_validation(observations: list[ValidationObservation],
-                    command: str, ok: bool) -> list[ValidationObservation]:
-    """Add one run, dropping an earlier run of the same target it supersedes."""
+                    command: str, ok: bool,
+                    integrity: str = "trusted") -> list[ValidationObservation]:
+    """Add one run, dropping an earlier run of the same target it supersedes.
+
+    The superseded run is dropped whatever its integrity: a rerun is the latest
+    word on that target. `integrity` is carried into the new observation, so a
+    tainted pass cannot silently replace a trusted failure with a trusted pass
+    (FR-036, FR-125).
+    """
     kind = validation_kind(command)
     if not kind:
         return observations
@@ -1189,6 +1374,8 @@ def fold_validation(observations: list[ValidationObservation],
     kept.append(ValidationObservation(
         kind=kind, command_summary=target,
         status="passed" if ok else "failed",
+        integrity=integrity if integrity in ("trusted", "tainted", "unknown")
+        else "unknown",
         evidence_ref=f"{kind}:{target[:60]}"))
     return kept
 
@@ -1204,6 +1391,22 @@ def final_validation_status(observations: list[ValidationObservation]) -> str:
     if any(one.status == "failed" for one in observations):
         return "failed"
     return "passed"
+
+
+def final_validation_integrity(observations: list[ValidationObservation]) -> str:
+    """Whether the turn's latest validation is authoritative.
+
+    `tainted` if any latest run was made against a weakened oracle; `unknown`
+    if any run's integrity is unknown; otherwise `trusted`. Empty when nothing
+    ran. A tainted pass is not evidence that the requested behaviour passes.
+    """
+    if not observations:
+        return ""
+    if any(one.integrity == "tainted" for one in observations):
+        return "tainted"
+    if any(one.integrity == "unknown" for one in observations):
+        return "unknown"
+    return "trusted"
 
 
 def _command_writes(tool: str, claim: str) -> bool:
@@ -1288,6 +1491,10 @@ class Assessment:
     #: claim (FR-036, FR-125).
     validation_obligation: bool = False
     validation_status: str = ""
+    #: Whether the latest validation is authoritative — `trusted`, `tainted`,
+    #: `unknown` or `""`. A tainted pass is not evidence the requested behaviour
+    #: passes, so a pass claim on it is contradicted (FR-036, FR-125).
+    validation_integrity: str = ""
     verdict: str = "no_intervention"          # no_intervention | annotate | block
 
     def annotation(self) -> str:
@@ -1449,7 +1656,9 @@ def assess(request: str, *, entries=(), changed_paths=(), failures=(),
             result.pending_clarification = str(getattr(decision, "id", "") or "")
 
     result.validation_obligation = requests_validation_status(request)
-    result.validation_status = final_validation_status(list(validations))
+    observations = list(validations)
+    result.validation_status = final_validation_status(observations)
+    result.validation_integrity = final_validation_integrity(observations)
     if result.validation_obligation:
         _check_validation_report(result, answer, claims_validation_pass,
                                  reports_validation_failure, reports_validation_unknown)
@@ -1472,7 +1681,10 @@ def _check_validation_report(result: Assessment, answer: str, claims_pass, repor
     A false pass is contradicted whether or not the answer claims the task is
     complete (FR-036, FR-125); an omitted status is a completion failure the
     single correction turn is for. Only a recognised validation observation
-    moves `validation_status` — an unrelated tool error never does.
+    moves `validation_status` — an unrelated tool error never does. A green run
+    against a weakened oracle (`integrity = tainted`) is not authoritative: a
+    pass claim on it is contradicted, because the check no longer means what the
+    task asked it to mean.
     """
     what = "the validation result"
     status = result.validation_status
@@ -1489,7 +1701,20 @@ def _check_validation_report(result: Assessment, answer: str, claims_pass, repor
                 "state it")
             result.contradicted = True
     elif status == "passed":
-        if reports_failure(answer) and not claims_pass(answer):
+        if result.validation_integrity == "tainted":
+            if claims_pass(answer):
+                result.unresolved.append(what)
+                result.unresolved_reasons[what] = (
+                    "a validation run passed, but the validation artifact was "
+                    "weakened, so the pass is not trustworthy")
+                result.contradicted = True
+            elif not (reports_failure(answer) or reports_unknown(answer)):
+                result.unresolved.append(what)
+                result.unresolved_reasons[what] = (
+                    "the validation oracle was weakened, so the result is not "
+                    "established; the answer does not say so")
+                result.contradicted = True
+        elif reports_failure(answer) and not claims_pass(answer):
             result.unresolved.append(what)
             result.unresolved_reasons[what] = (
                 "the latest validation run passed, but the answer says it failed")
@@ -1513,8 +1738,20 @@ def as_incomplete(assessment: Assessment) -> str:
     When the block came from a requested validation status rather than a
     completion claim, say that instead of accusing the model of a claim it did
     not make — the correction is to state the result, not to withdraw a claim.
+    A green run against a weakened oracle is named as such: the correction is to
+    stop claiming the check passed, not to weaken it further.
     """
     named = "\n".join(f"  - {what}" for what in assessment.unresolved)
+    if assessment.validation_status == "passed" \
+            and assessment.validation_integrity == "tainted":
+        return (
+            "A validation run exited zero, but the validation artifact was "
+            "changed without a grounded reason, so the pass is not trustworthy "
+            "and is not evidence that the requested behaviour works. Do not "
+            "claim the check passes. State plainly that the validation was "
+            "weakened and the result is not established, or restore the check "
+            "to the behaviour the request asked for.\n"
+            f"These are still unresolved:\n{named}")
     if assessment.validation_obligation and not assessment.claims_completion:
         status = assessment.validation_status
         shown = (f"The latest relevant validation run {status}."
