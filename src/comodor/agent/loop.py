@@ -592,8 +592,9 @@ class AgentLoop:
                 # withheld rather than run without the answer (FR-018). `ask`
                 # is native: it recorded the decision in this same ledger, so
                 # its payload is not imported again.
-                self._import_clarification(context, result,
-                                           native=call.name == "ask")
+                self._import_clarification(
+                    context, result,
+                    native=call.name == "ask" or bool(result.meta.get("native_decision")))
                 results.append(result)
 
         self._measurement.tool_calls += len(calls)
@@ -673,8 +674,9 @@ class AgentLoop:
             # never holds a call that can raise one — imports it here, so
             # the post-batch check ends the turn either way (FR-018, FR-029).
             if parallel and len(calls) > 1:
-                self._import_clarification(context, result,
-                                           native=call.name == "ask")
+                self._import_clarification(
+                    context, result,
+                    native=call.name == "ask" or bool(result.meta.get("native_decision")))
 
             # What the user said not to do, while the model is still deciding.
             #
@@ -756,10 +758,14 @@ class AgentLoop:
     def _is_mutating(self, call: ToolCall) -> bool:
         """Whether the preflight gates this call: anything that can change state.
 
-        Everything that is not a look and not the act of asking. The gate must
-        not protect only file writes: a shell command, a delegated child and a
-        persisted memory all change something the request did not settle.
+        Everything that is not a look and not the act of asking. A `delegate`
+        is decided by its own contract, not by the model's later opinion of it:
+        `write=true` in the foreground changes files (in an isolated checkout,
+        applied back); a read-only or background delegate does not.
         """
+        if call.name == "delegate":
+            return bool(call.arguments.get("write")) \
+                and not bool(call.arguments.get("background"))
         return call.name not in READ_ONLY_TOOLS and call.name not in _GATE_EXEMPT
 
     def _preflight_for_batch(self, context: ToolContext,
@@ -880,33 +886,47 @@ class AgentLoop:
 
     def _withhold_for_preflight(self, context: ToolContext,
                                 assessment: preflight.MutationAssessment) -> ToolResult | None:
-        """Register the missing decision and refuse the batch (FR-013, FR-018).
+        """Register the missing decision and put it to the person (FR-013, FR-018).
 
-        A decision the ledger already settles is not a reason to withhold
-        anything (FR-008). A client with no listener is `unattended` — nobody
-        was there to answer. A listening client is *asked*, not cancelled: the
-        user cancelled nothing, and the turn outcome presents the decision
-        through the existing clarification mechanism.
+        The decision enters the ledger and is presented through the same
+        clarification service `ask` uses, so both origins share one lifecycle
+        and one protocol. A decision the ledger already settles is not a reason
+        to withhold anything (FR-008); an answered one resolves the *same*
+        ledger decision and the mutation may be reconsidered. A listening
+        client is asked, never `cancelled`; a client with no listener is
+        `unattended`.
         """
+        from ..questions import Question
+        from ..tools import ask as ask_tool
+
         book = context.evidence
-        registered: list[str] = []
+        pending: list[tuple[Any, Any]] = []
         for missing in assessment.missing_decisions:
             decision = book.open_decision(
                 missing.what, affects=missing.affects,
                 evidence_consulted=assessment.evidence_refs)
             if decision.resolved:
                 continue
-            book.asked(decision.id)
-            if not self.bus.listening:
-                book.ended_without_answer(decision.id, "unattended")
-            registered.append(decision.what)
-        if not registered:
+            pending.append((Question(
+                prompt=decision.what,
+                header=(decision.materiality or "decision"),
+                options=[],
+                affects=list(missing.affects),
+                reason=decision.materiality,
+                evidence_consulted=list(decision.evidence_consulted),
+                decision_ref=decision.id), decision))
+        if not pending:
             return None
-        named = "; ".join(registered)
-        return ToolResult.failure(
-            f"not run: this change depends on a decision that is not settled "
-            f"({named}). Ask about it before changing anything; nothing that "
-            f"may depend on it runs until it is answered.", withheld=True)
+        result = ask_tool.present(context, pending, origin="mutation_preflight")
+        if all(decision.resolved for _, decision in pending):
+            # The person answered: the same decision is now KNOWN, and the
+            # mutation may be reconsidered rather than withheld.
+            return None
+        # The decision is already in this ledger; the payload must not be
+        # imported a second time as though a child had raised it.
+        result.meta["withheld"] = True
+        result.meta["native_decision"] = True
+        return result
 
     def _can_parallelise(self, calls: list[ToolCall]) -> bool:
         """Only when nothing in the batch could stop to ask a question.

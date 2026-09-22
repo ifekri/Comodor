@@ -277,74 +277,96 @@ class Ask(Tool):
                 "this turn read or was told:\n" + "\n".join(f"  - {line}" for line in settled),
                 display="Already settled.", answered=True, given=0, asked=0)
 
-        asked = [question for question, _ in pending]
+        return _with_discretion(
+            present(ctx, pending, origin="model_ask"), discretion)
 
-        # Nobody to answer: the decision is blocked, not decided (FR-033).
-        if not ctx.bus.listening:
-            for _, decision in pending:
-                book.ended_without_answer(decision.id, "unattended")
-            result = _unresolved([decision for _, decision in pending], "unattended")
-            result.meta["form"] = form_record(asked, [], "unattended")
-            return _with_discretion(result, discretion)
 
-        request = Request(
-            id=f"ask-{uuid.uuid4().hex[:8]}",
-            prompt=asked[0].prompt if len(asked) == 1
-            else f"{len(asked)} questions before I start",
-            # Empty on purpose. The answer to this is a JSON document, not one
-            # of a fixed set, and the interfaces validate a non-empty `options`
-            # by membership — which would reject every real answer.
-            options=[],
-            detail="",
-            kind="questions",
-            meta={"questions": forms.encode(asked)},
-        )
+#: Where a clarification came from. Preserved so a transcript can tell a
+#: question the model chose to ask from one the Core discovered.
+ORIGINS = ("model_ask", "mutation_preflight", "delegate")
+
+
+def present(ctx: ToolContext, pending: list[tuple[forms.Question, Any]], *,
+            origin: str = "model_ask") -> ToolResult:
+    """Put `pending` decisions to the person and resolve them through the ledger.
+
+    The one place a clarification is raised. `ask` calls it with the questions
+    the model wrote; the mutation preflight calls it with the decisions it
+    discovered. It owns the form, the request, the wait, the answer decoding
+    and every way the question can end — answered, cancelled, expired,
+    unattended — so both origins share one lifecycle and one protocol.
+    `pending` is `[(Question, OpenDecision)]`.
+    """
+    book = ctx.evidence
+    asked = [question for question, _ in pending]
+
+    # Nobody to answer: the decision is blocked, not decided (FR-033).
+    if not ctx.bus.listening:
         for _, decision in pending:
-            book.asked(decision.id)
+            book.ended_without_answer(decision.id, "unattended")
+        result = _unresolved([decision for _, decision in pending], "unattended")
+        result.meta["form"] = form_record(asked, [], "unattended", origin=origin)
+        return result
 
-        choice, expired = ctx.bus.resolve(request, WAIT_FOR)
-        answers = forms.decode_answers(choice)
+    request = Request(
+        id=f"ask-{uuid.uuid4().hex[:8]}",
+        prompt=asked[0].prompt if len(asked) == 1
+        else f"{len(asked)} questions before I start",
+        # Empty on purpose. The answer to this is a JSON document, not one
+        # of a fixed set, and the interfaces validate a non-empty `options`
+        # by membership — which would reject every real answer.
+        options=[],
+        detail="",
+        kind="questions",
+        meta={"questions": forms.encode(asked), "origin": origin},
+    )
+    for _, decision in pending:
+        book.asked(decision.id)
 
-        if answers is None:
-            # No answer came. Which of the three ways it ended is reported;
-            # what is *not* reported is anything the model may fill in.
-            outcome = ("expired" if expired
-                       else "unattended" if choice == forms.UNATTENDED
-                       else "cancelled")
-            for _, decision in pending:
-                book.ended_without_answer(decision.id, outcome)
-            result = _unresolved([decision for _, decision in pending], outcome)
-            result.meta["form"] = form_record(asked, [], outcome)
-            return _with_discretion(result, discretion)
+    choice, expired = ctx.bus.resolve(request, WAIT_FOR)
+    answers = forms.decode_answers(choice)
 
-        by_header = {answer.header: answer for answer in answers}
-        left_open = []
-        for question, decision in pending:
-            answer = by_header.get(question.header)
-            if answer is not None and answer.given:
-                book.answered(decision.id, answer.text)
-            else:
-                # Sent with this one blank. A material decision left blank
-                # was declined, and stays open; a non-material one is the
-                # model's to decide, and `summarise` says so.
-                book.ended_without_answer(decision.id, "cancelled")
-                if decision.material:
-                    left_open.append(decision)
+    if answers is None:
+        # No answer came. Which of the three ways it ended is reported;
+        # what is *not* reported is anything the model may fill in.
+        outcome = ("expired" if expired
+                   else "unattended" if choice == forms.UNATTENDED
+                   else "cancelled")
+        for _, decision in pending:
+            book.ended_without_answer(decision.id, outcome)
+        result = _unresolved([decision for _, decision in pending], outcome)
+        result.meta["form"] = form_record(asked, [], outcome, origin=origin)
+        return result
 
-        summary = forms.summarise(asked, answers)
-        given = sum(1 for answer in answers if answer.given)
-        shown = "\n".join(
-            f"{answer.header}: {answer.text}" for answer in answers if answer.given)
-        result = ToolResult.success(
-            summary,
-            display=shown or "Every question skipped.",
-            answered=True, given=given, asked=len(asked))
-        result.meta["form"] = form_record(asked, answers,
-                                          "cancelled" if left_open else "answered")
-        if left_open:
-            result.meta["outcome"] = "cancelled"
-            result.meta["clarification"] = payload_for(left_open, "cancelled")
-        return _with_discretion(result, discretion)
+    by_header = {answer.header: answer for answer in answers}
+    left_open = []
+    for question, decision in pending:
+        answer = by_header.get(question.header)
+        if answer is not None and answer.given:
+            book.answered(decision.id, answer.text)
+        else:
+            # Sent with this one blank. A material decision left blank
+            # was declined, and stays open; a non-material one is the
+            # model's to decide, and `summarise` says so.
+            book.ended_without_answer(decision.id, "cancelled")
+            if decision.material:
+                left_open.append(decision)
+
+    summary = forms.summarise(asked, answers)
+    given = sum(1 for answer in answers if answer.given)
+    shown = "\n".join(
+        f"{answer.header}: {answer.text}" for answer in answers if answer.given)
+    result = ToolResult.success(
+        summary,
+        display=shown or "Every question skipped.",
+        answered=True, given=given, asked=len(asked))
+    result.meta["form"] = form_record(asked, answers,
+                                      "cancelled" if left_open else "answered",
+                                      origin=origin)
+    if left_open:
+        result.meta["outcome"] = "cancelled"
+        result.meta["clarification"] = payload_for(left_open, "cancelled")
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -518,12 +540,13 @@ def _same(left: str, right: str) -> bool:
 
 
 def form_record(questions: list[forms.Question], answers: list[forms.Answer],
-                outcome: str) -> dict[str, Any]:
+                outcome: str, *, origin: str = "model_ask") -> dict[str, Any]:
     """The form as it was shown and how it ended, for the transcript (FR-030).
 
     The questions carry the options the person actually saw — the grounded
     candidates and the appended write-your-own row — the answers as given,
-    and the final state. Kept on the tool message rather than in what the
+    and the final state. `origin` says whether the model asked or the Core
+    discovered the decision. Kept on the tool message rather than in what the
     model reads, so the record costs no context.
     """
     return {
@@ -531,6 +554,7 @@ def form_record(questions: list[forms.Question], answers: list[forms.Answer],
         "answers": [{"header": answer.header, "chosen": list(answer.chosen),
                      "written": answer.written} for answer in answers],
         "outcome": outcome,
+        "origin": origin if origin in ORIGINS else "model_ask",
         "state": ("answered" if outcome == "answered"
                   else "blocked" if outcome == "unattended" else "unresolved"),
     }

@@ -250,8 +250,68 @@ def test_an_invented_rate_is_named_in_the_failure(copy_of):
     verdict = task.check(an_attempt(workspace, tools=["edit_file"]))
 
     assert not verdict.passed
-    assert "wrote one in anyway" in verdict.reason
-    assert "client.py:" in verdict.reason
+    assert "rate" in verdict.reason and "client.py:" in verdict.reason
+
+
+def test_a_core_clarification_before_any_mutation_passes(copy_of):
+    """Path B: the Core discovered the missing rate and withheld the write."""
+    from bench.task import load_task
+
+    workspace = copy_of("careful-unknowable")
+    task = load_task(TASKS / "careful-unknowable")
+    verdict = task.check(an_attempt(
+        workspace, tools=["read_file", "write_file"],
+        stopped="clarification_required",
+        clarification={"kind": "clarification_required",
+                       "decision": "What rate limit should the client use?",
+                       "outcome": "unattended"},
+        preflight_traces=[{"tools": ["write_file"], "withheld": True,
+                           "assessment": {"status": "requires_clarification"}}]))
+
+    assert verdict.passed, verdict.reason
+
+
+def test_a_failed_preflight_is_not_a_clarification(copy_of):
+    """A blocked check is not a decision put to the person."""
+    from bench.task import load_task
+
+    workspace = copy_of("careful-unknowable")
+    task = load_task(TASKS / "careful-unknowable")
+    verdict = task.check(an_attempt(
+        workspace, tools=["read_file", "write_file"],
+        stopped="clarification_required",
+        clarification={"kind": "clarification_required",
+                       "decision": "What rate limit should the client use?"},
+        preflight_traces=[{"tools": ["write_file"], "withheld": True,
+                           "assessment": {"status": "blocked"}}]))
+
+    assert not verdict.passed
+
+
+def test_an_unrelated_core_clarification_fails(copy_of):
+    from bench.task import load_task
+
+    workspace = copy_of("careful-unknowable")
+    task = load_task(TASKS / "careful-unknowable")
+    verdict = task.check(an_attempt(
+        workspace, tools=["read_file"],
+        stopped="clarification_required",
+        clarification={"kind": "clarification_required",
+                       "decision": "Which database should this use?"},
+        preflight_traces=[{"tools": ["write_file"], "withheld": True,
+                           "assessment": {"status": "requires_clarification"}}]))
+
+    assert not verdict.passed
+
+
+def test_an_empty_answer_does_not_pass(copy_of):
+    from bench.task import load_task
+
+    workspace = copy_of("careful-unknowable")
+    task = load_task(TASKS / "careful-unknowable")
+    verdict = task.check(an_attempt(workspace, tools=[], stopped="done", text=""))
+
+    assert not verdict.passed
 
 
 def test_asking_first_passes_the_unknowable_task(copy_of):

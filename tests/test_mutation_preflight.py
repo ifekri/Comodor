@@ -293,3 +293,105 @@ def test_the_preflight_trace_can_explain_an_allow(config, bus, workspace):
     assert trace["assessment"]["decisions"][0]["resolution"] == "missing"
     assert trace["withheld"] is True
     assert trace["question_fingerprint"] and trace["mutation_fingerprint"]
+
+
+# --------------------------------------------------------------------------- #
+# the shared clarification lifecycle
+# --------------------------------------------------------------------------- #
+
+
+def test_the_preflight_uses_the_shared_clarification_service(config, bus, workspace,
+                                                             monkeypatch):
+    from comodor.tools import ask as ask_tool
+
+    seen = {}
+    real = ask_tool.present
+
+    def spy(ctx, pending, *, origin="model_ask"):
+        seen["origin"] = origin
+        return real(ctx, pending, origin=origin)
+
+    monkeypatch.setattr(ask_tool, "present", spy)
+    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
+    agent = _agent(config, bus, _write_after_read("client.py", "RATE = 5\n"),
+                   answer=MISSING)
+
+    agent.run("add rate limiting to the client")
+
+    assert seen.get("origin") == "mutation_preflight"
+
+
+def test_a_non_interactive_preflight_is_unattended(config, bus, workspace):
+    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
+    agent = _agent(config, bus, _write_after_read("client.py", "RATE = 5\n"),
+                   answer=MISSING)
+
+    result = agent.run("add rate limiting to the client")
+
+    assert result.stopped == "clarification_required"
+    assert (result.clarification or {}).get("outcome") == "unattended"
+    assert (workspace / "client.py").read_text(encoding="utf-8") == "BASE = 1\n"
+
+
+def test_the_preflight_origin_is_preserved_in_the_form(config, bus, workspace):
+    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
+    agent = _agent(config, bus, _write_after_read("client.py", "RATE = 5\n"),
+                   answer=MISSING)
+
+    agent.run("add rate limiting to the client")
+
+    forms = [message.meta.get("question") for message in agent.conversation.messages
+             if isinstance(message.meta, dict) and message.meta.get("question")]
+    assert any(form.get("origin") == "mutation_preflight" for form in forms)
+
+
+# --------------------------------------------------------------------------- #
+# delegate mutability is the contract's, not the model's opinion
+# --------------------------------------------------------------------------- #
+
+
+def test_delegate_mutability_is_deterministic(config, bus):
+    agent = _agent(config, bus, [])
+
+    def call(**args):
+        return ToolCall(id="d", name="delegate", arguments={"task": "x", **args})
+
+    assert not agent._is_mutating(call())
+    assert not agent._is_mutating(call(write=False))
+    assert not agent._is_mutating(call(background=True))
+    assert not agent._is_mutating(call(write=True, background=True))
+    assert agent._is_mutating(call(write=True))
+
+
+def test_a_mutating_delegate_is_gated_before_it_starts(config, bus, workspace,
+                                                       monkeypatch):
+    scripts = [Script(text="Delegating.", tool_calls=[ToolCall(
+        id="d1", name="delegate",
+        arguments={"task": "write the limiter", "write": True})])]
+    agent = _agent(config, bus, scripts, answer=MISSING)
+    started = []
+    real = agent.tools.invoke
+
+    def spy(name, ctx, args):
+        started.append(name)
+        if name == "delegate":
+            from comodor.tools.base import ToolResult
+            return ToolResult.success("delegated")
+        return real(name, ctx, args)
+
+    monkeypatch.setattr(agent.tools, "invoke", spy)
+    result = agent.run("add rate limiting")
+
+    assert "delegate" not in started, "the child started under an unresolved decision"
+    assert result.stopped == "clarification_required"
+
+
+def test_a_read_only_delegate_pays_no_preflight(config, bus, workspace):
+    scripts = [Script(text="Delegating.", tool_calls=[ToolCall(
+        id="d1", name="delegate", arguments={"task": "explore the project"})]),
+        Script(text="Done.")]
+    agent = _agent(config, bus, scripts)
+
+    agent.run("what is in this project?")
+
+    assert agent._measurement.preflight_calls == 0
