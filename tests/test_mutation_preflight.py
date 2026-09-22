@@ -345,6 +345,41 @@ def test_the_preflight_origin_is_preserved_in_the_form(config, bus, workspace):
     assert any(form.get("origin") == "mutation_preflight" for form in forms)
 
 
+def test_an_answered_preflight_resumes_the_dependent_mutation(config, bus, workspace):
+    """Interactive: the preflight finds the missing rate, the real form is
+    presented, the person answers, the *same* ledger decision becomes KNOWN,
+    and the dependent write may run — with no false `cancelled`."""
+    import json
+
+    from comodor.events import Kind
+
+    answered: list[str] = []
+
+    def answer_the_form(event):
+        if event.kind is not Kind.REQUEST:
+            return
+        request = event.payload["request"]
+        headers = [question["header"] for question in request.meta["questions"]]
+        request.answer(json.dumps([{"header": headers[0], "prompt": "",
+                                    "chosen": [], "written": "5 per second"}]))
+        answered.append(headers[0])
+
+    bus.subscribe(answer_the_form)
+    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
+    agent = _agent(config, bus,
+                   _write_after_read("client.py", "RATE_LIMIT_RPS = 5\n"),
+                   answer=MISSING)
+
+    result = agent.run("add rate limiting to the client")
+
+    assert answered, "the preflight did not present a real form"
+    assert (workspace / "client.py").read_text(encoding="utf-8") == \
+        "RATE_LIMIT_RPS = 5\n", "the dependent mutation did not resume after the answer"
+    assert result.stopped == "done"
+    decision = agent.tool_context.evidence.decisions[0]
+    assert decision.state == "answered" and decision.answer == "5 per second"
+
+
 # --------------------------------------------------------------------------- #
 # delegate mutability is the contract's, not the model's opinion
 # --------------------------------------------------------------------------- #
