@@ -830,6 +830,12 @@ class AgentLoop:
                 withheld=True)
         if assessment.allows:
             return None
+        if assessment.rejected:
+            # The request or the evidence already forbids or contradicts this
+            # change. There is no decision to register and no question to ask:
+            # the mutation is not run, and the loop continues so the model can
+            # give an honest final answer (FR-013).
+            return self._reject_for_preflight(assessment)
         try:
             held = self._withhold_for_preflight(context, assessment)
         except Exception as problem:
@@ -848,6 +854,26 @@ class AgentLoop:
                 "why the change is settled, or ask about what is unresolved.",
                 withheld=True)
         return None
+
+    def _reject_for_preflight(
+            self, assessment: preflight.MutationAssessment) -> ToolResult:
+        """Withhold a mutation the request or the evidence already rules out.
+
+        A rejection is not a clarification: nothing is opened in the ledger, no
+        form is presented and no `clarification_required` outcome is produced.
+        The model is handed a bounded, grounded failure and the normal loop
+        continues, so it can report the blocker honestly instead of inventing a
+        substitute. The trace already carries the status and the blockers.
+        """
+        reasons = "; ".join(
+            f"{b.what} ({b.kind})" for b in assessment.blockers[:2]
+        ) or (assessment.reason or "the request or the evidence rules it out")
+        return ToolResult.failure(
+            "Not run: this change is already ruled out by the request or the "
+            f"inspected evidence. {reasons}. No question is asked — there is "
+            "nothing here for the user to decide. Do not invent a substitute or "
+            "fabricate the missing value; report what is blocked and continue.",
+            withheld=True)
 
     def _assess_batch(self, context: ToolContext,
                       calls: list[ToolCall]) -> preflight.MutationAssessment:

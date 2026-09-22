@@ -49,7 +49,9 @@ class FakeProvider:
     #: What the mutation preflight is answered with. The loop asks it once
     #: before the first call that can change anything; a test that is not
     #: about the guard must not have its script queue consumed by it, so the
-    #: preflight is answered here and never takes a `Script`.
+    #: preflight is answered here and never takes a `Script`. A list answers
+    #: one preflight per entry, repeating the last, for a turn that gates more
+    #: than one batch differently.
     preflight = '{"status": "allow", "decisions": [], "reason": "test default"}'
 
     def __init__(self, scripts: list[Script] | None = None, model: str = "fake-1",
@@ -74,7 +76,7 @@ class FakeProvider:
             # guard, not part of the conversation a test is scripting.
             self.preflight_questions.append(
                 next((m.content for m in messages if m.role is Role.USER), ""))
-            script = Script(text=self.preflight)
+            script = Script(text=self._next_preflight())
         else:
             self.calls.append(list(messages))
             script = self._next_script(messages)
@@ -112,6 +114,15 @@ class FakeProvider:
         if self.scripts:
             return self.scripts[-1]
         return Script(text=_echo(messages))
+
+    def _next_preflight(self) -> str:
+        """The preflight answer for this call. A list is a queue, last repeats."""
+        answer = self.preflight
+        if isinstance(answer, list):
+            if not answer:
+                return '{"status": "allow", "decisions": [], "reason": "test default"}'
+            return answer.pop(0) if len(answer) > 1 else answer[0]
+        return answer
 
     def list_models(self) -> list[str]:
         return ["fake-1", "fake-fast"]

@@ -15,6 +15,14 @@ already withholds dependent work. It is not a prohibition parser either — the
 stated constraints travel with the assessment so the decision is made on the
 whole request, not on a path heuristic.
 
+Three semantic outcomes, kept distinct. `allow`: the change is grounded.
+`requires_clarification`: a material decision is genuinely missing and a person
+can settle it. `reject`: the request or the verified evidence already settles
+the change in the negative — forbidden, contradicted or impossible — so no
+question is asked and nothing is added to the ledger as a missing decision. A
+fourth, `blocked`, is internal and fail-closed: an unreadable or inconsistent
+assessment, a provider or parser fault, never permission.
+
 The assessor is shown *what the mutation actually does* and *what the turn
 actually observed*, both bounded and redacted, because a tool name and a source
 name are not enough to tell "the repository defines this value" from "the
@@ -50,10 +58,14 @@ QUESTION_CHARS = 9_000
 #: The assessment prompt. One question with a fixed answer shape, and an
 #: explicit rule about values the mutation introduces — the failure this guard
 #: exists for is a concrete value chosen without a source, so the assessor is
-#: told to treat exactly that as missing rather than as discretion.
+#: told to treat exactly that as missing rather than as discretion. It also
+#: carries the distinction the guard must not collapse: a missing decision is
+#: something an answer can settle, while a blocker is something the request or
+#: the evidence has already settled in the negative, which no question resolves.
 PROMPT = """\
 You are the mutation preflight. A coding agent is about to change the project,
-and you decide whether that change depends on a decision nobody has made yet.
+and you decide whether that change may run, depends on a decision nobody has
+made yet, or is already ruled out.
 
 You are given the user's request, any constraints they stated, the concrete
 mutation about to run (the tool, the path, and the content or command it will
@@ -80,13 +92,50 @@ A choice that could change none of the classes above is implementation
 discretion. Do not ask about permission to proceed, about a plan the request
 already settles, or about a choice with an obvious default.
 
+Then choose exactly one outcome for the mutation as a whole:
+
+  allow                  — every material choice is settled, or is non-material
+                           discretion. The change may run.
+  requires_clarification — a material decision is genuinely missing AND a
+                           person could settle it AND the work could proceed
+                           once they answer. The change must not run until it
+                           is asked.
+  reject                 — the request or the evidence already settles this in
+                           the negative: the change is forbidden, contradicted
+                           or impossible, and no answer from the user would make
+                           it valid. The change must not run, and no question is
+                           asked.
+
+A missing decision is something an answer can settle. A blocker is something the
+request or the evidence has already settled against the change: an explicit
+prohibition, a required authoritative source that is explicitly unavailable, a
+value the request forbids inventing or substituting, a contradiction of an
+explicit request constraint, or a prerequisite the request or evidence
+establishes cannot be met. Do NOT ask the user to choose a value or action the
+request has already forbidden or declared unavailable; that is a reject, not a
+question.
+
+Examples:
+  "Add rate limiting." No quota or rate exists anywhere, and the account owner
+  must supply it. A rate written into the code invents a fact → the missing rate
+  is a decision the owner can settle → requires_clarification.
+  "Coordinates must come only from the authoritative dataset; the dataset is
+  unavailable; do not fetch it elsewhere; do not invent coordinates; do not
+  write a stand-in table." A mutation that writes substitute coordinates → the
+  request has already forbidden exactly this → reject.
+
 Answer with JSON only, no prose around it:
 
-{"status": "allow" | "requires_clarification",
+{"status": "allow" | "requires_clarification" | "reject",
  "decisions": [
    {"what": "<the choice, one sentence>",
     "affects": ["<one or more of the classes above>"],
     "resolution": "grounded" | "agent_discretion" | "missing",
+    "source_refs": ["<request, or the name of a file/command excerpt above>"]}],
+ "blockers": [
+   {"what": "<the conflict, one sentence>",
+    "kind": "request_constraint" | "unavailable_prerequisite" |
+            "contradicted_by_evidence",
     "source_refs": ["<request, or the name of a file/command excerpt above>"]}],
  "reason": "<one sentence>"}
 
@@ -98,11 +147,21 @@ Answer with JSON only, no prose around it:
 `decisions` may be empty only when there is nothing to weigh. A `grounded`
 decision must name at least one source. `affects` uses the class names exactly
 as listed. Do not invent a decision to look thorough; do not omit one to look
-decisive.\
+decisive.
+
+`blockers` is required for `reject` — at least one, each naming the conflict and
+at least one source — and must be empty for `allow` and `requires_clarification`.
+`requires_clarification` needs at least one decision with resolution `missing`.
+`allow` needs no missing decision and no blocker. A `reject` with no grounded
+blocker is not trusted and will be refused.\
 """
 
-_STATUSES = ("allow", "requires_clarification")
+_STATUSES = ("allow", "requires_clarification", "reject")
 _RESOLUTIONS = ("grounded", "agent_discretion", "missing")
+#: The kinds of conflict a rejection may name. Descriptive, not a parser: the
+#: preflight reads the whole request and evidence, so this is only a label.
+_BLOCKER_KINDS = ("request_constraint", "unavailable_prerequisite",
+                  "contradicted_by_evidence")
 
 #: What a class name is allowed to look like, before the ledger canonicalises
 #: it. Only used to drop a word the table does not know; the ledger's own
@@ -121,11 +180,28 @@ class Decision:
 
 
 @dataclass
+class Blocker:
+    """A grounded reason a mutation must not run, and no question would fix.
+
+    Distinct from a missing decision: a blocker is something the request or the
+    evidence has already settled against the change. `kind` is a bounded label;
+    `source_refs` is what makes it trustworthy — a blocker with no source is not
+    a rejection.
+    """
+
+    what: str
+    kind: str = ""
+    source_refs: list[str] = field(default_factory=list)
+
+
+@dataclass
 class MutationAssessment:
     """What the preflight decided about one batch of mutating calls.
 
     `status` is `allow` (the batch may run), `requires_clarification` (a
-    material decision is missing and the batch must not run), or `blocked`
+    material decision is missing and the batch must not run until it is asked),
+    `reject` (the request or the evidence already forbids or contradicts the
+    change, so the batch must not run and no question is raised), or `blocked`
     (the assessment could not be read or was inconsistent, which never becomes
     `allow`).
     """
@@ -133,6 +209,7 @@ class MutationAssessment:
     status: str = "blocked"
     proposed_action: str = ""
     decisions: list[Decision] = field(default_factory=list)
+    blockers: list[Blocker] = field(default_factory=list)
     reason: str = ""
     #: The bounded, redacted answer the assessor gave, kept for the trace.
     raw: str = ""
@@ -140,6 +217,10 @@ class MutationAssessment:
     @property
     def allows(self) -> bool:
         return self.status == "allow"
+
+    @property
+    def rejected(self) -> bool:
+        return self.status == "reject"
 
     @property
     def missing_decisions(self) -> list[Decision]:
@@ -153,6 +234,10 @@ class MutationAssessment:
                 {"what": d.what, "affects": d.affects, "resolution": d.resolution,
                  "source_refs": d.source_refs}
                 for d in self.decisions
+            ],
+            "blockers": [
+                {"what": b.what, "kind": b.kind, "source_refs": b.source_refs}
+                for b in self.blockers
             ],
             "answer": self.raw[:800],
         }
@@ -188,8 +273,10 @@ def parse(raw: str, *, proposed_action: str = "") -> MutationAssessment:
 
     Every mechanical rule is here: a resolution must be one of the three, a
     `grounded` decision must name a source, `agent_discretion` may not carry a
-    material class, and a status that contradicts its own decisions is refused.
-    An unreadable or inconsistent answer is `blocked`, never permission.
+    material class, and a status that contradicts its own decisions or blockers
+    is refused. A `reject` needs at least one grounded blocker — one that names
+    a source — or it is not trusted. An unreadable or inconsistent answer is
+    `blocked`, never permission.
     """
     data = _object(raw)
     if data is None:
@@ -227,15 +314,50 @@ def parse(raw: str, *, proposed_action: str = "") -> MutationAssessment:
         assessment.decisions.append(
             Decision(what=what, affects=affects, resolution=resolution, source_refs=refs))
 
+    raw_blockers = data.get("blockers") or []
+    if not isinstance(raw_blockers, list):
+        return _blocked(proposed_action, "the blockers were not a list", raw)
+    for item in raw_blockers[:MOST_DECISIONS]:
+        if not isinstance(item, dict):
+            return _blocked(proposed_action, "a blocker was not an object", raw)
+        what = str(item.get("what") or "").strip()
+        if not what:
+            return _blocked(proposed_action, "a blocker had no usable name", raw)
+        kind = str(item.get("kind") or "").strip().lower()
+        if kind not in _BLOCKER_KINDS:
+            return _blocked(proposed_action,
+                            f"a blocker had no usable kind ({kind!r})", raw)
+        refs = [str(r).strip() for r in item.get("source_refs") or [] if str(r).strip()]
+        if not refs:
+            # A blocker with no grounding is not a rejection; drop it rather
+            # than trust it. A `reject` that is left with none becomes blocked.
+            continue
+        assessment.blockers.append(Blocker(what=what, kind=kind, source_refs=refs))
+
     missing = assessment.missing_decisions
-    if status == "allow" and missing:
-        # An `allow` may not discard a missing decision; the honest reading is
-        # that the decision is missing, so the batch is withheld.
-        assessment.status = "requires_clarification"
-        assessment.reason = assessment.reason or "a material decision was missing"
-    elif status == "requires_clarification" and not missing:
-        return _blocked(proposed_action,
-                        "clarification requested with no missing decision", raw)
+    if status == "reject":
+        if not assessment.blockers:
+            return _blocked(proposed_action,
+                            "a rejection named no grounded blocker", raw)
+        if missing:
+            return _blocked(proposed_action,
+                            "a rejection also claimed a missing decision", raw)
+    elif status == "requires_clarification":
+        if not missing:
+            return _blocked(proposed_action,
+                            "clarification requested with no missing decision", raw)
+        if assessment.blockers:
+            return _blocked(proposed_action,
+                            "clarification requested alongside a grounded blocker", raw)
+    elif status == "allow":
+        if assessment.blockers:
+            return _blocked(proposed_action,
+                            "allow carried a grounded blocker", raw)
+        if missing:
+            # An `allow` may not discard a missing decision; the honest reading
+            # is that the decision is missing, so the batch is withheld.
+            assessment.status = "requires_clarification"
+            assessment.reason = assessment.reason or "a material decision was missing"
     return assessment
 
 

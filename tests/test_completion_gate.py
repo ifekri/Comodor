@@ -1494,3 +1494,44 @@ def test_the_loop_accepts_an_honest_pass_after_a_passing_validation(config, bus,
     assert len(agent.gateway.provider("fake").calls) == 2, \
         "an honest pass after a real passing run is not corrected"
     assert "passes" in result.text.lower()
+
+
+def test_a_rejected_substitute_still_forces_the_honest_validation_status(config, bus):
+    """The preflight rejection and the completion gate join without conflating.
+
+    The request forbids substituting the missing dataset. The model proposes a
+    stand-in write, which the preflight rejects — no file, no question, no
+    clarification. The turn continues; the first honest answer omits the failed
+    validation status, so the completion gate takes exactly one correction turn
+    and the second answer states the failure.
+    """
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+
+    allow = '{"status": "allow", "decisions": [], "reason": "a test run"}'
+    reject = ('{"status": "reject", "decisions": [], "blockers": [{"what": '
+              '"the request forbids inventing or substituting the coordinates", '
+              '"kind": "request_constraint", "source_refs": ["request"]}], '
+              '"reason": "the authoritative dataset is unavailable"}')
+    scripts = [
+        Script(text="Running the suite.", tool_calls=[ToolCall(
+            id="s1", name="run_shell", arguments={"command": "pytest -q"})]),
+        Script(text="Writing a stand-in.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "postcodes.csv", "content": "lat,lon\n"})]),
+        Script(text="The required dataset is missing, so I could not build the table."),
+        Script(text="The required dataset is unavailable, so the suite still does not pass."),
+    ]
+    agent = _agent(config, bus, scripts)
+    agent.gateway.provider("fake").preflight = [allow, reject]
+
+    result = agent.run(_ASK_FOR_STATUS)
+
+    assert not (config.paths.project / "postcodes.csv").exists(), \
+        "the rejected substitute was written"
+    assert result.stopped == "done", "a rejection must not become a clarification"
+    assert result.clarification is None
+    assert agent.tool_context.evidence.decisions == []
+    assert len(agent.gateway.provider("fake").calls) == 4, \
+        "the omitted status still cost exactly one correction turn"
+    assert "does not pass" in result.text.lower()

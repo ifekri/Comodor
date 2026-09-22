@@ -52,6 +52,37 @@ ALLOW_WITH_MISSING = (
     '"resolution": "missing", "source_refs": []}], "reason": "x"}'
 )
 GARBAGE = "I think it is probably fine?"
+REJECT = (
+    '{"status": "reject", "decisions": [], '
+    '"blockers": [{"what": "the request forbids inventing or substituting the '
+    'coordinates", "kind": "request_constraint", '
+    '"source_refs": ["request", "read_file:geocode.py"]}], '
+    '"reason": "the authoritative dataset is unavailable and substitution is forbidden"}'
+)
+REJECT_UNGROUNDED = (
+    '{"status": "reject", "decisions": [], '
+    '"blockers": [{"what": "it is forbidden", "kind": "request_constraint", '
+    '"source_refs": []}], "reason": "x"}'
+)
+ALLOW_WITH_BLOCKER = (
+    '{"status": "allow", "decisions": [], '
+    '"blockers": [{"what": "it is forbidden", "kind": "request_constraint", '
+    '"source_refs": ["request"]}], "reason": "x"}'
+)
+CLARIFY_WITH_BLOCKER = (
+    '{"status": "requires_clarification", '
+    '"decisions": [{"what": "Which rate limit?", "affects": ["behaviour"], '
+    '"resolution": "missing", "source_refs": []}], '
+    '"blockers": [{"what": "it is forbidden", "kind": "request_constraint", '
+    '"source_refs": ["request"]}], "reason": "x"}'
+)
+REJECT_WITH_MISSING = (
+    '{"status": "reject", '
+    '"decisions": [{"what": "Which rate limit?", "affects": ["behaviour"], '
+    '"resolution": "missing", "source_refs": []}], '
+    '"blockers": [{"what": "it is forbidden", "kind": "request_constraint", '
+    '"source_refs": ["request"]}], "reason": "x"}'
+)
 
 
 def _agent(config, bus, scripts, *, answer=None):
@@ -223,6 +254,96 @@ def test_a_value_the_configuration_states_is_allowed(config, bus, workspace):
 
 
 # --------------------------------------------------------------------------- #
+# a grounded rejection runs nothing, asks nothing, and opens no decision
+# --------------------------------------------------------------------------- #
+
+
+def test_a_grounded_rejection_runs_nothing_and_asks_nothing(
+        config, bus, workspace, monkeypatch):
+    """A forbidden substitution is not a question: no form, no decision."""
+    from comodor.tools import ask as ask_tool
+
+    asked: list[int] = []
+    resolved: list[int] = []
+    real_present = ask_tool.present
+
+    def spy_present(ctx, pending, **kwargs):
+        asked.append(1)
+        return real_present(ctx, pending, **kwargs)
+
+    monkeypatch.setattr(ask_tool, "present", spy_present)
+    monkeypatch.setattr(
+        bus, "resolve",
+        lambda request, timeout=None: (resolved.append(1), (None, False))[1])
+    (workspace / "geocode.py").write_text("DATA = 'postcodes.csv'\n", encoding="utf-8")
+    scripts = [
+        Script(text="Reading.", tool_calls=[ToolCall(
+            id="r1", name="read_file", arguments={"path": "geocode.py"})]),
+        Script(text="Writing a stand-in.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "postcodes.csv", "content": "lat,lon\n"})]),
+        Script(text="The authoritative dataset is unavailable and I was told not "
+                    "to substitute it, so the suite still does not pass."),
+    ]
+    agent = _agent(config, bus, scripts, answer=REJECT)
+
+    result = agent.run(
+        "The coordinates come only from the authoritative dataset; it is "
+        "unavailable; do not fetch it elsewhere; do not invent coordinates; do "
+        "not write a stand-in table.")
+
+    assert not (workspace / "postcodes.csv").exists(), "the rejected mutation ran"
+    assert result.stopped == "done", "a rejection is not a clarification"
+    assert result.clarification is None
+    assert asked == [], "a rejection presented a form"
+    assert resolved == [], "a rejection resolved a request"
+    assert agent.tool_context.evidence.decisions == [], \
+        "a rejection opened a ledger decision"
+    assert not agent.tool_context.evidence.withheld()
+    assert len(agent.gateway.provider("fake").calls) == 3, "the loop did not continue"
+    trace = agent._preflight_traces[0]
+    assert trace["assessment"]["status"] == "reject"
+    assert trace["withheld"] is True
+    assert trace["assessment"]["blockers"][0]["source_refs"]
+
+
+def test_a_missing_external_rate_still_clarifies(config, bus, workspace):
+    """The reject outcome must not swallow a real missing decision."""
+    (workspace / "client.py").write_text("BASE = 1\n", encoding="utf-8")
+    agent = _agent(config, bus,
+                   _write_after_read("client.py", "RATE_LIMIT_RPS = 5\n"),
+                   answer=MISSING)
+
+    result = agent.run("add rate limiting to the client")
+
+    assert result.stopped == "clarification_required"
+    assert agent.tool_context.evidence.decisions, "no decision was registered"
+    assert (workspace / "client.py").read_text(encoding="utf-8") == "BASE = 1\n"
+    assert agent._preflight_traces[0]["assessment"]["status"] == \
+        "requires_clarification"
+
+
+def test_a_supplied_authoritative_value_is_allowed(config, bus, workspace):
+    """With the source supplied, the same mutation is grounded, not rejected."""
+    (workspace / "geocode.py").write_text("DATA = 'postcodes.csv'\n", encoding="utf-8")
+    scripts = [
+        Script(text="Reading.", tool_calls=[ToolCall(
+            id="r1", name="read_file", arguments={"path": "geocode.py"})]),
+        Script(text="Writing.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "postcodes.csv", "content": "lat,lon\n"})]),
+        Script(text="Done."),
+    ]
+    agent = _agent(config, bus, scripts, answer=REQUEST_GROUNDED)
+
+    result = agent.run("write postcodes.csv from the dataset I supplied")
+
+    assert result.stopped == "done"
+    assert (workspace / "postcodes.csv").read_text(encoding="utf-8") == "lat,lon\n"
+    assert agent.tool_context.evidence.decisions == []
+
+
+# --------------------------------------------------------------------------- #
 # the grounding contract, mechanically
 # --------------------------------------------------------------------------- #
 
@@ -244,6 +365,53 @@ def test_an_allow_may_not_discard_a_missing_decision():
 def test_a_malformed_answer_is_blocked():
     assert preflight.parse(GARBAGE).status == "blocked"
     assert preflight.parse("").status == "blocked"
+
+
+# --------------------------------------------------------------------------- #
+# reject is a distinct, grounded outcome — not a clarification
+# --------------------------------------------------------------------------- #
+
+
+def test_a_grounded_rejection_is_recognised():
+    assessment = preflight.parse(REJECT)
+    assert assessment.status == "reject"
+    assert assessment.rejected
+    assert assessment.blockers
+    assert assessment.blockers[0].source_refs
+    assert assessment.blockers[0].kind == "request_constraint"
+
+
+def test_a_rejection_without_grounding_is_refused():
+    """A reject with no grounded blocker must not be trusted (fail closed)."""
+    assert preflight.parse(REJECT_UNGROUNDED).status == "blocked"
+
+
+def test_an_allow_may_not_carry_a_blocker():
+    assert preflight.parse(ALLOW_WITH_BLOCKER).status == "blocked"
+
+
+def test_a_clarification_may_not_carry_a_blocker():
+    assert preflight.parse(CLARIFY_WITH_BLOCKER).status == "blocked"
+
+
+def test_a_rejection_may_not_also_claim_a_missing_decision():
+    assert preflight.parse(REJECT_WITH_MISSING).status == "blocked"
+
+
+def test_reject_and_clarify_do_not_collapse():
+    """A missing external value clarifies; a forbidden substitution rejects."""
+    clarify = preflight.parse(MISSING)
+    reject = preflight.parse(REJECT)
+    assert clarify.status == "requires_clarification"
+    assert reject.status == "reject"
+    assert clarify.status != reject.status
+
+
+def test_the_rejection_trace_names_the_blocker():
+    trace = preflight.parse(REJECT).as_trace()
+    assert trace["status"] == "reject"
+    assert trace["blockers"][0]["source_refs"]
+    assert trace["blockers"][0]["kind"] == "request_constraint"
 
 
 # --------------------------------------------------------------------------- #
