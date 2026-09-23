@@ -15,166 +15,189 @@
 ## Quality & Completion Semantics
 
 - [ ] CHK001 Is "high-quality output" defined in observable terms rather than as an adjective, with the evidence classes quality is judged against enumerated? [Clarity, Spec §User Story 1 / §Epistemic state and grounding]
-- [ ] CHK002 Are FR-001's information-provenance categories enumerated as a closed set, so a premise cannot be held in an unlisted classification? [Completeness, Spec §Epistemic state and grounding FR-001]
+    - Reviewer finding: spec.md never defines "high-quality output" — the phrase appears only in the title and the Input line. No section enumerates the evidence classes quality is judged against (Constitution XIII lists them — the user's request, repository evidence, project conventions, the specification, runtime behaviour, tests, recorded validation evidence — but spec.md does not adopt them), and SC-001 to SC-004 measure specific failures rather than defining quality.
+- [x] CHK002 Are FR-001's information-provenance categories enumerated as a closed set, so a premise cannot be held in an unlisted classification? [Completeness, Spec §Epistemic state and grounding FR-001]
 - [ ] CHK131 Are FR-001's provenance categories kept distinct from the runtime `EvidenceState` lifecycle, so the two vocabularies are not conflated or given a shared count? [Clarity, Spec §Epistemic state FR-001 vs data-model.md §2]
-- [ ] CHK003 Is completion specified as distinguishable from partial completion, with a stated rule for which one an answer reports? [Clarity, Spec §Completion gate FR-036]
-- [ ] CHK004 Are unresolved elements required to be named individually, rather than summarised as "some work remains"? [Measurability, Spec §Completion gate FR-037]
+    - Reviewer finding: spec.md never states that FR-001's provenance categories are distinct from the runtime evidence lifecycle, and never names that lifecycle. §Key Entities "Evidence item" gives how it became known as "(stated, verified, derived, unknown)" — four values, omitting FR-001's "established project or user knowledge", in the same words as the lifecycle states VERIFIED/DERIVED/UNKNOWN — so the two vocabularies are conflated in spec.md; data-model.md §1/§2 then fold two FR-001 categories (stated by the user; established knowledge) into the single state KNOWN. The "not the same thing" statement exists only in plan.md §Quality Architecture.
+- [x] CHK003 Is completion specified as distinguishable from partial completion, with a stated rule for which one an answer reports? [Clarity, Spec §Completion gate FR-036]
+- [x] CHK004 Are unresolved elements required to be named individually, rather than summarised as "some work remains"? [Measurability, Spec §Completion gate FR-037]
 - [ ] CHK005 Is the proportionality rule for validation stated in a way that can be objectively applied — i.e. can a reviewer determine from the spec whether a given check is in or out of scope for a given change? [Measurability, Spec §Completion gate FR-042]
-- [ ] CHK006 Is the prohibition on unsupported confidence stated as a requirement on output, not merely as a principle? [Clarity, Spec §Epistemic state and grounding FR-005, FR-006]
-- [ ] CHK007 Are the exact conditions under which an unverified-claim notice must and must not fire specified, including the negative cases (hedged, negated, instruction)? [Completeness, Spec §Epistemic state and grounding FR-006]
-- [ ] CHK008 Is the requirement that repository-grounded claims carry evidence stated for each claim class (file, symbol, interface, command, configuration, repository state)? [Coverage, Spec §Epistemic state and grounding FR-004]
+    - Reviewer finding: FR-042 forbids validation "unrelated to the affected surface" but never defines "affected surface" or "unrelated", and does not reconcile that with FR-038, which mandates the project's whole configured check whenever any file changed. A reviewer cannot determine from spec.md whether, e.g., the full suite after a documentation-only edit is in or out of scope.
+- [x] CHK006 Is the prohibition on unsupported confidence stated as a requirement on output, not merely as a principle? [Clarity, Spec §Epistemic state and grounding FR-005, FR-006]
+- [x] CHK007 Are the exact conditions under which an unverified-claim notice must and must not fire specified, including the negative cases (hedged, negated, instruction)? [Completeness, Spec §Epistemic state and grounding FR-006]
+- [x] CHK008 Is the requirement that repository-grounded claims carry evidence stated for each claim class (file, symbol, interface, command, configuration, repository state)? [Coverage, Spec §Epistemic state and grounding FR-004]
 - [ ] CHK009 Is the distinction between VERIFIED and VALIDATED defined, so "observed" and "confirmed against delivered work" are not conflated? [Clarity, Spec §Key Entities]
-- [ ] CHK010 Is the completion gate's authority — annotate versus block — stated unambiguously, with the single blocking condition defined? [Clarity, Spec §Completion gate FR-124 to FR-127]
-- [ ] CHK011 Is a fallback specified for when the completion gate cannot reach a verdict? [Edge Case, Spec §Completion gate FR-127]
+    - Reviewer finding: spec.md does not define VERIFIED or VALIDATED at all. §Key Entities gives an evidence item's origin as "stated, verified, derived, unknown" and has no validated state; the observed-versus-confirmed-against-delivered-work distinction exists only in plan.md §Quality Architecture and data-model.md §2.
+- [x] CHK010 Is the completion gate's authority — annotate versus block — stated unambiguously, with the single blocking condition defined? [Clarity, Spec §Completion gate FR-124 to FR-127]
+- [x] CHK011 Is a fallback specified for when the completion gate cannot reach a verdict? [Edge Case, Spec §Completion gate FR-127]
 
 ## Anti-Hallucination & Evidence Grounding
 
 - [ ] CHK012 Does the spec state a mechanical rule preventing an unknown from becoming a usable fact, rather than only prohibiting it rhetorically? [Clarity, Spec §Epistemic state and grounding FR-002]
+    - Reviewer finding: FR-002 is a prohibition with three permitted exits (resolved by evidence, resolved by asking, reported unresolved), but (a) the mechanical rule that makes it enforceable — a derivation may never rest on UNKNOWN — is stated only in data-model.md §1 and contracts E4.1, not in spec.md; and (b) the closed exit list omits the non-material assumption path that FR-003, FR-011, FR-130 and User Story 1 scenario 7 permit. FR-001/FR-002 are scoped to "a consequential decision" and "consequential" is never related to FR-007 materiality, so spec.md does not say whether that path is an exception to FR-002 or outside its scope.
 - [ ] CHK013 Are the conditions that make clarification mandatory enumerated as a closed list, so materiality can be decided without judgement calls? [Measurability, Spec §When to ask FR-007]
-- [ ] CHK014 Is the requirement to inspect available repository evidence *before* asking stated, and scoped to the modes in which inspection is possible? [Consistency, Spec §When to ask FR-009, FR-010]
+    - NEEDS CLARIFICATION: FR-007's eleven classes are a closed list, but the trigger is uncertainty that "can materially change" a class and "materially" is undefined; the first class, "the requested behaviour", subsumes almost any decision, so classification still requires judgement. FR-130's tie-break (competing readings are material) narrows it but does not remove it. The threshold — or a narrower "requested behaviour" class — is an owner decision.
+- [x] CHK014 Is the requirement to inspect available repository evidence *before* asking stated, and scoped to the modes in which inspection is possible? [Consistency, Spec §When to ask FR-009, FR-010]
 - [ ] CHK015 Is the distinction between safe implementation discretion and missing product intent defined well enough that a reviewer can classify a given decision? [Clarity, Spec §When to ask FR-012]
-- [ ] CHK016 Are the categories the agent must *not* ask about specified (permission to proceed, plan confirmation, obvious defaults)? [Completeness, Spec §When to ask FR-011]
-- [ ] CHK017 Is it specified that an assumption the agent takes itself must be surfaced as an assumption rather than as a finding? [Clarity, Spec §Epistemic state and grounding FR-003]
-- [ ] CHK018 Are requirements defined preventing a tool failure, unreachable service, or partial repository access from being represented as a successful result? [Coverage, Spec §Failure and uncertainty FR-068]
-- [ ] CHK019 Is the handling of contradictory project evidence specified, rather than left to silent resolution? [Coverage, Spec §Failure and uncertainty FR-069]
-- [ ] CHK020 Is partial repository inspection required to be disclosed in the answer? [Completeness, Spec §Failure and uncertainty FR-070]
-- [ ] CHK021 Is low model confidence on a material decision given a defined disposition, rather than being left as an unspecified hedge? [Gap-check, Spec §Failure and uncertainty FR-115]
-- [ ] CHK022 Is "insufficient information" defined as a reportable outcome naming what is missing? [Clarity, Spec §Failure and uncertainty FR-113]
-- [ ] CHK023 Are requirements stated preventing a failed validation from being re-characterised as a limitation of the check, retried until green, or omitted? [Coverage, Spec §Failure and uncertainty FR-116]
+    - NEEDS CLARIFICATION: FR-012 defines neither "implementation freedom" nor "missing product intent". The only classification route is FR-130's link to the FR-007 materiality test, so this item inherits CHK013's undefined threshold.
+- [x] CHK016 Are the categories the agent must *not* ask about specified (permission to proceed, plan confirmation, obvious defaults)? [Completeness, Spec §When to ask FR-011]
+- [x] CHK017 Is it specified that an assumption the agent takes itself must be surfaced as an assumption rather than as a finding? [Clarity, Spec §Epistemic state and grounding FR-003]
+- [x] CHK018 Are requirements defined preventing a tool failure, unreachable service, or partial repository access from being represented as a successful result? [Coverage, Spec §Failure and uncertainty FR-068]
+- [x] CHK019 Is the handling of contradictory project evidence specified, rather than left to silent resolution? [Coverage, Spec §Failure and uncertainty FR-069]
+- [x] CHK020 Is partial repository inspection required to be disclosed in the answer? [Completeness, Spec §Failure and uncertainty FR-070]
+- [x] CHK021 Is low model confidence on a material decision given a defined disposition, rather than being left as an unspecified hedge? [Gap-check, Spec §Failure and uncertainty FR-115]
+- [x] CHK022 Is "insufficient information" defined as a reportable outcome naming what is missing? [Clarity, Spec §Failure and uncertainty FR-113]
+- [x] CHK023 Are requirements stated preventing a failed validation from being re-characterised as a limitation of the check, retried until green, or omitted? [Coverage, Spec §Failure and uncertainty FR-116]
 
 ## Interactive Clarification — Requirement Completeness
 
-- [ ] CHK024 Is an explicit waiting state defined for a clarification, distinct from answered, declined, cancelled and expired? [Completeness, Spec §The clarification interaction FR-018, FR-022]
+- [x] CHK024 Is an explicit waiting state defined for a clarification, distinct from answered, declined, cancelled and expired? [Completeness, Spec §The clarification interaction FR-018, FR-022]
 - [ ] CHK025 Is it specified that dependent work must not continue before an answer, while independent work must not be blocked? [Clarity, Spec §The clarification interaction FR-018]
-- [ ] CHK026 Are option semantics defined — what an option must carry, and the difference between single-choice and multiple-choice? [Completeness, Spec §The clarification interaction FR-015, FR-021]
-- [ ] CHK027 Is the mandatory final custom-answer row specified as a system-appended invariant the model can neither author nor remove, rather than as an instruction to the model? [Clarity, Spec §The clarification interaction FR-017]
-- [ ] CHK028 Is it specified that free text entered into the custom row is carried back as the answer to that specific question? [Completeness, Spec §The clarification interaction FR-017]
-- [ ] CHK029 Are requirements stated preventing invented or misleading candidate options? [Clarity, Spec §The clarification interaction FR-016]
-- [ ] CHK030 Is a stale answer defined, with its disposition specified (ignored, and never applied to a different question)? [Edge Case, Spec §The clarification interaction FR-024]
-- [ ] CHK031 Is duplicate-answer handling defined so that exactly one answer is applied? [Edge Case, Spec §The clarification interaction FR-025]
-- [ ] CHK032 Is invalid-answer handling defined, including the prohibition on coercing an invalid answer into a valid choice? [Edge Case, Spec §The clarification interaction FR-026]
-- [ ] CHK033 Is cancellation defined and distinguished from both "answered with nothing" and expiry? [Clarity, Spec §The clarification interaction FR-022]
-- [ ] CHK034 Is reconnect behaviour defined for an outstanding form, including where the restored state comes from? [Coverage, Spec §The clarification interaction FR-023]
-- [ ] CHK035 Is timeout/expiry behaviour defined, including the requirement that expiry be observable to clients? [Completeness, Spec §The clarification interaction FR-027]
-- [ ] CHK036 Is question identity specified as stable, with answers matched by identity rather than position? [Clarity, Spec §The clarification interaction FR-020]
-- [ ] CHK037 Is the "no automatic answer selection" rule stated absolutely, with the specific bypasses it forbids enumerated? [Completeness, Spec §The clarification interaction FR-019]
-- [ ] CHK038 Is behaviour specified for a model change occurring while a form is outstanding? [Edge Case, Spec §The clarification interaction FR-028]
-- [ ] CHK039 Are requirements defined for grouping all decisions outstanding at one point into a single form rather than successive questions? [Clarity, Spec §The clarification interaction FR-014]
+    - NEEDS CLARIFICATION: FR-018 forbids dependent work (satisfied) but only permits independent work ("MAY continue only where it is demonstrably independent"); nothing requires that independent work not be blocked, and FR-123 ends the run on a clarification-required outcome, which blocks independent work on non-interactive surfaces. Whether independent work MUST proceed while a clarification is outstanding, or merely MAY, is an owner decision.
+- [x] CHK026 Are option semantics defined — what an option must carry, and the difference between single-choice and multiple-choice? [Completeness, Spec §The clarification interaction FR-015, FR-021]
+- [x] CHK027 Is the mandatory final custom-answer row specified as a system-appended invariant the model can neither author nor remove, rather than as an instruction to the model? [Clarity, Spec §The clarification interaction FR-017]
+- [x] CHK028 Is it specified that free text entered into the custom row is carried back as the answer to that specific question? [Completeness, Spec §The clarification interaction FR-017]
+- [x] CHK029 Are requirements stated preventing invented or misleading candidate options? [Clarity, Spec §The clarification interaction FR-016]
+- [x] CHK030 Is a stale answer defined, with its disposition specified (ignored, and never applied to a different question)? [Edge Case, Spec §The clarification interaction FR-024]
+- [x] CHK031 Is duplicate-answer handling defined so that exactly one answer is applied? [Edge Case, Spec §The clarification interaction FR-025]
+- [x] CHK032 Is invalid-answer handling defined, including the prohibition on coercing an invalid answer into a valid choice? [Edge Case, Spec §The clarification interaction FR-026]
+- [x] CHK033 Is cancellation defined and distinguished from both "answered with nothing" and expiry? [Clarity, Spec §The clarification interaction FR-022]
+- [x] CHK034 Is reconnect behaviour defined for an outstanding form, including where the restored state comes from? [Coverage, Spec §The clarification interaction FR-023]
+- [x] CHK035 Is timeout/expiry behaviour defined, including the requirement that expiry be observable to clients? [Completeness, Spec §The clarification interaction FR-027]
+- [x] CHK036 Is question identity specified as stable, with answers matched by identity rather than position? [Clarity, Spec §The clarification interaction FR-020]
+- [x] CHK037 Is the "no automatic answer selection" rule stated absolutely, with the specific bypasses it forbids enumerated? [Completeness, Spec §The clarification interaction FR-019]
+- [x] CHK038 Is behaviour specified for a model change occurring while a form is outstanding? [Edge Case, Spec §The clarification interaction FR-028]
+- [x] CHK039 Are requirements defined for grouping all decisions outstanding at one point into a single form rather than successive questions? [Clarity, Spec §The clarification interaction FR-014]
 - [ ] CHK040 Is the source/reason for a clarification specified as information the question must carry? [Completeness, Spec §The clarification interaction; §Non-interactive surfaces FR-034]
+    - Reviewer finding: spec.md does not require an interactive question to carry its reason or the evidence consulted. FR-034 applies only to the non-interactive outcome and lists decision, candidates and evidence consulted but no reason (materiality class); the question fields `reason` / `evidence_consulted` exist only in plan.md, data-model.md §4 and contracts §C1.
 
 ## Non-Interactive Surfaces
 
-- [ ] CHK041 Is the distinction between "a person cancelled or declined" and "no person was present" defined as a difference in reported lifecycle outcome only, with neither authorising an invented answer? [Clarity, Spec §Non-interactive surfaces FR-035]
-- [ ] CHK042 Is the set of surfaces that block on a mandatory clarification stated explicitly rather than left to inference? [Completeness, Spec §Non-interactive surfaces FR-121]
+- [x] CHK041 Is the distinction between "a person cancelled or declined" and "no person was present" defined as a difference in reported lifecycle outcome only, with neither authorising an invented answer? [Clarity, Spec §Non-interactive surfaces FR-035]
+- [x] CHK042 Is the set of surfaces that block on a mandatory clarification stated explicitly rather than left to inference? [Completeness, Spec §Non-interactive surfaces FR-121]
 - [ ] CHK043 Is the structured clarification-required outcome specified with the fields a caller needs to answer it in a later invocation? [Measurability, Spec §Non-interactive surfaces FR-034]
-- [ ] CHK044 Is the clarification-required outcome required to be distinguishable from both success and failure, so a caller does not retry it as an error? [Clarity, Spec §Non-interactive surfaces FR-123]
-- [ ] CHK045 Is it specified that blocking applies only to decisions passing the materiality test, so routine automation is bounded? [Consistency, Spec §Non-interactive surfaces FR-122]
-- [ ] CHK046 Is the prohibition on selecting a default automatically restated for non-interactive surfaces specifically? [Coverage, Spec §Non-interactive surfaces FR-033]
+    - NEEDS CLARIFICATION: FR-034 lists decision, candidates and evidence consulted "sufficiently for the caller to answer it in a subsequent invocation", but "sufficiently" is not measurable, the outcome is not required to carry a stable decision or question identifier (the FR-020 identifiers are not required in it), and spec.md does not say how a later invocation supplies the answer or binds it to the open decision. The answer-in-a-later-invocation mechanism is an owner decision.
+- [x] CHK044 Is the clarification-required outcome required to be distinguishable from both success and failure, so a caller does not retry it as an error? [Clarity, Spec §Non-interactive surfaces FR-123]
+- [x] CHK045 Is it specified that blocking applies only to decisions passing the materiality test, so routine automation is bounded? [Consistency, Spec §Non-interactive surfaces FR-122]
+- [x] CHK046 Is the prohibition on selecting a default automatically restated for non-interactive surfaces specifically? [Coverage, Spec §Non-interactive surfaces FR-033]
 
 ## Token Efficiency — Requirement Completeness
 
-- [ ] CHK047 Is token efficiency stated as a measurable requirement with a defined unit and scope, rather than as an aspiration? [Measurability, Spec §Token efficiency FR-055]
-- [ ] CHK048 Is the baseline against which reduction is measured defined, including what the comparison strategy does? [Clarity, Spec §Success Criteria SC-011, SC-036]
-- [ ] CHK049 Is it specified that the numeric threshold is derived from the baseline rather than chosen in advance, so no arbitrary figure enters the spec? [Consistency, Spec §Clarifications — Resolved Q1]
-- [ ] CHK050 Are context-selection requirements specified — budget, relevance ranking, and the determinability of what was withheld? [Completeness, Spec §Token efficiency: techniques FR-096 to FR-098]
+- [x] CHK047 Is token efficiency stated as a measurable requirement with a defined unit and scope, rather than as an aspiration? [Measurability, Spec §Token efficiency FR-055]
+- [x] CHK048 Is the baseline against which reduction is measured defined, including what the comparison strategy does? [Clarity, Spec §Success Criteria SC-011, SC-036]
+- [x] CHK049 Is it specified that the numeric threshold is derived from the baseline rather than chosen in advance, so no arbitrary figure enters the spec? [Consistency, Spec §Clarifications — Resolved Q1]
+- [x] CHK050 Are context-selection requirements specified — budget, relevance ranking, and the determinability of what was withheld? [Completeness, Spec §Token efficiency: techniques FR-096 to FR-098]
 - [ ] CHK051 Are deduplication semantics specified, including how identity is established and how near-duplicates are treated? [Clarity, Spec §Token efficiency: techniques FR-099]
-- [ ] CHK052 Is stable-context reuse specified, including the prohibition on altering the stable portion mid-task? [Clarity, Spec §Token efficiency FR-050]
+    - Reviewer finding: FR-099 does not state how content identity is established (byte identity, hash, normalisation), requires near-duplicate material to be "carried once" without defining near-duplicate or which variant survives, and so permits collapsing two differing items into one — which can drop the difference and conflicts with FR-044 (see CHK123). plan.md T7 limits deduplication to hash equality and handles near-duplicates "separately and conservatively"; spec.md does not.
+- [x] CHK052 Is stable-context reuse specified, including the prohibition on altering the stable portion mid-task? [Clarity, Spec §Token efficiency FR-050]
 - [ ] CHK053 Are unchanged-content references and delta context specified, including the fallback when the base is no longer present? [Coverage, Spec §Token efficiency: techniques FR-100, FR-101]
+    - Reviewer finding: FR-100 (delta) and FR-101 (reference by identity) specify no fallback for when the base or referent is no longer present (compacted, evicted or changed). The send-the-full-form fallback exists only in plan.md T8 and tasks T073/T074.
 - [ ] CHK054 Is invalidation behaviour specified for every reuse mechanism (superseded reads, cached facts, references, summaries)? [Completeness, Spec §Token efficiency FR-045, FR-105; §Progressive learning FR-060]
-- [ ] CHK055 Is tool-result compaction specified such that nothing is discarded and the remainder stays retrievable? [Clarity, Spec §Token efficiency FR-047, FR-048]
-- [ ] CHK056 Is history compaction specified with its structural constraints — no orphaned tool call, original request always preserved? [Completeness, Spec §Token efficiency FR-049]
-- [ ] CHK057 Is it explicitly specified that a failing build or test log must retain the failure itself rather than collapse to a pass/fail flag? [Edge Case, Spec §Token efficiency: per class FR-090]
-- [ ] CHK058 Is the prohibition on losing critical evidence to compression stated as an absolute constraint on all optimizations? [Clarity, Spec §Token efficiency FR-044]
-- [ ] CHK059 Is it stated that token reduction may not substitute for correctness, with the consequence defined (a reduction that costs correctness is a regression)? [Consistency, Spec §Token efficiency FR-044; §Success Criteria SC-012]
-- [ ] CHK060 Are per-content-class requirements defined for every class the feature carries — history, file contents, diffs, tool results, build/test logs, project instructions, learned knowledge, repeated turns, delegated work, resume? [Coverage, Spec §Token efficiency: per class FR-086 to FR-095]
-- [ ] CHK061 Are canonical summaries required to carry provenance, so a claim resting on one can be traced? [Completeness, Spec §Token efficiency: techniques FR-102, FR-103]
-- [ ] CHK062 Is incremental repository understanding specified, including the rule on not re-verifying a fact without cause? [Clarity, Spec §Token efficiency: techniques FR-104, FR-105]
+    - Reviewer finding: invalidation is specified for superseded reads (FR-045), verified facts (FR-105) and learned items (FR-060), but not for references (FR-101), deltas (FR-100), deduplicated copies (FR-099) or canonical summaries (FR-086, FR-102): spec.md never says what event invalidates those representations. The universal rule ("must never survive an invalidation event that makes it incorrect") exists only in tasks.md tasks Phase 5.
+- [x] CHK055 Is tool-result compaction specified such that nothing is discarded and the remainder stays retrievable? [Clarity, Spec §Token efficiency FR-047, FR-048]
+- [x] CHK056 Is history compaction specified with its structural constraints — no orphaned tool call, original request always preserved? [Completeness, Spec §Token efficiency FR-049]
+- [x] CHK057 Is it explicitly specified that a failing build or test log must retain the failure itself rather than collapse to a pass/fail flag? [Edge Case, Spec §Token efficiency: per class FR-090]
+- [x] CHK058 Is the prohibition on losing critical evidence to compression stated as an absolute constraint on all optimizations? [Clarity, Spec §Token efficiency FR-044]
+- [x] CHK059 Is it stated that token reduction may not substitute for correctness, with the consequence defined (a reduction that costs correctness is a regression)? [Consistency, Spec §Token efficiency FR-044; §Success Criteria SC-012]
+- [x] CHK060 Are per-content-class requirements defined for every class the feature carries — history, file contents, diffs, tool results, build/test logs, project instructions, learned knowledge, repeated turns, delegated work, resume? [Coverage, Spec §Token efficiency: per class FR-086 to FR-095]
+- [x] CHK061 Are canonical summaries required to carry provenance, so a claim resting on one can be traced? [Completeness, Spec §Token efficiency: techniques FR-102, FR-103]
+- [x] CHK062 Is incremental repository understanding specified, including the rule on not re-verifying a fact without cause? [Clarity, Spec §Token efficiency: techniques FR-104, FR-105]
 
 ## Progressive Learning — Requirement Completeness
 
-- [ ] CHK063 Does the spec acknowledge the existing learning implementation rather than describing learning as new? [Consistency, Spec §Context: Brownfield; §Appendix A]
-- [ ] CHK064 Is it specified that new learning work extends existing machinery rather than introducing a parallel subsystem? [Consistency, Spec §Appendix A; §Assumptions]
-- [ ] CHK065 Are the admissible (learnable) signal classes enumerated as a closed list? [Completeness, Spec §Progressive learning FR-056]
-- [ ] CHK066 Are the non-learnable signal classes enumerated explicitly, including unverified model assertions? [Completeness, Spec §Progressive learning FR-056, FR-066]
-- [ ] CHK067 Is it specified that a rejected or reverted proposal is not admissible evidence? [Coverage, Spec §Progressive learning FR-109]
-- [ ] CHK068 Is it specified that a failed implementation cannot be recorded as a successful outcome? [Coverage, Spec §Progressive learning FR-056, FR-109]
-- [ ] CHK069 Is provenance defined as a required attribute with an enumerated value set? [Measurability, Spec §Progressive learning FR-057; §Key Entities]
-- [ ] CHK070 Is scope defined, distinguishing project-level from user-level knowledge? [Clarity, Spec §Progressive learning FR-057]
-- [ ] CHK071 Is cross-project isolation specified as a prohibition, not merely as a default? [Clarity, Spec §Progressive learning FR-058]
-- [ ] CHK072 Is staleness defined, including the trigger that makes a repository-derived item stale? [Completeness, Spec §Progressive learning FR-060; §Failure and uncertainty FR-114]
-- [ ] CHK073 Is supersession defined with a deterministic ordering rule and the requirement that the superseded item be retained? [Measurability, Spec §Progressive learning FR-059]
-- [ ] CHK074 Is contradictory-correction handling specified unambiguously, so two conflicting corrections cannot both be applied? [Consistency, Spec §Progressive learning FR-059]
-- [ ] CHK075 Is the storage lifecycle defined with all states and every transition either deterministic or user-initiated? [Completeness, Spec §Progressive learning FR-112]
-- [ ] CHK076 Is retrieval policy specified — relevance, scope, status exclusion and budget? [Completeness, Spec §Progressive learning FR-110]
-- [ ] CHK077 Is it specified that learning must reduce repeated clarification and rediscovery *without* introducing stale assumptions, so the two goals are not in silent conflict? [Consistency, Spec §Progressive learning FR-067]
-- [ ] CHK078 Is it specified that learned knowledge cannot silently override current repository evidence? [Consistency, Spec §Failure and uncertainty FR-114]
-- [ ] CHK079 Are inspectability and per-item deletion specified as user-facing requirements? [Completeness, Spec §Progressive learning FR-061]
-- [ ] CHK080 Are storage caps and the at-cap behaviour specified (explicit refusal, not silent eviction)? [Edge Case, Spec §Progressive learning FR-065]
-- [ ] CHK081 Is the persistence boundary specified as deterministic and testable, so learning cannot change a turn mid-flight? [Measurability, Spec §Progressive learning FR-063]
+- [x] CHK063 Does the spec acknowledge the existing learning implementation rather than describing learning as new? [Consistency, Spec §Context: Brownfield; §Appendix A]
+- [x] CHK064 Is it specified that new learning work extends existing machinery rather than introducing a parallel subsystem? [Consistency, Spec §Appendix A; §Assumptions]
+- [x] CHK065 Are the admissible (learnable) signal classes enumerated as a closed list? [Completeness, Spec §Progressive learning FR-056]
+- [x] CHK066 Are the non-learnable signal classes enumerated explicitly, including unverified model assertions? [Completeness, Spec §Progressive learning FR-056, FR-066]
+- [x] CHK067 Is it specified that a rejected or reverted proposal is not admissible evidence? [Coverage, Spec §Progressive learning FR-109]
+- [x] CHK068 Is it specified that a failed implementation cannot be recorded as a successful outcome? [Coverage, Spec §Progressive learning FR-056, FR-109]
+- [x] CHK069 Is provenance defined as a required attribute with an enumerated value set? [Measurability, Spec §Progressive learning FR-057; §Key Entities]
+- [x] CHK070 Is scope defined, distinguishing project-level from user-level knowledge? [Clarity, Spec §Progressive learning FR-057]
+- [x] CHK071 Is cross-project isolation specified as a prohibition, not merely as a default? [Clarity, Spec §Progressive learning FR-058]
+- [x] CHK072 Is staleness defined, including the trigger that makes a repository-derived item stale? [Completeness, Spec §Progressive learning FR-060; §Failure and uncertainty FR-114]
+- [x] CHK073 Is supersession defined with a deterministic ordering rule and the requirement that the superseded item be retained? [Measurability, Spec §Progressive learning FR-059]
+- [x] CHK074 Is contradictory-correction handling specified unambiguously, so two conflicting corrections cannot both be applied? [Consistency, Spec §Progressive learning FR-059]
+- [x] CHK075 Is the storage lifecycle defined with all states and every transition either deterministic or user-initiated? [Completeness, Spec §Progressive learning FR-112]
+- [x] CHK076 Is retrieval policy specified — relevance, scope, status exclusion and budget? [Completeness, Spec §Progressive learning FR-110]
+- [x] CHK077 Is it specified that learning must reduce repeated clarification and rediscovery *without* introducing stale assumptions, so the two goals are not in silent conflict? [Consistency, Spec §Progressive learning FR-067]
+- [x] CHK078 Is it specified that learned knowledge cannot silently override current repository evidence? [Consistency, Spec §Failure and uncertainty FR-114]
+- [x] CHK079 Are inspectability and per-item deletion specified as user-facing requirements? [Completeness, Spec §Progressive learning FR-061]
+- [x] CHK080 Are storage caps and the at-cap behaviour specified (explicit refusal, not silent eviction)? [Edge Case, Spec §Progressive learning FR-065]
+- [x] CHK081 Is the persistence boundary specified as deterministic and testable, so learning cannot change a turn mid-flight? [Measurability, Spec §Progressive learning FR-063]
 
 ## Architecture Reuse & Boundary Consistency
 
-- [ ] CHK082 Is the existing session architecture acknowledged, with the feature's additions expressed as extensions to it? [Consistency, Spec §Appendix A]
-- [ ] CHK083 Are the existing question/ASK mechanisms acknowledged, including the distinction between ASK *mode* and the asking *tool*? [Clarity, Spec §Context Finding 3; §Appendix A]
-- [ ] CHK084 Is existing persistence considered, with any new storage expressed as additive? [Consistency, Spec §Compatibility FR-081; §Appendix A]
-- [ ] CHK085 Are existing protocols considered, with additions required to be negotiated and backward-compatible? [Consistency, Spec §Compatibility FR-079, FR-080]
+- [x] CHK082 Is the existing session architecture acknowledged, with the feature's additions expressed as extensions to it? [Consistency, Spec §Appendix A]
+- [x] CHK083 Are the existing question/ASK mechanisms acknowledged, including the distinction between ASK *mode* and the asking *tool*? [Clarity, Spec §Context Finding 3; §Appendix A]
+- [x] CHK084 Is existing persistence considered, with any new storage expressed as additive? [Consistency, Spec §Compatibility FR-081; §Appendix A]
+- [x] CHK085 Are existing protocols considered, with additions required to be negotiated and backward-compatible? [Consistency, Spec §Compatibility FR-079, FR-080]
 - [ ] CHK086 Is existing TUI input/overlay ownership considered, with keyboard requirements expressed deterministically rather than by timing? [Clarity, Spec §The clarification interaction FR-031]
-- [ ] CHK087 Are existing permission boundaries and mode capabilities specified as preserved, including the fail-closed rule for unknown modes? [Consistency, Spec §Assumptions; §Capability discovery FR-118]
-- [ ] CHK088 Does the spec avoid specifying any parallel subsystem where an existing component is identified as the owner? [Consistency, Spec §Appendix A]
-- [ ] CHK089 Is capability discovery addressed, including the rule that a capability not advertised in the current mode may not be claimed? [Coverage, Spec §Capability discovery FR-117, FR-120]
+    - Reviewer finding: spec.md does not identify the existing owner of terminal form input/overlay — Appendix A has no row for the terminal overlay or the shared question reducer — and FR-031 lists keyboard actions without requiring them to be deterministic or independent of timing; SC-025 constrains tests only.
+- [x] CHK087 Are existing permission boundaries and mode capabilities specified as preserved, including the fail-closed rule for unknown modes? [Consistency, Spec §Assumptions; §Capability discovery FR-118]
+- [x] CHK088 Does the spec avoid specifying any parallel subsystem where an existing component is identified as the owner? [Consistency, Spec §Appendix A]
+- [x] CHK089 Is capability discovery addressed, including the rule that a capability not advertised in the current mode may not be claimed? [Coverage, Spec §Capability discovery FR-117, FR-120]
 
 ## Scenario & Surface Coverage
 
-- [ ] CHK090 Are terminal-interface behavioural requirements defined, including full keyboard operability and outstanding-question visibility? [Coverage, Spec §The clarification interaction FR-031]
-- [ ] CHK091 Are command-line/headless behavioural requirements defined for the clarification-required outcome? [Coverage, Spec §Non-interactive surfaces FR-121, FR-123]
-- [ ] CHK092 Are API/protocol behavioural requirements defined, including what an old client experiences? [Coverage, Spec §Compatibility FR-080]
-- [ ] CHK093 Are reconnect and session-continuity requirements defined for pending interactions? [Coverage, Spec §The clarification interaction FR-023]
-- [ ] CHK094 Are background/delegated-agent interaction requirements defined, including attribution and turn-boundary delivery? [Coverage, Spec §The clarification interaction FR-029]
-- [ ] CHK095 Are cross-platform expectations stated explicitly for all three supported platforms? [Completeness, Spec §Compatibility FR-078]
-- [ ] CHK096 Are transcript and export representation requirements defined for questions and answers? [Coverage, Spec §The clarification interaction FR-030]
-- [ ] CHK097 Are requirements defined for the conversation-only modes, where questions are permitted but inspection is not? [Edge Case, Spec §When to ask FR-010; §The clarification interaction FR-032]
+- [x] CHK090 Are terminal-interface behavioural requirements defined, including full keyboard operability and outstanding-question visibility? [Coverage, Spec §The clarification interaction FR-031]
+- [x] CHK091 Are command-line/headless behavioural requirements defined for the clarification-required outcome? [Coverage, Spec §Non-interactive surfaces FR-121, FR-123]
+- [x] CHK092 Are API/protocol behavioural requirements defined, including what an old client experiences? [Coverage, Spec §Compatibility FR-080]
+- [x] CHK093 Are reconnect and session-continuity requirements defined for pending interactions? [Coverage, Spec §The clarification interaction FR-023]
+- [x] CHK094 Are background/delegated-agent interaction requirements defined, including attribution and turn-boundary delivery? [Coverage, Spec §The clarification interaction FR-029]
+- [x] CHK095 Are cross-platform expectations stated explicitly for all three supported platforms? [Completeness, Spec §Compatibility FR-078]
+- [x] CHK096 Are transcript and export representation requirements defined for questions and answers? [Coverage, Spec §The clarification interaction FR-030]
+- [x] CHK097 Are requirements defined for the conversation-only modes, where questions are permitted but inspection is not? [Edge Case, Spec §When to ask FR-010; §The clarification interaction FR-032]
 
 ## Acceptance Criteria Quality
 
-- [ ] CHK098 Are quality acceptance criteria expressed with measurable targets rather than qualitative claims? [Measurability, Spec §Success Criteria SC-001 to SC-004]
-- [ ] CHK099 Are clarification acceptance criteria measurable, including the custom-row invariant under adversarial conditions? [Measurability, Spec §Success Criteria SC-005 to SC-010]
+- [x] CHK098 Are quality acceptance criteria expressed with measurable targets rather than qualitative claims? [Measurability, Spec §Success Criteria SC-001 to SC-004]
+- [x] CHK099 Are clarification acceptance criteria measurable, including the custom-row invariant under adversarial conditions? [Measurability, Spec §Success Criteria SC-005 to SC-010]
 - [ ] CHK100 Are token-efficiency acceptance criteria measurable *and* paired with a quality condition, so a saving alone cannot pass? [Measurability, Spec §Success Criteria SC-011 to SC-015]
-- [ ] CHK101 Are learning acceptance criteria measurable, including criteria for what must *not* be learned? [Measurability, Spec §Success Criteria SC-016 to SC-021]
-- [ ] CHK102 Are regression criteria measurable and tied to the exact commit under review rather than to an earlier one? [Measurability, Spec §Success Criteria SC-022]
-- [ ] CHK103 Is determinism specified as an acceptance property, including the prohibition on sleep- or timing-based correctness? [Measurability, Spec §Success Criteria SC-025]
-- [ ] CHK104 Is mutation-checking specified as the standard of proof for every guard? [Measurability, Spec §Success Criteria SC-025]
-- [ ] CHK105 Is benchmark methodology specified so quality and token usage are reported together, with a single-metric result explicitly insufficient? [Consistency, Spec §Observability FR-076, FR-077]
-- [ ] CHK106 Is benchmark reproducibility specified (isolation, learning disabled, rates rather than single booleans)? [Measurability, Spec §Success Criteria SC-026]
+    - NEEDS CLARIFICATION: SC-011 pairs cost with a quality condition (satisfied), but "materially fewer total tokens" has no numeric target. SC-036 says the target "is then set from that data and recorded in this specification"; the baseline was published 2026-09-14 (T015), yet no threshold is recorded, so SC-011 is not measurable as written. The later paired run (bench/results/paired-baseline-2026-09-20) shows the current strategy using more total tokens than the naive one, so a threshold cannot be derived mechanically; the decision is owner-held under T156.
+- [x] CHK101 Are learning acceptance criteria measurable, including criteria for what must *not* be learned? [Measurability, Spec §Success Criteria SC-016 to SC-021]
+- [x] CHK102 Are regression criteria measurable and tied to the exact commit under review rather than to an earlier one? [Measurability, Spec §Success Criteria SC-022]
+- [x] CHK103 Is determinism specified as an acceptance property, including the prohibition on sleep- or timing-based correctness? [Measurability, Spec §Success Criteria SC-025]
+- [x] CHK104 Is mutation-checking specified as the standard of proof for every guard? [Measurability, Spec §Success Criteria SC-025]
+- [x] CHK105 Is benchmark methodology specified so quality and token usage are reported together, with a single-metric result explicitly insufficient? [Consistency, Spec §Observability FR-076, FR-077]
+- [x] CHK106 Is benchmark reproducibility specified (isolation, learning disabled, rates rather than single booleans)? [Measurability, Spec §Success Criteria SC-026]
 - [ ] CHK107 Do measurable outcomes avoid naming implementation technologies, so they remain verifiable without knowing the design? [Clarity, Spec §Success Criteria]
-- [ ] CHK108 Are observability requirements defined with an enumerated metric set and a privacy constraint? [Completeness, Spec §Observability FR-072 to FR-075]
+    - Reviewer finding: SC-036 embeds implementation detail — the path `bench/results/paired-baseline-2026-09-14.json`, commit `5b611e4`, and the command `python -m bench --paired --provider <provider> --model <model> --tries 3`. That published-evidence record belongs with plan/tasks evidence, leaving the success criterion verifiable without knowing the design.
+- [x] CHK108 Are observability requirements defined with an enumerated metric set and a privacy constraint? [Completeness, Spec §Observability FR-072 to FR-075]
 
 ## Scope, Dependencies & Exclusions
 
-- [ ] CHK109 Is open PR #39 explicitly identified as pending external work? [Completeness, Spec §Dependencies and Integration Notes]
-- [ ] CHK110 Is it explicitly stated that the feature does not depend on unmerged PR #39 code? [Clarity, Spec §Scope exclusions FR-083]
-- [ ] CHK111 Is the overlap assessment with PR #39 stated as a finding with evidence, rather than as an assumption? [Traceability, Spec §Dependencies and Integration Notes]
-- [ ] CHK112 Is trading functionality explicitly excluded from scope? [Clarity, Spec §Scope exclusions FR-083]
-- [ ] CHK113 Are release publication, tag creation and deployment each explicitly excluded? [Completeness, Spec §Scope exclusions FR-084]
-- [ ] CHK114 Is it specified that no pending pull request may be merged, closed, rebased or incorporated? [Coverage, Spec §Scope exclusions FR-085]
-- [ ] CHK115 Are unrelated refactors, cleanup, formatting churn and dependency bumps explicitly excluded, with the rule for a genuinely unavoidable coupling stated? [Gap-probe — failed on first review 2026-09-14, closed by FR-128, Spec §Scope exclusions FR-128]
-- [ ] CHK116 Are all assumptions documented in one place and marked as assumptions rather than embedded in requirements? [Traceability, Spec §Assumptions]
+- [x] CHK109 Is open PR #39 explicitly identified as pending external work? [Completeness, Spec §Dependencies and Integration Notes]
+- [x] CHK110 Is it explicitly stated that the feature does not depend on unmerged PR #39 code? [Clarity, Spec §Scope exclusions FR-083]
+- [x] CHK111 Is the overlap assessment with PR #39 stated as a finding with evidence, rather than as an assumption? [Traceability, Spec §Dependencies and Integration Notes]
+- [x] CHK112 Is trading functionality explicitly excluded from scope? [Clarity, Spec §Scope exclusions FR-083]
+- [x] CHK113 Are release publication, tag creation and deployment each explicitly excluded? [Completeness, Spec §Scope exclusions FR-084]
+- [x] CHK114 Is it specified that no pending pull request may be merged, closed, rebased or incorporated? [Coverage, Spec §Scope exclusions FR-085]
+- [x] CHK115 Are unrelated refactors, cleanup, formatting churn and dependency bumps explicitly excluded, with the rule for a genuinely unavoidable coupling stated? [Gap-probe — failed on first review 2026-09-14, closed by FR-128, Spec §Scope exclusions FR-128]
+- [x] CHK116 Are all assumptions documented in one place and marked as assumptions rather than embedded in requirements? [Traceability, Spec §Assumptions]
 - [ ] CHK117 Is the single intended user-visible behaviour change identified explicitly and bounded to one change? [Clarity, Spec §Compatibility FR-082]
+    - Reviewer finding: FR-082 names "the one intended user-visible behaviour change" and then bounds it as "the only behavioural regression-by-design"; the two scopes differ, and other intended user-visible changes exist — FR-125 corrects a contradicted completion claim before delivery at the cost of an extra turn, FR-124/FR-037 annotate answers with named unresolved work, FR-129 suppresses a re-raise. FR-082 needs to be bounded to one precisely named class (e.g. the only backward-incompatible change) rather than to every user-visible change.
 
 ## Ambiguities, Conflicts & Traceability
 
-- [ ] CHK118 Does the spec contain no unresolved clarification markers? [Completeness, Spec §Clarifications — Resolved]
+- [x] CHK118 Does the spec contain no unresolved clarification markers? [Completeness, Spec §Clarifications — Resolved]
 - [ ] CHK119 Are all three resolved clarifications recorded with their decision and the requirements they bind? [Traceability, Spec §Clarifications — Resolved]
-- [ ] CHK120 Is a requirement identifier scheme established, with every identifier unique and every cross-reference resolving to a defined item? [Traceability, Spec §Requirements]
+    - Reviewer finding: Q1, Q2 and Q3 each record a decision and the requirements they bind. But the section opens "Three decisions … All three were put to the user" while it now records nine Q&As across three sessions, and the six Q&As under "Session 2026-09-14 (remediation)" and "(outcome encoding)" do not cite the requirements they bind (FR-018, FR-019, FR-022, FR-035, FR-080, FR-123, FR-129, FR-130).
+- [x] CHK120 Is a requirement identifier scheme established, with every identifier unique and every cross-reference resolving to a defined item? [Traceability, Spec §Requirements]
 - [ ] CHK121 Are there no conflicts between Constitution XV's prohibition on "proceeding and documenting the assumption afterwards" and every non-answer path (cancelled, declined, expired, unattended)? [Conflict-check — failed on first review 2026-09-14 as C1, closed by FR-018/FR-019/FR-022/FR-035/FR-129/FR-130, Spec §The clarification interaction vs §Non-interactive surfaces]
-- [ ] CHK128 Is it specified that cancellation, decline and expiry are lifecycle outcomes that do not resolve the decision, with only a real answer resuming dependent work? [Clarity, Spec §The clarification interaction FR-018, FR-022]
-- [ ] CHK129 Is the agent-assumption path specified as reachable only from a non-material decision, and unreachable from any decision that passed the materiality test? [Consistency, Spec §Epistemic state FR-003, §When to ask FR-130]
-- [ ] CHK130 Is it specified that a cancelled mandatory question is not re-raised within the same decision attempt, and that a later user request may resume it? [Completeness, Spec §The clarification interaction FR-129]
+    - Reviewer finding: the named requirements (FR-018, FR-019, FR-022, FR-035, FR-129, FR-130) do reconcile every non-answer path with Constitution XV, but User Story 1 acceptance scenario 1 still reads "no file is written until the form is answered, dismissed, or cancelled" — making dismissal or cancellation the end of the write-wait, which contradicts FR-018 ("Only a valid answer may resume that dependent work") and FR-019. The conflict is not fully closed in spec.md.
+- [x] CHK128 Is it specified that cancellation, decline and expiry are lifecycle outcomes that do not resolve the decision, with only a real answer resuming dependent work? [Clarity, Spec §The clarification interaction FR-018, FR-022]
+- [x] CHK129 Is the agent-assumption path specified as reachable only from a non-material decision, and unreachable from any decision that passed the materiality test? [Consistency, Spec §Epistemic state FR-003, §When to ask FR-130]
+- [x] CHK130 Is it specified that a cancelled mandatory question is not re-raised within the same decision attempt, and that a later user request may resume it? [Completeness, Spec §The clarification interaction FR-129]
 - [ ] CHK122 Are there no conflicts between the completion gate's annotate-by-default rule and the prohibition on claiming completion while work is unresolved? [Conflict-check, Spec §Completion gate FR-036 vs FR-124]
+    - Reviewer finding: FR-124 to FR-126 reconcile annotate-by-default with FR-036 only for an answer that "explicitly claims" completion, and "explicitly claims" is undefined. Two cases are unresolved: (a) the single correction turn FR-127 allows still yields a completion claim; (b) the gate "cannot reach a verdict" on an answer that claims completion. In both, FR-127's annotate fallback delivers a completion claim that FR-036 says MUST NOT be reported while an element is unresolved; spec.md does not say whether the fallback annotation must at least mark the completion claim as unconfirmed.
 - [ ] CHK123 Are there no conflicts between token reduction requirements and evidence-retention requirements? [Conflict-check, Spec §Token efficiency FR-044 vs FR-090]
+    - Reviewer finding: FR-044 forbids reducing tokens by truncating critical evidence, but FR-099 requires "near-duplicate material MUST be carried once". Near-duplicates differ by definition, and the difference can be the evidence (e.g. two test runs differing in one failing case, FR-090). spec.md does not require the difference to be preserved or kept retrievable when near-duplicates are collapsed, so the two requirements conflict as written.
 - [ ] CHK124 Is every term that could be read two ways — "material", "relevant", "proportionate", "trustworthy" — either defined or tied to an enumerated list? [Ambiguity, Spec §When to ask FR-007; §Completion gate FR-042]
-- [ ] CHK125 Are the claims in the brownfield context section (existing mechanisms, current no-answer behaviour, mode capability) presented as evidence-backed findings rather than assertions? [Traceability, Spec §Context: Brownfield]
-- [ ] CHK126 Does every user story carry independently testable acceptance scenarios in Given/When/Then form? [Completeness, Spec §User Scenarios & Testing]
+    - NEEDS CLARIFICATION: "relevant"/"relevance" (FR-051, FR-087, FR-097, FR-110), "proportionate" (FR-042) and "trustworthy" (FR-008, User Story 1 scenario 1) are undefined and tied to no enumerated list — "trustworthy stored knowledge" could be tied to the FR-056 admissible classes but is not; "material" has a closed class list in FR-007 but an undefined magnitude ("materially", see CHK013). Owner input is needed for the relevance criterion and the proportionality rule.
+- [x] CHK125 Are the claims in the brownfield context section (existing mechanisms, current no-answer behaviour, mode capability) presented as evidence-backed findings rather than assertions? [Traceability, Spec §Context: Brownfield]
+- [x] CHK126 Does every user story carry independently testable acceptance scenarios in Given/When/Then form? [Completeness, Spec §User Scenarios & Testing]
 - [ ] CHK127 Are edge cases grouped and complete for each major area (clarification lifecycle, token efficiency, learning, failure)? [Coverage, Spec §Edge Cases]
+    - Reviewer finding: edge cases are grouped for all four areas, but the clarification-lifecycle group is incomplete: it has no entry for unattended / no-listener execution (present only in User Story 1 and FR-033), and none for late discovery — a material unknown surfacing after the turn already changed files — whose semantics (earlier changes kept and disclosed, not rolled back, no claim that the workspace is unchanged) exist only in contracts §C6 and tasks T040. FR-013 covers only the before-mutation case.
 
 ## Notes
 
