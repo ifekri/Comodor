@@ -48,6 +48,9 @@ COST_CEILING = 1.00
 #: last installed, which is the one thing it must never do.
 SOURCE = Path(__file__).resolve().parent.parent / "src"
 
+#: How much of a killed child's partial output a timeout diagnostic keeps.
+TIMEOUT_DIAGNOSTIC_CHARS = 800
+
 
 @dataclass
 class Outcome:
@@ -304,6 +307,14 @@ def _verify_paired_checkpoint(header: dict, provider: str, model: str, tries: in
 
 def _paired_attempt_record(key: tuple[str, int, str], attempt: Attempt,
                            verdict: Verdict) -> dict:
+    """One paired cell's full, sanitized evidence, for auditing after the run.
+
+    Everything needed to audit the cell once its temporary workspace is gone:
+    the answer, the tools, the clarification, the measurement and the preflight
+    trace, plus the token counts. The structures are the agent's own
+    already-sanitized output — no prompt body, no file content, no secret is
+    added here.
+    """
     task, attempt_index, strategy = key
     return {
         "kind": "paired-attempt",
@@ -315,16 +326,20 @@ def _paired_attempt_record(key: tuple[str, int, str], attempt: Attempt,
         "attempt": {
             "ok": attempt.ok,
             "stopped": attempt.stopped,
+            "text": attempt.text,
             "steps": attempt.steps,
+            "tools": list(attempt.tools),
+            "tool_calls": attempt.tool_calls,
             "elapsed": attempt.elapsed,
+            "error": attempt.error,
+            "clarification": attempt.clarification,
+            "measurement": attempt.measurement,
+            "preflight_traces": list(attempt.preflight_traces),
             "input_tokens": attempt.input_tokens,
             "output_tokens": attempt.output_tokens,
             "cached_tokens": attempt.cached_tokens,
             "written_tokens": attempt.written_tokens,
             "cost_usd": attempt.cost_usd,
-            "tool_calls": attempt.tool_calls,
-            "error": attempt.error,
-            "measurement": attempt.measurement,
         },
     }
 
@@ -356,14 +371,18 @@ def _read_paired_checkpoint(path: Path) -> tuple[
         values = record["attempt"]
         attempt = Attempt(
             workspace=Path("."), ok=bool(values["ok"]), stopped=str(values["stopped"]),
-            text="", steps=int(values["steps"]), cost_usd=float(values["cost_usd"]),
+            text=str(values.get("text", "")), steps=int(values["steps"]),
+            tools=[str(name) for name in values.get("tools", [])],
+            cost_usd=float(values["cost_usd"]),
             elapsed=float(values["elapsed"]), error=str(values.get("error", "")),
             input_tokens=int(values["input_tokens"]),
             output_tokens=int(values["output_tokens"]),
             cached_tokens=int(values["cached_tokens"]),
             written_tokens=int(values.get("written_tokens", 0)),
             tool_calls=int(values.get("tool_calls", 0)),
+            clarification=dict(values.get("clarification") or {}),
             measurement=dict(values.get("measurement") or {}),
+            preflight_traces=list(values.get("preflight_traces") or []),
         )
         verdict = Verdict.ok() if record["passed"] else Verdict.no(str(record.get("reason", "")))
         saved[(str(record["task"]), int(record["attempt_index"]),
@@ -583,6 +602,39 @@ def _settings(home: Path, task: Task, strategy: str = baseline.CURRENT,
         json.dumps(settings, indent=2), encoding="utf-8")
 
 
+def _bounded_output(value: Any) -> str:
+    """A bounded, single-line excerpt of a child's partial output, or ""."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    text = " ".join(str(value).split())
+    if not text:
+        return ""
+    if len(text) <= TIMEOUT_DIAGNOSTIC_CHARS:
+        return text
+    return text[: TIMEOUT_DIAGNOSTIC_CHARS - 1] + "…"
+
+
+def _timeout_diagnostic(timeout: float,
+                        expired: subprocess.TimeoutExpired) -> str:
+    """An explicit, bounded note about a child killed at the deadline.
+
+    A bare `TimeoutExpired` is not evidence of a provider failure. The parent
+    killed the child and no final JSON was captured; any partial stdout/stderr
+    is kept, and the absence of output is stated as absence — never as proof
+    that the model did nothing.
+    """
+    note = f"hard timeout after {timeout:.0f}s; no final JSON captured"
+    stdout = _bounded_output(getattr(expired, "stdout", None))
+    stderr = _bounded_output(getattr(expired, "stderr", None))
+    if stdout:
+        note += f"; partial stdout: {stdout}"
+    if stderr:
+        note += f"; partial stderr: {stderr}"
+    return note
+
+
 def _invoke(task: Task, workspace: Path, home: Path,
             provider: str, model: str, prompt: str = "",
             interaction: tuple[Any, ...] = ()) -> Attempt:
@@ -626,10 +678,14 @@ def _invoke(task: Task, workspace: Path, home: Path,
             command, cwd=workspace, env=environment, capture_output=True,
             text=True, encoding="utf-8", errors="replace", timeout=task.timeout,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as expired:
+        # A hard timeout, not a provider verdict: the child was killed at the
+        # deadline and produced no final JSON. Keep whatever partial output
+        # arrived, and say plainly that nothing was captured — absence of
+        # output is not evidence that the model made no progress.
         return Attempt(workspace=workspace, ok=False, stopped="timeout", text="",
                        steps=0, elapsed=time.monotonic() - started,
-                       error=f"no answer within {task.timeout:.0f}s")
+                       error=_timeout_diagnostic(task.timeout, expired))
 
     elapsed = time.monotonic() - started
     report = _parse(finished.stdout)
