@@ -578,56 +578,15 @@ def test_every_hosted_provider_is_listed_in_the_models_page():
     assert not missing, f"not documented: {missing}"
 
 
-def test_bai_is_reachable_and_makes_tool_calls():
-    """Live, against the real endpoint, because the only thing that matters
-    about a new provider is whether it can drive tools — a provider that
-    cannot is unusable for coding, and finding that out on the sixth turn of a
-    real task is the failure this prevents.
-
-    Skipped without a key, so the suite stays offline for everyone else.
-    """
-    import json
-    import os
-    import urllib.request
-    from pathlib import Path
-
-    env = Path(__file__).resolve().parents[1] / "src" / ".env"
-    key = os.environ.get("BAI_API_KEY", "")
-    if not key and env.is_file():
-        for line in env.read_text(encoding="utf-8").splitlines():
-            if line.startswith("BAI_API_KEY="):
-                key = line.partition("=")[2].strip()
-    if not key:
-        pytest.skip("no BAI_API_KEY")
-
+def test_bai_is_no_longer_a_provider():
+    """The B.AI provider was removed from Comodor. Its live paid network test
+    went with it: provider-specific paid checks do not belong in the suite, and
+    generic OpenAI-compatible tool calling is covered deterministically against
+    the adapter. This pins the removal."""
     from comodor import catalogue
 
-    spec = catalogue.get("bai")
-    request = urllib.request.Request(
-        f"{spec.base_url}/chat/completions",
-        data=json.dumps({
-            "model": spec.default_model,
-            "messages": [{"role": "user", "content": "Weather in Tehran? Use the tool."}],
-            "tools": [{"type": "function", "function": {
-                "name": "get_weather",
-                "description": "Weather for a city.",
-                "parameters": {"type": "object",
-                               "properties": {"city": {"type": "string"}},
-                               "required": ["city"]}}}],
-            "max_tokens": 300,
-        }).encode(),
-        headers={"Authorization": f"Bearer {key}",
-                 "Content-Type": "application/json"})
-
-    try:
-        with urllib.request.urlopen(request, timeout=90) as reply:
-            body = json.loads(reply.read().decode())
-    except Exception as problem:                       # rate limit, or offline
-        pytest.skip(f"B.AI unreachable: {type(problem).__name__}")
-
-    choice = body["choices"][0]
-    assert choice.get("finish_reason") == "tool_calls"
-    assert choice["message"].get("tool_calls"), "no tool call came back"
+    assert catalogue.get("bai") is None
+    assert "BAI_API_KEY" not in {spec.env_key for spec in catalogue.CATALOGUE}
 
 
 # --------------------------------------------------------------------------- #

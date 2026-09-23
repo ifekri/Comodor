@@ -72,13 +72,14 @@ class OpenAICompatProvider:
     # -- wire helpers ----------------------------------------------------- #
 
     def _default_headers(self) -> dict[str, str]:
+        from . import models as discovery
+
         headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        if self.name == "openrouter":
-            # OpenRouter attributes traffic with these; harmless elsewhere.
-            headers["HTTP-Referer"] = "https://github.com/ifekri/comodor"
-            headers["X-Title"] = "Comodor"
+        # The provider's own application headers, from the one place both the
+        # generation path and model discovery read them.
+        headers.update(discovery.app_headers(self.name))
         headers.update(self.extra_headers)
         return headers
 
@@ -306,20 +307,22 @@ class OpenAICompatProvider:
     # -- misc ------------------------------------------------------------- #
 
     def list_models(self) -> list[str]:
-        try:
-            response = self._session.get(f"{self.base_url}/models", timeout=(5.0, 20.0))
-            self._raise_for_status(response)
-            payload = response.json()
-        except (http.RequestError, ProviderError, ValueError):
-            return []
-        entries = payload.get("data", payload) if isinstance(payload, dict) else payload
-        models: list[str] = []
-        for entry in entries or []:
-            if isinstance(entry, dict) and entry.get("id"):
-                models.append(str(entry["id"]))
-            elif isinstance(entry, str):
-                models.append(entry)
-        return sorted(models)
+        """The provider's own catalogue, through the one discovery path.
+
+        Delegates to `providers.models.listing` so the adapter, the model
+        picker, the setup wizard and the doctor all read availability the same
+        way: live first, from the provider, and never from a hand-written list.
+        The configured extra headers travel with the request — an endpoint that
+        needs a tenant or routing header would otherwise list nothing while
+        generation still worked — and the agent-facing set is returned, so a
+        model the provider marks as non-agent is not offered to the agent.
+        """
+        from . import models as discovery
+
+        found = discovery.listing(self.name, api_key=self.api_key,
+                                  base_url=self.base_url,
+                                  headers=self.extra_headers)
+        return [model.id for model in found.agent_models]
 
     def close(self) -> None:
         self._session.close()
