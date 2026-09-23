@@ -88,8 +88,10 @@ returned instead of an invented value. Delivers value with nothing else built.
 1. **Given** a request whose required behaviour cannot be determined from the
    request, the repository, the project configuration, or trustworthy learned
    knowledge, **When** the agent begins work, **Then** it presents a
-   multiple-choice form before performing any mutating action, and no file is
-   written until the form is answered, dismissed, or cancelled.
+   multiple-choice form before performing any mutating action that depends on
+   the decision, and no such dependent mutation runs unless a valid answer is
+   received. If the form is dismissed, cancelled or expires, the decision stays
+   unresolved and the dependent mutation does not run (FR-018, FR-019).
 2. **Given** a question form is on screen, **When** the developer selects the
    final row and types free text, **Then** that text is carried back to the
    agent as the answer for that question and visibly shapes the resulting work.
@@ -330,6 +332,17 @@ the baseline every later comparison uses.
   Expiry is not an answer either — the decision stays unresolved on the same
   terms as cancellation, and no client is left showing a card for a request that
   is no longer live.
+- A mandatory clarification arises where nobody is present to answer (a
+  scheduled run, a channel, a piped command, an API caller with no listener):
+  no form is waited out and no answer is supplied. The run ends in the
+  clarification-required outcome with lifecycle outcome `unattended`, naming the
+  open decision by its decision reference, and no dependent work runs
+  (FR-033, FR-034, FR-121).
+- A material unknown becomes known only after the turn has already changed
+  files (late discovery): from that moment no further mutation that may depend
+  on it runs; the earlier changes are neither denied nor silently rolled back;
+  they are disclosed in the clarification-required outcome as prior changes;
+  and nothing reports or implies that the workspace is unchanged (FR-013).
 - The client disconnects and reconnects mid-form: the outstanding form is
   restored from the session snapshot's pending interaction so the developer sees
   it again rather than losing it.
@@ -405,15 +418,117 @@ authoritative; that table records which product surfaces they affect. The Web
 UI (`src/comodor/web/`) is a live question surface and is classified REQUIRED
 there; the desktop application is planned, not built, and is NOT APPLICABLE.
 
+**Operational definitions.** The terms below are normative. Every use of the
+term in this specification carries the meaning given here.
+
+- **High-quality output**: output in which every consequential claim, change
+  and completion statement is supported by, and consistent with, the evidence
+  classes quality is judged against: (1) the user's actual request and stated
+  constraints; (2) repository evidence observed through a tool; (3) project
+  conventions and configuration; (4) the applicable specification and
+  contracts; (5) observable runtime behaviour; (6) tests and checks actually run
+  in the session or whose results were supplied; (7) recorded validation
+  evidence. Output is not high-quality merely because it compiles, because tests
+  pass, or because it is stated confidently. Quality is observed through the
+  success criteria: zero fabricated values and unmarked pass-claims
+  (SC-001 to SC-004), clarification correctness (SC-005 to SC-010,
+  SC-037 to SC-044) and benchmark outcome rates (SC-011, SC-012).
+- **Material / materially** (FR-007): a decision is material only when there
+  are at least two plausible, grounded resolutions and choosing one instead of
+  another can produce a different observable or contractual outcome in at least
+  one FR-007 class. "Can materially change" means exactly that. A difference is
+  **non-material** when every grounded alternative satisfies the same explicit
+  user intent, compatibility contract and acceptance criteria, and differs only
+  in internal implementation detail. Normally non-material, when no other
+  requirement makes them material: private helper structure, local variable
+  naming, equivalent internal decomposition, an equivalent implementation
+  mechanism, and formatting or internal organisation that does not alter an
+  interface. The class "the requested behaviour" does not make every
+  implementation choice material; it applies only when the user-visible or
+  requested result differs. Where the system cannot determine whether competing
+  readings are materially equivalent, FR-130 applies: the decision is material
+  and is clarified.
+- **Implementation discretion** (FR-012): exists when **all** grounded
+  alternatives satisfy the explicit request, satisfy repository and
+  specification constraints, preserve compatibility, preserve security and
+  persistence semantics, meet the same acceptance criteria, and do not cross the
+  materiality threshold above. The agent may choose among them without asking.
+- **Missing product intent** (FR-012): exists when two or more grounded
+  interpretations remain, the repository, configuration and trustworthy stored
+  knowledge do not settle them, and choosing between them changes a material
+  outcome. It is a mandatory clarification. Where the classification itself is
+  ambiguous, material wins and the clarification is raised (FR-130).
+- **Relevant / relevance**: information or evidence is relevant when it can
+  change, support, refute or validate an active requirement, decision,
+  completion claim, or affected-surface judgement for the current task.
+  Information that only repeats an already-settled fact and cannot affect the
+  current decision is not relevant merely because it is topically similar.
+- **Affected surface**: any behaviour, contract or canonical product surface
+  whose code, configuration or data the turn changed.
+- **Proportionate validation** (FR-042): the smallest set of checks that
+  directly exercises the changed behaviour, the affected contracts and
+  surfaces, and the repository-mandated quality gates applicable to the change.
+  A repository-wide gate that project policy requires — including the project's
+  own configured check of FR-038 — remains in scope even when its individual
+  tests are broader than the changed file. An optional suite with no coverage of
+  the change, of an affected surface, or of a mandatory repository gate is
+  **unrelated**, and is not run merely for volume.
+- **Trustworthy stored knowledge** (FR-008): a stored item is trustworthy for a
+  decision only when it was admitted from a source FR-056 allows, is active, is
+  correctly scoped to the current user or project, is neither stale nor
+  superseded, is not contradicted by current repository or tool evidence, and is
+  attributable to its provenance. Similarity or age alone does not make stored
+  knowledge trustworthy.
+- **Explicit completion claim** (FR-125): a statement in the answer that
+  asserts, without qualification, that the requested task — or a named requested
+  element — is done, complete, fixed, implemented or working. Hedged, negated,
+  conditional and instructional sentences are not completion claims.
+- **Information origin** (FR-001) and **evidence lifecycle state** are two
+  separate axes and MUST NOT be conflated. The *origin* says how an item became
+  known and is exactly one of FR-001's five categories: stated by the user;
+  verified from the repository or a tool; established project or user
+  knowledge; deterministically derived; unknown. The *lifecycle state* says
+  where an item or decision stands during the turn: `KNOWN`, `VERIFIED`,
+  `DERIVED`, `UNKNOWN`, `REQUIRES_CLARIFICATION`, `UNRESOLVED`, `BLOCKED`,
+  `VALIDATED` or `FAILED`. An item has one origin and, at any moment, one
+  lifecycle state. The two sets are not counted together, and one lifecycle
+  state may be reached from more than one origin (for example, `KNOWN` from a
+  user statement or from established knowledge). Lifecycle state names are never
+  used as origin values.
+- **VERIFIED** (lifecycle state): directly observed or established from
+  evidence — a tool result, a file read, or source inspected in the session.
+- **VALIDATED** (lifecycle state): checked against the delivered work or the
+  relevant acceptance or check mechanism by the completion gate. Observing a
+  fact (`VERIFIED`) never by itself makes the delivered work `VALIDATED`, and the
+  two states are never collapsed.
+- **Decision reference** (`decision_ref`): the stable identifier of one open
+  material decision. It identifies the decision itself across every
+  clarification lifecycle instance raised for it. A form or question request has
+  its own lifecycle identifier (FR-020), which is not a substitute for the
+  decision reference.
+
 ### Epistemic state and grounding
 
 - **FR-001**: The system MUST classify every item of information it relies on for
   a consequential decision as exactly one of: stated by the user; verified from
   the repository or a tool; established project or user knowledge; deterministically
-  derived from one of the preceding; or unknown.
+  derived from one of the preceding; or unknown. These five are
+  *information-origin* categories. They are not evidence lifecycle states
+  (see Operational definitions), and an item's origin is recorded separately
+  from its lifecycle state.
 - **FR-002**: The system MUST NOT convert an unknown into an assumed value in
   order to continue. An unknown is either resolved by evidence, resolved by
-  asking, or reported as unresolved.
+  asking, or reported as unresolved. The rule is mechanical: an item may be
+  recorded as deterministically derived only when every premise it rests on is
+  itself stated by the user, verified, established knowledge or deterministically
+  derived — **a derivation that rests on an unknown is refused**, so an unknown
+  can become usable only by being observed, stated, answered or validly derived,
+  never by being needed. The non-material discretion of FR-003, FR-011 and
+  FR-130 is not an exception to this rule and not a fourth way out of it: it does
+  not turn an unknown premise into a fact. The unknown stays unknown, and what
+  the agent records is its own choice between alternatives that the materiality
+  test found equivalent, labelled as an assumption. That choice is never
+  available for a material decision.
 - **FR-003**: When the system proceeds on an assumption it chose itself, it MUST
   state that assumption in its answer, identifiably as an assumption rather than
   as a finding. **This applies only to decisions that do not pass the materiality
@@ -438,10 +553,15 @@ there; the desktop application is planned, not built, and is NOT APPLICABLE.
   uncertainty can materially change any of: the requested behaviour;
   architecture; data loss; security; compatibility; an API or protocol contract;
   user-visible interface behaviour; a destructive operation; a release action; an
-  external side effect; or persisted state.
+  external side effect; or persisted state. "Can materially change" has the
+  operational meaning given under **Material** in Operational definitions: at
+  least two plausible, grounded resolutions whose choice changes the delivered
+  behaviour or one of these eleven effects. "The requested behaviour" counts
+  only when the user-visible or requested result differs, never merely because
+  an internal implementation choice differs.
 - **FR-008**: Clarification MUST NOT be raised for a decision that is settled by
   the request itself, by the repository, by project configuration, or by
-  trustworthy stored knowledge.
+  trustworthy stored knowledge (as defined in Operational definitions).
 - **FR-009**: In a mode permitted to use inspection tools, the system MUST
   inspect the available evidence before raising a clarification, and the
   question MUST concern what that inspection could not settle.
@@ -453,14 +573,22 @@ there; the desktop application is planned, not built, and is NOT APPLICABLE.
   where an obvious default exists the system MUST take it and say that it did.
 - **FR-012**: The system MUST distinguish implementation freedom it may exercise
   alone from missing product intent it must ask about, and MUST NOT ask about the
-  former.
+  former. The two are defined in Operational definitions as **Implementation
+  discretion** and **Missing product intent**; a decision that fits neither
+  definition cleanly is treated as missing product intent (FR-130).
 - **FR-130**: FR-003, FR-011 and FR-012 govern agent discretion over
   **non-material** implementation details only. None of them may be invoked to
   settle, downgrade or bypass a decision that passes the materiality test of
   FR-007. Where the two readings compete, the decision is treated as material and
   the clarification is raised.
 - **FR-013**: Where clarification is mandatory, the system MUST raise it before
-  performing any mutating action that depends on the unresolved decision.
+  performing any mutating action that depends on the unresolved decision. Where
+  the material unknown becomes known only after the turn has already changed
+  files (late discovery), the rule applies from that moment on: no further
+  mutation that may depend on the decision runs; mutations completed before it
+  became known are neither denied nor silently rolled back; they are disclosed as
+  prior changes in the clarification-required outcome; and nothing reports or
+  implies that the workspace is unchanged.
 
 ### The clarification interaction
 
@@ -482,7 +610,16 @@ there; the desktop application is planned, not built, and is NOT APPLICABLE.
   information, so the dependent path MUST remain unresolved or terminate — it
   MUST NOT continue. Work MAY continue only where it is demonstrably independent
   of the open decision; where dependency is uncertain, the work is treated as
-  dependent.
+  dependent. Independent work is **permitted, not mandatory**: an outstanding
+  clarification MUST NOT by itself prohibit work that is demonstrably
+  independent of the unresolved decision, but the system is not required to
+  start unrelated work merely to remain active, and an unanswered clarification
+  is never bypassed because independent work happened. "Independent work is not
+  blocked" means it is eligible to proceed, not that it must be executed. On a
+  non-interactive surface the run MAY finish already identified, bounded
+  independent work before returning the clarification-required outcome
+  (FR-123), and MUST NOT begin speculative unrelated work merely to delay that
+  stop.
 - **FR-019**: The system MUST NOT answer a question on the user's behalf. A
   required clarification that is unanswered, declined, cancelled, expired or
   unattended MUST NOT be converted into a default, an option selection, an
@@ -491,7 +628,15 @@ there; the desktop application is planned, not built, and is NOT APPLICABLE.
   the missing information itself.
 - **FR-020**: Each form and each question within it MUST carry a stable
   identifier, and answers MUST be matched to questions by that identifier rather
-  than by position.
+  than by position. That identifier belongs to one clarification lifecycle
+  instance. Every material decision additionally carries a stable decision
+  reference (`decision_ref`, Operational definitions) that survives across
+  lifecycle instances. Wherever the clarification capability is negotiated
+  (FR-080), each question raised for a material decision MUST carry its
+  `decision_ref`, its reason (the FR-007 materiality class that made it
+  mandatory) and the evidence already consulted (FR-009), so the user is never
+  asked to repeat inspection the agent already did. A client that does not
+  negotiate the capability receives the question unchanged.
 - **FR-021**: A form MUST be able to express both single-choice and
   multiple-choice questions, and the answer MUST record which options were chosen
   and any free text written.
@@ -504,7 +649,19 @@ there; the desktop application is planned, not built, and is NOT APPLICABLE.
 - **FR-129**: A mandatory clarification the user explicitly cancelled MUST NOT be
   re-raised during the same decision attempt. The agent MUST report the
   unresolved decision instead. A later explicit request from the user MAY resume
-  or answer it.
+  or answer it. A later answer resumes a decision **only** by being explicitly
+  associated with that decision's `decision_ref`. It MUST NOT be matched to an
+  unresolved decision by list position, by "most recent question", by textual
+  similarity, by taking the first unresolved decision, or by any other heuristic
+  inference. When the original form has expired or been cancelled, its lifecycle
+  identifier is stale, but the decision stays unresolved under its
+  `decision_ref`. A later explicit answer associated with that `decision_ref`
+  resolves it and permits dependent work to resume. Where an interactive pending
+  form still exists, the existing answer path makes this association itself,
+  because it already knows the `decision_ref`. On headless, API and other
+  subsequent-invocation surfaces, the structured resumption input MUST carry the
+  `decision_ref` explicitly. No second clarification mechanism is introduced for
+  this.
 - **FR-023**: An outstanding form MUST survive client disconnection and be
   restored to a reconnecting client from the session's pending-interaction state.
 - **FR-024**: An answer to a form that has expired, been cancelled, or already
@@ -526,7 +683,9 @@ there; the desktop application is planned, not built, and is NOT APPLICABLE.
 - **FR-031**: The terminal form MUST be fully operable from the keyboard —
   moving between questions and options, choosing, toggling in multiple-choice,
   entering custom text, sending, and closing — and MUST indicate which questions
-  remain unanswered without requiring the user to visit each.
+  remain unanswered without requiring the user to visit each. Keyboard behaviour
+  MUST be deterministic: the same key sequence applied to the same form state
+  yields the same result, with no dependence on timing, delays or sleeps.
 - **FR-032**: The clarification mechanism MUST remain available in every mode
   that permits questions, including conversation-only modes.
 
@@ -537,7 +696,14 @@ there; the desktop application is planned, not built, and is NOT APPLICABLE.
   rather than selecting an answer.
 - **FR-034**: That outcome MUST identify the decision, the candidate answers, and
   what evidence was already consulted, sufficiently for the caller to answer it
-  in a subsequent invocation.
+  in a subsequent invocation. "Sufficiently" means that the structured outcome
+  carries, at minimum, for every open decision: its `decision_ref`; the
+  decision, stated so it can be answered without re-reading the request; the
+  candidate answers (possibly empty, never invented); the evidence consulted;
+  the reason (the FR-007 materiality class); and the clarification lifecycle
+  outcome (FR-035). Where earlier mutations occurred, it also carries the prior
+  changes (FR-013). A caller answers in a later invocation by supplying an
+  answer explicitly associated with a `decision_ref` (FR-129).
 - **FR-035**: The system MUST distinguish the **three** ways a mandatory
   clarification can end without an answer. The distinction is in the **reported
   lifecycle outcome only** — it is never a difference in permission to guess.
@@ -589,7 +755,10 @@ there; the desktop application is planned, not built, and is NOT APPLICABLE.
   structured `clarification` block) rather than by inventing a value in the
   foreign enum; on the OpenAI-compatible envelope that means
   `finish_reason = "stop"` plus `comodor.stopped` and `comodor.clarification`
-  (contracts §C4).
+  (contracts §C4). Ending the run this way is consistent with FR-018: the run
+  MAY first finish already identified, bounded work that is demonstrably
+  independent of the open decision. It MUST NOT start speculative unrelated work
+  to delay the stop, and it MUST NOT run any work that depends on the decision.
 
 ### Completion gate
 
@@ -608,6 +777,12 @@ there; the desktop application is planned, not built, and is NOT APPLICABLE.
   MUST NOT convert an otherwise successful turn into a failure.
 - **FR-042**: Verification effort MUST be proportionate to what the turn touched;
   the system MUST NOT run validation unrelated to the affected surface.
+  "Proportionate", "affected surface" and "unrelated" have the meanings given in
+  Operational definitions. FR-042 and FR-038 therefore agree: the project's own
+  configured check that FR-038 requires after a file-changing turn is a
+  repository-mandated gate. It is never "unrelated" merely because it is
+  repository-wide. What FR-042 excludes is an optional suite with no coverage of
+  the change, of an affected surface, or of a mandatory gate.
 - **FR-043**: A turn that changed nothing MUST NOT trigger project verification.
 - **FR-124**: The completion gate's default authority is to **annotate**: an
   answer with unresolved work is delivered with that work named beside it, and
@@ -615,13 +790,24 @@ there; the desktop application is planned, not built, and is NOT APPLICABLE.
 - **FR-125**: The gate MUST **block** in exactly one case — the answer
   explicitly claims the task is complete and the gathered evidence contradicts
   that claim. In that case the answer MUST be corrected to state the work as
-  incomplete before it is delivered.
+  incomplete before it is delivered. "Explicitly claims" means an **explicit
+  completion claim** as defined in Operational definitions. An answer that
+  reports the task, or a requested element, as done while that element is
+  unresolved is contradicted by that fact alone.
 - **FR-126**: An honest partial answer — one that does not claim completion —
   MUST NOT be blocked, so the gate targets the false claim rather than
   incompleteness itself.
 - **FR-127**: Blocking MUST cost at most one additional correction turn, and a
   gate that cannot reach a verdict MUST fall back to annotating rather than
-  withholding the answer indefinitely.
+  withholding the answer indefinitely. The fallback never makes an unsupported
+  completion statement acceptable. Where the gate cannot establish support for
+  an explicit completion claim — because it cannot reach a verdict, or because
+  the one correction turn still produced a completion claim — the system MUST
+  NOT deliver that claim as completed. The annotation states that completion is
+  not confirmed and names the outstanding or unverifiable work, so the delivered
+  answer as a whole does not report the task as complete (FR-036). A failed
+  correction turn never licenses a false completion claim. The answer the agent
+  produced is still delivered (FR-124).
 
 ### Token efficiency
 
@@ -707,13 +893,26 @@ blanket rule would either lose evidence in one class or save nothing in another.
   pre-emptively; a reference to material the agent can fetch MUST be preferred
   over the material itself where the decision does not yet require it.
 - **FR-099**: Content already present in the assembled context MUST NOT appear
-  twice; duplicate and near-duplicate material MUST be carried once.
+  twice. **Exact duplicates** MUST be carried once, and may be collapsed only
+  when content identity (the identity of the carried content itself, such as a
+  content fingerprint) proves the two are equivalent. **Near-duplicates** may be
+  collapsed only when their differences are proven irrelevant (Operational
+  definitions) to every active requirement and decision. Where a difference could
+  carry evidence — for example, two test runs that differ in one failing case —
+  both representations remain. Semantic similarity alone is never proof of
+  equivalence. This keeps FR-099 subordinate to FR-044: deduplication never
+  removes evidence.
 - **FR-100**: Where context changes between turns, the change MUST be
   expressible as a delta against what was already established rather than as a
-  full restatement.
+  full restatement. If the base a delta rests on cannot be recovered, or cannot
+  be validated as current, the system MUST fetch or carry a full authoritative
+  representation before relying on the change. Missing base content is never
+  reconstructed by guessing.
 - **FR-101**: Material that has not changed MUST be referenceable by identity
   rather than by value, so that unchanged content need not be re-transmitted to
-  be relied upon.
+  be relied upon. If the referent cannot be recovered, or cannot be validated as
+  current, the system MUST fetch or carry a full authoritative representation
+  before relying on the reference.
 - **FR-102**: A canonical summary MUST carry its provenance — what it summarises
   and from where — so a claim resting on it can be traced back to the evidence.
 - **FR-103**: An assertion derived from inspected material MUST be able to cite
@@ -724,7 +923,14 @@ blanket rule would either lose evidence in one class or save nothing in another.
   step by step.
 - **FR-105**: A fact already verified in the session MUST NOT be re-verified
   without cause; a change to its underlying source is such a cause, the passage
-  of turns alone is not.
+  of turns alone is not. **Invalidation applies to every reuse mechanism in this
+  specification**: references (FR-101), deltas (FR-100), deduplicated
+  representations (FR-099), canonical summaries (FR-086, FR-102), verified
+  session facts (this requirement) and learned items (FR-060). A representation
+  becomes unusable as soon as the source identity, version or fingerprint it
+  rests on no longer matches, or is known to have changed. It is then re-fetched
+  or rebuilt from the authoritative source, and never relied on in its stale
+  form.
 
 ### Progressive learning
 
@@ -848,15 +1054,31 @@ blanket rule would either lose evidence in one class or save nothing in another.
   to work exactly as before.
 - **FR-081**: Stored sessions and stored knowledge written by the current version
   MUST remain readable after this change.
-- **FR-082**: The one intended user-visible behaviour change is this: **a
-  material clarification can no longer be resolved by default, assumption or
-  invented value when the required information was not actually supplied.**
-  Today, a form that is dismissed, that expires, or that is raised where nobody
-  is listening all lead the agent to choose sensible defaults and carry on; after
-  this change none of them do. Cancellation/decline, expiry and unattended
-  execution all remain distinguishable as lifecycle outcomes (FR-035), and all
-  three preserve the unresolved decision. This MUST be stated in release notes
-  and MUST be the only behavioural regression-by-design in this initiative.
+- **FR-082**: This initiative intends exactly **three** user-visible behaviour
+  changes, and no other:
+  1. **A mandatory clarification no longer resolves itself on a non-answer.**
+     **A material clarification can no longer be resolved by default,
+     assumption or invented value when the required information was not
+     actually supplied.** Today, a form that is dismissed, that expires, or that
+     is raised where nobody is listening all lead the agent to choose sensible
+     defaults and carry on; after this change none of them do. Cancellation or
+     decline, expiry and unattended execution remain distinguishable as
+     lifecycle outcomes (FR-035), and all three preserve the unresolved
+     decision; non-interactive runs report the clarification-required outcome
+     (FR-121 to FR-123).
+  2. **Completion claims are checked.** An answer with unresolved work is
+     annotated with that work named beside it, and an explicit completion claim
+     that the evidence contradicts, or that the gate cannot support, is
+     corrected or marked unconfirmed before delivery (FR-036, FR-037, FR-124 to
+     FR-127).
+  3. **A cancelled mandatory question is not re-raised** within the same
+     decision attempt; the unresolved decision is reported instead (FR-129).
+
+  Change 1 is the only one that removes behaviour an existing caller may rely
+  on. It is the only behavioural regression-by-design in this initiative and
+  MUST be stated in release notes. Changes 2 and 3 are additive: they add a
+  notice, a correction or a report, and remove nothing a caller was given
+  before.
 
 ### Capability discovery
 
@@ -892,12 +1114,16 @@ blanket rule would either lose evidence in one class or save nothing in another.
 
 ### Key Entities
 
-- **Evidence item**: something the agent relies on, carrying what it asserts, how
-  it became known (stated, verified, derived, unknown), and what it was observed
-  from.
-- **Open decision**: an unresolved point that materially affects the work,
-  carrying what must be decided, the candidate answers, and the evidence already
-  consulted.
+- **Evidence item**: something the agent relies on. It carries what it asserts;
+  its **information origin**, which is exactly one of FR-001's five categories
+  (stated by the user; verified from the repository or a tool; established
+  project or user knowledge; deterministically derived; unknown); its current
+  **evidence lifecycle state**, a separate axis (Operational definitions); and
+  what it was observed from.
+- **Open decision**: an unresolved point that materially affects the work. It
+  carries its stable decision reference (`decision_ref`), what must be decided,
+  the candidate answers, the reason (its FR-007 materiality class), and the
+  evidence already consulted.
 - **Clarification form**: a set of open decisions put to the user at one time,
   with a stable identity and a bounded lifetime. **Form lifecycle** (a live,
   claimed form): outstanding → answered, cancelled/declined, or expired. This is
@@ -997,21 +1223,33 @@ the benchmark, and each is independently mutation-checked.
 - **SC-011**: Against a naive baseline that resends full history, full file
   contents and full tool output every turn, the same benchmark tasks complete
   with materially fewer total tokens and **no reduction in any task's outcome
-  rate**. The numeric threshold is set from the baseline run required by SC-036,
-  not chosen in advance.
+  rate**. "Materially fewer" means **at least 10% lower mean total tokens per
+  attempt than the naive strategy, measured in the same paired run**. SC-011
+  passes only when **both** conditions hold:
+  1. current mean total tokens ≤ 0.90 × naive mean total tokens; **and**
+  2. for **every** benchmark task, the current outcome rate ≥ the naive outcome
+     rate. A task-level regression is never averaged away.
+
+  The two strategies are comparable only within one paired measurement that
+  uses the same provider, the same model, the same task set, the same number of
+  attempts, the same token-accounting version, the same counterbalancing
+  scheme and the same candidate runtime semantics. Absolute token totals are
+  never compared across token-accounting versions. The threshold is relative so
+  that it holds across providers. It was derived from the published paired
+  baselines (SC-036), not chosen in advance: in both runs the current strategy
+  used more total tokens than naive, so parity was not being met, and crossing
+  parity by a small margin is not "materially fewer". Recording the threshold
+  does not satisfy SC-011. Both historical runs **fail** it, and it is satisfied
+  only by a fresh qualifying paired measurement.
 - **SC-036**: A baseline measurement of the current system against the naive
   full-resend strategy is published before any efficiency threshold is adopted.
   It reports, per task, input tokens, output tokens, cached tokens, model turns,
-  tool calls and outcome rate for both strategies. The reduction target for
-  SC-011 is then set from that data and recorded in this specification, and no
-  efficiency work is accepted against a target that predates the baseline.
-  **Published (T015)**: `bench/results/paired-baseline-2026-09-14.json`
-  and `.md`, measured at commit `5b611e4` (the tasks Phase 1 state) with
-  `python -m bench --paired --provider <provider> --model <model> --tries 3`
-  (the provider/model the run was configured with; the artifact is sanitized
-  rather than naming it) — 13 tasks × 3 attempts × 2 strategies; current 31/39
-  attempts at a mean of 62,673 total tokens per attempt, naive 32/39 at 53,480.
-  This file is the threshold source for SC-011 (T156).
+  tool calls and outcome rate for both strategies, measured as repeated attempts
+  per task in one paired run. The reduction target for SC-011 is then set from
+  that data and recorded in this specification, and no efficiency work is
+  accepted against a target that predates the baseline. The baselines published
+  so far are listed in the *Benchmark evidence record* below. That record is
+  evidence, not part of this criterion.
 - **SC-012**: No benchmark task's outcome rate falls relative to the immediately
   preceding published baseline as a result of an efficiency change; any fall is
   reported as a regression and blocks the change.
@@ -1021,6 +1259,24 @@ the benchmark, and each is independently mutation-checked.
   over-budget result remaining retrievable in full.
 - **SC-015**: The stable portion of the request is byte-identical across turns
   within a task; measured as zero mid-task changes to it.
+
+*Benchmark evidence record (informative; not a success criterion).* These
+published paired runs are the data behind SC-036 and the SC-011 threshold.
+Their figures are comparable only within each run.
+
+- **Tasks Phase 1 baseline (T015)**: `bench/results/paired-baseline-2026-09-14.json`
+  and `.md`, measured at commit `5b611e4` with
+  `python -m bench --paired --provider <provider> --model <model> --tries 3`
+  (the provider/model the run was configured with; the artifact is sanitized
+  rather than naming it) — 13 tasks × 3 attempts × 2 strategies; current 31/39
+  attempts at a mean of 62,673 total tokens per attempt, naive 32/39 at 53,480
+  (current ≈ 17.2% higher).
+- **Candidate paired run (T155, token-accounting version 2)**:
+  `bench/results/paired-baseline-2026-09-20.json` and `.md`, measured at
+  commit `be9cf6f` — 13 tasks × 3 attempts × 2 strategies; current 30/39
+  attempts at a mean of 55,440 total tokens, naive 33/39 at 50,750
+  (current ≈ 9.24% higher); the comparison flags `feature-retry-decorator` and
+  `careful-unknowable` as outcome regressions.
 
 **Progressive learning**
 
@@ -1103,10 +1359,113 @@ the benchmark, and each is independently mutation-checked.
 
 ## Clarifications — Resolved
 
-Three decisions materially changed scope or user-visible behaviour and had no
-defensible default. All three were put to the user on 2026-09-14 and answered.
-The decisions are recorded below and are binding on the requirements above. No
-unresolved clarification markers remain in this specification.
+**Fifteen** clarification decisions are recorded below, in four groups. Each
+decision is binding on the requirements it names:
+
+| Group | Decisions |
+| --- | --- |
+| Session 2026-09-24 (specification review) | 6 — D1 to D6 |
+| Session 2026-09-14 (remediation) | 3 |
+| Session 2026-09-14 (outcome encoding) | 3 |
+| Original clarifications, 2026-09-14 | 3 — Q1 to Q3 |
+
+All fifteen were put to, or decided by, the repository owner, and every one
+lists the FR/SC requirements it binds. No unresolved clarification markers
+remain in this specification.
+
+### Session 2026-09-24 (specification review)
+
+The reviewer-owned specification quality gate (`checklists/spec-gate.md`)
+first passed 108 of 131 criteria. Six of the remaining 23 needed a product
+decision; the owner decided them as follows.
+
+- Q: When is a decision material — what does "can materially change" mean?
+  (CHK013; contributes to CHK015, CHK124) → A: **D1.** A decision is material
+  only when at least two plausible, grounded resolutions exist and choosing one
+  instead of another can change the delivered behaviour or one of the FR-007
+  effects. It is non-material when every grounded alternative satisfies the same
+  explicit intent, compatibility contract and acceptance criteria and differs
+  only in internal implementation detail. "The requested behaviour" applies only
+  when the user-visible or requested result differs. If equivalence cannot be
+  determined, FR-130 applies and the decision is material.
+  *Binds*: FR-007, FR-122, FR-130; Operational definitions (Material).
+- Q: How is implementation freedom told apart from missing product intent?
+  (CHK015) → A: **D2.** Implementation discretion exists when all grounded
+  alternatives satisfy the request and the repository and specification
+  constraints, preserve compatibility, security and persistence semantics, meet
+  the same acceptance criteria and stay below the materiality threshold; the
+  agent may choose. Missing product intent exists when two or more grounded
+  interpretations remain unsettled by repository, configuration and trustworthy
+  knowledge, and the choice changes a material outcome; it is a mandatory
+  clarification. Where the classification is ambiguous, material and
+  clarification win. *Binds*: FR-003, FR-011, FR-012, FR-130; Operational
+  definitions (Implementation discretion, Missing product intent).
+- Q: May independent work continue while a clarification is outstanding?
+  (CHK025) → A: **D3.** It is permitted, not mandatory. An outstanding
+  clarification does not by itself prohibit demonstrably independent work.
+  Dependent work pauses, and uncertain dependency counts as dependent. No
+  unrelated work is started just to stay active, and a clarification is never
+  bypassed because independent work happened. A non-interactive run may finish
+  already identified, bounded independent work before returning
+  `clarification_required`, but must not begin speculative work to delay the
+  stop. *Binds*: FR-018, FR-123, SC-043.
+- Q: How does a later answer resume a decision that was cancelled, expired or
+  unattended? (CHK043; also CHK040) → A: **D4.** Every material unresolved
+  decision has a stable `decision_ref` that identifies the decision across
+  lifecycle instances; a form's own lifecycle identifier is not a substitute.
+  The clarification-required outcome carries at least `decision_ref`, the
+  decision, the candidates, the evidence consulted, the reason and the lifecycle
+  outcome. A later answer resumes a decision only when it is explicitly
+  associated with its `decision_ref`, never by position, recency, textual
+  similarity, first-unresolved order or heuristic inference. Headless, API and
+  subsequent-invocation inputs carry the `decision_ref` explicitly. No second
+  clarification mechanism is introduced. *Binds*: FR-020, FR-034, FR-129,
+  SC-042; Operational definitions (Decision reference).
+  *Implementation gap, recorded for the plan/tasks convergence step (not fixed
+  here)*: at candidate `21af97f`, the question shape carries `decision_ref`
+  (`questions.py`, set by `tools/ask.py`), but the structured
+  clarification-required payload (`tools/ask.py::payload_for`) has no top-level
+  `decision_ref` — only a per-decision `id` inside `decisions[]`. No headless or
+  API resumption input carries a `decision_ref`. Whether the decision id stays
+  stable across lifecycle instances and turns has not been verified.
+- Q: What numeric threshold defines "materially fewer total tokens" in SC-011?
+  (CHK100; the owner decision behind T156) → A: **D5.** At least **10% lower
+  mean total tokens** than the naive strategy in the same paired run
+  (current ≤ 0.90 × naive), **and**, for every task, a current outcome rate at
+  least equal to naive — a task-level regression is never averaged away. The
+  comparison is valid only within one paired run that holds provider, model,
+  task set, attempts, token-accounting version, counterbalancing and candidate
+  semantics constant; absolute totals are never compared across accounting
+  versions. It was derived from the published paired baselines (T015:
+  current ≈ 17.2% higher; T155 accounting v2: ≈ 9.24% higher). It is relative so
+  that it holds across providers. A tiny crossing of parity is not material.
+  Recording the threshold does not satisfy SC-011: both historical runs fail it.
+  *Binds*: SC-011, SC-036 (and the specification-writing condition of T156).
+- Q: What do "material", "relevant", "proportionate validation" and
+  "trustworthy stored knowledge" mean? (CHK124; supports CHK005) → A: **D6.**
+  They are defined operationally in §Requirements, Operational definitions:
+  material per D1; relevant = able to change, support, refute or validate an
+  active requirement, decision, completion claim or affected-surface judgement;
+  proportionate validation = the smallest set of checks that exercises the
+  changed behaviour, the affected contracts and surfaces, and the applicable
+  repository-mandated gates, where a policy-required repository-wide gate stays
+  in scope and an optional suite with no coverage is unrelated; trustworthy
+  stored knowledge = FR-056-admitted, active, correctly scoped, neither stale
+  nor superseded, uncontradicted by current evidence, and attributable.
+  *Binds*: FR-008, FR-038, FR-042, FR-051, FR-087, FR-097, FR-110.
+
+**Corrections without a new decision.** The other 17 gate findings were closed
+from intent the Feature 002 artifacts already record: CHK001 (definition of
+high-quality output); CHK005 (FR-038/FR-042 reconciled); CHK009 and CHK131
+(information origin separated from lifecycle state; VERIFIED and VALIDATED
+defined; Key Entities); CHK012 (FR-002's mechanical rule); CHK040 (FR-020
+question metadata); CHK051 and CHK123 (FR-099); CHK053 (FR-100, FR-101);
+CHK054 (FR-105 invalidation); CHK086 (FR-031; Appendix A); CHK107 (SC-036;
+Benchmark evidence record); CHK117 (FR-082); CHK119 (this section);
+CHK121 (User Story 1, scenario 1); CHK122 (FR-125, FR-127); CHK127
+(Edge Cases; FR-013). Earlier statements calling FR-082 "the one" intended
+user-visible behaviour change — the Q2 decision below included — are
+superseded by FR-082's current text, which names three.
 
 ### Session 2026-09-14 (remediation)
 
@@ -1117,13 +1476,16 @@ unresolved clarification markers remain in this specification.
   invent one. Only a real answer resolves a mandatory clarification and resumes
   dependent work. An agent-chosen assumption remains available **only** for
   decisions that do not pass the materiality test of FR-007.
+  *Binds*: FR-003, FR-018, FR-019, FR-022, FR-130; SC-037 to SC-041.
 - Q: Does the user-cancelled case need a new protocol state? → A: **No.**
   *(Refined by the encoding session below. "No new state" still holds; what that
   session settles is **where** the distinction is carried — the clarification
   payload, not the turn outcome.)*
+  *Binds*: FR-022, FR-035, FR-080.
 - Q: May a cancelled mandatory question be re-raised? → A: **Not within the same
   decision attempt.** The agent reports the unresolved decision; a later explicit
   user request may resume or answer it.
+  *Binds*: FR-129; SC-044.
 
 ### Session 2026-09-14 (outcome encoding)
 
@@ -1134,15 +1496,18 @@ unresolved clarification markers remain in this specification.
   `stopped = "clarification_required"` — with the precise clarification lifecycle
   carried in an additive, optional field inside the structured clarification
   payload: `clarification.outcome ∈ {cancelled, expired, unattended}`.
+  *Binds*: FR-035, FR-123.
 - Q: Should `stopped` gain `clarification_cancelled` / `clarification_expired`?
   → A: **No.** No clarification-specific value is added to the turn outcome.
   `stopped = "cancelled"` is preserved **exclusively** for cancellation or
   interruption of the entire agent turn, exactly as the repository uses it today,
   and is never reused for question dismissal.
+  *Binds*: FR-022, FR-035, FR-071.
 - Q: What protects old clients? → A: `clarification.outcome` is additive and
   optional under the already-planned negotiated clarification capability
   (FR-080). A client that does not negotiate the capability never receives it and
   keeps its existing semantics unchanged.
+  *Binds*: FR-079, FR-080; SC-023.
 
 **Why this encoding.** The turn lifecycle and the clarification lifecycle are
 different things. Collapsing them would have made a dismissed question
@@ -1309,6 +1674,7 @@ can check that no parallel subsystem was introduced.
 | Area | Existing owner | What already holds | The gap this initiative closes |
 | --- | --- | --- | --- |
 | Question form primitive | `src/comodor/questions.py` | Shapes shared by tool, terminal and browser; mandatory custom-answer row appended by the core; nothing answered on the user's behalf | Nothing structural — preserve and test the guarantees |
+| Terminal question overlay | `apps/tui/src/App.tsx`, `packages/questions` | The terminal renders a question form as an overlay; the shared `packages/questions` package holds form position and selection as a pure reducer with no rendering and no timers, so keyboard behaviour is deterministic by construction | Render the added reason and evidence fields; keep keyboard behaviour deterministic (FR-031) |
 | Asking tool | `src/comodor/tools/ask.py` | One call for the whole set; SAFE, so available in plan mode; guidance not to ask what it can find out | Distinguish "declined" from "nobody present"; strengthen when asking is mandatory |
 | Clarification transport | `schemas/protocol/v2.json` | `question.requested`, `question.answer`, `question.resolved`; `QuestionField`/`QuestionOption`/`QuestionAnswer`; answers matched by stable header; pending interaction in session snapshot; `questions` is a negotiated capability | Additive representation of a clarification-required outcome for non-interactive callers |
 | Blocking-request lifecycle | `src/comodor/events.py` | `resolve()` waits, claims, and publishes expiry so no client shows a settled decision; `listening` reports whether anyone is there | Use presence to separate declined from unattended |
