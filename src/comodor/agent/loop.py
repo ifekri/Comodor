@@ -924,22 +924,23 @@ class AgentLoop:
         action = "; ".join(f"{call.name} {self._describe(call)}" for call in calls)
         assessment = preflight.parse(completion.text, proposed_action=action)
         assessment.evidence_refs = refs
-        self._enforce_oracle_integrity(assessment, calls)
+        self._enforce_oracle_integrity(assessment, calls, refs)
         self._trace_preflight(calls, refs, asked, mutations, assessment,
                               completion.usage)
         return assessment
 
     def _enforce_oracle_integrity(
             self, assessment: preflight.MutationAssessment,
-            calls: list[ToolCall]) -> None:
-        """Reject a high-confidence validation bypass, whatever the assessor said.
+            calls: list[ToolCall], refs: list[str]) -> None:
+        """Verify a validator correction, and reject an ungrounded weakening.
 
-        The assessor reads the request and the evidence; this is the bounded
-        local reading that a mutation weakens the check that exposes the
-        problem — a skip, an xfail, a removed assertion, a deleted test. A
-        correction grounded in evidence is exempt; anything else that carries
-        one of those signals is a rejection. It is evidence for the assessment,
-        not a second policy engine (FR-013, FR-036).
+        The assessor reads the request and the evidence; Core decides whether a
+        claimed correction is actually grounded. A claimed source counts only
+        when it names the request or a real evidence ref supplied to this
+        preflight, and a high-confidence weakening (skip, xfail, deselect, a
+        removed assertion, a deleted test) is authorised only by an explicit
+        request for it. Otherwise the mutation is a rejection. It is evidence
+        for the assessment, not a second policy engine (FR-013, FR-036).
         """
         from . import verify as _verify
 
@@ -952,9 +953,16 @@ class AgentLoop:
                 continue
             touched = touched or target
             signals.extend(found)
-        if not touched or not signals:
+        if not touched:
             return
-        if assessment.validator_change == "grounded_validator_correction":
+        assessment.validator_grounding_verified = \
+            _verify.validator_grounding_verified(
+                assessment.validator_change, assessment.validator_refs,
+                ["request", *refs], self._request_text, signals)
+        if not signals:
+            return
+        if assessment.validator_change == "grounded_validator_correction" \
+                and assessment.validator_grounding_verified:
             return
         assessment.status = "reject"
         assessment.decisions = []

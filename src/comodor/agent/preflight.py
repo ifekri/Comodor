@@ -260,8 +260,14 @@ class MutationAssessment:
     #: `ungrounded_weakening`, `unknown_validator_change`, or "" when no
     #: validation artifact is involved.
     validator_change: str = ""
-    #: The sources that ground a `grounded_validator_correction`.
+    #: The sources the assessor says ground a `grounded_validator_correction`.
+    #: These are claims: Core decides whether they name an actual source.
     validator_refs: list[str] = field(default_factory=list)
+    #: Whether Core verified that `validator_refs` names a real source (the
+    #: request or an actual evidence ref). Only Core sets this; a model answer
+    #: cannot. A `grounded_validator_correction` the model asserts is not
+    #: authoritative until this is true.
+    validator_grounding_verified: bool = False
     reason: str = ""
     #: The bounded, redacted answer the assessor gave, kept for the trace.
     raw: str = ""
@@ -276,9 +282,16 @@ class MutationAssessment:
 
     @property
     def grounds_validator(self) -> bool:
-        """Whether the mutation's effect on the oracle is authorised."""
-        return self.validator_change in ("preserves_validation",
-                                         "grounded_validator_correction")
+        """Whether the mutation's effect on the oracle is authorised.
+
+        A claim to preserve the check stands. A claimed correction stands only
+        once Core has verified its grounding — the model's enum is a claim, not
+        authority (FR-013, FR-036).
+        """
+        if self.validator_change == "preserves_validation":
+            return True
+        return (self.validator_change == "grounded_validator_correction"
+                and self.validator_grounding_verified)
 
     @property
     def missing_decisions(self) -> list[Decision]:
@@ -299,6 +312,7 @@ class MutationAssessment:
             ],
             "validator_change": self.validator_change,
             "validator_refs": list(self.validator_refs),
+            "validator_grounding_verified": self.validator_grounding_verified,
             "answer": self.raw[:800],
         }
 

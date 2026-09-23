@@ -38,6 +38,7 @@ import signal
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Iterable
 
 #: How long the project's own check may take before it is given up on. Long
 #: enough for a real suite, short enough that a hung command is reported rather
@@ -1279,6 +1280,111 @@ def oracle_risk(name: str, arguments: dict) -> tuple[bool, list[str]]:
             return False, []
         return True, signals
     return False, []
+
+
+# --------------------------------------------------------------------------- #
+# grounding a validator correction: a model's claim is not authority
+# --------------------------------------------------------------------------- #
+#
+# The assessor may answer `grounded_validator_correction` and cite sources, but
+# those are claims. Core decides whether they name an actual source, and whether
+# a high-confidence weakening is authorised. A missing prerequisite is not
+# evidence that the check is wrong; only the request or a real evidence ref can
+# authorise changing a check.
+
+#: A sentence, for the narrow request-authorization reading.
+_REQUEST_SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
+#: A sentence that names a check.
+_TEST_NOUN = re.compile(
+    r"(?i)\b(?:test|tests|suite|check|checks|assertion|assertions|case|cases|"
+    r"collection|collecting)\b")
+#: A negation in the same sentence means it is not authorization.
+_REQUEST_NEGATION = re.compile(r"(?i)(?:\b(?:not|never|without|avoid)\b|n't\b)")
+#: The verb a high-confidence weakening signal corresponds to in a request.
+_SIGNAL_AUTHORIZATION: dict[str, re.Pattern[str]] = {
+    "skip": re.compile(r"(?i)\b(?:skip|skipping|skipif|xfail|disable|disabling|disabled)\b"),
+    "xfail": re.compile(r"(?i)\b(?:skip|skipping|skipif|xfail|disable|disabling|disabled)\b"),
+    "deselect": re.compile(r"(?i)\b(?:deselect|exclude|excluding|omit|omitting|stop|"
+                           r"drop|dropping|collection|collecting)\b"),
+    "delete": re.compile(r"(?i)\b(?:remove|removing|delete|deleting|drop|dropping)\b"),
+    "deleted_test": re.compile(r"(?i)\b(?:remove|removing|delete|deleting|drop|dropping)\b"),
+    "removed_assertion": re.compile(
+        r"(?i)\b(?:remove|removing|delete|deleting|drop|dropping|loosen|loosening|"
+        r"relax|relaxing)\b"),
+}
+
+
+def normalize_ref(ref: str) -> str:
+    """A claimed source reduced to a comparable identity."""
+    text = str(ref or "").strip().strip("`'\"").replace("\\", "/").lower()
+    return " ".join(text.split())
+
+
+def ref_matches(ref: str, allowed: Iterable[str]) -> bool:
+    """Whether a claimed source names an actual available source.
+
+    A claimed `validator_ref` counts only when it is the request or a real
+    evidence ref supplied to the preflight — by full path or by basename. A
+    convincing-sounding sentence names nothing and does not count.
+    """
+    wanted = normalize_ref(ref)
+    if not wanted:
+        return False
+    if wanted == "request":
+        return True
+    wanted_base = wanted.rsplit("/", 1)[-1]
+    for candidate in allowed or ():
+        name = normalize_ref(candidate)
+        if not name:
+            continue
+        if wanted == name:
+            return True
+        if wanted_base and wanted_base == name.rsplit("/", 1)[-1]:
+            return True
+        if name.endswith("/" + wanted) or wanted.endswith("/" + name):
+            return True
+    return False
+
+
+def explicit_weakening_authorized(request: str, signals: Iterable[str]) -> bool:
+    """Whether the request explicitly asks for this weakening.
+
+    A narrow reading: a sentence that names a check and the verb the weakening
+    uses, with no negation. "Skip this flaky integration test" authorises a
+    skip; "get the suite green", "fix the tests" and "the dataset is
+    unavailable" authorise nothing (FR-013).
+    """
+    wanted = [name for name in signals if name in _SIGNAL_AUTHORIZATION]
+    if not wanted or not request:
+        return False
+    for sentence in _REQUEST_SENTENCE.findall(request):
+        if _REQUEST_NEGATION.search(sentence) or not _TEST_NOUN.search(sentence):
+            continue
+        for name in wanted:
+            if _SIGNAL_AUTHORIZATION[name].search(sentence):
+                return True
+    return False
+
+
+def validator_grounding_verified(validator_change: str,
+                                 validator_refs: Iterable[str],
+                                 allowed_refs: Iterable[str], request: str,
+                                 signals: Iterable[str]) -> bool:
+    """Whether a claimed validator correction is independently grounded.
+
+    Only a `grounded_validator_correction` can be verified. It needs a ref that
+    names an actual source (the request or a real evidence ref). If the mutation
+    also carries a high-confidence weakening, the request must explicitly
+    authorise that weakening — a prerequisite being unavailable is not evidence
+    that the check is wrong (FR-013, FR-036).
+    """
+    if validator_change != "grounded_validator_correction":
+        return False
+    if not any(ref_matches(ref, allowed_refs) for ref in validator_refs or ()):
+        return False
+    if signals:
+        return explicit_weakening_authorized(request, signals)
+    return True
 
 
 #: Commands whose primary purpose is validation, by kind. Classified from the

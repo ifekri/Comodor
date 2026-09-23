@@ -197,10 +197,13 @@ def test_an_unknown_validator_change_may_not_be_allowed():
     assert preflight.parse(ALLOW_UNKNOWN).status == "blocked"
 
 
-def test_a_grounded_correction_is_allowed():
+def test_a_grounded_correction_is_allowed_by_parse_but_not_yet_verified():
+    """Parse reads the model's claim; only Core verifies its grounding."""
     assessment = preflight.parse(GROUNDED)
     assert assessment.status == "allow"
-    assert assessment.grounds_validator
+    assert assessment.validator_change == "grounded_validator_correction"
+    assert assessment.validator_grounding_verified is False
+    assert not assessment.grounds_validator
 
 
 # --------------------------------------------------------------------------- #
@@ -372,9 +375,12 @@ def test_an_implementation_fix_is_allowed_and_trusted(config, bus, workspace,
 
 def test_a_grounded_validator_correction_is_allowed_and_trusted(
         config, bus, workspace, monkeypatch):
+    (workspace / "spec.md").write_text("The API status is 201.\n", encoding="utf-8")
     (workspace / "test_api.py").write_text(
         "def test_status():\n    assert 200 == 200\n", encoding="utf-8")
     scripts = [
+        Script(text="Reading the spec.", tool_calls=[ToolCall(
+            id="r1", name="read_file", arguments={"path": "spec.md"})]),
         Script(text="Correcting the expectation.", tool_calls=[ToolCall(
             id="e1", name="edit_file",
             arguments={"path": "test_api.py", "old_string": "assert 200 == 200",
@@ -454,9 +460,12 @@ def test_green_by_skip_is_not_success(config, bus, workspace):
 
 def test_legitimate_test_maintenance_still_works(config, bus, workspace, monkeypatch):
     """Tests are not read-only: an explicit, grounded test change is allowed."""
+    (workspace / "spec.md").write_text("The API status is 201.\n", encoding="utf-8")
     (workspace / "test_api.py").write_text(
         "def test_status():\n    assert 200 == 200\n", encoding="utf-8")
     scripts = [
+        Script(text="Reading the spec.", tool_calls=[ToolCall(
+            id="r1", name="read_file", arguments={"path": "spec.md"})]),
         Script(text="Updating the obsolete test.", tool_calls=[ToolCall(
             id="e1", name="edit_file",
             arguments={"path": "test_api.py", "old_string": "assert 200 == 200",
@@ -475,4 +484,186 @@ def test_legitimate_test_maintenance_still_works(config, bus, workspace, monkeyp
     assert "201 == 201" in (workspace / "test_api.py").read_text(encoding="utf-8")
     assert agent._oracle_tainted is False
     assert [v.integrity for v in agent._validations] == ["trusted"]
+    assert result.stopped == "done"
+
+
+# --------------------------------------------------------------------------- #
+# grounding a validator correction: the model's claim is not authority
+# --------------------------------------------------------------------------- #
+
+GROUNDED_FAKE = (
+    '{"status": "allow", "decisions": [], "blockers": [], '
+    '"validator_change": "grounded_validator_correction", '
+    '"validator_refs": ["some convincing sounding source"], "reason": "x"}'
+)
+GROUNDED_REQUEST = (
+    '{"status": "allow", "decisions": [], "blockers": [], '
+    '"validator_change": "grounded_validator_correction", '
+    '"validator_refs": ["request"], "reason": "the user asked for it"}'
+)
+GROUNDED_REAL_REFS = (
+    '{"status": "allow", "decisions": [], "blockers": [], '
+    '"validator_change": "grounded_validator_correction", '
+    '"validator_refs": ["request", "test_geocode.py"], '
+    '"reason": "the prerequisite is unavailable"}'
+)
+
+
+def test_a_fake_validator_ref_is_not_verified():
+    assert not verify.validator_grounding_verified(
+        "grounded_validator_correction",
+        ["some convincing sounding source"],
+        ["request", "geocode.py"], "fix it", [])
+
+
+def test_a_real_request_ref_is_verified_without_a_weakening():
+    assert verify.validator_grounding_verified(
+        "grounded_validator_correction", ["request"],
+        ["request", "geocode.py"], "the contract changed", [])
+
+
+def test_an_evidence_ref_is_verified_by_basename():
+    assert verify.validator_grounding_verified(
+        "grounded_validator_correction", ["geocode.py"],
+        ["request", "C:/work/project/geocode.py"], "x", [])
+
+
+def test_a_missing_prerequisite_does_not_ground_a_skip():
+    """Evidence the data is unavailable is not evidence the check is wrong."""
+    assert not verify.validator_grounding_verified(
+        "grounded_validator_correction", ["request", "test_geocode.py"],
+        ["request", "test_geocode.py", "geocode.py"],
+        "The authoritative dataset is unavailable; do not invent or substitute it.",
+        ["skip"])
+
+
+def test_an_explicit_skip_request_grounds_a_skip():
+    assert verify.validator_grounding_verified(
+        "grounded_validator_correction", ["request"],
+        ["request", "test_x.py"], "Skip this flaky integration test.", ["skip"])
+
+
+@pytest.mark.parametrize("text", [
+    "get the suite green",
+    "fix the failing tests",
+    "make CI pass",
+    "the dataset is unavailable",
+    "do not skip the tests",
+])
+def test_generic_requests_do_not_authorize_a_weakening(text):
+    assert not verify.explicit_weakening_authorized(text, ["skip"])
+
+
+@pytest.mark.parametrize("text,signal", [
+    ("Skip this flaky integration test.", "skip"),
+    ("Remove this obsolete test.", "deleted_test"),
+    ("Delete the old contract test.", "deleted_test"),
+    ("Mark this test xfail until upstream issue X is fixed.", "xfail"),
+    ("Stop collecting tests under legacy/.", "deselect"),
+])
+def test_explicit_weakening_requests_are_recognised(text, signal):
+    assert verify.explicit_weakening_authorized(text, [signal])
+
+
+def test_a_skip_with_fake_refs_is_rejected(config, bus, workspace):
+    """A self-labelled correction with invented sources does not authorise it."""
+    (workspace / "test_api.py").write_text(
+        "def test_status():\n    assert 200 == 200\n", encoding="utf-8")
+    original = (workspace / "test_api.py").read_text(encoding="utf-8")
+    scripts = [
+        Script(text="Skipping the failing test.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "test_api.py",
+                       "content": "import pytest\n@pytest.mark.skip\n"
+                                  "def test_status():\n    assert 200 == 200\n"})]),
+        Script(text="The suite passes."),
+    ]
+    agent = _agent(config, bus, scripts, answer=GROUNDED_FAKE)
+
+    result = agent.run("get the suite green")
+
+    assert (workspace / "test_api.py").read_text(encoding="utf-8") == original
+    assert result.stopped == "done"
+    trace = agent._preflight_traces[0]["assessment"]
+    assert trace["status"] == "reject"
+    assert trace["validator_grounding_verified"] is False
+
+
+def test_a_skip_grounded_only_by_a_missing_prerequisite_is_rejected(config, bus, workspace):
+    """The observed failure shape: real refs, but they prove absence, not wrongness."""
+    (workspace / "test_geocode.py").write_text(
+        "from pathlib import Path\n\n\n"
+        "def test_coords():\n    assert Path('data.csv').read_text()\n",
+        encoding="utf-8")
+    original = (workspace / "test_geocode.py").read_text(encoding="utf-8")
+    scripts = [
+        Script(text="Reading the failing test.", tool_calls=[ToolCall(
+            id="r1", name="read_file", arguments={"path": "test_geocode.py"})]),
+        Script(text="Skipping the failing test.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "test_geocode.py",
+                       "content": "import pytest\n@pytest.mark.skip\n"
+                                  "def test_coords():\n    assert False\n"})]),
+        Script(text="The suite passes."),
+    ]
+    agent = _agent(config, bus, scripts, answer=GROUNDED_REAL_REFS)
+
+    result = agent.run(
+        "The authoritative dataset is unavailable; do not invent or substitute "
+        "it. Get the suite green.")
+
+    assert (workspace / "test_geocode.py").read_text(encoding="utf-8") == original
+    assert result.stopped == "done"
+    trace = agent._preflight_traces[0]["assessment"]
+    assert trace["status"] == "reject"
+    assert trace["validator_grounding_verified"] is False
+
+
+def test_an_explicitly_authorized_skip_is_allowed_and_trusted(config, bus, workspace,
+                                                              monkeypatch):
+    (workspace / "test_api.py").write_text(
+        "def test_status():\n    assert 200 == 200\n", encoding="utf-8")
+    scripts = [
+        Script(text="Skipping the flaky test.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "test_api.py",
+                       "content": "import pytest\n@pytest.mark.skip\n"
+                                  "def test_status():\n    assert 200 == 200\n"})]),
+        Script(text="Running the suite.", tool_calls=[ToolCall(
+            id="s1", name="run_shell", arguments={"command": "pytest -q"})]),
+        Script(text="Skipped the flaky test as asked; the suite passes."),
+    ]
+    agent = _agent(config, bus, scripts, answer=GROUNDED_REQUEST)
+    _successful_shell(agent, monkeypatch)
+
+    result = agent.run("Skip this flaky integration test.")
+
+    assert "pytest.mark.skip" in (workspace / "test_api.py").read_text(encoding="utf-8")
+    assert agent._oracle_tainted is False
+    assert [v.integrity for v in agent._validations] == ["trusted"]
+    assert result.stopped == "done"
+
+
+def test_an_unverified_correction_without_a_signal_taints_the_oracle(
+        config, bus, workspace, monkeypatch):
+    """A non-weakening change is allowed, but an ungrounded one is not trusted."""
+    (workspace / "test_api.py").write_text(
+        "def test_status():\n    assert 200 == 200\n", encoding="utf-8")
+    scripts = [
+        Script(text="Correcting the expectation.", tool_calls=[ToolCall(
+            id="e1", name="edit_file",
+            arguments={"path": "test_api.py", "old_string": "assert 200 == 200",
+                       "new_string": "assert 201 == 201"})]),
+        Script(text="Running the tests.", tool_calls=[ToolCall(
+            id="s1", name="run_shell", arguments={"command": "pytest -q"})]),
+        Script(text="The suite passes."),
+    ]
+    agent = _agent(config, bus, scripts, answer=GROUNDED_FAKE)
+    _successful_shell(agent, monkeypatch)
+
+    result = agent.run("the documented status is now 201; update the test")
+
+    assert "201 == 201" in (workspace / "test_api.py").read_text(encoding="utf-8")
+    assert agent._oracle_tainted is True
+    assert [v.integrity for v in agent._validations] == ["tainted"]
     assert result.stopped == "done"
