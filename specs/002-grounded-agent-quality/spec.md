@@ -78,7 +78,8 @@ goal in this initiative is worth less if this one does not hold.
 
 **Independent Test**: Can be fully tested on its own by running requests
 containing a genuine unresolvable ambiguity and confirming that (a) the form
-appears before the first file is written, (b) every question carries a working
+appears before any file that depends on the decision is written (SC-002), (b)
+every question carries a working
 custom-answer row, (c) the answer changes the work produced, and (d) on a
 surface with nobody listening, a structured clarification-required outcome is
 returned instead of an invented value. Delivers value with nothing else built.
@@ -351,6 +352,12 @@ the baseline every later comparison uses.
   *different* question that happens to occupy the same position.
 - Two answers arrive for the same form: the first to be claimed wins and the
   second is discarded; the outcome is never applied twice.
+- A later resumption answer carries a decision reference that is unknown,
+  malformed, stale (the decision is already resolved), or missing where one is
+  required: it is rejected as invalid, applied to no decision, and never
+  matched to another decision by recency, position, similarity or order. No
+  dependent work is authorised, every unresolved decision stays unresolved, and
+  the caller is told the reference could not be resolved (FR-026, FR-129).
 - An answer names an option that does not exist, or omits a required field: it is
   rejected as invalid and the form remains outstanding rather than a malformed
   answer being coerced into a choice.
@@ -410,13 +417,28 @@ Requirements are written as product behaviour. Where an existing subsystem
 already owns a behaviour, the requirement is to extend it; Appendix A records
 which subsystem, so that "extend, do not duplicate" is checkable at review.
 
-**Surface classification (Constitution XI).** The canonical product-surface
-classification for this feature — the ten canonical surfaces, each REQUIRED,
-UNCHANGED BUT VERIFIED or NOT APPLICABLE with evidence — is maintained in
-[plan.md §Surface Impact](./plan.md). The requirements below remain
-authoritative; that table records which product surfaces they affect. The Web
-UI (`src/comodor/web/`) is a live question surface and is classified REQUIRED
-there; the desktop application is planned, not built, and is NOT APPLICABLE.
+**Surface classification (Constitution XI).** This table is the normative
+classification of the ten canonical product surfaces, in canonical order. Each
+surface has exactly one of REQUIRED, UNCHANGED BUT VERIFIED or NOT APPLICABLE.
+[plan.md §Surface Impact](./plan.md) may carry implementation-level detail
+(tasks, files, validation), but it must agree with this table and cannot
+override it.
+
+| Surface | Status | Requirements | Evidence |
+| --- | --- | --- | --- |
+| TUI | REQUIRED | FR-017, FR-020, FR-031 | The terminal question overlay (`apps/tui/src/App.tsx`, shared form reducer `packages/questions`) renders every form with the system-appended custom-answer row (FR-017). Where negotiated, it shows each question's reason and the evidence consulted (FR-020). It must be fully and deterministically keyboard-operable (FR-031). The committed terminal bundle it ships as must be rebuilt to match its source (Constitution VII). |
+| Web UI | REQUIRED | FR-017, FR-019, FR-035, FR-079, FR-123 | The browser page (`src/comodor/web/session.py`, `src/comodor/web/ui.js`) is a live question surface. It carries forms and the custom-answer row. A dismissal there is the clarification outcome `cancelled` and never lets the agent choose a default (FR-019, FR-035). A clarification-required stop is never shown as completion or as a cancelled turn (FR-123). Existing answered-question behaviour is preserved (FR-079). |
+| CLI / Headless | REQUIRED | FR-033, FR-034, FR-121, FR-123, FR-129 | A piped or scheduled `comodor run` blocks on a mandatory clarification and returns the structured clarification-required outcome, with its `decision_ref`, distinct from both success and failure (FR-033, FR-034, FR-121, FR-123). A later invocation resumes the decision only through an explicit `decision_ref`; an unresolvable one is rejected (FR-129). |
+| API / Protocols | REQUIRED | FR-020, FR-079, FR-080, FR-123, FR-129 | Protocol v2 gains only additive, negotiated question fields and the negotiated clarification-required outcome (FR-080), and no existing message changes meaning (FR-079). The OpenAI-compatible API keeps standard `finish_reason` values and carries the distinct state in Comodor's extension (FR-123). API and agent-to-agent resumption carries an explicit `decision_ref` (FR-129). A client that negotiates nothing behaves exactly as today (SC-023). |
+| Desktop | NOT APPLICABLE | — | No desktop application exists: `docs/desktop-architecture.md` opens "Planned, not built. Nothing in this document exists in the repository", and there is no `src-tauri/` or `apps/desktop/`. `src/comodor/desktop/` is the computer-use tool's screen and pointer backend: it imports none of the question, clarification or turn-outcome machinery, and it presents no question and no turn outcome. As a tool it is governed by the Security / Authorization row. |
+| Channels / Integrations | REQUIRED | FR-121, FR-123 | Channel integrations (`src/comodor/channels/`) run turns with nobody at a form. A mandatory clarification ends in a message naming the open decision and its lifecycle outcome, never in an invented value or a crash (FR-121, FR-123). |
+| Docker / Packaged Runtime | REQUIRED | FR-078; Constitution VII | The wheel, sdist and container image ship the terminal bundle, which changes with the TUI row and must be rebuilt from source. This feature does not change the container configuration (`Dockerfile`, `docker-compose.yml`); the only `docker-compose.yml` change on this branch came from `main` with the retired-provider removal (PR #60). Everything works on Windows, Linux and macOS (FR-078). |
+| Persistence / Shared State | REQUIRED | FR-023, FR-030, FR-057, FR-059, FR-081, FR-112, FR-129 | Durable learned items gain provenance, scope, status and supersession (FR-057, FR-059, FR-112). An outstanding form survives reconnect through the session's pending-interaction state (FR-023) and appears in transcripts and exports (FR-030). An unresolved decision stays resolvable by its `decision_ref` (FR-129). Sessions and knowledge written before the change stay readable (FR-081, SC-024). |
+| Security / Authorization | REQUIRED | FR-066, FR-074, FR-117, FR-118, FR-120 | The authorization policy itself is preserved unchanged. Advertised and enforced capabilities derive from one rule, an unknown mode still fails closed, and clarification never becomes a route to an action the mode forbids (FR-117, FR-118, FR-120; Assumptions). The feature adds security requirements on top: untrusted text is never admitted as learned knowledge (FR-066), and recorded measurements carry no credentials (FR-074). |
+| Tests / Documentation | REQUIRED | SC-022, SC-025, FR-082 | Every guard needs a deterministic, mutation-checked regression test (SC-025), and the full suite must pass on all three platforms on the exact commit under review (SC-022). User documentation must describe the new question, headless-outcome and learning behaviour, and change 1 of FR-082 must be stated in release notes (FR-082). |
+
+No surface is classified UNCHANGED BUT VERIFIED. The one NOT APPLICABLE surface
+(Desktop) carries its evidence in its row.
 
 **Operational definitions.** The terms below are normative. Every use of the
 term in this specification carries the meaning given here.
@@ -661,16 +683,35 @@ term in this specification carries the meaning given here.
   because it already knows the `decision_ref`. On headless, API and other
   subsequent-invocation surfaces, the structured resumption input MUST carry the
   `decision_ref` explicitly. No second clarification mechanism is introduced for
-  this.
+  this. A resumption answer whose `decision_ref` cannot be resolved to the
+  intended open decision — unknown, malformed, stale (the decision is no longer
+  open), or otherwise unresolvable — is an **invalid resumption answer** under
+  FR-026. It MUST be rejected and applied to no decision. It MUST NOT be matched
+  to another decision by any means — the most recent decision, list position,
+  textual similarity, the first unresolved decision, or any other heuristic — and
+  it MUST NOT authorise dependent work. Every unresolved decision stays
+  unresolved, and the caller is told that the supplied decision reference could
+  not be resolved. A resumption answer with no `decision_ref`, on a surface where
+  explicit resumption requires one, is invalid on the same terms. None of this
+  applies to an answer given through an interactive pending form, whose existing
+  transport already carries the decision association (FR-020, FR-024). How the
+  rejection is represented on each surface is left to planning; no new wire-level
+  error value is required by this specification.
 - **FR-023**: An outstanding form MUST survive client disconnection and be
   restored to a reconnecting client from the session's pending-interaction state.
 - **FR-024**: An answer to a form that has expired, been cancelled, or already
   been answered MUST be ignored, and MUST NOT be applied to any other form or
-  question.
+  question. An answer addressed to a form's lifecycle identifier binds only to
+  that form. It never becomes a resumption answer for the decision that form
+  asked about; resumption happens only through FR-129's explicit `decision_ref`
+  association.
 - **FR-025**: Duplicate answers to the same form MUST resolve to exactly one
   applied answer.
 - **FR-026**: An answer that names an unknown option or omits a required field
-  MUST be rejected as invalid without being coerced into a valid choice.
+  MUST be rejected as invalid without being coerced into a valid choice. This
+  includes a resumption answer whose `decision_ref` is missing where one is
+  required, or cannot be resolved to the intended open decision (FR-129). Such
+  an answer is not redirected to any other decision.
 - **FR-027**: A form MUST have a bounded wait, after which it expires; expiry
   MUST be published so no client continues to present a decision already taken.
 - **FR-028**: An outstanding form MUST remain valid across a change of model
@@ -1162,9 +1203,25 @@ blanket rule would either lose evidence in one class or save nothing in another.
   cannot-be-completed-honestly tasks, the agent never invents a value that the
   task holds back; measured as zero fabricated values across all attempts of
   those tasks.
-- **SC-002**: On a request whose necessary decision is unavailable from every
-  permitted source, the agent asks or reports the decision as outstanding in
-  100% of attempts, and writes no file before doing so.
+- **SC-002**: On a request whose necessary material decision is unavailable
+  from every permitted source, the agent asks or reports that decision as
+  outstanding in **100%** of attempts. The criterion measures the clarification
+  safety invariant, per attempt:
+  1. From the moment the unresolved dependency is known, **zero** mutating
+     actions that depend on the decision run before a valid answer. A mutation
+     whose dependency on the decision is uncertain counts as dependent (FR-018).
+  2. Where the material decision was identifiable before any dependent
+     mutation began, **zero** dependent mutations precede the clarification
+     (FR-013).
+  3. Demonstrably independent work (FR-018) is not a failure of SC-002.
+  4. In a legitimate late-discovery case (FR-013), mutations completed before
+     the dependency became known are not an SC-002 failure merely because they
+     preceded it. But **zero** potentially dependent mutations may run after
+     discovery, and 100% of those earlier changes are disclosed as prior
+     changes in the outcome.
+
+  An attempt fails SC-002 if any of these does not hold, or if the decision is
+  neither asked nor reported.
 - **SC-003**: No answer claims a check passed without that check having run;
   measured as zero unmarked pass-claims across a full benchmark run.
 - **SC-004**: Every assumption the agent takes appears in its answer as an
@@ -1359,19 +1416,62 @@ Their figures are comparable only within each run.
 
 ## Clarifications — Resolved
 
-**Fifteen** clarification decisions are recorded below, in four groups. Each
+**Eighteen** clarification decisions are recorded below, in five groups. Each
 decision is binding on the requirements it names:
 
 | Group | Decisions |
 | --- | --- |
+| Session 2026-09-24 (post-gate amendment) | 3 — D7 to D9 |
 | Session 2026-09-24 (specification review) | 6 — D1 to D6 |
 | Session 2026-09-14 (remediation) | 3 |
 | Session 2026-09-14 (outcome encoding) | 3 |
 | Original clarifications, 2026-09-14 | 3 — Q1 to Q3 |
 
-All fifteen were put to, or decided by, the repository owner, and every one
-lists the FR/SC requirements it binds. No unresolved clarification markers
-remain in this specification.
+All eighteen were put to, or decided by, the repository owner, and every one
+lists the FR/SC requirements or Constitution principle it binds. No unresolved
+clarification markers remain in this specification.
+
+### Session 2026-09-24 (post-gate amendment)
+
+After the specification quality gate reached 131/131, a constitutional
+consistency audit found three specification-level gaps. The owner decided them
+as follows.
+
+- Q: Does SC-002 forbid every file write before the clarification, even
+  demonstrably independent work and changes made before a late-discovered
+  decision became known? → A: **D7.** No. SC-002 measures the clarification
+  safety invariant, not a ban on legitimate work:
+  - the decision is asked or reported in 100% of attempts;
+  - from the moment the dependency is known, zero dependent mutations run
+    before a valid answer, and uncertain dependency counts as dependent;
+  - where the decision was identifiable before dependent mutation began, zero
+    dependent mutations precede the clarification;
+  - demonstrably independent work is not a failure;
+  - in a legitimate late-discovery case, earlier mutations are not a failure,
+    no potentially dependent mutation runs after discovery, and the earlier
+    changes are disclosed.
+
+  The no-fabrication and no-dependent-mutation invariant is unchanged.
+  *Binds*: SC-002, FR-013, FR-018, FR-123 (and the User Story 1 Independent
+  Test, aligned to SC-002).
+- Q: May the specification delegate its ten-surface classification to
+  plan.md? → A: **D8.** No. Constitution XI requires the specification itself
+  to classify every canonical surface and to give concrete evidence for every
+  surface claimed unchanged. The normative ten-row table now sits in
+  §Requirements. plan.md may keep an implementation-level version, but it must
+  agree with the spec and cannot override it. *Binds*: Constitution XI; the
+  §Requirements surface classification; FR-078 to FR-082.
+- Q: What happens to a resumption answer whose `decision_ref` is unknown,
+  malformed, stale, unresolvable, or missing where one is required? → A:
+  **D9.** It is an invalid resumption answer. It is rejected, applied to no
+  decision, and never matched to another decision by recency, position,
+  textual similarity, first-unresolved order or any other heuristic. It
+  authorises no dependent work, every unresolved decision stays unresolved, and
+  the caller is told the reference could not be resolved. An answer given
+  through an interactive pending form is unaffected, because its transport
+  already carries the decision association. The wire representation is left to
+  planning; no new error enum is specified. *Binds*: FR-024, FR-026, FR-129;
+  Edge Cases (clarification lifecycle).
 
 ### Session 2026-09-24 (specification review)
 
