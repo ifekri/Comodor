@@ -243,7 +243,7 @@ def test_model_discovery_falls_back_when_the_provider_cannot_be_reached(
     models = setup._discover_models(spec, Answers(provider="openai"))
 
     assert models, "the known list should stand in when the API says nothing"
-    assert set(models) <= set(spec.models)
+    assert set(models) <= set(spec.fallback_models)
     # And the plan is told the difference between "these are its models" and
     # "we could not ask", which is what stops an unverified list being
     # presented as a working provider.

@@ -11,8 +11,6 @@ the provider refusing the request.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from comodor.config import Config, ProviderConfig
@@ -29,12 +27,20 @@ def settings(tmp_path):
 
 
 def a_cached_catalogue(root, provider: str, entries: list[dict]):
-    """What the model picker leaves on disk after listing a provider."""
-    where = root / "cache"
-    where.mkdir(parents=True, exist_ok=True)
-    (where / f"models-{provider}.json").write_text(
-        json.dumps({"provider": provider, "fetched_at": 1.0, "models": entries}),
-        encoding="utf-8")
+    """What the model picker leaves on disk after listing a provider.
+
+    Written through the module's own writer so the endpoint-aware cache
+    identity stays in one place.
+    """
+    from comodor.providers import models as discovery
+
+    discovery._write_cache(
+        discovery.Listing(
+            provider=provider,
+            models=[discovery.Model(**entry) for entry in entries],
+            fetched_at=1.0,
+            endpoint=discovery.endpoint_of(provider)),
+        root)
 
 
 # --------------------------------------------------------------------------- #
@@ -115,9 +121,12 @@ def test_a_corrupt_catalogue_cache_is_ignored_not_fatal(settings):
     settings.provider = "ollama"
     settings.model = "whatever"
     settings.agent.context_limit = 128_000
-    where = settings.paths.user / "cache"
-    where.mkdir(parents=True, exist_ok=True)
-    (where / "models-ollama.json").write_text("{not json", encoding="utf-8")
+    from comodor.providers import models as discovery
+
+    path = discovery._cache_file("ollama", settings.paths.user,
+                                 discovery.endpoint_of("ollama"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json", encoding="utf-8")
 
     assert profile.of(settings).context == 128_000
 

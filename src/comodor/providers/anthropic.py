@@ -359,16 +359,17 @@ class AnthropicProvider:
     # -- misc ------------------------------------------------------------- #
 
     def list_models(self) -> list[str]:
-        try:
-            response = self._session.get(f"{self.base_url}/models", timeout=(5.0, 20.0))
-            self._raise_for_status(response)
-            payload = response.json()
-        except (http.RequestError, ProviderError, ValueError):
-            # The catalogue we ship is a reasonable answer when the API is out.
-            return [info.id for info in registry.known_models()
-                    if info.id.startswith("claude-")]
-        return sorted(str(entry["id"]) for entry in payload.get("data", [])
-                      if isinstance(entry, dict) and entry.get("id"))
+        """Anthropic's own model list, through the one discovery path.
+
+        Delegates to `providers.models.listing`, which walks the paginated
+        endpoint. A failed request yields nothing here rather than a static
+        list of Claude names presented as current availability.
+        """
+        from . import models as discovery
+
+        found = discovery.listing(self.name, api_key=self.api_key,
+                                  base_url=self.base_url)
+        return [model.id for model in found.models]
 
     def close(self) -> None:
         self._session.close()

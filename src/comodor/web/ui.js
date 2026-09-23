@@ -2088,7 +2088,7 @@ function modelCombo(current, onPick) {
       where.className = 'warn';
     } else {
       where.textContent = modelIndex.error
-        ? 'built-in list — ' + modelIndex.error : 'built-in list';
+        ? 'no live list — ' + modelIndex.error : 'no live list';
       where.className = 'warn';
     }
     const again = document.createElement('button');

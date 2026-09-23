@@ -185,7 +185,9 @@ class ProviderFact:
     has_env_key: bool
     has_stored_key: bool
     is_active: bool
-    known_models: tuple[str, ...]
+    #: A small hand-written starting hint, shown only when the provider cannot
+    #: be queried. Not current availability; never presented as such.
+    fallback_models: tuple[str, ...]
     rank: int
 
     @property
@@ -267,7 +269,7 @@ def detect_providers(config: Config, *, environment: Any = None,
             has_env_key=has_env,
             has_stored_key=bool(stored),
             is_active=config.provider == spec.id,
-            known_models=tuple(spec.models),
+            fallback_models=tuple(spec.fallback_models),
             rank=spec.rank,
         ))
     # Usable now, then by the catalogue's own ranking, then by name so the

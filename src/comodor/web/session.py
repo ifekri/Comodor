@@ -393,7 +393,9 @@ class Session:
                 "label": spec.label,
                 "blurb": spec.blurb,
                 "model": spec.default_model,
-                "models": list(spec.models),
+                # Not availability: a hand-written starting hint, kept separate
+                # so no caller presents it as what the provider offers today.
+                "fallback_models": list(spec.fallback_models),
                 "needs_key": bool(spec.needs_key),
                 "can_sign_in": self.can_sign_in(spec.id),
                 "keys_url": spec.keys_url,
@@ -556,7 +558,7 @@ class Session:
                 cache_root=self.config.paths.user,
                 refresh=refresh)
         except Exception as error:
-            return {"provider": provider, "models": [], "source": "catalogue",
+            return {"provider": provider, "models": [], "source": "unavailable",
                     "error": f"{type(error).__name__}", "age_seconds": 0}
         return found.as_dict()
 
@@ -1114,16 +1116,20 @@ class Session:
         the panel describing the agent must not be the thing that breaks it,
         so each part that can fail is guarded and simply says less.
         """
-        from .. import catalogue
         from .._version import __version__
 
         entry = self.config.providers.get(self.config.provider)
-        spec = catalogue.get(self.config.provider)
         safety = self.config.safety
 
         try:
+            from ..providers import models as discovery
+
+            kept = discovery.cached(self.config.provider,
+                                    entry.base_url if entry else "",
+                                    self.config.paths.user)
+            available = [item.id for item in (kept.models if kept else [])]
             models = sorted({
-                *(spec.models if spec else ()),
+                *available,
                 *( (entry.model,) if entry and entry.model else () ),
                 self.config.active_model(),
             })

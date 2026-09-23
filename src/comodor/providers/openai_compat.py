@@ -306,20 +306,17 @@ class OpenAICompatProvider:
     # -- misc ------------------------------------------------------------- #
 
     def list_models(self) -> list[str]:
-        try:
-            response = self._session.get(f"{self.base_url}/models", timeout=(5.0, 20.0))
-            self._raise_for_status(response)
-            payload = response.json()
-        except (http.RequestError, ProviderError, ValueError):
-            return []
-        entries = payload.get("data", payload) if isinstance(payload, dict) else payload
-        models: list[str] = []
-        for entry in entries or []:
-            if isinstance(entry, dict) and entry.get("id"):
-                models.append(str(entry["id"]))
-            elif isinstance(entry, str):
-                models.append(entry)
-        return sorted(models)
+        """The provider's own catalogue, through the one discovery path.
+
+        Delegates to `providers.models.listing` so the adapter, the model
+        picker, the setup wizard and the doctor all read availability the same
+        way: live first, from the provider, and never from a hand-written list.
+        """
+        from . import models as discovery
+
+        found = discovery.listing(self.name, api_key=self.api_key,
+                                  base_url=self.base_url)
+        return [model.id for model in found.models]
 
     def close(self) -> None:
         self._session.close()

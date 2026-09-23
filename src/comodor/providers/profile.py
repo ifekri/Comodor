@@ -143,7 +143,11 @@ def _from_catalogue(config: Any, model: str, cache_root: Path | None) -> int:
     try:
         from . import models as catalogue
 
-        cached = catalogue._read_cache(provider, Path(root))
+        providers = getattr(config, "providers", None) or {}
+        entry = providers.get(provider) if isinstance(providers, dict) else None
+        base_url = str(getattr(entry, "base_url", "") or "") if entry is not None else ""
+        endpoint = catalogue.endpoint_of(provider, base_url)
+        cached = catalogue._read_cache(provider, Path(root), endpoint)
         if cached is None:
             return 0
         wanted = model.strip().lower()

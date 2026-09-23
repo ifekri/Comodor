@@ -265,6 +265,17 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
 
     force_utf8()
 
+    from . import catalogue
+
+    retired = catalogue.RETIRED.get(config.provider)
+    if retired:
+        # Never send a prompt (or reuse a stored key) for a provider Comodor
+        # no longer supports. Say so and require an explicit replacement.
+        print(f"Error: the {retired} provider is no longer supported. "
+              f"Run `comodor setup` to choose a replacement provider.",
+              file=sys.stderr)
+        return 1
+
     from . import questions as forms
     from .application import assemble
     from .context_refs import Refusal, expand

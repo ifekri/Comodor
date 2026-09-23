@@ -506,20 +506,22 @@ def test_a_matching_setting_is_simply_reported(home):
 
 def test_a_small_local_model_is_called_small(home):
     """The window nobody sets and everybody hits."""
-    import json
-
     from comodor.doctor import _check_context_window
+    from comodor.providers import models as discovery
 
     config = configured(home)
     config.provider = "ollama"
     config.model = "qwen2.5-coder:7b"
     config.agent.context_limit = 1_000_000
-    cache = config.paths.user / "cache"
-    cache.mkdir(parents=True, exist_ok=True)
-    (cache / "models-ollama.json").write_text(json.dumps({
-        "provider": "ollama", "fetched_at": 1.0,
-        "models": [{"id": "qwen2.5-coder:7b", "context": 8192}]}),
-        encoding="utf-8")
+    entry = config.providers.get("ollama")
+    discovery._write_cache(
+        discovery.Listing(
+            provider="ollama",
+            models=[discovery.Model(id="qwen2.5-coder:7b", context=8192)],
+            fetched_at=1.0,
+            endpoint=discovery.endpoint_of(
+                "ollama", entry.base_url if entry else "")),
+        config.paths.user)
 
     found = _check_context_window(config)
 

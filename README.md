@@ -94,7 +94,7 @@ The whole table, and how to run it against your own model, is in
 | **Runs a model locally** | Pick one, watch it download, use it with the network unplugged. No key, no account. [→](docs/local-models.md) |
 | **Lives in your editor** | Speaks ACP, so VS Code, JetBrains and Zed drive it from their own panels. [→](docs/acp.md) |
 | **Follows your procedures** | Write a skill once; it loads when the work matches. 147 ready to install. [→](docs/skills.md) |
-| **Works with any model** | Sixteen hosted providers and three local runtimes, or anything with an OpenAI-compatible URL. [→](docs/models.md) |
+| **Works with any model** | Fifteen hosted providers and three local runtimes, or anything with an OpenAI-compatible URL. [→](docs/models.md) |
 | **Costs less** | 86% of input tokens served from cache, measured — not estimated. [→](docs/cost.md) |
 
 **One Python dependency.** The HTTP client, the SSE reader, the WebSocket that

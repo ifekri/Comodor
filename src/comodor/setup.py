@@ -1469,18 +1469,16 @@ class SetupWizard:
 
         if (check is not Check.VALID and check is not Check.INVALID
                 and spec is not None):
-            # Offered, and labelled as not confirmed by `_say_what_the_probe_found`.
-            # A refused credential is excluded: a list drawn under it would be
-            # presented as though the key were fine and only the network were
-            # slow, when what is owed is a correction.
-            models = list(spec.models)
+            # Nothing could be confirmed. Offer the hand-written fallback, which
+            # `check` already marks unverified — a starting hint, never the
+            # provider's current models. A refused credential is excluded: a
+            # list drawn under it would be presented as though the key were fine
+            # and only the network were slow, when what is owed is a correction.
+            models = list(spec.fallback_models)
 
-        known = list(spec.models) if spec is not None else []
-        if check is Check.VALID and known:
-            # What the catalogue recommends first, then everything else: the
-            # provider's own ordering is alphabetical, which is not advice.
-            models = [m for m in known if m in models] + \
-                     [m for m in models if m not in known]
+        # The provider's own order stands. Re-ordering it to put the
+        # catalogue's hand-written names first would present a stale hint as a
+        # recommendation the provider never made.
         self.plan.report_discovery(
             effect.attempt,
             Discovery(check=check, reason=reason, models=tuple(models[:40])))

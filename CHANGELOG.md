@@ -355,8 +355,6 @@ identical prefix:
 
     MiMo   request 1: prompt 9,963  cached 0
            request 2: prompt 9,963  cached 9,920   (99.6%)
-    B.AI   request 1: prompt 8,637  cached 0
-           request 2: prompt 8,637  cached 8,576   (99.3%)
 
 Automatic prefix caching works on these providers and it works almost
 perfectly, so raw token counts say very little about the bill. What is billed,
