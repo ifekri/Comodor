@@ -11,6 +11,7 @@ No test here makes a network call; every response is a fake session.
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -230,11 +231,12 @@ def test_a_provider_with_no_endpoint_is_unavailable(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
-def _write(provider, endpoint_url, models, age=0.0, root=Path(".")):
+def _write(provider, endpoint_url, models, age=0.0, root=Path("."),
+           api_key="", headers=None):
     discovery._write_cache(
         discovery.Listing(provider=provider, models=models,
                           fetched_at=time.time() - age, endpoint=endpoint_url),
-        root)
+        root, scope=discovery.scope_for(provider, api_key, headers))
 
 
 def test_a_fresh_cache_is_used_without_a_request(tmp_path, endpoint):
@@ -332,3 +334,278 @@ def test_a_local_runtime_is_listed_live(tmp_path, endpoint):
                               cache_root=tmp_path)
     assert found.source == "live"
     assert [m.id for m in found.models] == ["qwen2.5-coder:14b"]
+
+
+# --------------------------------------------------------------------------- #
+# the request carries the provider's headers
+# --------------------------------------------------------------------------- #
+
+
+def test_a_configured_custom_header_reaches_model_discovery(tmp_path, endpoint):
+    seen: dict = {}
+
+    def handler(url, kwargs):
+        seen.update(kwargs.get("headers") or {})
+        return FakeResponse(200, {"data": [{"id": "m"}]})
+
+    endpoint(handler)
+    discovery.listing("openai", api_key="k", base_url="https://x/v1",
+                      cache_root=tmp_path,
+                      headers={"X-Tenant": "acme", "X-Route": "eu"})
+
+    assert seen.get("X-Tenant") == "acme"
+    assert seen.get("X-Route") == "eu"
+    # ... and the API-key authentication is still there.
+    assert seen.get("Authorization") == "Bearer k"
+
+
+def test_openrouter_application_headers_travel_with_discovery(tmp_path, endpoint):
+    seen: dict = {}
+    endpoint(lambda url, kwargs: (seen.update(kwargs.get("headers") or {}),
+                                  FakeResponse(200, {"data": [{"id": "m"}]}))[1])
+    discovery.listing("openrouter", base_url="https://openrouter.ai/api/v1",
+                      cache_root=tmp_path)
+    assert seen.get("HTTP-Referer") and seen.get("X-Title")
+
+
+def test_a_custom_header_does_not_override_authentication(tmp_path, endpoint):
+    seen: dict = {}
+    endpoint(lambda url, kwargs: (seen.update(kwargs.get("headers") or {}),
+                                  FakeResponse(200, {"data": [{"id": "m"}]}))[1])
+    discovery.listing("openai", api_key="k", base_url="https://x/v1",
+                      cache_root=tmp_path, headers={"X-Tenant": "acme"})
+    assert seen.get("Authorization") == "Bearer k"
+    assert seen.get("X-Tenant") == "acme"
+
+
+def test_header_values_are_not_written_to_the_cache(tmp_path, endpoint):
+    endpoint(_ok({"data": [{"id": "m"}]}))
+    discovery.listing("openai", api_key="sk-secret-key", base_url="https://x/v1",
+                      cache_root=tmp_path, headers={"X-Tenant": "secret-tenant"})
+
+    for path in (tmp_path / "cache").glob("*"):
+        assert "sk-secret-key" not in path.name
+        assert "secret-tenant" not in path.name
+        text = path.read_text(encoding="utf-8")
+        assert "sk-secret-key" not in text
+        assert "secret-tenant" not in text
+        assert "Authorization" not in text
+
+
+def test_header_values_are_not_in_serialized_listing_output(tmp_path, endpoint):
+    endpoint(_ok({"data": [{"id": "m"}]}))
+    found = discovery.listing("openai", api_key="sk-secret-key",
+                              base_url="https://x/v1", cache_root=tmp_path,
+                              headers={"X-Tenant": "secret-tenant"})
+    blob = json.dumps(found.as_dict())
+    assert "sk-secret-key" not in blob
+    assert "secret-tenant" not in blob
+
+
+# --------------------------------------------------------------------------- #
+# an incomplete paginated walk is never authoritative
+# --------------------------------------------------------------------------- #
+
+
+def _anthropic_pages(pages):
+    def handler(url, kwargs):
+        after = (kwargs.get("params") or {}).get("after_id", "")
+        return pages[after]
+    return handler
+
+
+def test_an_anthropic_page_failure_is_not_a_live_listing(tmp_path, endpoint):
+    endpoint(_anthropic_pages({
+        "": FakeResponse(200, {"data": [{"id": "claude-a"}],
+                               "has_more": True, "last_id": "claude-a"}),
+        "claude-a": FakeResponse(500, {}),
+    }))
+    found = discovery.listing("anthropic", api_key="k",
+                              base_url="https://api.anthropic.com/v1",
+                              cache_root=tmp_path)
+    assert found.source == "unavailable"
+    assert found.models == []
+    assert "500" in found.error
+    assert not list((tmp_path / "cache").glob("models-anthropic-*.json"))
+
+
+def test_an_anthropic_page_timeout_is_not_a_live_listing(tmp_path, endpoint):
+    def handler(url, kwargs):
+        if not (kwargs.get("params") or {}).get("after_id"):
+            return FakeResponse(200, {"data": [{"id": "claude-a"}],
+                                      "has_more": True, "last_id": "claude-a"})
+        raise TimeoutError("slow")
+    endpoint(handler)
+    found = discovery.listing("anthropic", api_key="k",
+                              base_url="https://api.anthropic.com/v1",
+                              cache_root=tmp_path)
+    assert found.source == "unavailable"
+    assert "TimeoutError" in found.error
+
+
+def test_an_anthropic_malformed_page_is_not_a_live_listing(tmp_path, endpoint):
+    endpoint(_anthropic_pages({
+        "": FakeResponse(200, {"data": [{"id": "claude-a"}],
+                               "has_more": True, "last_id": "claude-a"}),
+        "claude-a": FakeResponse(200, ValueError("not json")),
+    }))
+    found = discovery.listing("anthropic", api_key="k",
+                              base_url="https://api.anthropic.com/v1",
+                              cache_root=tmp_path)
+    assert found.source == "unavailable"
+    assert "ValueError" in found.error
+
+
+def test_has_more_without_a_cursor_is_incomplete(tmp_path, endpoint):
+    endpoint(_ok({"data": [{"id": "claude-a"}], "has_more": True}))
+    found = discovery.listing("anthropic", api_key="k",
+                              base_url="https://api.anthropic.com/v1",
+                              cache_root=tmp_path)
+    assert found.source == "unavailable"
+    assert "cursor" in found.error
+
+
+def test_a_repeated_cursor_is_incomplete(tmp_path, endpoint):
+    endpoint(_ok({"data": [{"id": "claude-a"}],
+                  "has_more": True, "last_id": "same"}))
+    found = discovery.listing("anthropic", api_key="k",
+                              base_url="https://api.anthropic.com/v1",
+                              cache_root=tmp_path)
+    assert found.source == "unavailable"
+    assert "repeated" in found.error
+
+
+def test_the_page_limit_is_not_treated_as_complete(tmp_path, endpoint):
+    def handler(url, kwargs):
+        after = (kwargs.get("params") or {}).get("after_id", "") or "start"
+        return FakeResponse(200, {"data": [{"id": f"m-{after}"}],
+                                  "has_more": True, "last_id": f"c-{after}"})
+    endpoint(handler)
+    found = discovery.listing("anthropic", api_key="k",
+                              base_url="https://api.anthropic.com/v1",
+                              cache_root=tmp_path)
+    assert found.source == "unavailable"
+    assert "page limit" in found.error
+
+
+def test_an_incomplete_refresh_preserves_the_complete_cache(tmp_path, endpoint):
+    _write("anthropic", "https://api.anthropic.com/v1",
+           [discovery.Model(id="claude-old")],
+           age=discovery.FRESH_FOR + 10, root=tmp_path, api_key="k")
+    endpoint(_anthropic_pages({
+        "": FakeResponse(200, {"data": [{"id": "claude-a"}],
+                               "has_more": True, "last_id": "claude-a"}),
+        "claude-a": FakeResponse(500, {}),
+    }))
+    found = discovery.listing("anthropic", api_key="k",
+                              base_url="https://api.anthropic.com/v1",
+                              cache_root=tmp_path, refresh=True)
+    assert found.source == "stale"
+    assert [m.id for m in found.models] == ["claude-old"]
+
+
+def test_an_incomplete_walk_never_writes_a_cache(tmp_path, endpoint):
+    endpoint(_ok({"data": [{"id": "claude-a"}], "has_more": True}))
+    discovery.listing("anthropic", api_key="k",
+                      base_url="https://api.anthropic.com/v1", cache_root=tmp_path)
+    assert not list((tmp_path / "cache").glob("models-anthropic-*.json"))
+
+
+# --------------------------------------------------------------------------- #
+# agent-facing filtering
+# --------------------------------------------------------------------------- #
+
+
+def test_as_dict_exposes_the_agent_set_and_the_raw_set(tmp_path, endpoint):
+    endpoint(_ok({"data": [
+        {"id": "image", "architecture": {"output_modalities": ["image"]}},
+        {"id": "text", "architecture": {"output_modalities": ["text"]}},
+        {"id": "unknown"},
+    ]}))
+    found = discovery.listing("openrouter",
+                              base_url="https://openrouter.ai/api/v1",
+                              cache_root=tmp_path)
+    payload = found.as_dict()
+    assert {m["id"] for m in payload["models"]} == {"text", "unknown"}
+    assert {m["id"] for m in payload["all_models"]} == {"image", "text", "unknown"}
+
+
+def test_the_adapter_lists_only_agent_models(tmp_path, endpoint):
+    from comodor.config import ProviderConfig
+    from comodor.providers.gateway import build_provider
+
+    endpoint(_ok({"data": [
+        {"id": "image", "architecture": {"output_modalities": ["image"]}},
+        {"id": "text", "architecture": {"output_modalities": ["text"]}},
+    ]}))
+    provider = build_provider(ProviderConfig(
+        name="openai", kind="openai", base_url="https://x/v1", api_key="k"))
+    try:
+        assert provider.list_models() == ["text"]
+    finally:
+        provider.close()
+
+
+def test_a_custom_provider_unknown_model_is_still_selectable(tmp_path, endpoint):
+    endpoint(_ok({"data": [{"id": "whatever-1"}]}))
+    found = discovery.listing("custom", base_url="https://my-endpoint/v1",
+                              cache_root=tmp_path)
+    assert [m.id for m in found.agent_models] == ["whatever-1"]
+
+
+# --------------------------------------------------------------------------- #
+# the cache is scoped to the credential/header set
+# --------------------------------------------------------------------------- #
+
+
+def test_the_same_credential_reuses_the_cache(tmp_path, endpoint):
+    def explode(url, kwargs):
+        raise AssertionError("the cache should have been used")
+    endpoint(explode)
+    _write("openai", "https://x/v1", [discovery.Model(id="m")],
+           root=tmp_path, api_key="key-A")
+    found = discovery.listing("openai", api_key="key-A",
+                              base_url="https://x/v1", cache_root=tmp_path)
+    assert found.source == "cached"
+
+
+def test_a_changed_credential_does_not_reuse_the_cache(tmp_path, endpoint):
+    endpoint(_ok({"data": [{"id": "b-model"}]}))
+    _write("openai", "https://x/v1", [discovery.Model(id="a-model")],
+           root=tmp_path, api_key="key-A")
+    found = discovery.listing("openai", api_key="key-B",
+                              base_url="https://x/v1", cache_root=tmp_path)
+    assert found.source == "live"
+    assert [m.id for m in found.models] == ["b-model"]
+
+
+def test_a_changed_tenant_header_does_not_reuse_the_cache(tmp_path, endpoint):
+    endpoint(_ok({"data": [{"id": "b-model"}]}))
+    _write("openai", "https://x/v1", [discovery.Model(id="a-model")],
+           root=tmp_path, api_key="k", headers={"X-Tenant": "A"})
+    found = discovery.listing("openai", api_key="k", base_url="https://x/v1",
+                              cache_root=tmp_path, headers={"X-Tenant": "B"})
+    assert found.source == "live"
+
+
+def test_reordered_headers_are_the_same_scope():
+    assert discovery.scope_for("openai", "k", {"A": "1", "B": "2"}) == \
+        discovery.scope_for("openai", "k", {"B": "2", "A": "1"})
+
+
+def test_no_secret_appears_in_the_cache_path_or_content(tmp_path, endpoint):
+    endpoint(_ok({"data": [{"id": "m"}]}))
+    discovery.listing("openai", api_key="sk-secret", base_url="https://x/v1",
+                      cache_root=tmp_path, headers={"X-Tenant": "tenant-secret"})
+    for path in (tmp_path / "cache").glob("*"):
+        assert "sk-secret" not in path.name
+        assert "tenant-secret" not in path.name
+        text = path.read_text(encoding="utf-8")
+        assert "sk-secret" not in text
+        assert "tenant-secret" not in text
+
+
+def test_a_public_listing_still_caches(tmp_path, endpoint):
+    endpoint(_ok({"data": [{"id": "m"}]}))
+    discovery.listing("openai", base_url="https://x/v1", cache_root=tmp_path)
+    assert discovery.cached("openai", "https://x/v1", tmp_path) is not None

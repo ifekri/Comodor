@@ -1874,9 +1874,21 @@ def load(cwd: Path | str | None = None, overrides: dict[str, Any] | None = None,
                                      document.get("providers", {}))
         # A project may say which servers it uses; they arrive switched off.
         _apply_mcp(config.mcp, document.get("mcp"), trusted=trusted)
+        refused_provider = False
         if document.get("provider"):
-            config.provider = str(document["provider"])
-        if document.get("model"):
+            candidate = str(document["provider"])
+            if trusted or candidate not in catalogue.RETIRED:
+                config.provider = candidate
+            else:
+                # A project pin to a provider Comodor no longer supports must
+                # not trap the user or override their explicit choice: it is
+                # refused as an invalid project override, reported, and the
+                # tracked file is left alone.
+                config.project_refused.append(
+                    f"provider {candidate!r} "
+                    f"({catalogue.RETIRED[candidate]}) is no longer supported")
+                refused_provider = True
+        if document.get("model") and not refused_provider:
             config.model = str(document["model"])
 
     if use_environment:

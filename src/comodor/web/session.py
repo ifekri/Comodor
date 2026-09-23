@@ -556,7 +556,8 @@ class Session:
                 api_key=entry.api_key if entry else "",
                 base_url=entry.base_url if entry else "",
                 cache_root=self.config.paths.user,
-                refresh=refresh)
+                refresh=refresh,
+                headers=entry.headers if entry else None)
         except Exception as error:
             return {"provider": provider, "models": [], "source": "unavailable",
                     "error": f"{type(error).__name__}", "age_seconds": 0}
@@ -1126,8 +1127,12 @@ class Session:
 
             kept = discovery.cached(self.config.provider,
                                     entry.base_url if entry else "",
-                                    self.config.paths.user)
-            available = [item.id for item in (kept.models if kept else [])]
+                                    self.config.paths.user,
+                                    api_key=entry.api_key if entry else "",
+                                    headers=entry.headers if entry else None)
+            # The agent-facing set: a model the provider marks as non-agent is
+            # not offered as a Comodor model.
+            available = [item.id for item in (kept.agent_models if kept else [])]
             models = sorted({
                 *available,
                 *( (entry.model,) if entry and entry.model else () ),

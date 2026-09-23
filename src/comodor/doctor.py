@@ -318,7 +318,9 @@ def _check_model(config: Config) -> Finding | None:
                        remedy="run `comodor setup`")
 
     try:
-        kept = discovery.cached(config.provider, entry.base_url, config.paths.user)
+        kept = discovery.cached(config.provider, entry.base_url,
+                                config.paths.user,
+                                api_key=entry.api_key, headers=entry.headers)
     except Exception:
         kept = None
 

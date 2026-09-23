@@ -29,8 +29,8 @@ def settings(tmp_path):
 def a_cached_catalogue(root, provider: str, entries: list[dict]):
     """What the model picker leaves on disk after listing a provider.
 
-    Written through the module's own writer so the endpoint-aware cache
-    identity stays in one place.
+    Written through the module's own writer so the endpoint- and
+    credential-aware cache identity stays in one place.
     """
     from comodor.providers import models as discovery
 
@@ -40,7 +40,8 @@ def a_cached_catalogue(root, provider: str, entries: list[dict]):
             models=[discovery.Model(**entry) for entry in entries],
             fetched_at=1.0,
             endpoint=discovery.endpoint_of(provider)),
-        root)
+        root,
+        scope=discovery.scope_for(provider))
 
 
 # --------------------------------------------------------------------------- #

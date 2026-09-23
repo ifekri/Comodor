@@ -362,14 +362,17 @@ class AnthropicProvider:
         """Anthropic's own model list, through the one discovery path.
 
         Delegates to `providers.models.listing`, which walks the paginated
-        endpoint. A failed request yields nothing here rather than a static
-        list of Claude names presented as current availability.
+        endpoint and reports an incomplete walk as incomplete. A failed request
+        yields nothing here rather than a static list of Claude names presented
+        as current availability. Configured extra headers travel with the
+        request, and the agent-facing set is returned.
         """
         from . import models as discovery
 
         found = discovery.listing(self.name, api_key=self.api_key,
-                                  base_url=self.base_url)
-        return [model.id for model in found.models]
+                                  base_url=self.base_url,
+                                  headers=self.extra_headers)
+        return [model.id for model in found.agent_models]
 
     def close(self) -> None:
         self._session.close()

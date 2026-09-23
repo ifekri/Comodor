@@ -7,12 +7,17 @@ alone publishes four hundred models and the catalogue named six of them, three
 of which were a year old. Somebody picking from that list is picking from a
 list of what was true when the file was edited.
 
-So the list comes from the provider. Four things make that safe to do on a path
+So the list comes from the provider. Five things make that safe to do on a path
 somebody is waiting on:
 
 **No key needed, where none is needed.** OpenRouter and the local runtimes
 publish their catalogues to anybody. That is the common case and it costs
 nothing to ask.
+
+**The request carries what the provider's own requests carry.** Authentication
+and any configured extra headers (tenant, workspace, routing) travel with the
+``/models`` call, so an endpoint that needs them is not a provider that
+"generates but cannot list".
 
 **Cached, with the age visible.** A fetch per panel open would be rude to the
 provider and slow for the user. The answer is kept on disk and re-used until it
@@ -23,11 +28,15 @@ is stale, and what is returned says when it was fetched — so a caller can show
 cached list is served and marked stale. If there is no cache either, nothing is
 served as availability: the caller gets an empty list, the reason, and a small
 hand-written *fallback hint* kept deliberately separate and labelled unverified.
-A static list is never presented as the provider's current models.
+A static list is never presented as the provider's current models. An
+*incomplete* listing — a paginated walk that did not finish — is not
+authoritative either, and is never cached as if it were.
 
-**A cache belongs to one endpoint.** The cache identity is the provider *and*
-its normalized base URL, so a list fetched from a custom endpoint is never
-served as though it came from a different one.
+**A cache belongs to one endpoint and one credential.** The cache identity is
+the provider, its normalized base URL, *and* a non-reversible fingerprint of the
+effective credential/header scope. Two accounts behind one endpoint can see
+different models, so account A's list must not be served to account B. Only a
+bounded digest is kept; no key, token or header value is ever stored or logged.
 """
 
 from __future__ import annotations
@@ -54,10 +63,25 @@ TIMEOUT = (4.0, 8.0)
 
 #: Pagination guards. A provider that never says "that is all" must not hang
 #: the picker, so the loop is bounded by pages and by models and every request
-#: carries its own timeout.
+#: carries its own timeout. Reaching a bound is *not* a complete listing.
 MAX_PAGES = 10
 MAX_MODELS = 1000
 PAGE_LIMIT = 100
+
+#: Application headers a provider's own adapter sends on every request. A
+#: ``/models`` request must carry them too: a provider that attributes or
+#: routes on them would otherwise list nothing while generation still worked.
+#: The values match the adapter's own defaults; this is the one source both
+#: read.
+_APP_HEADERS: dict[str, dict[str, str]] = {
+    "openrouter": {"HTTP-Referer": "https://github.com/ifekri/comodor",
+                   "X-Title": "Comodor"},
+}
+
+
+def app_headers(provider: str) -> dict[str, str]:
+    """The provider's own application headers, by provider id."""
+    return dict(_APP_HEADERS.get(provider, {}))
 
 
 @dataclass
@@ -102,10 +126,11 @@ class Listing:
 
     provider: str
     models: list[Model] = field(default_factory=list)
-    #: "live" — asked just now. "cached" — asked recently, re-used.
-    #: "stale" — the cache is old and the provider could not be reached.
-    #: "unavailable" — nothing could be asked and there is no cache; `models`
-    #: is empty and `fallback` carries an unverified onboarding hint.
+    #: "live" — asked just now, and the walk finished. "cached" — asked
+    #: recently, re-used. "stale" — the cache is old and the provider could not
+    #: be reached, or the walk did not finish. "unavailable" — nothing could be
+    #: asked and there is no cache; `models` is empty and `fallback` carries an
+    #: unverified onboarding hint.
     source: str = "unavailable"
     fetched_at: float = 0.0
     error: str = ""
@@ -122,17 +147,21 @@ class Listing:
 
     @property
     def agent_models(self) -> list[Model]:
-        """Models whose structured type metadata does not say "not for an agent".
+        """The agent-facing set: everything whose type is not "not an agent".
 
         A model whose type is unknown stays: "we do not know" is not a reason
-        to hide something the provider says is available.
+        to hide something the provider says is available. Only structured
+        metadata that says the model is not a text/agent model removes it.
         """
         return [model for model in self.models if model.category != "other"]
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "provider": self.provider,
-            "models": [model.as_dict() for model in self.models],
+            # The picker set: a caller that offers models to an agent gets the
+            # agent-facing set. The full listing is still here for diagnostics.
+            "models": [model.as_dict() for model in self.agent_models],
+            "all_models": [model.as_dict() for model in self.models],
             "source": self.source,
             "fetched_at": self.fetched_at,
             "age_seconds": round(self.age_seconds),
@@ -154,31 +183,79 @@ def endpoint_of(provider: str, base_url: str = "") -> str:
     return (raw or "").strip().rstrip("/")
 
 
+def effective_headers(provider: str, api_key: str = "",
+                      extra: dict[str, str] | None = None) -> dict[str, str]:
+    """The headers a discovery request carries, merged one way.
+
+    Authentication first, then the provider's own application headers, then the
+    configured extra headers (which win). Header names are compared
+    case-insensitively by HTTP, so a custom header may not silently duplicate an
+    authentication header under a different case. No value is logged.
+    """
+    headers: dict[str, str] = {}
+    if api_key:
+        if provider == "anthropic":
+            headers["x-api-key"] = api_key
+            headers["anthropic-version"] = "2023-06-01"
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
+    headers.update(app_headers(provider))
+    for name, value in (extra or {}).items():
+        if name and value is not None:
+            headers[str(name)] = str(value)
+    return headers
+
+
+def auth_scope(headers: dict[str, str] | None) -> str:
+    """A non-reversible fingerprint of the credential/header scope.
+
+    Availability depends on who is asking: two accounts behind one endpoint can
+    see different models, so the cache must not carry one account's list into
+    another. Only a bounded SHA-256 digest is kept — never a raw key, token or
+    header value — and header order does not change the identity.
+    """
+    if not headers:
+        return "public"
+    material = "\n".join(f"{str(name).lower()}\u0000{headers[name]}"
+                         for name in sorted(headers, key=lambda n: str(n).lower()))
+    return hashlib.sha256(material.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def scope_for(provider: str, api_key: str = "",
+              headers: dict[str, str] | None = None) -> str:
+    """The cache scope for one provider and credential/header set."""
+    return auth_scope(effective_headers(provider, api_key, headers))
+
+
 def listing(provider: str, api_key: str = "", base_url: str = "",
-            cache_root: Path | None = None, refresh: bool = False) -> Listing:
+            cache_root: Path | None = None, refresh: bool = False,
+            headers: dict[str, str] | None = None) -> Listing:
     """Every model this provider offers, from the provider where possible.
 
-    Live first; a fresh cache next; an old cache only as stale evidence; and
-    nothing but a labelled fallback hint when neither is available. A `refresh`
-    that fails leaves the last cache in place rather than destroying it.
+    Live first (and only when the listing is complete); a fresh cache next; an
+    old cache only as stale evidence; and nothing but a labelled fallback hint
+    when neither is available. An incomplete listing and a failed `refresh`
+    both leave the last cache in place rather than destroying or overwriting
+    it, and neither is ever cached as authoritative.
     """
     spec = catalogue.get(provider)
     endpoint = endpoint_of(provider, base_url)
+    scope = scope_for(provider, api_key, headers)
 
-    cached = _read_cache(provider, cache_root, endpoint)
+    cached = _read_cache(provider, cache_root, endpoint, scope)
     if cached and not refresh and cached.age_seconds < FRESH_FOR:
         cached.source = "cached"
         return cached
 
-    fetched, why = _ask(provider, endpoint, api_key)
-    if fetched:
-        found = Listing(provider=provider, models=fetched, source="live",
+    models, why, complete = _ask(provider, endpoint, api_key, headers)
+    if complete and models:
+        found = Listing(provider=provider, models=models, source="live",
                         fetched_at=time.time(), endpoint=endpoint)
-        _write_cache(found, cache_root)
+        _write_cache(found, cache_root, scope)
         return found
 
+    # Not an authoritative listing: never mark it live, never write a cache.
     if cached:
-        # Old, and still the truth as of when it was asked. Said to be old.
         cached.source = "stale"
         cached.error = why
         return cached
@@ -189,53 +266,49 @@ def listing(provider: str, api_key: str = "", base_url: str = "",
 
 
 def cached(provider: str, base_url: str = "",
-           cache_root: Path | None = None) -> Listing | None:
+           cache_root: Path | None = None, api_key: str = "",
+           headers: dict[str, str] | None = None) -> Listing | None:
     """The last list kept on disk, if any, with no network call.
 
     `source` is `cached` while the list is still fresh and `stale` once it is
-    old. `None` when nothing has been kept for this provider and endpoint — in
-    which case availability is unknown, not false. This is the offline reader
-    for a caller that must not touch the network (e.g. `comodor doctor`).
+    old. `None` when nothing has been kept for this provider, endpoint and
+    credential scope — in which case availability is unknown, not false. This
+    is the offline reader for a caller that must not touch the network (e.g.
+    `comodor doctor`).
     """
     endpoint = endpoint_of(provider, base_url)
-    found = _read_cache(provider, cache_root, endpoint)
+    scope = scope_for(provider, api_key, headers)
+    found = _read_cache(provider, cache_root, endpoint, scope)
     if found is None:
         return None
     found.source = "cached" if found.age_seconds < FRESH_FOR else "stale"
     return found
 
 
-def _ask(provider: str, base_url: str, api_key: str) -> tuple[list[Model], str]:
-    """One request (or a bounded page-walk), or a reason there is no answer."""
+def _ask(provider: str, base_url: str, api_key: str,
+         headers: dict[str, str] | None) -> tuple[list[Model], str, bool]:
+    """A request (or a bounded page-walk): `(models, reason, complete)`.
+
+    `complete` is true only when the provider's answer is the whole list. A
+    single OpenAI-style response is complete when it arrives; a paginated walk
+    is complete only when it reaches the end. A partial walk is returned with
+    `complete=False`, so the caller never treats it as authoritative.
+    """
     if not base_url:
-        return [], "that provider has no endpoint to ask"
+        return [], "that provider has no endpoint to ask", False
 
     from ..net import http
 
     session = http.Session()
     try:
         if provider == "anthropic":
-            return _ask_anthropic(session, base_url, api_key)
-        return _ask_openai(session, base_url, api_key, provider)
+            return _ask_anthropic(session, base_url, api_key, headers)
+        return _ask_openai(session, base_url, api_key, headers, provider)
     finally:
         try:
             session.close()
         except Exception:
             pass
-
-
-def _headers(provider: str, api_key: str) -> dict[str, str]:
-    headers: dict[str, str] = {}
-    if not api_key:
-        return headers
-    # Anthropic wants its own header; everything else here is
-    # OpenAI-compatible and takes a bearer token.
-    if provider == "anthropic":
-        headers["x-api-key"] = api_key
-        headers["anthropic-version"] = "2023-06-01"
-    else:
-        headers["Authorization"] = f"Bearer {api_key}"
-    return headers
 
 
 def _status_reason(status: int) -> str:
@@ -245,65 +318,74 @@ def _status_reason(status: int) -> str:
 
 
 def _ask_openai(session: Any, base_url: str, api_key: str,
-                provider: str) -> tuple[list[Model], str]:
+                headers: dict[str, str] | None,
+                provider: str) -> tuple[list[Model], str, bool]:
     url = f"{base_url.rstrip('/')}/models"
     try:
-        response = session.get(url, headers=_headers(provider, api_key),
+        response = session.get(url,
+                               headers=effective_headers(provider, api_key, headers),
                                timeout=TIMEOUT)
         if response.status_code >= 400:
-            return [], _status_reason(response.status_code)
+            return [], _status_reason(response.status_code), False
         payload = response.json()
     except Exception as error:
-        return [], f"{type(error).__name__}"
+        return [], f"{type(error).__name__}", False
 
     models = _parse(payload, provider)
-    return (models, "") if models else ([], "the provider listed nothing")
+    if not models:
+        return [], "the provider listed nothing", True
+    return models, "", True
 
 
-def _ask_anthropic(session: Any, base_url: str,
-                   api_key: str) -> tuple[list[Model], str]:
+def _ask_anthropic(session: Any, base_url: str, api_key: str,
+                   headers: dict[str, str] | None) -> tuple[list[Model], str, bool]:
     """Anthropic's model list, walked a page at a time.
 
     Its endpoint is paginated (`has_more` / `last_id`), so asking once shows
     only the first page. The walk is bounded by `MAX_PAGES` and `MAX_MODELS`,
     de-duplicates ids, and stops the moment the provider says there is no more.
+    A walk that hits a bound, a repeated cursor, a missing cursor or a failing
+    page is **incomplete** and is reported as such — never as a live listing.
     """
     url = f"{base_url.rstrip('/')}/models"
+    request_headers = effective_headers("anthropic", api_key, headers)
     collected: list[Model] = []
     seen: set[str] = set()
+    cursors: set[str] = set()
     after = ""
     for _ in range(MAX_PAGES):
         params: dict[str, Any] = {"limit": PAGE_LIMIT}
         if after:
             params["after_id"] = after
         try:
-            response = session.get(url, headers=_headers("anthropic", api_key),
-                                   params=params, timeout=TIMEOUT)
+            response = session.get(url, headers=request_headers, params=params,
+                                   timeout=TIMEOUT)
             if response.status_code >= 400:
-                if collected:
-                    return collected, ""
-                return [], _status_reason(response.status_code)
+                return collected, _status_reason(response.status_code), False
             payload = response.json()
         except Exception as error:
-            # A page that failed after some succeeded still gave us evidence.
-            if collected:
-                return collected, ""
-            return [], f"{type(error).__name__}"
+            return collected, f"{type(error).__name__}", False
 
         for model in _parse(payload, "anthropic"):
             if model.id and model.id not in seen:
                 seen.add(model.id)
                 collected.append(model)
 
-        if len(collected) >= MAX_MODELS:
-            break
         more = bool(payload.get("has_more")) if isinstance(payload, dict) else False
+        if not more:
+            return collected, ("" if collected else "the provider listed nothing"), True
+
         last_id = str(payload.get("last_id") or "") if isinstance(payload, dict) else ""
-        if not more or not last_id:
-            break
+        if not last_id:
+            return collected, "the provider's page had no cursor", False
+        if last_id == after or last_id in cursors:
+            return collected, "the provider's paging cursor repeated", False
+        if len(collected) >= MAX_MODELS:
+            return collected, "the model list exceeded the discovery limit", False
+        cursors.add(last_id)
         after = last_id
 
-    return (collected, "") if collected else ([], "the provider listed nothing")
+    return collected, "the model list exceeded the page limit", False
 
 
 def _parse(payload: Any, provider: str = "") -> list[Model]:
@@ -414,37 +496,40 @@ def _per_million(value: Any) -> float | None:
 # --------------------------------------------------------------------------- #
 
 
-def _endpoint_key(endpoint: str) -> str:
-    """A short, non-secret identity for an endpoint, for the cache filename."""
-    if not endpoint:
+def _digest(value: str) -> str:
+    """A short, non-reversible identity for a cache key component."""
+    if not value:
         return "default"
-    return hashlib.sha1(endpoint.encode("utf-8", "replace")).hexdigest()[:12]
+    return hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()[:12]
 
 
-def _cache_file(provider: str, cache_root: Path | None,
-                endpoint: str = "") -> Path | None:
+def _cache_file(provider: str, cache_root: Path | None, endpoint: str = "",
+                scope: str = "public") -> Path | None:
     if cache_root is None:
         return None
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in provider)
-    return Path(cache_root) / "cache" / f"models-{safe}-{_endpoint_key(endpoint)}.json"
+    return (Path(cache_root) / "cache"
+            / f"models-{safe}-{_digest(endpoint)}-{_digest(scope)}.json")
 
 
-def _read_cache(provider: str, cache_root: Path | None,
-                endpoint: str = "") -> Listing | None:
-    path = _cache_file(provider, cache_root, endpoint)
+def _read_cache(provider: str, cache_root: Path | None, endpoint: str = "",
+                scope: str = "public") -> Listing | None:
+    path = _cache_file(provider, cache_root, endpoint, scope)
     if path is None or not path.is_file():
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        stored = str(payload.get("endpoint") or "")
-        if endpoint and stored and stored != endpoint:
-            # A cache for a different endpoint is not this endpoint's answer.
+        stored_endpoint = str(payload.get("endpoint") or "")
+        stored_scope = str(payload.get("scope") or "")
+        if endpoint and stored_endpoint and stored_endpoint != endpoint:
+            return None
+        if stored_scope and stored_scope != scope:
             return None
         return Listing(
             provider=provider,
             models=[Model(**entry) for entry in payload.get("models", [])],
             fetched_at=float(payload.get("fetched_at") or 0.0),
-            endpoint=stored or endpoint,
+            endpoint=stored_endpoint or endpoint,
         )
     except Exception:
         # A half-written or hand-edited cache is a cache to ignore, never a
@@ -452,8 +537,9 @@ def _read_cache(provider: str, cache_root: Path | None,
         return None
 
 
-def _write_cache(found: Listing, cache_root: Path | None) -> None:
-    path = _cache_file(found.provider, cache_root, found.endpoint)
+def _write_cache(found: Listing, cache_root: Path | None,
+                 scope: str = "public") -> None:
+    path = _cache_file(found.provider, cache_root, found.endpoint, scope)
     if path is None:
         return
     try:
@@ -461,6 +547,7 @@ def _write_cache(found: Listing, cache_root: Path | None) -> None:
         path.write_text(json.dumps({
             "fetched_at": found.fetched_at,
             "endpoint": found.endpoint,
+            "scope": scope,
             "models": [model.as_dict() for model in found.models],
         }), encoding="utf-8")
     except OSError:

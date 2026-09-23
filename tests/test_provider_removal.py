@@ -99,3 +99,65 @@ def test_an_old_bai_key_is_not_forwarded_to_another_provider(tmp_path):
     for entry in config.providers.values():
         assert "sk-bai-secret" not in (entry.api_key or "")
         assert "sk-bai-secret" not in " ".join(entry.api_keys or [])
+
+
+# --------------------------------------------------------------------------- #
+# a project pin must not re-trap the user
+# --------------------------------------------------------------------------- #
+
+
+def _write_project(tmp_path, document: dict):
+    project = tmp_path / "project"
+    (project / ".comodor").mkdir(parents=True, exist_ok=True)
+    (project / ".comodor" / "config.json").write_text(
+        json.dumps(document), encoding="utf-8")
+    return project
+
+
+def test_a_project_pin_to_a_retired_provider_does_not_override_the_user(tmp_path):
+    """A tracked project file pinning B.AI must not override the replacement
+    the user explicitly selected."""
+    _write_config(tmp_path, {"provider": "openrouter",
+                             "providers": {"openrouter": {"api_key": "sk-or"}}})
+    project = _write_project(tmp_path, {"provider": "bai"})
+
+    config = load(cwd=project)
+
+    assert config.provider == "openrouter", \
+        "a stale project pin must not override the user's explicit choice"
+    assert config.active() is not None
+    assert any("bai" in reason for reason in config.project_refused)
+
+
+def test_a_project_pin_to_a_retired_provider_is_reported(tmp_path):
+    _write_config(tmp_path, {"providers": {"openrouter": {"api_key": "sk-or"}}})
+    project = _write_project(tmp_path, {"provider": "bai"})
+
+    config = load(cwd=project)
+
+    assert any("no longer supported" in reason for reason in config.project_refused)
+
+
+def test_a_project_pin_to_a_retired_provider_loads_no_key(tmp_path):
+    _write_config(tmp_path, {"providers": {"openrouter": {"api_key": "sk-or"}}})
+    project = _write_project(tmp_path, {
+        "provider": "bai",
+        "providers": {"bai": {"api_key": "sk-bai"}},
+    })
+
+    config = load(cwd=project)
+
+    assert "bai" not in config.providers
+    assert all("sk-bai" not in (entry.api_key or "")
+               for entry in config.providers.values())
+
+
+def test_a_project_pin_alone_still_requires_setup(tmp_path):
+    """Nothing but a retired project pin: no supported provider is auto-picked."""
+    project = _write_project(tmp_path, {"provider": "bai"})
+
+    config = load(cwd=project)
+
+    assert config.needs_setup is True
+    assert config.active() is None
+    assert any("bai" in reason for reason in config.project_refused)

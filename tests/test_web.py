@@ -1500,7 +1500,7 @@ def test_the_model_list_does_not_invent_availability(served, monkeypatch):
     fault this exists to fix."""
     from comodor.providers import models as model_list
 
-    monkeypatch.setattr(model_list, "_ask", lambda *a, **k: ([], "no network"))
+    monkeypatch.setattr(model_list, "_ask", lambda *a, **k: ([], "no network", False))
 
     _, listing = call(served, "/api/models?provider=anthropic", token=served.token)
 
@@ -1508,6 +1508,22 @@ def test_the_model_list_does_not_invent_availability(served, monkeypatch):
     assert listing["error"] == "no network"
     assert listing["models"] == []
     assert listing["fallback"], "the hand-written hint is offered separately"
+
+
+def test_the_web_model_picker_uses_the_agent_facing_set(served, monkeypatch):
+    """A model the provider marks as non-agent is not offered to the agent,
+    while the raw listing keeps it for diagnostics."""
+    from comodor.providers import models as model_list
+
+    monkeypatch.setattr(model_list, "_ask", lambda *a, **k: (
+        [model_list.Model(id="image", category="other"),
+         model_list.Model(id="text", category="agent"),
+         model_list.Model(id="unknown")], "", True))
+
+    _, listing = call(served, "/api/models?provider=openai", token=served.token)
+
+    assert {m["id"] for m in listing["models"]} == {"text", "unknown"}
+    assert {m["id"] for m in listing["all_models"]} == {"image", "text", "unknown"}
 
 
 def test_a_price_nobody_stated_is_not_shown_as_free():
