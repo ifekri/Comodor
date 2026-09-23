@@ -1262,7 +1262,14 @@ class Config:
 
     @property
     def needs_setup(self) -> bool:
-        """Whether there is anything usable at all."""
+        """Whether there is anything usable at all.
+
+        A saved provider Comodor no longer supports counts as needing setup:
+        the user must choose a replacement explicitly, rather than have a
+        prompt (and a stored key) sent somewhere they did not pick.
+        """
+        if self.provider in catalogue.RETIRED:
+            return True
         return not self.available()
 
     def use(self, provider_id: str, api_key: str = "", model: str = "",
@@ -1786,6 +1793,13 @@ def _apply_provider_settings(providers: dict[str, ProviderConfig],
     for name, values in (stored or {}).items():
         if not isinstance(values, dict):
             continue
+        if name in catalogue.RETIRED:
+            # A provider Comodor no longer ships is not loaded as a usable
+            # entry: keeping its stored key live would silently reuse a
+            # credential for a provider that is no longer supported. The saved
+            # section stays in the file, unread, until the user picks a
+            # replacement.
+            continue
         entry = providers.get(name)
         if entry is None:
             entry = ProviderConfig(name=name, label=name.title())
@@ -1880,9 +1894,21 @@ def load(cwd: Path | str | None = None, overrides: dict[str, Any] | None = None,
                                      document.get("providers", {}))
         # A project may say which servers it uses; they arrive switched off.
         _apply_mcp(config.mcp, document.get("mcp"), trusted=trusted)
+        refused_provider = False
         if document.get("provider"):
-            config.provider = str(document["provider"])
-        if document.get("model"):
+            candidate = str(document["provider"])
+            if trusted or candidate not in catalogue.RETIRED:
+                config.provider = candidate
+            else:
+                # A project pin to a provider Comodor no longer supports must
+                # not trap the user or override their explicit choice: it is
+                # refused as an invalid project override, reported, and the
+                # tracked file is left alone.
+                config.project_refused.append(
+                    f"provider {candidate!r} "
+                    f"({catalogue.RETIRED[candidate]}) is no longer supported")
+                refused_provider = True
+        if document.get("model") and not refused_provider:
             config.model = str(document["model"])
 
     if use_environment:
@@ -1983,7 +2009,21 @@ def _apply_environment_sections(config: Config) -> None:
 
 
 def _choose_active(config: Config) -> None:
-    """Pick a usable provider, honouring the saved choice when it still works."""
+    """Pick a usable provider, honouring the saved choice when it still works.
+
+    A saved choice of a provider Comodor no longer ships is **not** swapped for
+    another: the user named one they recognised, and routing their prompt — and
+    a stored key — to a different paid provider without being asked is the one
+    outcome a removal must never produce. The name stays, the complaint names
+    it, and setup is required before model traffic.
+    """
+    if config.provider in catalogue.RETIRED:
+        label = catalogue.RETIRED[config.provider]
+        config.complaints.append(
+            f"provider {config.provider!r} ({label}) is no longer supported; "
+            f"run `comodor setup` to choose a replacement")
+        return
+
     entry = config.providers.get(config.provider)
     if entry is not None and entry.ready:
         if not config.model:

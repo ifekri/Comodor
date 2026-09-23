@@ -215,8 +215,8 @@ def test_an_empty_conversation_is_fine():
 # --------------------------------------------------------------------------- #
 # when it runs, which the cache decides
 #
-# Measured against two live endpoints: a repeated prefix comes back 99% cached
-# (MiMo 9,920 of 9,963; B.AI 8,576 of 8,637). Rewriting a message in the middle
+# Measured against a live endpoint: a repeated prefix comes back 99% cached
+# (MiMo 9,920 of 9,963). Rewriting a message in the middle
 # of the history stops everything after it matching, so the next request pays
 # full price for the tail. On every step that would cost more than it saves.
 # At the moment compaction would happen anyway it costs nothing extra —

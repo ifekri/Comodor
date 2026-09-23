@@ -1,7 +1,36 @@
 # Choosing a model
 
-Comodor works with anything that speaks the OpenAI or Anthropic API — seventeen
-providers out of the box, plus anything else with a URL.
+Comodor works with anything that speaks the OpenAI or Anthropic API — fifteen
+hosted providers and three local runtimes out of the box, plus anything else
+with a URL.
+
+---
+
+## Where the model list comes from
+
+The list of models a provider offers is fetched **from the provider**, not from
+a list written into Comodor. Model catalogues change weekly, so a hard-coded
+list would be wrong within a release.
+
+- **Live** — retrieved from the provider just now. This is authoritative.
+- **Cached** — retrieved recently and re-used, so opening a panel does not make
+  a request every time. The screen says how long ago it was checked.
+- **Stale** — the provider could not be reached and the last list is old. It is
+  shown as stale, never as current.
+- **No list** — the provider could not be queried and nothing was cached.
+  Comodor does not invent availability: you can type a model ID yourself. Any
+  small starting hint it offers is labelled unverified.
+
+The cache belongs to one provider **and one endpoint**, so a list from a custom
+URL is never served as though it came from somewhere else. Refreshing replaces
+the cache only after a successful response; a failed refresh keeps the last
+known list, marked stale.
+
+A model appearing in the list means the provider says it is available to your
+account. It does **not** by itself mean the model supports tools, vision,
+reasoning or streaming — those are only shown when the provider states them, and
+are otherwise left unknown. A model Comodor has never heard of is still
+selectable; only the provider's own list decides what is offered.
 
 ---
 
@@ -25,7 +54,7 @@ comodor setup        # pick one, once
 
 **Hosted, one key:** OpenRouter · Anthropic · OpenAI · Google Gemini ·
 DeepSeek · xAI (Grok) · Mistral · Groq · Cerebras · Moonshot (Kimi) ·
-Z.AI (GLM) · Qwen (DashScope) · Together AI · Fireworks · Xiaomi MiMo · B.AI
+Z.AI (GLM) · Qwen (DashScope) · Together AI · Fireworks · Xiaomi MiMo
 
 **On your machine, no key:** Ollama · LM Studio
 

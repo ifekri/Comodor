@@ -286,14 +286,23 @@ def _check_saved_provider(config: Config) -> Finding | None:
 
 
 def _check_model(config: Config) -> Finding | None:
-    """A model the provider does not offer fails on the first real request."""
+    """A model the provider does not offer fails on the first real request.
+
+    Availability comes from the provider, read from the list kept on disk — a
+    fresh one is evidence of what the provider returned recently, an old one is
+    described as stale, and no list at all means availability is *unknown*, not
+    false. The hand-written catalogue hint is never used to call a model
+    invalid, so a newly released model is not reported as broken.
+    """
     from . import catalogue
+    from .providers import models as discovery
 
     entry = config.providers.get(config.provider)
     if entry is None or not entry.ready:
         return None
 
     spec = catalogue.get(config.provider)
+    label = spec.label if spec is not None else config.provider
     model = config.active_model()
 
     if not model:
@@ -308,16 +317,31 @@ def _check_model(config: Config) -> Finding | None:
         return Finding("model", Status.FAIL, "no model is selected",
                        remedy="run `comodor setup`")
 
-    # Only a warning. The catalogue lists the models we know about, not every
-    # model a provider has ever served, and a new release should not be
-    # reported as broken.
-    if spec is not None and spec.models and model not in spec.models:
+    try:
+        kept = discovery.cached(config.provider, entry.base_url,
+                                config.paths.user,
+                                api_key=entry.api_key, headers=entry.headers)
+    except Exception:
+        kept = None
+
+    if kept is None or not kept.models:
+        # Nothing on disk to compare against. Availability is unknown.
+        return Finding("model", Status.OK, model)
+
+    if model in {item.id for item in kept.models}:
+        return Finding("model", Status.OK, model)
+
+    if kept.source == "cached":
         return Finding(
             "model", Status.WARN,
-            f"{model!r} is not in the known list for {spec.label}",
-            remedy=f"if requests fail, try {spec.default_model}")
-
-    return Finding("model", Status.OK, model)
+            f"{label} did not list {model!r} when its models were last checked",
+            remedy="pick a model the provider offers, or refresh the list")
+    hours = kept.age_seconds / 3600
+    return Finding(
+        "model", Status.WARN,
+        f"{model!r} was not in the list {label} returned "
+        f"{hours:.0f}h ago (availability may be stale)",
+        remedy="refresh the model list, or check the id")
 
 
 def _check_context_window(config: Config) -> Finding | None:

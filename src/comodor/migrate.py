@@ -356,7 +356,7 @@ def apply(reading: Found, config, take_keys: bool = True,
         wanted = config.model or outcome.model
         preferred = next(
             (spec for spec in landed
-             if wanted and (wanted == spec.default_model or wanted in spec.models)),
+             if wanted and (wanted == spec.default_model or wanted in spec.fallback_models)),
             landed[0])
         config.provider = preferred.id
         entry = config.providers.get(preferred.id)
@@ -369,11 +369,11 @@ def apply(reading: Found, config, take_keys: bool = True,
 def _known_model(model: str) -> bool:
     """Whether this agent could actually run that model.
 
-    Two places know about models and they know different amounts. The setup
-    catalogue lists a few well-known names per provider, for the wizard to
-    offer; the pricing registry knows every model it has a rate for. Asking
-    only the first refuses models the agent can perfectly well run, on the
-    grounds that the wizard would not have suggested them.
+    This is a compatibility question — "can Comodor drive it" — not an
+    availability one, so it may use the hand-written starting hints and the
+    pricing registry's known models. Availability is decided by the provider's
+    own live list, never here: a model absent from both of these is still
+    runnable if the provider offers it.
     """
     lowered = model.lower().strip()
     if not lowered:
@@ -382,7 +382,7 @@ def _known_model(model: str) -> bool:
     for spec in CATALOGUE:
         if spec.default_model and spec.default_model.lower() == lowered:
             return True
-        if any(known.lower() == lowered for known in spec.models):
+        if any(known.lower() == lowered for known in spec.fallback_models):
             return True
 
     from .providers import registry

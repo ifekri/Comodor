@@ -74,7 +74,7 @@ The goal is to make its decisions defensible.
 | **Permission-aware execution**   | Repository writes, commands and external actions remain subject to explicit capabilities, modes and authorization boundaries.                                  |
 | **Model independence**           | Hosted models, local runtimes and compatible endpoints can use the same agent architecture without coupling Comodor to one provider.                           |
 
-Comodor works with sixteen hosted providers and three local runtimes, and any OpenAI-compatible endpoint can be added as well.
+Comodor works with fifteen hosted providers and three local runtimes, and any OpenAI-compatible endpoint can be added as well.
 
 ---
 
