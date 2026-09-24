@@ -59,9 +59,10 @@
 ## Interactive Clarification — Requirement Completeness
 
 - [x] CHK024 Is an explicit waiting state defined for a clarification, distinct from answered, declined, cancelled and expired? [Completeness, Spec §The clarification interaction FR-018, FR-022]
-- [x] CHK025 Is it specified that dependent work must not continue before an answer, while independent work must not be blocked? [Clarity, Spec §The clarification interaction FR-018]
+- [ ] CHK025 Is it specified that dependent work must not continue before an answer, while independent work must not be blocked? [Clarity, Spec §The clarification interaction FR-018]
     - NEEDS CLARIFICATION: FR-018 forbids dependent work (satisfied) but only permits independent work ("MAY continue only where it is demonstrably independent"); nothing requires that independent work not be blocked, and FR-123 ends the run on a clarification-required outcome, which blocks independent work on non-interactive surfaces. Whether independent work MUST proceed while a clarification is outstanding, or merely MAY, is an owner decision.
     - Re-review 2026-09-24: SATISFIED — FR-018: independent work is permitted, not mandatory, and not prohibited by the outstanding clarification alone; dependent work pauses; uncertain dependency counts as dependent; the clarification is never bypassed. FR-123: a non-interactive run may finish identified, bounded independent work but starts no speculative work to delay the stop; D3.
+    - Post-D7–D9 re-review 2026-09-24: FAILED — FR-018, FR-123 and the D7 SC-002 now specify that demonstrably independent work is permitted (not mandatory) and that late-discovered decisions keep earlier mutations, but User Story 1's narrative still states the old blanket rule: "if a genuine decision remains it puts a short multiple-choice form on screen before it writes anything" (spec.md §User Story 1, first paragraph). Taken literally it forbids independent writes before the form and contradicts FR-013 late discovery, so spec.md is internally inconsistent on this criterion. The narrative needs to say that no write depending on the decision happens before the form.
 - [x] CHK026 Are option semantics defined — what an option must carry, and the difference between single-choice and multiple-choice? [Completeness, Spec §The clarification interaction FR-015, FR-021]
 - [x] CHK027 Is the mandatory final custom-answer row specified as a system-appended invariant the model can neither author nor remove, rather than as an instruction to the model? [Clarity, Spec §The clarification interaction FR-017]
 - [x] CHK028 Is it specified that free text entered into the custom row is carried back as the answer to that specific question? [Completeness, Spec §The clarification interaction FR-017]
@@ -231,3 +232,49 @@
 - Items CHK121–CHK123 are deliberate conflict probes: they pass only if the named pairs of requirements are shown to be reconcilable, not merely present
 - CHK115 and CHK021 are written as gap probes — they may fail against the current specification, which is the intended use of a gate
 - Add findings inline beneath an item rather than editing the item text, so the gate stays comparable across reviews
+
+## Post-D7–D9 Fresh Re-Review — 2026-09-24
+
+- Reviewed commit:
+  eb7bd6900cb730ef8c6e2a90b2e776a22b0cc588
+- Criteria reviewed fresh: 131
+- Satisfied: 130
+- Failed: 1 (CHK025)
+- Needs clarification: 0
+- D7 SC-002 consistency: FAIL — SC-002, FR-013, FR-018, FR-123, the User Story 1
+  Independent Test and acceptance scenarios agree, but the User Story 1
+  narrative still says the form appears "before it writes anything" (see
+  CHK025).
+- D8 Constitution XI surface audit: PASS — spec.md itself holds the normative
+  ten-row table, in canonical order, with one allowed status per row (nine
+  REQUIRED, Desktop NOT APPLICABLE) and evidence in every row. The planned
+  desktop application is kept distinct from the computer-use backend in
+  `src/comodor/desktop/`. Docker / Packaged Runtime is REQUIRED because the
+  packaged runtime ships the changed terminal bundle, although the container
+  configuration is unchanged. plan.md may add detail but cannot override the
+  table.
+- D9 decision_ref lifecycle: PASS — form/question lifecycle identity (FR-020,
+  FR-024) is kept separate from the semantic `decision_ref` (Operational
+  definitions, FR-034, FR-129). Unknown, malformed, stale, unresolvable and
+  missing-where-required references are rejected under FR-026/FR-129, applied
+  to no decision, never matched heuristically, authorise no dependent work,
+  leave every unresolved decision unresolved, and are reported to the caller.
+  Interactive pending forms are exempt through their existing association. The
+  uses of "stale" are distinguishable by the object each is attached to: a
+  form, or its lifecycle identifier, whose answers FR-024 ignores; versus a
+  `decision_ref` whose decision is no longer open, which FR-129 rejects and
+  reports. The two glosses of the latter — "no longer open" (FR-129) and
+  "already resolved" (Edge Cases) — denote the same state, since a real
+  answer is the only specified way a decision closes.
+- FR/SC/reference consistency: PASS — 130 unique FR IDs, 44 unique SC IDs, no
+  undefined reference, every range resolves, no clarification marker.
+- Clarification-record consistency: PASS — eighteen decisions, each naming the
+  FR/SC requirements or Constitution principle it binds.
+- Metadata sanity audit: FAIL — spec.md line 3 reads "**Feature Branch**:
+  `specs/002-grounded-agent-quality` (working branch to be created from
+  latest `main`; not yet created)". The branch exists as
+  `002-grounded-agent-quality` (PR #59), so the statement is factually stale
+  in both name and status. "Created: 2026-09-14", the Input text and
+  "Status: Draft" are not contradictory and pass.
+- Final specification gate: FAIL — the prior 131/131 result (704e47d) does not
+  carry over to this amended text.
