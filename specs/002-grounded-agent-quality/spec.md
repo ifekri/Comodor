@@ -1,6 +1,6 @@
 # Feature Specification: Grounded High-Quality Agent with Token-Efficient Context and Progressive Learning
 
-**Feature Branch**: `specs/002-grounded-agent-quality` (working branch to be created from latest `main`; not yet created)
+**Feature Branch**: `002-grounded-agent-quality`
 
 **Created**: 2026-09-14
 
@@ -62,7 +62,8 @@ A developer asks for something that a reasonable person could read two ways, or
 that depends on a fact the request never states and the repository does not
 settle. Instead of choosing a reading and building it, the agent gathers what
 evidence it can, and if a genuine decision remains it puts a short
-multiple-choice form on screen before it writes anything. Every question carries
+multiple-choice form on screen before it performs any mutation that depends on
+that unresolved decision. Every question carries
 a row the developer can type their own answer into. The developer answers in
 seconds, and the work that follows is built to what they actually meant.
 
