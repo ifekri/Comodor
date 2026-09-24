@@ -20,12 +20,17 @@ between the ledger and the parts of the system that use it.
 | Cost | No model call, no network, no new dependency | Every transition is triggered by a tool result, a user message, or the completion gate |
 
 **How `UNRESOLVED → KNOWN` works across turns.** The ledger still dies with its
-turn; that rule is unchanged. What survives an unresolved decision is the
-**decision**, not the ledger — carried by the existing pending-interaction slot
-in the session snapshot (FR-023) and reported in the turn's outcome. When the
-user later answers it (FR-129), that answer enters the **new** turn's ledger as
-`KNOWN` through the ordinary "Question answer" producer. No ledger is persisted,
-and no state is reconstructed from storage.
+turn; that rule is unchanged. A **live form** survives reconnect through the
+existing pending-interaction slot (FR-023). If the form ends cancelled, expired
+or unattended while its material decision remains unresolved, the **semantic
+decision** — not the ledger — stays resolvable through the form record the
+session transcript already stores, keyed by its stable `decision_ref`. That ref
+is the decision's `ref`, minted by the ledger once, when the materiality test
+promotes the decision to `REQUIRES_CLARIFICATION` (data-model.md §3). A later explicit
+DecisionAnswer must match that exact ref (FR-129); only then does the answer enter
+the **new** turn's ledger as user/caller-provided `KNOWN`. Missing, malformed,
+unknown, stale or unresolvable refs seed nothing and resolve nothing. No evidence
+ledger is persisted, and no decision is reconstructed by guessing from prose.
 
 ---
 
@@ -38,7 +43,7 @@ and no state is reconstructed from storage.
 | `ToolContext.note_read` | File reads — **already called today** | `VERIFIED` |
 | Derivation | A conclusion from existing entries | `DERIVED` |
 | Materiality test | Promotes an `UNKNOWN` that matters | `REQUIRES_CLARIFICATION` |
-| Question answer | A real answer closes the decision | `KNOWN` |
+| Question answer / valid DecisionAnswer | A real answer closes the exact decision; cross-turn resumption must match its `decision_ref` | `KNOWN` |
 | Question lifecycle (`events.Request` claim and expiry, via `bus.resolve`) | A mandatory clarification ended **without** an answer — explicitly cancelled, declined/dismissed, or expired | `UNRESOLVED` |
 | Question lifecycle — later answer | The user supplies a real answer to a decision left `UNRESOLVED` | `KNOWN` |
 | Absence of a listener (`bus.listening` is false) | Clarification is mandatory and nobody can answer | `BLOCKED` |
@@ -131,3 +136,28 @@ unattended case is **not** `UNRESOLVED`: nobody was there to decide, so it is
 | Completion gate cannot reach a verdict | Falls back to annotating rather than withholding (FR-127) |
 | The lifecycle outcome cannot be determined (cancelled vs expired unclear) | Treated as `UNRESOLVED` — the safe side, since every `UNRESOLVED` path withholds dependent work. **Never resolved to `KNOWN` by default** |
 | A decision is `UNRESOLVED` or `BLOCKED` at turn end | The turn reports it; it is never recorded as satisfied, and no assumption is emitted in its place (E4.7) |
+
+
+---
+
+## E8. Cross-turn decision boundary
+
+The evidence ledger is deliberately ephemeral. Keeping an unresolved decision
+resolvable is a session concern, not evidence-ledger persistence. The session
+already stores each form's record — the questions as shown, with their
+`decision_ref`, prompt, grounded options, reason and consulted evidence, plus
+the answers and the lifecycle outcome — and the unresolved set is derived from
+those records. No new record type is added, and nothing in it is evidence
+material or a secret. For a stateless run (`comodor run`, a scheduled job, a
+webhook event), those records exist only when the run ended
+`clarification_required`: that is the one case in which a fresh stateless run's
+transcript is kept, as a continuation that is never listed as a session
+(data-model.md §Stateless-run continuation).
+
+The layering is fixed. The ledger and everything else inside a turn belong to
+`AgentLoop`. Loading a continuation, validating a later answer against it, and
+persisting it belong to the shared turn entry `run_turn` in the application
+layer, which calls the loop only after validation succeeds (plan §B). The
+ledger never learns about sessions, continuations or bindings.
+
+When a new turn receives a valid DecisionAnswer, the session layer resolves the exact stored decision and the new ledger records the answer as `KNOWN`. Invalid or ambiguous refs never cause a ledger transition. This preserves the invariant that only genuine user/caller input can move an unresolved material decision into a usable state.

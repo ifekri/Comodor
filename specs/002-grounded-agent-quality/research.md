@@ -225,7 +225,209 @@ additive change (Constitution I, VI).
 
 ---
 
-## Open items carried forward
+## R9 — Can `OpenDecision.id` serve as the stable `decision_ref`?
+
+**Decision**: No. Add a separately minted `ref` to `OpenDecision`, and keep `id`
+ledger-internal.
+
+**Rationale**: `EvidenceLedger.open_decision` mints `id = f"d{n}"` from a
+per-ledger counter, and a new ledger per turn restarts it, so `d1` recurs in
+every turn of a session. Using it as the resumption key would let an answer meant
+for one turn's decision resolve another's — the positional matching FR-129
+forbids. The `ref` is minted once, when a decision first becomes a mandatory
+clarification, by a function the ledger takes as a parameter. Production uses an
+opaque random token; tests inject a deterministic sequence, so no test depends
+on randomness (Constitution IV).
+
+**Alternatives considered**:
+- *Compose the turn id with the ledger id* — rejected: the core loop has no turn
+  identity (the application layer mints turn ids), and threading one down only
+  to build a key crosses the layering for no gain.
+- *Hash the decision text* — rejected: two different decisions with the same
+  wording would collide, and matching by wording is the textual-similarity
+  fallback FR-129 forbids.
+
+## R10 — Where does an unresolved decision live between invocations?
+
+**Decision**: In the session transcript that already exists. The unresolved set
+is derived from the form records every form already leaves
+(`tools/ask.py::form_record` → `message.meta["question"]` → session JSON
+Lines). A ref resolves only within its own session.
+
+**Rationale**: those records already carry each question's `decision_ref`,
+prompt, grounded options, reason, consulted evidence, the answers and the
+lifecycle outcome — everything a later answer needs, for model-raised,
+preflight-raised and unattended forms alike. Deriving from them adds no store,
+keeps a single source of truth (FR-030's transcript is the same record), and
+keeps the evidence ledger unpersisted (R7). Session scope makes a ref from
+another conversation unknown by construction, and a ref goes stale once an
+`answered` record is appended.
+
+**Alternatives considered**:
+- *A new unresolved-decisions table or file* — rejected: a second store for
+  state the transcript already holds, which can disagree with it
+  (Constitution XVIII).
+- *Persisting the evidence ledger* — rejected for the reasons in R7.
+- *Global (cross-session) refs* — rejected: they would let an answer cross
+  conversations, and nothing in the specification needs it.
+
+## R14 — How does a headless run make its decision resumable?
+
+**Decision**: Persist a continuation **only** when a headless run ends
+`stopped = "clarification_required"`. It is written through the existing
+`SessionStore`, marked by an optional `SessionMeta.continuation` object (the
+refs it holds and the mode it stopped in; R16), and excluded from
+`list_sessions()`. This applies to every stateless run: `comodor run`, a
+scheduled job and a webhook event (R15). The headless input is a dedicated
+`run` option, `--decision-answers`, carrying the DecisionAnswer list; the refs
+alone locate the continuation.
+
+**Rationale**: FR-129 requires a later headless invocation to resume by
+`decision_ref` and to reject unknown and stale refs. That is only possible if
+something remembers which refs exist and whether they are still open. Writing
+only on `clarification_required` confines the new persistence to the runs that
+need it. Using `SessionStore` keeps one store, one transcript format and the
+existing redaction and export paths. Writing the marker only when non-empty
+leaves every ordinary session's meta file unchanged, and an older Comodor —
+which rejects unknown meta fields — skips continuations instead of listing
+them. Excluding continuations from `list_sessions()`, the single listing owner,
+keeps them out of the TUI resume list, the Web UI, ACP and insights with one
+filter.
+
+**Alternatives considered**:
+1. *Persist every headless run* — rejected: much broader persistence than FR-129
+   needs, and every scripted run would become a stored conversation — an
+   observable behaviour expansion.
+2. *Persist the clarification-required continuation only* — **selected**, with
+   the invariant that it is never listed as an ordinary session.
+3. *Stateless caller replay (the caller sends the earlier outcome back)* —
+   rejected: with no stored state, an unknown or stale `decision_ref` cannot be
+   told apart from a valid one, so D9's fail-closed rule could not be enforced.
+4. *Headless resumption only through the API or ACP* — rejected: it contradicts
+   FR-129's explicit headless requirement.
+5. *Reuse the global `--resume` for `comodor run`* — rejected: `--resume`
+   reopens interactive sessions, and giving it a second meaning on `run` would
+   couple two lifecycles and change an existing CLI contract for no gain.
+6. *A separate directory or store for continuations* — rejected: a second store
+   only to hide records the existing store can mark.
+
+## R15 — Who owns the turn entry that resumption needs?
+
+**Decision**: One function in the application layer, `run_turn`, immediately
+above `AgentLoop.run()`. All six existing turn-entry families call it instead
+of the loop: `web/session.py::Session.send` (Web UI, OpenAI-compatible API,
+Telegram, Slack, WhatsApp, Discord), `CoreService.send` (TUI user turn),
+`CoreService._deliver_completions` (the background-completion turn),
+`cli.py::run_headless`, `acp/agent.py`, and `cron/runner.py::run_job`
+(scheduled jobs, webhook events). It keeps `AgentLoop.run`'s inputs whole:
+`user_text`, `images` and `decisions` — open clarifications carried from
+background delegates — pass through unchanged. `decision_answers` is the one
+new input, and only it triggers resumption. It owns decision-answer acceptance,
+continuation resolution, whole-batch validation, refusal before any model call,
+continuation restore, answer seeding, the loop call, and a stateless run's
+continuation persistence.
+
+**Rationale**: the surfaces do not share a turn entry today — six callers
+reach `AgentLoop.run()` by different paths. Putting resumption in one function
+over the existing loop, conversation and store gives it exactly one owner
+without moving any surface onto new infrastructure. `AgentLoop` keeps
+everything that happens within a turn. `run_turn` takes only what crosses an
+invocation, so persistence never enters model iteration.
+
+**Alternatives considered**:
+- *Validate and seed in each surface* — rejected: six copies of the rules
+  that decide whether dependent work may run, which diverge — the exact failure
+  Constitution XVIII exists to prevent.
+- *Move every surface onto `CoreService`* — rejected: a broad refactor of the
+  Web session, channels, API, ACP, CLI and cron runner that Feature 002 does
+  not need, and outside its scope (Constitution V).
+- *Route delegate child loops (`tools/delegate.py`, `agent/background.py`)
+  through `run_turn` too* — rejected: they run a delegate's own work, take no
+  cross-invocation answer, and hand any clarification back to the parent, which
+  already reaches `run_turn` through the completion turn or the delegate tool's
+  result. Forcing them through an application-layer, continuation-aware entry
+  would couple internal delegation to session persistence for no behaviour.
+- *Fold carried `decisions` into `decision_answers`* — rejected: a carried
+  decision is an **open** question from delegated work, not an answer. Treating
+  it as one would settle it without the user (FR-019), or drop it (FR-029).
+- *Put resumption inside `AgentLoop`* — rejected: the loop would load and write
+  session files and know about continuations and bindings, coupling model
+  iteration to persistence and business policy.
+
+## R16 — What binds a continuation, and what does not?
+
+**Decision**: The canonical workspace (existing `SessionMeta.cwd`) and the
+effective safety mode (`continuation.mode`) bind a continuation; a resumption
+that differs in either is rejected before any model call. The provider and
+model (existing `SessionMeta.provider` / `model`) are provenance only.
+
+**Rationale**: resuming in another directory would run the dependent mutation
+on the wrong workspace, and resuming in another mode would change what the work
+is permitted to do. Both are safety boundaries, so a mismatch fails closed
+rather than being silently re-pointed, upgraded or downgraded
+(Constitution VIII). A decision, by contrast, is about the user's product
+intent, not the model that asked it: the specification keeps an outstanding
+form valid across a model change (FR-028), so a changed provider or model must
+neither stale nor orphan a `decision_ref`.
+
+**Alternatives considered**:
+- *Bind provider and model too* — rejected: it would over-bind the decision to
+  incidental runtime state, against FR-028.
+- *Adopt the caller's workspace or mode on resume* — rejected: it silently
+  redirects or re-permissions work.
+- *Duplicate `cwd` / provider / model inside `continuation`* — rejected: they
+  already live on `SessionMeta`; only the mode is new.
+
+## R11 — How does a later invocation deliver the answer?
+
+**Decision**: One common DecisionAnswer path, owned by the shared turn entry
+`run_turn` (R15). Each surface adapts its existing input
+channel: the headless `--decision-answers` option (R14); `decision_answers` in the API's
+existing request-side `comodor` block, with `X-Comodor-Session`; ACP prompt
+extension metadata; and, on channels, only an explicit structured reply naming
+the ref.
+
+**Rationale**: validation and seeding happen once, before any model call, so no
+surface has its own matcher. The answer shape is the existing `Answer`
+(`chosen` / `written`) keyed by `decision_ref` instead of a form header. A seeded
+answer enters the new turn exactly as a live-form answer does, so the evidence
+and learning paths need no new branch.
+
+**Alternatives considered**:
+- *Let each surface match answers itself* — rejected: several matchers diverge,
+  and the specification forbids surface-specific heuristics.
+- *Infer the decision from a free-text follow-up* — rejected: FR-129 forbids
+  textual and recency matching.
+- *A new protocol client→core message for TUI/Web* — deferred as unneeded: a
+  live form is answered through `question.answer`, and a later explicit request
+  re-raises the form with the same ref.
+
+## R12 — Does the protocol need a version change?
+
+**Decision**: No. Add optional `decision_ref` to `ClarificationRequired` and
+`ClarificationDecision`, and keep `decisions[].id` — still required by the
+schema — carrying the same value as a compatibility alias.
+
+**Rationale**: an optional property is ignored by a client that does not read
+it (R8), and keeping `id` means an existing reader sees the same shape. The
+change goes through `schemas/protocol/v2.json` and `tools/protocol-codegen.py`,
+never a hand edit (Constitution VI).
+
+## R13 — How does an invalid reference fail?
+
+**Decision**: Closed, before any work, all-or-nothing, and through each
+surface's existing error form: CLI exit `1` with the refs named (and an additive
+`error` object under `--json`), HTTP 400 with the existing OpenAI-style error
+body, and a JSON-RPC invalid-params error on ACP. No new `stopped` value, exit
+code or protocol enum.
+
+**Rationale**: a missing, malformed, unknown, stale or cross-session reference
+is a caller error, not a clarification outcome. Rejecting the whole input keeps
+partial application impossible, so every open decision stays exactly as it was
+and no dependent work can start (FR-026, FR-129). Reusing each surface's
+existing error channel is additive, and the specification requires no new enum.
+
+## Follow-up decisions resolved / acceptance still open
 
 | Item | Why not resolved now | Settled in |
 | --- | --- | --- |
@@ -233,6 +435,11 @@ additive change (Constitution I, VI).
 | Fingerprint granularity for repository-derived learning | Should follow real `rules.py` observation shapes | T111 (tasks Phase 6; plan Phase 5) |
 | SC-011 numeric token threshold | Resolved by user decision: set from the plan Phase 1 baseline (T015), never in advance | T015 (tasks Phase 1; plan Phase 1) → T156 (tasks Phase 9; plan Phase 7) |
 
-No other `NEEDS CLARIFICATION` remains. The three specification-level
-clarifications were resolved with the user on 2026-09-14 and are recorded in
-`spec.md`.
+No other `NEEDS CLARIFICATION` remains. The specification records eighteen
+clarification decisions (the latest on 2026-09-24) in its §Clarifications —
+Resolved.
+
+
+### 2026-09-24 alignment note
+
+The three items originally carried forward are no longer open design questions: the headless clarification exit code is `3`; learning fingerprint granularity is represented by the provenance-specific evidence identities documented in `data-model.md` and implemented by the current learning rules; and SC-011 has the owner-selected 10% relative threshold plus the per-task quality conjunct. What remains open is empirical acceptance on a fresh exact candidate and implementation convergence for stable cross-turn `decision_ref` resumption (D4/D9).

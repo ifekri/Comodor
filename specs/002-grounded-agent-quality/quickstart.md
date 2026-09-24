@@ -80,7 +80,9 @@ npm run test:renderer                          # widths 160/120/100/80/60
 Manual check — the custom-answer row:
 
 1. Ask Comodor something genuinely ambiguous.
-2. Confirm the form appears **before** any file is written.
+2. Confirm the form appears **before** any change that depends on the decision.
+   A change that is demonstrably independent of it may already have happened;
+   that is permitted, not a failure (SC-002).
 3. Confirm every question's last row is the write-your-own row, and that the
    model did not author a second one.
 4. Select it, type an answer, and confirm that text shapes the work.
@@ -211,7 +213,7 @@ python tools/capability-map.py --check
 Confirm on each surface that a clarification-required turn is reported as
 needing a decision, never as success and never as a crash.
 
-**Web UI** (REQUIRED — [plan.md §Surface Impact](./plan.md); T006, T133, T146):
+**Web UI** (REQUIRED — normative in [spec.md §Surface classification](./spec.md), implementation detail in [plan.md §Surface Impact](./plan.md); T006, T133, T146):
 
 ```bash
 python -m pytest tests/test_web.py -q -k "question or clarification"
@@ -263,3 +265,53 @@ Evidence from an earlier commit is not evidence.
 
 Anything not demonstrated this way is reported as **NOT VERIFIED**, which is an
 acceptable and expected answer.
+
+### Plan Phase 9 — convergence (planned, not yet implemented)
+
+**Current behaviour at `d911e3f`**: the clarification-required outcome carries
+`decisions[].id` — a turn-local value such as `d1` — and no top-level
+`decision_ref`, and no surface accepts an answer keyed by `decision_ref`. The
+checks below describe what plan Phase 9 must make true (plan.md §2026-09-24 Plan
+Convergence; contracts/clarification.md §C7). They are not current behaviour.
+
+**Cross-turn resumption (D4/D9)** — deterministic, no provider:
+
+```bash
+python -m pytest -q tests/test_clarification_protocol.py tests/test_clarification_required.py tests/test_headless.py tests/test_api.py tests/test_acp.py
+python tools/protocol-codegen.py --check
+```
+
+Expected once implemented:
+
+- a `decision_ref` stays the same across cancel, expiry and unattended endings
+  and across a later turn, and differs between decisions;
+- a valid answer resolves only its own decision and resumes the dependent work
+  to the same result as a first-time answer;
+- a missing, malformed, unknown, stale or cross-session ref is rejected before
+  any model call, changes no decision and runs no dependent work — on the CLI
+  with exit `1` and the refs named, on the API with HTTP 400, on ACP with an
+  invalid-params error;
+- headless: a run that ends normally leaves no stored session; one that ends
+  `clarification_required` leaves exactly one continuation, which appears in no
+  session list; `comodor run --decision-answers answers.json` resumes it by ref
+  alone; a second use of an answered ref is rejected as stale;
+- a resumed run's transcript is appended to the same continuation whatever it
+  ends in; if it stops again, the same continuation carries the new refs and
+  keeps the old ones;
+- resuming from another workspace, or in another mode, is rejected before any
+  model call; resuming with a different provider or model is accepted;
+- every surface reaches the loop through the one shared turn entry, so the same
+  rejection holds on the CLI, API, ACP and channels;
+- a live pending form still answers through its existing path;
+- an old client sees no change.
+
+**SC-002 dependency semantics (D7)** — deterministic:
+
+- up-front ambiguity: the specific dependent artifact is never written before
+  the clarification;
+- an uncertain dependency is withheld;
+- a demonstrably independent change may happen and does not fail the check;
+- late discovery: the earlier change persists, appears in `prior_changes`, and
+  nothing dependent runs afterwards.
+
+> **Acceptance note:** SC-011/SC-012 are live acceptance gates. Passing the deterministic suite, protocol checks or specification gate does not satisfy them. Final evidence must come from a fresh comparable paired run on the exact frozen candidate.

@@ -66,13 +66,24 @@ for the whole `clarification_required` category.
 ```jsonc
 {
   "kind": "clarification_required",
-  "decision": "string",              // what must be decided
-  "candidates": [                    // may be empty; never invented
+  "decision_ref": "opaque-stable-id", // semantic id of the first open decision
+  "decision": "string",               // what must be decided
+  "candidates": [                      // may be empty; never invented
     { "label": "string", "description": "string" }
   ],
-  "evidence_consulted": ["string"],  // what was already checked
-  "reason": "string",                // materiality class (FR-007)
-  "outcome": "cancelled"             // NEW, optional: "cancelled" | "expired" | "unattended"
+  "evidence_consulted": ["string"],    // what was already checked
+  "reason": "string",                  // materiality class (FR-007)
+  "outcome": "cancelled",              // optional: cancelled | expired | unattended
+  "decisions": [
+    {
+      "id": "opaque-stable-id",        // kept (still required by the schema); same value as decision_ref
+      "decision_ref": "opaque-stable-id",
+      "decision": "string",
+      "candidates": ["string"],
+      "evidence_consulted": ["string"],
+      "reason": "string"
+    }
+  ]
 }
 ```
 
@@ -141,6 +152,7 @@ clarification payload**, never in `stopped`.
   "stopped": "clarification_required",
   "clarification": {
     "kind": "clarification_required",
+    "decision_ref": "opaque-stable-id",
     "decision": "...",
     "candidates": [ /* … */ ],
     "evidence_consulted": [ /* … */ ],
@@ -171,9 +183,7 @@ clarification payload**, never in `stopped`.
   re-ask with a longer wait, or route to a human.
 - `stopped` distinguishes them from `error`, so a caller can tell "needs a
   decision" from "something broke".
-- Exit code is non-zero and distinct from the error code. *(Exact number
-  deferred per research R3 to T131 — tasks Phase 8, plan Phase 6 surface
-  wiring — decided against `cli.py`'s existing return conventions.)*
+- Exit code is **3** for `clarification_required`, distinct from success (`0`), generic error (`1`) and turn cancellation (`130`), matching the current `cli.py` contract.
 - Partial work already done in the turn is still reported (`steps`,
   `tool_calls`) — the loop fills the result as it goes, and that must not
   regress.
@@ -254,6 +264,9 @@ Rules:
 | Answers match by header | Never by position (FR-020) |
 | One claim wins | Duplicate answers resolve through the existing atomic claim, not timing (FR-025) |
 | Stale answers ignored | An answer to an expired, cancelled or answered form is discarded and never applied to another question (FR-024) |
+| Form id ≠ decision id | Form/question lifecycle identity is not the semantic open-decision identity. An expired or cancelled form id stays stale even though the underlying decision may remain resumable by its `decision_ref` (FR-020, FR-024, FR-129) |
+| Semantic resumption matches by `decision_ref` | A later cross-turn answer resolves only the exact unresolved decision named by `decision_ref`; missing, malformed, unknown, stale or unresolvable refs are rejected, applied to no decision and authorize no dependent work (FR-026, FR-129) |
+| No heuristic resumption | Recency, position, textual similarity, most-recent-question and first-unresolved fallbacks are forbidden. Surface adapters map to one common core decision-answer path rather than implementing their own matcher |
 | Expiry is observable | Expiry publishes its event (`Kind.REQUEST_EXPIRED`) so no client keeps showing a request that is no longer live (FR-027). **Publishing that event is not the whole of expiry semantics**: the run must also report `stopped = "clarification_required"` with `clarification.outcome = "expired"`, leave the decision unresolved, and withhold dependent work (FR-018, FR-022, FR-035) |
 | Reconnect restores | An outstanding form returns via the snapshot's pending interaction (FR-023) |
 | Delegates attribute | A clarification from background work is origin-tagged and never injected mid-turn (FR-029) |
@@ -295,3 +308,86 @@ client that does not know the field ignores it.
 This applies to every way the clarification can end — answered later,
 cancelled, expired or unattended. Only a valid answer permits dependent work to
 resume.
+
+
+---
+
+## C7. Cross-turn semantic resumption
+
+*Planned in plan Phase 9 (plan.md §2026-09-24 Plan Convergence B). At
+`d911e3f` the outcome carries `decisions[].id` (a turn-local value) and no
+surface accepts an answer keyed by `decision_ref`. This section is the
+contract that work must meet; it does not describe current behaviour.*
+
+A pending interactive form and an unresolved semantic decision are related but
+not identical lifecycles. The existing pending-interaction slot remains
+authoritative while a form is live, and supports reconnect (FR-023). When
+cancellation, expiry or unattended execution ends a form without an answer, the
+per-turn evidence ledger still dies. The decision stays resolvable through the
+form record that the session transcript already stores. That record carries each
+question's `decision_ref` and the lifecycle outcome, so no new store is needed.
+
+**Identity and lifetime.** A `decision_ref` is opaque, minted once when the
+decision first becomes a mandatory clarification, and never derived from
+wording, position or a turn counter. It resolves only within the session that
+raised it, and becomes **stale** once an `answered` record for it exists. A
+decision re-raised at the user's explicit request keeps its `decision_ref`.
+
+**Stateless runs** (`comodor run`, scheduled jobs, webhook events). A fresh
+stateless run keeps nothing when it succeeds or fails. When it ends
+`clarification_required`, its transcript — the form records included — is kept
+through the existing session store as a **continuation**: an ordinary
+transcript that is excluded from every session list, and found only by an exact
+`decision_ref`. A resumed run appends to the same continuation whatever it ends
+in. If it stops again, the same continuation gains the new refs and keeps the
+old ones. After resolution a continuation is kept, so a reused ref is reported
+stale rather than unknown; deleting it makes its refs unknown.
+
+**Binding.** A continuation is bound to its canonical workspace and to the
+safety mode it stopped in. A resumption from another workspace, or in another
+effective mode, is rejected before any model call, and nothing changes. The
+provider and model are provenance: changing them neither invalidates a
+`decision_ref` nor blocks a resumption (FR-028).
+
+**Validation order** (owned by the shared turn entry, plan §B.1): shape →
+exact resolution of every ref → one continuation (or the live session) for the
+batch → each decision open → workspace → mode → answer content → apply → run.
+Any failure rejects the whole batch with zero effect.
+
+A later invocation may supply one or more **DecisionAnswer**s:
+`{ "decision_ref": "...", "chosen": [...], "written": "..." }`, the existing
+answer shape keyed by `decision_ref` instead of a form header. The common
+application/session path validates the whole input against the session's
+unresolved set **before any model call or tool**, all-or-nothing.
+
+- **Valid** — every ref names an unresolved decision of this session and every
+  answer carries real input. Each answer resolves only its own decision, is
+  recorded as `answered`, and enters the new turn's ledger as caller-provided
+  `KNOWN`. Any decision left unanswered stays open; if dependent work still
+  needs it, the turn ends in `clarification_required` again, naming it.
+- **Invalid** — a ref that is missing where required, malformed, unknown,
+  stale, from another session, or otherwise unresolvable, or an answer with no
+  real input. The whole input is rejected. Nothing is recorded as answered,
+  every open decision stays unchanged, no dependent work runs, and the caller
+  is told which references could not be resolved.
+
+**Per-surface transport** (all additive; no new `stopped` value, no new exit
+code, no new protocol enum):
+
+| Surface | Resumption input | Rejection |
+| --- | --- | --- |
+| CLI / headless | `comodor run --decision-answers PATH` (`-` = stdin): a JSON DecisionAnswer list. The refs alone locate the headless continuation — which exists only because the earlier run ended `clarification_required`, and which is never listed as a session. All refs in a batch must belong to one open continuation. The positional task is optional here; if given, it accompanies the resumed turn. The global interactive `--resume` is not involved | No model call; the refs are named on stderr; exit `1`; `--json` output carries an `error` object naming the unresolved refs |
+| OpenAI-compatible API | `comodor.decision_answers` in the existing request-side `comodor` block, with `X-Comodor-Session` | HTTP 400 with the existing OpenAI-style error body (`type: invalid_request_error`) naming the refs |
+| ACP | Decision answers in the prompt request's extension metadata | JSON-RPC invalid-params error naming the refs |
+| Channels / integrations | Telegram (callback or command), Slack (block action) and WhatsApp (interactive reply) — only an explicit structured reply carrying the `decision_ref`. Discord and the webhook have no inbound structured reply route: they report the decision and its ref, and offer no resumption there (a stopped webhook event is a stateless run, resumable with `comodor run --decision-answers`). Any other reply is an ordinary new request | A reply naming the refs that could not be resolved |
+| Protocol clients (TUI, Web) | A live form is answered through `question.answer`, which already carries the association; a later explicit request re-raises the form with the same `decision_ref` | — (no new client→core message in this phase) |
+
+Every surface translates its native input into the same DecisionAnswer path —
+the shared turn entry `run_turn`, which every turn-entry family calls instead of
+the loop — and none has a matcher of its own. `run_turn` does not narrow the
+turn: `images` and carried `decisions` (open clarifications from background
+delegates) pass through unchanged. A carried decision is never an answer and
+never triggers resumption; only `decision_answers` do. No surface may guess the intended decision
+from prose, recency, most-recent question, list position, textual similarity or
+first-open order. A client that neither sends decision answers nor reads
+`decision_ref` behaves exactly as today (FR-080, SC-023).

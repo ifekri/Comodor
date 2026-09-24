@@ -2,7 +2,7 @@
 
 **Branch**: `002-grounded-agent-quality` | **Date**: 2026-09-14 | **Spec**: [spec.md](./spec.md)
 
-**Input**: Feature specification from `/specs/002-grounded-agent-quality/spec.md` (130 functional requirements, 44 success criteria — 174 in total; three clarifications resolved 2026-09-14)
+**Input**: Feature specification from `/specs/002-grounded-agent-quality/spec.md` (130 functional requirements, 44 success criteria — 174 in total; 18 clarification decisions resolved through 2026-09-24)
 
 ---
 
@@ -34,7 +34,7 @@ measurement.
 
 **Storage**: SQLite at `~/.comodor/brain.db` (learning; FTS5 where the build has it, pure-Python BM25 fallback). Sessions as JSON Lines under the user directory, one record per message, appended.
 
-**Testing**: `pytest` (134 test modules, `-n auto --dist loadfile`, `performance` marker excluded by default); Bun renderer tests for the terminal interface; `bench/` for quality-and-cost measurement.
+**Testing**: `pytest` under `tests/` (`-n auto --dist loadfile`, `performance` marker excluded by default); Bun renderer tests for the terminal interface; `bench/` for quality-and-cost measurement.
 
 **Target Platform**: Windows, Linux, macOS — equally supported (Constitution II).
 
@@ -44,7 +44,7 @@ measurement.
 
 **Constraints**: No new runtime dependency. No change to the cached system-prompt prefix mid-task (worth ~99% prefix-cache retention, measured; larger than anything this feature could recover). Protocol v2 stays compatible; any addition is negotiated. Secrets never enter state, snapshots, journals, checkpoints, logs or fixtures.
 
-**Scale/Scope**: 174 requirements (130 FR, 44 SC) across 8 plan phases. Estimated surface: ~11 Python modules extended, **one new product/runtime module** (`src/comodor/agent/evidence.py`), **two new benchmark-harness helper modules** (`bench/integrity.py`, `bench/baseline.py` — measurement infrastructure, never imported by `src/comodor/`), 1 schema addition, 1 shared TS package touched, the browser question surface (`src/comodor/web/`) characterized and verified, ~20 new deterministic test modules, benchmark harness extended.
+**Scale/Scope**: 174 requirements (130 FR, 44 SC) across the original 8 delivery phases plus 2 explicit convergence/acceptance phases added after the final specification review. Estimated surface: ~11 Python modules extended, **one new product/runtime module** (`src/comodor/agent/evidence.py`), **two new benchmark-harness helper modules** (`bench/integrity.py`, `bench/baseline.py` — measurement infrastructure, never imported by `src/comodor/`), 1 schema addition, 1 shared TS package touched, the browser question surface (`src/comodor/web/`) characterized and verified, ~20 new deterministic test modules, benchmark harness extended.
 
 ---
 
@@ -56,17 +56,17 @@ Checked against `.specify/memory/constitution.md` **v1.1.0** (21 principles).
 
 | Principle | Gate | Status |
 | --- | --- | --- |
-| I — Backward compatibility | Exactly one intended behaviour change (non-interactive blocking), named and release-noted; everything else additive | **PASS** — FR-082; plan Phase 3 (enforcement) / Phase 6 (surface wiring) — tasks Phase 3 / tasks Phase 8 |
+| I — Backward compatibility | FR-082 enumerates three intended user-visible changes; only removal of self-resolving mandatory non-answers is backward-incompatible/regression-by-design and release-noted, while completion correction/annotation and same-decision re-raise suppression are additive | **PASS** — FR-082; plan Phase 3 (enforcement) / Phase 6 (surface wiring) — tasks Phase 3 / tasks Phase 8 |
 | II — Three platforms | Every phase validated on the CI matrix; no platform-conditional logic introduced | **PASS** |
 | III — Fix the invariant | No sleeps, no raised timeouts, no weakened assertions; clarification waiting uses the existing claim-and-expire primitive, not timing | **PASS** — see Clarification Architecture |
 | IV — Deterministic regression tests | Every guard gets a mutation-checked test (SC-025); Phase-gated | **PASS** |
-| V — Narrow scope | Eight bounded phases, each independently validatable and revertable | **PASS** |
+| V — Narrow scope | Bounded phases, including explicit D4/D9 convergence and final acceptance phases, each independently validatable and revertable | **PASS** |
 | VI — Architectural boundaries | Evidence ledger lives in the core; frontends render it. Protocol change goes through the schema and codegen, never hand-edited | **PASS** |
 | VII — Reproducible artifacts | Terminal-interface bundle rebuilt and committed if TS changes | **PASS** — TS/TUI-affecting work lands in plan Phase 3 (clarification enforcement: protocol fields, overlay) and plan Phase 6 (surface wiring); the committed bundle rebuild is owned by T141 (tasks Phase 8), verified by T166 |
 | VIII — Security not weakened | Mode policy untouched; clarification never becomes a route to a forbidden action; no secret enters the ledger | **PASS** — explicit non-goal below |
 | IX — Release infra is production code | No release action in this initiative at all | **N/A** — FR-084 |
 | X — Quality gates mandatory | Full baseline runs per phase on the exact commit | **PASS** |
-| XI — Specifications name surfaces | All ten canonical surfaces classified in [plan.md §Surface Impact](#surface-impact) using only REQUIRED / UNCHANGED BUT VERIFIED / NOT APPLICABLE, each row carrying task IDs and file evidence; spec.md §Surface classification points to that table | **PASS** — the table exists below; re-checked against the repository (Web UI is a live question surface; the desktop application is planned, not built) |
+| XI — Specifications name surfaces | `spec.md` owns the normative ten-surface table using REQUIRED / UNCHANGED BUT VERIFIED / NOT APPLICABLE; this plan mirrors it and adds implementation/task evidence without overriding it | **PASS** — the table below is a convergence view of the authoritative spec classification; Web UI is REQUIRED and the planned desktop application is NOT APPLICABLE |
 | XII — Done means everything agrees | Phase not complete until implementation, tests, docs and evidence agree | **PASS** |
 | XIII — Quality-first | The whole feature | **PASS** |
 | XIV — Evidence before assumption | Evidence ledger is the mechanism | **PASS** |
@@ -112,6 +112,308 @@ and only needs to be called or tested.
 | 20 | Reconnect / resume | `session.snapshot` with `revision`; `PendingInteraction` carries `question` or `permission`; client drops events at or below revision | **Reuse** — the pending-question slot already exists |
 
 ---
+
+## 2026-09-24 Plan Convergence
+
+The committed specification at `d911e3f` (specification quality gate 131/131)
+is authoritative. Most of Feature 002 is implemented and validated. This
+convergence closes what the final specification added or sharpened. It extends
+the existing owners; it adds no clarification subsystem, no decision store, and
+no persisted evidence ledger. Task IDs for the work below are derived later by
+`/speckit.tasks`; this plan names the work, its owner and its gate.
+
+### A. The three intended user-visible changes (FR-082)
+
+| # | Change | Class | Requirements | Delivered by |
+| --- | --- | --- | --- | --- |
+| 1 | A mandatory clarification no longer resolves itself on a non-answer; non-interactive runs report `clarification_required` | **Backward-incompatible — the only regression-by-design**, release-noted | FR-019, FR-035, FR-121 to FR-123 | plan Phases 3 and 6 (implemented) |
+| 2 | Completion claims are checked: unresolved work is annotated; a contradicted claim is corrected; an unsupported claim is never delivered as completed | **Additive** — adds a notice or correction, removes nothing a caller had | FR-036, FR-037, FR-124 to FR-127 | plan Phase 6 (implemented); FR-127's unsupported-claim rule re-verified in plan Phase 9 |
+| 3 | A cancelled mandatory question is not re-raised within the same decision attempt | **Additive** — adds a report, removes nothing | FR-129 | plan Phase 3 (implemented) |
+
+Everything else in this feature is compatibility-preserving: every protocol
+addition is optional and negotiated (FR-080), and no existing message changes
+meaning (FR-079). No fourth user-visible change is intended.
+
+### B. Stable `decision_ref` and later resumption (D4, D9)
+
+**Repository facts** (inspected at `d911e3f`):
+
+- `agent/evidence.py::EvidenceLedger.open_decision` mints `OpenDecision.id` as
+  `f"d{n}"` from a per-ledger counter shared with evidence-entry ids. A new
+  ledger restarts it every turn, so `d1` recurs in every turn of a session. It
+  **cannot** serve as the semantic `decision_ref`: an answer keyed by it could
+  resolve the wrong turn's decision, which is exactly the heuristic matching
+  FR-129 forbids.
+- `tools/ask.py` sets `Question.decision_ref = decision.id`. Questions already
+  carry the field (`questions.py`, protocol `QuestionField.decision_ref`), but
+  with the turn-local value.
+- `tools/ask.py::payload_for` emits `decisions[].id` only. In
+  `schemas/protocol/v2.json`, `ClarificationDecision` requires `id` and
+  `decision`, and `ClarificationRequired` has no `decision_ref`.
+- The form lifecycle is already persisted. `ask.form_record` — written for
+  model-raised, preflight-raised (`origin="mutation_preflight"`) and unattended
+  forms — is stored by `agent/loop.py` on the tool message as
+  `message.meta["question"]`, appended to the session JSON Lines by
+  `session/store.py`, and rendered in exports (`_question_lines`).
+- CLI: `comodor run --json` emits the `clarification` block and exits `3`.
+  **A headless run is stateless**: `cli.py::run_headless` never touches
+  `SessionStore`, and nothing of a finished headless run is persisted. The
+  global `--resume` flag belongs to the interactive session path, and
+  `run_headless` never reads it. API: `api/server.py` reads a request-side
+  `comodor` block (today `mode`) and the `X-Comodor-Session` header, and
+  returns `comodor.clarification`. ACP: `acp/agent.py` sends a
+  `clarification_required` session update. Channels have no
+  clarification-specific code; they run turns through the application layer.
+- No surface accepts an answer keyed by `decision_ref`.
+- **Turn entry — six families, one loop.** Every application or surface path
+  that starts a primary turn ends in `AgentLoop.run(user_text, images,
+  decisions)`, but not through one caller:
+  1. `web/session.py::Session.send` (it builds its own `AgentLoop`) serves the
+     Web UI, the OpenAI-compatible API (`api/session_map.py`), Telegram, Slack,
+     WhatsApp and Discord. It passes `images` and `decisions`; the Web
+     session's own completion delivery re-enters through `Session.send`.
+  2. `application/__init__.py::CoreService.send` starts a normal TUI user turn.
+  3. `application/__init__.py::CoreService._deliver_completions` starts the
+     turn that delivers finished background delegates to the parent session.
+     It collects each record's `clarification` and passes them as
+     `decisions=carried or None`, so a delegate's open decision reaches the
+     parent turn unresolved (FR-029, FR-018). It is a separate call path from
+     `send`.
+  4. `cli.py::run_headless` calls `assemble()` and then `agent.run(task)`.
+  5. `acp/agent.py` calls `assemble()` and then `self.loop.run(text)`.
+  6. `cron/runner.py::run_job` builds its own `AgentLoop` for scheduled jobs,
+     and the webhook channel runs every event through it.
+- **Internal child loops are not turn entries.** `tools/delegate.py` and
+  `agent/background.py` run a delegate's own child loop (`loop.run(brief)`).
+  They take no cross-invocation answer; when a child stops for a decision, its
+  clarification returns to the parent — through the completion delivery above,
+  or through the delegate tool's result.
+- **Channel reply capabilities** (verified in source):
+  - **Telegram** — inline-keyboard callbacks (`telegram/keyboard.py`,
+    `callback_query` in `telegram/bot.py`) and bot commands (`_on_command`).
+  - **Slack** — block actions whose `action_id` / value come back in the
+    interaction payload (`slack/blocks.py`, `slack/bot.py`).
+  - **WhatsApp** — interactive reply buttons and lists (`whatsapp/menu.py`),
+    parsed as `type == "interactive"` in `whatsapp/webhook.py`.
+  - **Discord** — plain messages only; no component or interaction handling in
+    `discord/`.
+  - **Webhook** — inbound signed events run as one-shot templated jobs through
+    `cron/runner.py`, and the answer is delivered outbound to a `reply_url`;
+    there is no inbound reply route.
+- Sessions: `session/store.py::SessionMeta` is loaded as `SessionMeta(**json)`,
+  and a `TypeError` returns `None`, so an older reader silently skips a meta
+  file carrying a field it does not know. `SessionStore.list_sessions()` is the
+  single listing owner. Its callers are `application/__init__.py` (the
+  protocol's `session.list` — the TUI's resume list), `web/session.py`,
+  `acp/agent.py` and `insights.py`. Exports are
+  `SessionStore.export_markdown` / `export_json`, keyed by session id. No
+  session has a retention or prune policy; a session lives until it is
+  deleted.
+
+**Design — each concern stays with its existing owner:**
+
+| Concern | Owner (extended, not replaced) | Design |
+| --- | --- | --- |
+| Semantic identity | `agent/evidence.py` (`OpenDecision`) | Add a `ref`: an opaque id minted **once**, when a decision first enters `REQUIRES_CLARIFICATION`, by a minting function the ledger takes as a parameter (default: a random opaque token; tests inject a deterministic sequence, so no test depends on randomness). Never derived from wording, list position or a turn counter. A decision re-raised for resumption carries its original `ref` rather than a new one. `OpenDecision.id` stays ledger-internal. |
+| Lifetime | the session that raised the decision | A `decision_ref` resolves for the life of that session — for a stateless run, its continuation (below). It becomes **stale** once an answered record for it is persisted. A ref from any other session is **unknown**. There is no new retention policy: like every session, a continuation lives until it is deleted, and deleting one makes its refs unknown. There is no global tombstone store. |
+| Persistence | existing session transcript (`form_record` → `message.meta["question"]`) | No new store. The form record already carries each question's `decision_ref` and the lifecycle `outcome`. The session layer derives the **unresolved set**: refs whose latest record ended `cancelled`, `expired` or `unattended` with no later `answered` record. The evidence ledger stays turn-local and unpersisted. |
+| Stateless-run continuation | `session/store.py` (`SessionStore`, `SessionMeta`), written through the shared turn entry | A **stateless** run — `comodor run`, a scheduled job, a webhook event — persists nothing unless it ends `stopped = "clarification_required"`. Only then does it write its transcript through the existing `SessionStore`: the same JSON Lines records (form records included) and meta as any session. `SessionMeta` gains **one** optional field, `continuation`, a small object `{decision_refs: [...], mode: "..."}`, **written only on continuations**; every ordinary session's meta file is byte-for-byte unchanged, and an older Comodor, which rejects unknown fields, skips a continuation. `SessionMeta.cwd` (existing) is the workspace binding; `SessionMeta.provider` / `model` (existing) are provenance only. `list_sessions()` excludes any meta that has `continuation`, so a continuation never appears in the TUI resume list, the Web UI, ACP or insights. |
+| Exact continuation lookup | `SessionStore` | One exact lookup, `decision_ref` → continuation: the single continuation whose `continuation.decision_refs` contains the ref, by equality. No match → unknown; more than one → unresolvable. `decision_refs` keeps **every** ref the continuation has ever issued, answered ones included — a ref is never removed on resolution. The transcript's form records then decide open vs stale. Never recency, list order, workspace proximity, question text or first-unresolved order. |
+| `clarification_required` serialization | `tools/ask.py::payload_for`; `agent/loop.py` carries it | Add top-level `decision_ref` (the first open decision) and `decision_ref` on every `decisions[]` entry. Keep `decisions[].id`, set to the same value, so there is one identity with a compatibility alias. |
+| Protocol | `schemas/protocol/v2.json` → `tools/protocol-codegen.py` | Optional `decision_ref` on `ClarificationRequired` and `ClarificationDecision`. No change to required fields, no version bump; regenerate `src/comodor/protocol/_generated.py` and `packages/protocol/src/generated.ts`. No new client→core message in this phase: interactive clients answer a live form through `question.answer`, and a later explicit request re-raises the form with the same `decision_ref`. |
+| Shared turn entry (one owner) | `application/__init__.py` — one function, `run_turn`, sitting immediately above `AgentLoop.run()` | The single operation all six turn-entry families call **instead of** calling the loop directly: `Session.send` (Web, API, Telegram, Slack, WhatsApp, Discord), `CoreService.send` (TUI user turn), `CoreService._deliver_completions` (background-completion turn), `run_headless` (CLI), ACP and `run_job` (cron, webhook). **Inputs**: it never narrows `AgentLoop.run`'s contract. `user_text`, `images` and `decisions` pass through unchanged, and `decision_answers` is the one new input. `decisions` are **open** clarification payloads carried into the turn — today from background delegates — and stay unresolved; they never trigger a continuation lookup and are never treated as answers. `decision_answers` are explicit later-invocation answers, and only they trigger resolution and validation. It owns, in this order: accepting an optional DecisionAnswer batch; resolving the continuation a stateless caller's batch names; validating the whole batch (§B.1); refusing before any model call; restoring a continuation's conversation into the loop; seeding valid answers exactly as live-form answers are seeded; calling `AgentLoop.run(user_text, images, decisions)` with the carried inputs unchanged; persisting a stateless run's continuation (§B.2); and returning the ordinary `TurnResult`. A session-backed caller (Session, CoreService, ACP) passes its live conversation, which *is* its session. A stateless caller passes the session store and its execution binding (canonical workspace, effective mode). It is a function over the existing loop, conversation and store — not a second loop, clarification engine or persistence layer. Adapters only translate their native input into it. |
+| Invalid-reference rejection | common path | Missing, malformed, unknown, stale or unresolvable refs are rejected. The rejection names the refs that failed, changes no decision, authorises no dependent work, and never falls back to recency, position, textual similarity, most-recent-question or first-unresolved order (FR-026, FR-129). |
+| CLI / headless | `cli.py` (`run` parser, `run_headless` → `run_turn`) | A dedicated `run` option, `--decision-answers PATH` (`-` = stdin), carrying a JSON DecisionAnswer list — the headless representation of FR-129's structured resumption input. The global interactive `--resume` is **not** reused, because its contract is reopening interactive sessions. With `--decision-answers`, the positional task is optional; if given, it rides the resumed turn as the caller's message. The refs alone locate the continuation (exact lookup); all refs in a batch must resolve to the same continuation; the invocation's canonical workspace and effective mode must match the continuation's (§B.1). On rejection: no model call; the refs, or the binding mismatch, are named on stderr; exit code `1`; `--json` output carries an additive `error` object. No new exit code. `--interactions` is unchanged: it scripts a **live** form within one run, in order — the pending-form path — and never resolves a decision in a later invocation. |
+| API | `api/server.py`, `api/schema.py`, `api/session_map.py` | `decision_answers` inside the existing request-side `comodor` block, with `X-Comodor-Session`. On rejection: HTTP 400 with the existing OpenAI-style error body (`type: invalid_request_error`), naming the refs. The response envelope is otherwise unchanged. |
+| ACP | `acp/agent.py` | Decision answers ride the prompt request's extension metadata. On rejection: a JSON-RPC invalid-params error naming the refs. |
+| Channels / integrations | channel adapters → `Session.send` → `run_turn` | A message reporting a needed decision shows its `decision_ref` (the core's needed-decision text). Resumption only through an existing structured route that can carry the ref: a Telegram callback or command, a Slack block action, a WhatsApp interactive reply. **Discord** and the **webhook** have no inbound structured reply route: they report the decision and its ref and offer no resumption there; no new interaction system is added for Feature 002. A webhook event, like a scheduled job, is a stateless run, so its stopped run leaves a continuation resumable with `comodor run --decision-answers`. Ordinary free text on every channel is a new request, never matched to a decision. |
+| Delegated work | `agent/background.py` (`ScopedBus`) | A delegate's decision gets its `ref` from the same minting path and is recorded in the parent session, so resumption is the same path. |
+| Live pending forms | unchanged (`question.answer`, the bus's atomic claim) | A live form keeps its lifecycle identity; the core already knows its decision association (FR-020, FR-024). |
+| Backward compatibility | every surface | A client that neither sends decision answers nor reads `decision_ref` sees identical behaviour. `decisions[].id` remains, and every new field is optional. |
+
+**Layering.** `AgentLoop` stays the one execution loop. Within a turn it owns
+the evidence lifecycle, the mutation preflight, clarification, completion
+verification, and tool and model execution. `run_turn` (application layer)
+owns everything that crosses an invocation: loading a continuation, validating
+decision answers against it, restoring its conversation, and persisting a
+stateless run's continuation. Session persistence never moves into model
+iteration.
+
+#### B.1 Execution binding and validation order
+
+A continuation is bound to the conditions under which its decision was
+created:
+
+- **Workspace — binding.** `SessionMeta.cwd`, stored canonical (resolved
+  absolute path), is authoritative. A resumption whose invocation resolves to
+  a different canonical workspace is rejected. The continuation is never run
+  against the caller's current directory and never re-pointed to it.
+- **Mode — binding.** `continuation.mode` is the effective safety mode the run
+  stopped in. A resumption whose effective mode differs is rejected: no
+  automatic upgrade or downgrade, and act capability is never granted to work
+  that stopped in another mode.
+- **Provider and model — provenance, not identity.** They do not bind. A
+  changed provider or model neither makes a valid `decision_ref` unknown nor
+  stale (FR-028: an outstanding form stays valid across a model change). After
+  workspace, mode and answer validation succeed, the resumed work runs on the
+  invocation's configured provider and model.
+
+`run_turn` validates a resumption in exactly this order, and rejects the whole
+batch at the first failure:
+
+1. Parse the DecisionAnswer input.
+2. Validate its structural shape.
+3. Resolve every `decision_ref` exactly.
+4. Require the whole batch to resolve to one continuation (for a stateless
+   caller) or to the live session (for a session-backed caller).
+5. Verify every referenced decision is open (not stale).
+6. Verify the canonical workspace matches (stateless callers).
+7. Verify the effective mode matches (stateless callers).
+8. Validate each answer's `chosen` / `written` content.
+9. Apply the answers.
+10. Invoke `AgentLoop.run()`.
+
+On any failure: zero answers applied, no model call, no tool or dependent
+mutation, and every unresolved decision unchanged. The caller is told what
+failed. A session-backed caller's binding is its own live session, so steps 6
+and 7 are satisfied by construction there; the loop's mode enforcement governs
+the resumed turn as it governs every turn.
+
+#### B.2 Stateless-run continuation lifecycle
+
+- **Fresh run, ends normally or with an error**: nothing is persisted; this
+  feature adds no persistence here.
+- **Fresh run, ends `clarification_required`**: its whole resumable transcript
+  — form records with their `decision_ref`s, outcome and any `prior_changes` —
+  is written once through `SessionStore` as a continuation, whose
+  `continuation` holds its refs and mode, with `cwd` its canonical workspace.
+  The same redaction applies as to any stored session: tool output is redacted
+  at the tool layer before it enters the conversation.
+- **Resumed run** (a valid batch): no longer a fresh run — it is
+  continuation-backed. The continuation's transcript is loaded, the answers are
+  appended as `answered` form records through the common clarification
+  semantics, and the resumed turn runs in that same continuation. Its
+  transcript is **appended to that continuation whatever it ends in**:
+  success, error or another clarification. The fresh-run "persist only on
+  `clarification_required`" rule does not apply to a resumed run.
+- **Resumed run stops again**: the same continuation is kept. The new form and
+  outcome are appended, the new decisions get newly minted refs, and those refs
+  are **added** to `decision_refs` — every earlier ref stays. The new
+  `clarification_required` outcome is returned. No second continuation is
+  created. One continuation is one resumable chain of work.
+- **After resolution**: the answered ref stays in `decision_refs` and in the
+  transcript, so reusing it is rejected as **stale**. When every decision is
+  resolved and the work completes, the continuation is kept, still unlisted,
+  under the existing retention rule.
+- **Deleted**: a continuation removed through the existing delete path makes
+  its refs **unknown**, because the authority was intentionally removed.
+- **Transcript and export (FR-030)**: the continuation is an ordinary transcript
+  in the existing format, exportable through `SessionStore.export_markdown` /
+  `export_json` by the id its refs resolve to. It is only kept out of the
+  listing.
+
+**SC-042.** A real later answer resumes the dependent work through the same
+semantic decision, and produces the same requested result as answering during
+the original wait. The deterministic replay test holds everything else
+constant, provider and model included, and varies only "answered during the
+original wait" against "clarification stop → persisted continuation → explicit
+later answer". It compares the observable requested result, not the model's
+prose byte for byte.
+
+**Gate for this work (plan Phase 9)**: deterministic, mutation-checked tests
+prove:
+
+- `decision_ref` is stable across cancel, expiry and unattended endings and
+  across a later turn, and distinct across turns;
+- a valid answer resolves only its own decision and resumes the dependent work
+  to the same result as a first-time answer (SC-042);
+- each invalid class — missing, malformed, unknown, stale, cross-session — is
+  rejected before any model call, with no decision changed and no dependent
+  work run;
+- a fresh stateless run that ends normally persists nothing; one that ends
+  `clarification_required` persists exactly one continuation, which
+  `list_sessions()` does not return, which an older-format reader skips, and
+  which a later `comodor run --decision-answers` resumes by ref alone;
+- a resumed run appends its transcript to the same continuation whatever it
+  ends in; a resumed run that stops again keeps the same continuation and adds
+  its new refs without dropping the old ones; an answered ref is then rejected
+  as stale, and a deleted continuation's ref as unknown;
+- a resumption from a different canonical workspace, or in a different
+  effective mode, is rejected before any model call with no decision changed;
+  a changed provider or model is not a rejection;
+- every application or surface path that starts a primary turn — all six
+  families — goes through `run_turn`. This is proved behaviourally, by driving
+  each family's entry function and observing that `run_turn` was reached, and
+  not by forbidding loop calls in source text. `run_turn` itself calls the
+  loop, and delegate child loops legitimately call their own;
+- `images` and carried `decisions` reach `AgentLoop.run` unchanged through
+  `run_turn`; a delegate's open decision delivered by
+  `CoreService._deliver_completions` is still unresolved in the parent turn and
+  still blocks dependent work;
+- an ordinary session's meta file is unchanged byte for byte;
+- no fallback path exists (a mutation that adds one fails a test);
+- old clients are unaffected (SC-023).
+
+Protocol codegen `--check` and the capability map stay green.
+
+### C. SC-002 and dependency semantics (D7) — validation model
+
+The mechanisms already exist: the dependent-work guard in `agent/loop.py`, the
+mutation preflight in `agent/preflight.py`, and `prior_changes` for late
+discovery. Validation measures SC-002 as written, per attempt, never as a
+blanket "no write before asking" rule:
+
+| Scenario class | What a deterministic test asserts |
+| --- | --- |
+| Up-front ambiguity (the decision is identifiable before any dependent mutation) | Zero dependent writes, shell invocations or external calls before the clarification; the specific dependent artifact does not exist. |
+| Uncertain dependency | The mutation is withheld, as if dependent. |
+| Demonstrably independent work | It **may** run, does not fail SC-002, and is not required. No work is started merely to stay active. |
+| Late discovery | Changes made before discovery persist and appear in `prior_changes`; zero potentially dependent mutations run after discovery; nothing claims the workspace is unchanged. |
+
+The existing clarification suites (`test_clarification_lifecycle.py`,
+`test_clarification_pause.py`, `test_clarification_required.py`,
+`test_mutation_preflight.py`) assert that the **specific dependent artifact**
+is absent, not that nothing at all was written — consistent with D7. Plan
+Phase 9 adds the missing positive cases (independent work permitted; late
+discovery with prior changes), and audits the benchmark judges in
+`bench/tasks/careful-*` for a blanket no-write assertion without weakening any
+of them.
+
+### D. Requirements sharpened by the 2026-09-24 sessions — re-verification
+
+Each is re-verified against the code by a deterministic test in plan Phase 9;
+a gap becomes a task rather than an assumption:
+
+- **FR-127**: an unsupported completion claim is marked unconfirmed and never
+  delivered as completed. No "not confirmed" annotation was found in
+  `agent/claims.py`, `agent/verify.py` or `agent/loop.py` at `d911e3f`, so this
+  is a probable gap.
+- **FR-099**: exact duplicates collapse only on content identity; near-duplicates
+  only when the difference is proven irrelevant.
+- **FR-100 / FR-101**: full authoritative fallback when a base or referent
+  cannot be validated.
+- **FR-105**: one invalidation rule across every reuse mechanism.
+- **FR-018 / FR-123**: bounded independent work before a non-interactive stop;
+  no speculative work.
+
+### E. FR-082 — the headless continuation adds no fourth user-visible change
+
+Headless later resumption is FR-129's own requirement, and its CLI
+representation (`--decision-answers`) and the `decision_ref` fields are that
+requirement's surface. The continuation that makes it safe is internal: it is
+written only when a stateless run (`comodor run`, a scheduled job or a webhook
+event) already ends needing a decision, it never
+appears in any session list, UI or insights, it leaves the global `--resume`
+contract untouched, and it leaves ordinary sessions' stored files unchanged. No
+behaviour a user sees today changes beyond the three FR-082 changes, so no
+specification clarification is needed.
+
+### F. Acceptance (unchanged)
+
+SC-011 passes only when current mean total tokens ≤ 0.90 × naive in one
+comparable paired run **and** every task's current outcome rate ≥ naive. Both
+historical runs fail it. SC-012 has no final passing evidence. Both are settled
+only in plan Phase 10, on the exact frozen candidate, after plan Phase 9.
 
 ## Current Data Flow (as built)
 
@@ -346,7 +648,7 @@ fields are **additive and optional**, so an old client ignores them:
 | session persistence, reconnect | exists (`PendingInteraction`) | FR-023 |
 | **`reason`** | **new** | why clarification was required — which materiality class of FR-007 |
 | **`evidence_consulted`** | **new** | what was already checked, so the user is not asked to repeat the agent's work |
-| **`decision_ref`** | **new** | links the question to its `OpenDecision` so the answer closes the right one |
+| **`decision_ref`** | **new** | the decision's stable semantic `ref` (not the turn-local `OpenDecision.id`), so an answer — live, or a later one — closes exactly that decision (plan §2026-09-24 Plan Convergence B) |
 
 ### Determinism rules
 
@@ -389,7 +691,7 @@ mandatory clarification (passes FR-007 materiality)
 
    ALL THREE non-answer branches report ONE top-level category:
          TurnResult.stopped = "clarification_required"
-         payload: decision, candidates, evidence_consulted, reason, outcome
+         payload: decision_ref, decision, candidates, evidence_consulted, reason, outcome
                                        │
                                        ├─ CLI: distinct non-zero exit code ≠ error
                                        ├─ API/ACP: structured outcome, negotiated capability
@@ -570,11 +872,13 @@ checkout, not source.
 Each phase is independently validatable and revertable (Constitution V). **No
 phase begins before its predecessor's gate is green on the exact commit.**
 
-**Numbering**: the phases below are **plan phases (0–8)**. The executable task
-list in [tasks.md](./tasks.md) uses its own **task phases (1–11)**, and the two
-do not coincide (plan Phase 5 = learning = tasks Phase 6; plan Phase 7 =
-benchmark = tasks Phase 9). The normative mapping is the crosswalk table at the
-top of tasks.md; cross-artifact references use `plan Phase N` / `tasks Phase N`.
+**Numbering**: the phases below are **plan phases (0–10)**. The executable task
+list in [tasks.md](./tasks.md) uses its own **task phases**, and the two do not
+coincide (plan Phase 5 = learning = tasks Phase 6; plan Phase 7 = the historical
+benchmark phase = tasks Phase 9). Plan Phases 9 and 10 were added by the
+2026-09-24 convergence; their task phases and task IDs are derived by
+`/speckit.tasks`. The normative mapping is the crosswalk table at the top of
+tasks.md; cross-artifact references use `plan Phase N` / `tasks Phase N`.
 
 | Plan phase | Name | Delivers | Gate |
 | --- | --- | --- | --- |
@@ -584,14 +888,18 @@ top of tasks.md; cross-artifact references use `plan Phase N` / `tasks Phase N`.
 | **3** | Interactive clarification enforcement | IP-2 + IP-3; answered / cancelled-declined / expired / unattended clarification lifecycles; `clarification_required` outcome (FR-082 enforcement); additive protocol fields; renderer tests | Tests 3–8, 19; protocol codegen `--check` green; old client unaffected |
 | **4** | Token accounting & context optimization | IP-5; budget manager, dedup, delta, references, log summarisation | Tests 14, 15, 17; **no outcome-rate fall vs Phase 1 baseline** |
 | **5** | Progressive-learning hardening | IP-6; provenance, admission gate, supersession, fingerprint invalidation | Tests 10–13; caps unchanged |
-| **6** | Cross-surface integration | IP-4 completion gate; CLI/API/ACP/Web/channel wiring of the clarification-required outcome (FR-082 surface wiring); docs; capability map; bundle rebuild (T141) | Surface impact table complete with evidence; the one behaviour change release-noted |
-| **7** | Regression & performance benchmark | Full paired benchmark; SC-011 threshold set from Phase 1 data | Paired report published; no regression |
-| **8** | Full validation | Complete baseline on exact final HEAD, all three platforms | Every gate green; nothing claimed unverified |
+| **6** | Cross-surface integration | IP-4 completion gate; CLI/API/ACP/Web/channel wiring of the clarification-required outcome (FR-082 surface wiring); docs; capability map; bundle rebuild (T141) | Surface impact table complete with evidence; the backward-incompatible FR-082 change is release-noted and the two additive visible changes are documented |
+| **7** | Regression & performance benchmark (historical) | Full paired benchmark reports (tasks-phase-1 baseline T015; candidate run T155); the SC-011 threshold derived from them and recorded in spec.md (D5) | Paired reports published; threshold recorded. SC-011 and SC-012 acceptance moved to plan Phase 10 — both historical runs fail SC-011 |
+| **8** | Full deterministic validation | Complete local/CI baseline on the integrated candidate, all three platforms | Every deterministic gate green; nothing claimed unverified |
+| **9** | Specification convergence (D4/D7/D9 and re-verification) | Stable semantic `decision_ref` minted in the evidence owner; unresolved set derived from the existing session form records; common DecisionAnswer path in the application layer; additive protocol fields; CLI/API/ACP/channel adapters; D7 validation cases; re-verification of FR-099/100/101/105/127/018/123 (§2026-09-24 Plan Convergence B–D) | The §B gate: invalid refs fail closed before any model call, no heuristic path, stable and distinct refs, SC-042 replay, old clients unaffected; D7 cases green; every re-verification either passes or has become a task; protocol codegen, capability map and full deterministic suite green |
+| **10** | Final live acceptance | Provider qualification, then a fresh comparable paired run on the exact frozen candidate | SC-011 (≤ 0.90 × naive mean total tokens **and** no task-level outcome-rate fall) and SC-012 have fresh passing evidence |
 
 **Dependency note (plan-phase numbering)**: plan Phase 4 cannot start before
 plan Phase 1 (no baseline, no optimization — Constitution XXI). Plan Phase 3
 depends on plan Phase 2 (the ledger decides *when* to ask). Plan Phase 6 depends
-on plan Phases 2–5.
+on plan Phases 2–5. Plan Phase 9 follows the final specification review and
+closes D4/D9 before any final provider acceptance; plan Phase 10 depends on
+plan Phase 9 and on exact-head deterministic validation.
 
 ---
 
@@ -607,14 +915,14 @@ one validation task, and concrete file evidence. Phase references use the
 | --- | --- | --- | --- |
 | TUI | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10 | Existing question overlay in `apps/tui/src/App.tsx` and the shared reducer in `packages/questions/src/index.ts` render the new optional `reason` / `evidence_consulted` (T052); deterministic keyboard/input behaviour and the custom-answer row characterized at widths 160/120/100/80/60 (T008) and re-run (T163); committed bundle rebuilt (T141) and verified against source (T166); frontend lint/typecheck/tests/build (T162) |
 | Web UI | REQUIRED | plan Phase 1 / tasks Phase 1 (characterization); plan Phase 6 / tasks Phase 8 (wiring, verification); plan Phase 8 / tasks Phase 10 | Live browser question surface: `src/comodor/web/session.py` carries question forms to the page (`request.meta["questions"]`) and routes a dismissal as `CANCELLED` into `tools/ask.py`; `src/comodor/web/ui.js` renders options including the core-appended `free: true` row (`drawOwn`). Characterized before any change — question round-trip, option order, custom-answer row, single/multi-choice, header binding, current dismissal path (T006, `tests/test_web.py`); outcome wiring and regression — `clarification_required` never shown as completion, `clarification.outcome` preserved for cancelled/expired/unattended, dismissal ≠ turn cancellation, custom answer survives, no duplicate free row (T133); Phase 8 gate requires the Web clarification cases green alongside the permission suite (T146); full suite (T160) |
-| CLI / Headless | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8 | Today's no-listener behaviour pinned (T009); `comodor run --json` reports `stopped = "clarification_required"` with the nested `clarification` payload (T130, contracts §C3); distinct non-zero exit code ≠ error code (T131); non-interactive blocking test (T044); `docs/cli.md` (T143) |
-| API / Protocols | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10 | Additive optional `QuestionField` properties and the negotiated clarification-required capability in `schemas/protocol/v2.json` (T046, T048); artifacts regenerated and `--check` green (T047, T164); old-client compatibility (T136); `api/server.py` never maps the outcome to `finish_reason: "stop"` (T132); session bridge (T133); ACP (T134); capability honesty and mode authority (T138, T139); capability map (T140, T165) |
-| Desktop | NOT APPLICABLE | — | No desktop application/client exists: `docs/desktop-architecture.md` opens "Planned, not built. Nothing in this document exists in the repository"; there is no `src-tauri/`, `apps/desktop/` or desktop client package. The existing `src/comodor/desktop/` package is the computer-use **tool's** screen-capture/pointer backend (consumed by `tools/computer.py`, gated in `tools/registry.py`), not a client or runtime: it renders no questions and reads no turn outcome (`grep -rn question\|stopped src/comodor/desktop/` finds only the guard's own `Stopped` refusal). As a tool it is covered by the permission gates (T011, T167), not by this row |
-| Channels / Integrations | REQUIRED | plan Phase 3 / tasks Phase 3 (FR-121 blocking); plan Phase 6 / tasks Phase 8 | Non-interactive blocking applies to every channel (FR-121, T044); channel integrations under `src/comodor/channels/` report a needed decision instead of a result or a crash (T135); existing channel suites `tests/test_channel_service.py`, `tests/test_telegram.py`, `tests/test_slack.py`, `tests/test_whatsapp.py` stay green in T160; quickstart Web/channel checks |
+| CLI / Headless | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8; plan Phase 9 | Today's no-listener behaviour pinned (T009); `comodor run --json` reports `stopped = "clarification_required"` with the nested `clarification` payload (T130, contracts §C3); distinct exit code 3 ≠ generic error/cancellation (T131); non-interactive blocking test (T044); `docs/cli.md` (T143); exact-`decision_ref` resumption via `comodor run --decision-answers` through `run_turn` (the global `--resume` is not reused); invalid refs and workspace or mode mismatches refused before any model call with exit `1` (plan Phase 9, §B, §B.1) |
+| API / Protocols | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10; plan Phase 9 | Additive optional `QuestionField` properties and the negotiated clarification-required capability in `schemas/protocol/v2.json` (T046, T048); artifacts regenerated and `--check` green (T047, T164); old-client compatibility (T136); `api/server.py` maps the OpenAI-compatible envelope to standard `finish_reason: "stop"` while preserving the distinct Comodor state in `comodor.stopped` and `comodor.clarification` (T132); session bridge (T133); ACP (T134); capability honesty and mode authority (T138, T139); capability map (T140, T165); optional `decision_ref` on `ClarificationRequired` / `ClarificationDecision`, codegen, API `comodor.decision_answers` and ACP resumption (plan Phase 9, §B) |
+| Desktop | NOT APPLICABLE | — | No desktop application/client exists: `docs/desktop-architecture.md` opens "Planned, not built. Nothing in this document exists in the repository"; there is no `src-tauri/`, `apps/desktop/` or desktop client package. The existing `src/comodor/desktop/` package is the computer-use **tool's** screen-capture/pointer backend (consumed by `tools/computer.py`, gated in `tools/registry.py`), not a client or runtime: it renders no questions and reads no turn outcome (it imports none of the question, clarification or turn-outcome machinery; its uses of the words "question" and "stopped" are prose and the guard's own `Stopped` refusal). As a tool it is covered by the permission gates (T011, T167), not by this row |
+| Channels / Integrations | REQUIRED | plan Phase 3 / tasks Phase 3 (FR-121 blocking); plan Phase 6 / tasks Phase 8; plan Phase 9 | Non-interactive blocking applies to every channel (FR-121, T044); channel integrations under `src/comodor/channels/` report a needed decision instead of a result or a crash (T135); existing channel suites `tests/test_channel_service.py`, `tests/test_telegram.py`, `tests/test_slack.py`, `tests/test_whatsapp.py` stay green in T160; quickstart Web/channel checks; a later answer counts only as an explicit structured reply naming the `decision_ref`, routed through the common path; any other reply is a new request (plan Phase 9, §B) |
 | Docker / Packaged Runtime | REQUIRED | plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10 | **Docker configuration unchanged; packaged runtime artifact REQUIRED and verified.** `Dockerfile` / `docker-compose.yml` are not edited by any task (T169 scope review); the packaged terminal-interface bundle that the wheel, sdist and container ship is affected by the TS changes and is rebuilt (T141) and verified to match source (T166); existing Docker/packaging/release validation stays green (T160, T168, T170 confirms no release action) |
-| Persistence / Shared State | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 5 / tasks Phase 6; plan Phase 6 / tasks Phase 8 | Learning records gain provenance, status, fingerprint, supersession in `src/comodor/learning/store.py` (T099, T110, T111, T112, T117); session pending-interaction round-trip characterized (T007) and an outstanding form persisted/restored across reconnect with full lifecycle in transcript/export (`src/comodor/session/store.py`, T050, T051); pre-change sessions and stored knowledge remain readable (T137); ledger never persisted (T026) |
+| Persistence / Shared State | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 5 / tasks Phase 6; plan Phase 6 / tasks Phase 8; plan Phase 9 | Learning records gain provenance, status, fingerprint, supersession in `src/comodor/learning/store.py` (T099, T110, T111, T112, T117); session pending-interaction round-trip characterized (T007) and an outstanding form persisted/restored across reconnect with full lifecycle in transcript/export (`src/comodor/session/store.py`, T050, T051); pre-change sessions and stored knowledge remain readable (T137); ledger never persisted (T026); the unresolved-decision set is derived from the form records the session transcript already stores (`message.meta["question"]`) — no new store, and the ledger is still never persisted; a headless run persists only when it ends `clarification_required`, as a `SessionStore` continuation marked by the optional `SessionMeta.continuation` object (`decision_refs`, `mode`), written only on continuations and excluded from `list_sessions()`; a resumed run appends to it whatever it ends in (plan Phase 9, §B, §B.2) |
 | Security / Authorization | REQUIRED | every task phase that touches questions, ASK, modes, tool advertisement, session interaction, orchestration or protocol | Permission and mode enforcement characterized first (T011, `tests/test_baseline_permissions.py`; T012 capability advertisement); per-phase permission regression gates T028, T060, T069, T098, T119, T129, T146 and final T167; unknown modes fail closed and advertised capabilities stay mode-authoritative (T138, T139); the ledger holds fingerprints, never secrets, and is never persisted (T026); clarification never becomes a route to a forbidden action (plan §Explicit non-goal) |
-| Tests / Documentation | REQUIRED | all task phases; plan Phase 8 / tasks Phase 10 | Characterization suite T001–T013; mutation-checked regression tests for every guard (SC-025) across Phases 2–8; benchmark scenarios and integrity (T147–T158); `docs/questions.md` (T142), `docs/cli.md` (T143), `docs/learning.md` (T144); `CHANGELOG.md` unreleased note stating the one intended behaviour change (T145); full validation on the exact final HEAD, three platforms (T159–T170) |
+| Tests / Documentation | REQUIRED | all task phases; plan Phase 8 / tasks Phase 10 | Characterization suite T001–T013; mutation-checked regression tests for every guard (SC-025) across Phases 2–8; benchmark scenarios and integrity (T147–T158); `docs/questions.md` (T142), `docs/cli.md` (T143), `docs/learning.md` (T144); `CHANGELOG.md` unreleased note for the one backward-incompatible regression-by-design and documentation of the two additive visible changes in FR-082 (T145); full validation on the exact final HEAD, three platforms (T159–T170) |
 
 Traceability rule: every plan phase that changes a surface is traceable to this
 table — plan Phase 3 (TUI, CLI, API, Channels, Persistence, Security), plan
@@ -687,6 +995,19 @@ bench/
 tests/                       # NEW — ~20 deterministic modules; tests/test_web.py EXTENDED
 ```
 
+**Plan Phase 9 (convergence) extends, and adds nothing new**:
+`agent/evidence.py` (minted `ref` on `OpenDecision`), `tools/ask.py`
+(`payload_for`, question `decision_ref`), `session/store.py` (the unresolved
+set derived from stored form records; the optional `SessionMeta.continuation`
+index, the listing filter and the exact ref lookup), `application/__init__.py`
+(`run_turn`, the shared turn entry above `AgentLoop.run()`), its six callers
+— `web/session.py` (`Session.send`), `CoreService.send`,
+`CoreService._deliver_completions`, `cli.py` (`--decision-answers`),
+`acp/agent.py`, `cron/runner.py` — `api/server.py` / `api/schema.py` /
+`api/session_map.py`, `acp/agent.py`, `agent/background.py`, and
+`schemas/protocol/v2.json` with its regenerated artifacts. No new module, store
+or subsystem.
+
 **Structure Decision**: Existing repository layout retained unchanged. The single
 new **product/runtime** file is `src/comodor/agent/evidence.py`, placed in
 `agent/` because the ledger's lifetime is the agent turn and its only consumers
@@ -737,10 +1058,37 @@ Re-evaluated after the plan Phase 1 design artifacts below.
   protocol carries. The protocol change goes through the schema and codegen.
   **PASS**
 - **I (compatibility)**: all protocol additions are optional and negotiated; the
-  one intended behaviour change (FR-082) is isolated to plan Phase 3
-  (enforcement) / Phase 6 (surface wiring) and release-noted.
+  one backward-incompatible regression-by-design in FR-082 is isolated to plan
+  Phase 3 (enforcement) / Phase 6 (surface wiring) and release-noted; the two
+  other intended visible changes are additive and documented.
   **PASS**
 - **XXI (paired measurement)**: enforced structurally — plan Phase 4 (tasks
   Phase 5) cannot begin before plan Phase 1 (T015) publishes the baseline. **PASS**
 
 **Gate result after design: PASS.** No unjustified complexity.
+
+### Constitution Re-Check (post-convergence, 2026-09-24)
+
+Re-evaluated against the converged plan and the specification at `d911e3f`.
+
+| Principle | Check | Status |
+| --- | --- | --- |
+| I — Backward compatibility | Exactly one backward-incompatible change (FR-082 #1), release-noted. The new `decision_ref` fields and resumption inputs are optional, and `decisions[].id` is kept. `SessionMeta.continuation` is written only on continuations, so ordinary session files are unchanged and older readers skip continuations. The global `--resume` contract is untouched | **PASS** |
+| III — Fix the invariant | The turn-local id is replaced as semantic identity by a minted `ref`, not patched with matching heuristics; no sleeps, timeouts or retries | **PASS** |
+| IV — Deterministic regression tests | The ref minting function is injectable; every new guard (rejection classes, no-fallback, D7 cases) is mutation-checked | **PASS** |
+| V — Narrow scope | Plan Phase 9 is limited to the spec's D4/D7/D9 deltas and the named re-verifications; no surface is moved onto `CoreService`; one function is added above the loop, and the six existing callers switch to it; delegate child loops are left as they are | **PASS** |
+| VI — Boundaries and protocol contracts | Identity lives in the core evidence owner; cross-invocation resumption lives in `run_turn` (application), in-turn behaviour stays in `AgentLoop`; adapters only translate input; schema → codegen | **PASS** |
+| VII — Reproducible artifacts | Generated protocol TS/Python regenerated; the committed terminal bundle is rebuilt only if TUI source changes | **PASS** |
+| VIII — Security | A decision answer is caller input, validated before any tool; refs carry no secrets; mode policy is untouched; a continuation is bound to its workspace and mode and fails closed on a mismatch, so resumption can neither redirect mutations to another directory nor change mode; persistence follows the same redaction as any stored session | **PASS** |
+| X — Quality gates | Full deterministic baseline plus exact-HEAD CI at the plan Phase 9 gate | **PASS** |
+| XI — Surfaces | The spec owns the ten-row table; the Surface Impact table here mirrors its statuses and adds only implementation detail | **PASS** |
+| XII — Done means everything agrees | data-model, contracts, quickstart and research updated with this plan (including the H1/H2/M1/L2 repair); tasks follow via `/speckit.tasks` | **PASS** |
+| XIV — Evidence before assumption | The design rests on inspected code (§B facts); FR-127 is flagged as a probable gap rather than assumed done | **PASS** |
+| XV — Interactive clarification | Only an explicit answer bound to its `decision_ref` resolves a decision; invalid input changes nothing; channels without a structured reply route report the decision instead of guessing | **PASS** |
+| XVI / XXI — Token efficiency measured with quality | No context change in plan Phase 9; SC-011/SC-012 remain paired acceptance in plan Phase 10 | **PASS** |
+| XVII — Progressive learning | Unchanged; a resumed answer is a `settled_decision` only when it is a real answer | **PASS** |
+| XVIII — Extend, never duplicate | No new store, subsystem or matcher: the evidence owner, `SessionStore` (one optional meta field, a listing filter, an exact lookup) and existing request extensions are extended; `run_turn` removes the duplication six direct loop calls would otherwise force, while carrying `images` and delegate `decisions` through unchanged | **PASS** |
+| XIX — Grounded tool use | Unchanged | **PASS** |
+| XX — User control | No merge, tag, publish or deploy | **PASS** |
+
+**Gate result after convergence: PASS.**

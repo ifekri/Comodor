@@ -21,7 +21,8 @@ persisted (research R7).
 | Field | Type | Rule |
 | --- | --- | --- |
 | `claim` | text | What is asserted. Short; not the content itself |
-| `state` | enum | Exactly one member of the closed `EvidenceState` set defined in §2 |
+| `category` | enum | The **information origin** (FR-001): `stated` (stated by the user), `verified` (verified from the repository or a tool), `knowledge` (established project or user knowledge), `derived` (deterministically derived) or `unknown`. A separate axis from `state` (spec §Operational definitions); the core already records it (`agent/evidence.py::EvidenceEntry.category`) |
+| `state` | enum | Exactly one member of the closed `EvidenceState` set defined in §2 — the **lifecycle** axis |
 | `source` | text | Where it came from — a path, a tool name, `user`, or a derivation reference |
 | `observed_at` | turn-relative step | Which step established it |
 | `fingerprint` | opaque | Identity of the observed material. **Never the material, never a secret value** |
@@ -41,9 +42,14 @@ persisted (research R7).
 
 ## 2. Evidence state — **new**
 
+The nine states are the **lifecycle** axis. They are not the information
+origin (`category`, §1): one state can be reached from more than one origin —
+`KNOWN` from a user statement (`stated`) or from admitted established knowledge
+(`knowledge`) — and a state name is never used as an origin value.
+
 | State | Meaning | Entered by | May a decision rest on it? |
 | --- | --- | --- | --- |
-| `KNOWN` | The user stated it | User message | Yes |
+| `KNOWN` | Stated by the user or admitted established project/user knowledge | User message or `knowledge:<record>` reference | Yes |
 | `VERIFIED` | Observed through a tool or the repository | Tool result | Yes |
 | `DERIVED` | Deterministically follows from `KNOWN`/`VERIFIED`/`DERIVED` | Derivation | Yes |
 | `UNKNOWN` | Absent, unresolved | Default for anything absent | **No** |
@@ -66,7 +72,7 @@ REQUIRES_CLARIFICATION --expired-----------> UNRESOLVED   (clarification.outcome
 REQUIRES_CLARIFICATION --nobody present---> BLOCKED       (clarification.outcome: unattended)
    ^^ all three report ONE turn outcome: stopped = "clarification_required".
       stopped = "cancelled" stays reserved for turn-level cancellation.
-UNRESOLVED --user later supplies an answer-> KNOWN
+UNRESOLVED --valid explicit answer matching decision_ref-> KNOWN
 KNOWN | VERIFIED | DERIVED --gate confirms--> VALIDATED
 KNOWN | VERIFIED | DERIVED --contradicted--> FAILED
 VERIFIED --source fingerprint changed------> UNKNOWN
@@ -82,7 +88,8 @@ An unresolved point that materially affects the work. One becomes one question.
 
 | Field | Type | Rule |
 | --- | --- | --- |
-| `id` | stable id | Survives into the question as `decision_ref` |
+| `id` | ledger-local id | `d1`, `d2`, … from the per-ledger counter; links the decision to its ledger entries within one turn. **Not** the semantic identity — it restarts every turn |
+| `ref` | opaque stable id | The semantic identity, serialized everywhere as `decision_ref`. Minted **once**, when the decision first enters `REQUIRES_CLARIFICATION`, by the ledger's injectable minting function; never derived from wording, list position or a counter. A decision re-raised for resumption carries its original `ref` |
 | `what` | text | The decision, stated so it can be answered without re-reading the request |
 | `candidates` | list | Grounded readings or observed conventions. **Never invented** (FR-016). May be empty when no alternative can be enumerated |
 | `evidence_consulted` | list of entry ids | What was already checked — so the user is not asked to repeat the agent's work |
@@ -111,7 +118,7 @@ unchanged: `id`, `session_id`, `title`, `questions[]`, and per question `header`
 | --- | --- | --- |
 | `reason` | text | Which materiality class required this |
 | `evidence_consulted` | list of text | What was checked first |
-| `decision_ref` | id | Links back to the `OpenDecision` |
+| `decision_ref` | opaque stable id | The decision's semantic `ref` (§3). At `d911e3f` it carries the turn-local `OpenDecision.id`; plan Phase 9 replaces that value with the minted `ref`. The field and its optionality are unchanged |
 
 **Invariant preserved, not rebuilt**: the final `QuestionOption` with `free =
 true` is appended centrally by `questions.py::_options()`, which also strips
@@ -126,6 +133,80 @@ the only change is that a non-answer (cancel, decline, expiry, absence) no
 longer yields a synthesised answer (§7).
 
 ---
+
+### Unresolved decision — **derived from existing session records**
+
+The `EvidenceLedger` remains per-turn and is never persisted. A live form keeps
+using the existing pending-interaction snapshot for reconnect (FR-023). No new
+record type or store is added. Every form already leaves a **form record**
+(`tools/ask.py::form_record`) on its tool message (`message.meta["question"]`)
+in the session transcript, whether the model raised it, the mutation preflight
+raised it, or it went unattended. That record already carries each question
+with its `decision_ref`, prompt, options, `reason` and `evidence_consulted`, the
+answers given, and the lifecycle `outcome`.
+
+A session's **unresolved set** is derived from those records:
+
+| Field (as read from the record) | Rule |
+| --- | --- |
+| `decision_ref` | The question's `decision_ref`; the key. Never inferred from wording or position |
+| decision / candidates / reason / evidence consulted | The question's prompt, grounded options, `reason` and `evidence_consulted`, exactly as shown |
+| lifecycle `outcome` | `cancelled`, `expired` or `unattended` |
+| status | **Unresolved** while the latest record for the ref ended without an answer; **resolved** — so the ref becomes stale — once an `answered` record for it is appended |
+
+**Lifetime**: a ref resolves only within the session that raised it. A ref
+from any other session is unknown.
+
+### Stateless-run continuation — **existing `SessionMeta`, one optional field**
+
+A stateless run — `comodor run`, a scheduled job, a webhook event — persists
+nothing unless it ends `clarification_required`. Only then is its transcript
+written through the existing `SessionStore`, as a session whose meta carries
+one optional field:
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `continuation` | object `{decision_refs, mode}` | **Present only on continuations**; absent on every ordinary session, whose meta file is therefore unchanged, and an older reader — which rejects unknown fields — skips a continuation. `decision_refs`: every `decision_ref` this continuation has **ever** issued, answered ones included; new refs are **added** when a resumed run stops again, and a ref is **never removed** on resolution. `mode`: the effective safety mode the run stopped in — a **binding** |
+
+Existing `SessionMeta` fields keep their meaning and are not duplicated:
+- `cwd` — the canonical workspace; a **binding**.
+- `provider` / `model` — **provenance only**; never part of the decision's
+  identity, and never a reason to reject a resumption.
+
+- `list_sessions()` excludes any meta that has `continuation`, so continuations
+  never appear in the TUI resume list, the Web UI, ACP or insights.
+- A continuation is found **only** by exact membership of a `decision_ref` in
+  `continuation.decision_refs`. Exactly one match, or the ref is unknown. Open
+  vs stale is then read from the transcript's form records, never from the
+  meta.
+- **Lifecycle**: fresh run ending normally → nothing persisted. Fresh run
+  ending `clarification_required` → one continuation. Resumed run → its
+  transcript is appended to the same continuation, whatever it ends in.
+  Resumed run stopping again → same continuation, new refs added. Answered ref
+  → stale. Deleted continuation → its refs unknown.
+- Retention is the existing session rule: kept until deleted. There is no
+  global tombstone.
+- The transcript is an ordinary one, exportable by the id its refs resolve to
+  (`export_markdown`, `export_json`) (FR-030).
+
+### DecisionAnswer — **additive resumption input**
+
+A later non-interactive/headless/API/ACP invocation resumes a semantic decision with one structured input rather than by replaying or guessing a form. On the CLI it is `comodor run --decision-answers PATH|-`, and the refs alone locate the continuation; all refs in one batch must belong to the same open continuation.
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `decision_ref` | opaque stable id | Required on explicit cross-turn resumption surfaces |
+| `chosen` | list/string, optional | Selected grounded option(s), where applicable |
+| `written` | text, optional | Free-text answer; at least one answer representation must contain real user/caller input |
+
+Validation is owned by the shared turn entry `run_turn` (plan §B) and runs in
+the order of plan §B.1: shape; exact resolution of every ref; one continuation
+(or the live session) for the whole batch; each decision open; for a stateless
+caller, canonical workspace (`SessionMeta.cwd`) and effective mode
+(`continuation.mode`) match; answer content — then application, then the
+loop. A changed provider or model is not a mismatch. Matching is exact on
+`decision_ref` against the session's unresolved set, **before** any model call
+or tool. The input is all-or-nothing: missing, malformed, unknown, stale or otherwise unresolvable references make it invalid. An invalid input resolves nothing, leaves every open decision unchanged, authorises no dependent work, and is reported to the caller with the refs that failed. There is no recency, position, textual-similarity, most-recent-question or first-unresolved fallback. A valid answer is appended as an `answered` form record for its ref, and is seeded into the new turn's ledger as caller-provided `KNOWN` — exactly as a live-form answer is. That is the only cross-turn transition from an unresolved decision to usable knowledge. An answer through a live pending form is unaffected: its transport already carries the decision association.
 
 ## 5. Durable knowledge record — **exists, extended**
 
@@ -220,9 +301,13 @@ aggregation.
 | `cancelled` | existing — **the whole turn** was cancelled or interrupted (`cancel_reason` `stop` \| `interrupt`). **Unchanged, and never reused for a dismissed question** | false |
 | **`clarification_required`** | **new** — the single category for *every* mandatory clarification that ended without the required answer | false |
 
-**Structured clarification payload** — carries the `OpenDecision` (`what`,
-`candidates`, `evidence_consulted`, `reason`, FR-034) plus the clarification
-lifecycle discriminator:
+**Structured clarification payload** — carries the first `OpenDecision` through
+`decision_ref`, `what`, `candidates`, `evidence_consulted` and `reason` (FR-034),
+plus every open decision under `decisions[]`, each with its own `decision_ref`.
+Each `decisions[]` entry keeps its existing `id`, which carries the same value
+as its `decision_ref` — one identity with a compatibility alias. Where the turn
+changed files before the decision became known, the payload also carries
+`prior_changes` (FR-013). It carries the clarification lifecycle discriminator:
 
 ```text
 outcome?: "cancelled" | "expired" | "unattended"
@@ -312,7 +397,11 @@ TaskMeasurement.
                         └──────────────────┘
 ```
 
-**Persistence boundary**: everything above the dashed line of the turn —
-`EvidenceEntry`, `OpenDecision` — is in-memory only. Only `QuestionRequest`
-(through the existing pending-interaction slot), durable knowledge and
-measurements cross into storage.
+**Persistence boundary**: the per-turn `EvidenceEntry` collection and evidence
+ledger are in-memory only. A live `QuestionRequest` crosses into storage through
+the existing pending-interaction slot for reconnect. Every form's record —
+including its questions' `decision_ref` and its lifecycle outcome — already
+crosses into the session transcript. The unresolved set a later invocation
+matches against is derived from those records, so no new store exists. The
+`OpenDecision` runtime object and its ledger do not persist. Durable knowledge
+and measurements keep their existing persistence boundaries.
