@@ -430,6 +430,10 @@ class Service:
             self._await_written(talk, argument)
         elif verb == "qs":
             self._send_answers(talk)
+        elif verb == "da":
+            # An answer row on a stopped turn: `da:<decision_ref>:<n>`.
+            ref, _, slot = argument.rpartition(":")
+            self._resume_decision(talk, ref, option=int(slot) if slot.isdigit() else -1)
         else:
             self._menu(talk)
 
@@ -443,6 +447,35 @@ class Service:
         if not start_or_steer(talk.session, text, images,
                               self.config.whatsapp.busy_mode, refuse):
             return
+        self._follow_new_turn(talk)
+
+    def _resume_decision(self, talk: Conversation, ref: str, *,
+                         option: int | None = None, written: str = "") -> None:
+        """Answer one decision a stopped turn named, by its ref, and resume."""
+        from ..application import DecisionRejected
+
+        try:
+            started = talk.session.resume_decision(ref, option=option, written=written)
+        except DecisionRejected as refused:
+            self._send(talk.wa_id, f"That answer could not be used: {refused}")
+            return
+        if not started:
+            self._menu(talk, note="Still working on the last message — try "
+                                  "again when it is done.")
+            return
+        self._follow_new_turn(talk)
+
+    def _offer_decisions(self, talk: Conversation, clarification: Any) -> None:
+        """A turn that stopped for decisions offers them as a list to answer
+        from. Ordinary text afterwards is a new request, never an answer."""
+        from ..web.session import open_decisions
+
+        found = open_decisions(clarification)
+        if found:
+            self._list(talk.wa_id, "Answer to continue: pick an option.",
+                       "Answer", ui.decisions(found))
+
+    def _follow_new_turn(self, talk: Conversation) -> None:
         talk.turn = Turn()
         self._send(talk.wa_id, "_Working on it…_")
         threading.Thread(target=self._follow, args=(talk,),
@@ -536,6 +569,7 @@ class Service:
                     answer += f"\n\n⚠ {event.get('text', '')}"
                 elif kind == "turn_end":
                     self._finish(talk, answer, tools)
+                    self._offer_decisions(talk, event.get("clarification"))
                     return
                 elif kind == "cancelled":
                     self._finish(talk, answer + "\n\n_stopped_"

@@ -110,6 +110,14 @@ Lists longer than a screen — models, skills, history — are paged six at a ti
 with **Previous** and **Next**. Telegram will render eighty buttons happily and
 nobody will scroll them.
 
+## Answering a decision after the turn stopped
+
+When a turn stops because a decision is needed, its message names each
+decision with its `decision_ref`, and a second message offers the options as
+buttons. Tapping one answers exactly that decision, and the work carries on.
+To give an answer of your own, send `/answer <decision_ref> <your answer>`.
+Anything else you type is a new request, never read as an answer.
+
 ## Running it
 
 Three ways, in order of how long you want it to last.

@@ -351,3 +351,70 @@ def test_an_answer_naming_an_unknown_option_is_rejected_at_the_transport(config)
         assert (config.paths.project / "db.py").exists()
     finally:
         service.close()
+
+
+# --------------------------------------------------------------------------- #
+# T189 — the live pending-form path is unchanged by the ref; a decision
+# raised again later keeps its ref
+# --------------------------------------------------------------------------- #
+
+
+def _form_refs(agent):
+    return [question["decision_ref"]
+            for message in agent.conversation.messages
+            if isinstance(message.meta.get("question"), dict)
+            for question in message.meta["question"]["questions"]]
+
+
+def test_a_live_form_is_still_answered_through_its_request_with_the_ref_on_it(
+        config, bus):
+    answerer = Answerer(bus, answered_with(["SQLite"]))
+    agent = make_agent(config, bus, scripts_that_ask_then_write())
+    result = agent.run(REQUEST)
+    assert result.stopped == "done"
+    (shown,) = answerer.requests[0].meta["questions"]
+    decision = agent.tool_context.evidence.decisions[0]
+    # The form the person saw names the decision by its minted ref, and the
+    # answer arrived through the form's own request, not by that ref.
+    assert shown["decision_ref"] == decision.ref and decision.ref.startswith("dr-")
+    assert decision.state == "answered" and decision.answer == "SQLite"
+    assert _form_refs(agent) == [decision.ref]
+
+
+@pytest.mark.parametrize("ending", ["cancelled", "expired"])
+def test_an_answer_to_an_ended_form_is_still_ignored_despite_its_ref(
+        config, bus, ending):
+    answerer = Answerer(bus, None)
+    agent = make_agent(config, bus, scripts_that_ask_then_write())
+
+    def end_it(event):
+        if event.kind is Kind.REQUEST:
+            request = event.payload["request"]
+            if ending == "cancelled":
+                request.answer(forms.CANCELLED)
+            else:
+                request.expire()
+
+    bus.subscribe(end_it)
+    result = agent.run(REQUEST)
+    assert result.stopped == "clarification_required"
+    assert answerer.requests[0].meta["questions"][0]["decision_ref"]
+    assert answerer.requests[0].answer(answered_with(["SQLite"])) is False
+    decision = agent.tool_context.evidence.decisions[0]
+    assert decision.state == "unresolved" and decision.answer == ""
+    assert not (config.paths.project / "db.py").exists()
+
+
+def test_a_later_explicit_request_raises_the_same_decision_with_the_same_ref(
+        config, bus):
+    Answerer(bus, forms.CANCELLED)
+    agent = make_agent(config, bus, [
+        Script(text="One question first.", tool_calls=[a_question("q1")]),
+        Script(text="Asking again.", tool_calls=[a_question("q2")]),
+        Script(text="unreachable")])
+    first = agent.run(REQUEST)
+    again = agent.run("Please go ahead with the database now.")
+    assert first.stopped == again.stopped == "clarification_required"
+    refs = _form_refs(agent)
+    assert len(refs) == 2 and refs[0] == refs[1]
+    assert first.clarification["decision_ref"] == again.clarification["decision_ref"]

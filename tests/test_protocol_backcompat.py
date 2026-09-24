@@ -67,3 +67,67 @@ def test_the_turn_outcome_vocabulary_is_unchanged():
     result = TurnResult()
     assert result.stopped == "done"
     assert result.clarification is None
+
+
+# --------------------------------------------------------------------------- #
+# T177 / T178 — decision_ref is additive: nothing required changes, and a
+# client that ignores it reads the same payload it always did
+# --------------------------------------------------------------------------- #
+
+#: The required fields at d911e3f. The additions must leave these exactly.
+_REQUIRED_AT_D911E3F = {
+    "ClarificationRequired": ["session_id", "turn_id", "kind", "decision",
+                              "candidates", "evidence_consulted", "reason"],
+    "ClarificationDecision": ["id", "decision"],
+}
+
+
+def test_decision_ref_is_optional_and_nothing_required_changed():
+    schema = _schema()
+    assert schema["x-protocol-version"] == 2
+    defs = schema["$defs"]
+    for shape, required in _REQUIRED_AT_D911E3F.items():
+        assert defs[shape]["required"] == required
+        assert defs[shape]["properties"]["decision_ref"]["type"] == "string"
+        assert "decision_ref" not in defs[shape]["required"]
+    assert defs["ClarificationOutcome"]["enum"] == ["cancelled", "expired", "unattended"]
+
+
+def test_the_generated_shapes_carry_decision_ref_as_optional():
+    from comodor.protocol import _generated
+
+    assert _generated.SHAPES["ClarificationRequired"]["decision_ref"] == ("str", False)
+    assert _generated.SHAPES["ClarificationDecision"]["decision_ref"] == ("str", False)
+    assert _generated.SHAPES["ClarificationDecision"]["id"] == ("str", True)
+
+
+def test_a_client_that_ignores_decision_ref_reads_an_unchanged_payload(config):
+    """The relayed event validates as before, `decisions[].id` is present, and
+    it carries the same value as `decision_ref` — one identity, one alias."""
+    from comodor import protocol as P
+    from comodor.agent.evidence import Ledger
+    from comodor.application import _relay_clarification
+    from comodor.events import Event, Kind
+    from comodor.tools.ask import payload_for
+
+    book = Ledger(mint=lambda: "dr-compat-1")
+    decision = book.open_decision("Which database?", affects=["persistence"])
+    payload = payload_for([decision], "unattended")
+
+    service = CoreService(config)
+    try:
+        handle = service.session(service.create_session()["id"])
+        sent = []
+        service.on_event = lambda _s, name, params, _q: sent.append((name, params))
+        _relay_clarification(service, handle, Event(kind=Kind.TURN_END, payload={
+            "stopped": "clarification_required", "clarification": payload}))
+        body = next(params for name, params in sent if name == "clarification.required")
+    finally:
+        service.close()
+
+    P.validate("ClarificationRequired", body)
+    for key in _REQUIRED_AT_D911E3F["ClarificationRequired"]:
+        assert key in body
+    (entry,) = body["decisions"]
+    assert entry["id"] == entry["decision_ref"] == body["decision_ref"] == "dr-compat-1"
+    assert entry["decision"] == "Which database?"

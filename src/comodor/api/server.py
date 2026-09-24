@@ -229,6 +229,10 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
             mode = str(comodor.get("mode") or "").strip()
             if mode and not server.config.api.allow_mode_switch:
                 mode = ""
+            # Answers to decisions this session stopped for, by decision_ref.
+            # Passed only when present, so a plain request is exactly as before.
+            answering = ({"decision_answers": comodor["decision_answers"]}
+                         if "decision_answers" in comodor else {})
 
             session_id = str(self.headers.get("X-Comodor-Session") or "")
             talk = server.map.for_session(session_id)
@@ -237,7 +241,7 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
             request_id = f"chatcmpl-{secrets.token_hex(8)}"
             try:
                 outcome = talk.run(text, prior=prior, mode=mode,
-                                   patience=TURN_PATIENCE)
+                                   patience=TURN_PATIENCE, **answering)
             except schema.BadRequest as problem:
                 self._json(400, schema.error_body(str(problem)))
                 return

@@ -692,3 +692,76 @@ def test_a_verify_token_is_made_if_there_is_not_one(config, monkeypatch):
     a_wizard(config, good, monkeypatch)
 
     assert len(config.whatsapp.verify_token) >= 24
+
+
+# --------------------------------------------------------------------------- #
+# T188 — an interactive reply carrying the ref resumes that decision; text
+# never does
+# --------------------------------------------------------------------------- #
+
+
+def _recording_talk(talking):
+    talk = talking._conversation("15550001111")
+    talk.session.resumed, talk.session.sent, talk.session.refuse = [], [], None
+
+    def resume_decision(ref, *, option=None, written=""):
+        if talk.session.refuse is not None:
+            raise talk.session.refuse
+        talk.session.resumed.append((ref, option, written))
+        return False
+
+    def send(text, images=None, decisions=None, decision_answers=None):
+        talk.session.sent.append((text, decision_answers))
+        return False
+
+    talk.session.resume_decision = resume_decision
+    talk.session.send = send
+    # A follow loop started anyway ends at once rather than polling.
+    talk.session.wait_for = lambda cursor, timeout=8.0: [{"kind": "turn_end"}]
+    return talk
+
+
+def test_an_interactive_reply_resumes_exactly_its_decision(talking):
+    talk = _recording_talk(talking)
+    talking._handle(arriving(text="SQLite", action="da:dr-wa-1:0"))
+    assert talk.session.resumed == [("dr-wa-1", 0, "")]
+    assert talk.session.sent == []
+
+
+def test_the_webhook_reads_a_list_reply_as_that_action(talking):
+    (item,) = wh.read({"entry": [{"changes": [{"value": {
+        "contacts": [{"wa_id": "15550001111", "profile": {"name": "A"}}],
+        "messages": [{"from": "15550001111", "id": "wamid.1", "timestamp": "1",
+                      "type": "interactive",
+                      "interactive": {"type": "list_reply",
+                                      "list_reply": {"id": "da:dr-wa-2:1",
+                                                     "title": "PostgreSQL"}}}]}}]}]})
+    talk = _recording_talk(talking)
+    talking._handle(item)
+    assert talk.session.resumed == [("dr-wa-2", 1, "")]
+
+
+def test_free_text_on_whatsapp_is_a_new_request_never_an_answer(talking):
+    talk = _recording_talk(talking)
+    talking._handle(arriving(text="PostgreSQL"))
+    assert talk.session.resumed == []
+    assert talk.session.sent and talk.session.sent[0][1] is None
+
+
+def test_a_refused_whatsapp_answer_is_reported(talking):
+    from comodor.application import DecisionRejected
+
+    talk = _recording_talk(talking)
+    talk.session.refuse = DecisionRejected("stale", "already answered: dr-wa-3",
+                                           ["dr-wa-3"])
+    talking._handle(arriving(action="da:dr-wa-3:0"))
+    assert "could not be used" in talking.cloud.sent[-1]["text"]
+    assert "dr-wa-3" in talking.cloud.sent[-1]["text"]
+
+
+def test_a_stopped_turn_offers_rows_whose_ids_name_the_ref(talking):
+    talk = _recording_talk(talking)
+    talking._offer_decisions(talk, {"decisions": [
+        {"decision_ref": "dr-wa-4", "decision": "Which queue?",
+         "candidates": ["Redis", "RabbitMQ"]}]})
+    assert keys(talking.cloud.sent[-1]) == ["da:dr-wa-4:0", "da:dr-wa-4:1"]

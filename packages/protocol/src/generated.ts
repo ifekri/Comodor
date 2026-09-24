@@ -417,6 +417,7 @@ export interface ClarificationDecision {
   candidates?: Array<string>;
   evidence_consulted?: Array<string>;
   reason?: string;
+  decision_ref?: string;
 }
 
 /**
@@ -440,6 +441,7 @@ export interface ClarificationRequired {
   outcome?: ClarificationOutcome;
   decisions?: Array<ClarificationDecision>;
   prior_changes?: Array<string>;
+  decision_ref?: string;
 }
 
 export interface AnswerParams {

@@ -7,6 +7,8 @@ output. The guard — reading presence from the bus — is mutation-checked.
 
 from __future__ import annotations
 
+import pytest as _pytest
+
 from comodor.agent import AgentLoop, Conversation
 from comodor.events import EventBus
 from comodor.providers.base import ToolCall
@@ -120,3 +122,66 @@ def test_the_guard_is_the_presence_check(config, monkeypatch):
     agent, _ = make_agent(config, EventBus())
     result = agent.run(REQUEST)
     assert result.clarification["outcome"] == "unattended"
+
+
+# --------------------------------------------------------------------------- #
+# T179 — the outcome names every open decision by its stable ref
+# --------------------------------------------------------------------------- #
+
+
+
+def _two_questions():
+    option = lambda label: {"label": label, "source": "request", "evidence": label}  # noqa: E731
+    return ToolCall(id="q2", name="ask", arguments={"questions": [
+        {"question": "Which database?", "header": "Database", "affects": ["architecture"],
+         "options": [option("SQLite"), option("PostgreSQL")]},
+        {"question": "Which queue?", "header": "Queue", "affects": ["architecture"],
+         "options": [option("Redis"), option("RabbitMQ")]},
+    ]})
+
+
+def _scripted_bus(outcome):
+    from comodor.questions import CANCELLED
+
+    bus = EventBus()
+    if outcome == "unattended":
+        return bus
+
+    def reply(event):
+        request = event.get("request")
+        if request is not None and request.kind == "questions":
+            if outcome == "cancelled":
+                request.answer(CANCELLED)
+            else:
+                request.expire()
+
+    bus.subscribe(reply)
+    return bus
+
+
+@_pytest.mark.parametrize("outcome", ["cancelled", "expired", "unattended"])
+def test_the_payload_names_every_open_decision_by_its_ref(config, monkeypatch, outcome):
+    from comodor.agent import evidence
+
+    refs = iter(["dr-first", "dr-second"])
+    monkeypatch.setattr(evidence, "mint_ref", lambda: next(refs))
+    gateway = Gateway(config, scripts=[
+        Script(text="Two questions.", tool_calls=[_two_questions()]),
+        Script(text="Done anyway.")])
+    bus = _scripted_bus(outcome)
+    agent = AgentLoop(config, gateway, ToolRegistry(), bus,
+                      PermissionEngine(config, bus), Conversation())
+    result = agent.run("SQLite or PostgreSQL, Redis or RabbitMQ? Then build it.")
+
+    assert result.stopped == "clarification_required"
+    payload = result.clarification
+    assert payload["outcome"] == outcome
+    # The top level describes the first open decision; each entry names its
+    # own, with `id` the same value as a compatibility alias.
+    assert payload["decision_ref"] == "dr-first"
+    assert [entry["decision_ref"] for entry in payload["decisions"]] == [
+        "dr-first", "dr-second"]
+    assert all(entry["id"] == entry["decision_ref"] for entry in payload["decisions"])
+    # Nothing else in the outcome changed shape.
+    assert payload["kind"] == "clarification_required"
+    assert "prior_changes" not in payload

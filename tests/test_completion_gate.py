@@ -1535,3 +1535,64 @@ def test_a_rejected_substitute_still_forces_the_honest_validation_status(config,
     assert len(agent.gateway.provider("fake").calls) == 4, \
         "the omitted status still cost exactly one correction turn"
     assert "does not pass" in result.text.lower()
+
+
+# --------------------------------------------------------------------------- #
+# T192 — FR-127: an unsupported completion claim is never delivered as done
+# --------------------------------------------------------------------------- #
+
+
+def _writes_then(*answers):
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+
+    return [Script(text="Writing.", tool_calls=[ToolCall(
+        id="w1", name="write_file", arguments={"path": "parser.py", "content": "x = 1\n"})]),
+        *[Script(text=answer) for answer in answers]]
+
+
+def test_a_correction_that_still_claims_completion_is_marked_unconfirmed(config, bus):
+    agent = _agent(config, bus, _writes_then("The task is complete.",
+                                            "The task is complete."))
+    result = agent.run("- fix the parser\n- add a regression test")
+
+    assert len(agent.gateway.provider("fake").calls) == 3, "still one correction turn"
+    assert result.text == "The task is complete.", "the answer is still delivered"
+    assert result.annotation.startswith("Completion is not confirmed")
+    assert "add a regression test" in result.annotation, "the outstanding work is named"
+
+
+def test_a_gate_that_cannot_reach_a_verdict_marks_a_claim_unconfirmed(
+        config, bus, monkeypatch):
+    from comodor.agent import verify
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("the gate could not run")
+
+    monkeypatch.setattr(verify, "assess", broken)
+    agent = _agent(config, bus, _writes_then("The task is complete."))
+    result = agent.run("- fix the parser\n- add a regression test")
+
+    assert result.stopped == "done" and result.text == "The task is complete."
+    assert result.annotation == ("Completion is not confirmed — the completion "
+                                 "check could not reach a verdict.")
+
+
+def test_a_gate_that_cannot_reach_a_verdict_leaves_an_honest_answer_alone(
+        config, bus, monkeypatch):
+    """FR-126: no completion claim, nothing to mark."""
+    from comodor.agent import verify
+
+    monkeypatch.setattr(verify, "assess",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    agent = _agent(config, bus, _writes_then("I changed the parser; the test is still to do."))
+    result = agent.run("- fix the parser\n- add a regression test")
+    assert result.annotation == ""
+
+
+def test_an_accepted_correction_is_not_marked_unconfirmed(config, bus):
+    agent = _agent(config, bus, _writes_then(
+        "The task is complete.",
+        "Correction: the work is not complete — the regression test is missing."))
+    result = agent.run("- fix the parser\n- add a regression test")
+    assert "not confirmed" not in result.annotation

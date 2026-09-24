@@ -32,6 +32,7 @@ from ..agent.background import (
 )
 from ..agent.background import BackgroundDelegates, completion_turn
 from ..agent.spawn import spawner
+from ..application import DecisionRejected, run_turn
 from ..config import Config
 from ..events import Event, EventBus, Kind, Request
 from ..learning import LearningEngine
@@ -1604,31 +1605,48 @@ class Session:
     # -- what a browser does ------------------------------------------------ #
 
     def send(self, text: str, images: list[str] | None = None,
-             decisions: list[dict[str, Any]] | None = None) -> bool:
+             decisions: list[dict[str, Any]] | None = None,
+             decision_answers: Any = None) -> bool:
         """Start a turn. False if one is already running.
 
         ``images`` is base64 picture data for a model with vision, riding the
         user message the way the web interface's own screenshots do.
         ``decisions`` are clarification payloads a delegate left open, which
         the turn carries as open decisions of its own.
+
+        ``decision_answers`` answers decisions this session stopped for, by
+        their ``decision_ref`` — the API's ``comodor.decision_answers``, or a
+        channel's button carrying the ref. The turn runs through
+        ``application.run_turn``, which checks the whole batch before any of
+        it is applied; a batch it refuses raises ``DecisionRejected`` here,
+        before this returns, and nothing about the session changes.
         """
-        if not text.strip() and not images:
+        if not text.strip() and not images and decision_answers is None:
             return False
         if not self._turn.acquire(blocking=False):
             return False
 
-        if not self.meta.title:
+        if not self.meta.title and text.strip():
             self.meta.title = derive_title(text)
+
+        #: Set once `run_turn` has accepted the batch or refused it — which it
+        #: does before any model call — so a refusal reaches this caller.
+        decided = threading.Event()
+        refused: list[DecisionRejected] = []
 
         def work() -> None:
             self.busy = True
             self.bus.emit(Kind.STATUS, busy=True)
             try:
-                self.agent.run(text, images=images or None,
-                               decisions=decisions or None)
+                run_turn(self.agent, text, images=images or None,
+                         decisions=decisions or None,
+                         decision_answers=decision_answers, accepted=decided.set)
+            except DecisionRejected as problem:
+                refused.append(problem)
             except Exception as error:                # never lose the worker
                 self.bus.emit(Kind.ERROR, text=f"{type(error).__name__}: {error}")
             finally:
+                decided.set()
                 self.busy = False
                 # Saved before the lock is released, so the next turn cannot
                 # start writing messages into a store that is mid-append.
@@ -1644,7 +1662,37 @@ class Session:
             self._drain_delegates()
 
         threading.Thread(target=work, name="comodor-web-turn", daemon=True).start()
+        if decision_answers is not None:
+            decided.wait()
+            if refused:
+                raise refused[0]
         return True
+
+    def resume_decision(self, decision_ref: str, *, option: int | None = None,
+                        written: str = "") -> bool:
+        """A channel's structured reply to a decision this session stopped for.
+
+        A button carries the decision's ref and the position of the option
+        tapped — a label does not fit in a callback — so the position is read
+        back against the question as this session recorded it. Everything
+        else is `run_turn`'s: the ref is resolved exactly and the whole answer
+        checked before anything is applied, and a refusal raises
+        `DecisionRejected`. Free text on a channel never reaches here; it is
+        a new request.
+        """
+        from ..session.store import decision_states
+
+        chosen: list[str] = []
+        if option is not None:
+            recorded = decision_states(self.conversation.messages).get(decision_ref)
+            labels = [str(entry.get("label", "")) for entry in
+                      (recorded.question.get("options") or [] if recorded else [])
+                      if isinstance(entry, dict) and not entry.get("free")]
+            # An index that names nothing is passed on as what it is, and
+            # refused by the one validation path rather than here.
+            chosen = [labels[option] if 0 <= option < len(labels) else f"#{option}"]
+        return self.send("", decision_answers=[{"decision_ref": decision_ref,
+                                                "chosen": chosen, "written": written}])
 
     def _drain_delegates(self) -> None:
         """Turn finished background delegates into turns of their own.
@@ -1831,3 +1879,16 @@ def _plain(value: Any) -> Any:
         except Exception:
             pass
     return str(value)
+
+
+def open_decisions(clarification: Any) -> list[tuple[str, str, list[str]]]:
+    """`(decision_ref, decision, options)` for each decision a stopped turn's
+    payload names — what a channel draws its answer buttons from."""
+    if not isinstance(clarification, dict):
+        return []
+    found = []
+    for entry in clarification.get("decisions") or []:
+        if isinstance(entry, dict) and entry.get("decision_ref"):
+            found.append((str(entry["decision_ref"]), str(entry.get("decision", "")),
+                          [str(label) for label in entry.get("candidates") or []]))
+    return found

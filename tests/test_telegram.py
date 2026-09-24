@@ -977,3 +977,150 @@ def test_short_answers_are_not_spoken(talking, config):
     assert monkey_hits == []      # nothing patched: the length gate is pure
     talking._maybe_speak(7, "done")
     assert called == []
+
+
+# --------------------------------------------------------------------------- #
+# T186 — resuming a stopped decision by its ref: a button or /answer, never
+# free text
+# --------------------------------------------------------------------------- #
+
+
+
+
+class _Resumable:
+    """A session that records how it was asked to resume, and nothing more."""
+
+    cursor = 0
+
+    def __init__(self, cfg):
+        self.config = cfg
+        self.resumed: list[tuple] = []
+        self.sent: list[tuple] = []
+        self.refuse = None
+
+    def resume_decision(self, ref, *, option=None, written=""):
+        if self.refuse is not None:
+            raise self.refuse
+        self.resumed.append((ref, option, written))
+        return True
+
+    def send(self, text, images=None, decisions=None, decision_answers=None):
+        self.sent.append((text, decision_answers))
+        return True
+
+    @property
+    def busy(self):
+        return False
+
+    def wait_for(self, cursor, timeout=8.0):
+        return [{"kind": "turn_end", "stopped": "done"}]
+
+    def state(self):
+        return {"busy": False, "mode": "act"}
+
+    def set_mode(self, mode):
+        self.config.agent.mode = mode
+        return True
+
+    def close(self):
+        pass
+
+
+@pytest.fixture
+def resumable(config, monkeypatch):
+    from comodor.telegram.bot import Service
+
+    config.telegram.token = "42:test"
+    config.telegram.enabled = True
+    config.telegram.allowed = [7]
+    monkeypatch.setattr("comodor.web.session.Session", _Resumable)
+    return Service(config, bot=Recorder())
+
+
+def test_an_answer_button_resumes_exactly_its_decision(resumable):
+    resumable._on_tap(7, {"id": "q", "data": "da:dr-tg-1:1"})
+    session = resumable._conversation(7).session
+    assert session.resumed == [("dr-tg-1", 1, "")]
+    assert session.sent == []
+
+
+def test_answer_command_writes_an_answer_to_one_ref(resumable):
+    resumable._handle(a_message(7, "/answer dr-tg-2 use PostgreSQL please"))
+    session = resumable._conversation(7).session
+    assert session.resumed == [("dr-tg-2", None, "use PostgreSQL please")]
+
+
+def test_answer_command_without_a_ref_or_text_resumes_nothing(resumable):
+    resumable._handle(a_message(7, "/answer"))
+    resumable._handle(a_message(7, "/answer dr-tg-2"))
+    session = resumable._conversation(7).session
+    assert session.resumed == []
+    assert "/answer decision_ref" in resumable.bot.sent[-1]["text"]
+
+
+def test_free_text_is_a_new_request_never_an_answer(resumable):
+    resumable._handle(a_message(7, "PostgreSQL"))
+    session = resumable._conversation(7).session
+    assert session.resumed == []
+    assert session.sent and session.sent[0][1] is None, \
+        "free text carried decision answers"
+
+
+def test_a_refused_answer_is_reported_with_nothing_run(resumable):
+    from comodor.application import DecisionRejected
+
+    session = resumable._conversation(7).session
+    session.refuse = DecisionRejected("stale", "already answered: dr-tg-3", ["dr-tg-3"])
+    resumable._on_tap(7, {"id": "q", "data": "da:dr-tg-3:0"})
+    assert "could not be used" in resumable.bot.sent[-1]["text"]
+    assert "dr-tg-3" in resumable.bot.sent[-1]["text"]
+
+
+def test_a_stopped_turn_offers_one_button_per_option_carrying_the_ref(resumable):
+    talk = resumable._conversation(7)
+    resumable._offer_decisions(talk, {"decisions": [
+        {"decision_ref": "dr-tg-4", "decision": "Which database?",
+         "candidates": ["SQLite", "PostgreSQL"]}]})
+    sent = resumable.bot.sent[-1]
+    assert "dr-tg-4" in sent["text"]
+    data = [button["callback_data"] for row in sent["keyboard"]["inline_keyboard"]
+            for button in row]
+    assert data == ["da:dr-tg-4:0", "da:dr-tg-4:1"]
+    assert all(len(item.encode()) <= 64 for item in data)
+
+
+def test_a_tap_resumes_a_real_session_through_run_turn(config):
+    """End to end: the button's position is read against the question the
+    session recorded, and the one validation path applies it."""
+    from comodor.providers.base import Message, ToolCall
+    from comodor.providers.fake import Script
+    from comodor.providers.gateway import Gateway
+    from comodor.session.store import decision_states
+    from comodor.telegram.bot import Service
+
+    config.telegram.token = "42:test"
+    config.telegram.enabled = True
+    service = Service(config, bot=Recorder())
+    talk = service._conversation(7)
+    call = ToolCall(id="q1", name="ask", arguments={})
+    tool = Message.tool(call_id="q1", name="ask", content="unresolved")
+    tool.meta["question"] = {
+        "questions": [{"prompt": "Which database?", "header": "Database", "multi": False,
+                       "reason": "persisted_state", "decision_ref": "dr-tg-real",
+                       "options": [{"label": "SQLite"}, {"label": "PostgreSQL"},
+                                   {"label": "Something else", "free": True}]}],
+        "answers": [], "outcome": "expired", "origin": "model_ask", "state": "unresolved"}
+    talk.session.conversation.extend([Message.user("Set up db.py"),
+                                      Message.assistant("Q.", tool_calls=[call]), tool])
+    gateway = Gateway(talk.session.config, scripts=[Script(text="PostgreSQL it is.")])
+    talk.session.agent.gateway = gateway
+    try:
+        service._on_tap(7, {"id": "q", "data": "da:dr-tg-real:1"})
+        assert talk.session._turn.acquire(timeout=10)
+        talk.session._turn.release()
+        states = decision_states(talk.session.conversation.messages)
+        assert states["dr-tg-real"].status == "stale"
+        sent = [m.content for m in gateway.provider("fake").calls[0]]
+        assert any("Which database?\n  -> PostgreSQL" in text for text in sent)
+    finally:
+        talk.session.close()

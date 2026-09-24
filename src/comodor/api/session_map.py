@@ -26,7 +26,9 @@ import threading
 import time
 from typing import Any
 
+from ..application import DecisionRejected
 from ..config import Config
+from .schema import BadRequest
 
 #: A session unused for this long is closed and dropped.
 IDLE_TTL = 1800.0
@@ -50,7 +52,8 @@ class Talk:
         return self.session.busy
 
     def run(self, text: str, prior: list[dict[str, str]] | None = None,
-            mode: str = "", patience: float = 600.0) -> dict[str, Any]:
+            mode: str = "", patience: float = 600.0,
+            decision_answers: Any = None) -> dict[str, Any]:
         """One whole turn, waited for. Serialized per session.
 
         ``prior`` is the history the client sent and we do not keep. It is
@@ -61,6 +64,11 @@ class Talk:
 
         ``mode`` is honoured only when the client names a known one; an
         unknown word leaves the configured mode alone rather than guessing.
+
+        ``decision_answers`` answers decisions this session stopped for, by
+        their ``decision_ref``. The session's turn entry checks the whole
+        batch before anything is applied; a refused one is a bad request
+        naming the refs, and no model is called.
         """
         task = _with_prior(text, prior or [])
 
@@ -76,14 +84,23 @@ class Talk:
                         "a turn is already running on this session"}
             if mode:
                 self.session.set_mode(mode)
-            if not self.session.send(task):
+            # The cursor before the turn: a refusal starts no turn, and a
+            # resumed one is read from here like any other.
+            cursor = self.session.cursor
+            try:
+                started = self.session.send(task, decision_answers=decision_answers)
+            except DecisionRejected as refused:
+                refs = f" ({', '.join(refused.refs)})" if refused.refs else ""
+                raise BadRequest(f"decision answers refused ({refused.kind}): "
+                                 f"{refused}{refs}") from None
+            if not started:
                 return {"text": "", "steps": 0, "stopped": "busy", "error":
                         "the turn could not be started"}
-            return self._wait(patience)
+            return self._wait(patience, cursor)
 
-    def _wait(self, patience: float) -> dict[str, Any]:
+    def _wait(self, patience: float, cursor: int | None = None) -> dict[str, Any]:
         """Drain the event log until the turn ends, then read the answer."""
-        cursor = self.session.cursor
+        cursor = self.session.cursor if cursor is None else cursor
         deadline = time.monotonic() + patience
         text_parts: list[str] = []
         steps = 0

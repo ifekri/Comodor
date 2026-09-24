@@ -8,7 +8,10 @@ same file.
 
 from __future__ import annotations
 
+import json as _json
 import time
+from dataclasses import dataclass as _dataclass
+from dataclasses import field as _field
 
 from comodor.application import CoreService
 from comodor.providers.base import Message, Role
@@ -284,3 +287,170 @@ def test_a_failed_append_retries_the_unwritten_tail(config):
             "first half", "second half"]
     finally:
         service.close()
+
+
+# --------------------------------------------------------------------------- #
+# T174 — the optional `continuation` object, and the one listing filter
+# --------------------------------------------------------------------------- #
+
+
+#: The fixed fixture an ordinary meta file must keep, byte for byte: exactly
+#: the keys `SessionMeta` had before the continuation field existed.
+_ORDINARY_META = (
+    '{\n  "id": "s-fixed",\n  "title": "Fix the parser",\n  "cwd": "/work",\n'
+    '  "provider": "fake",\n  "model": "m1",\n  "created_at": 100.0,\n'
+    '  "updated_at": 200.0,\n  "messages": 4,\n  "cost_usd": 0.5,\n'
+    '  "compactions": 1,\n  "todos": [\n    {\n      "text": "a",\n'
+    '      "state": "done"\n    }\n  ]\n}')
+
+
+@_dataclass
+class _MetaAtD911e3f:
+    """`SessionMeta` exactly as it stood at d911e3f — the reader an older
+    Comodor runs. Kept as a copy so the compatibility claim is tested against
+    what that version actually does, not assumed."""
+
+    id: str
+    title: str = ""
+    cwd: str = ""
+    provider: str = ""
+    model: str = ""
+    created_at: float = 0.0
+    updated_at: float = 0.0
+    messages: int = 0
+    cost_usd: float = 0.0
+    compactions: int = 0
+    todos: list = _field(default_factory=list)
+
+
+def _load_meta_at_d911e3f(path):
+    """`SessionStore.load_meta` at d911e3f: `SessionMeta(**json)`, and a
+    `TypeError` for an unknown field reads as no session at all."""
+    try:
+        return _MetaAtD911e3f(**_json.loads(path.read_text(encoding="utf-8")))
+    except (ValueError, TypeError):
+        return None
+
+
+def _store(config):
+    from comodor.session.store import SessionStore
+
+    return SessionStore(config.paths.user / "sessions")
+
+
+def _ordinary(store, monkeypatch, session_id="s-fixed"):
+    from comodor.session import store as store_module
+    from comodor.session.store import SessionMeta
+
+    monkeypatch.setattr(store_module.time, "time", lambda: 200.0)
+    store.save_meta(SessionMeta(
+        id=session_id, title="Fix the parser", cwd="/work", provider="fake",
+        model="m1", created_at=100.0, messages=4, cost_usd=0.5, compactions=1,
+        todos=[{"text": "a", "state": "done"}]))
+
+
+def _continuation(store, session_id="c-1", refs=("ref-1",), mode="act"):
+    from comodor.session.store import SessionMeta
+
+    store.save_meta(SessionMeta(
+        id=session_id, cwd="/work", provider="fake", model="m1",
+        continuation={"decision_refs": list(refs), "mode": mode}))
+
+
+def test_an_ordinary_meta_file_keeps_exactly_its_old_keys(config, monkeypatch):
+    store = _store(config)
+    _ordinary(store, monkeypatch)
+    assert store.meta_path("s-fixed").read_text(encoding="utf-8") == _ORDINARY_META
+    assert "continuation" not in _json.loads(_ORDINARY_META)
+
+
+def test_a_continuation_meta_carries_the_object(config):
+    store = _store(config)
+    _continuation(store, refs=("ref-1", "ref-2"), mode="plan")
+    on_disk = _json.loads(store.meta_path("c-1").read_text(encoding="utf-8"))
+    assert on_disk["continuation"] == {"decision_refs": ["ref-1", "ref-2"],
+                                       "mode": "plan"}
+    loaded = store.load_meta("c-1")
+    assert loaded.continuation == {"decision_refs": ["ref-1", "ref-2"], "mode": "plan"}
+    # Workspace and provenance stay where they always were, not duplicated.
+    assert loaded.cwd == "/work" and loaded.model == "m1"
+
+
+def test_list_sessions_never_returns_a_continuation(config, monkeypatch):
+    store = _store(config)
+    _ordinary(store, monkeypatch)
+    _continuation(store)
+    assert [meta.id for meta in store.list_sessions()] == ["s-fixed"]
+    # Internal lookup can still ask for it, explicitly.
+    everything = {meta.id for meta in store.list_sessions(include_continuations=True)}
+    assert everything == {"s-fixed", "c-1"}
+
+
+def test_meta_written_before_the_field_existed_still_loads_and_lists(config):
+    store = _store(config)
+    store.meta_path("s-old").write_text(_ORDINARY_META.replace("s-fixed", "s-old"),
+                                        encoding="utf-8")
+    loaded = store.load_meta("s-old")
+    assert loaded is not None and loaded.continuation is None
+    assert [meta.id for meta in store.list_sessions()] == ["s-old"]
+
+
+def test_the_previous_reader_skips_a_continuation_and_keeps_ordinary_sessions(
+        config, monkeypatch):
+    from comodor.session.store import SessionMeta
+
+    # The copy is the d911e3f shape: every field but the new one.
+    assert set(SessionMeta.__dataclass_fields__) - {"continuation"} \
+        == set(_MetaAtD911e3f.__dataclass_fields__)
+    store = _store(config)
+    _ordinary(store, monkeypatch)
+    _continuation(store)
+    assert _load_meta_at_d911e3f(store.meta_path("c-1")) is None
+    old = _load_meta_at_d911e3f(store.meta_path("s-fixed"))
+    assert old is not None and old.title == "Fix the parser"
+
+
+def test_every_listing_consumer_leaves_a_continuation_out(config, monkeypatch):
+    import io
+
+    from comodor import insights
+    from comodor.acp import agent as acp_agent
+    from comodor.acp.jsonrpc import Connection
+    from comodor.providers.base import Message as _Message
+    from comodor.web.session import Session
+
+    store = _store(config)
+    _ordinary(store, monkeypatch)
+    store.append("s-fixed", _Message.user("ordinary parser work"))
+    _continuation(store)
+    store.append("c-1", _Message.user("hidden parser work"))
+    monkeypatch.undo()
+
+    service = CoreService(config)
+    try:
+        assert [s["id"] for s in service.history()["sessions"]] == ["s-fixed"]
+    finally:
+        service.close()
+
+    web = Session(config)
+    try:
+        assert "c-1" not in {card["id"] for card in web.chats()}
+        # Search reads the transcripts directly; it must not surface one either.
+        assert "c-1" not in {card["id"] for card in web.chats("parser")}
+        assert "s-fixed" in {card["id"] for card in web.chats("parser")}
+    finally:
+        web.close()
+
+    agent = acp_agent.ComodorAgent(config, Connection(
+        reader=io.StringIO(""), writer=io.StringIO(), log=io.StringIO()))
+    try:
+        listed = {entry["sessionId"] for entry in agent.session_list({})["sessions"]}
+        assert "c-1" not in listed and "s-fixed" in listed
+    finally:
+        agent.close()
+
+    # Insights count exactly the listed sessions: the continuation is not one.
+    counted = insights.collect(config, days=100_000)
+    assert counted.sessions == len(store.list_sessions(limit=100_000))
+    assert counted.sessions < len(store.list_sessions(limit=100_000,
+                                                      include_continuations=True))

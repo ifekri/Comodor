@@ -347,3 +347,62 @@ def test_mutation_dropping_carried_changes_claims_nothing_was_done(
 
     agent._execute([call])                        # carried again
     assert agent._clarification_outcome()["prior_changes"] == ["models.py"]
+
+
+# --------------------------------------------------------------------------- #
+# T190 — D7 / SC-002: measured per attempt, never as "no write before asking"
+# --------------------------------------------------------------------------- #
+
+
+def a_notes_write():
+    return ToolCall(id="n1", name="write_file",
+                    arguments={"path": "NOTES.md", "content": "Plan: pick a database.\n"})
+
+
+def test_d7_a_demonstrably_independent_write_is_permitted_and_is_no_failure(config, bus):
+    """(a) Work that does not depend on the decision may run before it is
+    known. It is kept, disclosed, and the stop is a clarification — not an
+    error and not a failed attempt; only the dependent artifact is absent."""
+    bus.subscribe(dismiss_forms)
+    agent = make_agent(config, bus, [
+        Script(text="Notes first.", tool_calls=[a_notes_write()]),
+        Script(text="One question.", tool_calls=[a_question()]),
+        Script(text="never"),
+    ])
+    result = agent.run(REQUEST)
+    assert result.stopped == "clarification_required" and result.error == ""
+    assert (config.paths.project / "NOTES.md").exists()
+    assert not (config.paths.project / "db.py").exists()
+    assert result.clarification["prior_changes"] == ["NOTES.md"]
+
+
+def test_d7_a_write_whose_dependence_is_uncertain_is_withheld(config, bus):
+    """(b) While the decision is open, a mutation nobody has shown to be
+    independent counts as dependent — even one whose name says nothing about
+    the decision — and is withheld."""
+    bus.subscribe(dismiss_forms)
+    agent = make_agent(config, bus, [
+        Script(text="Asking and writing notes.", tool_calls=[a_question(), a_notes_write()]),
+        Script(text="never"),
+    ])
+    result = agent.run(REQUEST)
+    assert result.stopped == "clarification_required"
+    assert not (config.paths.project / "NOTES.md").exists()
+
+
+def test_d7_independent_work_is_not_required_and_nothing_starts_to_stay_active(config):
+    """(d) With nobody there, the run stops at the decision. It is not made to
+    find independent work to do first, and nothing runs after the stop: no
+    further model call, no further tool."""
+    bus = EventBus()                       # nobody subscribed: unattended
+    gateway = Gateway(config, scripts=[
+        Script(text="One question.", tool_calls=[a_question()]),
+        Script(text="Meanwhile, some tidying.", tool_calls=[a_read(), a_notes_write()]),
+        Script(text="never")])
+    agent = AgentLoop(config, gateway, ToolRegistry(), bus,
+                      PermissionEngine(config, bus), Conversation())
+    result = agent.run(REQUEST)
+    assert result.stopped == "clarification_required"
+    assert [m.name for m in agent.conversation.messages if m.role is Role.TOOL] == ["ask"]
+    assert len(gateway.provider("fake").calls) == 1
+    assert "prior_changes" not in result.clarification

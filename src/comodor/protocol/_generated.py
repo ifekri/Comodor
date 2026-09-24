@@ -280,6 +280,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "candidates": ("list", False),
         "evidence_consulted": ("list", False),
         "reason": ("str", False),
+        "decision_ref": ("str", False),
     },
     "ClarificationRequired": {
         "session_id": ("str", True),
@@ -292,6 +293,7 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
         "outcome": ("str", False),
         "decisions": ("list", False),
         "prior_changes": ("list", False),
+        "decision_ref": ("str", False),
     },
     "AnswerParams": {
         "id": ("str", True),
@@ -772,6 +774,7 @@ class ClarificationDecision(_ClarificationDecisionRequired, total=False):
     candidates: list[str]
     evidence_consulted: list[str]
     reason: str
+    decision_ref: str
 
 
 class _ClarificationRequiredRequired(TypedDict):
@@ -798,6 +801,7 @@ class ClarificationRequired(_ClarificationRequiredRequired, total=False):
     outcome: str
     decisions: list[ClarificationDecision]
     prior_changes: list[str]
+    decision_ref: str
 
 
 class _AnswerParamsRequired(TypedDict):

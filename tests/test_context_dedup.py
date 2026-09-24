@@ -225,3 +225,23 @@ def test_a_delta_is_reproducible_from_difflib_alone():
     assert _delta(before, after, "f") == "".join(difflib.unified_diff(
         before.splitlines(keepends=True), after.splitlines(keepends=True),
         fromfile="f (as in the conversation)", tofile="f (now)", n=2))
+
+
+# --------------------------------------------------------------------------- #
+# T194 — FR-099 re-verified: similarity alone never collapses anything
+# --------------------------------------------------------------------------- #
+
+
+def test_a_near_duplicate_is_never_collapsed_on_similarity_alone():
+    """Differing by one character — and at another path, so no delta base
+    applies — the second result is carried in full, never as a reference to
+    the look-alike. Exact duplicates collapse only on content identity."""
+    conversation = Conversation()
+    body = big("x")
+    near = body.replace("line 100: x = 100", "line 100: x = 101")
+    assert near != body and len(near) == len(body)
+    conversation.admit(a_read("r1", "a.py", body), path="a.py")
+    second = conversation.admit(a_read("r2", "b.py", near), path="b.py")
+    assert second.content == near
+    assert "reference" not in second.meta and "delta_base" not in second.meta
+    assert conversation.referenced == 0

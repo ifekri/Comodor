@@ -514,3 +514,121 @@ def test_the_api_session_bridge_carries_prior_changes():
                             "outcome": "cancelled", "prior_changes": ["db.py"]})
 
     assert body["clarification"]["prior_changes"] == ["db.py"]
+
+
+# --------------------------------------------------------------------------- #
+# T183 — `comodor.decision_answers` resumes a decision on the API session
+# --------------------------------------------------------------------------- #
+
+
+def _stopped_talk(server, session_id="api-resume-1", refs=("dr-api-1",)):
+    """The API session the header names, stopped for one decision per ref."""
+    from comodor.providers.base import Message, ToolCall
+
+    talk = server.map.for_session(session_id)
+    conversation = talk.session.conversation
+    conversation.add(Message.user("Set up the service"))
+    for index, ref in enumerate(refs):
+        call = ToolCall(id=f"q{index}", name="ask", arguments={})
+        tool = Message.tool(call_id=f"q{index}", name="ask", content="unresolved")
+        header, prompt, options = (("Database", "Which database?", ["SQLite", "PostgreSQL"])
+                                   if index == 0 else
+                                   ("Queue", "Which queue?", ["Redis", "RabbitMQ"]))
+        tool.meta["question"] = {
+            "questions": [{"prompt": prompt, "header": header, "multi": False,
+                           "reason": "persisted_state", "decision_ref": ref,
+                           "options": [{"label": o} for o in options]
+                           + [{"label": "Something else", "free": True}]}],
+            "answers": [], "outcome": "cancelled", "origin": "model_ask",
+            "state": "unresolved"}
+        conversation.extend([Message.assistant("A question.", tool_calls=[call]), tool])
+    return talk
+
+
+def _scripted_talk(talk, scripts):
+    from comodor.providers.gateway import Gateway
+
+    talk.session.agent.gateway = Gateway(talk.session.config, scripts=scripts)
+    return talk.session.agent.gateway
+
+
+def _ask_api(server, session_id, answers, text="continue"):
+    body = {"messages": [{"role": "user", "content": text}]}
+    if answers is not None:
+        body["comodor"] = {"decision_answers": answers}
+    return _post(f"http://127.0.0.1:{server.port}/v1/chat/completions",
+                 server.token, body, headers={"X-Comodor-Session": session_id})
+
+
+def test_a_valid_decision_answer_resumes_the_session(server, config):
+    from comodor.providers.fake import Script
+    from comodor.session.store import decision_states
+
+    _setup(config)
+    talk = _stopped_talk(server)
+    gateway = _scripted_talk(talk, [Script(text="Going with SQLite.")])
+    status, body = _ask_api(server, "api-resume-1",
+                            [{"decision_ref": "dr-api-1", "chosen": ["SQLite"]}])
+    assert status == 200, body
+    assert body["comodor"]["stopped"] == "done"
+    assert body["choices"][0]["finish_reason"] == "stop"
+    assert body["choices"][0]["message"]["content"] == "Going with SQLite."
+    sent = [m.content for m in gateway.provider("fake").calls[0]]
+    assert any("Which database?\n  -> SQLite" in content for content in sent)
+    assert decision_states(talk.session.conversation.messages)["dr-api-1"].status == "stale"
+
+
+@pytest.mark.parametrize("answers, kind", [
+    ([{"decision_ref": "dr-api-unknown", "chosen": ["SQLite"]}], "unknown"),
+    ("not a list", "malformed"),
+    ([{"chosen": ["SQLite"]}], "missing"),
+    ([{"decision_ref": "dr-api-1", "chosen": ["MongoDB"]}], "invalid_answer"),
+    ([{"decision_ref": "dr-api-1", "chosen": [], "written": " "}], "empty"),
+])
+def test_an_invalid_batch_is_a_400_and_calls_no_model(server, config, answers, kind):
+    from comodor.providers.fake import Script
+
+    _setup(config)
+    talk = _stopped_talk(server)
+    gateway = _scripted_talk(talk, [Script(text="should never run")])
+    before = list(talk.session.conversation.messages)
+    status, body = _ask_api(server, "api-resume-1", answers)
+    assert status == 400
+    assert body["error"]["type"] == "invalid_request_error"
+    assert f"({kind})" in body["error"]["message"]
+    assert gateway.provider("fake").calls == []
+    assert talk.session.conversation.messages == before
+
+
+def test_the_refusal_names_the_refs_and_one_bad_answer_applies_none(server, config):
+    from comodor.providers.fake import Script
+    from comodor.session.store import decision_states
+
+    _setup(config)
+    talk = _stopped_talk(server, refs=("dr-api-1", "dr-api-2"))
+    gateway = _scripted_talk(talk, [Script(text="should never run")])
+    status, body = _ask_api(server, "api-resume-1", [
+        {"decision_ref": "dr-api-1", "chosen": ["SQLite"]},
+        {"decision_ref": "dr-api-2", "chosen": ["Kafka"]}])
+    assert status == 400 and "dr-api-2" in body["error"]["message"]
+    states = decision_states(talk.session.conversation.messages)
+    assert states["dr-api-1"].status == states["dr-api-2"].status == "open"
+    assert gateway.provider("fake").calls == []
+
+
+def test_a_request_without_decision_answers_is_exactly_as_before(server, config,
+                                                                 monkeypatch):
+    """A plain client never reaches the new path: the bridge is called with
+    the same arguments it always was."""
+    from comodor.api import session_map
+
+    seen = []
+
+    def plain(self, text, prior=None, mode="", patience=600.0, **extra):
+        seen.append(extra)
+        return {"text": "hi", "steps": 1, "stopped": "done"}
+
+    monkeypatch.setattr(session_map.Talk, "run", plain)
+    status, body = _ask_api(server, "api-plain", None, text="hello")
+    assert status == 200 and seen == [{}]
+    assert "decision_answers" not in json.dumps(body)

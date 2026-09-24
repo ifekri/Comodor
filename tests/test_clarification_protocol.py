@@ -267,3 +267,74 @@ def test_the_relay_carries_prior_changes(config):
         assert body["prior_changes"] == ["db.py"]
     finally:
         service.close()
+
+
+# --------------------------------------------------------------------------- #
+# T173 — the question and its form record carry the minted ref, never a d#
+# --------------------------------------------------------------------------- #
+
+
+def _ask_database(call_id: str = "q1") -> ToolCall:
+    return ToolCall(id=call_id, name="ask", arguments={"questions": [{
+        "question": "Which database?", "header": "Database",
+        "affects": ["persistence"],
+        "options": [{"label": "SQLite", "source": "request", "evidence": "SQLite"},
+                    {"label": "PostgreSQL", "source": "request",
+                     "evidence": "PostgreSQL"}]}]})
+
+
+def _unattended_turn(config, scripts, conversation=None):
+    gateway = Gateway(config, scripts=scripts)
+    bus = EventBus()
+    agent = AgentLoop(config, gateway, ToolRegistry(), bus,
+                      PermissionEngine(config, bus), conversation or Conversation())
+    return agent
+
+
+def _form_records(agent):
+    return [message.meta["question"] for message in agent.conversation.messages
+            if isinstance(message.meta.get("question"), dict)]
+
+
+def test_the_question_and_its_form_record_carry_the_minted_ref(config, monkeypatch):
+    from comodor.agent import evidence
+
+    monkeypatch.setattr(evidence, "mint_ref", lambda: "dr-minted-1")
+    agent = _unattended_turn(config, [Script(text="One question.",
+                                             tool_calls=[_ask_database()])])
+    result = agent.run("SQLite or PostgreSQL? Then write db.py.")
+    assert result.stopped == "clarification_required"
+
+    (record,) = _form_records(agent)
+    (question,) = record["questions"]
+    decision = next(d for d in agent.tool_context.evidence.decisions if d.material)
+    assert question["decision_ref"] == decision.ref == "dr-minted-1"
+    assert question["decision_ref"] != decision.id
+    assert not question["decision_ref"].startswith("d1")
+
+
+def test_the_default_minter_never_puts_a_ledger_id_on_the_wire(config):
+    agent = _unattended_turn(config, [Script(text="One question.",
+                                             tool_calls=[_ask_database()])])
+    agent.run("SQLite or PostgreSQL? Then write db.py.")
+    (record,) = _form_records(agent)
+    ref = record["questions"][0]["decision_ref"]
+    assert ref.startswith("dr-") and len(ref) > 10
+
+
+def test_a_decision_raised_again_later_in_the_session_keeps_its_ref(config):
+    conversation = Conversation()
+    first = _unattended_turn(config, [Script(text="One question.",
+                                             tool_calls=[_ask_database("q1")])],
+                             conversation)
+    first.run("SQLite or PostgreSQL? Then write db.py.")
+    original = _form_records(first)[0]["questions"][0]["decision_ref"]
+
+    # A later turn of the same conversation puts the same question again.
+    again = _unattended_turn(config, [Script(text="Asking again.",
+                                             tool_calls=[_ask_database("q2")])],
+                             conversation)
+    again.run("Please go ahead with db.py now.")
+    records = _form_records(again)
+    assert len(records) == 2
+    assert records[1]["questions"][0]["decision_ref"] == original

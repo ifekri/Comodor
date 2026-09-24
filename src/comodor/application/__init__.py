@@ -31,6 +31,7 @@ exists to hold.
 from __future__ import annotations
 
 import copy
+import json
 import threading
 import time
 import uuid
@@ -45,7 +46,8 @@ from ..safety.modes import known as known_mode
 from ..safety.permissions import Risk
 from .journal import Journal
 
-__all__ = ["Assembly", "assemble", "CoreService", "Journal", "SessionHandle"]
+__all__ = ["Assembly", "assemble", "Binding", "CoreService", "DecisionRejected",
+           "Journal", "SessionHandle", "run_turn"]
 
 #: What a client may say it can do. A capability it does not claim is one the
 #: core answers on its behalf rather than waiting on — or, for the
@@ -604,7 +606,7 @@ class CoreService:
             # a turn that never runs.
             handle._released.wait(timeout=5.0)
             try:
-                handle.assembly.agent.run(text)
+                run_turn(handle.assembly.agent, text)
             except Exception as problem:  # pragma: no cover - defensive
                 self._emit(handle, "notification.created", {
                     "session_id": handle.id, "level": "error",
@@ -757,7 +759,10 @@ class CoreService:
             carried = [record["clarification"] for record in records
                        if isinstance(record.get("clarification"), dict)]
             try:
-                handle.assembly.agent.run(text, decisions=carried or None)
+                # The same turn entry as every other; the carried decisions
+                # pass through unchanged and stay open — they are never
+                # answers, and never a reason to look anything up.
+                run_turn(handle.assembly.agent, text, decisions=carried or None)
             except Exception as problem:  # pragma: no cover - defensive
                 self._emit(handle, "notification.created", {
                     "session_id": handle.id, "level": "error",
@@ -1025,6 +1030,350 @@ class CoreService:
         return True
 
 
+# --------------------------------------------------------------------------- #
+# the shared turn entry
+# --------------------------------------------------------------------------- #
+#
+# Six paths start a primary turn: the web session (which the API and every
+# chat channel drive), the protocol core's `send` and its background-completion
+# delivery, `comodor run`, ACP, and a scheduled or webhook job. Each of them
+# calls `run_turn` rather than the loop. Everything that crosses an invocation
+# lives here — resolving a decision answered later, checking it against the
+# session that raised it, restoring and persisting a stateless run's
+# continuation — and nothing of it lives in the loop, which keeps owning what
+# happens inside one turn.
+
+#: What a resumed turn says when the caller gave no message of its own.
+RESUME_TEXT = ("Continue the work that stopped for these decisions, using the "
+               "answers given.")
+
+
+@dataclass(frozen=True)
+class Binding:
+    """Where and how a stateless run executes: the two things a later answer
+    to its decision must match, because they are what the decision was made
+    under. Provider and model are deliberately not here (FR-028)."""
+
+    workspace: str
+    mode: str
+
+    @classmethod
+    def of(cls, config: Config) -> "Binding":
+        return cls(workspace=canonical_workspace(config.paths.project),
+                   mode=str(config.agent.mode or "act").lower())
+
+
+def canonical_workspace(path: Any) -> str:
+    """The workspace as one comparable string: absolute, resolved."""
+    return str(Path(str(path)).expanduser().resolve())
+
+
+def _same_workspace(left: str, right: str) -> bool:
+    import os
+
+    return bool(left) and os.path.normcase(canonical_workspace(left)) \
+        == os.path.normcase(canonical_workspace(right))
+
+
+class DecisionRejected(ValueError):
+    """A DecisionAnswer batch refused whole, before any answer or model call.
+
+    `kind` names the check that failed — malformed, missing, unknown,
+    unresolvable, cross_continuation, stale, workspace, mode, empty or
+    invalid_answer — and `refs` the references it failed on.
+    """
+
+    def __init__(self, kind: str, message: str, refs: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.refs = list(refs or [])
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"kind": self.kind, "message": str(self), "refs": list(self.refs)}
+
+
+def parse_decision_answers(raw: Any) -> list[dict[str, Any]]:
+    """Steps 1 and 2: the input, as a list of well-formed DecisionAnswers.
+
+    `raw` is the JSON text a CLI file or stdin carries, or the list an API,
+    ACP or channel adapter already decoded. Each entry is the existing answer
+    shape keyed by `decision_ref` instead of a form header:
+    `{"decision_ref": ..., "chosen": [...], "written": "..."}`.
+    """
+    from ..agent.evidence import well_formed_ref
+
+    if isinstance(raw, (str, bytes)):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raise DecisionRejected("malformed", "the decision answers are not valid JSON") \
+                from None
+    if not isinstance(raw, list) or not raw:
+        raise DecisionRejected(
+            "malformed", "decision answers must be a non-empty JSON list of "
+                         "{decision_ref, chosen, written} objects")
+    parsed: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw, start=1):
+        if not isinstance(entry, dict):
+            raise DecisionRejected("malformed", f"decision answer {index} is not an object")
+        unknown = set(entry) - {"decision_ref", "chosen", "written"}
+        if unknown:
+            raise DecisionRejected(
+                "malformed", f"decision answer {index} has unknown fields: "
+                             f"{', '.join(sorted(unknown))}")
+        if "decision_ref" not in entry or entry.get("decision_ref") in (None, ""):
+            raise DecisionRejected(
+                "missing", f"decision answer {index} names no decision_ref")
+        ref = entry["decision_ref"]
+        if not well_formed_ref(ref):
+            raise DecisionRejected("malformed", f"decision answer {index} has a "
+                                                f"malformed decision_ref", [str(ref)[:64]])
+        if ref in seen:
+            raise DecisionRejected("malformed", f"{ref} is answered twice", [ref])
+        seen.add(ref)
+        chosen = entry.get("chosen", [])
+        if isinstance(chosen, str):
+            chosen = [chosen]
+        if not isinstance(chosen, list) or not all(isinstance(c, str) for c in chosen):
+            raise DecisionRejected("malformed", f"`chosen` for {ref} must be a list "
+                                                f"of option labels", [ref])
+        written = entry.get("written", "")
+        if not isinstance(written, str):
+            raise DecisionRejected("malformed", f"`written` for {ref} must be text", [ref])
+        parsed.append({"decision_ref": ref, "chosen": [c for c in chosen if c.strip()],
+                       "written": written})
+    return parsed
+
+
+@dataclass
+class _Resumption:
+    """A validated batch: which continuation, which decisions, which answers."""
+
+    continuation: Any            # SessionMeta, or None for a live session
+    entries: list[tuple[Any, dict[str, Any]]]   # (RecordedDecision, answer)
+
+
+def _validate(agent: Any, raw: Any, *, store: Any, binding: Binding | None) -> _Resumption:
+    """Steps 1–8 of plan §B.1, in order, stopping at the first failure.
+
+    Nothing here changes anything: a failure leaves every decision, the
+    continuation and the conversation exactly as they were.
+    """
+    from .. import questions as forms
+    from ..safety.modes import known
+    from ..session.store import UnresolvableRef, decision_states
+
+    answers = parse_decision_answers(raw)                               # 1, 2
+    refs = [answer["decision_ref"] for answer in answers]
+
+    continuation = None
+    if store is not None:
+        owners: dict[str, Any] = {}
+        unknown: list[str] = []
+        for ref in refs:                                                # 3
+            try:
+                meta = store.find_continuation(ref)
+            except UnresolvableRef:
+                raise DecisionRejected(
+                    "unresolvable", f"{ref} is claimed by more than one "
+                                    f"continuation and cannot be resolved", [ref]) from None
+            if meta is None:
+                unknown.append(ref)
+            else:
+                owners[ref] = meta
+        if unknown:
+            raise DecisionRejected(
+                "unknown", "no stopped run issued these decisions: "
+                           + ", ".join(unknown), unknown)
+        if len({meta.id for meta in owners.values()}) > 1:              # 4
+            raise DecisionRejected(
+                "cross_continuation", "these answers belong to different "
+                                      "stopped runs; answer one run at a time", refs)
+        continuation = owners[refs[0]]
+        recorded = store.decisions(continuation.id)
+    else:
+        # A live session is its own binding: its conversation is the record.
+        recorded = decision_states(agent.conversation.messages)
+    missing = [ref for ref in refs if ref not in recorded]
+    if missing:
+        raise DecisionRejected(
+            "unknown", "this session raised no such decisions: "
+                       + ", ".join(missing), missing)
+
+    stale = [ref for ref in refs if recorded[ref].status != "open"]        # 5
+    if stale:
+        raise DecisionRejected(
+            "stale", "already answered: " + ", ".join(stale), stale)
+
+    if continuation is not None:
+        if binding is None:
+            raise DecisionRejected("workspace", "no workspace to check the "
+                                                "continuation against", refs)
+        if not _same_workspace(continuation.cwd, binding.workspace):     # 6
+            raise DecisionRejected(
+                "workspace", f"these decisions were raised in "
+                             f"{continuation.cwd}, not {binding.workspace}; "
+                             f"run from that workspace to answer them", refs)
+        stopped_in = str((continuation.continuation or {}).get("mode") or "")
+        if not known(binding.mode) or binding.mode != stopped_in:        # 7
+            raise DecisionRejected(
+                "mode", f"these decisions were raised in {stopped_in or 'an unknown'} "
+                        f"mode, not {binding.mode or 'an unknown one'}; resume in "
+                        f"the mode the work stopped in", refs)
+
+    entries: list[tuple[Any, dict[str, Any]]] = []
+    for answer in answers:                                              # 8
+        ref = answer["decision_ref"]
+        decision = recorded[ref]
+        if not answer["chosen"] and not answer["written"].strip():
+            raise DecisionRejected("empty", f"the answer to {ref} carries no "
+                                            f"choice and no written text", [ref])
+        question = forms.Question.from_json(decision.question)
+        problem = forms.invalid_answers([question], [forms.Answer(
+            header=question.header, prompt=question.prompt,
+            chosen=list(answer["chosen"]), written=answer["written"])])
+        if problem:
+            raise DecisionRejected("invalid_answer", f"{ref}: {problem}", [ref])
+        entries.append((decision, answer))
+    return _Resumption(continuation=continuation, entries=entries)
+
+
+def _answered_message(resumption: _Resumption) -> Any:
+    """Step 9: the answers, as the caller's own message carrying the
+    `answered` form record — the record that makes each ref stale."""
+    from ..providers.base import Message
+    from ..questions import Answer
+
+    lines: list[str] = []
+    questions: list[dict[str, Any]] = []
+    answers: list[dict[str, Any]] = []
+    for decision, answer in resumption.entries:
+        question = dict(decision.question)
+        text = Answer(header=str(question.get("header", "")), prompt="",
+                      chosen=list(answer["chosen"]), written=answer["written"]).text
+        lines.append(f"{question.get('prompt', '')}\n  -> {text}")
+        questions.append(question)
+        answers.append({"header": str(question.get("header", "")),
+                        "decision_ref": decision.ref,
+                        "chosen": list(answer["chosen"]),
+                        "written": answer["written"]})
+    message = Message.user("The user answered the decisions this work stopped "
+                           "for:\n\n" + "\n".join(lines))
+    message.meta["question"] = {
+        "questions": questions, "answers": answers, "outcome": "answered",
+        "origin": resumption.entries[0][0].origin, "state": "answered",
+    }
+    return message
+
+
+def _refs_in(clarification: Any) -> list[str]:
+    """Every decision_ref a clarification-required payload names, in order."""
+    if not isinstance(clarification, dict):
+        return []
+    refs = [str(entry.get("decision_ref")) for entry in clarification.get("decisions") or []
+            if isinstance(entry, dict) and entry.get("decision_ref")]
+    top = clarification.get("decision_ref")
+    if top and top not in refs:
+        refs.insert(0, str(top))
+    return refs
+
+
+def run_turn(agent: Any, user_text: str = "", *,
+             images: list[str] | None = None,
+             decisions: list[dict[str, Any]] | None = None,
+             decision_answers: Any = None,
+             store: Any = None,
+             binding: Binding | None = None,
+             accepted: Callable[[], None] | None = None) -> Any:
+    """Run one primary turn, and everything that crosses an invocation.
+
+    `user_text`, `images` and `decisions` are the loop's own inputs and reach
+    `AgentLoop.run` unchanged. `decisions` are *open* clarifications carried
+    into the turn — a background delegate's — and stay open: they never
+    trigger a lookup and are never answers. `decision_answers` is the one new
+    input: answers given in a later invocation, keyed by `decision_ref`, and
+    only they are resolved and validated — whole, in the order of plan §B.1,
+    before anything is applied or any model is called. A failure raises
+    `DecisionRejected` and changes nothing.
+
+    A session-backed caller (the web session, the protocol core, ACP) passes
+    only the loop: its live conversation is its session. A stateless caller
+    (`comodor run`, a scheduled or webhook job) also passes the session store
+    and its binding; its run is kept as a hidden continuation only if it
+    stops for a decision, and a resumed one appends to that same continuation
+    however it ends (§B.2). `accepted` is called once the batch has passed —
+    or at once when there is none — so a caller running this on a worker
+    thread can report a rejection before it returns.
+    """
+    resumption = None
+    if decision_answers is not None:
+        resumption = _validate(agent, decision_answers, store=store, binding=binding)
+    if accepted is not None:
+        accepted()
+
+    restored = 0
+    answered_record = None
+    if resumption is not None:
+        if resumption.continuation is not None:
+            # The stopped run's own transcript comes back first: the resumed
+            # turn continues that work, not a fresh one.
+            agent.conversation.extend(store.load(resumption.continuation.id))
+            restored = len(agent.conversation.messages)
+        message = _answered_message(resumption)
+        agent.conversation.add(message)
+        answered_record = message.meta["question"]
+
+    extra: dict[str, Any] = {}
+    if images is not None:
+        extra["images"] = images
+    if decisions is not None:
+        extra["decisions"] = decisions
+    if answered_record is not None:
+        extra["answered"] = answered_record
+    text = user_text if (user_text or resumption is None) else RESUME_TEXT
+    result = agent.run(text, **extra)
+
+    if store is not None:
+        _keep_continuation(agent, store, binding, result, text,
+                           resumption.continuation if resumption else None,
+                           start=0 if resumption is None else restored)
+    return result
+
+
+def _keep_continuation(agent: Any, store: Any, binding: Binding | None, result: Any,
+                       text: str, continuation: Any, *, start: int) -> None:
+    """Plan §B.2, for a stateless caller.
+
+    A fresh run keeps nothing unless it stopped for a decision; then its whole
+    transcript becomes one hidden continuation. A resumed run appends what it
+    added to the continuation it resumed, whatever it ended in, and adds any
+    decision it stopped for again — no ref is ever dropped.
+    """
+    from ..session.store import SessionMeta, derive_title, new_session_id
+
+    messages = list(agent.conversation.messages)
+    raised = _refs_in(getattr(result, "clarification", None))
+    if continuation is None:
+        if getattr(result, "stopped", "") != "clarification_required" or binding is None:
+            return
+        config = agent.config
+        continuation = SessionMeta(
+            id=new_session_id(), title=derive_title(text), cwd=binding.workspace,
+            provider=str(config.provider or ""), model=config.active_model() or "",
+            continuation={"decision_refs": [], "mode": binding.mode})
+        start = 0
+    refs = list((continuation.continuation or {}).get("decision_refs") or [])
+    refs += [ref for ref in raised if ref not in refs]
+    continuation.continuation = {**(continuation.continuation or {}), "decision_refs": refs}
+    continuation.messages = len(messages)
+    # The meta first: from its first line on disk the transcript is a
+    # continuation, and no listing or search ever offers it as a session.
+    store.save_meta(continuation)
+    for message in messages[start:]:
+        store.append(continuation.id, message)
+
+
 def _encode_answer(answers: list[dict[str, Any]]) -> str:
     """What the `ask` tool actually reads back.
 
@@ -1230,11 +1579,16 @@ def _relay_clarification(service: CoreService, handle: SessionHandle,
     outcome = str(payload.get("outcome", ""))
     if outcome in ("cancelled", "expired", "unattended"):
         body["outcome"] = outcome
+    if payload.get("decision_ref"):
+        # The first open decision's stable identity; optional and additive.
+        body["decision_ref"] = str(payload["decision_ref"])
     decisions = [
         {"id": str(entry.get("id", "")), "decision": str(entry.get("decision", "")),
          "candidates": [str(c) for c in entry.get("candidates") or []],
          "evidence_consulted": [str(e) for e in entry.get("evidence_consulted") or []],
-         "reason": str(entry.get("reason", ""))}
+         "reason": str(entry.get("reason", "")),
+         **({"decision_ref": str(entry["decision_ref"])}
+            if entry.get("decision_ref") else {})}
         for entry in payload.get("decisions") or [] if isinstance(entry, dict)]
     if decisions:
         body["decisions"] = decisions
@@ -1247,9 +1601,10 @@ def _relay_clarification(service: CoreService, handle: SessionHandle,
     ended = {"cancelled": "the question was cancelled",
              "expired": "the question expired unanswered",
              "unattended": "nobody was there to answer"}.get(outcome, "no answer was given")
+    named = f" (decision_ref: {body['decision_ref']})" if body.get("decision_ref") else ""
     service._emit(handle, "notification.created", {
         "session_id": handle.id, "level": "warning",
-        "text": f"Stopped: a decision is needed — {body['decision']} ({ended})."})
+        "text": f"Stopped: a decision is needed — {body['decision']}{named} ({ended})."})
 
 
 def _stop_reason(event: Event) -> str:

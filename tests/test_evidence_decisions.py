@@ -404,3 +404,102 @@ def test_uninspected_areas_are_named_in_the_answer():
     assert report.count("vendor/") == 1
     assert "Nothing is claimed" in report
     assert Ledger().report_partial_access() == ""
+
+
+# --------------------------------------------------------------------------- #
+# T172 — the semantic decision_ref: minted once, never derived, never d#
+# --------------------------------------------------------------------------- #
+
+
+def _material(book: Ledger, what: str = "Which database?", **kwargs):
+    return book.open_decision(what, affects=["persistence"], **kwargs)
+
+
+def test_two_turns_mint_distinct_refs_for_the_same_question():
+    # Two ledgers are two turns. The ledger-local id restarts (`d1` twice);
+    # the semantic ref must not, or an answer could close the wrong turn's
+    # decision.
+    first, second = _material(Ledger()), _material(Ledger())
+    assert first.id == second.id
+    assert first.ref and second.ref
+    assert first.ref != second.ref
+    assert ev.well_formed_ref(first.ref) and ev.well_formed_ref(second.ref)
+
+
+def test_a_ref_is_never_the_ledger_local_id_nor_derived_from_the_wording():
+    decision = _material(Ledger(), "Which database should the service use?")
+    assert decision.ref != decision.id
+    assert not decision.ref.startswith("d1")
+    assert "database" not in decision.ref.lower()
+    # The same words in another turn give another ref: nothing about the
+    # wording, the position or a counter goes into it.
+    refs = {_material(Ledger(), "Which database should the service use?").ref
+            for _ in range(20)}
+    assert len(refs) == 20
+
+
+@pytest.mark.parametrize("ending", ["cancelled", "expired", "unattended"])
+def test_one_decision_keeps_its_ref_whichever_way_the_question_ended(ending):
+    book = Ledger()
+    decision = _material(book)
+    minted = decision.ref
+    book.asked(decision.id)
+    book.ended_without_answer(decision.id, ending)
+    assert book.decision(decision.id).ref == minted
+
+
+def test_an_injected_minter_makes_refs_deterministic():
+    counter = iter(["ref-a", "ref-b", "ref-c"])
+    book = Ledger(mint=lambda: next(counter))
+    assert _material(book, "Which database?").ref == "ref-a"
+    assert _material(book, "Which queue?").ref == "ref-b"
+
+
+def test_a_ref_is_minted_once_per_decision_not_per_mention():
+    minted: list[str] = []
+
+    def mint() -> str:
+        minted.append(f"ref-{len(minted) + 1}")
+        return minted[-1]
+
+    book = Ledger(mint=mint)
+    first = _material(book, "Which database?")
+    again = _material(book, "which  DATABASE?")
+    assert again.ref == first.ref == "ref-1"
+    assert minted == ["ref-1"]
+
+
+def test_a_decision_raised_again_keeps_the_ref_it_already_has():
+    # Carried from a delegate, or put again in a later turn: the decision
+    # accepts its original ref instead of minting a new one.
+    book = Ledger(mint=lambda: "ref-new")
+    carried = _material(book, "Which database?", ref="ref-original")
+    assert carried.ref == "ref-original"
+
+    later = Ledger(mint=lambda: "ref-new")
+    later.outstanding("Which database?", "ref-original")
+    assert _material(later, "Which database?").ref == "ref-original"
+    assert _material(later, "Which queue?").ref == "ref-new"
+
+
+def test_only_a_decision_that_needs_asking_gets_a_ref(config):
+    book = Ledger(mint=lambda: "ref-x")
+    immaterial = book.open_decision("Tabs or spaces?", affects=[])
+    assert immaterial.ref == ""
+    book.knowledge("Which database?", "lesson:1", answer="postgres")
+    settled = book.open_decision("Which database?", affects=["persistence"])
+    assert settled.state == "answered" and settled.ref == ""
+
+
+def test_the_minter_is_the_module_function_unless_one_is_injected(monkeypatch):
+    monkeypatch.setattr(ev, "mint_ref", lambda: "ref-patched")
+    assert _material(Ledger()).ref == "ref-patched"
+
+
+@pytest.mark.parametrize("value, ok", [
+    ("dr-0123456789abcdef0123", True), ("ref-1", True), ("", False),
+    ("has space", False), ("x" * 65, False), (None, False), (7, False),
+    ("-leading", False), ("ok:1.2_3-4", True),
+])
+def test_what_counts_as_a_well_formed_ref(value, ok):
+    assert ev.well_formed_ref(value) is ok

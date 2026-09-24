@@ -913,6 +913,10 @@
         },
         "reason": {
           "type": "string"
+        },
+        "decision_ref": {
+          "type": "string",
+          "description": "Optional and additive. The decision's stable semantic identity, minted once when it first needed asking and kept across turns and invocations. A later invocation answers the decision by this value. `id` carries the same value, as a compatibility alias."
         }
       },
       "description": "One decision the turn left open."
@@ -975,6 +979,10 @@
             "type": "string"
           },
           "description": "Optional and additive. Work this turn completed before the decision became known: files a writer changed and bounded names of shell operations that changed the filesystem. Those changes are preserved rather than rolled back, and disclosed so a caller never reads the stop as 'the workspace is unchanged'. Absent when nothing was changed before the decision. A bounded description only — never file contents, command text or credentials."
+        },
+        "decision_ref": {
+          "type": "string",
+          "description": "Optional and additive. The stable semantic identity of the first open decision; `decisions[].decision_ref` names every one. A later invocation answers a decision by this value, and only by it."
         }
       }
     },
@@ -1370,7 +1378,7 @@
         },
         "decision_ref": {
           "type": "string",
-          "description": "The open decision this question belongs to, stable for the turn. Optional."
+          "description": "The open decision this question belongs to: its stable semantic identity, the same across turns and invocations. Optional."
         }
       },
       "description": "One question within a form. `header` is its stable name and is what an answer is matched on — not the position, which would silently reattach every answer if a question were reordered. `reason`, `evidence_consulted` and `decision_ref` are optional and additive: absent, the form is exactly the form an earlier core sent."

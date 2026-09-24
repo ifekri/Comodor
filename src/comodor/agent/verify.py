@@ -1602,14 +1602,24 @@ class Assessment:
     #: passes, so a pass claim on it is contradicted (FR-036, FR-125).
     validation_integrity: str = ""
     verdict: str = "no_intervention"          # no_intervention | annotate | block
+    #: Why an explicit completion claim is delivered unconfirmed, or "": the
+    #: gate could not reach a verdict, or the one correction turn still made
+    #: the contradicted claim. Such a claim is never delivered as completed
+    #: (FR-127).
+    unconfirmed: str = ""
 
     def annotation(self) -> str:
         """The notice shown beside an answer with unresolved work (FR-037)."""
-        if not self.unresolved:
-            return ""
         lines = [f"  - {what}" + (f" ({self.unresolved_reasons.get(what)})"
                                   if self.unresolved_reasons.get(what) else "")
                  for what in self.unresolved]
+        if self.unconfirmed:
+            text = f"Completion is not confirmed — {self.unconfirmed}."
+            if lines:
+                text += "\nOutstanding:\n" + "\n".join(lines)
+            return text
+        if not self.unresolved:
+            return ""
         return ("Not everything the request asked for was delivered:\n"
                 + "\n".join(lines))
 

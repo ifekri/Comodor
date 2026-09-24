@@ -215,6 +215,13 @@ twenty-four hours of *your* last message. If a long task finishes after that,
 the bot cannot tell you — it says so in its log, and writing to it again
 reopens the window.
 
+## Answering a decision after the turn stopped
+
+When a turn stops because a decision is needed, its message names each
+decision with its `decision_ref`, and a list offers the options. Picking one
+answers exactly that decision, and the work carries on. Anything you type
+afterwards is a new request, never read as an answer.
+
 ## Running it
 
 Exactly as Telegram:

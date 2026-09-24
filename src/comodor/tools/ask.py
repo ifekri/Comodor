@@ -262,7 +262,7 @@ class Ask(Tool):
                 continue
             question.reason = decision.materiality
             question.evidence_consulted = list(decision.evidence_consulted)
-            question.decision_ref = decision.id
+            question.decision_ref = decision.ref
             pending.append((question, decision))
 
         if not pending:
@@ -564,7 +564,10 @@ def payload_for(decisions: list[Any], outcome: str) -> dict[str, Any]:
     """The structured clarification-required payload (contracts §C2).
 
     Singular fields describe the first open decision, as the contract
-    shapes them; `decisions` carries every one that is open.
+    shapes them; `decisions` carries every one that is open. Each decision
+    is named by its semantic `decision_ref` — what a later invocation
+    answers it by — and `id` carries the same value as a compatibility
+    alias, never the ledger-local `d#`.
     """
     first = decisions[0]
     return {
@@ -574,14 +577,59 @@ def payload_for(decisions: list[Any], outcome: str) -> dict[str, Any]:
         "evidence_consulted": list(first.evidence_consulted),
         "reason": first.materiality,
         "outcome": outcome,
+        "decision_ref": first.ref,
         "decisions": [
-            {"id": decision.id, "decision": decision.what,
+            {"id": decision.ref, "decision_ref": decision.ref,
+             "decision": decision.what,
              "candidates": list(decision.candidates),
              "evidence_consulted": list(decision.evidence_consulted),
              "reason": decision.materiality}
             for decision in decisions
         ],
     }
+
+
+def carried_record(payloads: list[Any], *,
+                   origin: str = "delegate") -> dict[str, Any] | None:
+    """A form record for decisions another piece of work left open.
+
+    A delegate that stopped for a decision raised its form in its own
+    session; the parent has only the clarification payload. This writes that
+    payload into the parent's transcript as the record a form leaves — each
+    decision under the ref the delegate minted — so the parent session knows
+    it is open and can resolve it later by that ref. Only decisions that
+    carry a ref are recorded; nothing is invented for one that does not.
+    """
+    from ..agent.evidence import well_formed_ref
+
+    questions: list[forms.Question] = []
+    outcome = ""
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        outcome = outcome or str(payload.get("outcome") or "")
+        nested = [entry for entry in payload.get("decisions") or []
+                  if isinstance(entry, dict) and entry.get("decision")]
+        for entry in nested or [payload]:
+            what = str(entry.get("decision") or "").strip()
+            ref = entry.get("decision_ref")
+            if not what or not well_formed_ref(ref):
+                continue
+            labels = [str(option.get("label", "")) if isinstance(option, dict) else str(option)
+                      for option in entry.get("candidates") or []]
+            reason = str(entry.get("reason") or payload.get("reason") or "")
+            questions.append(forms.Question(
+                prompt=what, header=f"Decision {len(questions) + 1}",
+                options=[forms.Option(label=label) for label in labels if label.strip()]
+                + [forms.Option(label=forms.WRITE_YOUR_OWN, free=True)],
+                reason=reason,
+                evidence_consulted=[str(item) for item in entry.get("evidence_consulted")
+                                    or payload.get("evidence_consulted") or []],
+                decision_ref=ref))
+    if not questions:
+        return None
+    ending = outcome if outcome in ("cancelled", "expired", "unattended") else "cancelled"
+    return form_record(questions, [], ending, origin=origin)
 
 
 _ENDED = {

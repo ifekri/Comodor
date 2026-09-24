@@ -114,6 +114,37 @@ def _operation_key(call: ToolCall) -> str:
     return "|".join(parts)
 
 
+def _answer_text(answer: dict[str, Any]) -> str:
+    written = str(answer.get("written") or "").strip()
+    return written or ", ".join(str(choice) for choice in answer.get("chosen") or []
+                                if str(choice).strip())
+
+
+def _answered_pairs(form: dict[str, Any]) -> list[tuple[str, str]]:
+    """(question, answer) for each question a form record holds an answer to.
+
+    An answer is matched to its question by `decision_ref` where it names one
+    — a batch answered later can span forms whose headers repeat — and by the
+    form's header otherwise, as a live form's answers always were.
+    """
+    questions = [question for question in form.get("questions") or []
+                 if isinstance(question, dict)]
+    by_header = {str(q.get("header") or ""): str(q.get("prompt") or "") for q in questions}
+    by_ref = {str(q.get("decision_ref")): str(q.get("prompt") or "")
+              for q in questions if q.get("decision_ref")}
+    pairs: list[tuple[str, str]] = []
+    for answer in form.get("answers") or []:
+        if not isinstance(answer, dict):
+            continue
+        text = _answer_text(answer)
+        named = answer.get("decision_ref")
+        prompt = (by_ref.get(str(named), "") if named
+                  else by_header.get(str(answer.get("header") or ""), ""))
+        if text and prompt:
+            pairs.append((prompt, text))
+    return pairs
+
+
 def _carried_decisions(carried: dict[str, Any]) -> list[dict[str, Any]]:
     """Every open decision a carried clarification payload names, in order.
 
@@ -262,13 +293,19 @@ class AgentLoop:
     # -- public API ------------------------------------------------------- #
 
     def run(self, user_text: str, images: list[str] | None = None,
-            decisions: list[dict[str, Any]] | None = None) -> TurnResult:
+            decisions: list[dict[str, Any]] | None = None,
+            answered: dict[str, Any] | None = None) -> TurnResult:
         """Handle one user message from start to finish.
 
         `decisions` are clarification payloads left open by work that this
         turn is reporting on — a delegate that stopped for an answer. They
         enter the turn's ledger as unresolved, so nothing that depends on
         them runs here either.
+
+        `answered` is the `answered` form record of decisions answered in a
+        later invocation — already validated by `application.run_turn`, which
+        put it in the conversation. The answers enter this turn's ledger, and
+        the project's settled decisions, exactly as a live form's answers do.
         """
         started = time.monotonic()
         self.cancel.reset()
@@ -309,10 +346,21 @@ class AgentLoop:
         # never changes, and every request after the first is served from the
         # provider's cache at a tenth of the price. See providers/caching.py.
         playbook = self._recall(user_text)
-        self.conversation.add(
-            Message.user(user_text, images=images or [], briefing=playbook))
+        message = Message.user(user_text, images=images or [], briefing=playbook)
+        if decisions:
+            # A delegate's open decisions are recorded in this session, under
+            # the refs the delegate minted, so they can be answered later by
+            # ref like any other (FR-029, FR-129). The payloads are unchanged.
+            from ..tools.ask import carried_record
+
+            record = carried_record(decisions)
+            if record is not None:
+                message.meta["question"] = record
+        self.conversation.add(message)
         self.bus.emit(Kind.TURN_START, text=user_text)
-        self._open_ledger(user_text, decisions or [])
+        self._open_ledger(user_text, decisions or [], answered)
+        if answered:
+            self._learn_form(answered)
 
         deadline = started + self.config.agent.max_seconds
 
@@ -456,7 +504,12 @@ class AgentLoop:
 
                     self._say_internally(verify.as_incomplete(assessment))
                     continue
-                if assessment.unresolved:
+                if assessment.verdict == "block" and corrected:
+                    # The one correction turn still made the contradicted
+                    # claim: it is delivered, but never as completed (FR-127).
+                    assessment.unconfirmed = ("the answer still claims completion "
+                                              "that the evidence does not support")
+                if assessment.unresolved or assessment.unconfirmed:
                     # Beside the answer for a person watching, and on the
                     # result for a caller who is not (FR-037).
                     result.annotation = assessment.annotation()
@@ -681,6 +734,15 @@ class AgentLoop:
             # A form, as it was shown and how it ended, so the transcript and
             # an export can say what was asked and what came back (FR-030).
             form = result.meta.get("form")
+            if not isinstance(form, dict) \
+                    and isinstance(result.meta.get("clarification"), dict) \
+                    and not (call.name == "ask" or result.meta.get("native_decision")):
+                # A child's decision has no form of its own here. Recorded
+                # under the ref the child minted, so this session can resolve
+                # it later by that ref, like any other (FR-029, FR-129).
+                from ..tools.ask import carried_record
+
+                form = carried_record([result.meta["clarification"]])
             if isinstance(form, dict):
                 message.meta["question"] = form
             # What a writing delegate changed, so a read of one of those files
@@ -1029,7 +1091,7 @@ class AgentLoop:
                 affects=list(missing.affects),
                 reason=decision.materiality,
                 evidence_consulted=list(decision.evidence_consulted),
-                decision_ref=decision.id), decision))
+                decision_ref=decision.ref), decision))
         if not pending:
             return None
         result = ask_tool.present(context, pending, origin="mutation_preflight")
@@ -1108,7 +1170,8 @@ class AgentLoop:
         self.conversation.add(message)
 
     def _open_ledger(self, user_text: str,
-                     decisions: list[dict[str, Any]] | None = None) -> None:
+                     decisions: list[dict[str, Any]] | None = None,
+                     answered: dict[str, Any] | None = None) -> None:
         """A fresh ledger for the turn, seeded with what the user stated.
 
         The request text and what recall brought ride on the context too,
@@ -1137,6 +1200,15 @@ class AgentLoop:
                 getattr(item, "text", "") or str(item) for item in self._recalled]
             context.evidence.known("the request, as the user stated it",
                                    material=user_text)
+            # A decision this session raised and never settled keeps its
+            # ref if it is raised again: the form records already say which
+            # refs are still open (FR-020, FR-129).
+            from ..session.store import decision_states
+
+            for ref, recorded in decision_states(self.conversation.messages).items():
+                if recorded.status == "open":
+                    context.evidence.outstanding(
+                        str(recorded.question.get("prompt") or ""), ref)
             # What the project already settled goes in before the imported
             # decisions: a carried question the ledger can already answer
             # settles rather than reopening and stopping the turn (FR-008,
@@ -1144,6 +1216,8 @@ class AgentLoop:
             for decision in self._settled_decisions():
                 context.evidence.knowledge(decision.trigger, f"lesson:{decision.id}",
                                            answer=decision.guidance)
+            if answered:
+                self._seed_answers(context, answered)
             for carried in decisions or []:
                 self._carry_open_decision(context, carried)
         except Exception:
@@ -1163,25 +1237,53 @@ class AgentLoop:
         Only answers: a question left blank, and a form that was cancelled,
         expired or found nobody to answer, teach nothing.
         """
+        form = result.meta.get("form")
+        if isinstance(form, dict):
+            self._learn_form(form)
+
+    def _learn_form(self, form: dict[str, Any]) -> None:
+        """One form record's answers, into the project's settled decisions.
+
+        The one path: a live form's record and a record of answers given in a
+        later invocation both arrive here, so a decision answered either way
+        is not asked again (FR-109).
+        """
         if self.memory is None or not self.config.learning.enabled:
             return
-        form = result.meta.get("form")
-        if not isinstance(form, dict):
-            return
-        prompts = {str(question.get("header") or ""): str(question.get("prompt") or "")
-                   for question in form.get("questions") or [] if isinstance(question, dict)}
-        for answer in form.get("answers") or []:
-            if not isinstance(answer, dict):
-                continue
-            text = str(answer.get("written") or "").strip() or ", ".join(
-                str(choice) for choice in answer.get("chosen") or [] if str(choice).strip())
-            prompt = prompts.get(str(answer.get("header") or ""), "")
-            if not text or not prompt:
-                continue
+        for prompt, text in _answered_pairs(form):
             try:
                 self.memory.settle_decision(prompt, text)
             except Exception:
                 continue
+
+    def _seed_answers(self, context: ToolContext, record: dict[str, Any]) -> None:
+        """Answers given in a later invocation, into this turn's ledger.
+
+        Exactly as a live form's answers enter it: the decision, under the ref
+        it already has, answered — KNOWN, from the user. The only way an open
+        decision from an earlier turn becomes usable knowledge (FR-129).
+        """
+        book = context.evidence
+        by_ref = {str(question.get("decision_ref") or ""): question
+                  for question in record.get("questions") or [] if isinstance(question, dict)}
+        for answer in record.get("answers") or []:
+            if not isinstance(answer, dict):
+                continue
+            question = by_ref.get(str(answer.get("decision_ref") or ""))
+            text = _answer_text(answer)
+            if question is None or not text:
+                continue
+            reason = str(question.get("reason") or "")
+            decision = book.open_decision(
+                str(question.get("prompt") or ""),
+                affects=[reason] if reason else None,
+                candidates=[str(option.get("label", "")) for option in
+                            question.get("options") or []
+                            if isinstance(option, dict) and not option.get("free")],
+                ref=str(question.get("decision_ref") or ""))
+            if not decision.resolved:
+                book.asked(decision.id)
+                book.answered(decision.id, text)
 
     def _learning_contradicted(self, path: str) -> str:
         """Learned items this file no longer supports, marked stale — or ""."""
@@ -1245,7 +1347,11 @@ class AgentLoop:
                             if isinstance(option, dict) else option
                             for option in entry.get("candidates") or []],
                 evidence_consulted=list(entry.get("evidence_consulted")
-                                        or carried.get("evidence_consulted") or []))
+                                        or carried.get("evidence_consulted") or []),
+                # The ref the work that raised it minted: the decision keeps
+                # its identity — and its origin — in this turn too. Only the
+                # named field: an older payload's `id` is a ledger-local `d#`.
+                ref=str(entry.get("decision_ref") or ""))
             if decision.resolved:
                 # The ledger already answered this (a settled decision seeded
                 # first); do not reopen it as unresolved and make the gate
@@ -1313,9 +1419,15 @@ class AgentLoop:
         ended = {"cancelled": "the question was cancelled",
                  "expired": "the question expired unanswered",
                  "unattended": "nobody was there to answer"}
-        names = [entry.get("decision", "") for entry in payload.get("decisions", [])] \
-            or [payload.get("decision", "")]
-        listed = "\n".join(f"- {name}" for name in names if name)
+        entries = [entry for entry in payload.get("decisions", []) if isinstance(entry, dict)] \
+            or [payload]
+        # Each decision with the ref a later answer names it by: this is the
+        # text every channel relays, including those with no structured reply
+        # of their own (FR-121, FR-129).
+        listed = "\n".join(
+            f"- {entry.get('decision', '')}"
+            + (f" (decision_ref: {entry['decision_ref']})" if entry.get("decision_ref") else "")
+            for entry in entries if entry.get("decision"))
         prior = [str(item) for item in payload.get("prior_changes") or [] if str(item)]
         if prior:
             changed = "\n".join(f"- {item}" for item in prior)
@@ -1666,9 +1778,21 @@ class AgentLoop:
                 answer=result.text,
                 validations=self._validations)
         except Exception:
-            # A gate that cannot reach a verdict annotates nothing and blocks
-            # nothing: it falls back to delivering the answer (FR-127).
-            return verify.Assessment()
+            # A gate that cannot reach a verdict blocks nothing: the answer is
+            # delivered (FR-124). But an explicit completion claim it could not
+            # check is not delivered as completed — it is marked unconfirmed
+            # (FR-127). Failing to read the answer counts as a claim.
+            fallback = verify.Assessment()
+            try:
+                from .claims import claims_completion
+
+                claimed = claims_completion(result.text)
+            except Exception:
+                claimed = True
+            if claimed:
+                fallback.verdict = "annotate"
+                fallback.unconfirmed = "the completion check could not reach a verdict"
+            return fallback
 
     def _note(self, text: str) -> None:
         self.bus.emit(Kind.NOTICE, text=text)

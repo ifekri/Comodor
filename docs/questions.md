@@ -101,6 +101,26 @@ does not fall back to a guess. The turn ends reporting that the decision is
 needed (`stopped: "clarification_required"`), with no invented value, no
 selected option and no default applied.
 
+## Answering later
+
+Every question the agent asks belongs to a decision with a stable
+`decision_ref`: it is the same for as long as the decision is open, and the
+same when the decision is asked again. A decision left open — dismissed,
+expired or unattended — can be answered later by that ref alone, never by
+wording, by recency or by position:
+
+- `comodor run --decision-answers` resumes a headless run, a scheduled job or
+  a webhook event that stopped for a decision (see [the CLI](cli.md)). It must
+  be resumed from the same workspace and in the same mode.
+- The API takes `comodor.decision_answers` on the same session.
+- ACP takes it in a prompt's `_meta.comodor.decision_answers`.
+- Telegram, Slack and WhatsApp offer answer buttons when a turn stops.
+  Discord and webhooks name the decision and its ref, and offer no answer
+  route of their own.
+
+Answers are checked whole before anything runs. An answer supplies
+information; it never grants a permission the mode does not allow.
+
 ## When it does not ask
 
 By design, not by accident:

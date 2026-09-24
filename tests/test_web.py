@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from comodor.providers.gateway import Gateway
 from comodor.web.server import ASSETS, COOKIE, GUARD, Server
 
 
@@ -2055,3 +2056,118 @@ def test_a_dismissed_question_is_not_a_cancelled_turn_on_the_page(served):
     kinds = [event["kind"] for event in log["events"]]
     assert "request" in kinds
     assert "cancelled" not in kinds
+
+
+# --------------------------------------------------------------------------- #
+# T202 — Session.send runs its turn through run_turn
+# --------------------------------------------------------------------------- #
+
+
+
+
+def _web_session(config):
+    from comodor.web.session import Session
+
+    return Session(config)
+
+
+def _turn_done(session) -> None:
+    """The turn lock is released when the worker has persisted and finished."""
+    assert session._turn.acquire(timeout=10.0), "the turn never finished"
+    session._turn.release()
+
+
+def _open_decision_in(session, ref="dr-web-1"):
+    """The session's own conversation, as a turn that stopped for a decision
+    leaves it: the question's form record is on its tool message."""
+    from comodor.providers.base import Message as _Message
+    from comodor.providers.base import ToolCall as _ToolCall
+
+    call = _ToolCall(id="q1", name="ask", arguments={})
+    asked = _Message.assistant("One question first.", tool_calls=[call])
+    tool = _Message.tool(call_id="q1", name="ask", content="unresolved")
+    tool.meta["question"] = {
+        "questions": [{"prompt": "Which database?", "header": "Database",
+                       "multi": False, "reason": "persisted_state",
+                       "decision_ref": ref,
+                       "options": [{"label": "SQLite"}, {"label": "PostgreSQL"},
+                                   {"label": "Something else", "free": True}]}],
+        "answers": [], "outcome": "cancelled", "origin": "model_ask",
+        "state": "unresolved"}
+    session.conversation.extend([_Message.user("Set up db.py"), asked, tool])
+    return ref
+
+
+def test_an_image_turn_and_a_carried_decision_turn_reach_the_loop_unchanged(config):
+    session = _web_session(config)
+    seen = []
+    session.agent.run = lambda text, **kwargs: seen.append((text, kwargs)) or \
+        __import__("comodor.agent.loop", fromlist=["TurnResult"]).TurnResult()
+    try:
+        images = ["data:image/png;base64,AAAA"]
+        assert session.send("look at this", images=images)
+        _turn_done(session)
+        carried = [{"kind": "clarification_required", "decision": "Which host?",
+                    "decision_ref": "dr-delegate-web", "outcome": "unattended"}]
+        assert session.send("a delegate finished", decisions=carried)
+        _turn_done(session)
+    finally:
+        session.close()
+    assert seen[0] == ("look at this", {"images": images})
+    assert seen[1][0] == "a delegate finished"
+    assert seen[1][1]["decisions"] is carried
+    assert "answered" not in seen[1][1]
+
+
+def test_a_decision_answer_through_send_resumes_the_session(config):
+    from comodor.providers.base import ToolCall as _ToolCall
+    from comodor.providers.fake import Script
+
+    session = _web_session(config)
+    try:
+        ref = _open_decision_in(session)
+        session.agent.gateway = Gateway(session.config, scripts=[
+            Script(text="Writing.", tool_calls=[_ToolCall(
+                id="w1", name="write_file",
+                arguments={"path": "db.py", "content": "ENGINE = 'sqlite'\n"})]),
+            Script(text="Done — SQLite.")])
+        assert session.send("", decision_answers=[{"decision_ref": ref,
+                                                    "chosen": ["SQLite"]}])
+        _turn_done(session)
+        assert (config.paths.project / "db.py").read_text(encoding="utf-8") \
+            == "ENGINE = 'sqlite'\n"
+        # The answer is on record in the session, so the ref is spent.
+        from comodor.application import DecisionRejected
+        from comodor.session.store import decision_states
+
+        assert decision_states(session.conversation.messages)[ref].status == "stale"
+        with pytest.raises(DecisionRejected) as again:
+            session.send("", decision_answers=[{"decision_ref": ref,
+                                                "chosen": ["SQLite"]}])
+        assert again.value.kind == "stale"
+    finally:
+        session.close()
+
+
+def test_a_refused_decision_answer_changes_nothing_and_frees_the_session(config):
+    from comodor.application import DecisionRejected
+    from comodor.providers.fake import Script
+
+    session = _web_session(config)
+    try:
+        _open_decision_in(session)
+        session.agent.gateway = Gateway(session.config,
+                                        scripts=[Script(text="should never run")])
+        before = list(session.conversation.messages)
+        with pytest.raises(DecisionRejected) as refused:
+            session.send("", decision_answers=[{"decision_ref": "dr-elsewhere",
+                                                "chosen": ["SQLite"]}])
+        assert refused.value.kind == "unknown"
+        _turn_done(session)
+        assert session.conversation.messages == before
+        assert session.agent.gateway.provider("fake").calls == []
+        # The session is free for the next turn.
+        assert session.send("hello")
+        _turn_done(session)
+    finally:
+        session.close()

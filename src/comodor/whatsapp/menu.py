@@ -163,6 +163,20 @@ def question(request_id: str, index: int, options: list[str],
     return "Choose", rows
 
 
+def decisions(open_decisions: list[tuple[str, str, list[str]]]) -> list[Row]:
+    """A stopped turn's open decisions, one list row per grounded option.
+
+    Each row's id is `da:<decision_ref>:<n>`, so the interactive reply that
+    comes back answers exactly that decision. The option is the row's title;
+    the decision it belongs to is its description.
+    """
+    rows = []
+    for ref, prompt, options in open_decisions:
+        for slot, label in enumerate(options):
+            rows.append(Row(f"da:{ref}:{slot}", label[:24], prompt[:72]))
+    return rows[:MOST_ROWS]
+
+
 def page(action: str, items: list[Row], *, back: str = "menu",
          page_number: int = 0) -> list[Row]:
     """One screenful of a longer list, with its own way forward and back.

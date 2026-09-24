@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -69,7 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     run = sub.add_parser("run", help="run one task without the interface")
-    run.add_argument("task", help="what to do")
+    run.add_argument("task", nargs="?", default="",
+                     help="what to do (optional with --decision-answers)")
     run.add_argument("--json", action="store_true", help="emit a JSON result")
     run.add_argument("--yes", action="store_true",
                      help="approve file writes and commands automatically")
@@ -80,6 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
              "order: \"answer\" (with an optional value, or values keyed by "
              "question header), \"cancel\", \"expire\" or \"unattended\". "
              "Nothing is scripted without it.")
+    run.add_argument(
+        "--decision-answers", default=None, metavar="PATH",
+        help="answer decisions an earlier run stopped for: a JSON list of "
+             "{\"decision_ref\", \"chosen\", \"written\"} objects, from PATH or "
+             "from stdin with -. The refs alone find the stopped run; it must "
+             "be resumed from the same workspace and in the same mode.")
 
     written = sub.add_parser(
         "help", help="what this is and how to use it, in full")
@@ -378,6 +386,21 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     from .events import EventBus, Kind
     from .safety import Redactor
 
+    answers = None
+    source = getattr(args, "decision_answers", None)
+    if source is not None:
+        try:
+            answers = (sys.stdin.read() if source == "-"
+                       else Path(source).read_text(encoding="utf-8"))
+        except OSError as problem:
+            print(f"error: the decision answers could not be read: {problem}",
+                  file=sys.stderr)
+            return 1
+    elif not args.task:
+        print("error: `comodor run` needs a task, or --decision-answers to "
+              "resume a run that stopped for a decision", file=sys.stderr)
+        return 2
+
     if args.yes:
         config.safety.auto_approve_writes = True
         config.safety.auto_approve_shell = True
@@ -452,17 +475,32 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     # prompt pointed at a credentials file should not.
     secrets = Redactor([entry.api_key for entry in config.providers.values()
                         if entry.api_key])
-    try:
-        task, warning = expand(args.task, config.paths.project,
-                               context_limit=config.agent.context_limit,
-                               redact=secrets)
-    except Refusal as refusal:
-        print(f"refused: {refusal}", file=sys.stderr)
-        return 2
+    task, warning = "", ""
+    if args.task:
+        try:
+            task, warning = expand(args.task, config.paths.project,
+                                   context_limit=config.agent.context_limit,
+                                   redact=secrets)
+        except Refusal as refusal:
+            print(f"refused: {refusal}", file=sys.stderr)
+            return 2
     if warning:
         print(f"warning: {warning}", file=sys.stderr)
 
-    result = agent.run(task)
+    # A stateless run: it keeps nothing unless it stops for a decision, and
+    # then only a hidden continuation a later `--decision-answers` resumes by
+    # ref. `run_turn` owns both, and refuses a bad batch before any model call.
+    from .application import Binding, DecisionRejected, run_turn
+    from .session.store import SessionStore
+
+    try:
+        result = run_turn(agent, task, decision_answers=answers,
+                          store=SessionStore(config.paths.user / "sessions"),
+                          binding=Binding.of(config))
+    except DecisionRejected as refused:
+        _report_refusal(refused, args.json)
+        built.close()
+        return 1
     memory.wait_for_reflection(timeout=20.0)
 
     if args.json:
@@ -520,6 +558,17 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
         # not an error (1), and not a cancelled turn (130).
         return 3
     return 0 if result.ok else 1
+
+
+def _report_refusal(refused: Any, as_json: bool) -> None:
+    """A refused DecisionAnswer batch: what failed, and nothing else happened."""
+    print(f"error: decision answers refused ({refused.kind}): {refused}",
+          file=sys.stderr)
+    if refused.refs:
+        print("  refs: " + ", ".join(refused.refs), file=sys.stderr)
+    if as_json:
+        print(json.dumps({"text": "", "ok": False, "stopped": "error",
+                          "error": refused.as_dict()}, ensure_ascii=False, indent=2))
 
 
 def run_setup_command(config: Config, args: Any = None) -> int:

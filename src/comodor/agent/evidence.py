@@ -33,9 +33,10 @@ from __future__ import annotations
 import hashlib
 import itertools
 import re
+import secrets
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Iterable
+from typing import Callable, Iterable
 
 
 class EvidenceState(str, Enum):
@@ -145,6 +146,34 @@ def fingerprint_of(material: str | bytes) -> str:
     return hashlib.sha256(material).hexdigest()[:FINGERPRINT_LENGTH]
 
 
+def mint_ref() -> str:
+    """A new semantic decision identity: opaque, random, collision-resistant.
+
+    Nothing about the decision goes into it — not its wording, not its place
+    in a list, not a counter. `OpenDecision.id` restarts with every ledger, so
+    `d1` names a different decision in every turn; an answer keyed by it could
+    close the wrong one. This is what an answer given later is keyed by
+    instead. Eighty random bits, short enough for a channel's button payload.
+    """
+    return "dr-" + secrets.token_hex(10)
+
+
+#: What a `decision_ref` may look like: what `mint_ref` produces, and what an
+#: injected test minter produces. Anything else is malformed and is rejected
+#: before it is looked up.
+DECISION_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+
+
+def well_formed_ref(value: object) -> bool:
+    return isinstance(value, str) and DECISION_REF.match(value) is not None
+
+
+def _decision_key(what: str) -> str:
+    """The same decision stated the same way, whatever the spacing or case —
+    the identity `ask` already uses to recognise a question put twice."""
+    return " ".join(str(what).lower().split())
+
+
 @dataclass
 class EvidenceEntry:
     """One thing the agent is relying on (data-model.md §1)."""
@@ -170,6 +199,8 @@ class EvidenceEntry:
 class OpenDecision:
     """An unresolved point that materially affects the work (data-model.md §3)."""
 
+    #: Ledger-local (`d1`, `d2`, …): ties the decision to its entries within
+    #: one turn. Never the decision's identity outside this ledger.
     id: str
     what: str
     entry_id: str
@@ -186,6 +217,10 @@ class OpenDecision:
     assumption: str = ""
     #: Whether inspection was permitted when this was raised (FR-009/FR-010).
     inspected: bool = True
+    #: The semantic identity, serialized as `decision_ref`. Minted once, when
+    #: the decision first needs asking, and never changed; empty for a
+    #: decision that never needed asking (settled, or not material).
+    ref: str = ""
 
     @property
     def material(self) -> bool:
@@ -294,7 +329,8 @@ def may_inspect(mode: str | None) -> bool:
 class Ledger:
     """One turn's evidence and open decisions. Created and discarded with the turn."""
 
-    def __init__(self, mode: str | None = "act") -> None:
+    def __init__(self, mode: str | None = "act",
+                 mint: Callable[[], str] | None = None) -> None:
         self._entries: dict[str, EvidenceEntry] = {}
         self._decisions: dict[str, OpenDecision] = {}
         self._assumptions: list[Assumption] = []
@@ -304,6 +340,12 @@ class Ledger:
         self._ids = itertools.count(1)
         self.step = 0
         self.mode = mode
+        #: Where a new `ref` comes from. Injected by a test that needs refs it
+        #: can predict; otherwise `mint_ref`, looked up when it is called.
+        self._mint = mint
+        #: Refs of decisions this session raised earlier and never settled,
+        #: by the decision they name. A decision raised again keeps its ref.
+        self._outstanding: dict[str, str] = {}
 
     # -- reading ------------------------------------------------------------ #
 
@@ -483,9 +525,20 @@ class Ledger:
 
     # -- decisions: materiality, asking, and the ways asking can end ---------- #
 
+    def outstanding(self, what: str, ref: str) -> None:
+        """A decision raised earlier in this session is still open under `ref`.
+
+        Raising it again in this ledger then keeps that ref instead of minting
+        a new one, so an answer given later to either question closes the one
+        decision (FR-020). The ref was minted; it is only remembered here.
+        """
+        if what and well_formed_ref(ref):
+            self._outstanding.setdefault(_decision_key(what), ref)
+
     def open_decision(self, what: str, *, affects: Iterable[str] | None = None,
                       candidates: Iterable[str] = (),
-                      evidence_consulted: Iterable[str] = ()) -> OpenDecision:
+                      evidence_consulted: Iterable[str] = (),
+                      ref: str = "") -> OpenDecision:
         """Record a decision the agent cannot settle itself.
 
         Runs the materiality test. A material decision's entry moves
@@ -495,6 +548,10 @@ class Ledger:
         say so (FR-003). In a mode that may not inspect, `evidence_consulted`
         is empty and recorded as such — the ledger never lets the agent claim
         an inspection it could not make (FR-010).
+
+        A material decision gets its semantic `ref` here, once. `ref` is given
+        when the decision already has one — carried from a delegate, or
+        answered in a later invocation — and is kept rather than replaced.
         """
         settled = self.settled(what)
         entry = settled or self.find(what) or self.unknown(what)
@@ -513,8 +570,25 @@ class Ledger:
             decision.answer = settled.answer or f"settled by {settled.source}"
         elif materiality and entry.state is EvidenceState.UNKNOWN:
             self.transition(entry.id, "materiality")
+        if settled is None and materiality:
+            decision.ref = self._ref_for(decision, ref)
         self._decisions[decision.id] = decision
         return decision
+
+    def _ref_for(self, decision: OpenDecision, given: str) -> str:
+        """The one semantic identity this decision has: kept if it has one,
+        shared with the same decision already open here, else newly minted."""
+        if well_formed_ref(given):
+            return given
+        key = _decision_key(decision.what)
+        for earlier in self._decisions.values():
+            if earlier.ref and (earlier.entry_id == decision.entry_id
+                                or _decision_key(earlier.what) == key):
+                return earlier.ref
+        known = self._outstanding.get(key)
+        if known:
+            return known
+        return (self._mint or mint_ref)()
 
     def assume(self, decision_id: str, chosen: str) -> Assumption:
         """Decide a non-material point and record that it was assumed (FR-003).

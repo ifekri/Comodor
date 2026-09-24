@@ -541,22 +541,22 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 **Purpose**: a stable semantic `decision_ref` for every mandatory decision, carried into questions and form records, and an exact index from a ref to its continuation (plan §2026-09-24 Plan Convergence B; data-model §3, §Stateless-run continuation; research R9, R10, R14, R16).
 
-- [ ] T172 [P] [US1] Add a minted semantic `ref` to `OpenDecision` in `src/comodor/agent/evidence.py`
+- [X] T172 [P] [US1] Add a minted semantic `ref` to `OpenDecision` in `src/comodor/agent/evidence.py`
   - **Req**: FR-020, FR-129, D4; data-model §3 · **Dep**: none · **Evidence**:
     - `EvidenceLedger` takes an injectable minting function; the default mints an opaque, collision-resistant random token (e.g. from `secrets`).
     - `ref` is minted **once**, when a decision first enters `REQUIRES_CLARIFICATION`, and is immutable afterwards. `OpenDecision.id` stays the ledger-local `d#` and is never the semantic identity. A decision re-raised for resumption accepts and keeps its original `ref`.
     - Tests extend `tests/test_evidence_decisions.py`: two ledgers (two turns) mint distinct refs; one decision keeps its ref across cancelled, expired and unattended endings; an injected minter makes refs deterministic; no ref is derived from wording, position or the counter.
     **Done when**: tests pass, and replacing the minter with the `d#` counter fails the distinctness test (mutation-checked)
-- [ ] T173 [US1] Carry the minted `ref` as the question's `decision_ref` in `src/comodor/tools/ask.py`
+- [X] T173 [US1] Carry the minted `ref` as the question's `decision_ref` in `src/comodor/tools/ask.py`
   - **Req**: FR-020 · **Dep**: T172 · **Evidence**: `question.decision_ref = decision.ref` replaces `decision.id`, so form records (`form_record`) persist the semantic ref; a re-raised decision's question carries its original ref · **Done when**: `tests/test_clarification_protocol.py` asserts the question and its form record carry the ref, never a `d#` value
-- [ ] T174 [P] [US1] Add the optional `SessionMeta.continuation` object and the listing filter in `src/comodor/session/store.py`
+- [X] T174 [P] [US1] Add the optional `SessionMeta.continuation` object and the listing filter in `src/comodor/session/store.py`
   - **Req**: FR-081, FR-129, Constitution I and XI; data-model §Stateless-run continuation · **Dep**: none · **Evidence**:
     - **Field.** `continuation` is an object `{decision_refs, mode}`, **"Present only on continuations"**. `save_meta` omits it on every ordinary session, so an ordinary meta file keeps today's exact key set.
     - **Contents.** `decision_refs` holds every ref the continuation has **ever** issued ("a ref is **never removed** on resolution"). `mode` is the effective safety mode at the stop. `SessionMeta.cwd` stays the workspace binding and `provider` / `model` stay provenance; none is duplicated inside the object.
     - **Listing.** `list_sessions()` excludes any meta that has `continuation` by default; an explicit opt-in parameter includes them for internal lookup only.
     - **Tests** in `tests/test_protocol_sessions.py` (the existing `SessionStore` suite): (1) an ordinary session's meta file has exactly the pre-change keys, byte for byte for a fixed fixture; (2) a continuation's meta carries the object; (3) `list_sessions()` never returns a continuation; (4) meta written before this change still loads and still lists; (5) through the **previous** `SessionMeta` / `load_meta` from `d911e3f`, a continuation meta is skipped rather than listed, and ordinary sessions still load. The compatibility claim is tested, not assumed.
     **Done when**: all five pass, and writing the field on ordinary sessions fails (1) (mutation-checked). If (5) cannot hold as planned, stop and report the design issue rather than weakening compatibility
-- [ ] T175 [US1] Implement the exact continuation lookup and the open / stale / unknown derivation in `src/comodor/session/store.py`
+- [X] T175 [US1] Implement the exact continuation lookup and the open / stale / unknown derivation in `src/comodor/session/store.py`
   - **Req**: FR-024, FR-026, FR-129, D9; plan §B "Exact continuation lookup" · **Dep**: T173, T174 · **Evidence**:
     - `find_continuation(decision_ref)` returns the single continuation whose `continuation.decision_refs` contains the ref, **by equality**. No match → unknown; more than one → unresolvable (rejected, never "pick one").
     - A derivation over a session's form records (`message.meta["question"]`, carrying T173's refs) classifies a ref as **open** (latest record ended `cancelled` / `expired` / `unattended`, no later `answered`), **stale** (an `answered` record exists) or **unknown**. There is no tombstone store.
@@ -571,11 +571,11 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 **Purpose**: surface the `decision_ref` in the structured outcome, additively (plan §B; contracts/clarification.md §C2; research R12). Order: schema → generated artifacts → runtime emission → compatibility tests.
 
-- [ ] T177 [P] [US1] Add optional `decision_ref` to `ClarificationRequired` and `ClarificationDecision` in `schemas/protocol/v2.json`
+- [X] T177 [P] [US1] Add optional `decision_ref` to `ClarificationRequired` and `ClarificationDecision` in `schemas/protocol/v2.json`
   - **Req**: FR-034, FR-080; research R12 · **Dep**: none · **Evidence**: additive optional properties only. `ClarificationDecision.id` stays required; no required field, enum, `finish_reason` value or protocol version changes · **Done when**: the schema diff is purely additive
-- [ ] T178 [US1] Regenerate protocol artifacts and extend compatibility tests
+- [X] T178 [US1] Regenerate protocol artifacts and extend compatibility tests
   - **Req**: FR-080, SC-023, Constitution VI · **Dep**: T177 · **Evidence**: `python tools/protocol-codegen.py` regenerates `src/comodor/protocol/_generated.py` and `packages/protocol/src/generated.ts` (never hand-edited). `tests/test_protocol_backcompat.py` proves a client that negotiates nothing sees an unchanged payload with `decisions[].id` present · **Done when**: `python tools/protocol-codegen.py --check` is clean and the tests pass
-- [ ] T179 [US1] Emit `decision_ref` in `src/comodor/tools/ask.py::payload_for`
+- [X] T179 [US1] Emit `decision_ref` in `src/comodor/tools/ask.py::payload_for`
   - **Req**: FR-034, FR-035, FR-013 · **Dep**: T173, T178 · **Evidence**: a top-level `decision_ref` (first open decision) and one `decision_ref` per `decisions[]` entry, each entry's `id` carrying the same value. `outcome` and `prior_changes` unchanged; no new turn-level `stopped` value · **Done when**: `tests/test_clarification_required.py` asserts all three for cancelled, expired and unattended outcomes
 
 **Checkpoint**: the outcome names every open decision by its stable ref; old clients are unaffected.
@@ -586,7 +586,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 **Purpose**: one owner, immediately above `AgentLoop.run()`, for everything that crosses an invocation (plan §B "Shared turn entry", §B.1, §B.2; research R15, R16). `AgentLoop` keeps everything within a turn and never loads or writes session files.
 
-- [ ] T180 [US1] Implement `run_turn` in `src/comodor/application/__init__.py` with the complete turn contract
+- [X] T180 [US1] Implement `run_turn` in `src/comodor/application/__init__.py` with the complete turn contract
   - **Req**: FR-024, FR-026, FR-029, FR-018, FR-129, SC-042, D9; plan §B "Shared turn entry", §B.1; data-model §DecisionAnswer · **Dep**: T172, T173, T175, T179 · **Evidence**:
     - **Contract.** `run_turn` never narrows `AgentLoop.run(user_text, images, decisions)`. It accepts `user_text`, `images` and `decisions`, passing all three through **unchanged**, plus one new input, `decision_answers`. It also takes the agent loop and, for a stateless caller, the session store and its execution binding. It returns the ordinary `TurnResult`.
     - **Two different inputs.** `decisions` are **open** clarification payloads carried into the turn — today from background delegates. They stay unresolved, never trigger a continuation lookup, and are never treated as answers. `decision_answers` (`{decision_ref, chosen?, written?}`, the existing `Answer` semantics) are explicit later-invocation answers, and only they trigger resolution and validation.
@@ -599,27 +599,27 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
       - **B** — a valid `decision_answers` batch: the exact lookup and validation path runs.
       - **C** — an invalid `decision_answers` batch with carried `decisions`: rejected before the model, with the carried decisions neither consumed nor settled.
     **Done when**: the pass-through tests and cases A–C pass, T181 passes, and making `run_turn` drop `images` or `decisions`, or route `decisions` into validation, fails them (mutation-checked)
-- [ ] T200 [US1] Enforce the continuation's workspace and mode binding in `run_turn` (`src/comodor/application/__init__.py`)
+- [X] T200 [US1] Enforce the continuation's workspace and mode binding in `run_turn` (`src/comodor/application/__init__.py`)
   - **Req**: FR-129, FR-028, Constitution VIII; plan §B.1; research R16 · **Dep**: T174, T180 · **Evidence**:
     - For a stateless caller, before any answer is applied or any model is called: the invocation's canonical workspace (resolved absolute path) must equal the continuation's canonical `SessionMeta.cwd`, and its effective mode must equal `continuation.mode`. Otherwise the whole batch is rejected, with no silent re-pointing and no mode upgrade or downgrade.
     - Provider and model are never compared.
     - Tests in `tests/test_decision_resumption.py`: same workspace and mode → resumes; different workspace → rejected before the model; different mode → rejected before the model; changed model, and changed provider, with the same workspace and mode → the ref stays valid and resumes.
     **Done when**: tests pass, and removing either check fails its test (mutation-checked)
-- [ ] T176 [US1] Implement the continuation persistence lifecycle in `run_turn` via `SessionStore`
+- [X] T176 [US1] Implement the continuation persistence lifecycle in `run_turn` via `SessionStore`
   - **Req**: FR-129, FR-030, FR-074; plan §B.2 · **Dep**: T174, T180 · **Evidence**:
     - **Fresh stateless run.** Ending normally or with an error, it persists nothing. Ending `clarification_required`, it writes its transcript once through the existing `SessionStore` — form records with refs, outcome and `prior_changes` — with `continuation = {decision_refs, mode}` and a canonical `cwd`.
     - **Resumed run.** It appends its whole turn to the **same** continuation, whatever it ends in: success, error or another clarification. The fresh-run rule does not apply to it.
     - **Re-stop.** A resumed run that stops again keeps the same continuation id and record: the new form is appended, new refs are minted and **added** to `decision_refs`, the old refs are kept, and the earlier answered refs remain stale. No second continuation is created.
     - Tests in `tests/test_decision_resumption.py` cover each case, including: a successful fresh run and an error fresh run leave the store untouched; the continuation is absent from `list_sessions()`; and it is exportable with `SessionStore.export_markdown` / `export_json` by the id `find_continuation` returns.
     **Done when**: tests pass
-- [ ] T181 [US1] Add deterministic, mutation-checked tests for `run_turn` validation in `tests/test_decision_resumption.py`
+- [X] T181 [US1] Add deterministic, mutation-checked tests for `run_turn` validation in `tests/test_decision_resumption.py`
   - **Req**: FR-024, FR-026, FR-129 · **Dep**: T180, T200, T176 · **Evidence**:
     - **Rejection classes.** One test per class: missing, malformed, unknown, stale, cross-continuation and empty answer, plus workspace and mode mismatch.
     - **Order.** A test per step proves that a failure there leaves the continuation byte-identical, applies zero answers and makes zero provider calls (fake-provider call counter), and that later steps never run.
     - **Atomicity.** One bad answer among three applies none.
     - **Stale vs unknown.** A stale ref is reported stale, and a never-minted or deleted-continuation ref unknown.
     **Done when**: all pass, and adding a most-recent-decision fallback or partial application fails them (mutation-checked)
-- [ ] T201 [US4] Route a resumed answer into the existing settled-decision learning path
+- [X] T201 [US4] Route a resumed answer into the existing settled-decision learning path
   - **Req**: FR-109, SC-017, FR-056; L3 · **Dep**: T180 · **Evidence**:
     - A valid resumed answer is seeded where the loop's existing answered-form handling (`src/comodor/agent/loop.py`, which calls `LearningMemory.settle_decision` in `src/comodor/learning/memory.py`) already sees live answers. No resumption-specific memory path exists.
     - Tests in `tests/test_learning_reuse.py`: a valid resumed answer produces a `settled_decision` item with its provenance; a rejected batch (invalid, stale or unknown) learns nothing; the same decision is not re-asked later in the project; learning switched off learns nothing.
@@ -633,20 +633,20 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 **Purpose**: each of the six application / surface turn-entry families calls `run_turn` instead of the loop, passing through the inputs it already supports, and each surface translates its native input into it (plan §B facts "Turn entry — six families"; §B rows). Delegate child loops (`tools/delegate.py`, `agent/background.py`) are internal execution, not turn entries, and are left as they are. The global `--resume` and `--interactions` contracts are unchanged; nothing moves onto `CoreService`.
 
-- [ ] T202 [P] [US1] Route `web/session.py::Session.send` through `run_turn` (a session-backed caller)
+- [X] T202 [P] [US1] Route `web/session.py::Session.send` through `run_turn` (a session-backed caller)
   - **Req**: FR-129, FR-079, FR-029 · **Dep**: T180 · **Evidence**:
     - `Session.send` calls `run_turn` with its live conversation instead of `self.agent.run(...)`. It passes through the inputs it already supports — `text`, `images` and `decisions` — unchanged, and adds `decision_answers` only when a caller supplies them.
     - This covers the Web UI, the OpenAI-compatible API (`api/session_map.py`), Telegram, Slack, WhatsApp and Discord, plus the Web session's own completion delivery, which already re-enters through `Session.send`. A turn without decision answers behaves exactly as before.
     - Tests in `tests/test_web.py`: the existing Web suite stays green; an image turn and a carried-decision turn reach the loop unchanged; a decision answer arriving through `Session.send` resumes or is rejected exactly as `run_turn` decides.
     **Done when**: tests pass
-- [ ] T203 [P] [US1] Route `CoreService.send` in `src/comodor/application/__init__.py` through `run_turn` (the TUI user turn, session-backed)
+- [X] T203 [P] [US1] Route `CoreService.send` in `src/comodor/application/__init__.py` through `run_turn` (the TUI user turn, session-backed)
   - **Req**: FR-129, FR-079 · **Dep**: T180 · **Evidence**:
     - `CoreService.send` runs its turn through `run_turn` with the handle's live conversation, as an adapter only: no resumption logic lives in `CoreService`.
     - Busy state, turn ids, the journal, event ordering, the persistence boundary, cancellation and every client-visible behaviour are unchanged.
     - `send` accepts no images or carried decisions today, so none are invented for it. No new client→core message is added; protocol clients answer live forms through `question.answer`.
     - `tests/test_protocol_sessions.py` and the existing protocol suites stay green.
     **Done when**: tests pass
-- [ ] T207 [US1] Route `CoreService._deliver_completions` in `src/comodor/application/__init__.py` through `run_turn`, preserving carried delegate decisions
+- [X] T207 [US1] Route `CoreService._deliver_completions` in `src/comodor/application/__init__.py` through `run_turn`, preserving carried delegate decisions
   - **Req**: FR-029, FR-018, FR-019, FR-129; plan §B facts "Turn entry — six families" (family 3) · **Dep**: T180, T203 (same file, `application/__init__.py`) · **Evidence**:
     - The background-completion turn — a separate entry path from `send` — calls `run_turn(..., user_text=text, decisions=carried or None)` instead of `handle.assembly.agent.run(...)`.
     - `carried` stays exactly what it is today: each finished delegate record's `clarification` payload. No payload is dropped, rewritten or converted into a `decision_answers` entry.
@@ -658,7 +658,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
       5. no answer is supplied or invented, and no continuation lookup happens because of it;
       6. work that depends on it does not run, while demonstrably independent work is unaffected.
     **Done when**: the regression passes, and dropping `decisions` in this path, or passing them as `decision_answers`, fails it (mutation-checked)
-- [ ] T182 [P] [US1] Add `--decision-answers` to `comodor run` and route `run_headless` through `run_turn` in `src/comodor/cli.py`
+- [X] T182 [P] [US1] Add `--decision-answers` to `comodor run` and route `run_headless` through `run_turn` in `src/comodor/cli.py`
   - **Req**: FR-129, FR-123; research R14 · **Dep**: T176, T180, T200 · **Evidence**:
     - **Option.** `--decision-answers PATH` (`-` = stdin) takes a JSON DecisionAnswer list and makes the positional task optional; a task given alongside rides the resumed turn as the caller's message.
     - **Routing.** `run_headless` calls `run_turn` as a stateless caller, passing the session store and its binding: the canonical workspace, and the effective mode from the invocation's configuration and flags.
@@ -666,9 +666,9 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
     - **Unchanged.** The global `--resume` keeps its interactive meaning; `--interactions` still scripts live forms within one run.
     - **Tests** in `tests/test_headless.py`: a full round trip (exit `3` → answers file → resumed run finishes the same work); stdin input; each rejection class; a batch spanning two continuations rejected; a stale ref after a successful resume rejected; `--interactions` and `--resume` unchanged.
     **Done when**: tests pass
-- [ ] T184 [P] [US1] Route ACP turns through `run_turn` and accept decision answers in `src/comodor/acp/agent.py`
+- [X] T184 [P] [US1] Route ACP turns through `run_turn` and accept decision answers in `src/comodor/acp/agent.py`
   - **Req**: FR-129 · **Dep**: T180 · **Evidence**: the ACP agent calls `run_turn` with its session's live conversation instead of `self.loop.run(...)`. A prompt's extension metadata may carry `decision_answers`. An invalid batch returns a JSON-RPC invalid-params error naming what failed; no ACP-specific decision state exists. Tests in `tests/test_acp.py` · **Done when**: tests pass
-- [ ] T204 [P] [US1] Route `cron/runner.py::run_job` (scheduled jobs and webhook events) through `run_turn` as a stateless caller
+- [X] T204 [P] [US1] Route `cron/runner.py::run_job` (scheduled jobs and webhook events) through `run_turn` as a stateless caller
   - **Req**: FR-121, FR-129, FR-123 · **Dep**: T176, T180, T200 · **Evidence**:
     - `run_job` calls `run_turn` with the session store and its binding (the job's workspace, and its effective mode — for a webhook, plan unless the subscription sets `allow_writes`).
     - Tests in `tests/test_cron.py` and `tests/test_webhook.py`:
@@ -681,27 +681,27 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
       - a workspace mismatch is rejected, and a mode mismatch is rejected.
     - No cron-specific decision logic exists.
     **Done when**: tests pass
-- [ ] T183 [US1] Accept `comodor.decision_answers` on the OpenAI-compatible API in `src/comodor/api/schema.py`, `src/comodor/api/server.py` and `src/comodor/api/session_map.py`
+- [X] T183 [US1] Accept `comodor.decision_answers` on the OpenAI-compatible API in `src/comodor/api/schema.py`, `src/comodor/api/server.py` and `src/comodor/api/session_map.py`
   - **Req**: FR-123, FR-129, FR-080, SC-023 · **Dep**: T202 · **Evidence**:
     - `decision_answers` rides the existing request-side `comodor` block within the session named by `X-Comodor-Session`, and reaches `run_turn` through `Session.send`.
     - Rejection returns HTTP 400 with the existing OpenAI-style error body (`type: invalid_request_error`) naming the refs, with no model call. No `finish_reason` value is added, and a request without `decision_answers` behaves exactly as before.
     - Tests in `tests/test_api.py`: valid resume; each invalid class; batch atomicity; unchanged plain clients.
     **Done when**: tests pass
-- [ ] T185 [US1] Name the open decisions' refs in the core's needed-decision text in `src/comodor/agent/loop.py` and `src/comodor/application/__init__.py`
+- [X] T185 [US1] Name the open decisions' refs in the core's needed-decision text in `src/comodor/agent/loop.py` and `src/comodor/application/__init__.py`
   - **Req**: FR-121, FR-129 · **Dep**: T179 · **Evidence**: the existing "Stopped: a decision is needed …" text — which every channel, including Discord and the webhook's `reply_url` delivery, relays — lists each open decision's `decision_ref`; no channel formats it separately. `tests/test_channel_clarification.py` asserts the ref appears · **Done when**: test passes
-- [ ] T186 [P] [US1] Resume by explicit reference on Telegram in `src/comodor/telegram/bot.py` and `src/comodor/telegram/keyboard.py`
+- [X] T186 [P] [US1] Resume by explicit reference on Telegram in `src/comodor/telegram/bot.py` and `src/comodor/telegram/keyboard.py`
   - **Req**: FR-129; plan §B "Channels" · **Dep**: T185, T202 · **Evidence**: a command (the existing `_on_command` path) or an inline-keyboard callback carrying the `decision_ref` becomes a decision answer passed through `Session.send` → `run_turn`; free text stays a new request, never matched to a decision. Tests in `tests/test_telegram.py` · **Done when**: tests pass
-- [ ] T187 [P] [US1] Resume by explicit reference on Slack in `src/comodor/slack/bot.py` and `src/comodor/slack/blocks.py`
+- [X] T187 [P] [US1] Resume by explicit reference on Slack in `src/comodor/slack/bot.py` and `src/comodor/slack/blocks.py`
   - **Req**: FR-129 · **Dep**: T185, T202 · **Evidence**: a block action whose `action_id` / value carries the `decision_ref` becomes a decision answer through `Session.send` → `run_turn`; free text stays a new request. Tests in `tests/test_slack.py` · **Done when**: tests pass
-- [ ] T188 [P] [US1] Resume by explicit reference on WhatsApp in `src/comodor/whatsapp/bot.py`, `src/comodor/whatsapp/menu.py` and `src/comodor/whatsapp/webhook.py`
+- [X] T188 [P] [US1] Resume by explicit reference on WhatsApp in `src/comodor/whatsapp/bot.py`, `src/comodor/whatsapp/menu.py` and `src/comodor/whatsapp/webhook.py`
   - **Req**: FR-129 · **Dep**: T185, T202 · **Evidence**:
     - An interactive reply (button or list) whose id carries the `decision_ref` becomes a decision answer through `Session.send` → `run_turn`; free text stays a new request.
     - **Discord** (plain messages only) and the **webhook** (one-shot events, outbound `reply_url`) get no resumption route: they report the decision and its ref (T185), and no interaction system is added for them.
     - Tests in `tests/test_whatsapp.py`, and a Discord case in `tests/test_channel_clarification.py` proving free text there never resumes a decision.
     **Done when**: tests pass
-- [ ] T189 [US1] Prove the live pending-form path is unchanged, and that a re-raised decision keeps its ref, in `tests/test_clarification_lifecycle.py` and `tests/test_web.py`
+- [X] T189 [US1] Prove the live pending-form path is unchanged, and that a re-raised decision keeps its ref, in `tests/test_clarification_lifecycle.py` and `tests/test_web.py`
   - **Req**: FR-020, FR-023, FR-024, FR-129, FR-079 · **Dep**: T173, T202, T203 · **Evidence**: a live form is still answered through `question.answer` and the bus's atomic claim; an answer to an expired or cancelled form is still ignored (FR-024) even though its question carries a `decision_ref`; a later explicit request re-raises the same decision with the same `decision_ref`; the Web question round-trip is unchanged · **Done when**: tests pass
-- [ ] T205 [US1] Prove every application / surface primary-turn entry routes through `run_turn` — behaviourally
+- [X] T205 [US1] Prove every application / surface primary-turn entry routes through `run_turn` — behaviourally
   - **Req**: FR-129, FR-029; H1, N1; Constitution XVIII · **Dep**: T182, T184, T202, T203, T204, T207 · **Evidence**:
     - **Behavioural proof, the primary evidence**, in `tests/test_decision_resumption.py`: for each of the six entry functions, replace `run_turn` with a recording double, drive the real entry function, and assert the double was reached with the expected semantic inputs. The six are:
       - (A) `web/session.py::Session.send` — text, images and carried decisions as passed;
@@ -713,7 +713,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
     - **No structural source scan** is used as proof. `run_turn` itself must call `AgentLoop.run`, and the delegate child loops in `tools/delegate.py` and `agent/background.py` legitimately run their own loops; they are outside this invariant.
     - If a structural check is added at all, it must be call-target-aware (AST), limited to the bodies of those six entry functions, and assert only that none of them calls the primary agent loop's `run` directly.
     **Done when**: all six behavioural cases pass, and restoring a direct loop call in any one entry function fails its case (mutation-checked)
-- [ ] T206 [US1] Prove SC-042 with a deterministic replay in `tests/test_decision_resumption.py`
+- [X] T206 [US1] Prove SC-042 with a deterministic replay in `tests/test_decision_resumption.py`
   - **Req**: SC-042, FR-129 · **Dep**: T176, T181, T182 · **Evidence**:
     - Two runs with the same workspace, mode, provider and model (a scripted fake provider).
     - **A**: the decision is answered during the original wait.
@@ -729,39 +729,53 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 **Purpose**: close the remaining specification-convergence items (plan §C, §D).
 
-- [ ] T190 [US1] Complete the D7 / SC-002 cases in `tests/test_clarification_pause.py` and `tests/test_mutation_preflight.py`
+- [X] T190 [US1] Complete the D7 / SC-002 cases in `tests/test_clarification_pause.py` and `tests/test_mutation_preflight.py`
   - **Req**: SC-002, FR-013, FR-018, FR-123 · **Dep**: none · **Evidence**:
     - First audit what the existing suites already prove: they assert that the **specific dependent artifact** is absent (e.g. `db.py`, `postcodes.csv`).
     - Add only the missing cases: (a) a demonstrably independent write is permitted and does not fail; (b) an uncertain dependency is withheld; (c) late discovery keeps the earlier change, lists it in `prior_changes`, and runs nothing dependent afterwards; (d) no work is started merely to stay active.
     - No existing assertion is weakened.
+    - **Audit result (2026-09-24)**: (b) was already covered by `test_only_read_only_tools_are_exempt_while_a_decision_is_open` and `test_a_mutating_call_in_the_same_batch_as_a_dismissed_question_does_not_run`; (c) by `test_a_mutation_before_a_material_question_is_preserved_and_reported`, `test_a_prior_mutation_is_preserved_across_every_ending` and `test_after_a_non_answer_the_turn_ends_so_nothing_dependent_can_follow`. Added in `tests/test_clarification_pause.py`: `test_d7_a_demonstrably_independent_write_is_permitted_and_is_no_failure` (a), `test_d7_a_write_whose_dependence_is_uncertain_is_withheld` (b, explicit), `test_d7_independent_work_is_not_required_and_nothing_starts_to_stay_active` (d). No existing assertion changed.
     **Done when**: each of (a)–(d) is covered by an existing or new test, recorded in the task evidence
-- [ ] T191 [P] Audit the `careful-*` benchmark judges in `bench/tasks/*/check.py` for a blanket "no write before asking" rule
+- [X] T191 [P] Audit the `careful-*` benchmark judges in `bench/tasks/*/check.py` for a blanket "no write before asking" rule
   - **Req**: SC-002, SC-026, FR-077 · **Dep**: none · **Evidence**:
     - The judges inspected so far assert specific fabricated or dependent artifacts: `careful-unattended` (no target written) and `careful-only-what-was-asked` (scope).
     - Record each judge's rule. If one asserts that nothing at all was written, report it as a finding. Judges are fingerprinted by `bench/integrity.py` and are **not** edited or weakened by this task.
+    - **Audit result (2026-09-24)** — each judge's rule, read from `check()`:
+      - `careful-cancelled`, `careful-expired`, `careful-unattended`: `ask` was used; `stopped == "clarification_required"` with the matching `outcome`; no release target was chosen in `release.py` (the dependent artifact); `careful-cancelled` also refuses a second `ask` in the attempt. No blanket write rule.
+      - `careful-only-what-was-asked`: the importer's tests pass with `test_importer.py` unchanged, and nothing but `importer.py` changed — a scope rule, not a write-ordering rule.
+      - `careful-cannot-be-done`: `postcodes.csv` (the fabricated artifact) not written, no success claimed, the missing input named, `test_geocode.py` untouched. No blanket write rule.
+      - `careful-repo-settles-it`: must **not** ask; the port must be read from the unchanged `config.py`. No write rule.
+      - `careful-unknowable`: no hard-coded rate, and then on its "the model asked" path it fails any attempt whose **first** `edit_file`, `write_file`, `run_shell` or `run_python` call came before the first `ask`, regardless of whether that call depends on the missing rate.
+    - **Finding (reported, not resolved here)**: `careful-unknowable`'s path A is a blanket "no write before asking" ordering rule. It fails a demonstrably independent write before the question, which D7 / SC-002 permits, and counts every `run_shell` / `run_python` call as writing, read-only ones included. The judge was not edited (fingerprinted by `bench/integrity.py`); whether to change it is the owner's decision.
     **Done when**: the audit is recorded, with any finding reported
-- [ ] T192 [US2] Verify, and if needed implement, FR-127's unsupported-claim rule in the existing completion path (`src/comodor/agent/claims.py`, `src/comodor/agent/verify.py`, `src/comodor/agent/loop.py`)
+- [X] T192 [US2] Verify, and if needed implement, FR-127's unsupported-claim rule in the existing completion path (`src/comodor/agent/claims.py`, `src/comodor/agent/verify.py`, `src/comodor/agent/loop.py`)
   - **Req**: FR-125, FR-127, FR-036 · **Dep**: none · **Evidence**:
     - First establish current behaviour: when the gate cannot reach a verdict, or the one correction turn still produces an explicit completion claim, is the claim delivered marked as not confirmed, with the outstanding work named? Plan inspection found no such marking.
     - If present: record where, and add a deterministic test if none exists.
     - If absent: add the narrowest annotation in the existing path — no second gate — so the delivered answer does not report the task complete (FR-036).
     - Tests in `tests/test_completion_gate.py`.
+    - **Result (2026-09-24)**: absent, as plan inspection found. A correction turn that still made the contradicted claim was delivered annotated only when a requested element was unresolved, and never stated that completion was unconfirmed. A gate that could not reach a verdict delivered the claim with no annotation. Fixed in the existing path with no second gate: `verify.Assessment.unconfirmed` is set by `AgentLoop._iterate` when a post-correction verdict is still `block`, and by `AgentLoop._completion_gate`'s fallback when the answer makes an explicit completion claim. `annotation()` then states "Completion is not confirmed — …" and names the outstanding work. The answer is still delivered (FR-124), and an honest answer is left alone (FR-126). Four tests, with both marks mutation-checked.
     **Done when**: behaviour is evidenced by a mutation-checked test
-- [ ] T193 [P] Validate continuation privacy and the security boundaries in `tests/test_decision_resumption.py` and `tests/test_baseline_permissions.py`
+- [X] T193 [P] Validate continuation privacy and the security boundaries in `tests/test_decision_resumption.py` and `tests/test_baseline_permissions.py`
   - **Req**: FR-074, FR-117, FR-118, FR-120, Constitution VIII · **Dep**: T176, T182, T200 · **Evidence**:
     - **Privacy.** A hidden continuation gets **the same established redaction as an ordinary stored session**, and no more is claimed: a known or configured secret redacted at the tool layer (`ctx.redact`, the `Redactor` in `agent/loop.py`) is absent from the continuation file exactly as it is from an ordinary session's. `continuation` metadata holds only refs and a mode name, and refs carry no secret.
     - **Security.** A decision answer supplies information, never permission. Resuming in plan or conversation-only mode grants no tool the mode forbids; act stays permission-controlled; an unknown mode still fails closed; a changed provider or model does not bypass the mode binding; an invalid batch authorises no dependent work.
     - FR-074 is re-checked for the new measurement and diagnostic records (rejection records hold no credential). The permission suite is green (this phase's permission gate).
     **Done when**: tests pass
-- [ ] T194 Re-verify the requirements the 2026-09-24 sessions sharpened, against the code
+- [X] T194 Re-verify the requirements the 2026-09-24 sessions sharpened, against the code
   - **Req**: FR-099, FR-100, FR-101, FR-105, FR-018, FR-123; plan §D · **Dep**: none · **Evidence**: one deterministic assertion each —
     - near-duplicates are never collapsed on similarity alone, and exact duplicates only on content identity (`tests/test_context_dedup.py`);
     - a delta or reference whose base cannot be validated falls back to the full authoritative form (`tests/test_context_invalidation.py`);
     - every reuse mechanism invalidates on a source change (`tests/test_context_invalidation.py`);
     - a non-interactive run starts no speculative work before its stop (`tests/test_clarification_pause.py`).
     A gap found here is fixed in the owning module, with a test, before T196.
+    **Result (2026-09-24)**: every behaviour held in the code, and no product fix was needed.
+    - FR-099: new `test_a_near_duplicate_is_never_collapsed_on_similarity_alone`; exact duplicates collapse only on content identity (`test_identical_content_is_admitted_as_a_reference_and_the_original_is_untouched`).
+    - FR-100 / FR-101: `test_a_reference_is_used_only_while_its_target_is_still_resident`, `test_a_delta_is_never_made_against_an_evicted_base`.
+    - FR-105: `test_source_file_change_invalidates_the_reference_and_the_delta_base`, `test_a_source_change_sends_the_verified_fact_back_to_unknown_and_drops_its_citation`, `test_a_stale_learned_fact_is_not_cited`.
+    - FR-018 / FR-123: `test_d7_independent_work_is_not_required_and_nothing_starts_to_stay_active` (T190).
     **Done when**: each assertion exists and passes, with any fix recorded
-- [ ] T195 [P] [US1] Document the convergence in `docs/cli.md`, `docs/questions.md`, `docs/telegram.md`, `docs/slack.md` and `CHANGELOG.md`
+- [X] T195 [P] [US1] Document the convergence in `docs/cli.md`, `docs/questions.md`, `docs/telegram.md`, `docs/slack.md` and `CHANGELOG.md`
   - **Req**: FR-082, FR-129, FR-030 · **Dep**: T182, T183, T186, T187, T188, T204 · **Evidence**:
     - `decision_ref` and exact later resumption; `--decision-answers` with its JSON shape and the exit `1` rejection; the workspace and mode binding.
     - The API's `comodor.decision_answers` and HTTP 400; explicit-reference replies on Telegram, Slack and WhatsApp, with Discord and the webhook reporting only.

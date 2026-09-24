@@ -181,3 +181,115 @@ def test_a_cancelled_turn_is_not_rewritten_as_a_clarification():
 
     assert "stopped" in captured["text"].lower()
     assert DECISION not in captured["text"]
+
+
+# --------------------------------------------------------------------------- #
+# T185 — the needed-decision text names each decision's ref, once, in the core
+# --------------------------------------------------------------------------- #
+
+
+def test_the_closing_text_names_every_open_decisions_ref(config, bus, monkeypatch):
+    from comodor.agent import evidence
+
+    refs = iter(["dr-first-ref", "dr-second-ref"])
+    monkeypatch.setattr(evidence, "mint_ref", lambda: next(refs))
+    option = lambda label: {"label": label, "source": "request", "evidence": label}  # noqa: E731
+    question = ToolCall(id="q1", name="ask", arguments={"questions": [
+        {"question": "Which database should we use?", "header": "Database",
+         "affects": ["persistence"], "options": [option("SQLite"), option("PostgreSQL")]},
+        {"question": "Which queue should we use?", "header": "Queue",
+         "affects": ["persistence"], "options": [option("Redis"), option("RabbitMQ")]}]})
+    agent = AgentLoop(config, Gateway(config, scripts=[
+        Script(text="Asking.", tool_calls=[question]), Script(text="never")]),
+        ToolRegistry(), bus, PermissionEngine(config, bus), AgentConversation())
+    ends: list[str] = []
+
+    def watch(event):
+        # A listening bus: the form is dismissed at once rather than waited on.
+        if event.kind is Kind.REQUEST:
+            event.payload["request"].answer(forms.CANCELLED)
+        elif event.kind is Kind.ASSISTANT_END:
+            ends.append(str(event.payload.get("text") or ""))
+
+    bus.subscribe(watch)
+
+    result = agent.run("SQLite or PostgreSQL, Redis or RabbitMQ?")
+
+    assert result.stopped == "clarification_required"
+    assert "- Which database should we use? (decision_ref: dr-first-ref)" in result.text
+    assert "- Which queue should we use? (decision_ref: dr-second-ref)" in result.text
+    assert ends[-1] == result.text, "the text every channel relays carries the refs"
+
+
+@pytest.mark.parametrize("module,key", [(spec[0], spec[2]) for spec in CHANNELS])
+def test_every_channel_relays_the_ref_as_the_core_wrote_it(module, key):
+    """No channel formats the ref itself: Discord and the webhook's reply
+    delivery included, each relays the core's text, which already names it."""
+    named = DECISION + " (decision_ref: dr-relay-1)"
+    bot = importlib.import_module(module)
+    service = bot.Service.__new__(bot.Service)
+    service.stopping = threading.Event()
+    captured: dict = {}
+    if hasattr(bot.Service, "_finish"):
+        service._finish = lambda talk, answer, tools: captured.update(text=answer)
+    else:
+        service._draw = (lambda talk, text, tools, final=False:
+                         captured.update(text=text))
+    events = _clarification_events()
+    events[1] = {"kind": "assistant_end", "text": named}
+    service._follow(_talk(bot, events))
+    assert "decision_ref: dr-relay-1" in captured.get("text", "")
+
+
+def test_the_core_notification_names_the_ref_too(config):
+    from comodor.application import CoreService, _relay_clarification
+    from comodor.events import Event
+
+    service = CoreService(config)
+    try:
+        handle = service.session(service.create_session()["id"])
+        sent = []
+        service.on_event = lambda _s, name, params, _q: sent.append((name, params))
+        _relay_clarification(service, handle, Event(kind=Kind.TURN_END, payload={
+            "stopped": "clarification_required",
+            "clarification": {"decision": "Which database?", "candidates": [],
+                              "evidence_consulted": [], "reason": "persisted_state",
+                              "outcome": "unattended", "decision_ref": "dr-core-1"}}))
+    finally:
+        service.close()
+    (note,) = [params["text"] for name, params in sent if name == "notification.created"]
+    assert "(decision_ref: dr-core-1)" in note
+
+
+# --------------------------------------------------------------------------- #
+# T188 — Discord has no structured reply: it reports, and never resumes
+# --------------------------------------------------------------------------- #
+
+
+def test_discord_free_text_is_a_new_request_never_a_decision_answer(monkeypatch):
+    """Discord relays the needed-decision text with its ref (T185) and offers
+    no resumption route: whatever is typed afterwards starts a new turn
+    carrying no decision answer."""
+    import inspect
+
+    bot = importlib.import_module("comodor.discord.bot")
+    assert "resume_decision" not in inspect.getsource(bot), \
+        "Discord gained a resumption route no structured reply can carry"
+
+    sent: list[tuple] = []
+
+    class Recording:
+        busy = False
+        cursor = 0
+
+        def send(self, text, images=None, decisions=None, decision_answers=None):
+            sent.append((text, decision_answers))
+            return False
+
+        def interrupt(self, *_):
+            pass
+
+    from comodor.channels.busy import start_or_steer
+
+    start_or_steer(Recording(), "PostgreSQL", None, "queue", lambda note: None)
+    assert sent == [("PostgreSQL", None)]

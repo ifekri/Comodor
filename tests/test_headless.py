@@ -537,3 +537,176 @@ def test_a_malformed_values_map_is_refused_when_the_scenario_loads():
     with pytest.raises(TaskError):
         _interactions([{"action": "answer", "values": {"Framework": 3}}])
     assert _interactions([{"action": "answer", "values": {"Framework": "Flask"}}])
+
+
+# --------------------------------------------------------------------------- #
+# T182 — `comodor run --decision-answers`: a later invocation resumes by ref
+# --------------------------------------------------------------------------- #
+
+
+def _json_run(config, **overrides):
+    out, err = io.StringIO(), io.StringIO()
+    from contextlib import redirect_stderr
+
+    with redirect_stdout(out), redirect_stderr(err):
+        code = cli.run_headless(config, run(config, json=True, **overrides))
+    return code, (json.loads(out.getvalue()) if out.getvalue().strip() else None), \
+        err.getvalue()
+
+
+def _stopped_run(scripted, question=None):
+    config = scripted([Script(text="One thing first.",
+                              tool_calls=[question or a_question()])])
+    code, report, _ = _json_run(config)
+    assert code == 3
+    return config, report["clarification"]["decision_ref"]
+
+
+def _answers(tmp_path, entries, name="answers.json"):
+    path = tmp_path / name
+    path.write_text(json.dumps(entries), encoding="utf-8")
+    return str(path)
+
+
+def _model_calls(scripted) -> int:
+    return sum(len(provider.calls) for provider in scripted.providers)
+
+
+def test_a_stopped_run_resumes_in_a_later_invocation_by_ref(scripted, tmp_path):
+    config, ref = _stopped_run(scripted)
+    scripted.plan = [
+        Script(text="Writing it.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "app.py", "content": "FRAMEWORK = 'flask'\n"})]),
+        Script(text="Done — Flask.")]
+    code, report, _ = _json_run(config, task="", decision_answers=_answers(
+        tmp_path, [{"decision_ref": ref, "written": "Flask"}]))
+    assert code == 0 and report["stopped"] == "done"
+    assert (config.paths.project / "app.py").read_text(encoding="utf-8") \
+        == "FRAMEWORK = 'flask'\n"
+    replies = [m.content for m in scripted.providers[-1].calls[0]]
+    assert any("Which framework?\n  -> Flask" in reply for reply in replies)
+
+
+def test_the_answers_can_come_from_stdin(scripted, monkeypatch):
+    config, ref = _stopped_run(scripted)
+    scripted.plan = [Script(text="Done — Flask.")]
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(
+        [{"decision_ref": ref, "written": "Flask"}])))
+    code, report, _ = _json_run(config, task="", decision_answers="-")
+    assert code == 0 and report["stopped"] == "done"
+
+
+def test_a_task_given_alongside_rides_the_resumed_turn(scripted, tmp_path):
+    config, ref = _stopped_run(scripted)
+    scripted.plan = [Script(text="Done.")]
+    code, _, _ = _json_run(config, task="and keep it small", decision_answers=_answers(
+        tmp_path, [{"decision_ref": ref, "written": "Flask"}]))
+    assert code == 0
+    sent = scripted.providers[-1].calls[0]
+    assert sent[-1].content == "and keep it small"
+
+
+@pytest.mark.parametrize("entries, kind", [
+    ("not json", "malformed"),
+    ([{"written": "Flask"}], "missing"),
+    ([{"decision_ref": "dr-never-minted", "written": "Flask"}], "unknown"),
+    ([{"decision_ref": "__REF__", "written": "   "}], "empty"),
+])
+def test_each_refused_batch_exits_1_and_calls_no_model(scripted, tmp_path, entries, kind):
+    config, ref = _stopped_run(scripted)
+    before = _model_calls(scripted)
+    if isinstance(entries, list):
+        entries = [{**e, **({"decision_ref": ref} if e.get("decision_ref") == "__REF__"
+                            else {})} for e in entries]
+    path = tmp_path / "answers.json"
+    path.write_text(entries if isinstance(entries, str) else json.dumps(entries),
+                    encoding="utf-8")
+    code, report, err = _json_run(config, task="", decision_answers=str(path))
+    assert code == 1
+    assert report["ok"] is False and report["error"]["kind"] == kind
+    assert f"({kind})" in err
+    assert _model_calls(scripted) == before, "a refused batch called the model"
+
+
+def test_a_refusal_names_the_refs_on_stderr(scripted, tmp_path):
+    config, _ = _stopped_run(scripted)
+    code, report, err = _json_run(config, task="", decision_answers=_answers(
+        tmp_path, [{"decision_ref": "dr-nope", "written": "Flask"}]))
+    assert code == 1 and "dr-nope" in err and report["error"]["refs"] == ["dr-nope"]
+
+
+def test_a_batch_spanning_two_stopped_runs_is_refused(scripted, tmp_path):
+    config, first = _stopped_run(scripted)
+    _, second = _stopped_run(scripted)
+    code, report, _ = _json_run(config, task="", decision_answers=_answers(tmp_path, [
+        {"decision_ref": first, "written": "Flask"},
+        {"decision_ref": second, "written": "Django"}]))
+    assert code == 1 and report["error"]["kind"] == "cross_continuation"
+
+
+def test_a_ref_already_answered_is_refused_as_stale(scripted, tmp_path):
+    config, ref = _stopped_run(scripted)
+    scripted.plan = [Script(text="Done.")]
+    answers = _answers(tmp_path, [{"decision_ref": ref, "written": "Flask"}])
+    assert _json_run(config, task="", decision_answers=answers)[0] == 0
+    code, report, _ = _json_run(config, task="", decision_answers=answers)
+    assert code == 1 and report["error"]["kind"] == "stale"
+
+
+def test_a_different_mode_or_workspace_is_refused(scripted, tmp_path):
+    config, ref = _stopped_run(scripted)
+    answers = _answers(tmp_path, [{"decision_ref": ref, "written": "Flask"}])
+    config.agent.mode = "plan"
+    code, report, _ = _json_run(config, task="", decision_answers=answers)
+    assert code == 1 and report["error"]["kind"] == "mode"
+    config.agent.mode = "act"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    from dataclasses import replace
+
+    config.paths = replace(config.paths, project=elsewhere)
+    code, report, _ = _json_run(config, task="", decision_answers=answers)
+    assert code == 1 and report["error"]["kind"] == "workspace"
+
+
+def test_a_run_needs_a_task_or_decision_answers(scripted):
+    config = scripted([Script(text="unused")])
+    code = cli.run_headless(config, run(config, task=""))
+    assert code == 2
+    assert _model_calls(scripted) == 0
+
+
+def test_the_resume_flag_and_interactions_keep_their_meaning(scripted):
+    """`--resume` is the interactive session flag and `run` never reads it;
+    `--interactions` still scripts a live form within the same run."""
+    parser = cli.build_parser()
+    parsed = parser.parse_args(["--resume", "abc", "run", "a task"])
+    assert parsed.resume == "abc" and parsed.command == "run"
+    assert parsed.decision_answers is None and parsed.task == "a task"
+
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()]),
+                       Script(text="Flask it is.")])
+    code = cli.run_headless(config, run(
+        config, resume="abc",
+        interactions=json.dumps([{"action": "answer", "value": "Flask"}])))
+    assert code == 0
+    from comodor.session.store import SessionStore
+
+    store = SessionStore(config.paths.user / "sessions")
+    assert store.list_sessions(include_continuations=True) == [], \
+        "a run answered live keeps no continuation"
+
+
+def test_a_finished_run_keeps_nothing_and_a_stopped_one_keeps_it_hidden(scripted):
+    from comodor.session.store import SessionStore
+
+    config = scripted([Script(text="All done.")])
+    assert cli.run_headless(config, run(config)) == 0
+    store = SessionStore(config.paths.user / "sessions")
+    assert store.list_sessions(include_continuations=True) == []
+
+    config, ref = _stopped_run(scripted)
+    store = SessionStore(config.paths.user / "sessions")
+    assert store.list_sessions() == []
+    assert store.find_continuation(ref) is not None
