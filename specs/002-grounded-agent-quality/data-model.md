@@ -371,6 +371,46 @@ TaskMeasurement.
 
 ---
 
+## 9. Benchmark comparability records — **new, benchmark only** (D10–D12)
+
+Benchmark infrastructure under `bench/`; nothing under `src/comodor/` reads or
+writes these.
+
+**Scenario fingerprint** (existing shape, now also published)
+
+| Field | Rule |
+| --- | --- |
+| `task.md`, `check.py` | SHA-256 of the file, line endings normalised; `null` when absent |
+| `repo`, `hidden` | path → SHA-256 for every file in the tree, noise directories excluded |
+| `budgets` | the judge's declared `MAX_STEPS`, `TIMEOUT`, `WRITES`, `CATEGORY` (those present), read as text |
+
+Produced only by `bench/integrity.py::fingerprint`. The **digest** is the
+SHA-256 of its canonical JSON (sorted keys, compact separators). Two scenarios
+are the same exactly when their digests are equal.
+
+**Published paired baseline** (`kind: "paired-baseline"`): one additive key
+per task entry, `scenario_fingerprint`. It holds the full fingerprint the run
+was judged with, captured at run start, and is shared by that task's
+`current` and `naive` arms. A document whose tasks lack it is historical; its
+fingerprints are reconstructed from its own `commit`.
+
+**SC-012 comparison** (`kind: "sc012-comparison"`)
+
+| Field | Rule |
+| --- | --- |
+| `candidate`, `baseline` | `file`, `commit`, `fingerprint_source`: `recorded` or `reconstructed:<commit>` |
+| `result` | `PASS` \| `FAIL` \| `UNDECIDABLE`. `UNDECIDABLE` when comparability cannot be established; otherwise `FAIL` when any task fails |
+| `baseline_only_tasks` | baseline tasks missing from the candidate; any entry makes the result `UNDECIDABLE` |
+| `tasks[]` | one per candidate task: `task`, `candidate_fingerprint` and `reference_fingerprint` (digests), `scenario_status` (`CHANGED` \| `UNCHANGED`), `reference_kind` (`PUBLISHED_BASELINE` \| `SAME_RUN_NAIVE`), `candidate_rate` and `reference_rate` (`passed`, `tries`), `result` (`PASS` \| `FAIL` \| `UNDECIDABLE`), `reason` |
+
+**Selection rule**:
+- UNCHANGED: the digests are equal. The reference is the baseline's
+  `current` rate, and the reference fingerprint is the baseline's.
+- CHANGED: the digests differ, or the task is new to the candidate. The
+  reference is the candidate's own `naive` rate, and the reference fingerprint
+  is the candidate's.
+- A task passes when candidate rate ≥ reference rate, as exact fractions.
+
 ## Entity relationships
 
 ```text

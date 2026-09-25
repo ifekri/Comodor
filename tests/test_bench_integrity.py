@@ -9,6 +9,7 @@ figure obtained by any of these is not a result.
 from __future__ import annotations
 
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -163,3 +164,107 @@ def test_a_fingerprint_does_not_depend_on_line_endings(tmp_path):
     with_lf = integrity.fingerprint(scenario)
 
     assert with_crlf == with_lf
+
+
+# --------------------------------------------------------------------------- #
+# history: fingerprint_at and digest (T208; SC-012, D11)
+# --------------------------------------------------------------------------- #
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def _commit_all(repo: Path, message: str) -> str:
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def history(tmp_path):
+    """A throwaway repository with two real scenarios under `bench/tasks`."""
+    if subprocess.run(["git", "--version"], capture_output=True).returncode != 0:
+        pytest.skip("git not available")
+    repo = tmp_path / "repo"
+    tasks = repo / "bench" / "tasks"
+    tasks.mkdir(parents=True)
+    for name in ("careful-unknowable", "fix-off-by-one"):
+        shutil.copytree(REAL_TASKS / name, tasks / name,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+    (repo / "bench" / "runner.py").write_text("# harness\n", encoding="utf-8")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "config", "core.autocrlf", "false")
+    first = _commit_all(repo, "first")
+    return repo, tasks, first
+
+
+def test_fingerprint_at_a_commit_equals_fingerprint_all_of_that_tree(history):
+    repo, tasks, first = history
+    assert integrity.fingerprint_at(first, repo=repo) == integrity.fingerprint_all(tasks)
+
+
+def test_fingerprint_at_reads_the_commit_not_the_working_tree(history):
+    repo, tasks, first = history
+    before = integrity.fingerprint_all(tasks)
+    (tasks / "fix-off-by-one" / "task.md").write_text("an uncommitted edit\n", encoding="utf-8")
+    assert integrity.fingerprint_at(first, repo=repo) == before
+
+
+def test_fingerprint_at_an_unresolvable_commit_raises(history):
+    repo, _, _ = history
+    for commit in ("0" * 40, "no-such-ref", "", "--help"):
+        with pytest.raises(ValueError):
+            integrity.fingerprint_at(commit, repo=repo)
+
+
+def test_a_digest_does_not_depend_on_key_order():
+    one = {"task.md": "a", "check.py": "b", "repo": {"x.py": "1", "y.py": "2"},
+           "hidden": {}, "budgets": {"MAX_STEPS": "25", "CATEGORY": "careful"}}
+    other = {"budgets": {"CATEGORY": "careful", "MAX_STEPS": "25"}, "hidden": {},
+             "repo": {"y.py": "2", "x.py": "1"}, "check.py": "b", "task.md": "a"}
+    assert one == other
+    assert integrity.digest(one) == integrity.digest(other)
+    assert len(integrity.digest(one)) == 64
+
+
+@pytest.mark.parametrize("edit", ["task.md", "check.py", "repo", "hidden", "budget"])
+def test_a_digest_moves_with_every_part_of_a_scenario(history, edit):
+    repo, tasks, first = history
+    scenario = tasks / "careful-unknowable"
+    if edit == "task.md":
+        (scenario / "task.md").write_text("a different prompt\n", encoding="utf-8")
+    elif edit == "check.py":
+        judge = scenario / "check.py"
+        judge.write_text(judge.read_text(encoding="utf-8") + "\n# softened\n", encoding="utf-8")
+    elif edit == "repo":
+        (scenario / "repo" / "added.py").write_text("x = 1\n", encoding="utf-8")
+    elif edit == "hidden":
+        (scenario / "hidden").mkdir(exist_ok=True)
+        (scenario / "hidden" / "answer.txt").write_text("secret\n", encoding="utf-8")
+    else:
+        judge = scenario / "check.py"
+        judge.write_text(judge.read_text(encoding="utf-8").replace("MAX_STEPS = 25",
+                                                                   "MAX_STEPS = 60"),
+                         encoding="utf-8")
+    second = _commit_all(repo, f"change {edit}")
+    before = integrity.fingerprint_at(first, repo=repo)
+    after = integrity.fingerprint_at(second, repo=repo)
+    assert integrity.digest(before["careful-unknowable"]) \
+        != integrity.digest(after["careful-unknowable"])
+    assert integrity.digest(before["fix-off-by-one"]) \
+        == integrity.digest(after["fix-off-by-one"])
+
+
+def test_a_harness_only_commit_leaves_every_scenario_digest_unchanged(history):
+    repo, _, first = history
+    (repo / "bench" / "runner.py").write_text("# harness, rewritten\n", encoding="utf-8")
+    (repo / "bench" / "report.py").write_text("# new reporting\n", encoding="utf-8")
+    second = _commit_all(repo, "harness only")
+    before = integrity.fingerprint_at(first, repo=repo)
+    after = integrity.fingerprint_at(second, repo=repo)
+    assert {name: integrity.digest(fp) for name, fp in before.items()} \
+        == {name: integrity.digest(fp) for name, fp in after.items()}

@@ -1310,7 +1310,29 @@ the benchmark, and each is independently mutation-checked.
   evidence, not part of this criterion.
 - **SC-012**: No benchmark task's outcome rate falls relative to the immediately
   preceding published baseline as a result of an efficiency change; any fall is
-  reported as a regression and blocks the change.
+  reported as a regression and blocks the change. The comparison is made per
+  task, between measurements judged by the same scenario (D10–D12):
+  1. A task's **scenario fingerprint** is the one the benchmark's integrity
+     record keeps: its prompt, judge, starting repository, hidden files and
+     declared budgets. A task is **unchanged** when its fingerprint at
+     the baseline's recorded commit equals its fingerprint at the candidate
+     under test, and **changed** otherwise. No reviewer judgement decides it.
+  2. An **unchanged** task's reference is its outcome rate under the current
+     strategy in the immediately preceding published baseline.
+  3. A **changed** task's reference is its outcome rate under the naive
+     strategy in the same fresh paired run as the candidate's measurement: same
+     judge, same product, efficiency switched off. The earlier published rate
+     is never compared across a scenario change.
+  4. Every task has exactly one reference. No task is excluded and the
+     denominator is always the whole task set. SC-012 passes only when, for
+     every task, the candidate's outcome rate is at least its reference.
+  5. The published SC-012 result records, per task: the reference used
+     (published baseline or same-run naive), both fingerprints, and both
+     rates.
+  6. Every published baseline records the per-task scenario fingerprints it
+     was judged with, so the next comparison reads comparability from the
+     result itself. The 2026-09-20 baseline predates this rule; its
+     fingerprints are recomputed from its recorded commit.
 - **SC-013**: A superseded file read is never re-sent; measured as zero
   superseded copies present in any assembled request across a benchmark run.
 - **SC-014**: No tool output is lost to truncation; measured as every
@@ -1417,20 +1439,54 @@ Their figures are comparable only within each run.
 
 ## Clarifications — Resolved
 
-**Eighteen** clarification decisions are recorded below, in five groups. Each
+**Twenty-one** clarification decisions are recorded below, in six groups. Each
 decision is binding on the requirements it names:
 
 | Group | Decisions |
 | --- | --- |
+| Session 2026-09-25 (SC-012 comparability) | 3 — D10 to D12 |
 | Session 2026-09-24 (post-gate amendment) | 3 — D7 to D9 |
 | Session 2026-09-24 (specification review) | 6 — D1 to D6 |
 | Session 2026-09-14 (remediation) | 3 |
 | Session 2026-09-14 (outcome encoding) | 3 |
 | Original clarifications, 2026-09-14 | 3 — Q1 to Q3 |
 
-All eighteen were put to, or decided by, the repository owner, and every one
+All twenty-one were put to, or decided by, the repository owner, and every one
 lists the FR/SC requirements or Constitution principle it binds. No unresolved
 clarification markers remain in this specification.
+
+### Session 2026-09-25 (SC-012 comparability)
+
+The `careful-unknowable` judge was corrected to the D7 rule, and the
+`careful-cannot-be-done` prompt and judge changed. Both changes came after the
+2026-09-20 published baseline (`be9cf6f`), so for those tasks that baseline and
+a final run are not judged by the same scenario. SC-011 is unaffected, because
+both of its strategies share one run's judges. The owner decided how SC-012
+compares across such a change.
+
+- Q: For SC-012, when a task's benchmark scenario is not identical between the
+  published baseline and the final run, what is that task compared against?
+  → A: **D10.** The naive strategy of the same fresh paired run: same judge,
+  same product, efficiency switched off. That is exactly a fall "as a result of
+  an efficiency change". An unchanged task keeps the published baseline's
+  current-strategy rate. No task is excluded, and no rate is compared across a
+  scenario change. Rejected: a new baseline run, which would measure either the
+  candidate against itself or the old product, which lacks the evidence the
+  current judge reads; excluding changed tasks, which would drop the tasks this
+  feature targets; and comparing historical figures unchanged. *Binds*: SC-012,
+  FR-077, SC-026.
+- Q: How is a task's scenario decided to have changed since the baseline? → A:
+  **D11.** Mechanically: its `bench/integrity.py` scenario fingerprint (prompt,
+  judge, starting repository, hidden files, budgets) at the baseline's recorded
+  commit differs from the candidate's. Harness changes outside the fingerprint
+  do not make a task changed. At the 2026-09-20 baseline this makes
+  `careful-unknowable` and `careful-cannot-be-done` changed. *Binds*: SC-012.
+- Q: Must every published baseline record the scenario fingerprints it was
+  judged with? → A: **D12.** Yes. Every published baseline carries its per-task
+  scenario fingerprints, and the SC-012 result records, per task, the reference
+  used, both fingerprints and both rates. The 2026-09-20 baseline predates the
+  rule; its fingerprints are recomputed from `be9cf6f`. *Binds*: SC-012, SC-036,
+  FR-076.
 
 ### Session 2026-09-24 (post-gate amendment)
 

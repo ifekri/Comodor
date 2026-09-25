@@ -21,14 +21,20 @@ and nothing here imports the runtime: it reads files and hashes bytes.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import subprocess
 import sys
+import tarfile
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 TASKS = HERE / "tasks"
 RECORD = TASKS / "FINGERPRINTS.json"
+#: The checkout `fingerprint_at` reads history from.
+REPO = HERE.parent
 
 #: Never part of a fingerprint: left behind by running the tests, not by
 #: writing the task.
@@ -106,6 +112,44 @@ def fingerprint_all(root: Path = TASKS) -> dict[str, dict[str, object]]:
         for directory in sorted(root.iterdir())
         if directory.is_dir() and not directory.name.startswith("_")
     }
+
+
+def fingerprint_at(commit: str, *, repo: Path | None = None) -> dict[str, dict[str, object]]:
+    """Every scenario as it stood at `commit`, hashed by today's algorithm.
+
+    A published result names the commit it measured. Comparing it with a later
+    run needs both sides' scenarios fingerprinted the same way, so the tasks
+    are taken from that commit's own tree — never from the working tree or
+    another revision — and passed through the one `fingerprint_all` there is.
+    """
+    root = repo or REPO
+    if not commit or commit.startswith("-") or subprocess.run(
+            ["git", "cat-file", "-e", f"{commit}^{{commit}}"], cwd=root,
+            capture_output=True, timeout=60).returncode != 0:
+        raise ValueError(f"commit {commit!r} cannot be resolved in {root}")
+    archive = subprocess.run(["git", "archive", "--format=tar", commit, "bench/tasks"],
+                             cwd=root, capture_output=True, timeout=120)
+    if archive.returncode != 0:
+        raise ValueError(f"commit {commit} has no bench/tasks: "
+                         f"{archive.stderr.decode('utf-8', 'replace').strip()}")
+    with tempfile.TemporaryDirectory() as temporary:
+        with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+            if hasattr(tarfile, "data_filter"):
+                tar.extractall(temporary, filter="data")
+            else:                                       # pragma: no cover
+                tar.extractall(temporary)
+        return fingerprint_all(Path(temporary) / "bench" / "tasks")
+
+
+def digest(fingerprint: object) -> str:
+    """A fixed-length identity for a fingerprint: SHA-256 of its canonical JSON.
+
+    Keys are sorted, so two fingerprints that are equal as mappings have one
+    digest whatever order they were built in. Two scenarios are the same
+    exactly when their digests are.
+    """
+    canonical = json.dumps(fingerprint, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def record(root: Path = TASKS, target: Path = RECORD) -> Path:

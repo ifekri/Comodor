@@ -408,12 +408,119 @@ contract untouched, and it leaves ordinary sessions' stored files unchanged. No
 behaviour a user sees today changes beyond the three FR-082 changes, so no
 specification clarification is needed.
 
-### F. Acceptance (unchanged)
+### F. Acceptance
 
 SC-011 passes only when current mean total tokens ≤ 0.90 × naive in one
 comparable paired run **and** every task's current outcome rate ≥ naive. Both
 historical runs fail it. SC-012 has no final passing evidence. Both are settled
-only in plan Phase 10, on the exact frozen candidate, after plan Phase 9.
+only in plan Phase 10, on the exact frozen candidate, after plan Phase 9. SC-011
+is unchanged by §G. SC-012 is decided by §G's per-task reference rule.
+
+### G. SC-012 comparability and baseline provenance (D10–D12, 2026-09-25)
+
+**Repository facts** (inspected at `77b765b`):
+
+- `bench/integrity.py::fingerprint(directory)` is the one scenario
+  fingerprint: the hashes of `task.md` and `check.py`, the `repo/` and
+  `hidden/` trees, and the declared budgets, with line endings normalised.
+  `fingerprint_all(root)` applies it to every scenario under a root, and
+  `FINGERPRINTS.json` is its committed record.
+- `bench/runner.py::_paired_header` already computes `fingerprint_all()` once
+  at the start of a paired run and binds it into the checkpoint, and a resume
+  is refused if it moved. `python -m bench` refuses to run on a drifted suite.
+- `bench/report.py::as_paired_json` publishes, per task, `current` and `naive`
+  records carrying `passed` and `tries`, and a top-level short `commit`. It
+  records **no** fingerprint. The 2026-09-20 baseline
+  (`bench/results/paired-baseline-2026-09-20.json`, `commit: "be9cf6f"`) has
+  none either.
+- `commit` comes from `git rev-parse --short HEAD`, with no dirty-tree
+  marker. Recorded fingerprints (D12) remove the dependence on it for future
+  results.
+- Recomputing `fingerprint_all()` over `bench/tasks` at `be9cf6f` and at HEAD
+  gives 19 scenarios each, of which exactly two differ:
+  `careful-cannot-be-done` (`check.py`, `task.md`) and `careful-unknowable`
+  (`check.py`). This is **current evidence only**. Nothing names these tasks;
+  the rule below is fingerprint-driven.
+
+**Design:**
+
+| Concern | Owner (extended, not replaced) | Design |
+| --- | --- | --- |
+| Scenario fingerprint (D11) | `bench/integrity.py` | The canonical producer stays `fingerprint(directory)`, with no second algorithm. Two additions. `fingerprint_at(commit)` extracts `bench/tasks` from that commit (`git archive`) into a temporary directory and applies the **current** `fingerprint_all` to it, so both sides are hashed by one algorithm. It fails if the commit cannot be resolved (`git cat-file -e <commit>^{commit}`). `digest(fingerprint)` is the SHA-256 of the fingerprint's canonical JSON (`sort_keys`, compact separators), a fixed-length identity for evidence. Two fingerprints are equal exactly when their digests are equal. Harness code outside the fingerprint (`runner.py`, `task.py`, `report.py`) is not part of a scenario and never makes a task changed. |
+| Baseline provenance (D12) | `bench/runner.py`, `bench/report.py` | Captured **once, at run start**: the `fingerprint_all()` result the paired header already computes, verified unchanged on resume, is passed to `write_paired` / `as_paired_json`. There is no second computation at write time. Stored per task in the published paired JSON as an additive key `"scenario_fingerprint"`, holding the full fingerprint (the same shape as a `FINGERPRINTS.json` entry), inside the task's entry beside `current` and `naive`. Both arms of a task come from one run and one fingerprint. The Markdown report gains no column. Only the paired baseline kind (`kind: "paired-baseline"`) is a published baseline for SC-012 and SC-036. The single-strategy and blocked-ablation reports are unchanged. |
+| Reading provenance | `bench/report.py` | One reader, `scenario_fingerprints(report)`. It returns `(per-task fingerprints, source)`. It uses the recorded `scenario_fingerprint` values when **every** task carries one (source `recorded`). Otherwise it reconstructs from the report's own `commit` via `fingerprint_at` (source `reconstructed:<commit>`). A report with no usable commit and no recorded values is undecidable. It never mixes: fingerprints come either from the file or from that file's own commit, never another commit, and never partly each. Historical artifacts are read, never rewritten. |
+| SC-012 comparison (D10) | `bench/report.py`, CLI in `bench/__main__.py` | `sc012_comparison(candidate, baseline)` over two paired reports. For every task in the candidate: **UNCHANGED** when `digest(candidate fp) == digest(baseline fp)` for that task. The reference is then the baseline's `current` rate, kind `PUBLISHED_BASELINE`, and the reference fingerprint is the baseline's. Otherwise **CHANGED**: the reference is the candidate's own `naive` rate from the same run, kind `SAME_RUN_NAIVE`, and the reference fingerprint is the candidate's. A candidate task absent from the baseline is CHANGED. The per-task result is `PASS` when `Fraction(passed, tries)` of the candidate `current` is at least the reference's, `FAIL` otherwise. The selection is fixed: no option, parameter or file can choose a reference, exclude a task or supply fingerprints. |
+| Fail-closed (undecidable) | `bench/report.py` | The overall result is `UNDECIDABLE`, never PASS, when: either document is not `kind: "paired-baseline"`; fingerprints cannot be obtained for either side; a baseline task is missing from the candidate (the task set may not shrink to hide a fall; the tasks are listed); a candidate `current` arm has `tries == 0`; or the selected reference arm is missing or has `tries == 0`. The overall result is otherwise `FAIL` if any task fails, else `PASS`. The denominator is every task in the candidate. |
+| Output (T199 evidence) | `bench/report.py`, `bench/results/` | `python -m bench --sc012 <candidate.json> --against <baseline.json> [--label NAME]` writes `bench/results/sc012-<label>.json` and `.md`. It needs no provider or model, calls none, and exits `0` PASS, `1` FAIL, `2` UNDECIDABLE. The JSON has `kind: "sc012-comparison"`; `candidate` and `baseline` objects (file, commit, fingerprint source); `result`; `baseline_only_tasks`; and one entry per candidate task with: `task`, `candidate_fingerprint` and `reference_fingerprint` (digests), `scenario_status` (`CHANGED` or `UNCHANGED`), `reference_kind` (`PUBLISHED_BASELINE` or `SAME_RUN_NAIVE`), `candidate_rate` and `reference_rate` (`passed`, `tries`), `result` (`PASS`, `FAIL` or `UNDECIDABLE`) and `reason`. The Markdown shows the same table. |
+
+**Execution order.** The D12 recording and the comparator are benchmark-only
+changes, implemented and tested before T196. The candidate HEAD therefore
+already carries them when:
+- T196 runs its gates;
+- T197 qualifies the provider;
+- T198 runs the full paired suite (`python -m bench --paired`, no `--only`),
+  producing both arms for every task under one set of recorded fingerprints;
+- T199 runs `python -m bench --sc012 <T198 artifact> --against
+  bench/results/paired-baseline-2026-09-20.json`, publishes the result, and
+  marks SC-012 only on `PASS`.
+
+No new baseline run is required. The 2026-09-20 artifact is not rewritten; its
+fingerprints are reconstructed from `be9cf6f`, which requires a full-history
+checkout (the CI workflow already fetches with `fetch-depth: 0`).
+
+**What this prevents.**
+- A changed task compared with its old published rate: selection is by digest
+  only.
+- An excluded task: a missing arm or a shrunken task set is `UNDECIDABLE`.
+- A manually chosen reference: no override exists.
+- Fingerprints from a different commit: each report is read from itself or its
+  own commit.
+- A naive result under a different scenario: both arms and the fingerprint
+  come from the same paired document and run.
+
+**Gate for this work** (deterministic, no model, mutation-checked):
+- `tests/test_bench_integrity.py`:
+  - `fingerprint_at(commit)` on a temporary git repository equals
+    `fingerprint_all` of the same tree;
+  - an unresolvable commit raises;
+  - `digest` is order-independent and changes when any fingerprint part
+    changes.
+- `tests/test_bench_baseline.py`, recording:
+  - a paired report records a `scenario_fingerprint` per task equal to the
+    run-start fingerprint;
+  - one computation feeds both the checkpoint header and the report.
+- `tests/test_bench_baseline.py`, reading:
+  - a report whose tasks all carry `scenario_fingerprint` reads as
+    `recorded`;
+  - one without reads as `reconstructed:<commit>` through `fingerprint_at`;
+  - one with neither is undecidable.
+- `tests/test_bench_baseline.py`, comparison:
+  - an unchanged task is compared with the published `current` rate;
+  - a changed task with the same-run `naive` rate;
+  - a task new to the candidate is CHANGED;
+  - equal rates pass and a lower rate fails;
+  - PASS only when every task passes;
+  - each UNDECIDABLE condition is reported, and none can yield PASS;
+  - every evidence field is present;
+  - `--sc012` exits `0` / `1` / `2` and needs no provider.
+- Mutations that must fail these tests:
+  - selecting `PUBLISHED_BASELINE` for a changed task;
+  - excluding a task whose reference is missing;
+  - reading recorded fingerprints from one file and the baseline from another
+    commit;
+  - comparing with `>` instead of at least;
+  - treating a candidate-only task as UNCHANGED.
+
+### Constitution re-check (post-clarification, 2026-09-25)
+
+| Principle | Result |
+| --- | --- |
+| IV — Deterministic regression tests | Comparator, reader and recording tested offline on fixtures and a temporary git repository; the listed mutations are required to fail. **PASS** |
+| X / XII — Gates and agreement | Spec SC-012 (D10–D12), this section, research R17, data-model §9 and quickstart agree; tasks follow via `/speckit.tasks`. **PASS** |
+| XIV — Evidence before assumption | The two changed scenarios were computed, not assumed; the rule is fingerprint-driven, not name-driven. **PASS** |
+| XVIII — Extend, never duplicate | One fingerprint algorithm (`bench/integrity.py`), reused for recording, reconstruction and comparison; no new module (the standing benchmark-helper limit holds). **PASS** |
+| XXI — Paired measurement | SC-011 unchanged; SC-012's reference for a changed scenario is the same-run paired arm, so quality is never compared across two decision functions. **PASS** |
+| XX — User control | No run, push, merge or release is part of this planning; T197–T199 remain the owner's paid runs. **PASS** |
 
 ## Current Data Flow (as built)
 
@@ -892,7 +999,7 @@ tasks.md; cross-artifact references use `plan Phase N` / `tasks Phase N`.
 | **7** | Regression & performance benchmark (historical) | Full paired benchmark reports (tasks-phase-1 baseline T015; candidate run T155); the SC-011 threshold derived from them and recorded in spec.md (D5) | Paired reports published; threshold recorded. SC-011 and SC-012 acceptance moved to plan Phase 10 — both historical runs fail SC-011 |
 | **8** | Full deterministic validation | Complete local/CI baseline on the integrated candidate, all three platforms | Every deterministic gate green; nothing claimed unverified |
 | **9** | Specification convergence (D4/D7/D9 and re-verification) | Stable semantic `decision_ref` minted in the evidence owner; unresolved set derived from the existing session form records; common DecisionAnswer path in the application layer; additive protocol fields; CLI/API/ACP/channel adapters; D7 validation cases; re-verification of FR-099/100/101/105/127/018/123 (§2026-09-24 Plan Convergence B–D) | The §B gate: invalid refs fail closed before any model call, no heuristic path, stable and distinct refs, SC-042 replay, old clients unaffected; D7 cases green; every re-verification either passes or has become a task; protocol codegen, capability map and full deterministic suite green |
-| **10** | Final live acceptance | Provider qualification, then a fresh comparable paired run on the exact frozen candidate | SC-011 (≤ 0.90 × naive mean total tokens **and** no task-level outcome-rate fall) and SC-012 have fresh passing evidence |
+| **10** | Final live acceptance | Provider qualification, then a fresh comparable paired run on the exact frozen candidate, recording its scenario fingerprints; then the SC-012 comparison against the 2026-09-20 baseline (§G) | SC-011 (≤ 0.90 × naive mean total tokens **and** no task-level outcome-rate fall) has fresh passing evidence; SC-012 is `PASS` in the published `python -m bench --sc012` result, with every task compared against its fingerprint-selected reference (D10–D12) |
 
 **Dependency note (plan-phase numbering)**: plan Phase 4 cannot start before
 plan Phase 1 (no baseline, no optimization — Constitution XXI). Plan Phase 3
@@ -922,7 +1029,7 @@ one validation task, and concrete file evidence. Phase references use the
 | Docker / Packaged Runtime | REQUIRED | plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10 | **Docker configuration unchanged; packaged runtime artifact REQUIRED and verified.** `Dockerfile` / `docker-compose.yml` are not edited by any task (T169 scope review); the packaged terminal-interface bundle that the wheel, sdist and container ship is affected by the TS changes and is rebuilt (T141) and verified to match source (T166); existing Docker/packaging/release validation stays green (T160, T168, T170 confirms no release action) |
 | Persistence / Shared State | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 5 / tasks Phase 6; plan Phase 6 / tasks Phase 8; plan Phase 9 | Learning records gain provenance, status, fingerprint, supersession in `src/comodor/learning/store.py` (T099, T110, T111, T112, T117); session pending-interaction round-trip characterized (T007) and an outstanding form persisted/restored across reconnect with full lifecycle in transcript/export (`src/comodor/session/store.py`, T050, T051); pre-change sessions and stored knowledge remain readable (T137); ledger never persisted (T026); the unresolved-decision set is derived from the form records the session transcript already stores (`message.meta["question"]`) — no new store, and the ledger is still never persisted; a headless run persists only when it ends `clarification_required`, as a `SessionStore` continuation marked by the optional `SessionMeta.continuation` object (`decision_refs`, `mode`), written only on continuations and excluded from `list_sessions()`; a resumed run appends to it whatever it ends in (plan Phase 9, §B, §B.2) |
 | Security / Authorization | REQUIRED | every task phase that touches questions, ASK, modes, tool advertisement, session interaction, orchestration or protocol | Permission and mode enforcement characterized first (T011, `tests/test_baseline_permissions.py`; T012 capability advertisement); per-phase permission regression gates T028, T060, T069, T098, T119, T129, T146 and final T167; unknown modes fail closed and advertised capabilities stay mode-authoritative (T138, T139); the ledger holds fingerprints, never secrets, and is never persisted (T026); clarification never becomes a route to a forbidden action (plan §Explicit non-goal) |
-| Tests / Documentation | REQUIRED | all task phases; plan Phase 8 / tasks Phase 10 | Characterization suite T001–T013; mutation-checked regression tests for every guard (SC-025) across Phases 2–8; benchmark scenarios and integrity (T147–T158); `docs/questions.md` (T142), `docs/cli.md` (T143), `docs/learning.md` (T144); `CHANGELOG.md` unreleased note for the one backward-incompatible regression-by-design and documentation of the two additive visible changes in FR-082 (T145); full validation on the exact final HEAD, three platforms (T159–T170) |
+| Tests / Documentation | REQUIRED | all task phases; plan Phase 8 / tasks Phase 10 | Characterization suite T001–T013; mutation-checked regression tests for every guard (SC-025) across Phases 2–8; benchmark scenarios and integrity (T147–T158); `docs/questions.md` (T142), `docs/cli.md` (T143), `docs/learning.md` (T144); `CHANGELOG.md` unreleased note for the one backward-incompatible regression-by-design and documentation of the two additive visible changes in FR-082 (T145); full validation on the exact final HEAD, three platforms (T159–T170); benchmark provenance and the SC-012 comparator — per-task scenario fingerprints recorded in published paired baselines and a fingerprint-driven comparison (§G, D10–D12), tested offline |
 
 Traceability rule: every plan phase that changes a surface is traceable to this
 table — plan Phase 3 (TUI, CLI, API, Channels, Persistence, Security), plan
@@ -1040,7 +1147,9 @@ is read precisely: one new **product/runtime** module, not one new Python file.
 
 Validation: a deterministic test asserts that no module under `src/comodor/`
 imports `bench.integrity` or `bench.baseline` (owned by T154; enforced again in
-T169's scope review). No other new subsystem. Every remaining change extends a
+T169's scope review). No other new subsystem. The SC-012 provenance and
+comparison work (§G) adds no benchmark file: it extends `integrity.py`,
+`runner.py`, `report.py` and `__main__.py`. Every remaining change extends a
 module that already owns the behaviour, as recorded in the Architecture Audit.
 
 ---

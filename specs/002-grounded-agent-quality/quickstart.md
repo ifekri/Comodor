@@ -315,3 +315,33 @@ Expected once implemented:
   nothing dependent runs afterwards.
 
 > **Acceptance note:** SC-011/SC-012 are live acceptance gates. Passing the deterministic suite, protocol checks or specification gate does not satisfy them. Final evidence must come from a fresh comparable paired run on the exact frozen candidate.
+
+### Plan Phase 10 — SC-012 comparison (D10–D12, planned, not yet implemented)
+
+Offline and deterministic; no provider or model is called:
+
+```bash
+python -m pytest tests/test_bench_integrity.py tests/test_bench_baseline.py -q
+python -m bench.integrity check
+```
+
+After T198 has published the fresh paired run, with its per-task
+`scenario_fingerprint`:
+
+```bash
+python -m bench --sc012 bench/results/<T198 artifact>.json \
+    --against bench/results/paired-baseline-2026-09-20.json --label sc012-final
+```
+
+Expected:
+- Exit `0` (PASS), `1` (FAIL) or `2` (UNDECIDABLE).
+- `bench/results/sc012-sc012-final.json` and `.md`, with one row per task:
+  its scenario status, its reference kind, both fingerprint digests and both
+  rates.
+- The 2026-09-20 baseline reads as `reconstructed:be9cf6f`; this needs a
+  full-history checkout.
+- The candidate reads as `recorded`.
+- A task whose scenario changed since `be9cf6f` shows `CHANGED` and
+  `SAME_RUN_NAIVE`; every other task shows `UNCHANGED` and
+  `PUBLISHED_BASELINE`.
+- SC-012 is marked only on `PASS`.

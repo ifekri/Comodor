@@ -15,8 +15,10 @@ import platform
 import subprocess
 import time
 from datetime import date
+from fractions import Fraction
 from pathlib import Path
 
+from . import integrity
 from .runner import Outcome
 
 #: The token-accounting contract these reports obey.
@@ -294,12 +296,16 @@ def as_paired_json(current: list[Outcome], naive: list[Outcome], *,
     tasks = []
     for one in current:
         other = by_name.get(one.task.name)
-        tasks.append({
+        entry = {
             "name": one.task.name,
             "category": one.task.category,
             "current": _strategy_record(one),
             "naive": _strategy_record(other) if other is not None else None,
-        })
+        }
+        fingerprint = _paired_fingerprint(one, other)
+        if fingerprint is not None:
+            entry["scenario_fingerprint"] = fingerprint
+        tasks.append(entry)
     return {
         "kind": "paired-baseline",
         "model": model,
@@ -323,6 +329,21 @@ def as_paired_json(current: list[Outcome], naive: list[Outcome], *,
         },
         "tasks": tasks,
     }
+
+
+def _paired_fingerprint(current: Outcome, naive: Outcome | None) -> dict | None:
+    """The one scenario both arms of a task were judged by (D12).
+
+    Taken from the outcomes, which carry what the run fingerprinted at its
+    start — never recomputed here, where the tree may have moved since. Two
+    arms judged by different scenarios are not a pair, and nothing is
+    published for them.
+    """
+    fingerprint = current.scenario_fingerprint
+    if naive is not None and naive.scenario_fingerprint != fingerprint:
+        raise ValueError(f"{current.task.name}: the current and naive arms carry "
+                         f"different scenario fingerprints; they are not a pair")
+    return fingerprint
 
 
 def _strategy_record(one: Outcome) -> dict:
@@ -478,6 +499,236 @@ def _slug(text: str) -> str:
     kept = [character if character.isalnum() else "-"
             for character in text.lower()]
     return "".join(kept).strip("-").replace("--", "-") or "unknown"
+
+
+# --------------------------------------------------------------------------- #
+# SC-012: no task's outcome rate falls against its reference (D10–D12)
+# --------------------------------------------------------------------------- #
+
+PASS, FAIL, UNDECIDABLE = "PASS", "FAIL", "UNDECIDABLE"
+CHANGED, UNCHANGED = "CHANGED", "UNCHANGED"
+PUBLISHED_BASELINE, SAME_RUN_NAIVE = "PUBLISHED_BASELINE", "SAME_RUN_NAIVE"
+
+
+class Undecidable(ValueError):
+    """Comparability cannot be established; the reason says why."""
+
+
+def scenario_fingerprints(report: dict) -> tuple[dict[str, dict], str]:
+    """Each task's scenario fingerprint in a published paired result, and where
+    it came from.
+
+    `recorded` when every task carries the `scenario_fingerprint` its run
+    captured (D12). Otherwise the whole set is reconstructed from the report's
+    own `commit` — `reconstructed:<commit>` — which is how a result from
+    before recording is read. Never both: a partly recorded report is
+    reconstructed in full, and a task missing at the report's own commit makes
+    the provenance undecidable rather than being borrowed from elsewhere or
+    dropped. The report is only read.
+    """
+    tasks = report.get("tasks") or []
+    names = [task.get("name") for task in tasks]
+    recorded = [task.get("scenario_fingerprint") for task in tasks]
+    if tasks and all(isinstance(value, dict) for value in recorded):
+        return dict(zip(names, recorded, strict=True)), "recorded"
+    commit = report.get("commit")
+    if not commit:
+        raise Undecidable("it records no scenario fingerprints and no commit to "
+                          "reconstruct them from")
+    try:
+        at_commit = integrity.fingerprint_at(str(commit))
+    except ValueError as problem:
+        raise Undecidable(f"its commit cannot be read: {problem}") from problem
+    missing = [name for name in names if name not in at_commit]
+    if missing:
+        raise Undecidable(f"task(s) {', '.join(map(str, missing))} have no scenario "
+                          f"at the report's own commit {commit}")
+    return {name: at_commit[name] for name in names}, f"reconstructed:{commit}"
+
+
+def sc012_comparison(candidate: dict, baseline: dict, *, candidate_file: str,
+                     baseline_file: str) -> dict:
+    """Every candidate task against the one reference its scenario selects.
+
+    A task whose scenario fingerprint equals the published baseline's is
+    compared with the baseline's `current` rate. Any other task — a changed
+    scenario, or one new to the candidate — is compared with the candidate's
+    own `naive` rate from the same paired run, judged by the same scenario.
+    Nothing chooses a reference but the digests, nothing leaves the
+    denominator, and anything that cannot be decided makes the whole result
+    UNDECIDABLE, never PASS.
+    """
+    problems: list[str] = []
+    sides: dict[str, dict] = {}
+    fingerprints: dict[str, dict[str, dict] | None] = {}
+    for side, document, file in (("candidate", candidate, candidate_file),
+                                 ("baseline", baseline, baseline_file)):
+        sides[side] = {"file": str(file), "commit": str(document.get("commit") or ""),
+                       "fingerprint_source": ""}
+        fingerprints[side] = None
+        if document.get("kind") != "paired-baseline":
+            problems.append(f"the {side} is not a paired baseline "
+                            f"(kind {document.get('kind')!r})")
+            continue
+        try:
+            fingerprints[side], sides[side]["fingerprint_source"] = \
+                scenario_fingerprints(document)
+        except Undecidable as problem:
+            problems.append(f"the {side}'s scenario fingerprints cannot be "
+                            f"established: {problem}")
+
+    candidate_tasks = _tasks_by_name(candidate, "candidate", problems)
+    baseline_tasks = _tasks_by_name(baseline, "baseline", problems)
+    if not candidate_tasks:
+        problems.append("the candidate has no tasks")
+    baseline_only = [name for name in baseline_tasks if name not in candidate_tasks]
+    if baseline_only:
+        problems.append(f"baseline task(s) missing from the candidate: "
+                        f"{', '.join(map(str, baseline_only))}")
+
+    rows = [_sc012_row(name, entry, baseline_tasks.get(name), fingerprints)
+            for name, entry in candidate_tasks.items()]
+    if problems or any(row["result"] == UNDECIDABLE for row in rows):
+        result = UNDECIDABLE
+    elif any(row["result"] == FAIL for row in rows):
+        result = FAIL
+    else:
+        result = PASS
+    return {
+        "kind": "sc012-comparison",
+        "candidate": sides["candidate"],
+        "baseline": sides["baseline"],
+        "result": result,
+        "undecidable_reasons": problems,
+        "baseline_only_tasks": baseline_only,
+        "tasks": rows,
+    }
+
+
+def _tasks_by_name(document: dict, side: str, problems: list[str]) -> dict[str, dict]:
+    by_name: dict[str, dict] = {}
+    for entry in document.get("tasks") or []:
+        name = entry.get("name")
+        if name in by_name:
+            problems.append(f"the {side} names task {name} more than once")
+        by_name[name] = entry
+    return by_name
+
+
+def _sc012_row(name: str, entry: dict, published: dict | None,
+               fingerprints: dict[str, dict[str, dict] | None]) -> dict:
+    row = {
+        "task": name,
+        "candidate_fingerprint": None,
+        "reference_fingerprint": None,
+        "scenario_status": None,
+        "reference_kind": None,
+        "candidate_rate": _arm_rate(entry.get("current")),
+        "reference_rate": None,
+        "result": UNDECIDABLE,
+        "reason": "",
+    }
+    if fingerprints["candidate"] is None:
+        row["reason"] = "the candidate's scenario fingerprints cannot be established"
+        return row
+    row["candidate_fingerprint"] = integrity.digest(fingerprints["candidate"][name])
+    baseline_digest = None
+    if published is not None:
+        if fingerprints["baseline"] is None:
+            row["reason"] = "the baseline's scenario fingerprints cannot be established"
+            return row
+        baseline_digest = integrity.digest(fingerprints["baseline"][name])
+    if baseline_digest is not None and baseline_digest == row["candidate_fingerprint"]:
+        row.update(scenario_status=UNCHANGED, reference_kind=PUBLISHED_BASELINE,
+                   reference_fingerprint=baseline_digest,
+                   reference_rate=_arm_rate(published.get("current")))
+    else:
+        row.update(scenario_status=CHANGED, reference_kind=SAME_RUN_NAIVE,
+                   reference_fingerprint=row["candidate_fingerprint"],
+                   reference_rate=_arm_rate(entry.get("naive")))
+    ours, reference = row["candidate_rate"], row["reference_rate"]
+    if not ours or not ours["tries"]:
+        row["reason"] = "the candidate's current arm is missing or has no valid tries"
+    elif not reference or not reference["tries"]:
+        row["reason"] = (f"the reference ({_REFERENCE[row['reference_kind']]}) is "
+                         f"missing or has no valid tries")
+    else:
+        holds = Fraction(ours["passed"], ours["tries"]) \
+            >= Fraction(reference["passed"], reference["tries"])
+        row["result"] = PASS if holds else FAIL
+        row["reason"] = (f"{ours['passed']}/{ours['tries']} {'>=' if holds else '<'} "
+                         f"{reference['passed']}/{reference['tries']} "
+                         f"({_REFERENCE[row['reference_kind']]})")
+    return row
+
+
+_REFERENCE = {PUBLISHED_BASELINE: "published baseline, current strategy",
+              SAME_RUN_NAIVE: "same run, naive strategy"}
+
+
+def _arm_rate(arm: object) -> dict | None:
+    """`{passed, tries}` from one arm, or `None` when there is no usable arm."""
+    if not isinstance(arm, dict):
+        return None
+    passed, tries = arm.get("passed"), arm.get("tries")
+    if type(passed) is not int or type(tries) is not int or not 0 <= passed <= tries:
+        return None
+    return {"passed": passed, "tries": tries}
+
+
+def as_sc012_markdown(result: dict) -> str:
+    def rate(value: dict | None) -> str:
+        return f"{value['passed']}/{value['tries']}" if value else "—"
+
+    def short(value: str | None) -> str:
+        return f"`{value[:12]}`" if value else "—"
+
+    def side(record: dict) -> str:
+        return (f"`{record['file']}` (commit `{record['commit'] or '—'}`, fingerprints "
+                f"{record['fingerprint_source'] or 'unavailable'})")
+
+    lines = [
+        f"# SC-012 comparison — {result['result']}",
+        "",
+        f"Candidate {side(result['candidate'])} against the published baseline "
+        f"{side(result['baseline'])}.",
+        "",
+        "A task whose scenario fingerprint matches the published baseline's is "
+        "compared with the baseline's current-strategy rate; any other task with "
+        "the naive rate from the candidate's own paired run. Rates are compared "
+        "as exact fractions, and an equal rate passes.",
+        "",
+        "| Task | Scenario | Reference | Candidate | Reference rate | "
+        "Candidate fingerprint | Reference fingerprint | Result | Reason |",
+        "| --- | --- | --- | ---: | ---: | --- | --- | --- | --- |",
+    ]
+    for row in result["tasks"]:
+        reason = str(row["reason"]).replace("|", "\\|").replace("\n", " ")
+        lines.append(
+            f"| {row['task']} | {row['scenario_status'] or '—'} | "
+            f"{row['reference_kind'] or '—'} | {rate(row['candidate_rate'])} | "
+            f"{rate(row['reference_rate'])} | {short(row['candidate_fingerprint'])} | "
+            f"{short(row['reference_fingerprint'])} | {row['result']} | {reason} |")
+    lines.append("")
+    if result["baseline_only_tasks"]:
+        lines += [f"**Baseline tasks missing from the candidate**: "
+                  f"{', '.join(map(str, result['baseline_only_tasks']))}.", ""]
+    if result["undecidable_reasons"]:
+        lines += ["**Why it cannot be decided**:", ""]
+        lines += [f"- {reason}" for reason in result["undecidable_reasons"]]
+        lines.append("")
+    return "\n".join(lines)
+
+
+def write_sc012(result: dict, directory: Path, *, label: str) -> tuple[Path, Path]:
+    """`sc012-<label>.json` and `.md`, overwritten: one label, one verdict."""
+    directory.mkdir(parents=True, exist_ok=True)
+    stem = f"sc012-{_slug(label)}"
+    json_file = directory / f"{stem}.json"
+    _write_lf(json_file, json.dumps(result, indent=2) + "\n")
+    markdown_file = directory / f"{stem}.md"
+    _write_lf(markdown_file, as_sc012_markdown(result))
+    return json_file, markdown_file
 
 
 # --------------------------------------------------------------------------- #

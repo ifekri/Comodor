@@ -378,6 +378,49 @@ neither stale nor orphan a `decision_ref`.
 - *Duplicate `cwd` / provider / model inside `continuation`* — rejected: they
   already live on `SessionMeta`; only the mode is new.
 
+## R17 — How is SC-012 compared across a scenario change, and where does provenance live?
+
+**Decision**:
+- The per-task scenario fingerprint is `bench/integrity.py::fingerprint`
+  (D11). It is reused for recording, reconstruction and comparison, with no
+  second hashing algorithm.
+- A paired run records the run-start fingerprints, already computed for the
+  checkpoint header, into each task's entry of the published JSON as
+  `scenario_fingerprint` (D12).
+- A historical report without them is read by reconstructing from its own
+  recorded `commit` with the current algorithm (`fingerprint_at`).
+- `sc012_comparison` selects each task's reference mechanically: the published
+  `current` rate when the digests match, otherwise the same run's `naive`
+  rate (D10).
+- It fails closed as `UNDECIDABLE` when comparability cannot be established.
+- It is exposed as `python -m bench --sc012 … --against …`, in existing modules
+  only.
+
+**Rationale**:
+- One algorithm on both sides makes "changed" a byte-level fact, not a
+  reviewer's call.
+- Capturing at run start ties the recorded fingerprints to the scenarios
+  actually judged. The drift check and the checkpoint binding already
+  guarantee that.
+- Reconstructing from the report's own commit is the only way to read the
+  2026-09-20 baseline without rewriting it.
+- A fail-closed comparator makes a shrunken task set or a missing arm visible
+  instead of silently passing.
+
+**Alternatives considered**:
+- *A second, reporting-only hash*: rejected. Two definitions of "changed"
+  could disagree.
+- *Recomputing fingerprints at write time*: rejected. It could differ from
+  what the run was judged with if the tree changed mid-run.
+- *Hashing the whole `bench/` tree*: rejected by D11. Harness changes would
+  make every task changed.
+- *A new `bench/compare.py`*: rejected under the standing limit on new
+  benchmark helpers; `report.py` already owns comparison output.
+- *Rewriting the 2026-09-20 artifact to add fingerprints*: rejected, because
+  historical artifacts are never altered (as with token accounting).
+- *Manual reference override flags*: rejected. Selection must be mechanical
+  (D10–D11).
+
 ## R11 — How does a later invocation deliver the answer?
 
 **Decision**: One common DecisionAnswer path, owned by the shared turn entry

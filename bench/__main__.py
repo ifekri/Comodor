@@ -8,13 +8,14 @@ inherited somebody's settings would produce a number about their machine.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
 from pathlib import Path
 
 from . import baseline, integrity
-from .report import write, write_blocked, write_paired
+from .report import FAIL, PASS, sc012_comparison, write, write_blocked, write_paired, write_sc012
 from .runner import run_blocked, run_paired, run_task
 from .task import TaskError, load_tasks
 
@@ -59,7 +60,18 @@ def main(argv: list[str] | None = None) -> int:
                              "(dedup delta budget ranking summary_provenance log_summary)")
     parser.add_argument("--label", default="",
                         help="a name for this run, carried into the result files")
+    parser.add_argument("--sc012", default="", metavar="CANDIDATE",
+                        help="compare a paired result with --against under SC-012 "
+                             "(no provider or model; exits 0 PASS, 1 FAIL, "
+                             "2 UNDECIDABLE)")
+    parser.add_argument("--against", default="", metavar="BASELINE",
+                        help="with --sc012: the published paired baseline")
     args = parser.parse_args(argv)
+
+    # A comparison of two published results: it reads files and local history
+    # only, so it is settled before tasks, drift, credentials or a model.
+    if args.sc012 or args.against:
+        return _sc012(args)
 
     _load_env(ROOT / "src" / ".env")
 
@@ -166,6 +178,32 @@ def main(argv: list[str] | None = None) -> int:
         for path in kept[:10]:
             print(f"  {path}")
     return 0
+
+
+def _sc012(args: argparse.Namespace) -> int:
+    if not args.sc012 or not args.against:
+        print("bench: --sc012 <candidate.json> needs --against <baseline.json>",
+              file=sys.stderr)
+        return 2
+    documents = []
+    for file in (args.sc012, args.against):
+        try:
+            document = json.loads(Path(file).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as problem:
+            print(f"bench: cannot read {file}: {problem}", file=sys.stderr)
+            return 2
+        if not isinstance(document, dict):
+            print(f"bench: {file} is not a result document", file=sys.stderr)
+            return 2
+        documents.append(document)
+    result = sc012_comparison(*documents, candidate_file=args.sc012,
+                              baseline_file=args.against)
+    json_file, markdown_file = write_sc012(result, HERE / "results",
+                                           label=args.label or Path(args.sc012).stem)
+    print(f"SC-012: {result['result']}")
+    print(json_file)
+    print(markdown_file)
+    return {PASS: 0, FAIL: 1}.get(result["result"], 2)
 
 
 def _load_env(path: Path) -> None:

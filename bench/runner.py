@@ -73,6 +73,9 @@ class Outcome:
     #: Sequence runs the harness could not measure (a correction hook that
     #: raised). Kept for the report, excluded from pass/fail aggregation.
     invalid: list[str] = field(default_factory=list)
+    #: The scenario these attempts were judged by, as `bench.integrity`
+    #: fingerprinted it at the start of a paired run (D12). `None` elsewhere.
+    scenario_fingerprint: dict | None = None
 
     @property
     def passed(self) -> int:
@@ -227,23 +230,29 @@ def run_paired(tasks: list[Task], *, provider: str, model: str, tries: int = 3,
     together, and which goes first alternates across blocks, so a pair differs
     by the strategy and little else. Returns `(current, naive)` — the same two
     lists the sequential mode produced, from a fairer experiment.
+
+    The scenarios are fingerprinted once, here, at the start: the same header
+    binds the checkpoint and is carried on both arms of every task, so the
+    published result names the scenarios the attempts were actually judged by.
     """
     if any(task.sequence for task in tasks):
         raise ValueError("the paired experiment does not take sequence tasks")
 
+    header = _paired_header(provider, model, tries, tasks)
     done: dict[tuple[str, int, str], tuple[Attempt, Verdict, str]] = {}
     if checkpoint is not None:
-        header, saved = _read_paired_checkpoint(checkpoint)
-        if header is None:
-            _write_checkpoint(checkpoint, _paired_header(provider, model, tries, tasks))
+        saved_header, saved = _read_paired_checkpoint(checkpoint)
+        if saved_header is None:
+            _write_checkpoint(checkpoint, header)
         else:
-            _verify_paired_checkpoint(header, provider, model, tries, tasks)
+            _verify_paired_checkpoint(saved_header, header)
             done = saved
 
     current = [Outcome(task=task, strategy=baseline.CURRENT) for task in tasks]
     naive = [Outcome(task=task, strategy=baseline.NAIVE) for task in tasks]
     for outcome in (*current, *naive):
         outcome.learning = learning
+        outcome.scenario_fingerprint = header["fingerprints"].get(outcome.task.name)
 
     block = 0
     for index, task in enumerate(tasks):
@@ -291,9 +300,7 @@ def _paired_header(provider: str, model: str, tries: int, tasks: list[Task]) -> 
     }
 
 
-def _verify_paired_checkpoint(header: dict, provider: str, model: str, tries: int,
-                              tasks: list[Task]) -> None:
-    expected = _paired_header(provider, model, tries, tasks)
+def _verify_paired_checkpoint(header: dict, expected: dict) -> None:
     for key in ("provider", "model", "tries", "cohort", "strategies", "scheme"):
         if header.get(key) != expected[key]:
             raise ValueError(
