@@ -59,6 +59,9 @@ def ask_in_the_background(service, session_id, questions):
             redact=Redactor([]),
             cancel=Cancellation(),
             cwd=handle.assembly.config.paths.project,
+            # The request names every candidate, so the options are grounded
+            # (spec 002, FR-016) and reach the client.
+            request_text="Refactor, replace or keep? Now, or after the release?",
         )
         result["tool"] = Ask().run(context, questions=questions)
 

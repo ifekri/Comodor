@@ -100,7 +100,7 @@ def test_the_block_says_what_to_do_with_it():
 
 
 class Loop:
-    """The two attributes `_repeat_the_plan` touches."""
+    """The attributes `_repeat_the_plan` touches."""
 
     def __init__(self, todos, conversation):
         from comodor.agent.loop import AgentLoop
@@ -108,6 +108,7 @@ class Loop:
         self.tool_context = type("Ctx", (), {"todos": todos})()
         self.conversation = conversation
         self._repeat_the_plan = AgentLoop._repeat_the_plan.__get__(self)
+        self._say_internally = AgentLoop._say_internally.__get__(self)
 
 
 class Recorder:

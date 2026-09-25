@@ -4,7 +4,38 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 ## Unreleased
 
-Nothing yet.
+### Changed
+
+- **A material clarification can no longer be resolved by default, assumption
+  or invented value when the required information was not supplied.** This is
+  the single intended behaviour change. Previously a dismissed, expired or
+  unattended question fell back to "choose sensible defaults and carry on";
+  now it leaves the decision unresolved, runs no dependent work, and the turn
+  ends reporting `clarification_required` with a `clarification.outcome` of
+  `cancelled`, `expired` or `unattended`. An answered question behaves as
+  before. `comodor run` exits `3` for this outcome and `--json` carries the
+  decision in a `clarification` block.
+
+### Added
+
+- **Answer a stopped decision later, by its `decision_ref`.** Additive. Every
+  open decision now carries a stable `decision_ref`, in the `clarification`
+  block and in the protocol's `clarification.required` event, as optional
+  fields (`decisions[].id` is kept, with the same value). `comodor run
+  --decision-answers PATH|-` resumes a run that stopped for a decision. So do
+  the API's `comodor.decision_answers` (refused with HTTP 400), ACP prompt
+  metadata `_meta.comodor.decision_answers` (refused with invalid params) and
+  answer buttons on Telegram, Slack and WhatsApp. Answers are checked whole
+  before anything runs. The run must resume in the workspace and mode it
+  stopped in, and an answer never grants a permission. A stopped `comodor
+  run`, scheduled job or webhook event is kept as an unlisted continuation,
+  exportable by id; nothing is kept for a run that did not stop. Discord and
+  webhooks report the decision and its ref. Plain text on any channel is
+  still a new request.
+- **Unsupported completion claims are marked unconfirmed.** Additive. When
+  the completion check cannot reach a verdict, or its one correction turn
+  still claims completion, the answer is delivered with "Completion is not
+  confirmed" beside it and the outstanding work named.
 
 ## 2.0.1 — 2026-09-13
 

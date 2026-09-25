@@ -99,6 +99,23 @@ export function select(state: FormState, id: string): FormState {
   return { ...state, chosen: replaceAt(state.chosen, state.at, next) };
 }
 
+/**
+ * Why the current question is being asked, and what was already checked.
+ *
+ * Both are optional on the wire (a core from before they existed sends
+ * neither), and a renderer shows the line only when there is something to
+ * say. `reason` is the materiality class the decision falls in; `evidence`
+ * is what the agent inspected first, so the person is not asked to repeat
+ * that inspection.
+ */
+export function grounds(state: FormState): { reason: string; evidence: string[] } {
+  const question = current(state);
+  return {
+    reason: question?.reason ?? "",
+    evidence: [...(question?.evidence_consulted ?? [])],
+  };
+}
+
 /** Whether the current question offers a write-your-own row. */
 export function allowsWriting(state: FormState): boolean {
   return Boolean(current(state)?.options.some((option) => option.free));

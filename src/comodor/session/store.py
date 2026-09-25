@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import json
 import secrets
+import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 from ..providers.base import Message, Role, ToolCall
 from ..safety.redact import redact
@@ -42,6 +43,16 @@ class SessionMeta:
     #: state, not an event: only the latest version is of any use, and the
     #: transcript is append-only by design.
     todos: list[dict[str, str]] = field(default_factory=list)
+    #: Present only on a stateless run's continuation — a `comodor run`, a
+    #: scheduled job or a webhook event that stopped for a decision:
+    #: `{"decision_refs": [...], "mode": "..."}`. Every ref the continuation
+    #: ever issued (none is removed on resolution), and the safety mode it
+    #: stopped in. `cwd` is its workspace; `provider` and `model` are only
+    #: where it came from. Absent — and not written — on every other session,
+    #: so an ordinary meta file keeps exactly its old keys, and an older
+    #: Comodor, which refuses a field it does not know, skips a continuation
+    #: instead of listing it.
+    continuation: dict[str, Any] | None = None
 
     @property
     def when(self) -> str:
@@ -102,13 +113,64 @@ class SessionStore:
             ],
             "at": time.time(),
         }
+        # A question form, as it was shown and how it ended. Additive: a
+        # record written before this key existed reads back exactly as it
+        # did, and a reader that does not know the key ignores it.
+        form = message.meta.get("question") if message.meta else None
+        if isinstance(form, dict):
+            record["question"] = form
+        # A spill path the conversation was given. Additive, like `question`:
+        # a record written before this key existed reads back unchanged. Kept
+        # so a resumed session still protects the file its pointer names from
+        # pruning (FR-089).
+        spill = message.meta.get("spill") if message.meta else None
+        if isinstance(spill, str) and spill:
+            record["spill"] = spill
+        # Where a USER-role message came from. The loop's own prompts
+        # (compaction brief, completion correction, plan restatement) are
+        # marked; without the mark surviving the round trip a resumed session
+        # would treat model-written text as something the person said, and the
+        # memory tool could persist it as a `user_statement` (FR-066).
+        if message.meta.get("synthetic"):
+            record["synthetic"] = True
+        if message.meta.get("compacted"):
+            record["compacted"] = True
+        # A deduplicated reference or a delta names the earlier full result it
+        # was written against. That link is a promise the content is still in
+        # the conversation, and it is what compaction and the budget manager
+        # protect; without it a resumed session could summarise the base away
+        # and leave the pointer standing for nothing (FR-100, FR-101).
+        for key in ("reference", "delta_base"):
+            value = message.meta.get(key) if message.meta else None
+            if isinstance(value, str) and value:
+                record[key] = value
+        if message.meta.get("delta"):
+            record["delta"] = True
+        # The source a tool message observed: the file it was about and the
+        # fingerprint of what was there. Without them a resumed observation
+        # cannot be tied to a file, so a learned item resting on it could
+        # never be invalidated when that file changes (FR-060, FR-114).
+        for key in ("path", "fingerprint"):
+            value = message.meta.get(key) if message.meta else None
+            if isinstance(value, str) and value:
+                record[key] = value
+        # A withheld result keeps its path and fingerprint but its content is a
+        # retrieval pointer, not the full result. The mark has to survive the
+        # round trip or `_resident()` mistakes the note for a full copy and a
+        # reread is replaced with a reference to content that is not there.
+        if message.meta.get("withheld"):
+            record["withheld"] = True
         with self.path_for(session_id).open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def save_meta(self, meta: SessionMeta) -> None:
         meta.updated_at = time.time()
+        record = asdict(meta)
+        if record.get("continuation") is None:
+            # An ordinary session: its file keeps the keys it always had.
+            record.pop("continuation", None)
         self.meta_path(meta.id).write_text(
-            json.dumps(asdict(meta), ensure_ascii=False, indent=2), encoding="utf-8")
+            json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # -- reading ---------------------------------------------------------- #
 
@@ -119,6 +181,25 @@ class SessionStore:
         messages: list[Message] = []
         for record in _read_jsonl(path):
             try:
+                meta: dict[str, Any] = {}
+                if isinstance(record.get("question"), dict):
+                    meta["question"] = record["question"]
+                if isinstance(record.get("spill"), str) and record["spill"]:
+                    meta["spill"] = record["spill"]
+                if record.get("synthetic"):
+                    meta["synthetic"] = True
+                if record.get("compacted"):
+                    meta["compacted"] = True
+                for key in ("reference", "delta_base"):
+                    if isinstance(record.get(key), str) and record[key]:
+                        meta[key] = record[key]
+                if record.get("delta"):
+                    meta["delta"] = True
+                for key in ("path", "fingerprint"):
+                    if isinstance(record.get(key), str) and record[key]:
+                        meta[key] = record[key]
+                if record.get("withheld"):
+                    meta["withheld"] = True
                 messages.append(Message(
                     role=Role(record.get("role", "user")),
                     content=record.get("content", ""),
@@ -129,6 +210,7 @@ class SessionStore:
                     tool_calls=[ToolCall(id=call.get("id", ""), name=call.get("name", ""),
                                          arguments=call.get("arguments") or {})
                                 for call in record.get("tool_calls") or []],
+                    meta=meta,
                 ))
             except (ValueError, TypeError):
                 continue
@@ -143,15 +225,49 @@ class SessionStore:
         except (ValueError, TypeError):
             return None
 
-    def list_sessions(self, limit: int = 30) -> list[SessionMeta]:
+    def list_sessions(self, limit: int = 30, *,
+                      include_continuations: bool = False) -> list[SessionMeta]:
+        """The stored sessions a person can pick from, newest first.
+
+        The one listing every surface reads — the terminal's resume list, the
+        web sidebar, ACP and insights. A stateless run's continuation is not a
+        session anybody opened, so it is left out here, once, for all of them.
+        Internal lookup asks for it explicitly.
+        """
         metas: list[SessionMeta] = []
         for path in sorted(self.root.glob("*.meta.json"), reverse=True):
             meta = self.load_meta(path.name.removesuffix(".meta.json"))
-            if meta is not None:
+            if meta is not None and (include_continuations
+                                     or meta.continuation is None):
                 metas.append(meta)
             if len(metas) >= limit:
                 break
         return sorted(metas, key=lambda item: item.updated_at, reverse=True)
+
+    def is_continuation(self, session_id: str) -> bool:
+        meta = self.load_meta(session_id)
+        return meta is not None and meta.continuation is not None
+
+    def find_continuation(self, decision_ref: str) -> SessionMeta | None:
+        """The one continuation that issued `decision_ref`, or None.
+
+        Exact membership, nothing else: not the most recent continuation, not
+        the one in this workspace, not one whose question reads alike. A ref
+        that two continuations claim cannot be resolved and is refused rather
+        than settled by picking one.
+        """
+        matches = [meta for meta in self.list_sessions(
+                       limit=sys.maxsize, include_continuations=True)
+                   if meta.continuation is not None
+                   and any(ref == decision_ref
+                           for ref in _refs_of(meta.continuation))]
+        if len(matches) > 1:
+            raise UnresolvableRef(decision_ref)
+        return matches[0] if matches else None
+
+    def decisions(self, session_id: str) -> dict[str, "RecordedDecision"]:
+        """What a stored session's form records say about each decision."""
+        return decision_states(self.load(session_id))
 
     def delete(self, session_id: str) -> bool:
         removed = False
@@ -183,6 +299,9 @@ class SessionStore:
                     lines += [f"> **{call.name}** "
                               f"`{json.dumps(call.arguments, ensure_ascii=False)[:200]}`", ""]
             elif message.role is Role.TOOL:
+                form = message.meta.get("question") if message.meta else None
+                if isinstance(form, dict):
+                    lines += _question_lines(form)
                 status = "failed" if message.is_error else "ok"
                 body = message.content[:2000]
                 lines += [f"<details><summary>{message.name} ({status})</summary>", "",
@@ -203,6 +322,123 @@ class SessionStore:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
         return target
+
+
+def _question_lines(form: dict[str, Any]) -> list[str]:
+    """A question form in an export: what was asked, what was offered, what
+    came back, and how it ended — as it was, not as the model summarised it.
+
+    Every option the person saw is listed, the write-your-own row included,
+    and a question that was cancelled, expired or unattended says so rather
+    than reading as answered.
+    """
+    outcome = str(form.get("outcome", ""))
+    ended = {"answered": "answered", "cancelled": "cancelled — left unresolved",
+             "expired": "expired — left unresolved",
+             "unattended": "unattended — nobody could answer; left unresolved"}
+    lines = ["### Question", ""]
+    answers = {str(entry.get("header", "")): entry for entry in form.get("answers") or []
+               if isinstance(entry, dict)}
+    for question in form.get("questions") or []:
+        if not isinstance(question, dict):
+            continue
+        lines.append(f"**{question.get('header', '')}** — {question.get('prompt', '')}")
+        for option in question.get("options") or []:
+            if not isinstance(option, dict):
+                continue
+            label = str(option.get("label", ""))
+            note = " *(write your own)*" if option.get("free") else ""
+            lines.append(f"- {label}{note}")
+        given = answers.get(str(question.get("header", "")))
+        chosen = [str(c) for c in (given or {}).get("chosen") or []]
+        written = str((given or {}).get("written") or "").strip()
+        if chosen or written:
+            answer = ", ".join(chosen + ([written] if written else []))
+            lines.append(f"- **Answer:** {answer}")
+        else:
+            lines.append("- **Answer:** none")
+        lines.append("")
+    lines += [f"*Outcome: {ended.get(outcome, outcome or 'unknown')}*", ""]
+    return lines
+
+
+class UnresolvableRef(LookupError):
+    """More than one continuation claims one decision_ref."""
+
+
+def _refs_of(continuation: dict[str, Any]) -> list[str]:
+    refs = continuation.get("decision_refs") if isinstance(continuation, dict) else None
+    return [ref for ref in refs if isinstance(ref, str)] if isinstance(refs, list) else []
+
+
+@dataclass
+class RecordedDecision:
+    """One decision as a session's form records describe it."""
+
+    ref: str
+    #: `open` — the latest record ended cancelled, expired or unattended with
+    #: no answer; `stale` — an answer for it is on record, so it is closed.
+    status: str
+    #: The question as it was shown: prompt, header, options, reason.
+    question: dict[str, Any]
+    outcome: str
+    origin: str
+
+
+def decision_states(messages: Iterable[Message]) -> dict[str, RecordedDecision]:
+    """Each decision a transcript raised, read from its form records.
+
+    The unresolved set is derived, not stored: every form leaves a record on
+    its message (`message.meta["question"]`), and the record carries each
+    question's `decision_ref`, the answers and how the form ended. A decision
+    is open while its latest record ended without an answer, and stale once an
+    answer for it is on record — an answer is final. A ref the records never
+    name is simply absent: unknown to this session.
+    """
+    from ..agent.evidence import well_formed_ref
+
+    found: dict[str, RecordedDecision] = {}
+    for message in messages:
+        form = message.meta.get("question") if message.meta else None
+        if not isinstance(form, dict):
+            continue
+        outcome = str(form.get("outcome") or "")
+        origin = str(form.get("origin") or "model_ask")
+        answers = [entry for entry in form.get("answers") or []
+                   if isinstance(entry, dict)]
+        for question in form.get("questions") or []:
+            if not isinstance(question, dict):
+                continue
+            ref = question.get("decision_ref")
+            if not well_formed_ref(ref):
+                continue
+            earlier = found.get(ref)
+            if earlier is not None and earlier.status == "stale":
+                continue
+            if _answered(question, answers):
+                status = "stale"
+            elif outcome in ("answered", "cancelled", "expired", "unattended"):
+                # Blank is not an answer, whatever the form's overall outcome.
+                status = "open"
+            else:
+                continue
+            found[ref] = RecordedDecision(ref=ref, status=status, question=question,
+                                          outcome=outcome, origin=origin)
+    return found
+
+
+def _answered(question: dict[str, Any], answers: list[dict[str, Any]]) -> bool:
+    """Whether the record holds a real answer to this question — matched by
+    its ref where the answer names one, otherwise by the form's header."""
+    ref = question.get("decision_ref")
+    header = str(question.get("header", ""))
+    for answer in answers:
+        named = answer.get("decision_ref")
+        if (named == ref) if named else (str(answer.get("header", "")) == header):
+            chosen = [str(c) for c in answer.get("chosen") or [] if str(c).strip()]
+            if chosen or str(answer.get("written") or "").strip():
+                return True
+    return False
 
 
 def _read_jsonl(path: Path) -> Iterator[dict[str, Any]]:

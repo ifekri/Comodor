@@ -486,3 +486,74 @@ def test_a_project_may_not_add_itself_to_the_list():
 
     assert "slack" not in kept
     assert "slack" in refused
+
+
+# --------------------------------------------------------------------------- #
+# T187 — a block action carrying the ref resumes that decision; text never does
+# --------------------------------------------------------------------------- #
+
+
+def _recording(talking, user="U0000001"):
+    talk = talking._conversation(user)
+    talk.session.resumed = []
+    talk.session.sent = []
+    talk.session.refuse = None
+
+    def resume_decision(ref, *, option=None, written=""):
+        if talk.session.refuse is not None:
+            raise talk.session.refuse
+        talk.session.resumed.append((ref, option, written))
+        return False
+
+    def send(text, images=None, decisions=None, decision_answers=None):
+        talk.session.sent.append((text, decision_answers))
+        return False
+
+    talk.session.resume_decision = resume_decision
+    talk.session.send = send
+    # A follow loop that is started anyway ends at once instead of polling an
+    # empty stream until its patience runs out.
+    talk.session.wait_for = lambda cursor, timeout=8.0: [{"kind": "turn_end"}]
+    return talk
+
+
+def _action(value, user="U0000001"):
+    return {"type": "block_actions", "user": {"id": user}, "channel": {"id": "D1"},
+            "actions": [{"action_id": value, "value": value}], "message": {}}
+
+
+def test_a_block_action_resumes_exactly_its_decision(talking):
+    talk = _recording(talking)
+    talking._on_action(_action("da:dr-sl-1:1"))
+    assert talk.session.resumed == [("dr-sl-1", 1, "")]
+    assert talk.session.sent == []
+
+
+def test_free_text_in_slack_is_a_new_request_never_an_answer(talking):
+    talk = _recording(talking)
+    talking._on_event(dm(text="PostgreSQL"))
+    assert talk.session.resumed == []
+    assert talk.session.sent and talk.session.sent[0][1] is None
+
+
+def test_a_refused_slack_answer_is_reported(talking):
+    from comodor.application import DecisionRejected
+
+    talk = _recording(talking)
+    talk.session.refuse = DecisionRejected("unknown", "no such decision: dr-sl-9",
+                                           ["dr-sl-9"])
+    talking._on_action(_action("da:dr-sl-9:0"))
+    assert "could not be used" in talking.slack.sent[-1]["text"]
+    assert "dr-sl-9" in talking.slack.sent[-1]["text"]
+
+
+def test_a_stopped_turn_offers_buttons_whose_action_names_the_ref(talking):
+    talk = _recording(talking)
+    talking._offer_decisions(talk, {"decisions": [
+        {"decision_ref": "dr-sl-2", "decision": "Which queue?",
+         "candidates": ["Redis", "RabbitMQ"]}]})
+    blocks = talking.slack.sent[-1]["blocks"]
+    ids = [element["action_id"] for block in blocks if block["type"] == "actions"
+           for element in block["elements"]]
+    assert ids == ["da:dr-sl-2:0", "da:dr-sl-2:1"]
+    assert any("dr-sl-2" in str(block) for block in blocks if block["type"] == "section")

@@ -12,6 +12,7 @@ from comodor.learning import BrainStore, LearningEngine
 from comodor.learning.bm25 import BM25Index, similarity, tokenize
 from comodor.learning.reflect import extract_json, parse_reflection
 from comodor.learning.store import Lesson, score
+from comodor.providers.base import Message
 from comodor.providers.fake import Script
 from comodor.providers.gateway import Gateway
 from comodor.safety import PermissionEngine
@@ -96,9 +97,10 @@ def test_score_prefers_a_trusted_lesson_over_a_slightly_better_match():
 
 def test_store_round_trip_and_search(tmp_path):
     store = BrainStore(tmp_path / "brain.db")
-    store.add_lesson(Lesson(kind="pitfall", trigger="running pip on windows",
+    store.add_lesson(Lesson(provenance="user_statement",
+                            kind="pitfall", trigger="running pip on windows",
                             guidance="Use python -m pip so the right interpreter runs."))
-    store.add_lesson(Lesson(kind="fact", trigger="the database",
+    store.add_lesson(Lesson(provenance="user_statement", kind="fact", trigger="the database",
                             guidance="Migrations live in alembic/versions."))
 
     hits = store.search_lessons("pip install on windows")
@@ -109,7 +111,7 @@ def test_store_round_trip_and_search(tmp_path):
 
 def test_credit_updates_win_and_loss_counts(tmp_path):
     store = BrainStore(tmp_path / "brain.db")
-    lesson = store.add_lesson(Lesson(guidance="something useful"))
+    lesson = store.add_lesson(Lesson(provenance="user_statement", guidance="something useful"))
     store.credit([lesson.id], won=True)
     store.credit([lesson.id], won=False)
     store.flush()                       # reinforcement is queued, not inline
@@ -121,8 +123,9 @@ def test_credit_updates_win_and_loss_counts(tmp_path):
 
 def test_consolidate_prunes_decayed_lessons_but_spares_new_ones(tmp_path):
     store = BrainStore(tmp_path / "brain.db")
-    doomed = store.add_lesson(Lesson(guidance="a belief that never worked out"))
-    fresh = store.add_lesson(Lesson(guidance="brand new observation"))
+    doomed = store.add_lesson(Lesson(provenance="user_statement",
+                                     guidance="a belief that never worked out"))
+    fresh = store.add_lesson(Lesson(provenance="user_statement", guidance="brand new observation"))
 
     # Age the first one and give it a losing record, directly in the database so
     # the test does not depend on how the dataclass defaults are ordered.
@@ -194,7 +197,7 @@ def test_taught_lessons_are_pinned_and_always_recalled(config, bus):
 def test_playbook_respects_the_token_budget(config, bus):
     engine = LearningEngine(config, bus)
     for index in range(20):
-        engine.store.add_lesson(Lesson(
+        engine.store.add_lesson(Lesson(provenance="user_statement",
             scope=engine.write_scope, trigger=f"situation {index}",
             guidance="a fairly long piece of guidance " * 12, confidence=0.8))
     lessons = engine.store.all_lessons()
@@ -215,14 +218,17 @@ def test_playbook_respects_the_token_budget(config, bus):
 def test_duplicate_lessons_merge_instead_of_accumulating(config, bus):
     engine = LearningEngine(config, bus)
     first = Lesson(scope=engine.write_scope, trigger="running the suite",
-                   guidance="Use pytest -q rather than unittest.", confidence=0.5)
+                   guidance="Use pytest -q rather than unittest.", confidence=0.5,
+                   provenance="user_statement")
     engine.store.add_lesson(first)
 
     restated = Lesson(scope=engine.write_scope, trigger="running tests",
                       guidance="Prefer pytest -q over unittest when running tests.")
-    stored, merged = engine._absorb([restated])
+    said = [Message.user("prefer pytest -q over unittest when running tests")]
+    stored, merged, refused = engine._absorb([restated], said)
 
     assert stored == []
+    assert refused == []
     assert merged == 1
     assert len(engine.store.all_lessons()) == 1
     assert engine.store.all_lessons()[0].confidence > 0.5
@@ -231,7 +237,7 @@ def test_duplicate_lessons_merge_instead_of_accumulating(config, bus):
 
 def test_feedback_moves_confidence(config, bus):
     engine = LearningEngine(config, bus)
-    lesson = engine.store.add_lesson(Lesson(scope=engine.write_scope,
+    lesson = engine.store.add_lesson(Lesson(provenance="user_statement", scope=engine.write_scope,
                                             guidance="a claim about the code"))
     before = engine.store.all_lessons()[0].effective_confidence()
     engine.feedback([lesson], good=True)
@@ -271,12 +277,16 @@ def test_a_task_teaches_a_lesson_that_the_next_task_recalls(config, bus):
     agent = AgentLoop(config, gateway, ToolRegistry(), bus,
                       PermissionEngine(config, bus), Conversation(), memory)
 
-    agent.run("run the test suite")
+    # The lesson is admissible because the person said it: reflection
+    # only distils what the transcript already holds (FR-056).
+    agent.run("run the test suite — run pytest from the repository root, "
+              "running it from src/ cannot import the package")
     memory.wait_for_reflection(timeout=10.0)
 
     lessons = memory.store.all_lessons()
     assert len(lessons) == 1, "reflection should have stored exactly one lesson"
     assert "repository root" in lessons[0].guidance
+    assert lessons[0].provenance == "user_statement"
 
     # A fresh conversation, so nothing but the brain can carry the knowledge over.
     agent.conversation = Conversation()
@@ -301,7 +311,7 @@ def test_a_failed_task_penalises_the_lessons_it_relied_on(config, bus):
     config.learning.reflect = False
     gateway = Gateway(config, scripts=[Script(error="provider down")])
     memory = LearningEngine(config, bus, gateway)
-    memory.store.add_lesson(Lesson(
+    memory.store.add_lesson(Lesson(provenance="user_statement",
         scope=memory.write_scope, trigger="deploying the service",
         guidance="Deploy with the makefile target, not the raw docker command."))
     agent = AgentLoop(config, gateway, ToolRegistry(), bus,
@@ -341,7 +351,8 @@ def test_reflection_asks_the_model_before_the_review_does(config, bus):
     agent = AgentLoop(config, gateway, ToolRegistry(), bus,
                       PermissionEngine(config, bus), Conversation(), memory)
 
-    agent.run("run the test suite")
+    agent.run("run the test suite — run pytest from the repository root, "
+              "running it from src/ cannot import the package")
     memory.wait_for_reflection(timeout=10.0)
 
     provider = gateway.provider("fake")

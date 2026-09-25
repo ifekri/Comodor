@@ -485,6 +485,51 @@ def test_a_permission_nobody_answers_is_a_refusal(driven, tmp_path, monkeypatch)
     assert request.wait(timeout=3) == "no"
 
 
+def test_a_question_form_is_not_shown_as_a_yes_no_permission_prompt(driven, tmp_path):
+    """ACP has no request shape for a structured question form.
+
+    The only thing an agent may ask a client is a permission prompt, whose
+    options are allow/reject choices. A form put there, or answered with
+    "yes"/"no", would be a lie about what was asked and what was chosen, so
+    the form fails honestly: the request resolves as unattended and the turn
+    reports the decision as still needed.
+    """
+    from comodor import questions as forms
+    from comodor.events import Request
+
+    agent, out = driven
+    project = tmp_path / "p"
+    project.mkdir()
+    session = agent.sessions[agent.session_new({"cwd": str(project)})["sessionId"]]
+
+    request = Request(id="q-1", kind="questions", prompt="Which database?",
+                      options=[], meta={"questions": [{"header": "DB",
+                      "prompt": "Which database?", "options": []}]})
+    session._ask(request)
+
+    asked = [m for m in out.messages
+             if m.get("method") == "session/request_permission"]
+    assert asked == [], "a form is not a permission prompt"
+    assert request.wait(timeout=3) == forms.UNATTENDED
+
+
+def test_closing_a_session_leaves_a_question_form_open_not_answered(driven, tmp_path):
+    """A question nobody answered is unattended, never an invented "no"."""
+    from comodor import questions as forms
+    from comodor.events import Request
+
+    agent, _ = driven
+    project = tmp_path / "p"
+    project.mkdir()
+    session = agent.sessions[agent.session_new({"cwd": str(project)})["sessionId"]]
+    request = Request(id="q-2", kind="questions", prompt="?", options=[])
+    session._pending[request.id] = request
+
+    session.close()
+
+    assert request.wait(timeout=3) == forms.UNATTENDED
+
+
 def test_closing_a_session_answers_anything_still_waiting(driven, tmp_path):
     """A worker blocked on a prompt nobody will ever answer is a process that
     does not exit."""
@@ -639,3 +684,119 @@ def test_login_is_refused_because_none_is_offered(driven):
 
     with pytest.raises(RpcError):
         agent.login({})
+
+
+# --------------------------------------------------------------------------- #
+# a clarification is a structured outcome, not a completed turn (T134)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_clarification_turn_is_not_reported_as_completed(driven, config):
+    agent, out = driven
+    made = agent.session_new({"cwd": str(config.paths.project)})
+    session = agent.sessions[made["sessionId"]]
+
+    from comodor.agent.loop import TurnResult
+
+    result = TurnResult()
+    result.stopped = "clarification_required"
+    result.text = "A decision is needed."
+    result.clarification = {
+        "kind": "clarification_required", "decision": "Which database?",
+        "candidates": [], "evidence_consulted": [], "reason": "",
+        "outcome": "unattended"}
+    session.loop.run = lambda text: result
+
+    session.prompt([{"type": "text", "text": "do it"}])
+    assert session._turn.acquire(timeout=5), "the turn did not finish"
+    session._turn.release()
+
+    updates = [message["params"]["update"] for message in out.messages
+               if message.get("method") == "session/update"]
+    stops = [update.get("stopReason") for update in updates
+             if update.get("sessionUpdate") == "state_update"]
+    assert "end_turn" not in stops
+    assert "refusal" in stops, "a clarification-required turn is not completion"
+
+    clarifications = [update for update in updates
+                      if update.get("sessionUpdate") == "clarification_required"]
+    assert clarifications and clarifications[0]["outcome"] == "unattended"
+
+
+# --------------------------------------------------------------------------- #
+# T184 — ACP turns go through run_turn; decision answers ride `_meta`
+# --------------------------------------------------------------------------- #
+
+
+def _stopped_acp_session(agent, config, ref="dr-acp-1"):
+    """An ACP session whose conversation stopped for one decision."""
+    from comodor.providers.base import Message, ToolCall
+
+    made = agent.session_new({"cwd": str(config.paths.project)})
+    session = agent.sessions[made["sessionId"]]
+    call = ToolCall(id="q1", name="ask", arguments={})
+    tool = Message.tool(call_id="q1", name="ask", content="unresolved")
+    tool.meta["question"] = {
+        "questions": [{"prompt": "Which database?", "header": "Database",
+                       "multi": False, "reason": "persisted_state", "decision_ref": ref,
+                       "options": [{"label": "SQLite"}, {"label": "PostgreSQL"},
+                                   {"label": "Something else", "free": True}]}],
+        "answers": [], "outcome": "unattended", "origin": "model_ask",
+        "state": "blocked"}
+    session.conversation.extend([Message.user("Set up db.py"),
+                                 Message.assistant("One question.", tool_calls=[call]),
+                                 tool])
+    return made["sessionId"], session
+
+
+def test_a_decision_answer_in_the_prompt_metadata_resumes_the_session(driven, config):
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+    from comodor.providers.gateway import Gateway
+    from comodor.session.store import decision_states
+
+    agent, out = driven
+    session_id, session = _stopped_acp_session(agent, config)
+    session.loop.gateway = Gateway(session.config, scripts=[
+        Script(text="Writing.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "db.py", "content": "ENGINE = 'sqlite'\n"})]),
+        Script(text="Done.")])
+    agent.session_prompt({"sessionId": session_id, "prompt": [],
+                          "_meta": {"comodor": {"decision_answers": [
+                              {"decision_ref": "dr-acp-1", "chosen": ["SQLite"]}]}}})
+    assert session._turn.acquire(timeout=10), "the turn did not finish"
+    session._turn.release()
+    assert (config.paths.project / "db.py").read_text(encoding="utf-8") \
+        == "ENGINE = 'sqlite'\n"
+    assert decision_states(session.conversation.messages)["dr-acp-1"].status == "stale"
+
+
+@pytest.mark.parametrize("answers, kind", [
+    ([{"decision_ref": "dr-unknown", "chosen": ["SQLite"]}], "unknown"),
+    ("not a list", "malformed"),
+    ([{"decision_ref": "dr-acp-1", "chosen": ["MongoDB"]}], "invalid_answer"),
+])
+def test_a_refused_batch_is_invalid_params_and_nothing_runs(driven, config, answers, kind):
+    from comodor.providers.fake import Script
+    from comodor.providers.gateway import Gateway
+
+    agent, out = driven
+    session_id, session = _stopped_acp_session(agent, config)
+    gateway = Gateway(session.config, scripts=[Script(text="should never run")])
+    session.loop.gateway = gateway
+    before = list(session.conversation.messages)
+    with pytest.raises(RpcError) as raised:
+        agent.session_prompt({"sessionId": session_id, "prompt": [],
+                              "_meta": {"comodor": {"decision_answers": answers}}})
+    assert raised.value.code == INVALID_PARAMS
+    assert raised.value.data["kind"] == kind
+    assert f"({kind})" in raised.value.message
+    assert session._turn.acquire(timeout=10)
+    session._turn.release()
+    assert session.conversation.messages == before
+    assert gateway.provider("fake").calls == []
+    updates = [m["params"]["update"] for m in out.messages
+               if m.get("method") == "session/update"]
+    assert not any(u.get("sessionUpdate") == "state_update" for u in updates), \
+        "a refused batch is an error to the request, not a turn"

@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -69,11 +70,24 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     run = sub.add_parser("run", help="run one task without the interface")
-    run.add_argument("task", help="what to do")
+    run.add_argument("task", nargs="?", default="",
+                     help="what to do (optional with --decision-answers)")
     run.add_argument("--json", action="store_true", help="emit a JSON result")
     run.add_argument("--yes", action="store_true",
                      help="approve file writes and commands automatically")
     run.add_argument("--max-steps", type=int, help="override the step limit")
+    run.add_argument(
+        "--interactions", default="",
+        help="JSON list of answers to script for question forms, applied in "
+             "order: \"answer\" (with an optional value, or values keyed by "
+             "question header), \"cancel\", \"expire\" or \"unattended\". "
+             "Nothing is scripted without it.")
+    run.add_argument(
+        "--decision-answers", default=None, metavar="PATH",
+        help="answer decisions an earlier run stopped for: a JSON list of "
+             "{\"decision_ref\", \"chosen\", \"written\"} objects, from PATH or "
+             "from stdin with -. The refs alone find the stopped run; it must "
+             "be resumed from the same workspace and in the same mode.")
 
     written = sub.add_parser(
         "help", help="what this is and how to use it, in full")
@@ -253,6 +267,96 @@ def _load_plugins(config: Config, bus: Any) -> Any:
     return manager
 
 
+def _scripted_interactions(raw: Any) -> list[Any]:
+    """The caller's scripted answers, in order. Empty when none were given.
+
+    The contract is a JSON list whose entries are either an action string
+    (`"cancel"`, `"expire"`, `"unattended"`, `"answer"`) or an object with an
+    `action` and, for an answer, a `value`. A headless run with an empty
+    script behaves exactly as it always has: every form is unattended.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, (list, tuple)):
+        return list(raw)
+    try:
+        parsed = json.loads(str(raw))
+    except ValueError:
+        return []
+    return list(parsed) if isinstance(parsed, list) else []
+
+
+def _apply_interaction(request: Any, action: Any, forms: Any) -> None:
+    """Do to a form what a person would have done. The tool does the rest.
+
+    Every branch resolves the *request* the way its surface would, so the ask
+    tool, the ledger and the loop produce the same lifecycle they do for a
+    real answer, a real dismissal, a real expiry or a real absence.
+    """
+    values: dict[str, str] = {}
+    if isinstance(action, dict):
+        verb = str(action.get("action", "")).strip().lower()
+        value = str(action.get("value", "") or "")
+        keyed = action.get("values")
+        if isinstance(keyed, dict):
+            values = {str(header): str(answer or "") for header, answer in keyed.items()}
+    else:
+        verb, value = str(action).strip().lower(), ""
+
+    if verb == "cancel":
+        request.answer(forms.CANCELLED)
+    elif verb == "expire":
+        request.expire()
+    elif verb == "answer":
+        request.answer(_answers_from_form(request, value, forms, values=values))
+    else:                                    # "unattended", or unrecognised
+        request.answer(forms.UNATTENDED)
+
+
+def _answers_from_form(request: Any, value: str, forms: Any,
+                       values: dict[str, str] | None = None) -> str:
+    """A real answer document, built from the form the model actually raised.
+
+    The question headers are the model's, so an answer must bind to them by
+    header rather than guess. `values` answers each question by its header.
+    A lone `value` is one answer, not one answer per question: it picks the
+    option it names on every question that offers it, and otherwise is
+    written into the first question's write-your-own row only — a framework
+    answer must not also land in an unrelated database question. A question
+    left with nothing takes its first offered option, or stays unanswered.
+    """
+    questions = forms.decode(request.meta.get("questions") or [])
+    keyed = dict(values or {})
+    answers = []
+    # A lone value that names an option somewhere is that choice, and only
+    # that; one that names nothing is free text for the first question.
+    free_text_for = (
+        questions[0].header
+        if value and not keyed and questions and not any(
+            value in [option.label for option in question.options if not option.free]
+            for question in questions)
+        else None)
+    for question in questions:
+        offered = [option.label for option in question.options if not option.free]
+        given = keyed.get(question.header, "")
+        if given and given in offered:
+            chosen, written = [given], ""
+        elif given:
+            chosen, written = [], given
+        elif value and value in offered:
+            chosen, written = [value], ""
+        elif question.header == free_text_for:
+            chosen, written = [], value
+        elif offered:
+            chosen, written = [offered[0]], ""
+        else:
+            chosen, written = [], ""
+        answers.append(forms.Answer(header=question.header,
+                                    prompt=question.prompt,
+                                    chosen=chosen, written=written))
+    return forms.encode_answers(answers)
+
+
 def run_headless(config: Config, args: argparse.Namespace) -> int:
     """One task, no TUI. Used by scripts, hooks and CI."""
     # Before anything can be printed. A Windows console is cp1252 by default,
@@ -281,6 +385,21 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     from .context_refs import Refusal, expand
     from .events import EventBus, Kind
     from .safety import Redactor
+
+    answers = None
+    source = getattr(args, "decision_answers", None)
+    if source is not None:
+        try:
+            answers = (sys.stdin.read() if source == "-"
+                       else Path(source).read_text(encoding="utf-8"))
+        except OSError as problem:
+            print(f"error: the decision answers could not be read: {problem}",
+                  file=sys.stderr)
+            return 1
+    elif not args.task:
+        print("error: `comodor run` needs a task, or --decision-answers to "
+              "resume a run that stopped for a decision", file=sys.stderr)
+        return 2
 
     if args.yes:
         config.safety.auto_approve_writes = True
@@ -315,6 +434,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     # first edit, or that nothing was ever read. The count was already
     # reported; the names cost nothing and are what makes it checkable.
     used: list[str] = []
+    interactions = _scripted_interactions(getattr(args, "interactions", ""))
 
     def observe(event: Any) -> None:
         if event.kind is Kind.TOOL_START:
@@ -322,7 +442,13 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
         elif event.kind is Kind.REQUEST:
             request = event.get("request")
             if request is not None and request.kind == "questions":
-                request.answer(forms.CANCELLED)
+                # Nobody is here. Unless the caller scripted what a person
+                # would do — answer, cancel, expire — the decision is reported
+                # as unattended and the run ends needing it, rather than
+                # carrying on without it. The scripted paths drive the same
+                # tool and lifecycle the interactive surfaces do.
+                action = interactions.pop(0) if interactions else "unattended"
+                _apply_interaction(request, action, forms)
 
     bus.subscribe(observe)
 
@@ -349,21 +475,36 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     # prompt pointed at a credentials file should not.
     secrets = Redactor([entry.api_key for entry in config.providers.values()
                         if entry.api_key])
-    try:
-        task, warning = expand(args.task, config.paths.project,
-                               context_limit=config.agent.context_limit,
-                               redact=secrets)
-    except Refusal as refusal:
-        print(f"refused: {refusal}", file=sys.stderr)
-        return 2
+    task, warning = "", ""
+    if args.task:
+        try:
+            task, warning = expand(args.task, config.paths.project,
+                                   context_limit=config.agent.context_limit,
+                                   redact=secrets)
+        except Refusal as refusal:
+            print(f"refused: {refusal}", file=sys.stderr)
+            return 2
     if warning:
         print(f"warning: {warning}", file=sys.stderr)
 
-    result = agent.run(task)
+    # A stateless run: it keeps nothing unless it stops for a decision, and
+    # then only a hidden continuation a later `--decision-answers` resumes by
+    # ref. `run_turn` owns both, and refuses a bad batch before any model call.
+    from .application import Binding, DecisionRejected, run_turn
+    from .session.store import SessionStore
+
+    try:
+        result = run_turn(agent, task, decision_answers=answers,
+                          store=SessionStore(config.paths.user / "sessions"),
+                          binding=Binding.of(config))
+    except DecisionRejected as refused:
+        _report_refusal(refused, args.json)
+        built.close()
+        return 1
     memory.wait_for_reflection(timeout=20.0)
 
     if args.json:
-        print(json.dumps({
+        payload = {
             "text": result.text,
             "ok": result.ok,
             "stopped": result.stopped,
@@ -371,20 +512,63 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
             "tool_calls": result.tool_calls,
             "tools": used,
             "error": result.error,
+            # What the completion gate could not see delivered (FR-037). A
+            # partial answer is qualified here rather than only on the
+            # terminal, so a script that reads `stopped` sees the same thing
+            # a person would.
+            "annotation": result.annotation,
             "usage": {
                 "input_tokens": result.usage.input_tokens,
                 "output_tokens": result.usage.output_tokens,
+                # What the provider served from its cache. Kept apart from
+                # `input_tokens` because it is billed differently and because
+                # the benchmark's paired report needs both halves (FR-076).
+                "cached_tokens": result.usage.cached_tokens,
+                # What the provider stored for next time. It is a separate,
+                # non-overlapping part of the prompt and is billed for cache
+                # creation, so a benchmark total that omits it understates the
+                # read for the providers that use it.
+                "written_tokens": result.usage.written_tokens,
                 "cost_usd": round(result.usage.cost_usd, 6),
             },
             "elapsed": round(result.elapsed, 2),
-        }, ensure_ascii=False, indent=2))
+            # The paired record: counts only, beside the outcome above.
+            "measurement": result.measurement.as_dict(),
+            # The mutation preflight's sanitized trace — fingerprints and
+            # bounded excerpts — so a wrong `allow` can be explained from the
+            # artifact without rerunning the model (spec 002, FR-013).
+            "preflight_traces": list(getattr(result, "preflight_traces", []) or []),
+        }
+        if result.clarification is not None:
+            # The structured clarification outcome rides its own block, so a
+            # dismissed question is never indistinguishable from the user
+            # cancelling the whole turn (contracts §C3; FR-123).
+            payload["clarification"] = result.clarification
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(result.text)
+        if result.annotation:
+            print(f"\n{result.annotation}")
         if result.error:
             print(f"\nerror: {result.error}", file=sys.stderr)
 
     built.close()
+    if result.stopped == "clarification_required":
+        # A distinct code for "a decision is still needed": not success (0),
+        # not an error (1), and not a cancelled turn (130).
+        return 3
     return 0 if result.ok else 1
+
+
+def _report_refusal(refused: Any, as_json: bool) -> None:
+    """A refused DecisionAnswer batch: what failed, and nothing else happened."""
+    print(f"error: decision answers refused ({refused.kind}): {refused}",
+          file=sys.stderr)
+    if refused.refs:
+        print("  refs: " + ", ".join(refused.refs), file=sys.stderr)
+    if as_json:
+        print(json.dumps({"text": "", "ok": False, "stopped": "error",
+                          "error": refused.as_dict()}, ensure_ascii=False, indent=2))
 
 
 def run_setup_command(config: Config, args: Any = None) -> int:

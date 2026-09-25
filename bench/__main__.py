@@ -8,13 +8,15 @@ inherited somebody's settings would produce a number about their machine.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
 from pathlib import Path
 
-from .report import write
-from .runner import run_task
+from . import baseline, integrity
+from .report import FAIL, PASS, sc012_comparison, write, write_blocked, write_paired, write_sc012
+from .runner import run_blocked, run_paired, run_task
 from .task import TaskError, load_tasks
 
 HERE = Path(__file__).resolve().parent
@@ -37,7 +39,39 @@ def main(argv: list[str] | None = None) -> int:
                         help="directory to move failed workspaces into")
     parser.add_argument("--dry-run", action="store_true",
                         help="load every task and print the suite, run nothing")
+    parser.add_argument("--strategy", choices=baseline.STRATEGIES,
+                        default=baseline.CURRENT,
+                        help="the context strategy to measure (default: current)")
+    parser.add_argument("--paired", action="store_true",
+                        help="run every task under both strategies and write the "
+                             "paired baseline report")
+    parser.add_argument("--blocked", action="store_true",
+                        help="run the single-optimization experiment: every "
+                             "configuration in every (task, try) block, in a "
+                             "counterbalanced order (T096); requires --only")
+    parser.add_argument("--checkpoint", default="",
+                        help="with --blocked: the JSONL file to append each "
+                             "attempt to and resume from (default: the label)")
+    parser.add_argument("--learning", action="store_true",
+                        help="switch the learning engine on for every attempt (off "
+                             "by default; each attempt still starts with an empty brain)")
+    parser.add_argument("--without", nargs="*", default=[],
+                        help="context optimizations to switch off, by name "
+                             "(dedup delta budget ranking summary_provenance log_summary)")
+    parser.add_argument("--label", default="",
+                        help="a name for this run, carried into the result files")
+    parser.add_argument("--sc012", default="", metavar="CANDIDATE",
+                        help="compare a paired result with --against under SC-012 "
+                             "(no provider or model; exits 0 PASS, 1 FAIL, "
+                             "2 UNDECIDABLE)")
+    parser.add_argument("--against", default="", metavar="BASELINE",
+                        help="with --sc012: the published paired baseline")
     args = parser.parse_args(argv)
+
+    # A comparison of two published results: it reads files and local history
+    # only, so it is settled before tasks, drift, credentials or a model.
+    if args.sc012 or args.against:
+        return _sc012(args)
 
     _load_env(ROOT / "src" / ".env")
 
@@ -66,18 +100,68 @@ def main(argv: list[str] | None = None) -> int:
 
     keep = Path(args.keep).resolve() if args.keep else None
 
-    print(f"{len(tasks)} tasks, {args.tries} attempts each, "
-          f"against {args.model} via {args.provider}\n")
-    started = time.monotonic()
-    outcomes = []
-    for index, task in enumerate(tasks, start=1):
-        print(f"[{index}/{len(tasks)}] {task.category}/{task.name}")
-        outcomes.append(run_task(task, provider=args.provider, model=args.model,
-                                 tries=args.tries, keep=keep))
+    # A scenario that has been weakened, shortened or re-labelled compared with
+    # its recorded fingerprint changes what the number means, and a run against
+    # a drifted suite is not a result about the agent. Refuse it here, before
+    # anything is measured, rather than let it reach a report.
+    drift = integrity.check()
+    if not drift.clean:
+        print("bench: benchmark scenarios have drifted from their record:\n"
+              + drift.describe()
+              + "\nRun `python -m bench.integrity record` only after reviewing "
+                "the change.", file=sys.stderr)
+        return 2
 
-    json_file, markdown_file = write(outcomes, HERE / "results",
-                                     provider=args.provider, model=args.model,
-                                     tries=args.tries)
+    if args.blocked:
+        if not args.only:
+            print("bench: --blocked needs an explicit --only cohort so the "
+                  "workload is stated, not inferred", file=sys.stderr)
+            return 2
+        started = time.monotonic()
+        checkpoint = (Path(args.checkpoint) if args.checkpoint
+                      else HERE / "results" / f"{args.label or 'blocked'}.checkpoint.jsonl")
+        run = run_blocked(tasks, provider=args.provider, model=args.model,
+                          tries=args.tries, keep=keep, learning=args.learning,
+                          checkpoint=checkpoint)
+        _, markdown_file = write_blocked(run, HERE / "results", label=args.label)
+        passed = sum(1 for entry in run.attempts if entry.passed)
+        print(f"\n{passed}/{len(run.attempts)} attempts passed "
+              f"({len(run.blocks())} blocks of {len(run.configurations)}) "
+              f"in {(time.monotonic() - started) / 60:.0f} minutes")
+        print(f"{markdown_file}")
+        return 0
+
+    if args.paired:
+        started = time.monotonic()
+        print(f"{len(tasks)} tasks, {args.tries} attempts each, "
+              f"against {args.model} via {args.provider}, "
+              f"strategy {' and '.join(baseline.STRATEGIES)}, "
+              f"counterbalanced in (task, try) blocks\n")
+        checkpoint = (Path(args.checkpoint) if args.checkpoint
+                      else HERE / "results" / f"paired-{args.label or 'paired'}.checkpoint.jsonl")
+        current, naive = run_paired(
+            tasks, provider=args.provider, model=args.model, tries=args.tries,
+            keep=keep, learning=args.learning, checkpoint=checkpoint)
+        json_file, markdown_file = write_paired(
+            current, naive, HERE / "results", provider=args.provider,
+            model=args.model, tries=args.tries)
+        outcomes = current
+    else:
+        started = time.monotonic()
+        print(f"{len(tasks)} tasks, {args.tries} attempts each, "
+              f"against {args.model} via {args.provider}, "
+              f"strategy {args.strategy}\n")
+        outcomes = []
+        for index, task in enumerate(tasks, start=1):
+            print(f"[{args.strategy}] [{index}/{len(tasks)}] {task.category}/{task.name}",
+                  flush=True)
+            outcomes.append(run_task(task, provider=args.provider, model=args.model,
+                                     tries=args.tries, keep=keep,
+                                     strategy=args.strategy, learning=args.learning,
+                                     without=tuple(args.without)))
+        json_file, markdown_file = write(outcomes, HERE / "results",
+                                         provider=args.provider, model=args.model,
+                                         tries=args.tries, label=args.label)
 
     total = sum(one.passed for one in outcomes)
     of = sum(one.tries for one in outcomes)
@@ -87,12 +171,39 @@ def main(argv: list[str] | None = None) -> int:
           f"minutes")
     print(f"{markdown_file}")
 
-    kept = [path for one in outcomes for path in one.kept]
+    groups = [current, naive] if args.paired else [outcomes]
+    kept = [path for group in groups for one in group for path in one.kept]
     if kept:
         print(f"\n{len(kept)} failed workspace(s) kept:")
         for path in kept[:10]:
             print(f"  {path}")
     return 0
+
+
+def _sc012(args: argparse.Namespace) -> int:
+    if not args.sc012 or not args.against:
+        print("bench: --sc012 <candidate.json> needs --against <baseline.json>",
+              file=sys.stderr)
+        return 2
+    documents = []
+    for file in (args.sc012, args.against):
+        try:
+            document = json.loads(Path(file).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as problem:
+            print(f"bench: cannot read {file}: {problem}", file=sys.stderr)
+            return 2
+        if not isinstance(document, dict):
+            print(f"bench: {file} is not a result document", file=sys.stderr)
+            return 2
+        documents.append(document)
+    result = sc012_comparison(*documents, candidate_file=args.sc012,
+                              baseline_file=args.against)
+    json_file, markdown_file = write_sc012(result, HERE / "results",
+                                           label=args.label or Path(args.sc012).stem)
+    print(f"SC-012: {result['result']}")
+    print(json_file)
+    print(markdown_file)
+    return {PASS: 0, FAIL: 1}.get(result["result"], 2)
 
 
 def _load_env(path: Path) -> None:

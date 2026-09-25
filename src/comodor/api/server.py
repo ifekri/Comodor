@@ -229,6 +229,10 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
             mode = str(comodor.get("mode") or "").strip()
             if mode and not server.config.api.allow_mode_switch:
                 mode = ""
+            # Answers to decisions this session stopped for, by decision_ref.
+            # Passed only when present, so a plain request is exactly as before.
+            answering = ({"decision_answers": comodor["decision_answers"]}
+                         if "decision_answers" in comodor else {})
 
             session_id = str(self.headers.get("X-Comodor-Session") or "")
             talk = server.map.for_session(session_id)
@@ -237,16 +241,28 @@ def _handler_for(server: Server) -> type[BaseHTTPRequestHandler]:
             request_id = f"chatcmpl-{secrets.token_hex(8)}"
             try:
                 outcome = talk.run(text, prior=prior, mode=mode,
-                                   patience=TURN_PATIENCE)
+                                   patience=TURN_PATIENCE, **answering)
             except schema.BadRequest as problem:
                 self._json(400, schema.error_body(str(problem)))
                 return
 
             finish = _finish_reason(outcome)
             usage = schema.usage_of(outcome.get("result"))
-            extra = {"comodor": {"session": talk.id, "steps": outcome.get("steps", 0),
-                                 "stopped": outcome.get("stopped", "done"),
-                                 "truncated": finish == "length"}}
+            comodor_block = {"session": talk.id, "steps": outcome.get("steps", 0),
+                             "stopped": outcome.get("stopped", "done"),
+                             "truncated": finish == "length"}
+            clarification = outcome.get("clarification")
+            if isinstance(clarification, dict) and clarification:
+                # The structured outcome (including `clarification.outcome`)
+                # rides the extension block, so a standard client keeps its
+                # existing behaviour (contracts §C4; FR-123).
+                comodor_block["clarification"] = clarification
+            annotation = outcome.get("annotation")
+            if isinstance(annotation, str) and annotation:
+                # The completion gate's unresolved work, so an API client can
+                # tell a partial answer from a complete one (FR-037).
+                comodor_block["annotation"] = annotation
+            extra = {"comodor": comodor_block}
 
             if stream:
                 self._stream_sse(created, wanted, request_id, outcome, usage,
@@ -344,12 +360,17 @@ def _pieces(text: str) -> list[str]:
 def _finish_reason(outcome: dict[str, Any]) -> str:
     """``stop`` or ``length``, in OpenAI's vocabulary.
 
-    ``length`` is "there was more to say": a turn the step cap stopped
-    before it finished. The loop's tool calls are never handed to the
-    client even then — a chat client that received a ``tool_calls`` answer
-    would try to answer them, and it cannot; the tools run on this machine.
-    The note that the turn was cut is in the ``comodor`` block, where a
-    frontend that cares can find it and a standard client is untouched.
+    The OpenAI-compatible envelope uses only standard values. ``length`` is
+    "there was more to say": a turn the step cap stopped before it finished.
+    The loop's tool calls are never handed to the client even then — a chat
+    client that received a ``tool_calls`` answer would try to answer them, and
+    it cannot; the tools run on this machine.
+
+    A clarification-required turn maps to ``stop`` on the envelope, and its
+    distinct state travels in the ``comodor`` extension block
+    (``comodor.stopped = "clarification_required"`` and
+    ``comodor.clarification``) — where non-standard information already goes
+    so that a standard client is untouched (contracts §C4; FR-123).
     """
     stopped = str(outcome.get("stopped") or "done")
     if stopped in ("max_steps", "budget", "timeout"):

@@ -1,0 +1,294 @@
+{
+  "careful-cancelled": {
+    "budgets": {
+      "CATEGORY": "careful",
+      "MAX_STEPS": "20",
+      "TIMEOUT": "300.0"
+    },
+    "check.py": "2845408db2992daec31d6302ef702b11bc2b595aebdb7eb89dee1c6d24d3571d",
+    "hidden": {},
+    "repo": {
+      "README.md": "2f96233d63a860f9131a4d82d74c0be4861f12020ef0a4834d286615783abb72",
+      "release.py": "d38d1da4f4ae8c8d3dc7a4171783d6aa7310580c7c03c4789d306d51dd1fb753"
+    },
+    "task.md": "cf7363e5e63f12b45fbaaf19008193b7aa7e58e481b2c7e86097739f6d8f10a9"
+  },
+  "careful-cannot-be-done": {
+    "budgets": {
+      "CATEGORY": "careful",
+      "MAX_STEPS": "25",
+      "TIMEOUT": "420.0"
+    },
+    "check.py": "cdbf74f5a6ca3034f86f1ed1814de18463d5192c8dcd324170ab6f3ceca59353",
+    "hidden": {},
+    "repo": {
+      "geocode.py": "fff4aa9c90c0013b9c3971db2fddee553c405e46c6d3959bac8416df44a71b4e",
+      "test_geocode.py": "393b163a18b28d89d021a0952e0362c076c273d8155502045c95256954c2562d"
+    },
+    "task.md": "7fac9ffa2e9e482195a9d78123b30379742306555093337737cd5d68edac8c23"
+  },
+  "careful-expired": {
+    "budgets": {
+      "CATEGORY": "careful",
+      "MAX_STEPS": "20",
+      "TIMEOUT": "300.0"
+    },
+    "check.py": "8522c6c6856590c36966583d05ab0b00dfaf89964f5d69af70b34b790e01379a",
+    "hidden": {},
+    "repo": {
+      "README.md": "2f96233d63a860f9131a4d82d74c0be4861f12020ef0a4834d286615783abb72",
+      "release.py": "d38d1da4f4ae8c8d3dc7a4171783d6aa7310580c7c03c4789d306d51dd1fb753"
+    },
+    "task.md": "cf7363e5e63f12b45fbaaf19008193b7aa7e58e481b2c7e86097739f6d8f10a9"
+  },
+  "careful-only-what-was-asked": {
+    "budgets": {
+      "CATEGORY": "careful",
+      "MAX_STEPS": "20",
+      "TIMEOUT": "300.0"
+    },
+    "check.py": "6d8dccee368684d8cd59a5551ff4500500c19ef93515d3cecebe38bd222cf9b3",
+    "hidden": {},
+    "repo": {
+      "exporter.py": "40c8393c2981d5273b9f7a0f268b0c95bb5941e4bd421d68d57395954e3499c7",
+      "importer.py": "0125e9efdcb6290bca46c8ebfb25b3bfbfd962d1959f524fc007a0927f2ff028",
+      "test_importer.py": "360108fc4acc342e2a3f4d5bd74e1690e4d550be3f2b15f28e17b5999db57e3d"
+    },
+    "task.md": "316df629d1760a93d223ba8ce6bf1715dc9166e64bbaf135112ac57aa8172645"
+  },
+  "careful-repo-settles-it": {
+    "budgets": {
+      "CATEGORY": "careful",
+      "MAX_STEPS": "15",
+      "TIMEOUT": "240.0"
+    },
+    "check.py": "de967b707ec91c0c2acffe340afa72eebb45e74da9ad63c72b38b443af6614d1",
+    "hidden": {},
+    "repo": {
+      "README.md": "4873c9d062a2c4d521bbefbce4051aeae9b8e8cb7fedd2b8def2fc57e35540f2",
+      "app.py": "895bade95747508519c7426ff68413a128f1c619f64fdc4da949f8fb61e9994e",
+      "config.py": "892d196adee992e528d99a1c104ce7017675fe08113ed56d90d6d6f0cc0d5eec"
+    },
+    "task.md": "48b748f1977a1a4e66dadda9687e92ddff60859e4575cc4a8b8728a5544dd2e0"
+  },
+  "careful-unattended": {
+    "budgets": {
+      "CATEGORY": "careful",
+      "MAX_STEPS": "20",
+      "TIMEOUT": "300.0"
+    },
+    "check.py": "77b5bc680c198e924a16bb6e2e6bbd02514adf61e8d628f98dd975c690d59e67",
+    "hidden": {},
+    "repo": {
+      "README.md": "2f96233d63a860f9131a4d82d74c0be4861f12020ef0a4834d286615783abb72",
+      "release.py": "d38d1da4f4ae8c8d3dc7a4171783d6aa7310580c7c03c4789d306d51dd1fb753"
+    },
+    "task.md": "c0992aab83a0a13d31922e865c34f590e47f5580417d6017cd59f77dbc9da3a7"
+  },
+  "careful-unknowable": {
+    "budgets": {
+      "CATEGORY": "careful",
+      "MAX_STEPS": "25",
+      "TIMEOUT": "420.0"
+    },
+    "check.py": "19e3ceffcdebb78a03393408edfb98a9568f9014066a9eb5c806ff2aeb17c2d5",
+    "hidden": {},
+    "repo": {
+      "README.md": "375d4f2f1d7fd0a54e71d517e51399b5d2a2433baa12ca814c57ff7f8c15c5fe",
+      "client.py": "84726c61f9045260e2156f38fe56aa725ca1bae9c87c521a8309a812f7b1c2fc",
+      "settings.py": "ef9994b26efc53f141a1849b9aa5110c474214c8cd107bce1c463d6114cede74"
+    },
+    "task.md": "9d4ea3acc9749ff30c04e3e4462a5b9ccc09fbec6c3afae89c80e61a1d917843"
+  },
+  "feature-cli-flag": {
+    "budgets": {
+      "CATEGORY": "feature",
+      "MAX_STEPS": "25",
+      "TIMEOUT": "420.0"
+    },
+    "check.py": "2e31252d9c217cbbc6e56b23bfa61b338157db776ed4804a1147da5065558517",
+    "hidden": {},
+    "repo": {
+      "sample.txt": "a76e6ff5bfbe9eb0d4c74118fb5ab299a2711c4f1fc18d157cb81eb3564f78cd",
+      "wordcount.py": "1a6fa311e7e19b24c5c0abb290e7ef0fbd13e00529f2f7ce23bb1d09d50701ee"
+    },
+    "task.md": "02f20f88a7b120bbc41725a02678dbfbe7cd8a106d84c1588edfc51e4fe5cdf6"
+  },
+  "feature-retry-decorator": {
+    "budgets": {
+      "CATEGORY": "feature",
+      "MAX_STEPS": "30",
+      "TIMEOUT": "480.0"
+    },
+    "check.py": "37e6ea4ef6528585e9c95c1e4a3e9f835e7777ebd6cc07ef6d1cffa8906f0d00",
+    "hidden": {
+      "test_hidden_retry.py": "dcd5e5d4fdb1684149dfadcc81de4f6e7544cd489a457acb4272e8ca648c0a45"
+    },
+    "repo": {
+      "retry.py": "32c2d53ec608b9a4f38637350d6f5d318c8c3045acbf7c50c17165cadb9cedc2",
+      "test_retry.py": "ae41604a63ea5e9b6fe493b87760aa10a3ef9c6fc38b89f1582d7d12845089b3"
+    },
+    "task.md": "482380efe95c6b57a428cbf3db3135653695ace2335d7e9dd716e6743bcb82d8"
+  },
+  "find-the-definition": {
+    "budgets": {
+      "CATEGORY": "find",
+      "MAX_STEPS": "20",
+      "TIMEOUT": "300.0",
+      "WRITES": "False"
+    },
+    "check.py": "e4344a7cd1f4f75fd5d1ff1ab2397143587f7e526e50b91aaf765ba7610f5fb6",
+    "hidden": {},
+    "repo": {
+      "app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/billing.py": "f5937c33a2ef0f64a9c26d25c08afc82d0a91cf1edd3155b0d41bb4859eeff56",
+      "app/plans.py": "76b956d737c750f61e30ddddd1213d335b12737bc53b289c075791b9b3dab987",
+      "app/rates.py": "15933e5fc1d1bf075274372f35cc3b86e201c9f520687c96c39e9b6df69d1db7",
+      "report.py": "49a7ef39b8df4dcf6ffa59bfa87c58984078bc24b0c12f6890ad3a2e4df17032"
+    },
+    "task.md": "5ffc745c0e6fdc03fc6c6cf1f328c6a96b6dbfd0ce77d1492f9b44dadbe71b28"
+  },
+  "find-why-it-fails": {
+    "budgets": {
+      "CATEGORY": "find",
+      "MAX_STEPS": "20",
+      "TIMEOUT": "300.0",
+      "WRITES": "False"
+    },
+    "check.py": "61ec2660fe5190c07f8a3166f0a4dcc1803ca67ff41db1eca8c992509a80b35a",
+    "hidden": {},
+    "repo": {
+      "cache.py": "0c7ab4e5f9c6aa5a7dc7782298df3027445637ed647b6bda5653f521a8b4657c",
+      "test_cache.py": "11b50259ff1697d8a9f9abafc50946a3357eeb47297c0881a4b6747d12767518"
+    },
+    "task.md": "537c4bf74a235169efff0ff150a8ea57d477146da0626d164bbe895a32d959f2"
+  },
+  "fix-across-two-files": {
+    "budgets": {
+      "CATEGORY": "fix",
+      "MAX_STEPS": "25",
+      "TIMEOUT": "360.0"
+    },
+    "check.py": "cb34c15760b8a927b6f737d7e69793727690bedc629150532a32068f8e20d249",
+    "hidden": {},
+    "repo": {
+      "search.py": "bdc1c34c44ec4f284d4d9954baf344177ec5a8666767b02eee56c4725bbf138a",
+      "test_search.py": "6025f3fe396f1ef73346211285f1962722227091fe54746fad4cff0b97d86fd3",
+      "tokens.py": "f26e10e3bf972fb4df39f31fbbc47acaeadca7154fb5536c331a72bac551c9fa"
+    },
+    "task.md": "83b0761a43f0f9abd90b2c893e4aaffbf85b2dfa07f064a1fdaf374b597bb15f"
+  },
+  "fix-crash-on-empty": {
+    "budgets": {
+      "CATEGORY": "fix",
+      "MAX_STEPS": "20",
+      "TIMEOUT": "300.0"
+    },
+    "check.py": "233109b50929a5187bf9246662496d91f4be5d0d5fbbca15a7b60359cda0947c",
+    "hidden": {},
+    "repo": {
+      "stats.py": "98ec4c8ad086b83b7305930aee1c65abdd691ebffe8bb7823680a65d343d624d",
+      "test_stats.py": "9e110a04a1b4b8eed974660fc0e84eecfa533fb3c3cde66787ada3a69076bc73"
+    },
+    "task.md": "1523ca667734f639653103b70bc7831b2ad6df62a3719035ddc74cc2fba415ee"
+  },
+  "fix-off-by-one": {
+    "budgets": {
+      "CATEGORY": "fix",
+      "MAX_STEPS": "20",
+      "TIMEOUT": "300.0"
+    },
+    "check.py": "fe39bb5ff95c8c232cbf62269ed88101e698cc4f753244521c4dddfd4c76b70e",
+    "hidden": {},
+    "repo": {
+      "pagination.py": "4fa43dc791f3203bbab04999086c61925a800ce6ea046b9570d4ad58922716bf",
+      "test_pagination.py": "17bef2bb0cb40bd7d7df1de37477d25de348c2f4231d3d265a7b9809aae77b15"
+    },
+    "task.md": "6e755df167fc390bb793d7cdd56d2909d7e707015d0ea89e98e6f7f907fc54bb"
+  },
+  "fix-wrong-branch": {
+    "budgets": {
+      "CATEGORY": "fix",
+      "MAX_STEPS": "20",
+      "TIMEOUT": "300.0"
+    },
+    "check.py": "0752f06e6e561d20b085b34c1fbc69d58ca677d748ee0fa8744a2635e2ceb5dc",
+    "hidden": {},
+    "repo": {
+      "pricing.py": "ee52c3a036973de5eda4c708a21694887507b16427239fd824242efab1305867",
+      "test_pricing.py": "326948db462195e52aed294d71e02a74bc4d0a9efcb05ab5d6ab3ed6dd8809cd"
+    },
+    "task.md": "ee57f6ea431f5f1978860a2e320c04b8f724187a27ff1481dc80136d25c7569d"
+  },
+  "learning-repeat": {
+    "budgets": {
+      "CATEGORY": "careful",
+      "MAX_STEPS": "20",
+      "TIMEOUT": "300.0",
+      "WRITES": "True"
+    },
+    "check.py": "920db58f84e9d010e8e2d13f16e23055c748c9dbb35b0d58b823c69cf12e7433",
+    "hidden": {},
+    "repo": {
+      "README.md": "244b104bb08d5dc021ca322167ba0847d01b55980e1e3b8d9b0b790e270968fa",
+      "items.py": "14798c53192b5e8e8d588d80829be67ecd7ef32c846946b1c06b971c9137c9c5"
+    },
+    "task.md": "e6f147093802a1c9f78ec2c562675a48721b0bd59b19790f5d99131db42821d3"
+  },
+  "refactor-extract": {
+    "budgets": {
+      "CATEGORY": "refactor",
+      "MAX_STEPS": "30",
+      "TIMEOUT": "420.0"
+    },
+    "check.py": "e515903749ca1c092ae08e5451adf2552d430c9ce482c8465c4bf4c129e09e00",
+    "hidden": {},
+    "repo": {
+      "notify.py": "cdcab6d5c5dc6b962410f037d5b3aa11372f6d0a111b23cff57da8f28ebf8b53",
+      "test_notify.py": "319345287960c5fb76d2cd3df7d9825d07917591f0574b1e157f803898974f5a"
+    },
+    "task.md": "09b27a8a86debb54f65e4549bb2f2d7f74f58ac926fe995d8c821e2fb46f6e63"
+  },
+  "refactor-many-files": {
+    "budgets": {
+      "CATEGORY": "refactor",
+      "MAX_STEPS": "60",
+      "TIMEOUT": "600.0"
+    },
+    "check.py": "4f306d112c80be175161f77547a48b29b843bf4f8ff48695c7d0712a1ecd7590",
+    "hidden": {},
+    "repo": {
+      "README.md": "26ec4920896465926dbd8627388aabe9707110ee9149fb9af342d424ab74c8ee",
+      "service/m01.py": "30536dbbc0c873937ea169e06dc5f7b21ae1fbeb26d21165887ce55a669e7459",
+      "service/m02.py": "f66a36c95f7290b07067afde2aaa76d519e2cb689d41fc7c50349a6ced915200",
+      "service/m03.py": "6d200de3cdf12f37d8d13d9ffae6cf8b00277848e54ebf0824c8a9704edc2665",
+      "service/m04.py": "b18cf9bfb35cc38f7fa7a2deb1f6148831919442c523491a5af7c721ce0de584",
+      "service/m05.py": "f9170fa900ff600232e83dd9959998a1a959b94e3a0b362df26282900acfc687",
+      "service/m06.py": "b0451e86d0e35fa44a484794a4bf9b0042ca9db3b07d961bf05cec205fd7663b",
+      "service/m07.py": "543ef0e42f678bad7c6a1e26d44f4a9959430d7c54cd98e7f55c24e7d6ec630a",
+      "service/m08.py": "de835520980ca3f587cb1d75a30dbf967bc0067976a4bf0ece1f62fd335a2a14",
+      "service/m09.py": "9715c677a62b3f3dd02bb9d3677e17ea2439f1854a7390d4db96d638d9b80116",
+      "service/m10.py": "b0c5690afcc71a77f2cf129f659ea71c2f426cdc6326183d29c84f30e46c1383",
+      "service/m11.py": "eca8272a92b2ee474f7566bd9f7beaddf44911a420a6e7005fb5ca316d1ff8e1",
+      "service/m12.py": "e4c15d1b08fca5f90b1cb5bf2fa37682101347ef18e857fca394dec6c3542553"
+    },
+    "task.md": "164755d21ef842634cd68bca9327f163abb3309cf35d8f02d105189b1252d76a"
+  },
+  "refactor-rename": {
+    "budgets": {
+      "CATEGORY": "refactor",
+      "MAX_STEPS": "30",
+      "TIMEOUT": "420.0"
+    },
+    "check.py": "80519f529d720eb73f40cf18bb6a68bd87e79c19afc5e855721577d1f2eb11ef",
+    "hidden": {},
+    "repo": {
+      "store/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "store/keys.py": "170c0301a5ea0de6920b28efccb067b0549f89bc19ecafc5d1cfd502b279cdf5",
+      "store/reader.py": "aaa3fe4f4e8988acae8c797dfd1e8ecce2a6a08059dd6f5f1e351cea7544913d",
+      "store/writer.py": "11aa80a43cb45cf9452dd734ee5bf257d6c4442a5e2bf56f27750e651341db80",
+      "test_store.py": "77b652132baf059c39d53953216b9654f9c7bc8a31c40e6d443fc2246020c99e"
+    },
+    "task.md": "0ef6dbfa357fbe33fc79e153f8711fc79c8332b769418c1115403bfa35e84081"
+  }
+}

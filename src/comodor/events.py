@@ -96,6 +96,10 @@ class Request:
     _done: threading.Event = field(default_factory=threading.Event, repr=False)
     _answer: str | None = field(default=None, repr=False)
     _claim: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    #: Set when the claim was `expire` rather than an answer. Lets a waiter
+    #: tell "nobody answered and the wait gave up" apart from "somebody
+    #: answered", whichever side claimed the request first.
+    _expired: bool = field(default=False, repr=False)
 
     #: What the waiter falls back to when nobody answers. The last option,
     #: which for every request this program raises is the safe one: `deny` for
@@ -133,6 +137,7 @@ class Request:
             if self._done.is_set():
                 return False
             self._answer = self.fallback
+            self._expired = True
             self._done.set()
             return True
 
@@ -144,6 +149,17 @@ class Request:
     @property
     def answered(self) -> bool:
         return self._done.is_set()
+
+    @property
+    def expired(self) -> bool:
+        """Whether the wait ended unanswered, however the claim was made.
+
+        A request resolved through :meth:`wait`'s own timeout is expired here,
+        and so is one some other side expired on the worker's behalf — the two
+        are the same fact to everybody downstream (FR-022). An answer, even
+        the fallback value used as one, is not.
+        """
+        return self._expired
 
 
 Subscriber = Callable[[Event], None]
@@ -225,7 +241,8 @@ class EventBus:
         """
         self.ask(request)
         request.wait(timeout)
-        if request.expire():
+        claimed = request.expire()
+        if claimed or request.expired:
             self.publish(Event(kind=Kind.REQUEST_EXPIRED,
                                payload={"request": request,
                                         "choice": request.choice}))
@@ -289,7 +306,8 @@ class ScopedBus:
         """
         self.ask(request)
         request.wait(timeout)
-        if request.expire():
+        claimed = request.expire()
+        if claimed or request.expired:
             self.publish(Event(kind=Kind.REQUEST_EXPIRED,
                                payload={"request": request,
                                         "choice": request.choice}))

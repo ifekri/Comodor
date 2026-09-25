@@ -34,7 +34,7 @@ def _seed(store, *, offset_days: float = 0.0):
     now = time.time() - offset_days * 86400.0
     lesson = Lesson(trigger="when touching deploys",
                     guidance="run the smoke test first",
-                    created_at=now, updated_at=now)
+                    created_at=now, updated_at=now, provenance="user_statement")
     store.add_lesson(lesson)
     rule = Rule(key="python.quotes", statement="single quotes in python",
                 support=31, against=3, created_at=now, updated_at=now)
@@ -45,7 +45,7 @@ def _seed(store, *, offset_days: float = 0.0):
                VALUES('style', ?, ?, '', 'global', ?, ?, 'observation', ?, ?)""",
             (rule.key, rule.statement, rule.support, rule.against, now, now))
     store.add_skill(Skill(name="migrate-alembic", uses=4, wins=3, losses=1))
-    store.add_fact(Fact(text="staging database is postgres 15"))
+    store.add_fact(Fact(provenance="user_statement", text="staging database is postgres 15"))
     return store
 
 

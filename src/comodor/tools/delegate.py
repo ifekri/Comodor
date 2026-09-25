@@ -197,6 +197,16 @@ class Delegate(Tool):
             return ToolResult.failure(f"the delegate failed: {result.error}")
         if result.stopped == "cancelled":
             return ToolResult.failure("the delegate was cancelled")
+        if result.stopped == "clarification_required":
+            # The child left a mandatory decision unanswered. Its payload has
+            # to reach the parent ledger, or the parent would carry on with
+            # work that may depend on the decision (FR-018, FR-029).
+            payload = result.clarification if isinstance(result.clarification, dict) else {}
+            return ToolResult.success(
+                content=answer or "The delegate stopped for a decision.",
+                clarification=payload, outcome=str(payload.get("outcome") or ""),
+                steps=result.steps, tool_calls=result.tool_calls,
+                delegate_tokens=result.usage.prompt_tokens)
         if not answer:
             return ToolResult.failure(
                 f"the delegate stopped after {result.steps} steps without an "

@@ -1,0 +1,21 @@
+# Machine-local Spec Kit state — not meant to be shared.
+# Managed by the Specify CLI; safe to edit (your changes are preserved on refresh).
+
+# Local pointer to the current feature directory. Rewritten every time you
+# switch features, so it is per-checkout state rather than something to share.
+feature.json
+
+# Per-machine extension config overrides.
+extensions/*/local-config.yml
+
+# Install bookkeeping for whichever integration `specify init` wired up.
+# Per-checkout state, like `feature.json`; the file itself stays on disk.
+integrations/*.manifest.json
+
+# Local Spec Kit tool and extension state. Per-checkout, recreated by the CLI
+# from the project's own scripts/templates; not part of the repository.
+init-options.json
+integration.json
+extensions.yml
+extensions/.registry
+workflows/workflow-registry.json
