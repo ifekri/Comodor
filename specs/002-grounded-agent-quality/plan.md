@@ -411,7 +411,8 @@ specification clarification is needed.
 ### F. Acceptance
 
 SC-011 passes only when current mean total tokens ≤ 0.90 × naive in one
-comparable paired run **and** every task's current outcome rate ≥ naive. Both
+comparable paired run **and** every task's current outcome rate ≥ naive, where
+"every task" is that run's complete paired-eligible cohort (D13, §G). Both
 historical runs fail it. SC-012 has no final passing evidence. Both are settled
 only in plan Phase 10, on the exact frozen candidate, after plan Phase 9. SC-011
 is unchanged by §G. SC-012 is decided by §G's per-task reference rule.
@@ -458,8 +459,9 @@ changes, implemented and tested before T196. The candidate HEAD therefore
 already carries them when:
 - T196 runs its gates;
 - T197 qualifies the provider;
-- T198 runs the full paired suite (`python -m bench --paired`, no `--only`),
-  producing both arms for every task under one set of recorded fingerprints;
+- T198 runs the complete paired suite: the complete paired-eligible cohort
+  of the frozen candidate (D13, below), producing both arms for every task in
+  it under one set of recorded fingerprints;
 - T199 runs `python -m bench --sc012 <T198 artifact> --against
   bench/results/paired-baseline-2026-09-20.json`, publishes the result, and
   marks SC-012 only on `PASS`.
@@ -467,6 +469,45 @@ already carries them when:
 No new baseline run is required. The 2026-09-20 artifact is not rewritten; its
 fingerprints are reconstructed from `be9cf6f`, which requires a full-history
 checkout (the CI workflow already fetches with `fetch-depth: 0`).
+
+**Paired-run population (D13, 2026-09-26).**
+- **Cohort**: derived mechanically from the frozen candidate's task metadata
+  immediately before T198:
+  - `ALL_TASKS` = every task `bench.task.load_tasks` loads from `bench/tasks`;
+  - `PAIRED_TASKS` = every task in `ALL_TASKS` whose `task.sequence` is false.
+- **Sequence tasks** are outside the paired experiment by type: `run_paired`
+  refuses a cohort containing one, and that refusal is unchanged. No task is
+  left out for its name, expected or measured result, difficulty, cost,
+  timeout risk, reviewer preference or a manual choice.
+- **Command**: `python -m bench --paired` with no task selection loads
+  `ALL_TASKS` and is refused when it contains a sequence task. T198 then runs
+  `python -m bench --paired --provider <provider> --model <model> --tries 3
+  --only <PAIRED_TASKS>`.
+  - `--only` is a transport for the complete cohort, not its definition: the
+    set of names passed must equal the set of `PAIRED_TASKS` names.
+  - A smaller, partial or hand-picked selection is forbidden.
+  - The name list is derived at run time and is never a fixed list in any
+    artifact.
+- **Artifact**: the T198 paired artifact holds exactly `PAIRED_TASKS` of the
+  exact SHA it ran on. For every task in it:
+  - both the `current` and `naive` arms, each with the required tries;
+  - one `scenario_fingerprint` shared by both arms;
+  - that fingerprint's digest equal to
+    `digest(fingerprint_at(<that SHA>)[task])`.
+  A sequence task has no paired row and none is required.
+- **Acceptance**:
+  - SC-011 is evaluated over the complete paired-eligible cohort of the T198
+    run. Current mean total tokens ≤ 0.90 × naive, and for every task in
+    that cohort current outcome rate ≥ naive.
+  - SC-012 (T199) reads the same artifact, so its candidate task set, and
+    its denominator, is that cohort. D10 selects each task's reference
+    unchanged: a task new to the candidate takes the same-run naive rate, and
+    missing evidence is `UNDECIDABLE`.
+  - A sequence task is counted in neither denominator; it is measured under
+    its own criteria (SC-021).
+- **Current observation, not a constant**: 19 tasks, 18 paired-eligible, one
+  sequence task (`learning-repeat`), so 18 × 3 tries × 2 strategies = 108
+  paid attempts. The cohort is derived again if the catalogue changes.
 
 **What this prevents.**
 - A changed task compared with its old published rate: selection is by digest
@@ -521,6 +562,14 @@ checkout (the CI workflow already fetches with `fetch-depth: 0`).
 | XVIII — Extend, never duplicate | One fingerprint algorithm (`bench/integrity.py`), reused for recording, reconstruction and comparison; no new module (the standing benchmark-helper limit holds). **PASS** |
 | XXI — Paired measurement | SC-011 unchanged; SC-012's reference for a changed scenario is the same-run paired arm, so quality is never compared across two decision functions. **PASS** |
 | XX — User control | No run, push, merge or release is part of this planning; T197–T199 remain the owner's paid runs. **PASS** |
+
+### Constitution re-check (D13, 2026-09-26)
+
+| Principle | Result |
+| --- | --- |
+| X / XII — Gates and agreement | Spec D13 and §G agree on the paired-run population; tasks follow via `/speckit.tasks`, and the requirements checklist's decision count via `/speckit.checklist`. **PASS** |
+| XIV — Evidence before assumption | The refusal of sequence tasks was reproduced offline before any paid call; the cohort is derived from task metadata, not named. **PASS** |
+| XXI — Paired measurement | The SC-011 threshold and the D10–D12 reference rule are unchanged; only the population both are evaluated over is stated. **PASS** |
 
 ## Current Data Flow (as built)
 

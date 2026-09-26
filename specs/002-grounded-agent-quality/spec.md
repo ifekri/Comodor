@@ -1285,8 +1285,16 @@ the benchmark, and each is independently mutation-checked.
   attempt than the naive strategy, measured in the same paired run**. SC-011
   passes only when **both** conditions hold:
   1. current mean total tokens ≤ 0.90 × naive mean total tokens; **and**
-  2. for **every** benchmark task, the current outcome rate ≥ the naive outcome
-     rate. A task-level regression is never averaged away.
+  2. for **every** task in the measurement's complete paired-eligible cohort
+     (D13), the current outcome rate ≥ the naive outcome rate. A task-level
+     regression is never averaged away.
+
+  The **complete paired-eligible cohort** is every benchmark task that is not
+  declared a multi-turn sequence task in its own task definition. A sequence
+  task cannot take part in a paired measurement, so it is outside the paired
+  experiment by its type, never by choice, and is measured under its own
+  criteria (e.g. SC-021). Every other task is in the cohort; none is left out
+  for its name, result, difficulty, cost or timeout risk.
 
   The two strategies are comparable only within one paired measurement that
   uses the same provider, the same model, the same task set, the same number of
@@ -1324,8 +1332,10 @@ the benchmark, and each is independently mutation-checked.
      judge, same product, efficiency switched off. The earlier published rate
      is never compared across a scenario change.
   4. Every task has exactly one reference. No task is excluded and the
-     denominator is always the whole task set. SC-012 passes only when, for
-     every task, the candidate's outcome rate is at least its reference.
+     denominator is always the whole task set of the fresh paired candidate
+     measurement: its complete paired-eligible cohort (SC-011, D13). SC-012
+     passes only when, for every task, the candidate's outcome rate is at
+     least its reference.
   5. The published SC-012 result records, per task: the reference used
      (published baseline or same-run naive), both fingerprints, and both
      rates.
@@ -1439,11 +1449,12 @@ Their figures are comparable only within each run.
 
 ## Clarifications — Resolved
 
-**Twenty-one** clarification decisions are recorded below, in six groups. Each
-decision is binding on the requirements it names:
+**Twenty-two** clarification decisions are recorded below, in seven groups.
+Each decision is binding on the requirements it names:
 
 | Group | Decisions |
 | --- | --- |
+| Session 2026-09-26 (paired-run population) | 1 — D13 |
 | Session 2026-09-25 (SC-012 comparability) | 3 — D10 to D12 |
 | Session 2026-09-24 (post-gate amendment) | 3 — D7 to D9 |
 | Session 2026-09-24 (specification review) | 6 — D1 to D6 |
@@ -1451,9 +1462,46 @@ decision is binding on the requirements it names:
 | Session 2026-09-14 (outcome encoding) | 3 |
 | Original clarifications, 2026-09-14 | 3 — Q1 to Q3 |
 
-All twenty-one were put to, or decided by, the repository owner, and every one
+All twenty-two were put to, or decided by, the repository owner, and every one
 lists the FR/SC requirements or Constitution principle it binds. No unresolved
 clarification markers remain in this specification.
+
+### Session 2026-09-26 (paired-run population)
+
+Before the final paired run, the benchmark held 19 tasks, one of them a
+multi-turn sequence task (`learning-repeat`). The paired runner refuses a
+cohort that contains a sequence task, so a paired run over "every benchmark
+task" could not execute, and SC-011's "every benchmark task" and SC-012's
+"whole task set" could be read as the whole catalogue or as the tasks a paired
+run can hold. The owner decided which.
+
+- Q: For acceptance criteria decided by a paired benchmark run, which tasks
+  form the population? → A: **D13.** The **complete paired-eligible cohort**:
+  every loaded benchmark task whose definition does not declare it a sequence
+  task (`task.sequence` is false), derived mechanically from task metadata.
+  - A sequence task is outside the paired experiment by its type, because
+    the paired runner does not run sequence tasks. It is never dropped for
+    its name, expected or measured result, difficulty, cost, timeout risk,
+    reviewer preference or any manual choice.
+  - In SC-011's paired measurement, "every benchmark task" means every task
+    in that measurement's complete paired-eligible cohort. In SC-012, "the
+    whole task set" means the whole paired-eligible task set of the fresh
+    paired candidate artifact. A sequence task is not counted there as PASS,
+    FAIL, a regression or UNDECIDABLE; it is measured under its own criteria
+    (e.g. SC-021).
+  - Execution: when the command line would otherwise load a sequence task, a
+    task-selection option (`--only`) may be used solely to enumerate the
+    complete cohort, and only when the set of names it passes equals the set
+    of loaded tasks whose `task.sequence` is false. Any smaller, hand-picked
+    subset remains forbidden. The option is a transport, not the definition:
+    task metadata is authoritative.
+  - The paired runner's refusal of a sequence task is unchanged. The
+    2026-09-20 baseline is not rewritten; its tasks are compared under D10,
+    and a candidate task absent from it takes the same-run naive reference.
+  - Current observation, not a rule: 19 tasks, 18 paired-eligible, 1 sequence
+    task (`learning-repeat`), so a paired run at three attempts per strategy
+    is 108 attempts. These figures follow the catalogue if it changes.
+  *Binds*: SC-011, SC-012, SC-036.
 
 ### Session 2026-09-25 (SC-012 comparability)
 

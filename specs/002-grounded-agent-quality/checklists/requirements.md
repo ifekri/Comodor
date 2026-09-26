@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain — **21/21 recorded clarification decisions resolved through 2026-09-25** (see Notes)
+- [x] No [NEEDS CLARIFICATION] markers remain — **22/22 recorded clarification decisions resolved through 2026-09-26** (see Notes)
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -97,7 +97,7 @@ spec's own cross-references — remains valid.
 
 ## Notes
 
-**Clarifications resolved (21 of 21), through 2026-09-25.** The clarification record now contains the original three decisions, six 2026-09-14 remediation/outcome-encoding decisions, D1–D6 from the specification review, D7–D9 from the post-gate amendment, and D10–D12 from the 2026-09-25 SC-012 comparability session. Every decision names the FR/SC/Constitution rule it binds. The specification carries no unresolved clarification markers.
+**Clarifications resolved (22 of 22), through 2026-09-26.** The clarification record now contains the original three decisions, six 2026-09-14 remediation/outcome-encoding decisions, D1–D6 from the specification review, D7–D9 from the post-gate amendment, D10–D12 from the 2026-09-25 SC-012 comparability session, and D13 from the 2026-09-26 paired-run population clarification. Every decision names the FR/SC/Constitution rule it binds. The specification carries no unresolved clarification markers.
 
 - **Q1 — token threshold** (SC-011): *set the target after a baseline run.* The
   threshold is derived from the baseline measurement now required by SC-036, and
@@ -159,7 +159,7 @@ depended upon.
 ## Alignment update — 2026-09-24
 
 - Current specification inventory: **130 FR / 44 SC**; identifier ranges are FR-001…FR-130 and SC-001…SC-044.
-- Clarification record: **21/21 resolved**, including D1–D12. No active `[NEEDS CLARIFICATION]` marker remains in `spec.md`.
+- Clarification record: **22/22 resolved**, including D1–D13. No active `[NEEDS CLARIFICATION]` marker remains in `spec.md`.
 - Constitution XI: `spec.md` itself owns the normative ten-surface classification; `plan.md` may add implementation evidence but cannot override it.
 - FR-082 now enumerates three intended user-visible changes. Only the removal of self-resolving mandatory non-answers is the backward-incompatible regression-by-design; the completion annotation/correction and same-decision re-raise suppression are additive.
 - SC-011 is measurable at **>=10% lower mean total tokens than naive in the same paired run plus zero task-level outcome-rate regression**. The historical paired runs do not satisfy it; specification clarity is not acceptance evidence.

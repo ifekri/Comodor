@@ -915,7 +915,19 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
       5. every T208–T212 implementation and test change is staged.
     - **Freeze boundary**: commit with neutral, scoped messages and no AI attribution. The final commit is the candidate freeze boundary; record its SHA here as the frozen HEAD. Any tracked candidate change after it invalidates the freeze and requires T196 again.
     - **Push** to PR #59 only after the owner's explicit authorization, with `gh` identity `ifekri`. No merge, auto-merge, tag or release.
-    **Done when**: the staged set is verified as above, the frozen HEAD SHA is recorded, and it is pushed
+    - **Re-freeze.** T213 owns every freeze of the candidate, not only the first.
+      - **Current frozen HEAD**: the most recent authorized freeze commit. It is the one candidate SHA that T196–T199 use, and it supersedes every earlier freeze for them.
+      - **When**: if an authorized tracked change to the acceptance contract lands before final acceptance completes, this procedure runs again for exactly that change, with its own staging set and the same discipline: explicit paths or hunk staging only, the forbidden commands above, and the verification before commit.
+      - **Result**: one new, normal, additive commit whose SHA becomes the current frozen HEAD. The earlier frozen SHA remains historical evidence only.
+      - **Push**: normal push only, after the owner's explicit authorization, never forced.
+      - **Consequence**: once the new SHA is pushed, T196 reruns on it, then T197 on the same SHA. T198 runs only after both pass there, and T199 consumes that T198 artifact. No T196 or T197 result from an earlier freeze is final evidence for a later one. Any tracked candidate change after a re-freeze invalidates this chain again.
+    - **D13 re-freeze** (2026-09-26): D13 and its alignment change the tracked contract after the freeze at `0337e40bee87b1c2c475231b81f12e8746a1d35c`. That SHA, and the T196 and T197 passes recorded on it, remain historical evidence only. The D13 staging set is exactly:
+      - `spec.md`: the six D13 edits only (SC-011 item 2 and the cohort definition; SC-012 item 4; the decision count and group table; "All twenty-two"; the "Session 2026-09-26 (paired-run population)" section). The older D4 "Implementation gap, verified again…" hunk and the Q2 "Superseded scope note (2026-09-24)" hunk stay unstaged.
+      - `plan.md`: the whole diff, after confirming it is only D13 alignment (§F, and §G's execution order, "Paired-run population" and D13 constitution re-check).
+      - `tasks.md`: the whole diff, after confirming it holds only the D13 alignment of T198, this re-freeze clause, T196's current-frozen-HEAD wording and T199's D13 traceability.
+      - `checklists/requirements.md`: the three D13 lines only ("22/22 … through 2026-09-26", "22 of 22 … through 2026-09-26" naming D13, "22/22 resolved, including D1–D13"), staged by line. At normal diff context the Notes line shares a hunk with an older reviewer edit. The six older reviewer-owned hunks stay unstaged.
+      - No other file belongs to this re-freeze merely because it is locally modified.
+    **Done when**: the staged set is verified as above, the frozen HEAD SHA is recorded, and it is pushed; a re-freeze is done when its own staging set is verified and its commit is pushed as the current frozen HEAD
 - [X] T214 Reconcile the stale clarification count in the reviewer-owned `specs/002-grounded-agent-quality/checklists/requirements.md`
   - **Req**: Constitution X, XII · **Dep**: none; must complete **before T213**, because it changes a tracked file that belongs in the frozen candidate · **Evidence**:
     - **Stale locations** (current line numbers, identified by content):
@@ -938,7 +950,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 - [ ] T196 Run every deterministic gate on the exact convergence HEAD
   - **Req**: SC-022, SC-023, SC-025, SC-035; Constitution VII · **Dep**: Phases 12–16, Phase 16b (T208–T213) · **Evidence**:
-    - Runs on the frozen HEAD recorded by T213, which contains the D10–D12 benchmark work. Any later change to the candidate reruns this task.
+    - Runs on the **current frozen HEAD**: the exact SHA produced by T213's freeze or re-freeze procedure, which is the candidate every later acceptance task uses. Any tracked candidate change after that freeze invalidates this task's result, and it is rerun on the new frozen HEAD. A pass on an earlier freeze is not evidence for a later one.
     - `python -m ruff check src tests bench tools`; `python -m pytest -q`; `python -m pytest -m performance -n 0 -q`.
     - `python tools/protocol-codegen.py --check`; `python tools/capability-map.py --check`; `python -m bench.integrity`; `git diff --check`.
     - `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`; the renderer suite.
@@ -955,18 +967,40 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 - [ ] T197 [US6] Qualify the acceptance provider and model on the exact frozen candidate with `python -m bench.health`
   - **Req**: SC-026 · **Dep**: T196 · **Evidence**: the health gate passes as defined, with no raised timeout or selective retry, and the provider and model are recorded (sanitized per repository policy) · **Done when**: qualification is recorded for the frozen HEAD
 - [ ] T198 [US6] Run the final comparable paired measurement and decide SC-011
-  - **Req**: SC-011, SC-036, FR-076, FR-077 · **Dep**: T197 · **Evidence**:
-    - One fresh paired run over the **complete** suite, with no `--only`: `python -m bench --paired --provider <provider> --model <model> --tries 3`. It uses the same provider, model, task set, attempts, token-accounting version, counterbalancing and candidate semantics for both strategies, on the frozen HEAD of T196 and T197. The result is published in `bench/results/`.
-    - The published artifact carries both the `current` and `naive` arm for **every** task, and a `scenario_fingerprint` on every task (D12, T209).
+  - **Req**: SC-011, SC-036, FR-076, FR-077, D13; plan §G · **Dep**: T197 · **Evidence**:
+    - **Frozen SHA**: the exact HEAD that T196 and T197 passed on, run from a clean worktree detached at it. Every reference below to the frozen SHA means that commit.
+    - **Cohort** (D13; plan §G "Paired-run population"), derived mechanically from the frozen SHA's task metadata immediately before the run:
+      - `ALL_TASKS`: every task `bench.task.load_tasks` loads from `bench/tasks`, with no selection;
+      - `PAIRED_TASKS`: every task in `ALL_TASKS` whose `task.sequence` is false;
+      - `SEQUENCE_TASKS`: every task in `ALL_TASKS` whose `task.sequence` is true. These are outside the paired experiment by type, because `run_paired` refuses them. Nothing else removes a task: never its name, expected or measured result, difficulty, cost, timeout risk, reviewer preference or a manual choice.
+    - **Command**: one fresh paired run over the complete paired-eligible cohort: `python -m bench --paired --provider <provider> --model <model> --tries 3 --only <the exact names of PAIRED_TASKS>`.
+      - It uses the same provider, model, task set, attempts, token-accounting version, counterbalancing and candidate semantics for both strategies.
+      - `--only` only carries the complete cohort to the command line; it does not define eligibility. The set of names it passes must equal `{task.name for task in PAIRED_TASKS}`.
+      - A smaller, partial, hand-picked or cherry-picked selection is forbidden. The name list is built from `PAIRED_TASKS` at run time, never copied from an earlier list.
+      - The result is published in `bench/results/`.
+    - **Paid-call boundary**: every check below passes before the first provider or model call. Any failure stops the task before that call; the selector list is not repaired by hand, and the mismatch is reported.
+      1. The worktree HEAD equals the frozen SHA, and `python -m bench.integrity check` passes.
+      2. `ALL_TASKS`, `PAIRED_TASKS` and `SEQUENCE_TASKS` are derived as above, independently of any `--only` result.
+      3. The `--only` selector set equals the `PAIRED_TASKS` name set.
+      4. **Loaded-cohort check**: `--only` matches by name *or prefix*, so checking the selector strings is not enough. Load the cohort with the same semantics the command uses, `load_tasks(<bench/tasks>, only=<selectors>)`, and require all of:
+         - the set of loaded names equals the `PAIRED_TASKS` name set;
+         - every loaded task has `task.sequence` false;
+         - the number of loaded tasks equals `len(PAIRED_TASKS)`;
+         - no loaded name repeats.
+      5. The expected artifact task set is recorded as the `PAIRED_TASKS` name set.
+    - **Current observation, not a rule**: at `0337e40` there are 19 tasks, 18 paired-eligible and one sequence task (`learning-repeat`), which is 18 × 3 tries × 2 strategies = 108 paid attempts. The 18 exact names load exactly those 18 tasks, with no prefix collision and no sequence task. The loaded-cohort check still runs on every execution.
+    - **Artifact**: the published artifact holds exactly the `PAIRED_TASKS` name set, with no missing task, no extra task and no sequence task. For **every** task in it:
+      - both the `current` and `naive` arm, each with the required tries;
+      - a `scenario_fingerprint` (D12, T209) that both arms share.
     - **Fingerprint verification**, before the artifact is accepted as T198 or T199 evidence:
-      - for every task in the artifact, `digest(recorded scenario_fingerprint) == digest(fingerprint_at(<T213 frozen HEAD SHA>))[task]`, using `bench.integrity.digest` and `bench.integrity.fingerprint_at` (T208) against the exact SHA T213 recorded;
-      - the artifact's task set equals the task set `fingerprint_at(<T213 frozen HEAD SHA>)` yields for the paired suite;
+      - for every task in the artifact, `digest(recorded scenario_fingerprint) == digest(fingerprint_at(<frozen SHA>)[task])`, using `bench.integrity.digest` and `bench.integrity.fingerprint_at` (T208) against the exact frozen SHA;
+      - the artifact's task set equals the `PAIRED_TASKS` name set derived from the frozen SHA, and every one of those tasks is present in `fingerprint_at(<frozen SHA>)`;
       - never compared against the mutable working tree: the frozen commit is authoritative.
-    - A missing arm, a missing or mismatched fingerprint, a missing task, or an incomplete comparison makes the run **invalid for acceptance**: a failed run, not a partial one.
-    - SC-011 **passes only if** current mean total tokens ≤ 0.90 × naive **and** every task's current outcome rate ≥ naive; otherwise it is reported as failing. SC-011 is decided here only; T199 reads the same artifact for SC-012 and does not change SC-011.
+    - A missing arm, a missing or mismatched fingerprint, a missing or extra task, or an incomplete comparison makes the run **invalid for acceptance**: a failed run, not a partial one.
+    - SC-011 is evaluated over the complete paired-eligible cohort of this run (D13). It **passes only if** current mean total tokens ≤ 0.90 × naive **and**, for every task in `PAIRED_TASKS`, the current outcome rate ≥ naive; otherwise it is reported as failing. A sequence task is not counted as PASS, FAIL, a regression or UNDECIDABLE in this denominator; it is measured under its own criteria (SC-021). SC-011 is decided here only; T199 reads the same artifact for SC-012 and does not change SC-011.
     **Done when**: the result is published, and the checkbox is marked only if SC-011 passes
 - [ ] T199 [US6] Decide SC-012 from the same run against the immediately preceding published baseline, by the D10–D12 reference rule
-  - **Req**: SC-012, FR-077, D10–D12; plan §G · **Dep**: T198 (T214 is already in the frozen candidate through T213) · **Evidence**:
+  - **Req**: SC-012, FR-077, D10–D13; plan §G · **Dep**: T198 (T214 is already in the frozen candidate through T213) · **Evidence**:
     - Run `python -m bench --sc012 <the paired JSON T198 published in bench/results/> --against bench/results/paired-baseline-2026-09-20.json --label sc012-final`. It needs a full-history checkout and calls no provider or model.
     - Each task's reference is selected mechanically (T211):
       - an unchanged scenario fingerprint uses the 2026-09-20 `current` rate;
