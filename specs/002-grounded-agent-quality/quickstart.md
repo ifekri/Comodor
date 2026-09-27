@@ -314,7 +314,7 @@ Expected once implemented:
 - late discovery: the earlier change persists, appears in `prior_changes`, and
   nothing dependent runs afterwards.
 
-> **Acceptance note:** SC-011/SC-012 are live acceptance gates. Passing the deterministic suite, protocol checks or specification gate does not satisfy them. Final evidence must come from a fresh comparable paired run on the exact frozen candidate.
+> **Acceptance note (2026-09-27):** SC-011/SC-012 are optional benchmark metrics, not acceptance gates (spec *Acceptance scope*). Passing the deterministic suite, protocol checks or specification gate does not satisfy them either: a result exists only from a fresh comparable paired run on a frozen candidate, with a provider and model the developer chooses.
 
 ### Plan Phase 10 — SC-012 comparison (D10–D12, planned, not yet implemented)
 

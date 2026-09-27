@@ -1198,6 +1198,18 @@ blanket rule would either lose evidence in one class or save nothing in another.
 
 ### Measurable Outcomes
 
+**Acceptance scope** (owner decision, 2026-09-27). Accepting this feature
+requires no particular external provider or model, no paid provider call, and
+no repository secret or variable. SC-011 and SC-012, whose evidence can come
+only from a fresh live-model paired benchmark run, are **optional benchmark
+metrics**: they are computed exactly as defined below whenever a developer
+chooses to run the paired benchmark with a provider and model of their
+choosing, their results are reported as diagnostic evidence, and neither a
+missing nor a failing result blocks acceptance. Neither is claimed as met
+without such a run. The benchmark's deterministic guarantees remain required:
+scenario integrity, fingerprint provenance, the comparison rules and their
+tests. Published benchmark results are historical evidence, not requirements.
+
 **Grounding and assumption prevention**
 
 - **SC-001**: Across the benchmark's deliberately-ambiguous and
@@ -1305,8 +1317,10 @@ the benchmark, and each is independently mutation-checked.
   baselines (SC-036), not chosen in advance: in both runs the current strategy
   used more total tokens than naive, so parity was not being met, and crossing
   parity by a small margin is not "materially fewer". Recording the threshold
-  does not satisfy SC-011. Both historical runs **fail** it, and it is satisfied
-  only by a fresh qualifying paired measurement.
+  does not satisfy SC-011. Both historical runs **fail** it. When it is
+  measured, it is satisfied only by a fresh qualifying paired measurement; it
+  is an optional benchmark metric and does not gate acceptance (*Acceptance
+  scope*).
 - **SC-036**: A baseline measurement of the current system against the naive
   full-resend strategy is published before any efficiency threshold is adopted.
   It reports, per task, input tokens, output tokens, cached tokens, model turns,
@@ -1318,7 +1332,9 @@ the benchmark, and each is independently mutation-checked.
   evidence, not part of this criterion.
 - **SC-012**: No benchmark task's outcome rate falls relative to the immediately
   preceding published baseline as a result of an efficiency change; any fall is
-  reported as a regression and blocks the change. The comparison is made per
+  reported as a regression (FR-077). It is an optional benchmark metric,
+  computed from a paired run a developer chooses to make, and it does not gate
+  acceptance (*Acceptance scope*). The comparison is made per
   task, between measurements judged by the same scenario (D10–D12):
   1. A task's **scenario fingerprint** is the one the benchmark's integrity
      record keeps: its prompt, judge, starting repository, hidden files and

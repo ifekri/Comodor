@@ -65,7 +65,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 | plan Phase 7 | Regression & performance benchmark (historical) — paired reports, SC-011 threshold | tasks Phase 9 | T147–T158. T156 recorded the SC-011 threshold (D5); SC-011/SC-012 **acceptance** is T198/T199 in tasks Phase 18. Not to be confused with tasks Phase 7 (completion gate) |
 | plan Phase 8 | Full validation on the exact final HEAD, three platforms | tasks Phase 10, tasks Phase 11 | T159–T170 (validation) · T171 (PR #39 read-only audit) |
 | plan Phase 9 | Specification convergence — stable `decision_ref`, the shared turn entry `run_turn`, continuation binding and lifecycle, surfaces, D7, FR-127, re-verification | tasks Phases 12–17 | T172–T175 (identity and index) · T177–T179 (output and protocol) · T180, T200, T176, T181, T201 (shared turn entry) · T182–T189, T202–T207 (surface adapters and cross-surface proofs) · T190–T195 (D7, FR-127, security, re-verification, docs) · T196 (exact-HEAD gates) |
-| plan Phase 10 | Final live acceptance on the exact frozen candidate, with the SC-012 comparability rule (plan §G) | tasks Phase 16b, tasks Phase 18 | T208–T212 (SC-012 comparability and baseline provenance, D10–D12) · T213 (freeze the candidate) · T214 (checklist count) · T197 (provider qualification) · T198 (SC-011; the paired run T199 reads) · T199 (SC-012) |
+| plan Phase 10 | Optional live benchmark on a frozen candidate (not an acceptance gate), with the SC-012 comparability rule (plan §G) | tasks Phase 16b, tasks Phase 18 | T208–T212 (SC-012 comparability and baseline provenance, D10–D12) · T213 (freeze the candidate) · T214 (checklist count) · T197 (superseded, not required) · T198 (optional SC-011 run; the paired run T199 reads) · T199 (optional SC-012) |
 
 **Reading rule**: `plan Phase 5` = learning hardening = tasks Phase 6; `tasks Phase 5` = token-efficient context = plan Phase 4; `plan Phase 7` = benchmark = tasks Phase 9; `tasks Phase 7` = completion gate = plan Phase 6; `plan Phase 9` = convergence = tasks Phases 12–17; `plan Phase 10` = final acceptance = tasks Phases 16b and 18. A phrase such as "deferred to Phase 5" without a `plan`/`tasks` qualifier is non-conforming and must be read against this table.
 
@@ -920,12 +920,16 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
       - **When**: if an authorized tracked change to the acceptance contract lands before final acceptance completes, this procedure runs again for exactly that change, with its own staging set and the same discipline: explicit paths or hunk staging only, the forbidden commands above, and the verification before commit.
       - **Result**: one new, normal, additive commit whose SHA becomes the current frozen HEAD. The earlier frozen SHA remains historical evidence only.
       - **Push**: normal push only, after the owner's explicit authorization, never forced.
-      - **Consequence**: once the new SHA is pushed, T196 reruns on it, then T197 on the same SHA. T198 runs only after both pass there, and T199 consumes that T198 artifact. No T196 or T197 result from an earlier freeze is final evidence for a later one. Any tracked candidate change after a re-freeze invalidates this chain again.
+      - **Consequence**: once the new SHA is pushed, T196 reruns on it. The optional T198 and T199 run only on a SHA T196 passed, and T199 consumes that T198 artifact. No T196 result from an earlier freeze is evidence for a later one. Any tracked candidate change after a re-freeze invalidates this chain again. T197 is superseded (spec *Acceptance scope*, 2026-09-27).
     - **D13 re-freeze** (2026-09-26): D13 and its alignment change the tracked contract after the freeze at `0337e40bee87b1c2c475231b81f12e8746a1d35c`. That SHA, and the T196 and T197 passes recorded on it, remain historical evidence only. The D13 staging set is exactly:
       - `spec.md`: the six D13 edits only (SC-011 item 2 and the cohort definition; SC-012 item 4; the decision count and group table; "All twenty-two"; the "Session 2026-09-26 (paired-run population)" section). The older D4 "Implementation gap, verified again…" hunk and the Q2 "Superseded scope note (2026-09-24)" hunk stay unstaged.
       - `plan.md`: the whole diff, after confirming it is only D13 alignment (§F, and §G's execution order, "Paired-run population" and D13 constitution re-check).
       - `tasks.md`: the whole diff, after confirming it holds only the D13 alignment of T198, this re-freeze clause, T196's current-frozen-HEAD wording and T199's D13 traceability.
       - `checklists/requirements.md`: the three D13 lines only ("22/22 … through 2026-09-26", "22 of 22 … through 2026-09-26" naming D13, "22/22 resolved, including D1–D13"), staged by line. At normal diff context the Notes line shares a hunk with an older reviewer edit. The six older reviewer-owned hunks stay unstaged.
+      - No other file belongs to this re-freeze merely because it is locally modified.
+    - **Acceptance-scope re-freeze** (2026-09-27): the owner removed every external provider/model dependency from acceptance. This changes the tracked contract after the freeze at `bacdafc420c3edbe2313592d9fa41cfbdb6a7d6e`; that SHA, and the T196 pass recorded on it, remain historical evidence only. The staging set is exactly:
+      - `spec.md`: the three acceptance-scope edits only (the *Acceptance scope* paragraph under "Measurable Outcomes", SC-011's closing sentence, and SC-012's opening sentence). The older D4 "Implementation gap, verified again…" hunk and the Q2 "Superseded scope note (2026-09-24)" hunk stay unstaged.
+      - `plan.md`, `tasks.md` and `quickstart.md`: the whole diff of each, after confirming it holds only this decision's edits.
       - No other file belongs to this re-freeze merely because it is locally modified.
     **Done when**: the staged set is verified as above, the frozen HEAD SHA is recorded, and it is pushed; a re-freeze is done when its own staging set is verified and its commit is pushed as the current frozen HEAD
 - [X] T214 Reconcile the stale clarification count in the reviewer-owned `specs/002-grounded-agent-quality/checklists/requirements.md`
@@ -960,15 +964,16 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 ---
 
-## Phase 18: Final Acceptance
+## Phase 18: Optional Live Benchmark (not an acceptance gate)
 
-**Purpose**: settle SC-011 and SC-012 on the exact frozen candidate. Historical runs (T015, T155) are evidence but **do not** pass either criterion. The threshold is fixed (D5) and never adjusted after seeing results; timeouts, retries, judges, assertions and sample sizes are not weakened to obtain a pass.
+**Purpose**: an optional, non-gating measurement of SC-011 and SC-012 (spec *Acceptance scope*, 2026-09-27). Accepting Feature 002 needs no provider, model, paid call, secret or variable. When a developer chooses to run it, it runs on a frozen candidate that passed T196, with a provider and model of their choosing given on the command line (`--provider`, `--model`, or `BENCH_PROVIDER` / `BENCH_MODEL`); its results are reported as diagnostic evidence, pass or fail, and never claimed without a run. Historical runs (T015, T155) are evidence but **do not** pass either criterion. The threshold is fixed (D5) and never adjusted after seeing results; timeouts, retries, judges, assertions and sample sizes are not weakened to obtain a pass.
 
-- [ ] T197 [US6] Qualify the acceptance provider and model on the exact frozen candidate with `python -m bench.health`
-  - **Req**: SC-026 · **Dep**: T196 · **Evidence**: the health gate passes as defined, with no raised timeout or selective retry, and the provider and model are recorded (sanitized per repository policy) · **Done when**: qualification is recorded for the frozen HEAD
-- [ ] T198 [US6] Run the final comparable paired measurement and decide SC-011
-  - **Req**: SC-011, SC-036, FR-076, FR-077, D13; plan §G · **Dep**: T197 · **Evidence**:
-    - **Frozen SHA**: the exact HEAD that T196 and T197 passed on, run from a clean worktree detached at it. Every reference below to the frozen SHA means that commit.
+- [ ] T197 [US6] **Superseded — not required** (2026-09-27): provider and model qualification is no longer part of acceptance
+  - **Req**: SC-026 · **Dep**: none · **Status**: superseded by the spec's *Acceptance scope*. No provider or model is qualified for acceptance, and no qualification result is recorded or claimed. `python -m bench.health` stays an optional developer tool for checking a provider before a benchmark run, with the provider and model given on the command line. · **Done when**: never; it stays unchecked, and nothing depends on it
+- [ ] T198 [US6] *(Optional, not an acceptance gate)* Run a comparable paired measurement and compute SC-011
+  - **Req**: SC-011, SC-036, FR-076, FR-077, D13; plan §G · **Dep**: T196 · **Evidence**:
+    - **Frozen SHA**: the exact current frozen HEAD that T196 passed on, run from a clean worktree detached at it. Every reference below to the frozen SHA means that commit.
+    - **Provider and model**: chosen by whoever runs it and passed as `--provider` / `--model` (or `BENCH_PROVIDER` / `BENCH_MODEL`). None is prescribed.
     - **Cohort** (D13; plan §G "Paired-run population"), derived mechanically from the frozen SHA's task metadata immediately before the run:
       - `ALL_TASKS`: every task `bench.task.load_tasks` loads from `bench/tasks`, with no selection;
       - `PAIRED_TASKS`: every task in `ALL_TASKS` whose `task.sequence` is false;
@@ -998,8 +1003,8 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
       - never compared against the mutable working tree: the frozen commit is authoritative.
     - A missing arm, a missing or mismatched fingerprint, a missing or extra task, or an incomplete comparison makes the run **invalid for acceptance**: a failed run, not a partial one.
     - SC-011 is evaluated over the complete paired-eligible cohort of this run (D13). It **passes only if** current mean total tokens ≤ 0.90 × naive **and**, for every task in `PAIRED_TASKS`, the current outcome rate ≥ naive; otherwise it is reported as failing. A sequence task is not counted as PASS, FAIL, a regression or UNDECIDABLE in this denominator; it is measured under its own criteria (SC-021). SC-011 is decided here only; T199 reads the same artifact for SC-012 and does not change SC-011.
-    **Done when**: the result is published, and the checkbox is marked only if SC-011 passes
-- [ ] T199 [US6] Decide SC-012 from the same run against the immediately preceding published baseline, by the D10–D12 reference rule
+    **Done when**: the result is published and reported, and the checkbox is marked only if SC-011 passes. Not running it, or a failing result, does not block acceptance
+- [ ] T199 [US6] *(Optional, not an acceptance gate)* Compute SC-012 from the same run against the immediately preceding published baseline, by the D10–D12 reference rule
   - **Req**: SC-012, FR-077, D10–D13; plan §G · **Dep**: T198 (T214 is already in the frozen candidate through T213) · **Evidence**:
     - Run `python -m bench --sc012 <the paired JSON T198 published in bench/results/> --against bench/results/paired-baseline-2026-09-20.json --label sc012-final`. It needs a full-history checkout and calls no provider or model.
     - Each task's reference is selected mechanically (T211):
@@ -1008,9 +1013,9 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
     - No task is excluded. A baseline task missing from the candidate, or any missing arm, is `UNDECIDABLE`.
     - The published `bench/results/sc012-sc012-final.json` and `.md` record, per task: the fingerprint digests, `CHANGED` or `UNCHANGED`, the reference kind, both `passed/tries` and the result with its reason. They also record the fingerprint source of each side (the baseline reads as `reconstructed:be9cf6f`), the overall result and `baseline_only_tasks`.
     - A task-level fall is reported as a regression (FR-077).
-    **Done when**: the result is published, and the checkbox is marked only if the result is `PASS` (exit `0`); `FAIL` and `UNDECIDABLE` leave SC-012 open
+    **Done when**: the result is published, and the checkbox is marked only if the result is `PASS` (exit `0`); `FAIL` and `UNDECIDABLE` leave SC-012 open. Not running it, `FAIL` and `UNDECIDABLE` do not block acceptance
 
-**Final checkpoint**: Feature 002 is acceptance-complete only when T172–T214 are complete, the exact-HEAD gates are green, and SC-011 and SC-012 pass on fresh evidence.
+**Final checkpoint**: Feature 002 is acceptance-complete when T172–T196 and T208–T214 are complete and the exact-HEAD deterministic gates (T196) are green on the current frozen HEAD. Acceptance needs no provider, model, paid call, secret or variable (spec *Acceptance scope*). T197 is superseded; T198 and T199 are optional benchmark runs whose SC-011 and SC-012 results are reported as diagnostic evidence and never claimed without a run.
 
 ---
 
@@ -1073,7 +1078,7 @@ Phase 7 (completion gate) ◄─┴───────────────
                                                    Phase 17 (exact-HEAD deterministic gates)
                                                                               │
                                                                               ▼
-                                                       Phase 18 (final acceptance: SC-011, SC-012)
+                                                       Phase 18 (optional benchmark: SC-011, SC-012)
 ```
 
 - **Phase 5 is hard-blocked by T015.** No optimization before the baseline (Constitution XXI).
@@ -1089,7 +1094,7 @@ Phase 7 (completion gate) ◄─┴───────────────
   - T214 (the reviewer's checklist count) completes before the freeze;
   - T213 freezes and pushes the candidate only after T190–T195, T208–T212 and T214, staging exactly its listed set.
 - **Phase 17 depends on Phase 16b**: T196 runs on T213's frozen HEAD, and any tracked change after it requires T196 again.
-- **Phase 18 depends on Phase 17**: no acceptance measurement before every deterministic gate is green on the frozen HEAD. The sequence is: T208 ∥ T209 → T210 → T211 → T212 → T214 → T213 (freeze and push) → T196 → T197 → T198 → T199.
+- **Phase 18 depends on Phase 17**: no benchmark measurement before every deterministic gate is green on the frozen HEAD. The required sequence is: T208 ∥ T209 → T210 → T211 → T212 → T214 → T213 (freeze and push) → T196, which completes acceptance. The optional T198 → T199 follow T196 on the same SHA; T197 is superseded.
 - **A permission gate closes every phase that touches questions, ASK, modes, tool advertisement, session interaction, orchestration or protocol**: T028, T060, T069, T098, T119, T129, T146, confirmed finally by T167.
 
 ### Parallel opportunities
@@ -1124,7 +1129,7 @@ Phase 7 (completion gate) ◄─┴───────────────
 6. **Phase 11** → PR #39 audited, decision handed to the user.
 7. **Phases 12–17** → specification convergence: stable `decision_ref`, the shared turn entry `run_turn`, continuation binding and lifecycle, six turn-entry families, D7, FR-127, gates green on one HEAD.
 8. **Phase 16b** → SC-012 decidable mechanically (D10–D12) and the candidate frozen.
-9. **Phase 18** → final acceptance on the frozen candidate: SC-011 and SC-012 decided on fresh evidence.
+9. **Phase 18** → optional live benchmark on the frozen candidate: SC-011 and SC-012 computed and reported when run; not an acceptance gate.
 
 ---
 

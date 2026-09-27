@@ -413,9 +413,12 @@ specification clarification is needed.
 SC-011 passes only when current mean total tokens ≤ 0.90 × naive in one
 comparable paired run **and** every task's current outcome rate ≥ naive, where
 "every task" is that run's complete paired-eligible cohort (D13, §G). Both
-historical runs fail it. SC-012 has no final passing evidence. Both are settled
-only in plan Phase 10, on the exact frozen candidate, after plan Phase 9. SC-011
-is unchanged by §G. SC-012 is decided by §G's per-task reference rule.
+historical runs fail it. SC-012 has no final passing evidence. Both are optional
+benchmark metrics (spec *Acceptance scope*, 2026-09-27): they are measured only
+when a developer runs the paired benchmark with a provider and model of their
+choosing, on a frozen candidate that passed T196, and neither is a condition of
+acceptance. SC-011 is unchanged by §G. SC-012 is computed by §G's per-task
+reference rule.
 
 ### G. SC-012 comparability and baseline provenance (D10–D12, 2026-09-25)
 
@@ -457,14 +460,18 @@ is unchanged by §G. SC-012 is decided by §G's per-task reference rule.
 **Execution order.** The D12 recording and the comparator are benchmark-only
 changes, implemented and tested before T196. The candidate HEAD therefore
 already carries them when:
-- T196 runs its gates;
-- T197 qualifies the provider;
-- T198 runs the complete paired suite: the complete paired-eligible cohort
-  of the frozen candidate (D13, below), producing both arms for every task in
-  it under one set of recorded fingerprints;
-- T199 runs `python -m bench --sc012 <T198 artifact> --against
+- T196 runs its gates, which is the required acceptance step;
+- optionally, T198 runs the complete paired suite: the complete
+  paired-eligible cohort of the frozen candidate (D13, below), producing both
+  arms for every task in it under one set of recorded fingerprints, with a
+  provider and model given on the command line;
+- optionally, T199 runs `python -m bench --sc012 <T198 artifact> --against
   bench/results/paired-baseline-2026-09-20.json`, publishes the result, and
   marks SC-012 only on `PASS`.
+
+T197, provider and model qualification, is superseded by the spec's
+*Acceptance scope* (2026-09-27): no provider or model is qualified for
+acceptance. `python -m bench.health` remains an optional developer tool.
 
 No new baseline run is required. The 2026-09-20 artifact is not rewritten; its
 fingerprints are reconstructed from `be9cf6f`, which requires a full-history
@@ -570,6 +577,15 @@ checkout (the CI workflow already fetches with `fetch-depth: 0`).
 | X / XII — Gates and agreement | Spec D13 and §G agree on the paired-run population; tasks follow via `/speckit.tasks`, and the requirements checklist's decision count via `/speckit.checklist`. **PASS** |
 | XIV — Evidence before assumption | The refusal of sequence tasks was reproduced offline before any paid call; the cohort is derived from task metadata, not named. **PASS** |
 | XXI — Paired measurement | The SC-011 threshold and the D10–D12 reference rule are unchanged; only the population both are evaluated over is stated. **PASS** |
+
+### Constitution re-check (acceptance scope, 2026-09-27)
+
+| Principle | Result |
+| --- | --- |
+| X / XII — Gates and agreement | Spec *Acceptance scope*, §F, §G, plan Phase 10, tasks Phase 18 and the quickstart agree that no provider, model, paid call, secret or variable gates acceptance; the deterministic gates (T196) remain required. **PASS** |
+| XVI — Token efficiency is a product requirement | Token use stays measurable: the benchmark, its token accounting, scenario fingerprints and the SC-012 evaluator are kept and tested. No token saving is claimed without a run. **PASS** |
+| XXI — Quality and token efficiency measured together | The paired comparison is kept as a tool and run "where practical"; the owner ruled a paid run is not a condition of acceptance. The maintained evidence is the published paired runs (T015, T155) and the blocked ablation (T096), none of which is presented as passing SC-011 or SC-012. **PASS** |
+| XX — User control | No paid call, secret or variable is required; any benchmark run is the owner's choice. **PASS** |
 
 ## Current Data Flow (as built)
 
@@ -1048,14 +1064,15 @@ tasks.md; cross-artifact references use `plan Phase N` / `tasks Phase N`.
 | **7** | Regression & performance benchmark (historical) | Full paired benchmark reports (tasks-phase-1 baseline T015; candidate run T155); the SC-011 threshold derived from them and recorded in spec.md (D5) | Paired reports published; threshold recorded. SC-011 and SC-012 acceptance moved to plan Phase 10 — both historical runs fail SC-011 |
 | **8** | Full deterministic validation | Complete local/CI baseline on the integrated candidate, all three platforms | Every deterministic gate green; nothing claimed unverified |
 | **9** | Specification convergence (D4/D7/D9 and re-verification) | Stable semantic `decision_ref` minted in the evidence owner; unresolved set derived from the existing session form records; common DecisionAnswer path in the application layer; additive protocol fields; CLI/API/ACP/channel adapters; D7 validation cases; re-verification of FR-099/100/101/105/127/018/123 (§2026-09-24 Plan Convergence B–D) | The §B gate: invalid refs fail closed before any model call, no heuristic path, stable and distinct refs, SC-042 replay, old clients unaffected; D7 cases green; every re-verification either passes or has become a task; protocol codegen, capability map and full deterministic suite green |
-| **10** | Final live acceptance | Provider qualification, then a fresh comparable paired run on the exact frozen candidate, recording its scenario fingerprints; then the SC-012 comparison against the 2026-09-20 baseline (§G) | SC-011 (≤ 0.90 × naive mean total tokens **and** no task-level outcome-rate fall) has fresh passing evidence; SC-012 is `PASS` in the published `python -m bench --sc012` result, with every task compared against its fingerprint-selected reference (D10–D12) |
+| **10** | Optional live benchmark (not an acceptance gate) | A fresh comparable paired run on a frozen candidate that passed exact-head deterministic validation (T196), with a provider and model the developer chooses, recording its scenario fingerprints; then the SC-012 comparison against the 2026-09-20 baseline (§G) | Diagnostic only: SC-011 (≤ 0.90 × naive mean total tokens **and** no task-level outcome-rate fall) and SC-012 (the published `python -m bench --sc012` result, every task against its fingerprint-selected reference, D10–D13) are reported when run and never required for acceptance (spec *Acceptance scope*) |
 
 **Dependency note (plan-phase numbering)**: plan Phase 4 cannot start before
 plan Phase 1 (no baseline, no optimization — Constitution XXI). Plan Phase 3
 depends on plan Phase 2 (the ledger decides *when* to ask). Plan Phase 6 depends
 on plan Phases 2–5. Plan Phase 9 follows the final specification review and
-closes D4/D9 before any final provider acceptance; plan Phase 10 depends on
-plan Phase 9 and on exact-head deterministic validation.
+closes D4/D9 before the frozen candidate is validated; the optional plan
+Phase 10 benchmark runs only on a candidate that passed plan Phase 9 and
+exact-head deterministic validation.
 
 ---
 
@@ -1243,7 +1260,7 @@ Re-evaluated against the converged plan and the specification at `d911e3f`.
 | XII — Done means everything agrees | data-model, contracts, quickstart and research updated with this plan (including the H1/H2/M1/L2 repair); tasks follow via `/speckit.tasks` | **PASS** |
 | XIV — Evidence before assumption | The design rests on inspected code (§B facts); FR-127 is flagged as a probable gap rather than assumed done | **PASS** |
 | XV — Interactive clarification | Only an explicit answer bound to its `decision_ref` resolves a decision; invalid input changes nothing; channels without a structured reply route report the decision instead of guessing | **PASS** |
-| XVI / XXI — Token efficiency measured with quality | No context change in plan Phase 9; SC-011/SC-012 remain paired acceptance in plan Phase 10 | **PASS** |
+| XVI / XXI — Token efficiency measured with quality | No context change in plan Phase 9; SC-011/SC-012 remain paired benchmark metrics in plan Phase 10 (optional and non-gating since the 2026-09-27 acceptance-scope decision) | **PASS** |
 | XVII — Progressive learning | Unchanged; a resumed answer is a `settled_decision` only when it is a real answer | **PASS** |
 | XVIII — Extend, never duplicate | No new store, subsystem or matcher: the evidence owner, `SessionStore` (one optional meta field, a listing filter, an exact lookup) and existing request extensions are extended; `run_turn` removes the duplication six direct loop calls would otherwise force, while carrying `images` and delegate `decisions` through unchanged | **PASS** |
 | XIX — Grounded tool use | Unchanged | **PASS** |
