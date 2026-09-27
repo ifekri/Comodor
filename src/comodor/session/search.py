@@ -133,6 +133,10 @@ class SessionIndex:
 
         for path in sorted(Path(self.store.root).glob("*.jsonl")):
             session_id = path.stem
+            if self.store.is_continuation(session_id):
+                # A stateless run's continuation is not a session anybody
+                # opened; like `list_sessions`, search does not offer it.
+                continue
             seen.add(session_id)
             try:
                 mtime = path.stat().st_mtime

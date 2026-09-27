@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from ..providers.base import Message, ToolSpec
 
@@ -118,6 +119,123 @@ class TokenCounter:
                       actual_input_tokens: int) -> None:
         raw = estimate_messages(messages) + estimate_tools(tools or [])
         self.calibration.observe(raw, actual_input_tokens)
+
+
+# --------------------------------------------------------------------------- #
+# measurement: what one task cost, beside how it went
+# --------------------------------------------------------------------------- #
+
+
+@dataclass
+class TurnRecord:
+    """One model call's cost, from the provider's own accounting (FR-055).
+
+    The three input figures are kept apart because they are billed apart.
+    `estimated` is set only when the provider reported nothing and the
+    estimator filled in the prompt size — never silently.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    #: Cache-creation tokens: a separate, non-overlapping part of the prompt
+    #: for the providers that bill it, so it is kept apart rather than folded
+    #: into input or cached.
+    written_tokens: int = 0
+    context_size: int = 0
+    estimated: bool = False
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens,
+                "cached_tokens": self.cached_tokens, "written_tokens": self.written_tokens,
+                "context_size": self.context_size, "estimated": self.estimated}
+
+
+@dataclass
+class TaskMeasurement:
+    """One task's paired record: cost and outcome together (FR-072, FR-073).
+
+    Counts, sizes and one-word states only. No prompt body, no file content,
+    no credential ever enters this record (FR-074) — `as_dict` is the whole
+    of what leaves it, and the redaction test mutates exactly that.
+    """
+
+    turns: list[TurnRecord] = field(default_factory=list)
+    tool_calls: int = 0
+    retries: int = 0
+    clarifications_raised: int = 0
+    clarifications_answered: int = 0
+    corrections: int = 0
+    knowledge_hits: int = 0
+    knowledge_stale: int = 0
+    #: The mutation preflight's own cost, kept apart from the turn's: it is a
+    #: bounded check the Core makes, not part of answering the request, and
+    #: folding it into the task's figures would hide what the guard costs.
+    preflight_calls: int = 0
+    preflight_tokens: int = 0
+    outcome: str = ""
+    validation_outcome: str = ""
+
+    def record_turn(self, usage: Any, context_estimate: int = 0) -> TurnRecord:
+        """Provider `Usage` is the truth; the estimate fills in only its absence."""
+        prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
+        record = TurnRecord(
+            input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+            output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+            cached_tokens=int(getattr(usage, "cached_tokens", 0) or 0),
+            written_tokens=int(getattr(usage, "written_tokens", 0) or 0),
+            context_size=prompt if prompt else int(context_estimate or 0),
+            estimated=not prompt,
+        )
+        self.turns.append(record)
+        return record
+
+    @property
+    def model_turns(self) -> int:
+        return len(self.turns)
+
+    @property
+    def input_tokens(self) -> int:
+        return sum(turn.input_tokens for turn in self.turns)
+
+    @property
+    def output_tokens(self) -> int:
+        return sum(turn.output_tokens for turn in self.turns)
+
+    @property
+    def cached_tokens(self) -> int:
+        return sum(turn.cached_tokens for turn in self.turns)
+
+    @property
+    def written_tokens(self) -> int:
+        return sum(turn.written_tokens for turn in self.turns)
+
+    @property
+    def context_size(self) -> int:
+        """The last request's size — what the model read most recently."""
+        return self.turns[-1].context_size if self.turns else 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cached_tokens": self.cached_tokens,
+            "written_tokens": self.written_tokens,
+            "context_size": self.context_size,
+            "model_turns": self.model_turns,
+            "tool_calls": self.tool_calls,
+            "retries": self.retries,
+            "clarifications_raised": self.clarifications_raised,
+            "clarifications_answered": self.clarifications_answered,
+            "corrections": self.corrections,
+            "knowledge_hits": self.knowledge_hits,
+            "knowledge_stale": self.knowledge_stale,
+            "preflight_calls": self.preflight_calls,
+            "preflight_tokens": self.preflight_tokens,
+            "outcome": self.outcome,
+            "validation_outcome": self.validation_outcome,
+            "estimated_turns": sum(1 for turn in self.turns if turn.estimated),
+        }
 
 
 def humanise(count: int) -> str:

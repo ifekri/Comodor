@@ -178,6 +178,20 @@ def mode_choices(request_id: str, what: str,
     ]
 
 
+def decisions(open_decisions: list[tuple[str, str, list[str]]]) -> list[dict[str, Any]]:
+    """A stopped turn's open decisions, one button per grounded option.
+
+    Each button's `action_id` and value are `da:<decision_ref>:<n>`, so the
+    block action that comes back answers exactly that decision.
+    """
+    blocks: list[dict[str, Any]] = []
+    for ref, prompt, options in open_decisions:
+        blocks.append(section(f"*{prompt}*\n`{ref}`"))
+        blocks += actions([Choice(f"da:{ref}:{slot}", label)
+                           for slot, label in enumerate(options)])
+    return blocks
+
+
 def question(request_id: str, index: int, prompt: str, options: list[str],
              chosen: set[int] | None = None, multi: bool = False,
              total: int = 1) -> list[dict[str, Any]]:

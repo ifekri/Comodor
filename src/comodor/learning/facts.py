@@ -17,7 +17,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
-from .store import BrainStore, Fact
+from .store import BrainStore, Fact, InadmissibleRecord
 
 #: Facts about the project and its environment. Eight is the whole budget —
 #: past this, the honest move is to merge, not to grow.
@@ -73,13 +73,20 @@ class FactService:
     # -- writing ------------------------------------------------------------ #
 
     def add(
-        self, text: str, kind: str = "memory", *, staged: bool = False, origin_episode: int = 0
+        self, text: str, kind: str = "memory", *, staged: bool = False, origin_episode: int = 0,
+        provenance: str = "user_statement", source_ref: str = "", fingerprint: str = "",
     ) -> Fact:
         """Add one fact, or raise :class:`FactError` saying why not.
 
         An exact repeat is a success that changed nothing — a model told
         "duplicate" will rephrase and try again, which is how a memory system
         fills with five wordings of one fact.
+
+        `provenance` is how the fact came to be known. The default is the
+        person writing one by hand (`comodor memory add`, the page's panel);
+        a proposal from the model or the review must say what corroborated
+        it, and the store refuses anything that is not one of the six
+        admissible classes (FR-056).
         """
         kind = _clean_kind(kind)
         text = _clean_text(text)
@@ -104,15 +111,21 @@ class FactService:
             listing = "\n".join(f"- #{fact.id}: {fact.text}" for fact in current)
             raise FactError(_CAP_GUIDANCE.format(list=listing))
 
-        fact = self.store.add_fact(
-            Fact(
-                kind=kind,
-                scope=self.write_scope,
-                text=text,
-                origin_episode=origin_episode,
-                status=STATUS_STAGED if staged else STATUS_SETTLED,
+        try:
+            fact = self.store.add_fact(
+                Fact(
+                    kind=kind,
+                    scope=self.write_scope,
+                    text=text,
+                    origin_episode=origin_episode,
+                    status=STATUS_STAGED if staged else STATUS_SETTLED,
+                    provenance=provenance,
+                    source_ref=source_ref,
+                    fingerprint=fingerprint,
+                )
             )
-        )
+        except InadmissibleRecord as refused:
+            raise FactError(str(refused)) from None
         if fact is None:  # raced another writer; it won
             for candidate in self.entries(kind):
                 if candidate.text.strip().lower() == text.lower():
@@ -245,6 +258,12 @@ def _check_injection(text: str) -> None:
         "you are now",
         "new instructions:",
         "system prompt",
+        "from now on",
+        "remember to always",
+        "remember: always",
+        "you must always",
+        "you must never",
+        "assistant:",
     ):
         if phrase in lowered:
             raise FactError(

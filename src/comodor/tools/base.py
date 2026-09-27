@@ -84,16 +84,89 @@ class ToolContext:
     #: against, in a run that was otherwise correct.
     seen: set[str] = field(default_factory=set)
 
+    #: What this turn read, text included, by resolved path.
+    #:
+    #: `seen` outlives the turn on purpose, so a write can tell whether it is
+    #: replacing known contents. Grounding must not: an option is backed by a
+    #: source only when *this* turn's read of it supports the candidate, and a
+    #: file read two turns ago is not evidence for what is being asserted now.
+    #: Cleared with the ledger, and holds no more than the reads of one turn.
+    read_this_turn: dict[str, str] = field(default_factory=dict)
+
     #: The learning brain's store, when one exists. Tools that count things
     #: against the user — the daily image-generation fuse — share this one
     #: metadata table, so a delegate cannot quietly sidestep the count.
     brain_store: Any = None
 
-    def note_read(self, path: Path) -> None:
-        self.seen.add(self._key(path))
+    #: The turn's evidence ledger (`agent/evidence.py`): what has been stated,
+    #: observed and derived, and which decisions are still open. Built on
+    #: first use so a context made without one costs nothing, shared by
+    #: reference across the per-call views, and never serialised — it lives
+    #: exactly as long as this context does.
+    _evidence: Any = field(default=None, repr=False, compare=False)
+    #: The request this turn is answering, as the user wrote it, and what
+    #: recall brought for it — the two things a candidate answer can be
+    #: grounded against besides the ledger (`tools/ask.py`). Set by the
+    #: loop at the start of every turn.
+    request_text: str = ""
+    recalled: list[str] = field(default_factory=list)
+    #: Earlier user messages of this conversation, most recent last, for
+    #: the memory tool to check a fact against what the person actually
+    #: said (FR-066). Set by the loop with the request text.
+    stated: list[str] = field(default_factory=list)
+    #: Spill files this session's tool results point at. Pruning leaves
+    #: these alone, so a pointer the model was given resolves for as long as
+    #: the conversation that holds it (FR-089).
+    spilled: set[str] = field(default_factory=set)
+
+    @property
+    def evidence(self) -> Any:
+        if self._evidence is None:
+            from ..agent.evidence import Ledger
+
+            self._evidence = Ledger(mode=getattr(self.config.agent, "mode", "act"))
+        return self._evidence
+
+    def reset_evidence(self) -> None:
+        """A new turn, a new ledger. The old one is simply dropped."""
+        self._evidence = None
+        # What the last turn read does not ground this one: the sources of a
+        # grounding claim are the ones consulted since it started.
+        self.read_this_turn.clear()
+
+    def note_read(self, path: Path, material: str | bytes = "") -> None:
+        key = self._key(path)
+        self.seen.add(key)
+        if material:
+            text = material.decode("utf-8", errors="replace") \
+                if isinstance(material, bytes) else str(material)
+            self.read_this_turn[key] = text
+        # A whole-file read is an observation: the ledger records that the
+        # file was seen, from where, and a fingerprint of what was there —
+        # never the contents. Bookkeeping must not be the reason a read fails.
+        try:
+            self.evidence.verified(f"read {self.relative(path)}",
+                                   source=self.relative(path), material=material,
+                                   reference=f"call {self.call_id}" if self.call_id else "")
+        except Exception:
+            pass
 
     def was_read(self, path: Path) -> bool:
         return self._key(path) in self.seen
+
+    def note_window(self, path: Path, material: str | bytes = "") -> None:
+        """Record the bounded window this turn actually saw.
+
+        A partial read is not the whole file, so it is not `seen` — a write
+        must still warn that it is replacing something only partly known. But
+        the window *was* observed this turn, and a candidate found inside it is
+        grounded by it; recordings are cleared with the ledger.
+        """
+        if not material:
+            return
+        text = material.decode("utf-8", errors="replace") \
+            if isinstance(material, bytes) else str(material)
+        self.read_this_turn[self._key(path)] = text
 
     @staticmethod
     def _key(path: Path) -> str:

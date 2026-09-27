@@ -16,11 +16,13 @@ from dataclasses import dataclass, field
 
 from ..agent import AgentLoop, Conversation
 from ..agent.spawn import spawner
+from ..application import Binding, run_turn
 from ..events import EventBus, Kind
 from ..mcp import MCPManager
 from ..providers.gateway import Gateway
 from ..questions import CANCELLED
 from ..safety import PermissionEngine, make_assessor
+from ..session.store import SessionStore
 from ..skills import load_for as load_skills
 from ..tools import ToolRegistry
 
@@ -86,7 +88,14 @@ def run_job(config, job) -> RunOutcome:
 
     unsubscribe = bus.subscribe(observe)
     try:
-        result = agent.run(job.prompt)
+        # A stateless run, like `comodor run`: it keeps nothing unless it
+        # stops for a decision, and then a hidden continuation bound to this
+        # workspace and mode — resumable only by an explicit answer naming
+        # the decision's ref (`comodor run --decision-answers`), never by the
+        # next tick or the next event.
+        result = run_turn(agent, job.prompt,
+                          store=SessionStore(config.paths.user / "sessions"),
+                          binding=Binding.of(config))
     finally:
         unsubscribe()
         tools.close()

@@ -8,6 +8,7 @@ that, written against the real service the way `test_protocol.py` drives it.
 
 from __future__ import annotations
 
+import copy as _copy
 import time
 from typing import Any
 
@@ -485,3 +486,116 @@ def _settled(service: CoreService, session_id: str,
         if time.monotonic() >= deadline:
             raise AssertionError("the turn never ended")
         time.sleep(0.01)
+
+
+# --------------------------------------------------------------------------- #
+# T207 — the completion turn goes through run_turn, and the delegate's open
+# decision reaches the parent unchanged, unresolved and still blocking
+# --------------------------------------------------------------------------- #
+
+
+
+class _OneFinishedDelegate:
+    """A manager with one finished delegate record that stopped for a decision."""
+
+    def __init__(self, record):
+        self._records = [record]
+        self.restored: list[str] = []
+
+    def take_pending(self):
+        records, self._records = self._records, []
+        return records
+
+    def restore(self, identifiers):
+        self.restored.extend(identifiers)
+
+    def listing(self):
+        return []
+
+    def closing(self):
+        pass
+
+    def stop_all(self):
+        pass
+
+    def wait(self, *_):
+        pass
+
+
+def _delegate_record():
+    payload = {
+        "kind": "clarification_required", "decision": "Which database?",
+        "candidates": [{"label": "SQLite", "description": ""}],
+        "evidence_consulted": [], "reason": "architecture", "outcome": "unattended",
+        "decision_ref": "dr-from-delegate",
+        "decisions": [{"id": "dr-from-delegate", "decision_ref": "dr-from-delegate",
+                       "decision": "Which database?", "candidates": ["SQLite"],
+                       "evidence_consulted": [], "reason": "architecture"}],
+    }
+    return {"id": "d1", "state": "done", "label": "db",
+            "answer": "Stopped: a decision is needed", "clarification": payload}
+
+
+def test_the_completion_turn_carries_the_delegates_decision_through_run_turn(
+        config, monkeypatch):
+    import comodor.application as application
+
+    (config.paths.project / "README.md").write_text("A project.\n", encoding="utf-8")
+    record = _delegate_record()
+    expected = _copy.deepcopy(record["clarification"])
+    manager = _OneFinishedDelegate(record)
+
+    def build(cfg, **_):
+        bus = EventBus()
+        gateway = Gateway(cfg, scripts=[
+            Script(text="Reading, then writing.", tool_calls=[
+                ToolCall(id="r1", name="read_file", arguments={"path": "README.md"})]),
+            Script(text="Now the file.", tool_calls=[
+                ToolCall(id="w1", name="write_file",
+                         arguments={"path": "db.py", "content": "ENGINE = 'sqlite'\n"})]),
+            Script(text="Done.")])
+        agent = AgentLoop(cfg, gateway, ToolRegistry(), bus,
+                          PermissionEngine(cfg, bus), Conversation())
+        return Assembly(config=cfg, bus=bus, gateway=gateway, memory=None,
+                        permissions=None, skills=None, mcp=None, tools=None,
+                        agent=agent, conversation=agent.conversation,
+                        delegates=manager)
+
+    reached = []
+    real = application.run_turn
+
+    def recording(agent, user_text="", **kwargs):
+        reached.append(kwargs)
+        return real(agent, user_text, **kwargs)
+
+    def no_lookup(*_a, **_k):
+        raise AssertionError("a carried decision triggered a continuation lookup")
+
+    monkeypatch.setattr(application, "run_turn", recording)
+    monkeypatch.setattr(application, "_validate", no_lookup)
+
+    service = CoreService(config, assemble_with=build)
+    try:
+        handle = service.session(service.create_session()["id"])
+        service._deliver_completions(handle)
+        agent = handle.assembly.agent
+    finally:
+        service.close()
+
+    # 3. the parent turn reached run_turn with that payload in `decisions`,
+    #    unchanged, and not as an answer.
+    (kwargs,) = reached
+    assert kwargs["decisions"] == [expected]
+    assert "decision_answers" not in kwargs or kwargs["decision_answers"] is None
+    # 4. at the loop the decision is still open, under the delegate's own ref.
+    decision = next(d for d in agent.tool_context.evidence.decisions
+                    if d.what == "Which database?")
+    assert decision.ref == "dr-from-delegate"
+    assert decision.state in ("unresolved", "blocked") and decision.answer == ""
+    # 6. the dependent write did not run; the independent read did.
+    assert not (config.paths.project / "db.py").exists()
+    assert any(entry.source == "README.md"
+               for entry in agent.tool_context.evidence.entries)
+    # 5. no answer was supplied or invented anywhere in the parent's session.
+    assert all("dr-from-delegate" not in str(m.meta.get("question", {}).get("answers"))
+               for m in agent.conversation.messages)

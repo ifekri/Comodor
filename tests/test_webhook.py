@@ -290,3 +290,147 @@ def test_an_unsigned_delivery_is_refused(listening):
     status, _ = _deliver(listening.port, "/ci", "s3cret",
                          b'{"status": "green"}', sign=False)
     assert status == 404
+
+
+# --------------------------------------------------------------------------- #
+# T204 — a webhook event is a stateless run; it keeps a hidden continuation
+# only when it stops, and no later event resumes it
+# --------------------------------------------------------------------------- #
+
+
+def _isolated_config(tmp_path):
+    """A config wholly inside tmp_path, on the fake provider: nothing here may
+    reach the real user's home, where continuations would otherwise land."""
+    from comodor.config import Config, ProviderConfig
+    from comodor.paths import Paths
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (tmp_path / "home").mkdir()
+    cfg = Config(paths=Paths(user=tmp_path / "home", project=project))
+    cfg.providers = {"fake": ProviderConfig(name="fake", kind="fake", base_url="offline",
+                                            api_key="test", model="fake-1", label="Fake")}
+    cfg.provider, cfg.model = "fake", "fake-1"
+    cfg.agent.context_limit = 100_000
+    cfg.learning.enabled = False
+    return cfg
+
+
+@pytest.fixture
+def iso(tmp_path):
+    return _isolated_config(tmp_path)
+
+
+@pytest.fixture
+def iso_server(iso, tmp_path):
+    from comodor.webhook.server import Server
+    from comodor.webhook.subs import Sub, Subscriptions
+
+    made = Server(iso, host="127.0.0.1", port=0, subs=Subscriptions(tmp_path / "hook"))
+    made.subs.add(Sub(name="ci", path="/ci", secret="s3cret", template="Build: {.status}"))
+    return made
+
+
+def _stopping_plans(monkeypatch, *plans):
+    from comodor.providers.gateway import Gateway as RealGateway
+
+    queue = [list(plan) for plan in plans]
+
+    def factory(configuration, scripts=None):
+        return RealGateway(configuration, scripts=queue.pop(0) if queue else [])
+
+    monkeypatch.setattr("comodor.cron.runner.Gateway", factory)
+    monkeypatch.setattr("comodor.providers.gateway.Gateway", factory)
+
+
+def _ask_branch():
+    from comodor.providers.base import ToolCall
+
+    return ToolCall(id="q1", name="ask", arguments={"questions": [{
+        "question": "Which environment is this build for?", "header": "Environment",
+        "affects": ["behaviour"],
+        "options": [{"label": "staging", "source": "request", "evidence": "staging"},
+                    {"label": "production", "source": "request",
+                     "evidence": "production"}]}]})
+
+
+def _continuations(config):
+    from comodor.session.store import SessionStore
+
+    return SessionStore(config.paths.user / "sessions").list_sessions(
+        include_continuations=True)
+
+
+def test_a_webhook_event_that_stops_keeps_one_plan_mode_continuation(iso_server, iso, monkeypatch):
+    server, config = iso_server, iso
+    from comodor.providers.fake import Script
+    from comodor.webhook.server import Event
+
+    _stopping_plans(monkeypatch, [Script(text="A question.", tool_calls=[_ask_branch()])])
+    server._run(Event(sub=server.subs.by_path("/ci"),
+                      payload={"status": "staging or production"}))
+    (meta,) = _continuations(config)
+    assert meta.continuation["mode"] == "plan"
+    from comodor.session.store import SessionStore
+
+    assert SessionStore(config.paths.user / "sessions").list_sessions() == []
+
+
+def test_a_later_unrelated_webhook_event_does_not_resume_it(iso_server, iso, monkeypatch):
+    server, config = iso_server, iso
+    from comodor.providers.fake import Script
+    from comodor.session.store import SessionStore
+    from comodor.webhook.server import Event
+
+    _stopping_plans(monkeypatch, [Script(text="A question.", tool_calls=[_ask_branch()])],
+                    [Script(text="Build noted.")])
+    server._run(Event(sub=server.subs.by_path("/ci"), payload={"status": "red"}))
+    (meta,) = _continuations(config)
+    ref = meta.continuation["decision_refs"][0]
+    store = SessionStore(config.paths.user / "sessions")
+    before = store.path_for(meta.id).read_bytes()
+    server._run(Event(sub=server.subs.by_path("/ci"), payload={"status": "green"}))
+    assert [m.id for m in _continuations(config)] == [meta.id]
+    assert store.path_for(meta.id).read_bytes() == before
+    assert store.decisions(meta.id)[ref].status == "open"
+
+
+def test_the_webhooks_stopped_run_resumes_only_by_explicit_ref_in_its_mode(
+        iso_server, iso, monkeypatch):
+    server, config = iso_server, iso
+    import argparse
+    import io
+    import json
+    from contextlib import redirect_stderr, redirect_stdout
+
+    from comodor import cli
+    from comodor.providers.fake import Script
+    from comodor.session.store import SessionStore
+    from comodor.webhook.server import Event
+
+    config.learning.enabled = False
+    _stopping_plans(monkeypatch, [Script(text="A question.", tool_calls=[_ask_branch()])],
+                    [Script(text="Planned for staging.")])
+    server._run(Event(sub=server.subs.by_path("/ci"), payload={"status": "red"}))
+    (meta,) = _continuations(config)
+    ref = meta.continuation["decision_refs"][0]
+    answers = config.paths.user / "answers.json"
+    answers.write_text(json.dumps([{"decision_ref": ref, "written": "staging"}]),
+                       encoding="utf-8")
+
+    def resume(mode):
+        config.agent.mode = mode
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            code = cli.run_headless(config, argparse.Namespace(
+                task="", yes=False, json=True, max_steps=5,
+                decision_answers=str(answers)))
+        return code, json.loads(out.getvalue())
+
+    code, report = resume("act")
+    assert code == 1 and report["error"]["kind"] == "mode", \
+        "act capability is never granted to work that stopped in plan mode"
+    code, report = resume("plan")
+    assert code == 0 and report["stopped"] == "done"
+    store = SessionStore(config.paths.user / "sessions")
+    assert store.decisions(meta.id)[ref].status == "stale"

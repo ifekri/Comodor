@@ -132,6 +132,13 @@ arrives, and the whole menu fits one screen.
 
 While a task is running the only thing offered is **Stop**.
 
+## Answering a decision after the turn stopped
+
+When a turn stops because a decision is needed, its message names each
+decision with its `decision_ref`, and a second message offers the options as
+buttons. A button answers exactly that decision, and the work carries on.
+Anything you type afterwards is a new request, never read as an answer.
+
 ## Running it
 
 ```bash

@@ -43,9 +43,16 @@ class Script:
 
 class FakeProvider:
     """Replays :class:`Script` objects, one per call, then repeats the last."""
-
     name = "fake"
     label = "Fake"
+
+    #: What the mutation preflight is answered with. The loop asks it once
+    #: before the first call that can change anything; a test that is not
+    #: about the guard must not have its script queue consumed by it, so the
+    #: preflight is answered here and never takes a `Script`. A list answers
+    #: one preflight per entry, repeating the last, for a turn that gates more
+    #: than one batch differently.
+    preflight = '{"status": "allow", "decisions": [], "reason": "test default"}'
 
     def __init__(self, scripts: list[Script] | None = None, model: str = "fake-1",
                  chunk: int = 24) -> None:
@@ -53,6 +60,9 @@ class FakeProvider:
         self.model = model
         self.chunk = chunk
         self.calls: list[list[Message]] = []
+        #: The question each mutation preflight was asked, so a test can prove
+        #: what the assessor was actually shown.
+        self.preflight_questions: list[str] = []
         self._index = 0
         # Two background passes can ask at once; the queue must hand each
         # script to exactly one of them, in call order.
@@ -61,8 +71,15 @@ class FakeProvider:
     def stream(self, messages: list[Message], *, tools: list[ToolSpec] | None = None,
                model: str = "", temperature: float = 0.3, max_tokens: int = 4096,
                **kwargs: Any) -> Iterator[StreamEvent]:
-        self.calls.append(list(messages))
-        script = self._next_script(messages)
+        if _is_preflight(messages):
+            # Answered here, and not recorded as a turn: it is the loop's own
+            # guard, not part of the conversation a test is scripting.
+            self.preflight_questions.append(
+                next((m.content for m in messages if m.role is Role.USER), ""))
+            script = Script(text=self._next_preflight())
+        else:
+            self.calls.append(list(messages))
+            script = self._next_script(messages)
 
         for piece in _chunks(script.reasoning, self.chunk):
             yield StreamEvent(type=EventType.REASONING, text=piece)
@@ -98,6 +115,15 @@ class FakeProvider:
             return self.scripts[-1]
         return Script(text=_echo(messages))
 
+    def _next_preflight(self) -> str:
+        """The preflight answer for this call. A list is a queue, last repeats."""
+        answer = self.preflight
+        if isinstance(answer, list):
+            if not answer:
+                return '{"status": "allow", "decisions": [], "reason": "test default"}'
+            return answer.pop(0) if len(answer) > 1 else answer[0]
+        return answer
+
     def list_models(self) -> list[str]:
         return ["fake-1", "fake-fast"]
 
@@ -108,6 +134,18 @@ class FakeProvider:
 def _chunks(text: str, size: int) -> Iterator[str]:
     for start in range(0, len(text), size):
         yield text[start:start + size]
+
+
+def _is_preflight(messages: list[Message]) -> bool:
+    """Whether this call is the mutation preflight rather than a turn.
+
+    The loop's guard is the only caller whose system prompt says so; every
+    other call is a turn and takes its script from the queue in order.
+    """
+    for message in messages:
+        if message.role is Role.SYSTEM:
+            return "mutation preflight" in (message.content or "")
+    return False
 
 
 def _echo(messages: list[Message]) -> str:

@@ -70043,6 +70043,13 @@ function select(state, id) {
   }
   return { ...state, chosen: replaceAt(state.chosen, state.at, next) };
 }
+function grounds(state) {
+  const question = current(state);
+  return {
+    reason: question?.reason ?? "",
+    evidence: [...question?.evidence_consulted ?? []]
+  };
+}
 function allowsWriting(state) {
   return Boolean(current(state)?.options.some((option) => option.free));
 }
@@ -71939,6 +71946,7 @@ function QuestionCard({ question, waiting, width, onChange }) {
         style: { fg: terminal["text.primary"] },
         children: clip(asked.prompt, Math.max(8, width - 4))
       }, undefined, false, undefined, this),
+      groundsLine(question, Math.max(8, width - 4)),
       asked.options.map((option, index) => {
         const here = index === question.cursor;
         const chosen = isSelected(question, option.id);
@@ -71985,6 +71993,20 @@ function QuestionCard({ question, waiting, width, onChange }) {
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
+}
+function groundsLine(state, width) {
+  const { reason, evidence } = grounds(state);
+  if (!reason && evidence.length === 0)
+    return null;
+  const parts = [];
+  if (reason)
+    parts.push(`needed for: ${reason.replace(/_/g, " ")}`);
+  if (evidence.length > 0)
+    parts.push(`checked: ${evidence.join(", ")}`);
+  return /* @__PURE__ */ import_jsx_dev_runtime2.jsxDEV("text", {
+    style: { fg: terminal["text.muted"], flexShrink: 0 },
+    children: clip(parts.join("   "), width)
+  }, undefined, false, undefined, this);
 }
 function progress(state) {
   const answeredAt = (index) => (state.chosen[index] ?? []).length > 0 || (state.written[index] ?? "").trim().length > 0;

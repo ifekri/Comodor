@@ -137,7 +137,7 @@ def _write(ctx: ToolContext, path: Path, content: str, action: str,
     # Written is known. Without this a second `write_file` to the same path
     # would warn that the contents are unread, when the thing that put them
     # there was the call before it.
-    ctx.note_read(path)
+    ctx.note_read(path, material=content)
 
     if not getattr(ctx.config.safety, "verify_edits", True):
         return ""
@@ -205,7 +205,12 @@ class ReadFile(Tool):
         # I have not". Only a whole read counts: a twenty-line window of a
         # thousand-line file is not knowing the file.
         if start == 1 and len(window) >= total:
-            ctx.note_read(target)
+            ctx.note_read(target, material="\n".join(window))
+        else:
+            # A bounded window is still something this turn observed: a
+            # candidate found inside it is grounded by it. Only the window is
+            # recorded — never the unread parts.
+            ctx.note_window(target, material="\n".join(window))
 
         # Not padded to a fixed width. The padding was six characters on every
         # line whatever the number, and a file read is the largest new thing

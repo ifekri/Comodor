@@ -26,7 +26,9 @@ import threading
 import time
 from typing import Any
 
+from ..application import DecisionRejected
 from ..config import Config
+from .schema import BadRequest
 
 #: A session unused for this long is closed and dropped.
 IDLE_TTL = 1800.0
@@ -50,7 +52,8 @@ class Talk:
         return self.session.busy
 
     def run(self, text: str, prior: list[dict[str, str]] | None = None,
-            mode: str = "", patience: float = 600.0) -> dict[str, Any]:
+            mode: str = "", patience: float = 600.0,
+            decision_answers: Any = None) -> dict[str, Any]:
         """One whole turn, waited for. Serialized per session.
 
         ``prior`` is the history the client sent and we do not keep. It is
@@ -61,6 +64,11 @@ class Talk:
 
         ``mode`` is honoured only when the client names a known one; an
         unknown word leaves the configured mode alone rather than guessing.
+
+        ``decision_answers`` answers decisions this session stopped for, by
+        their ``decision_ref``. The session's turn entry checks the whole
+        batch before anything is applied; a refused one is a bad request
+        naming the refs, and no model is called.
         """
         task = _with_prior(text, prior or [])
 
@@ -76,14 +84,23 @@ class Talk:
                         "a turn is already running on this session"}
             if mode:
                 self.session.set_mode(mode)
-            if not self.session.send(task):
+            # The cursor before the turn: a refusal starts no turn, and a
+            # resumed one is read from here like any other.
+            cursor = self.session.cursor
+            try:
+                started = self.session.send(task, decision_answers=decision_answers)
+            except DecisionRejected as refused:
+                refs = f" ({', '.join(refused.refs)})" if refused.refs else ""
+                raise BadRequest(f"decision answers refused ({refused.kind}): "
+                                 f"{refused}{refs}") from None
+            if not started:
                 return {"text": "", "steps": 0, "stopped": "busy", "error":
                         "the turn could not be started"}
-            return self._wait(patience)
+            return self._wait(patience, cursor)
 
-    def _wait(self, patience: float) -> dict[str, Any]:
+    def _wait(self, patience: float, cursor: int | None = None) -> dict[str, Any]:
         """Drain the event log until the turn ends, then read the answer."""
-        cursor = self.session.cursor
+        cursor = self.session.cursor if cursor is None else cursor
         deadline = time.monotonic() + patience
         text_parts: list[str] = []
         steps = 0
@@ -104,7 +121,9 @@ class Talk:
                     steps += 1
                 elif kind == "turn_end":
                     return self._outcome(text_parts, steps,
-                                         str(event.get("stopped") or "done"))
+                                         str(event.get("stopped") or "done"),
+                                         event.get("clarification"),
+                                         event.get("annotation"))
                 elif kind == "cancelled":
                     return self._outcome(text_parts, steps, "cancelled")
 
@@ -112,9 +131,12 @@ class Talk:
                 "stopped": "timeout", "error": "the turn outlived its patience"}
 
     def _outcome(self, text_parts: list[str], steps: int,
-                 stopped: str) -> dict[str, Any]:
+                 stopped: str, clarification: Any = None,
+                 annotation: Any = None) -> dict[str, Any]:
         """The answer plus what the loop charged, from the session's own
-        accounting. Usage lives on the conversation, not on the events."""
+        accounting. Usage lives on the conversation, not on the events. The
+        structured clarification payload (including `clarification.outcome`)
+        survives intact and un-collapsed (contracts §C4; FR-123)."""
         try:
             state = self.session.state() or {}
         except Exception:
@@ -132,8 +154,16 @@ class Talk:
         class _Result:
             usage = _Usage()
 
-        return {"text": "".join(text_parts), "steps": steps, "stopped": stopped,
+        body = {"text": "".join(text_parts), "steps": steps, "stopped": stopped,
                 "result": _Result()}
+        if isinstance(clarification, dict) and clarification:
+            body["clarification"] = clarification
+        if isinstance(annotation, str) and annotation:
+            # The completion gate's unresolved work rides the outcome too, so
+            # an API client cannot read a partial answer as an unqualified
+            # completion (FR-037).
+            body["annotation"] = annotation
+        return body
 
     def close(self) -> None:
         try:

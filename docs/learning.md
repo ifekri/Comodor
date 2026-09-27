@@ -144,7 +144,38 @@ about "the lexer".
 
 `project` keeps lessons to the repository they were learned in — the right
 default, since a convention in one codebase is wrong in another. `global` shares
-them everywhere.
+them everywhere. Project-scoped knowledge is never applied in another project.
+
+---
+
+## What it will learn, and what it will not
+
+Every durable item records **where it came from** — its provenance. There are
+six admissible origins, and nothing else is storable:
+
+| Provenance | Where it comes from |
+| --- | --- |
+| `user_correction` | You rewrote, undid or refused what the agent produced |
+| `user_statement` | You stated it, in your own words |
+| `settled_decision` | You answered a question form |
+| `counted_convention` | Counted from the repository, with evidence |
+| `validated_outcome` | A project check confirmed it |
+| `tool_confirmed` | A tool observed it, about *what that source contained* |
+
+A model's own assertion — a reflected lesson, a reviewed fact — is admitted
+only once the transcript corroborates it into one of those classes. Text that
+merely appeared in a file, a web page or a tool result is not authority of its
+own: it may become a `tool_confirmed` fact about what that source contained, but
+never a belief about the world, and an instruction-shaped string in retrieved
+content is refused outright.
+
+Every item also carries a **source fingerprint** and a lifecycle. When the
+source changes and no longer supports the item, it is marked `stale` and stops
+being recalled; when a newer contradicting item arrives, the older is marked
+`superseded` and points at the newer one. Neither is deleted — both stay
+inspectable in `comodor journey`, so you can see what was learned and why it
+stopped applying. A learned item never overrides a freshly observed
+repository fact: the observation governs and the item is marked stale.
 
 ---
 

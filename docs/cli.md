@@ -81,6 +81,7 @@ comodor run "refactor the parser" --max-steps 40
 | `--yes` | approve writes and commands automatically |
 | `--json` | a machine-readable result on stdout |
 | `--max-steps N` | override the step limit for this run |
+| `--interactions JSON` | script answers to question forms, in order: `"answer"` (or `{"action":"answer","value":"…"}`, or `{"action":"answer","values":{"<header>":"…"}}` for a form with several questions), `"cancel"`, `"expire"`, `"unattended"`. A lone `value` picks the option it names wherever it is offered and otherwise answers the first question only. Without it, a form nobody can answer is `unattended` |
 
 Without `--yes` it will ask, on stderr, and refuse rather than assume if nothing
 can answer. That is deliberate: a script that silently self-approves is a script
@@ -113,7 +114,39 @@ that does something you did not expect at three in the morning.
 | `max_steps` | it hit `agent.max_steps` |
 | `budget` | it hit `agent.max_cost_usd` or `agent.max_seconds` |
 | `cancelled` | you interrupted it |
+| `clarification_required` | it stopped because a decision it needs is unanswered |
 | `error` | something went wrong; `error` says what |
+
+A `clarification_required` turn carries the decision in a `clarification`
+block, so a script can see what is needed without parsing prose:
+
+```json
+{
+  "stopped": "clarification_required",
+  "ok": false,
+  "clarification": {
+    "kind": "clarification_required",
+    "decision": "Which database should we use?",
+    "candidates": [{"label": "SQLite"}, {"label": "PostgreSQL"}],
+    "outcome": "unattended",
+    "decision_ref": "dr-4f1c0e9a2b7d63c85e10",
+    "decisions": [{"id": "dr-4f1c0e9a2b7d63c85e10",
+                   "decision_ref": "dr-4f1c0e9a2b7d63c85e10",
+                   "decision": "Which database should we use?"}]
+  }
+}
+```
+
+Every open decision is named by its `decision_ref`: a stable identity, the
+same across turns and invocations, that a later answer is given by.
+`decisions[].id` carries the same value.
+
+`clarification.outcome` is `cancelled` (the form was dismissed or a material
+question was declined), `expired` (the form waited out) or `unattended`
+(nobody was listening). All three leave the decision open and run no
+dependent work. `outcome` is never `cancelled` for a dismissed question if
+that would read as the whole turn being cancelled — `stopped: "cancelled"`
+keeps that meaning exclusively.
 
 `ok` is true for `done` and `max_steps` — running out of steps is not a failure,
 it is a ceiling doing its job — so check `stopped` too if you need the
@@ -123,6 +156,57 @@ difference:
 comodor run "update the changelog for this release" --yes --json > result.json
 jq -e '.stopped == "done"' result.json
 ```
+
+`comodor run` exits `3` when a decision is still needed, distinct from `0`
+(done), `1` (an error) and `130` (interrupted). A script can therefore tell
+"waiting on a human" apart from "it failed".
+
+### Answering later: `--decision-answers`
+
+A stopped run is not lost. When — and only when — a `comodor run` stops with
+`clarification_required`, its work is kept as a hidden continuation: it is in
+no session list, and nothing else changes on disk. A later invocation answers
+the decisions by ref and the work carries on:
+
+```bash
+comodor run "set up the database layer" --json > stopped.json      # exits 3
+cat > answers.json <<'JSON'
+[{"decision_ref": "dr-4f1c0e9a2b7d63c85e10", "chosen": ["SQLite"]}]
+JSON
+comodor run --decision-answers answers.json --json                   # carries on
+```
+
+`--decision-answers PATH` (`-` reads stdin) takes a JSON list of
+`{"decision_ref", "chosen", "written"}` objects: `chosen` names one of the
+offered options, `written` is an answer of your own. The refs alone find the
+stopped run; a task given alongside rides the resumed turn as your message.
+
+The answers are checked whole, before anything runs:
+
+- every ref must name a decision the stopped run issued and has not yet had
+  answered — a reused ref is refused as already answered;
+- every ref in one batch must belong to the same stopped run;
+- the run must be resumed from the same workspace and in the same mode it
+  stopped in. A mode is never upgraded or downgraded to fit, and an answer
+  never grants a permission. A different provider or model is fine;
+- every answer must carry a real choice or text.
+
+A refused batch changes nothing and calls no model. It exits `1`, names the
+refs on stderr and, with `--json`, prints an `error` object:
+
+```json
+{"text": "", "ok": false, "stopped": "error",
+ "error": {"kind": "stale", "message": "already answered: dr-…", "refs": ["dr-…"]}}
+```
+
+A resumed run that stops for another decision stays in the same
+continuation, which adds the new ref. A continuation is an ordinary
+transcript, exportable by its id, and is kept until it is deleted. Scheduled
+jobs and webhook events stop the same way and are resumed the same way:
+never by the next tick or event, only by an explicit answer.
+
+`--decision-answers` is not `--resume` (which reopens an interactive session)
+and not `--interactions` (which scripts a form within the same run).
 
 It still learns from a headless run. A correction you make afterwards teaches
 the same lesson an interactive one would.

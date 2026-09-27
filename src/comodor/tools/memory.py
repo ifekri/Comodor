@@ -93,9 +93,19 @@ class Memory(Tool):
     def run(self, ctx: ToolContext, **args: Any) -> ToolResult:
         action = str(args.get("action") or "").strip().lower()
         kind = str(args.get("kind") or "memory")
+        if action in ("add", "replace", "remove") and not getattr(
+                getattr(ctx.config, "learning", None), "enabled", True):
+            return ToolResult.failure(
+                "learning is switched off (learning.enabled = false), so the "
+                "memory is read-only; nothing durable is written")
         try:
             if action == "add":
-                fact = self._service.add(str(args.get("text") or ""), kind=kind)
+                text = str(args.get("text") or "")
+                refusal = self._unbacked(ctx, text)
+                if refusal:
+                    return ToolResult.failure(refusal)
+                fact = self._service.add(text, kind=kind, provenance="user_statement",
+                                         source_ref="the user's message")
                 return ToolResult.success(
                     f"Memory holds: {self._service.usage_line()}", display=f"fact {kind} remembered"
                 )
@@ -116,6 +126,29 @@ class Memory(Tool):
         except ValueError as error:
             return ToolResult.failure(str(error))
 
+    @staticmethod
+    def _unbacked(ctx: ToolContext, text: str) -> str:
+        """Why a fact may not be written, or "".
+
+        The tool records what the person stated (its provenance is
+        `user_statement`), so inside a turn the fact must be backed by
+        something the person said in this conversation. Text that only
+        appeared in a file, a page or a tool result is not theirs to have
+        said, and cannot be written here as if it were (FR-066). Outside a
+        turn — no request text — there is nothing to check against.
+        """
+        from ..learning.memory import _content_words, covers
+
+        said = [ctx.request_text, *getattr(ctx, "stated", [])]
+        said = [line for line in said if line]
+        if not said:
+            return ""
+        words = _content_words(text)
+        if not words or any(covers(words, line) for line in said):
+            return ""
+        return ("nothing the user said in this conversation backs that; the "
+                "memory records what they state, not what was read or inferred")
+
     def _list(self) -> ToolResult:
         entries = self._service.entries()
         if not entries:
@@ -125,5 +158,6 @@ class Memory(Tool):
         lines = [f"Memory holds: {self._service.usage_line()}", ""]
         for fact in entries:
             mark = " (pinned)" if fact.pinned else ""
-            lines.append(f"- #{fact.id} ({fact.kind}{mark}): {fact.text}")
+            origin = f", {fact.provenance}" if getattr(fact, "provenance", "") else ""
+            lines.append(f"- #{fact.id} ({fact.kind}{mark}{origin}): {fact.text}")
         return ToolResult.success("\n".join(lines))

@@ -106,25 +106,30 @@ def test_a_question_nobody_can_answer_does_not_hold_the_run(scripted):
     code = cli.run_headless(config, run(config))
     elapsed = time.monotonic() - started
 
-    assert code == 0
+    # Since spec 002 (FR-082) a question nobody can answer ends the run
+    # needing a decision rather than carrying on; the exit is non-zero and
+    # the run still does not wait.
+    assert code != 0
     assert elapsed < 15.0, f"the run waited {elapsed:.0f}s for an answer"
 
 
-def test_the_model_is_told_to_carry_on_rather_than_ask_again(scripted):
-    """The tool already has the right words for an unfilled form. What matters
-    is that the model is handed them, rather than a timeout and no explanation."""
+def test_a_headless_form_ends_the_run_needing_a_decision(scripted):
+    """Nobody is there to answer, so the run stops and says what is needed
+    (spec 002, FR-033, FR-082). The model is never told to carry on."""
     config = scripted([
         Script(text="One thing first.", tool_calls=[a_question()]),
         Script(text="Flask it is."),
     ])
 
-    cli.run_headless(config, run(config))
+    code = cli.run_headless(config, run(config))
 
+    assert code != 0
     assert scripted.providers, "the run should have built a gateway"
     replies = [message.content for call in scripted.providers[0].calls
                for message in call]
-    assert any("closed the form without answering" in reply for reply in replies), \
-        f"the model was never told the form came back empty: {replies}"
+    assert not any("sensible defaults" in reply for reply in replies)
+    assert not any("Flask it is" in reply for reply in replies), \
+        "the second script never ran: the turn stopped at the question"
 
 
 def test_a_permission_prompt_is_left_to_its_own_deadline(scripted):
@@ -184,6 +189,36 @@ def test_a_run_that_used_nothing_says_so_rather_than_omitting_it(scripted):
 
     report = json.loads(out.getvalue())
     assert report["tools"] == [], "an empty list and a missing key are not the same"
+
+
+def test_the_headless_json_carries_the_clarification_outcome(scripted):
+    """A decision is still needed; the JSON says so, with the structured
+    outcome and the partial work, and the exit code is distinct from both
+    success and failure (T130, T131; FR-121, FR-123)."""
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()])])
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        code = cli.run_headless(config, run(config, json=True))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "clarification_required"
+    assert report["ok"] is False
+    assert report["clarification"]["outcome"] == "unattended"
+    assert report["clarification"]["decision"] == "Which framework?"
+    assert report["tool_calls"] == 1, "partial work is preserved"
+    assert code == 3, "distinct from success (0) and error (1)"
+
+
+def test_a_dismissed_question_is_not_a_cancelled_turn(scripted):
+    """`stopped: "cancelled"` keeps its turn-level meaning; a dismissed
+    question never emits it (contracts §C2; FR-035)."""
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()])])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(config, json=True))
+    report = json.loads(out.getvalue())
+    assert report["stopped"] != "cancelled"
 
 
 # --------------------------------------------------------------------------- #
@@ -266,3 +301,412 @@ def test_a_headless_run_does_not_load_the_interface(tmp_path):
     marker = [line for line in done.stdout.splitlines() if line.startswith("LOADED:")]
     assert marker, done.stdout
     assert marker[0] == "LOADED:", f"a headless run loaded {marker[0][7:]}"
+
+
+# --------------------------------------------------------------------------- #
+# scripted interactions: the user side of a clarification, automated (T149,
+# T150). The form, the lifecycle and the outcome are the product's; only the
+# person's reply is scripted.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_scripted_answer_resumes_the_work(scripted):
+    config = scripted([
+        Script(text="One thing first.", tool_calls=[a_question()]),
+        Script(text="Flask it is."),
+    ])
+
+    code = cli.run_headless(config, run(
+        config, interactions=json.dumps([{"action": "answer", "value": "Flask"}])))
+
+    assert code == 0
+    assert scripted.providers, "the run should have built a gateway"
+    replies = [message.content for call in scripted.providers[0].calls
+               for message in call]
+    assert any("Flask" in reply for reply in replies), "the answer never reached the model"
+
+
+def test_a_scripted_cancellation_needs_a_decision_not_a_cancelled_turn(scripted):
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()])])
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        code = cli.run_headless(config, run(
+            config, json=True, interactions=json.dumps(["cancel"])))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "clarification_required"
+    assert report["stopped"] != "cancelled"
+    assert report["clarification"]["outcome"] == "cancelled"
+    assert code == 3
+
+
+def test_a_scripted_expiry_is_distinct_from_cancellation(scripted):
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()])])
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(
+            config, json=True, interactions=json.dumps(["expire"])))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "clarification_required"
+    assert report["clarification"]["outcome"] == "expired"
+    assert report["clarification"]["outcome"] != "cancelled"
+
+
+def test_an_unscripted_form_is_still_unattended(scripted):
+    """The old behaviour is unchanged: no script means nobody is there."""
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()])])
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(config, json=True))
+
+    report = json.loads(out.getvalue())
+    assert report["clarification"]["outcome"] == "unattended"
+
+
+def test_a_cancelled_or_expired_run_invents_no_value(scripted):
+    """Neither dismissal nor expiry becomes a chosen default."""
+    for action in ("cancel", "expire", "unattended"):
+        config = scripted([
+            Script(text="One thing first.", tool_calls=[a_question()]),
+            Script(text="Flask it is."),
+        ])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = cli.run_headless(config, run(
+                config, json=True, interactions=json.dumps([action])))
+        report = json.loads(out.getvalue())
+        assert code == 3
+        assert report["ok"] is False
+        replies = [message.content for call in scripted.providers[0].calls
+                   for message in call]
+        assert not any("Flask it is" in reply for reply in replies), (
+            f"the second script ran under {action}: dependent work resumed")
+
+
+def test_the_json_usage_reports_cache_creation_tokens(scripted):
+    """A provider that bills cache creation reports it; the payload carries it
+    so a benchmark total does not understate what the model read."""
+    config = scripted([Script(text="Done.")])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(config, json=True))
+    report = json.loads(out.getvalue())
+    assert "written_tokens" in report["usage"]
+
+
+# --------------------------------------------------------------------------- #
+# the completion annotation reaches the headless result (FR-037)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_headless_json_carries_the_completion_annotation(scripted):
+    """An honest partial answer is qualified for automation, not only drawn
+    for a person: `stopped` alone must not read as an unqualified completion
+    while the gate has unresolved work."""
+    config = scripted([Script(text="I started on the config file.")])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(
+            config, json=True, task="- add a config file\n- write the tests"))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "done"
+    assert report["annotation"], "the unresolved work rides the result"
+    assert "config file" in report["annotation"]
+
+
+def test_the_plain_headless_output_shows_the_annotation(scripted):
+    config = scripted([Script(text="I started on the config file.")])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(
+            config, task="- add a config file\n- write the tests"))
+
+    printed = out.getvalue()
+    assert "I started on the config file." in printed
+    assert "Not everything the request asked for was delivered" in printed
+
+
+def test_a_completion_claim_is_annotated_after_the_correction_turn(scripted):
+    """The block costs one correction turn; if the corrected answer still
+    does not show the work, the fallback is to annotate, and that annotation
+    is on the result too."""
+    config = scripted([Script(text="Everything is complete."),
+                       Script(text="Everything is complete.")])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(
+            config, json=True, task="- add a config file\n- write the tests"))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "done"
+    assert report["annotation"], "the fallback after one correction still annotates"
+
+
+def test_a_fully_delivered_answer_carries_no_annotation(scripted):
+    config = scripted([
+        Script(text="Writing the notes now.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "notes.md", "content": "hi"})]),
+        Script(text="Added notes.md."),
+    ])
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.run_headless(config, run(config, json=True, task="- add notes.md"))
+
+    report = json.loads(out.getvalue())
+    assert report["stopped"] == "done"
+    assert report["annotation"] == ""
+
+
+def a_two_question_form() -> ToolCall:
+    return ToolCall(id="call-2", name="ask", arguments={"questions": [
+        {"question": "Which framework?", "header": "Framework", "multiSelect": False,
+         "options": [{"label": "Flask", "description": "small"},
+                     {"label": "Django", "description": "large"}]},
+        {"question": "Which database?", "header": "Database", "multiSelect": False,
+         "options": [{"label": "SQLite", "description": "file"},
+                     {"label": "PostgreSQL", "description": "server"}]},
+    ]})
+
+
+class _Form:
+    def __init__(self, call: ToolCall) -> None:
+        self.meta = {"questions": call.arguments["questions"]}
+
+
+def _decoded(document: str) -> dict:
+    from comodor import questions as forms
+
+    return {answer.header: (answer.chosen, answer.written)
+            for answer in forms.decode_answers(document)}
+
+
+def test_a_lone_value_answers_the_questions_that_offer_it_and_no_other():
+    """One scripted `value` is one answer: it picks the option it names where
+    offered and does not spill into an unrelated question (review 4045469373)."""
+    from comodor import questions as forms
+
+    answers = _decoded(cli._answers_from_form(_Form(a_two_question_form()), "Flask", forms))
+    assert answers["Framework"] == (["Flask"], "")
+    assert answers["Database"] == (["SQLite"], ""), "the default, not the framework answer"
+
+
+def test_a_lone_free_text_value_lands_in_the_first_question_only():
+    from comodor import questions as forms
+
+    answers = _decoded(cli._answers_from_form(_Form(a_two_question_form()), "FastAPI", forms))
+    assert answers["Framework"] == ([], "FastAPI")
+    assert answers["Database"] == (["SQLite"], "")
+
+
+def test_values_keyed_by_header_answer_each_question():
+    from comodor import questions as forms
+
+    answers = _decoded(cli._answers_from_form(
+        _Form(a_two_question_form()), "", forms,
+        values={"Framework": "Django", "Database": "DuckDB"}))
+    assert answers["Framework"] == (["Django"], "")
+    assert answers["Database"] == ([], "DuckDB")
+
+
+def test_a_keyed_interaction_reaches_the_form(scripted):
+    config = scripted([
+        Script(text="Two things first.", tool_calls=[a_two_question_form()]),
+        Script(text="Django and DuckDB it is."),
+    ])
+
+    code = cli.run_headless(config, run(config, interactions=json.dumps([
+        {"action": "answer", "values": {"Framework": "Django", "Database": "DuckDB"}}])))
+
+    assert code == 0
+    replies = [message.content for call in scripted.providers[0].calls
+               for message in call]
+    assert any("DuckDB" in reply and "Django" in reply for reply in replies)
+
+
+def test_a_malformed_values_map_is_refused_when_the_scenario_loads():
+    from bench.task import TaskError, _interactions
+
+    with pytest.raises(TaskError):
+        _interactions([{"action": "answer", "values": ["Flask"]}])
+    with pytest.raises(TaskError):
+        _interactions([{"action": "answer", "values": {"Framework": 3}}])
+    assert _interactions([{"action": "answer", "values": {"Framework": "Flask"}}])
+
+
+# --------------------------------------------------------------------------- #
+# T182 — `comodor run --decision-answers`: a later invocation resumes by ref
+# --------------------------------------------------------------------------- #
+
+
+def _json_run(config, **overrides):
+    out, err = io.StringIO(), io.StringIO()
+    from contextlib import redirect_stderr
+
+    with redirect_stdout(out), redirect_stderr(err):
+        code = cli.run_headless(config, run(config, json=True, **overrides))
+    return code, (json.loads(out.getvalue()) if out.getvalue().strip() else None), \
+        err.getvalue()
+
+
+def _stopped_run(scripted, question=None):
+    config = scripted([Script(text="One thing first.",
+                              tool_calls=[question or a_question()])])
+    code, report, _ = _json_run(config)
+    assert code == 3
+    return config, report["clarification"]["decision_ref"]
+
+
+def _answers(tmp_path, entries, name="answers.json"):
+    path = tmp_path / name
+    path.write_text(json.dumps(entries), encoding="utf-8")
+    return str(path)
+
+
+def _model_calls(scripted) -> int:
+    return sum(len(provider.calls) for provider in scripted.providers)
+
+
+def test_a_stopped_run_resumes_in_a_later_invocation_by_ref(scripted, tmp_path):
+    config, ref = _stopped_run(scripted)
+    scripted.plan = [
+        Script(text="Writing it.", tool_calls=[ToolCall(
+            id="w1", name="write_file",
+            arguments={"path": "app.py", "content": "FRAMEWORK = 'flask'\n"})]),
+        Script(text="Done — Flask.")]
+    code, report, _ = _json_run(config, task="", decision_answers=_answers(
+        tmp_path, [{"decision_ref": ref, "written": "Flask"}]))
+    assert code == 0 and report["stopped"] == "done"
+    assert (config.paths.project / "app.py").read_text(encoding="utf-8") \
+        == "FRAMEWORK = 'flask'\n"
+    replies = [m.content for m in scripted.providers[-1].calls[0]]
+    assert any("Which framework?\n  -> Flask" in reply for reply in replies)
+
+
+def test_the_answers_can_come_from_stdin(scripted, monkeypatch):
+    config, ref = _stopped_run(scripted)
+    scripted.plan = [Script(text="Done — Flask.")]
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(
+        [{"decision_ref": ref, "written": "Flask"}])))
+    code, report, _ = _json_run(config, task="", decision_answers="-")
+    assert code == 0 and report["stopped"] == "done"
+
+
+def test_a_task_given_alongside_rides_the_resumed_turn(scripted, tmp_path):
+    config, ref = _stopped_run(scripted)
+    scripted.plan = [Script(text="Done.")]
+    code, _, _ = _json_run(config, task="and keep it small", decision_answers=_answers(
+        tmp_path, [{"decision_ref": ref, "written": "Flask"}]))
+    assert code == 0
+    sent = scripted.providers[-1].calls[0]
+    assert sent[-1].content == "and keep it small"
+
+
+@pytest.mark.parametrize("entries, kind", [
+    ("not json", "malformed"),
+    ([{"written": "Flask"}], "missing"),
+    ([{"decision_ref": "dr-never-minted", "written": "Flask"}], "unknown"),
+    ([{"decision_ref": "__REF__", "written": "   "}], "empty"),
+])
+def test_each_refused_batch_exits_1_and_calls_no_model(scripted, tmp_path, entries, kind):
+    config, ref = _stopped_run(scripted)
+    before = _model_calls(scripted)
+    if isinstance(entries, list):
+        entries = [{**e, **({"decision_ref": ref} if e.get("decision_ref") == "__REF__"
+                            else {})} for e in entries]
+    path = tmp_path / "answers.json"
+    path.write_text(entries if isinstance(entries, str) else json.dumps(entries),
+                    encoding="utf-8")
+    code, report, err = _json_run(config, task="", decision_answers=str(path))
+    assert code == 1
+    assert report["ok"] is False and report["error"]["kind"] == kind
+    assert f"({kind})" in err
+    assert _model_calls(scripted) == before, "a refused batch called the model"
+
+
+def test_a_refusal_names_the_refs_on_stderr(scripted, tmp_path):
+    config, _ = _stopped_run(scripted)
+    code, report, err = _json_run(config, task="", decision_answers=_answers(
+        tmp_path, [{"decision_ref": "dr-nope", "written": "Flask"}]))
+    assert code == 1 and "dr-nope" in err and report["error"]["refs"] == ["dr-nope"]
+
+
+def test_a_batch_spanning_two_stopped_runs_is_refused(scripted, tmp_path):
+    config, first = _stopped_run(scripted)
+    _, second = _stopped_run(scripted)
+    code, report, _ = _json_run(config, task="", decision_answers=_answers(tmp_path, [
+        {"decision_ref": first, "written": "Flask"},
+        {"decision_ref": second, "written": "Django"}]))
+    assert code == 1 and report["error"]["kind"] == "cross_continuation"
+
+
+def test_a_ref_already_answered_is_refused_as_stale(scripted, tmp_path):
+    config, ref = _stopped_run(scripted)
+    scripted.plan = [Script(text="Done.")]
+    answers = _answers(tmp_path, [{"decision_ref": ref, "written": "Flask"}])
+    assert _json_run(config, task="", decision_answers=answers)[0] == 0
+    code, report, _ = _json_run(config, task="", decision_answers=answers)
+    assert code == 1 and report["error"]["kind"] == "stale"
+
+
+def test_a_different_mode_or_workspace_is_refused(scripted, tmp_path):
+    config, ref = _stopped_run(scripted)
+    answers = _answers(tmp_path, [{"decision_ref": ref, "written": "Flask"}])
+    config.agent.mode = "plan"
+    code, report, _ = _json_run(config, task="", decision_answers=answers)
+    assert code == 1 and report["error"]["kind"] == "mode"
+    config.agent.mode = "act"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    from dataclasses import replace
+
+    config.paths = replace(config.paths, project=elsewhere)
+    code, report, _ = _json_run(config, task="", decision_answers=answers)
+    assert code == 1 and report["error"]["kind"] == "workspace"
+
+
+def test_a_run_needs_a_task_or_decision_answers(scripted):
+    config = scripted([Script(text="unused")])
+    code = cli.run_headless(config, run(config, task=""))
+    assert code == 2
+    assert _model_calls(scripted) == 0
+
+
+def test_the_resume_flag_and_interactions_keep_their_meaning(scripted):
+    """`--resume` is the interactive session flag and `run` never reads it;
+    `--interactions` still scripts a live form within the same run."""
+    parser = cli.build_parser()
+    parsed = parser.parse_args(["--resume", "abc", "run", "a task"])
+    assert parsed.resume == "abc" and parsed.command == "run"
+    assert parsed.decision_answers is None and parsed.task == "a task"
+
+    config = scripted([Script(text="One thing first.", tool_calls=[a_question()]),
+                       Script(text="Flask it is.")])
+    code = cli.run_headless(config, run(
+        config, resume="abc",
+        interactions=json.dumps([{"action": "answer", "value": "Flask"}])))
+    assert code == 0
+    from comodor.session.store import SessionStore
+
+    store = SessionStore(config.paths.user / "sessions")
+    assert store.list_sessions(include_continuations=True) == [], \
+        "a run answered live keeps no continuation"
+
+
+def test_a_finished_run_keeps_nothing_and_a_stopped_one_keeps_it_hidden(scripted):
+    from comodor.session.store import SessionStore
+
+    config = scripted([Script(text="All done.")])
+    assert cli.run_headless(config, run(config)) == 0
+    store = SessionStore(config.paths.user / "sessions")
+    assert store.list_sessions(include_continuations=True) == []
+
+    config, ref = _stopped_run(scripted)
+    store = SessionStore(config.paths.user / "sessions")
+    assert store.list_sessions() == []
+    assert store.find_continuation(ref) is not None

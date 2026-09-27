@@ -55,7 +55,7 @@ def big_store(tmp_path_factory):
     path = tmp_path_factory.mktemp("perf") / "brain.db"
     store = BrainStore(path)
     for index in range(CORPUS):
-        store.add_lesson(Lesson(
+        store.add_lesson(Lesson(provenance="user_statement",
             scope="project:perf",
             trigger=" ".join(random.sample(WORDS, 4)),
             guidance=" ".join(random.sample(WORDS, 12)),
@@ -121,7 +121,7 @@ def test_lookup_cost_does_not_grow_with_the_corpus(tmp_path):
 
     for target in (500, 5000):
         while len(store.hot) < target:
-            store.add_lesson(Lesson(
+            store.add_lesson(Lesson(provenance="user_statement",
                 scope="project:growth",
                 trigger=" ".join(random.sample(WORDS, 4)),
                 guidance=" ".join(random.sample(WORDS, 12))))
@@ -235,7 +235,7 @@ def test_the_hot_index_does_not_load_the_whole_table():
 def test_starting_up_with_a_large_brain_is_not_felt(tmp_path):
     store = BrainStore(tmp_path / "brain.db")
     for index in range(8000):
-        store.add_lesson(Lesson(kind="style", scope="global",
+        store.add_lesson(Lesson(provenance="user_statement", kind="style", scope="global",
                                 trigger=f"trigger {index}",
                                 guidance=f"guidance {index} pytest fixture router"))
     store.flush()

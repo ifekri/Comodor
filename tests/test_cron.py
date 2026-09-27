@@ -6,9 +6,15 @@ hand and the suite runs in milliseconds.
 
 from __future__ import annotations
 
+import argparse as _argparse
 import dataclasses
+import io as _io
+import json as _json
 import time
+from contextlib import redirect_stderr as _redirect_stderr
+from contextlib import redirect_stdout as _redirect_stdout
 from datetime import datetime, timedelta
+from types import SimpleNamespace as _Job
 
 import pytest
 
@@ -16,6 +22,9 @@ from comodor.config import Config, CronConfig
 from comodor.cron.jobs import Job, JobError, JobStore
 from comodor.cron.parse import Schedule, UnparsableSchedule, next_fire, parse
 from comodor.cron.scheduler import Scheduler, _keep_answer, _record
+from comodor.providers.base import ToolCall as _ToolCall
+from comodor.providers.fake import Script as _Script
+from comodor.providers.gateway import Gateway as _RealGateway
 
 # --------------------------------------------------------------------------- #
 # parsing
@@ -354,3 +363,166 @@ def test_an_unconfigured_channel_is_reported_not_crashed(
     job = store.get("job1")
     assert job.last_result == "ok"
     assert "discord" in job.last_error
+
+
+# --------------------------------------------------------------------------- #
+# T204 — a scheduled run is a stateless run through run_turn
+# --------------------------------------------------------------------------- #
+
+
+
+
+def _isolated_config(tmp_path):
+    """A config wholly inside tmp_path, on the fake provider: nothing here may
+    reach the real user's home, where continuations would otherwise land."""
+    from comodor.config import Config, ProviderConfig
+    from comodor.paths import Paths
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (tmp_path / "home").mkdir()
+    cfg = Config(paths=Paths(user=tmp_path / "home", project=project))
+    cfg.providers = {"fake": ProviderConfig(name="fake", kind="fake", base_url="offline",
+                                            api_key="test", model="fake-1", label="Fake")}
+    cfg.provider, cfg.model = "fake", "fake-1"
+    cfg.agent.context_limit = 100_000
+    cfg.learning.enabled = False
+    return cfg
+
+
+@pytest.fixture
+def iso(tmp_path):
+    return _isolated_config(tmp_path)
+
+
+def _question():
+    return _ToolCall(id="q1", name="ask", arguments={"questions": [{
+        "question": "Which branch should the report cover?", "header": "Branch",
+        "affects": ["behaviour"],
+        "options": [{"label": "main", "source": "request", "evidence": "main"},
+                    {"label": "develop", "source": "request", "evidence": "develop"}]}]})
+
+
+def _plans(monkeypatch, *plans):
+    """Each Gateway built takes the next plan: a job, then a later command."""
+    queue = [list(plan) for plan in plans]
+    built = []
+
+    def factory(configuration, scripts=None):
+        gateway = _RealGateway(configuration, scripts=queue.pop(0) if queue else [])
+        built.append(gateway)
+        return gateway
+
+    monkeypatch.setattr("comodor.cron.runner.Gateway", factory)
+    monkeypatch.setattr("comodor.providers.gateway.Gateway", factory)
+    return built
+
+
+def _store(config):
+    from comodor.session.store import SessionStore
+
+    return SessionStore(config.paths.user / "sessions")
+
+
+def _refs_of_store(config):
+    return [ref for meta in _store(config).list_sessions(include_continuations=True)
+            for ref in meta.continuation["decision_refs"]]
+
+
+def _bytes(config):
+    root = config.paths.user / "sessions"
+    return {p.name: p.read_bytes() for p in sorted(root.iterdir())} if root.exists() else {}
+
+
+def _resume_from_the_command_line(config, answers):
+    from comodor import cli
+
+    path = config.paths.user / "answers.json"
+    path.write_text(_json.dumps(answers), encoding="utf-8")
+    args = _argparse.Namespace(task="", yes=False, json=True, max_steps=5,
+                               decision_answers=str(path))
+    out, err = _io.StringIO(), _io.StringIO()
+    with _redirect_stdout(out), _redirect_stderr(err):
+        code = cli.run_headless(config, args)
+    return code, _json.loads(out.getvalue()), err.getvalue()
+
+
+def test_a_scheduled_run_that_completes_keeps_nothing(iso, monkeypatch):
+    config = iso
+    from comodor.cron.runner import run_job
+
+    _plans(monkeypatch, [_Script(text="The report is ready.")])
+    outcome = run_job(config, _Job(prompt="Summarise the day.", model=""))
+    assert outcome.ok
+    assert _bytes(config) == {}
+
+
+def test_a_scheduled_run_that_stops_keeps_one_hidden_continuation(iso, monkeypatch):
+    config = iso
+    from comodor.cron.runner import run_job
+
+    _plans(monkeypatch, [_Script(text="A question.", tool_calls=[_question()])])
+    outcome = run_job(config, _Job(prompt="Summarise the branch.", model=""))
+    assert not outcome.ok
+    store = _store(config)
+    assert store.list_sessions() == []
+    (meta,) = store.list_sessions(include_continuations=True)
+    assert meta.continuation["mode"] == config.agent.mode
+    assert len(meta.continuation["decision_refs"]) == 1
+
+
+def test_a_later_tick_is_new_work_and_never_resumes_it(iso, monkeypatch):
+    config = iso
+    from comodor.cron.runner import run_job
+
+    _plans(monkeypatch, [_Script(text="A question.", tool_calls=[_question()])],
+           [_Script(text="The report is ready.")])
+    run_job(config, _Job(prompt="Summarise the branch.", model=""))
+    before = _bytes(config)
+    ref = _refs_of_store(config)[0]
+    later = run_job(config, _Job(prompt="Summarise the branch.", model=""))
+    assert later.ok
+    assert _bytes(config) == before, "the next tick touched the stopped run"
+    meta = _store(config).find_continuation(ref)
+    assert _store(config).decisions(meta.id)[ref].status == "open"
+
+
+def test_an_explicit_answer_on_the_command_line_resumes_it(iso, monkeypatch):
+    config = iso
+    from comodor.cron.runner import run_job
+
+    config.learning.enabled = False
+    _plans(monkeypatch, [_Script(text="A question.", tool_calls=[_question()])],
+           [_Script(text="Report for main: all green.")])
+    run_job(config, _Job(prompt="Summarise the branch.", model=""))
+    ref = _refs_of_store(config)[0]
+    code, report, _ = _resume_from_the_command_line(
+        config, [{"decision_ref": ref, "written": "main"}])
+    assert code == 0 and report["stopped"] == "done"
+    meta = _store(config).find_continuation(ref)
+    assert _store(config).decisions(meta.id)[ref].status == "stale"
+
+
+def test_a_workspace_or_mode_mismatch_is_refused(iso, monkeypatch, tmp_path):
+    config = iso
+    from dataclasses import replace
+
+    from comodor.cron.runner import run_job
+
+    config.learning.enabled = False
+    _plans(monkeypatch, [_Script(text="A question.", tool_calls=[_question()])])
+    run_job(config, _Job(prompt="Summarise the branch.", model=""))
+    ref = _refs_of_store(config)[0]
+    answers = [{"decision_ref": ref, "written": "main"}]
+
+    other = config.agent.mode
+    config.agent.mode = "plan" if other != "plan" else "act"
+    code, report, _ = _resume_from_the_command_line(config, answers)
+    assert code == 1 and report["error"]["kind"] == "mode"
+    config.agent.mode = other
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    config.paths = replace(config.paths, project=elsewhere)
+    code, report, _ = _resume_from_the_command_line(config, answers)
+    assert code == 1 and report["error"]["kind"] == "workspace"

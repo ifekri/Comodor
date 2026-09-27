@@ -122,7 +122,8 @@ def test_a_recalled_lesson_still_reaches_the_model(config, bus):
     agent = AgentLoop(config, gateway, ToolRegistry(), bus,
                       PermissionEngine(config, bus), Conversation(), memory)
 
-    agent.run("run the test suite")
+    # Said by the person, so the reflected lesson is admissible (FR-056).
+    agent.run("run the test suite — run pytest from the repository root")
     memory.wait_for_reflection(timeout=10.0)
     agent.conversation = Conversation()
     agent.run("run the test suite again")
@@ -142,7 +143,7 @@ def test_the_lesson_travels_after_the_cached_part_not_before_it(config, bus):
     agent = AgentLoop(config, gateway, ToolRegistry(), bus,
                       PermissionEngine(config, bus), Conversation(), memory)
 
-    agent.run("run the test suite")
+    agent.run("run the test suite — run pytest from the repository root")
     memory.wait_for_reflection(timeout=10.0)
     agent.conversation = Conversation()
     agent.run("run the test suite again")

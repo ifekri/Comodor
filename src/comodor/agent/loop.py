@@ -41,9 +41,10 @@ from ..providers.base import (
 from ..providers.gateway import Gateway
 from ..safety import PermissionEngine, Risk
 from ..tools import ToolContext, ToolRegistry, ToolResult
-from . import plan, staleness
-from .context import Conversation
-from .prompts import COMPACT_PROMPT, build_system_prompt
+from . import plan, preflight, staleness
+from .context import Conversation, Optimizer
+from .prompts import COMPACT_PROMPT, build_system_prompt, project_instructions
+from .tokens import TaskMeasurement
 
 MAX_PARALLEL_TOOLS = 6
 
@@ -58,6 +59,109 @@ SAY_WHAT_HAPPENED = (
 #: Blank line between the skill block and the playbook block.
 SECTION_GAP = "\n\n"
 
+#: Tools that change the project. Kept here so a successful write can be
+#: recorded for the completion gate's delivery evidence (FR-036).
+_WRITE_TOOLS = frozenset({"write_file", "edit_file"})
+
+#: Tools that may still run while a mandatory decision is open, because all
+#: they do is look (FR-018). `Risk.SAFE` is deliberately not the test: `memory`
+#: persists durable facts, `todo_write` writes the plan, `delegate` starts
+#: background work and `ask`/`propose_mode` raise requests — all SAFE, none of
+#: them reading. Nothing here changes state or starts work, so exempting these
+#: and withholding the rest keeps decision-dependent work behind the ledger
+#: without stopping the model from gathering what it can.
+READ_ONLY_TOOLS = frozenset({
+    "read_file", "list_dir", "glob", "grep", "search_history",
+    "read_skill_file", "mcp_read_resource",
+})
+
+#: Calls the mutation preflight does not gate: the ones that only look (above),
+#: and the ones whose whole purpose is to resolve a decision or ask for one.
+#: Gating `ask` would be a loop — the check would withhold the very call that
+#: answers it.
+_GATE_EXEMPT = frozenset({"ask", "propose_mode"})
+
+#: Calls that can open or hand back a mandatory decision. A batch containing
+#: one runs in order, so the decision is recorded before a sibling could act.
+_DECISION_RAISERS = frozenset({"ask", "delegate"})
+
+
+def _brief_failure(content: str) -> str:
+    text = " ".join((content or "").split())
+    return text[:160]
+
+
+#: Argument names that identify the operation a call performs. Ordered so the
+#: key is deterministic; the values are the model's own call arguments.
+_TARGET_ARGS = ("path", "command", "url", "query", "pattern", "resource",
+                "name", "selector", "skill")
+
+
+def _operation_key(call: ToolCall) -> str:
+    """A deterministic identity for the operation a call performs.
+
+    `path`/`command` alone left every url/query/pattern tool with an empty key,
+    so a successful call for one target cleared an unrelated failure and the
+    completion gate could accept a claim while a requested operation was still
+    failing. The key is the tool plus the arguments that determine its target;
+    it is used for matching only and is never shown or stored.
+    """
+    parts = [call.name]
+    for name in _TARGET_ARGS:
+        value = call.arguments.get(name)
+        if value:
+            parts.append(f"{name}={value}")
+    return "|".join(parts)
+
+
+def _answer_text(answer: dict[str, Any]) -> str:
+    written = str(answer.get("written") or "").strip()
+    return written or ", ".join(str(choice) for choice in answer.get("chosen") or []
+                                if str(choice).strip())
+
+
+def _answered_pairs(form: dict[str, Any]) -> list[tuple[str, str]]:
+    """(question, answer) for each question a form record holds an answer to.
+
+    An answer is matched to its question by `decision_ref` where it names one
+    — a batch answered later can span forms whose headers repeat — and by the
+    form's header otherwise, as a live form's answers always were.
+    """
+    questions = [question for question in form.get("questions") or []
+                 if isinstance(question, dict)]
+    by_header = {str(q.get("header") or ""): str(q.get("prompt") or "") for q in questions}
+    by_ref = {str(q.get("decision_ref")): str(q.get("prompt") or "")
+              for q in questions if q.get("decision_ref")}
+    pairs: list[tuple[str, str]] = []
+    for answer in form.get("answers") or []:
+        if not isinstance(answer, dict):
+            continue
+        text = _answer_text(answer)
+        named = answer.get("decision_ref")
+        prompt = (by_ref.get(str(named), "") if named
+                  else by_header.get(str(answer.get("header") or ""), ""))
+        if text and prompt:
+            pairs.append((prompt, text))
+    return pairs
+
+
+def _carried_decisions(carried: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every open decision a carried clarification payload names, in order.
+
+    The structured payload (`tools/ask.py::payload_for`) describes the first
+    decision at the top level and lists all of them under `decisions` when
+    there is more than one. Both shapes have to reach the parent ledger; a
+    payload that lists several and has them read as one loses the rest.
+    """
+    nested = carried.get("decisions")
+    if isinstance(nested, list):
+        entries = [entry for entry in nested if isinstance(entry, dict)
+                   and str(entry.get("decision") or "").strip()]
+        if entries:
+            return entries
+    return [carried]
+
+
 
 @dataclass
 class TurnResult:
@@ -67,9 +171,30 @@ class TurnResult:
     steps: int = 0
     tool_calls: int = 0
     usage: Usage = field(default_factory=Usage)
-    stopped: str = "done"        # done | max_steps | budget | cancelled | error
+    #: done | max_steps | budget | cancelled | error | clarification_required.
+    #: `cancelled` means the whole turn was cancelled or interrupted, and
+    #: nothing else: a question the person dismissed ends the turn as
+    #: `clarification_required` with the dismissal inside `clarification`.
+    stopped: str = "done"
     error: str = ""
     elapsed: float = 0.0
+    #: The structured clarification-required payload, when a mandatory
+    #: question ended without an answer: the decision, its candidates, what
+    #: was consulted, and `outcome` — cancelled, expired or unattended.
+    clarification: dict[str, Any] | None = None
+    #: The completion gate's annotation when the turn delivered less than the
+    #: request asked for (FR-037). It rides the result, not only the display
+    #: events, so `comodor run` — and its JSON — tells automation the same
+    #: thing the terminal shows: a partial answer is never an unqualified
+    #: `stopped="done"`.
+    annotation: str = ""
+    #: What the turn cost beside how it went — counts only (FR-072).
+    measurement: TaskMeasurement = field(default_factory=TaskMeasurement)
+    #: One sanitized record per mutation preflight: fingerprints and bounded
+    #: excerpts, never unrestricted source content. It rides the result, not
+    #: the counts-only measurement, so a wrong `allow` can be explained from a
+    #: benchmark/debug artifact without rerunning the model.
+    preflight_traces: list[dict[str, Any]] = field(default_factory=list)
     #: Why a turn was cancelled, when it was ("stop" — the human pressed stop
     #: — or "interrupt" — a new message took over under the interrupt busy
     #: mode). The learn step reads this so the review knows which kind of
@@ -94,6 +219,10 @@ class AgentLoop:
         self.bus = bus
         self.permissions = permissions
         self.conversation = conversation or Conversation()
+        # Which context optimizations run, from the settings — all of them
+        # unless switched off by name, none under the benchmark's naive
+        # strategy (`agent/context.py::OPTIMIZATIONS`).
+        self.conversation.optimizer = Optimizer.from_config(config)
         self.memory = memory                     # LearningEngine, or None
         self.skills = skills                     # SkillRegistry, or None
         #: The background-delegate manager, when this session has one. Read at
@@ -121,6 +250,32 @@ class AgentLoop:
         #: turn to tell "it says the tests pass and ran them" from "it says the
         #: tests pass".
         self._used: list[str] = []
+        #: Tool calls that failed this turn, `(tool, reason)`, and the paths a
+        #: successful write touched. Both feed the completion gate (FR-116,
+        #: FR-036).
+        self._failed: list[tuple[str, str, str]] = []
+        self._written_paths: list[str] = []
+        #: Changes a delegate reported having made before it stopped for a
+        #: decision — an in-place writer's, which no patch application lists.
+        self._carried_changes: list[str] = []
+        #: Shell tools this turn that changed the filesystem (a bounded
+        #: operation name, never the command text). Reported with the files a
+        #: mutation touched when a decision turns up after the change.
+        self._mutating_commands: list[str] = []
+        #: Validation runs this turn — a `pytest`, a build, a lint — so the
+        #: completion gate can compare the answer's claim about a check against
+        #: what actually ran. Transient; never persisted with command text.
+        self._validations: list[Any] = []
+        #: The request this turn is answering, for the gate's element list.
+        self._request_text = ""
+        #: The turn's mutation preflight, computed once before the first call
+        #: that can change anything (FR-013). `None` until then; an assessment
+        #: whose status is `allow` lets every mutating call this turn proceed.
+        self._batch_preflight: preflight.MutationAssessment | None = None
+        #: Whether this turn changed a validation artifact without a grounded
+        #: reason. A validation run after that is not authoritative: its oracle
+        #: no longer means what the task asked it to mean (FR-036, FR-125).
+        self._oracle_tainted = False
         #: What the user said not to do this turn, in their own words.
         self._rules: list[str] = []
         #: Worked out once per model. The model does not change mid-turn, and
@@ -130,16 +285,51 @@ class AgentLoop:
         #: remembers which model it describes and is rebuilt for another.
         self._profile: Any = None
         self._profile_for: tuple[str, str] = ("", "")
+        #: The turn's paired record; replaced at the start of every turn.
+        self._measurement = TaskMeasurement()
+        #: The project-instructions block for the current turn.
+        self._instructions: str | None = None
 
     # -- public API ------------------------------------------------------- #
 
-    def run(self, user_text: str, images: list[str] | None = None) -> TurnResult:
-        """Handle one user message from start to finish."""
+    def run(self, user_text: str, images: list[str] | None = None,
+            decisions: list[dict[str, Any]] | None = None,
+            answered: dict[str, Any] | None = None) -> TurnResult:
+        """Handle one user message from start to finish.
+
+        `decisions` are clarification payloads left open by work that this
+        turn is reporting on — a delegate that stopped for an answer. They
+        enter the turn's ledger as unresolved, so nothing that depends on
+        them runs here either.
+
+        `answered` is the `answered` form record of decisions answered in a
+        later invocation — already validated by `application.run_turn`, which
+        put it in the conversation. The answers enter this turn's ledger, and
+        the project's settled decisions, exactly as a live form's answers do.
+        """
         started = time.monotonic()
         self.cancel.reset()
         self._cancel_reason = ""
         self._used = []
+        self._failed = []
+        self._written_paths = []
+        self._carried_changes = []
+        self._mutating_commands = []
+        self._validations = []
+        self._request_text = user_text
+        self._batch_preflight = None
+        self._oracle_tainted = False
+        self._preflight_traces: list[dict[str, Any]] = []
         result = TurnResult()
+        result.preflight_traces = self._preflight_traces
+        self._measurement = result.measurement
+        # The project's instructions, read once for the turn. Every step's
+        # head is built from this same string, so the stable portion stays
+        # byte-identical for the whole task (FR-050, FR-091).
+        try:
+            self._instructions = project_instructions(self.config)
+        except Exception:
+            self._instructions = ""
 
         # What the user said not to do, pulled out once. Patterns over their
         # own words — no model call, and nothing that could cost a request.
@@ -156,9 +346,21 @@ class AgentLoop:
         # never changes, and every request after the first is served from the
         # provider's cache at a tenth of the price. See providers/caching.py.
         playbook = self._recall(user_text)
-        self.conversation.add(
-            Message.user(user_text, images=images or [], briefing=playbook))
+        message = Message.user(user_text, images=images or [], briefing=playbook)
+        if decisions:
+            # A delegate's open decisions are recorded in this session, under
+            # the refs the delegate minted, so they can be answered later by
+            # ref like any other (FR-029, FR-129). The payloads are unchanged.
+            from ..tools.ask import carried_record
+
+            record = carried_record(decisions)
+            if record is not None:
+                message.meta["question"] = record
+        self.conversation.add(message)
         self.bus.emit(Kind.TURN_START, text=user_text)
+        self._open_ledger(user_text, decisions or [], answered)
+        if answered:
+            self._learn_form(answered)
 
         deadline = started + self.config.agent.max_seconds
 
@@ -190,9 +392,13 @@ class AgentLoop:
 
         result.elapsed = time.monotonic() - started
         result.usage = self.conversation.usage
+        result.measurement.outcome = result.stopped
+        result.measurement.knowledge_hits = len(self._recalled)
         self._say_if_unverified(result)
         self.bus.emit(Kind.TURN_END, stopped=result.stopped, steps=result.steps,
-                      elapsed=result.elapsed, error=result.error)
+                      elapsed=result.elapsed, error=result.error,
+                      clarification=result.clarification,
+                      annotation=result.annotation)
 
         self._learn(user_text, result)
         return result
@@ -225,6 +431,7 @@ class AgentLoop:
         spoken = ""
         asked_to_speak = False
         checked = False
+        corrected = False
 
         while True:
             self.cancel.raise_if_cancelled()
@@ -233,7 +440,8 @@ class AgentLoop:
             specs = self.tools.specs(agent.mode)
             system_prompt = build_system_prompt(
                 self.config, profile=self._model_profile(),
-                tool_bridge=self._tool_bridge_live())
+                tool_bridge=self._tool_bridge_live(),
+                instructions=self._instructions)
             self._maybe_compact(system_prompt, specs)
 
             completion = self._stream_once(system_prompt, specs)
@@ -257,12 +465,21 @@ class AgentLoop:
                         # message with another one would otherwise be asked
                         # forever.
                         asked_to_speak = True
-                        self.conversation.add(Message.user(SAY_WHAT_HAPPENED))
+                        self._say_internally(SAY_WHAT_HAPPENED)
                         continue
                     else:
                         result.text = ""
                 else:
                     result.text = assistant.content
+
+                # A decision this turn was handed — a delegate's carried form —
+                # is still open when the model answers without calling a tool.
+                # The turn reports it rather than finishing normally, and a
+                # cancelled turn outranks it (FR-018, contracts §C5).
+                carried_decision = self._clarification_outcome()
+                if carried_decision is not None:
+                    self.cancel.raise_if_cancelled()
+                    return self._end_for_clarification(result, carried_decision)
 
                 # The project's own check, once, before the turn is called
                 # finished. Only when something was changed — a turn that read
@@ -274,12 +491,50 @@ class AgentLoop:
                     if self._project_check_failed():
                         continue
 
+                # The completion gate. Annotate unresolved work beside the
+                # answer; block only an explicit completion claim the evidence
+                # contradicts, and only once — the fallback is to annotate
+                # (FR-124 to FR-127).
+                assessment = self._completion_gate(result)
+                result.measurement.validation_outcome = assessment.verdict
+                if assessment.verdict == "block" and not corrected:
+                    corrected = True
+                    result.text = ""          # this answer is replaced, not kept
+                    from . import verify
+
+                    self._say_internally(verify.as_incomplete(assessment))
+                    continue
+                if assessment.verdict == "block" and corrected:
+                    # The one correction turn still made the contradicted
+                    # claim: it is delivered, but never as completed (FR-127).
+                    assessment.unconfirmed = ("the answer still claims completion "
+                                              "that the evidence does not support")
+                if assessment.unresolved or assessment.unconfirmed:
+                    # Beside the answer for a person watching, and on the
+                    # result for a caller who is not (FR-037).
+                    result.annotation = assessment.annotation()
+                    self._note(result.annotation)
+
                 result.stopped = "done"
                 return result
 
             result.tool_calls += len(calls)
             self._execute(calls)
             self.bus.emit(Kind.STEP, step=result.steps, tool_calls=len(calls))
+            self._advance_ledger(result.steps)
+
+            # A mandatory question ended without an answer. The decision is
+            # open, nothing that depends on it may run, and the model is not
+            # the one to fill it in — so the turn ends here, saying what is
+            # needed (FR-018, FR-033, FR-035).
+            needed = self._clarification_outcome()
+            if needed is not None:
+                # A cancelled turn outranks an unanswered form: the transport
+                # resolved the pending request to unblock this worker, and the
+                # thing the user stopped is the turn, not the question
+                # (contracts §C5).
+                self.cancel.raise_if_cancelled()
+                return self._end_for_clarification(result, needed)
 
             if not agent.loop:
                 # Loop off: run the tools the model asked for, then stop and
@@ -317,7 +572,7 @@ class AgentLoop:
 
     def _stream_once(self, system_prompt: str, specs: list[ToolSpec]) -> dict[str, Any]:
         """One streamed assistant response, surfaced to the UI as it arrives."""
-        payload = self.conversation.render(system_prompt)
+        payload = self.conversation.render(system_prompt, specs)
         agent = self.config.agent
 
         self._message_id = uuid.uuid4().hex[:12]
@@ -357,6 +612,7 @@ class AgentLoop:
                       tool_calls=[call.name for call in tool_calls])
 
         self.conversation.record_usage(usage)
+        self._measurement.record_turn(usage, self.conversation.last_request_tokens)
         if usage.prompt_tokens:
             # What the model *read*, not what it was billed for. With caching on
             # those differ by an order of magnitude, and it is the former the
@@ -381,15 +637,78 @@ class AgentLoop:
     def _execute(self, calls: list[ToolCall]) -> None:
         context = self._tool_context()
         parallel = self._can_parallelise(calls)
+        # Once, single-threaded, before any worker reads it: the turn's
+        # pre-mutation check (FR-013). A batch that cannot change anything
+        # costs no call.
+        self._preflight_for_batch(context, calls)
 
         if parallel and len(calls) > 1:
             with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_TOOLS, len(calls))) as pool:
                 futures = [pool.submit(self._run_one, call, context) for call in calls]
                 results = [future.result() for future in futures]
         else:
-            results = [self._run_one(call, context) for call in calls]
+            results = []
+            for call in calls:
+                result = self._run_one(call, context)
+                # A child that stopped for a decision is imported before the
+                # next call starts, so a sibling write in the same batch is
+                # withheld rather than run without the answer (FR-018). `ask`
+                # is native: it recorded the decision in this same ledger, so
+                # its payload is not imported again.
+                self._import_clarification(
+                    context, result,
+                    native=call.name == "ask" or bool(result.meta.get("native_decision")))
+                results.append(result)
 
+        self._measurement.tool_calls += len(calls)
         for call, result in zip(calls, results, strict=True):
+            # The thing the call was about, so a failure and a later retry of
+            # the same operation share a key and two different targets do not.
+            key = _operation_key(call)
+            if call.name in ("run_shell", "run_python") \
+                    and not result.meta.get("withheld"):
+                # A recognised validation run, so the completion gate can tell a
+                # test/build result from an unrelated tool error. A withheld
+                # command never ran and is not an observation (FR-036).
+                from . import verify as _verify
+
+                command = str(call.arguments.get("command")
+                              or call.arguments.get("code") or "")
+                self._validations = _verify.fold_validation(
+                    self._validations, command, result.ok,
+                    integrity="tainted" if self._oracle_tainted else "trusted")
+            if not result.ok:
+                self._measurement.retries += 1
+                self._failed.append((call.name, key, _brief_failure(result.content)))
+            else:
+                # A failure this same operation has since recovered is no longer
+                # unresolved: a transient mismatch followed by a successful
+                # retry must not make a finished turn read as incomplete.
+                self._failed = [entry for entry in self._failed
+                                if not (entry[0] == call.name and entry[1] == key)]
+                if call.name in _WRITE_TOOLS:
+                    path = str(result.meta.get("path") or "")
+                    if path:
+                        self._written_paths.append(path)
+                if result.meta.get("applied"):
+                    # A writing delegate applied its patch here: those files are
+                    # this turn's mutation evidence too (FR-036).
+                    for applied_path in result.meta.get("files") or []:
+                        if applied_path:
+                            self._written_paths.append(str(applied_path))
+                if call.name in ("run_shell", "run_python"):
+                    from . import verify as _verify
+
+                    command = str(call.arguments.get("command")
+                                  or call.arguments.get("code") or "")
+                    if _verify.command_mutates(command, call.name):
+                        # A bounded operation name, never the command text: the
+                        # report says a change happened, not what was typed.
+                        self._mutating_commands.append(call.name)
+            if call.name == "ask":
+                self._measurement.clarifications_raised += int(result.meta.get("asked", 0) or 0)
+                self._measurement.clarifications_answered += int(result.meta.get("given", 0) or 0)
+                self._learn_decisions(result)
             message = Message.tool(
                 call_id=call.id, name=call.name,
                 content=result.content, is_error=not result.ok,
@@ -398,6 +717,50 @@ class AgentLoop:
             # untrue can be found and dropped. The tools already know; nothing
             # was carrying it across.
             staleness.note(message, str(result.meta.get("path") or ""))
+            # The result's own metadata rides with it: a spill path is what
+            # makes an overflowed command safely retrievable later, and the
+            # budget manager reads it from the message, not from the tool
+            # result that no longer exists by then.
+            for key in ("spill", "overflowed", "full_chars", "log", "diff",
+                        "content_fingerprint"):
+                if key in result.meta:
+                    message.meta.setdefault(key, result.meta[key])
+            # A learned item that this file no longer supports is marked
+            # stale now, and the model is told, so an answer resting on it
+            # is corrected before the turn ends (FR-114).
+            contradicted = self._learning_contradicted(str(result.meta.get("path") or ""))
+            if contradicted:
+                message.content = f"{message.content}\n\n{contradicted}"
+            # A form, as it was shown and how it ended, so the transcript and
+            # an export can say what was asked and what came back (FR-030).
+            form = result.meta.get("form")
+            if not isinstance(form, dict) \
+                    and isinstance(result.meta.get("clarification"), dict) \
+                    and not (call.name == "ask" or result.meta.get("native_decision")):
+                # A child's decision has no form of its own here. Recorded
+                # under the ref the child minted, so this session can resolve
+                # it later by that ref, like any other (FR-029, FR-129).
+                from ..tools.ask import carried_record
+
+                form = carried_record([result.meta["clarification"]])
+            if isinstance(form, dict):
+                message.meta["question"] = form
+            # What a writing delegate changed, so a read of one of those files
+            # earlier in the conversation is known to be superseded (FR-114).
+            if result.meta.get("applied"):
+                message.meta["applied"] = True
+                message.meta["files"] = [str(f) for f in result.meta.get("files") or []]
+            if result.meta.get("isolated") is False:
+                message.meta["isolated"] = False
+            # A child that stopped for a decision (a synchronous delegate) hands
+            # its payload back through the tool result. A sequential batch
+            # imported it as each result arrived; a parallel batch — which
+            # never holds a call that can raise one — imports it here, so
+            # the post-batch check ends the turn either way (FR-018, FR-029).
+            if parallel and len(calls) > 1:
+                self._import_clarification(
+                    context, result,
+                    native=call.name == "ask" or bool(result.meta.get("native_decision")))
 
             # What the user said not to do, while the model is still deciding.
             #
@@ -410,13 +773,17 @@ class AgentLoop:
             said = self._what_was_asked(context, call.name)
             if said:
                 message.content = f"{message.content}\n\n{said}"
+            self._record_evidence(context, call, result)
             # A tool that produced a picture — a screenshot of a page — sends
             # it as one. Where the dialect allows an image beside a tool result
             # it goes there; where it does not, the adapter moves it.
             picture = result.meta.get("image")
             if isinstance(picture, str) and picture:
                 message.images = [picture]
-            self.conversation.add(message)
+            # Through the funnel: identical material already resident is
+            # admitted as a reference, a changed file as a delta (FR-099,
+            # FR-100, FR-101). The earlier copy is never rewritten.
+            self.conversation.admit(message, path=str(result.meta.get("path") or ""))
 
     def _run_one(self, call: ToolCall, context: ToolContext) -> ToolResult:
         self._used.append(call.name)
@@ -425,12 +792,21 @@ class AgentLoop:
                       summary=self._describe(call))
         if self.cancel.cancelled:
             result = ToolResult.failure("cancelled before the tool ran")
+        elif self._withheld_by(context, call):
+            # A mutating action after a mandatory question went unanswered.
+            # Whether it depends on the open decision cannot be known from
+            # here, and uncertain dependency is treated as dependent (FR-018).
+            result = ToolResult.failure(self._withheld_by(context, call), withheld=True)
         else:
-            # The tool is handed a view of the context that knows which call
-            # it is, so anything it streams is tagged where it is produced
-            # rather than guessed at by whoever receives it.
-            result = self.tools.invoke(call.name, context.for_call(call.id),
-                                       call.arguments)
+            gate = self._mutation_gate(context, call)
+            if gate is not None:
+                result = gate
+            else:
+                # The tool is handed a view of the context that knows which call
+                # it is, so anything it streams is tagged where it is produced
+                # rather than guessed at by whoever receives it.
+                result = self.tools.invoke(call.name, context.for_call(call.id),
+                                           call.arguments)
         self.bus.emit(Kind.TOOL_END, id=call.id, name=call.name, ok=result.ok,
                       content=result.content, display=result.rendered,
                       elapsed=result.elapsed, meta=result.meta)
@@ -440,6 +816,295 @@ class AgentLoop:
         tool = self.tools.get(call.name)
         return tool.summary(call.arguments) if tool else call.name
 
+    def _withheld_by(self, context: ToolContext, call: ToolCall) -> str:
+        """Why a call may not run now, or an empty string.
+
+        Only explicitly read-only tools stay available — they are how the
+        agent gathers what it can without the answer. Everything else waits
+        for the decision, including the SAFE tools that persist state or
+        start work: `memory`, `todo_write`, `delegate`, `ask`, `propose_mode`
+        are not read-only, and "SAFE" is a statement about risk, not about
+        whether a call depends on an open decision (FR-018).
+        """
+        try:
+            if call.name in READ_ONLY_TOOLS:
+                return ""
+            open_decisions = [decision for decision in context.evidence.withheld()
+                              if decision.state in ("unresolved", "blocked", "asked")]
+            if not open_decisions:
+                return ""
+            named = "; ".join(decision.what for decision in open_decisions)
+            return (f"not run: a required decision is still open ({named}). "
+                    f"Nothing that may depend on it runs until it is answered.")
+        except Exception:
+            return ""
+
+    def _is_mutating(self, call: ToolCall) -> bool:
+        """Whether the preflight gates this call: anything that can change state.
+
+        Everything that is not a look and not the act of asking. A `delegate`
+        is decided by its own contract, not by the model's later opinion of it:
+        `write=true` in the foreground changes files (in an isolated checkout,
+        applied back); a read-only or background delegate does not.
+        """
+        if call.name == "delegate":
+            return bool(call.arguments.get("write")) \
+                and not bool(call.arguments.get("background"))
+        return call.name not in READ_ONLY_TOOLS and call.name not in _GATE_EXEMPT
+
+    def _preflight_for_batch(self, context: ToolContext,
+                             calls: list[ToolCall]) -> None:
+        """Assess the whole batch of mutating calls once, before it runs.
+
+        One bounded call per batch — not per tool, and not one verdict for the
+        whole turn: the next model turn's mutations are a new batch and are
+        assessed again. A batch with nothing that can change anything costs no
+        call.
+        """
+        mutating = [call for call in calls if self._is_mutating(call)]
+        if not mutating:
+            self._batch_preflight = None
+            return
+        try:
+            self._batch_preflight = self._assess_batch(context, mutating)
+        except Exception as problem:
+            # Fails closed: a preflight that could not run is not permission.
+            self._note(f"The mutation preflight could not run ({problem}).")
+            self._batch_preflight = preflight.MutationAssessment(
+                status="blocked",
+                reason=f"the preflight could not run ({type(problem).__name__})")
+
+    def _mutation_gate(self, context: ToolContext,
+                       call: ToolCall) -> ToolResult | None:
+        """The Core's pre-mutation check, or None when the call may run.
+
+        Fails closed: a fault anywhere in the guard withholds the mutation
+        rather than permitting it. A material decision the model did not ask
+        about is registered and the call does not run (FR-013, FR-018); an
+        implementation choice the request leaves to the agent is not a material
+        decision and the call proceeds (FR-011, FR-012).
+        """
+        if not self._is_mutating(call):
+            return None
+        try:
+            if self._batch_preflight is None:
+                self._batch_preflight = self._assess_batch(context, [call])
+            assessment = self._batch_preflight
+        except Exception as problem:
+            self._note(f"The mutation preflight could not run ({problem}).")
+            return ToolResult.failure(
+                "not run: the mutation preflight could not run, so this change "
+                "is not cleared. Fix the check or ask about what is unresolved.",
+                withheld=True)
+        if assessment.allows:
+            self._note_oracle_change(call, assessment)
+            return None
+        if assessment.rejected:
+            # The request or the evidence already forbids or contradicts this
+            # change. There is no decision to register and no question to ask:
+            # the mutation is not run, and the loop continues so the model can
+            # give an honest final answer (FR-013).
+            return self._reject_for_preflight(assessment)
+        try:
+            held = self._withhold_for_preflight(context, assessment)
+        except Exception as problem:
+            self._note(f"The mutation preflight could not register its decision ({problem}).")
+            return ToolResult.failure(
+                "not run: a material decision is unresolved and could not be "
+                "recorded, so this change is not cleared.", withheld=True)
+        if held is not None:
+            return held
+        if assessment.status == "blocked":
+            # An assessment nobody could read is not permission. There is no
+            # decision to register — only a check that did not clear.
+            return ToolResult.failure(
+                "not run: the mutation preflight could not clear this change "
+                f"({assessment.reason or 'unreadable assessment'}). Say plainly "
+                "why the change is settled, or ask about what is unresolved.",
+                withheld=True)
+        return None
+
+    def _reject_for_preflight(
+            self, assessment: preflight.MutationAssessment) -> ToolResult:
+        """Withhold a mutation the request or the evidence already rules out.
+
+        A rejection is not a clarification: nothing is opened in the ledger, no
+        form is presented and no `clarification_required` outcome is produced.
+        The model is handed a bounded, grounded failure and the normal loop
+        continues, so it can report the blocker honestly instead of inventing a
+        substitute. The trace already carries the status and the blockers.
+        """
+        reasons = "; ".join(
+            f"{b.what} ({b.kind})" for b in assessment.blockers[:2]
+        ) or (assessment.reason or "the request or the evidence rules it out")
+        return ToolResult.failure(
+            "Not run: this change is already ruled out by the request or the "
+            f"inspected evidence. {reasons}. No question is asked — there is "
+            "nothing here for the user to decide. Do not invent a substitute or "
+            "fabricate the missing value; report what is blocked and continue.",
+            withheld=True)
+
+    def _note_oracle_change(self, call: ToolCall,
+                            assessment: preflight.MutationAssessment) -> None:
+        """Taint the turn's validation if a validator changed without grounding.
+
+        Defense in depth: the preflight rejects a high-confidence weakening, but
+        a validator change it allowed without grounding means a later green run
+        cannot be trusted as evidence of the requested behaviour. Only a
+        grounded correction (or a change that preserves the check) leaves the
+        oracle trustworthy (FR-036, FR-125).
+        """
+        try:
+            from . import verify as _verify
+
+            target, _signals = _verify.oracle_risk(call.name, call.arguments or {})
+        except Exception:
+            return
+        if not target or assessment.grounds_validator:
+            return
+        self._oracle_tainted = True
+
+    def _assess_batch(self, context: ToolContext,
+                      calls: list[ToolCall]) -> preflight.MutationAssessment:
+        """One bounded model call: does this batch depend on a missing decision?"""
+        from ..providers.base import collapse
+
+        mutations = preflight.mutation_payload(calls, context.redact)
+        evidence, refs = preflight.evidence_payload(self.conversation.messages,
+                                                    context.redact)
+        asked = preflight.question(self._request_text, self._rules, mutations, evidence)
+        completion = collapse(self.gateway.stream(
+            [Message.system(preflight.PROMPT), Message.user(asked)],
+            model=self.config.model, temperature=0.0,
+            # The model's normal output budget, not a small cap: a reasoning
+            # model spends output tokens thinking before it answers, and a cap
+            # sized for the answer alone leaves no text and blocks everything.
+            max_tokens=getattr(self.config.agent, "max_output_tokens", 8192),
+        ))
+        self._measurement.preflight_calls += 1
+        self._measurement.preflight_tokens += completion.usage.total
+        action = "; ".join(f"{call.name} {self._describe(call)}" for call in calls)
+        assessment = preflight.parse(completion.text, proposed_action=action)
+        assessment.evidence_refs = refs
+        self._enforce_oracle_integrity(assessment, calls, refs)
+        self._trace_preflight(calls, refs, asked, mutations, assessment,
+                              completion.usage)
+        return assessment
+
+    def _enforce_oracle_integrity(
+            self, assessment: preflight.MutationAssessment,
+            calls: list[ToolCall], refs: list[str]) -> None:
+        """Verify a validator correction, and reject an ungrounded weakening.
+
+        The assessor reads the request and the evidence; Core decides whether a
+        claimed correction is actually grounded. A claimed source counts only
+        when it names the request or a real evidence ref supplied to this
+        preflight, and a high-confidence weakening (skip, xfail, deselect, a
+        removed assertion, a deleted test) is authorised only by an explicit
+        request for it. Otherwise the mutation is a rejection. It is evidence
+        for the assessment, not a second policy engine (FR-013, FR-036).
+        """
+        from . import verify as _verify
+
+        touched = False
+        signals: list[str] = []
+        for call in calls:
+            try:
+                target, found = _verify.oracle_risk(call.name, call.arguments or {})
+            except Exception:
+                continue
+            touched = touched or target
+            signals.extend(found)
+        if not touched:
+            return
+        assessment.validator_grounding_verified = \
+            _verify.validator_grounding_verified(
+                assessment.validator_change, assessment.validator_refs,
+                ["request", *refs], self._request_text, signals)
+        if not signals:
+            return
+        if assessment.validator_change == "grounded_validator_correction" \
+                and assessment.validator_grounding_verified:
+            return
+        assessment.status = "reject"
+        assessment.decisions = []
+        assessment.blockers = [preflight.Blocker(
+            what="the change weakens the validation that exposes the problem",
+            kind="validation_bypass",
+            source_refs=["mutation", *sorted(set(signals))[:4]])]
+        assessment.reason = (
+            "an ungrounded validation bypass is not a fix; the check must keep "
+            "asserting the behaviour the request asked for")
+
+    def _trace_preflight(self, calls: list[ToolCall], refs: list[str], asked: str,
+                         mutations: str, assessment: preflight.MutationAssessment,
+                         usage: Usage) -> None:
+        """A safe trace, so a wrong `allow` can be explained without a rerun.
+
+        Fingerprints and bounded excerpts only: no unrestricted source content,
+        no secret. It rides the turn's measurement, which the benchmark and the
+        headless JSON already carry.
+        """
+        try:
+            self._preflight_traces.append({
+                "step": self._measurement.model_turns,
+                "tools": [call.name for call in calls],
+                "action": assessment.proposed_action[:400],
+                "evidence_refs": list(refs),
+                "question_fingerprint": preflight.fingerprint(asked),
+                "mutation_fingerprint": preflight.fingerprint(mutations),
+                "assessment": assessment.as_trace(),
+                "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+                "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+                "withheld": assessment.status != "allow",
+            })
+        except Exception:
+            pass
+
+    def _withhold_for_preflight(self, context: ToolContext,
+                                assessment: preflight.MutationAssessment) -> ToolResult | None:
+        """Register the missing decision and put it to the person (FR-013, FR-018).
+
+        The decision enters the ledger and is presented through the same
+        clarification service `ask` uses, so both origins share one lifecycle
+        and one protocol. A decision the ledger already settles is not a reason
+        to withhold anything (FR-008); an answered one resolves the *same*
+        ledger decision and the mutation may be reconsidered. A listening
+        client is asked, never `cancelled`; a client with no listener is
+        `unattended`.
+        """
+        from ..questions import Question
+        from ..tools import ask as ask_tool
+
+        book = context.evidence
+        pending: list[tuple[Any, Any]] = []
+        for missing in assessment.missing_decisions:
+            decision = book.open_decision(
+                missing.what, affects=missing.affects,
+                evidence_consulted=assessment.evidence_refs)
+            if decision.resolved:
+                continue
+            pending.append((Question(
+                prompt=decision.what,
+                header=(decision.materiality or "decision"),
+                options=[],
+                affects=list(missing.affects),
+                reason=decision.materiality,
+                evidence_consulted=list(decision.evidence_consulted),
+                decision_ref=decision.ref), decision))
+        if not pending:
+            return None
+        result = ask_tool.present(context, pending, origin="mutation_preflight")
+        if all(decision.resolved for _, decision in pending):
+            # The person answered: the same decision is now KNOWN, and the
+            # mutation may be reconsidered rather than withheld.
+            return None
+        # The decision is already in this ledger; the payload must not be
+        # imported a second time as though a child had raised it.
+        result.meta["withheld"] = True
+        result.meta["native_decision"] = True
+        return result
+
     def _can_parallelise(self, calls: list[ToolCall]) -> bool:
         """Only when nothing in the batch could stop to ask a question.
 
@@ -447,6 +1112,13 @@ class AgentLoop:
         A model with no known support for it that emits a batch anyway is
         usually emitting something malformed; running those concurrently turns
         one wasted turn into several.
+
+        A batch containing a call that can raise a decision — `ask`, or a
+        foreground `delegate` whose child can — runs in order, always. The
+        withheld check runs when each call starts, and a decision payload is
+        imported only after the batch finishes: run concurrently, a SAFE
+        `memory`/`todo_write` beside them could persist state the decision
+        forbids.
         """
         if not self.config.safety.auto_approve_safe:
             return False
@@ -455,7 +1127,8 @@ class AgentLoop:
             return False
         for call in calls:
             tool = self.tools.get(call.name)
-            if tool is None or tool.risk is not Risk.SAFE:
+            if tool is None or tool.risk is not Risk.SAFE \
+                    or call.name in _DECISION_RAISERS:
                 return False
         return True
 
@@ -477,6 +1150,348 @@ class AgentLoop:
             return ""
         context.rules_shown += 1
         return reminder(context.rules)
+
+    # -- the evidence ledger ----------------------------------------------- #
+    #
+    # Bookkeeping about what this turn has been told and has seen. Every
+    # method here is wrapped the way `_say_if_unverified` is: a fault in the
+    # record must never be the reason a turn fails.
+
+    def _say_internally(self, content: str) -> None:
+        """A USER-role prompt the loop writes to itself, not the person's words.
+
+        The provider's alternation needs the user role, but the transcript must
+        not pretend the person said a compaction brief, a completion correction
+        or a plan restatement. Marked, so `context.stated` — and with it the
+        memory tool's "the user stated this" check (FR-066) — leaves it out.
+        """
+        message = Message.user(content)
+        message.meta["synthetic"] = True
+        self.conversation.add(message)
+
+    def _open_ledger(self, user_text: str,
+                     decisions: list[dict[str, Any]] | None = None,
+                     answered: dict[str, Any] | None = None) -> None:
+        """A fresh ledger for the turn, seeded with what the user stated.
+
+        The request text and what recall brought ride on the context too,
+        so a candidate answer can be grounded against them. Decisions the
+        project has already settled enter as KNOWN, so the same question
+        is answered from the record rather than asked again (FR-109).
+        """
+        try:
+            context = self._tool_context()
+            context.reset_evidence()
+            context.request_text = user_text
+            context.stated = [
+                message.content for message in self.conversation.messages
+                if getattr(message.role, "value", "") == "user"
+                and not message.meta.get("synthetic")
+                and not message.meta.get("compacted")
+                and isinstance(message.content, str) and message.content][-20:]
+            # A spill file this conversation already points at stays protected
+            # across a resume: the pointer in the restored message is only
+            # worth something while the file it names is still there (FR-089).
+            for message in self.conversation.messages:
+                path = message.meta.get("spill") if message.meta else None
+                if isinstance(path, str) and path:
+                    context.spilled.add(path)
+            context.recalled = [
+                getattr(item, "text", "") or str(item) for item in self._recalled]
+            context.evidence.known("the request, as the user stated it",
+                                   material=user_text)
+            # A decision this session raised and never settled keeps its
+            # ref if it is raised again: the form records already say which
+            # refs are still open (FR-020, FR-129).
+            from ..session.store import decision_states
+
+            for ref, recorded in decision_states(self.conversation.messages).items():
+                if recorded.status == "open":
+                    context.evidence.outstanding(
+                        str(recorded.question.get("prompt") or ""), ref)
+            # What the project already settled goes in before the imported
+            # decisions: a carried question the ledger can already answer
+            # settles rather than reopening and stopping the turn (FR-008,
+            # FR-109).
+            for decision in self._settled_decisions():
+                context.evidence.knowledge(decision.trigger, f"lesson:{decision.id}",
+                                           answer=decision.guidance)
+            if answered:
+                self._seed_answers(context, answered)
+            for carried in decisions or []:
+                self._carry_open_decision(context, carried)
+        except Exception:
+            pass
+
+    def _settled_decisions(self) -> list[Any]:
+        if self.memory is None or not self.config.learning.enabled:
+            return []
+        try:
+            return list(self.memory.settled_decisions())[:50]
+        except Exception:
+            return []
+
+    def _learn_decisions(self, result: ToolResult) -> None:
+        """What an answered form settled, kept for the project (T106).
+
+        Only answers: a question left blank, and a form that was cancelled,
+        expired or found nobody to answer, teach nothing.
+        """
+        form = result.meta.get("form")
+        if isinstance(form, dict):
+            self._learn_form(form)
+
+    def _learn_form(self, form: dict[str, Any]) -> None:
+        """One form record's answers, into the project's settled decisions.
+
+        The one path: a live form's record and a record of answers given in a
+        later invocation both arrive here, so a decision answered either way
+        is not asked again (FR-109).
+        """
+        if self.memory is None or not self.config.learning.enabled:
+            return
+        for prompt, text in _answered_pairs(form):
+            try:
+                self.memory.settle_decision(prompt, text)
+            except Exception:
+                continue
+
+    def _seed_answers(self, context: ToolContext, record: dict[str, Any]) -> None:
+        """Answers given in a later invocation, into this turn's ledger.
+
+        Exactly as a live form's answers enter it: the decision, under the ref
+        it already has, answered — KNOWN, from the user. The only way an open
+        decision from an earlier turn becomes usable knowledge (FR-129).
+        """
+        book = context.evidence
+        by_ref = {str(question.get("decision_ref") or ""): question
+                  for question in record.get("questions") or [] if isinstance(question, dict)}
+        for answer in record.get("answers") or []:
+            if not isinstance(answer, dict):
+                continue
+            question = by_ref.get(str(answer.get("decision_ref") or ""))
+            text = _answer_text(answer)
+            if question is None or not text:
+                continue
+            reason = str(question.get("reason") or "")
+            decision = book.open_decision(
+                str(question.get("prompt") or ""),
+                affects=[reason] if reason else None,
+                candidates=[str(option.get("label", "")) for option in
+                            question.get("options") or []
+                            if isinstance(option, dict) and not option.get("free")],
+                ref=str(question.get("decision_ref") or ""))
+            if not decision.resolved:
+                book.asked(decision.id)
+                book.answered(decision.id, text)
+
+    def _learning_contradicted(self, path: str) -> str:
+        """Learned items this file no longer supports, marked stale — or ""."""
+        if not path or self.memory is None or not self.config.learning.enabled:
+            return ""
+        try:
+            marked = self.memory.check_staleness([path])
+        except Exception:
+            return ""
+        if not marked:
+            return ""
+        # Recorded, so the per-task measurement and `comodor insights` show the
+        # stale knowledge this turn detected rather than always zero.
+        self._measurement.knowledge_stale += len(marked)
+        lines = "\n".join(f"- {item['text']} ({item['why']})" for item in marked)
+        return ("[Learned knowledge contradicted by what was just observed and "
+                f"marked stale — rely on the observation, not on it:\n{lines}]")
+
+    def _import_clarification(self, context: ToolContext, result: ToolResult,
+                              *, native: bool = False) -> None:
+        """A child's clarification payload, into this turn's ledger, once.
+
+        The open decision enters the ledger so dependent calls are withheld
+        and the turn ends for it; what the child changed before it stopped
+        joins this turn's prior work. A worktree child's changes also arrive
+        as an applied patch (`files`); an in-place child's arrive only here,
+        already relative and bounded (contracts §C6).
+
+        `native` marks a payload the `ask` tool raised in *this* ledger: the
+        decision is already recorded, so importing the payload again would
+        open a second decision for one question. A child's payload was
+        recorded in the child's own ledger and is not native.
+        """
+        if native:
+            return
+        carried = result.meta.get("clarification")
+        if not isinstance(carried, dict) or not carried:
+            return
+        self._carry_open_decision(context, carried)
+        self._carried_changes.extend(
+            str(item) for item in carried.get("prior_changes") or [] if str(item))
+
+    def _carry_open_decision(self, context: ToolContext, carried: dict[str, Any]) -> None:
+        """Every decision another piece of work left open enters this ledger.
+
+        A payload for one decision carries its fields at the top level; a
+        payload for several also lists them under `decisions`. Reading only
+        the top level kept the first and silently dropped the rest, so the
+        parent reported one decision where the delegate had raised three.
+        """
+        book = context.evidence
+        outcome = str(carried.get("outcome") or "cancelled")
+        for entry in _carried_decisions(carried):
+            what = str(entry.get("decision") or "")
+            if not what:
+                continue
+            decision = book.open_decision(
+                what, affects=[str(entry.get("reason")
+                                   or carried.get("reason") or "behaviour")],
+                candidates=[option.get("label", option)
+                            if isinstance(option, dict) else option
+                            for option in entry.get("candidates") or []],
+                evidence_consulted=list(entry.get("evidence_consulted")
+                                        or carried.get("evidence_consulted") or []),
+                # The ref the work that raised it minted: the decision keeps
+                # its identity — and its origin — in this turn too. Only the
+                # named field: an older payload's `id` is a ledger-local `d#`.
+                ref=str(entry.get("decision_ref") or ""))
+            if decision.resolved:
+                # The ledger already answered this (a settled decision seeded
+                # first); do not reopen it as unresolved and make the gate
+                # annotate work the project already settled (FR-008).
+                continue
+            book.asked(decision.id)
+            book.ended_without_answer(decision.id, outcome)
+
+    def _prior_changes(self) -> list[str]:
+        """Work this turn already did before a decision became known.
+
+        Files a writer changed, plus the shell tools that changed something,
+        deduplicated and in stable order. Paths are shown relative to the
+        workspace, so the payload carries no local filesystem path; a bounded
+        description only, never file contents or command text. Empty when
+        nothing was changed.
+        """
+        context = self.tool_context
+
+        def shown(item: str) -> str:
+            if context is not None and ("/" in item or "\\" in item):
+                try:
+                    return context.relative(Path(item))
+                except Exception:
+                    return item
+            return item
+
+        return sorted({shown(item) for item in (*self._written_paths,
+                                                 *self._mutating_commands,
+                                                 *self._carried_changes)})
+
+    def _clarification_outcome(self) -> dict[str, Any] | None:
+        """The payload for the decisions this turn left open, or None.
+
+        A preflight decision a listening client is being asked about is
+        `asked`, not `cancelled`: the user cancelled nothing, and the turn
+        outcome presents the question through the existing mechanism.
+        """
+        try:
+            context = self.tool_context
+            if context is None:
+                return None
+            open_decisions = [decision for decision in context.evidence.withheld()
+                              if decision.state in ("unresolved", "blocked", "asked")]
+            if not open_decisions:
+                return None
+            from ..tools.ask import payload_for
+
+            outcome = open_decisions[0].outcome or (
+                "asked" if any(d.state == "asked" for d in open_decisions)
+                else "cancelled")
+            payload = payload_for(open_decisions, outcome)
+            prior = self._prior_changes()
+            if prior:
+                # A mutation that happened before the decision became known is
+                # preserved, not rolled back, and is disclosed (contracts §C6).
+                payload["prior_changes"] = prior
+            return payload
+        except Exception:
+            return None
+
+    @staticmethod
+    def _needs_a_decision(payload: dict[str, Any]) -> str:
+        """The answer of a turn that stopped for a decision — nothing invented."""
+        ended = {"cancelled": "the question was cancelled",
+                 "expired": "the question expired unanswered",
+                 "unattended": "nobody was there to answer"}
+        entries = [entry for entry in payload.get("decisions", []) if isinstance(entry, dict)] \
+            or [payload]
+        # Each decision with the ref a later answer names it by: this is the
+        # text every channel relays, including those with no structured reply
+        # of their own (FR-121, FR-129).
+        listed = "\n".join(
+            f"- {entry.get('decision', '')}"
+            + (f" (decision_ref: {entry['decision_ref']})" if entry.get("decision_ref") else "")
+            for entry in entries if entry.get("decision"))
+        prior = [str(item) for item in payload.get("prior_changes") or [] if str(item)]
+        if prior:
+            changed = "\n".join(f"- {item}" for item in prior)
+            tail = ("Work already completed earlier in this turn, before the "
+                    f"decision became known, is preserved:\n{changed}\n"
+                    "No further work depending on the decision was done, and no "
+                    "default was chosen.")
+        else:
+            tail = "Nothing depending on it was done, and no default was chosen."
+        return (f"Stopped: a decision is needed before this can continue "
+                f"({ended.get(payload.get('outcome', ''), 'no answer was given')}).\n"
+                f"{listed}\n{tail}")
+
+    def _advance_ledger(self, step: int) -> None:
+        try:
+            if self.tool_context is not None:
+                self.tool_context.evidence.step = step
+        except Exception:
+            pass
+
+    #: Tools whose result is an observation of the repository or the machine.
+    OBSERVERS = frozenset({"read_file", "list_dir", "glob", "grep", "run_shell",
+                           "run_python", "web_fetch", "web_search", "browse"})
+
+    def _record_evidence(self, context: ToolContext, call: ToolCall,
+                         result: ToolResult) -> None:
+        """What one tool result establishes, as the ledger sees it.
+
+        A read, search or command that succeeded is `VERIFIED`, with the
+        path or the command as its source and a fingerprint of what came
+        back. A result that failed, or one the table cannot place, stays
+        `UNKNOWN`: the safe state, because nothing may rest on it. Writes are
+        recorded by the tools themselves through `note_read`; questions and
+        plans are not observations and record nothing here.
+        """
+        try:
+            if call.name in staleness.WRITERS or call.name not in self.OBSERVERS:
+                return
+            book = context.evidence
+            path = str(result.meta.get("path") or call.arguments.get("path") or "")
+            subject = path or self._describe(call)
+            claim_subject = subject
+            if call.name in ("run_shell", "run_python"):
+                full = str(call.arguments.get("command")
+                           or call.arguments.get("code") or "")
+                if full:
+                    # The internal evidence identity needs the whole command: a
+                    # write operator or path past the display summary's cut
+                    # still proves the change (FR-036). `source` keeps the
+                    # bounded description, and the ledger is per-turn and never
+                    # persisted.
+                    claim_subject = full[:2000]
+            claim = f"{call.name} {claim_subject}".strip()
+            if not result.ok:
+                if book.find(claim) is None:
+                    book.unknown(claim)
+                return
+            if path and call.name == "read_file" and context.was_read(context.resolve(path)):
+                return                     # the whole-file read is already recorded
+            source = path if call.name == "read_file" and path else f"{call.name}:{subject}"
+            book.verified(claim, source=source, material=result.content,
+                          reference=f"call {call.id}")
+        except Exception:
+            pass
 
     def _tool_context(self) -> ToolContext:
         # The context is built once and kept — it holds the checkpoint store,
@@ -514,12 +1529,18 @@ class AgentLoop:
 
     def _maybe_compact(self, system_prompt: str, specs: list[ToolSpec]) -> None:
         agent = self.config.agent
+        # The benchmark's comparison strategy: everything is re-sent as it
+        # was, so the cost of the product's context work can be measured
+        # against it. Compaction stays — a request larger than the window is
+        # refused by every provider, and a baseline that cannot finish a task
+        # measures nothing — but nothing below it runs.
+        naive = getattr(agent, "context_strategy", "current") == "naive"
 
         # Before measuring anything. Screenshots are the largest thing in a
         # desktop run's history and the fastest to go stale, and dropping them
         # is exact and free - where compaction is a model call. Doing it first
         # also means the measurement below is of what will actually be sent.
-        gone = self.conversation.forget_old_pictures(
+        gone = 0 if naive else self.conversation.forget_old_pictures(
             getattr(agent, "keep_screenshots", 2))
         if gone:
             self._emit_usage(system_prompt, specs)
@@ -542,7 +1563,7 @@ class AgentLoop:
         # every step would have spent more than it saved. Doing it at the point
         # compaction would happen anyway costs nothing extra, because
         # compaction busts the same cache and pays a model call on top.
-        stale, freed = self.conversation.forget_superseded_reads()
+        stale, freed = (0, 0) if naive else self.conversation.forget_superseded_reads()
         if stale:
             self._note(f"Dropped {stale} file read{'s' if stale > 1 else ''} "
                        f"that later edits had already made out of date "
@@ -553,6 +1574,23 @@ class AgentLoop:
                 # Enough. The history is smaller *and* more accurate, and
                 # nothing was summarised away to get there.
                 return
+
+        # Still under pressure. Before a model call summarises history away,
+        # the budget manager moves retrievable, low-relevance tool results
+        # aside — exact pointers, no summary, nothing lost (FR-096, FR-097).
+        if not naive:
+            head = self.conversation.counter.count(
+                [Message.system(system_prompt)], specs)
+            budget = max(0, int(limit * agent.compact_at) - head)
+            moved, freed = self.conversation.withhold(budget, self.conversation.last_user_text)
+            if moved:
+                self._note(f"Moved {moved} tool result{'s' if moved > 1 else ''} out "
+                           f"of the conversation to stay within the context budget "
+                           f"({freed:,} tokens); each is retrievable.")
+                self._emit_usage(system_prompt, specs)
+                if not self.conversation.needs_compaction(limit, agent.compact_at,
+                                                          system_prompt, specs):
+                    return
 
         removed = self.conversation.compact(self._summarise)
         if removed:
@@ -579,10 +1617,17 @@ class AgentLoop:
         except Exception:
             return
         if block:
-            self.conversation.add(Message.user(block))
+            self._say_internally(block)
 
     def _summarise(self, messages: list[Message]) -> str:
-        """Ask the model to write the brief that replaces old history."""
+        """Ask the model to write the brief that replaces old history.
+
+        The summary is a real provider call, so its tokens are part of what
+        the turn cost and are recorded here exactly as the main call's are
+        recorded after its stream: one call, one contribution, no double
+        counting. A call that fails raises before its usage is recorded, the
+        same as the main path — a failed summary leaves no phantom usage.
+        """
         from ..providers.base import collapse
 
         transcript = "\n\n".join(
@@ -593,6 +1638,10 @@ class AgentLoop:
             [Message.system(COMPACT_PROMPT), Message.user(transcript)],
             model=self.config.model, temperature=0.2, max_tokens=1500,
         ))
+        # Counted here rather than in `compact`: the call happened even if the
+        # caller later decides the brief is unusable, and the runtime owns the
+        # truth about what it spent. The benchmark consumes this.
+        self.conversation.record_usage(completion.usage)
         return completion.text
 
     def _model_profile(self):
@@ -636,7 +1685,11 @@ class AgentLoop:
 
     def _emit_usage(self, system_prompt: str, specs: list[ToolSpec]) -> None:
         limit = self._window()
-        used = self.conversation.used_tokens(system_prompt, specs)
+        # What the last request actually carried, counted where it was
+        # rendered; a fresh count only when nothing has been sent yet or the
+        # history moved since (compaction, a sweep).
+        used = (self.conversation.last_request_tokens
+                or self.conversation.used_tokens(system_prompt, specs))
         usage = self.conversation.usage
         self.bus.emit(
             Kind.USAGE,
@@ -683,8 +1736,7 @@ class AgentLoop:
             return False
 
         self._note(f"{command} fails — giving it one turn to fix that.")
-        self.conversation.add(
-            Message.user(project.as_correction(command, outcome)))
+        self._say_internally(project.as_correction(command, outcome))
         return True
 
     def _say_if_unverified(self, result: TurnResult) -> None:
@@ -703,8 +1755,78 @@ class AgentLoop:
         if notice:
             self._note(notice)
 
+    def _completion_gate(self, result: TurnResult) -> Any:
+        """Compare the request against what the turn delivered (IP-4).
+
+        Annotate by default; the one blocking case is an explicit completion
+        claim the evidence contradicts. Never persisted.
+        """
+        from . import verify
+
+        try:
+            context = self._tool_context()
+            ledger = context.evidence
+            decisions = getattr(ledger, "decisions", []) or []
+            pending = [decision for decision in decisions
+                       if str(getattr(decision, "state", "")) in ("unresolved", "blocked")]
+            return verify.assess(
+                self._request_text,
+                entries=getattr(ledger, "entries", []) or [],
+                changed_paths=self._written_paths,
+                failures=[(tool, reason) for tool, _key, reason in self._failed],
+                pending=pending,
+                answer=result.text,
+                validations=self._validations)
+        except Exception:
+            # A gate that cannot reach a verdict blocks nothing: the answer is
+            # delivered (FR-124). But an explicit completion claim it could not
+            # check is not delivered as completed — it is marked unconfirmed
+            # (FR-127). Failing to read the answer counts as a claim.
+            fallback = verify.Assessment()
+            try:
+                from .claims import claims_completion
+
+                claimed = claims_completion(result.text)
+            except Exception:
+                claimed = True
+            if claimed:
+                fallback.verdict = "annotate"
+                fallback.unconfirmed = "the completion check could not reach a verdict"
+            return fallback
+
     def _note(self, text: str) -> None:
         self.bus.emit(Kind.NOTICE, text=text)
+
+    def _end_for_clarification(self, result: TurnResult,
+                               needed: dict[str, Any]) -> TurnResult:
+        """End the turn reporting a decision that is still needed.
+
+        One place, so every path that stops for an unanswered mandatory form
+        reports it the same way: the outcome, the payload, the validation
+        state, the visible message, and no dependent work (FR-018, FR-035,
+        FR-121).
+        """
+        result.stopped = "clarification_required"
+        result.clarification = needed
+        result.measurement.validation_outcome = "clarification_required"
+        result.text = self._needs_a_decision(needed)
+        self._announce_decision(result.text)
+        return result
+
+    def _announce_decision(self, text: str) -> None:
+        """Close the turn with the needed decision as a visible message.
+
+        A clarification-required turn produces no streamed answer of its own,
+        so without this a channel would draw only whatever the model said
+        before it asked and never the decision that stopped it. The message is
+        the turn's own closing text; it adds nothing to the model's history.
+        """
+        if not text:
+            return
+        self._message_id = uuid.uuid4().hex[:12]
+        self.bus.emit(Kind.ASSISTANT_START, id=self._message_id)
+        self.bus.emit(Kind.ASSISTANT_END, text=text, id=self._message_id,
+                      tool_calls=[])
 
     # -- learning --------------------------------------------------------- #
 
@@ -730,7 +1852,8 @@ class AgentLoop:
             return ""
 
         try:
-            self.memory.before_turn(user_text)
+            noticed = self.memory.before_turn(user_text)
+            self._measurement.corrections += len(getattr(noticed, "corrections", []) or [])
         except Exception:
             pass
 
@@ -821,6 +1944,7 @@ class AgentLoop:
                 approvals=approvals,
                 tokens=self.conversation.usage.total,
                 cost_usd=self.conversation.usage.cost_usd,
+                measurement=result.measurement.as_dict(),
             )
         except Exception:
             # Learning is a background nicety; it must never break a turn.

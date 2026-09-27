@@ -1,0 +1,459 @@
+"""The six-task same-project sequence (T152; SC-021).
+
+One project, six comparable tasks: the first three are the initial window, the
+last three the learned window. The two primary metrics are the mandatory
+clarification count and the user correction count; success must not regress. An
+incomparable run is invalid, not passing.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from bench import report, runner
+from bench.task import Attempt, SequenceResult, SequenceStep, Task, Verdict, load_task
+
+TASKS = Path(__file__).resolve().parents[1] / "bench" / "tasks"
+REPEAT = TASKS / "learning-repeat"
+
+
+def _steps(count: int = 6) -> list[SequenceStep]:
+    return [SequenceStep(prompt=f"add setting K{index + 1}",
+                         expect={"path": "items.py", "marker": f"K{index + 1}"})
+            for index in range(count)]
+
+
+def _attempt(workspace: Path, *, clarifications: int = 0, corrections: int = 0,
+             success: bool = True) -> Attempt:
+    return Attempt(
+        workspace=workspace, ok=True, stopped="done", text="done", steps=1,
+        measurement={"clarifications_raised": clarifications,
+                     "corrections": corrections},
+        success=success)
+
+
+def _result(workspace: Path, attempts: list[Attempt],
+            steps: list[SequenceStep] | None = None) -> SequenceResult:
+    task = Task(name="s", category="careful", prompt="p", repo=workspace,
+                check=lambda a: Verdict.ok())
+    return SequenceResult(task=task, steps=steps or _steps(len(attempts)),
+                          attempts=attempts)
+
+
+# --------------------------------------------------------------------------- #
+# window aggregation (items 9, 10, 11)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_windows_aggregate_the_first_and_last_three(tmp_path):
+    attempts = [_attempt(tmp_path, clarifications=c, corrections=k)
+                for c, k in ((1, 1), (1, 1), (1, 1), (0, 1), (0, 0), (0, 0))]
+    windows = _result(tmp_path, attempts).windows()
+
+    assert windows["initial"] == {"clarifications": 3, "corrections": 3,
+                                  "success": 3, "tasks": 3}
+    assert windows["learned"] == {"clarifications": 0, "corrections": 1,
+                                  "success": 3, "tasks": 3}
+
+
+def test_the_metrics_come_from_the_measurement(tmp_path):
+    attempt = _attempt(tmp_path, clarifications=2, corrections=1)
+    assert attempt.clarifications_raised == 2
+    assert attempt.corrections == 1
+    assert attempt.validation_outcome == ""
+
+
+# --------------------------------------------------------------------------- #
+# the SC-021 verdict (items 12, 13)
+# --------------------------------------------------------------------------- #
+
+
+def test_both_metrics_falling_and_success_held_passes(tmp_path):
+    attempts = [_attempt(tmp_path, clarifications=1, corrections=1) for _ in range(3)] \
+        + [_attempt(tmp_path, clarifications=0, corrections=0) for _ in range(3)]
+    verdict = load_task(REPEAT).check_sequence(_result(tmp_path, attempts))
+    assert verdict.passed, verdict.reason
+
+
+def test_a_metric_that_does_not_fall_fails(tmp_path):
+    attempts = [_attempt(tmp_path, clarifications=1, corrections=1) for _ in range(3)] \
+        + [_attempt(tmp_path, clarifications=1, corrections=0) for _ in range(3)]
+    verdict = load_task(REPEAT).check_sequence(_result(tmp_path, attempts))
+    assert not verdict.passed
+    assert "clarifications" in verdict.reason
+
+
+def test_a_correctness_regression_fails_even_when_both_metrics_fall(tmp_path):
+    attempts = [_attempt(tmp_path, clarifications=1, corrections=1, success=True)
+                for _ in range(3)] \
+        + [_attempt(tmp_path, clarifications=0, corrections=0, success=False)
+           for _ in range(3)]
+    verdict = load_task(REPEAT).check_sequence(_result(tmp_path, attempts))
+    assert not verdict.passed
+    assert "regressed" in verdict.reason
+
+
+def test_an_incomparable_sequence_is_invalid(tmp_path):
+    steps = _steps(6)
+    steps[3] = SequenceStep(prompt="something else",
+                            expect={"path": "other.py", "marker": "K4"})
+    attempts = [_attempt(tmp_path) for _ in range(6)]
+    result = _result(tmp_path, attempts, steps)
+
+    assert not result.comparable
+    verdict = load_task(REPEAT).check_sequence(result)
+    assert not verdict.passed
+    assert "not comparable" in verdict.reason
+
+
+# --------------------------------------------------------------------------- #
+# the runner: one project, one brain, fresh conversations (items 7, 8)
+# --------------------------------------------------------------------------- #
+
+
+def _sequence_task(tmp_path: Path) -> Task:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "items.py").write_text("SETTINGS = {}\n", encoding="utf-8")
+    steps = tuple(SequenceStep(prompt=f"add setting K{index + 1}",
+                               expect={"path": "items.py",
+                                       "marker": f"K{index + 1}"})
+                  for index in range(6))
+    return Task(name="seq", category="careful", prompt="p", repo=repo,
+                check=lambda attempt: Verdict.ok(), sequence=steps,
+                check_sequence=lambda result: Verdict.ok())
+
+
+def test_the_sequence_uses_one_project_and_one_brain(monkeypatch, tmp_path):
+    task = _sequence_task(tmp_path)
+    seen: list[dict] = []
+
+    def fake_invoke(task, workspace, home, provider, model, prompt="",
+                    interaction=()):
+        seen.append({"workspace": workspace, "home": home, "prompt": prompt})
+        return _attempt(workspace)
+
+    monkeypatch.setattr(runner, "_invoke", fake_invoke)
+    outcome = runner.run_task(task, provider="fake", model="m", tries=1,
+                              say=lambda *a, **k: None)
+
+    assert len(seen) == 6, "every step is its own turn"
+    assert len({entry["workspace"] for entry in seen}) == 1, "one workspace"
+    assert len({entry["home"] for entry in seen}) == 1, "one brain"
+    assert [entry["prompt"] for entry in seen] == [step.prompt
+                                                   for step in task.sequence]
+    assert outcome.attempts and outcome.sequence
+
+
+def test_a_sequence_run_writes_the_learning_mode_once(monkeypatch, tmp_path):
+    """The brain is the same across steps; only transient state is fresh."""
+    import json
+
+    task = _sequence_task(tmp_path)
+    homes: list[Path] = []
+    written: list[dict] = []
+
+    def fake_invoke(task, workspace, home, provider, model, prompt="",
+                    interaction=()):
+        homes.append(home)
+        written.append(json.loads((home / "config.json").read_text(encoding="utf-8")))
+        return _attempt(workspace)
+
+    monkeypatch.setattr(runner, "_invoke", fake_invoke)
+    runner.run_task(task, provider="fake", model="m", tries=1,
+                    learning=True, say=lambda *a, **k: None)
+
+    assert written and all(config["learning"]["enabled"] is True
+                           for config in written)
+    assert len(set(homes)) == 1
+
+
+# --------------------------------------------------------------------------- #
+# the report carries the sequence record
+# --------------------------------------------------------------------------- #
+
+
+def test_the_report_includes_the_sequence_record(tmp_path):
+    attempts = [_attempt(tmp_path, clarifications=1, corrections=1) for _ in range(3)] \
+        + [_attempt(tmp_path, clarifications=0, corrections=0) for _ in range(3)]
+    task = Task(name="learning-repeat", category="careful", prompt="p",
+                repo=tmp_path, check=lambda a: Verdict.ok(),
+                sequence=tuple(_steps(6)),
+                check_sequence=lambda result: Verdict.ok())
+    outcome = runner.Outcome(task=task, verdicts=[Verdict.ok()], attempts=attempts)
+
+    body = report.as_json([outcome], provider="fake", model="m", tries=1)
+    record = body["tasks"][0]["sequence"]
+
+    assert record["comparable"] is True
+    assert record["windows"]["initial"]["clarifications"] == 3
+    assert record["windows"]["learned"]["clarifications"] == 0
+    assert record["verdict"] == "pass"
+    assert len(record["steps"]) == 6
+    assert record["steps"][0]["clarifications"] == 1
+
+
+def _step_fake(calls):
+    """A stand-in for the per-step `comodor run`, so no process starts."""
+    def fake(task, workspace, home, provider, model, prompt="", interaction=()):
+        calls.append(prompt)
+        return Attempt(workspace=workspace, ok=True, stopped="done", text="",
+                       steps=1, input_tokens=100, output_tokens=10, cached_tokens=50)
+    return fake
+
+
+def test_a_sequence_honours_the_requested_tries(monkeypatch, tmp_path):
+    """`--tries 3` means three whole sequences, not one."""
+    task = _sequence_task(tmp_path)
+    calls: list = []
+    monkeypatch.setattr(runner, "_invoke", _step_fake(calls))
+    outcome = runner.run_task(task, provider="fake", model="m", tries=3,
+                              say=lambda *a, **k: None)
+
+    assert len(calls) == 18, "three runs of six steps"
+    assert len(outcome.verdicts) == 3
+    assert len(outcome.sequence_runs()) == 3
+    assert [run.attempts[0].sequence_run for run in outcome.sequence_runs()] == [1, 2, 3]
+
+
+def test_sequence_totals_are_per_run_not_per_step(monkeypatch, tmp_path):
+    task = _sequence_task(tmp_path)
+    monkeypatch.setattr(runner, "_invoke", _step_fake([]))
+    outcome = runner.run_task(task, provider="fake", model="m", tries=2,
+                              say=lambda *a, **k: None)
+
+    row = report.as_json([outcome], provider="fake", model="m", tries=2)["tasks"][0]
+    # Each step totals 160 tokens (100+50+10); a run of six steps is 960.
+    assert row["mean_total_tokens"] == 960
+    assert row["sequence"]["runs"] == 2
+
+
+def test_a_sequence_step_reports_artifact_success_not_exit(monkeypatch, tmp_path):
+    """The step's success is whether it produced its artifact, not that the
+    process exited cleanly."""
+    repo = tmp_path / "repo2"
+    repo.mkdir()
+    steps = tuple(SequenceStep(prompt=f"add setting K{index + 1}",
+                               expect={"path": "items.py",
+                                       "marker": f"K{index + 1}"})
+                  for index in range(6))
+    task = Task(name="seq-artifact", category="careful", prompt="p", repo=repo,
+                check=lambda attempt: Verdict.ok(), sequence=steps,
+                check_sequence=lambda result: Verdict.ok())
+    monkeypatch.setattr(runner, "_invoke", _step_fake([]))
+    outcome = runner.run_task(task, provider="fake", model="m", tries=1,
+                              say=lambda *a, **k: None)
+    row = report.as_json([outcome], provider="fake", model="m", tries=1)["tasks"][0]
+    assert row["sequence"]["steps"][0]["success"] is False
+
+
+def test_a_sequence_mean_is_per_run(monkeypatch, tmp_path):
+    """A six-step sequence is a whole attempt, not six of them."""
+    task = _sequence_task(tmp_path)
+    monkeypatch.setattr(runner, "_invoke", _step_fake([]))
+    outcome = runner.run_task(task, provider="fake", model="m", tries=2,
+                              say=lambda *a, **k: None)
+
+    assert outcome.mean("total_tokens") == 960
+
+
+def test_a_mixed_sequence_verdict_is_the_first_runs():
+    """The per-step block describes the first run; the aggregate is at the task
+    level, so a partly-passing sequence is not labelled `pass`."""
+    from bench.runner import Outcome
+    from bench.task import SequenceStep, Verdict
+
+    steps = [SequenceStep(prompt="add", expect={"path": "items.py", "marker": "K"})]
+    task = Task(name="s", category="careful", prompt="p", repo=Path("."),
+                check=lambda a: Verdict.ok(), sequence=tuple(steps),
+                check_sequence=lambda r: Verdict.ok())
+    attempt = Attempt(workspace=Path("."), ok=True, stopped="done", text="",
+                      steps=1, sequence_run=1)
+    outcome = Outcome(task=task, verdicts=[Verdict.no("the first run failed"),
+                                           Verdict.ok()], attempts=[attempt])
+    record = report._sequence_record(outcome.sequence_result, outcome, runs=2)
+
+    assert record["verdict"] == "fail"
+    assert record["passed_runs"] == 1
+    assert record["runs"] == 2
+
+
+def test_a_raising_correction_hook_makes_the_run_invalid(tmp_path, monkeypatch):
+    """The simulated correction never happened, so the run is not a
+    measurement — never an ordinary agent failure (SC-021)."""
+    monkeypatch.setattr(runner, "fresh_copy",
+                        lambda repo, workspace: workspace.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(runner, "_settings", lambda *args, **kwargs: None)
+
+    def fake_invoke(task, workspace, home, provider, model, *, prompt, interaction):
+        return _attempt(workspace)
+
+    monkeypatch.setattr(runner, "_invoke", fake_invoke)
+
+    def boom(index, attempt, workspace):
+        raise OSError("disk gone")
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok(),
+                sequence=tuple(_steps(2)), correct=boom,
+                check_sequence=lambda result: Verdict.ok())
+
+    attempts, verdict, _ = runner._run_sequence_once(
+        task, provider="p", model="m", keep=None, say=lambda *args, **kwargs: None,
+        strategy="current", learning=True, without=())
+
+    assert verdict.passed is False
+    assert "invalid" in verdict.reason.lower()
+
+    invalid = SequenceResult(task=task, steps=list(_steps(2)),
+                             attempts=[_attempt(tmp_path), _attempt(tmp_path)],
+                             invalid_reason="the correction hook failed")
+    assert invalid.comparable is False, "an invalid run is not a measurement"
+
+
+def test_a_truncated_invalid_sequence_is_reported_without_crashing(tmp_path):
+    """An invalid run may stop before every step has an attempt; the report
+    must still be written (SC-021)."""
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok())
+
+    class One:
+        verdicts = [Verdict.ok()]
+        passed = 1
+        invalid: list[str] = []
+
+    sequence = SequenceResult(task=task, steps=list(_steps(2)),
+                              attempts=[_attempt(tmp_path)],
+                              invalid_reason="the correction hook failed")
+
+    record = report._sequence_record(sequence, One(), runs=1)
+
+    assert record["comparable"] is False
+    assert record["invalid_reason"]
+    assert len(record["steps"]) == 1
+
+
+def test_an_invalid_sequence_run_is_excluded_from_aggregation(tmp_path, monkeypatch):
+    """A harness failure is recorded but not counted as a pass or a fail."""
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok(),
+                sequence=tuple(_steps(2)),
+                check_sequence=lambda result: Verdict.ok())
+    monkeypatch.setattr(
+        runner, "_run_sequence_once",
+        lambda *args, **kwargs: ([_attempt(tmp_path)],
+                                 Verdict.invalid_run("hook failed"), ""))
+
+    outcome = runner.run_task(task, provider="p", model="m", tries=2,
+                              say=lambda *args, **kwargs: None)
+
+    assert outcome.tries == 0
+    assert outcome.passed == 0
+    assert outcome.invalid == ["hook failed", "hook failed"]
+    assert outcome.attempts == [], \
+        "an invalid run's steps are not scored in the token/cost aggregates"
+
+
+def test_a_raising_sequence_judge_is_an_invalid_run(tmp_path, monkeypatch):
+    """A judge that cannot inspect its fixture is a broken experiment, not an
+    agent failure."""
+    monkeypatch.setattr(runner, "fresh_copy",
+                        lambda repo, workspace: workspace.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(runner, "_settings", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "_invoke", lambda *args, **kwargs: _attempt(tmp_path))
+
+    def boom(result):
+        raise RuntimeError("judge broken")
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok(),
+                sequence=tuple(_steps(2)), check_sequence=boom)
+
+    _, verdict, _ = runner._run_sequence_once(
+        task, provider="p", model="m", keep=None, say=lambda *args, **kwargs: None,
+        strategy="current", learning=True, without=())
+
+    assert verdict.invalid is True
+    assert "invalid" in verdict.reason.lower()
+
+
+def test_an_all_invalid_task_is_neither_passed_nor_failed(tmp_path):
+    from bench import report
+    from bench.runner import Outcome
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok())
+    outcome = Outcome(task=task)
+    outcome.invalid.append("hook failed")
+
+    totals = report.as_json([outcome], provider="p", model="m", tries=3)["totals"]
+
+    assert totals["passed"] == 0
+    assert totals["failed"] == 0
+    assert totals["invalid"] == 1
+    assert totals["tasks"] == 0
+
+
+def test_an_all_invalid_task_keeps_its_diagnosis_in_the_report(tmp_path):
+    """Every run invalid: the row still says which hook or judge broke, and
+    the sequence block says the run is invalid rather than vanishing
+    (review 4045469362)."""
+    from bench.runner import Outcome
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok(), sequence=tuple(_steps(2)))
+    outcome = Outcome(task=task, sequence=True)
+    outcome.invalid.extend(["invalid run — the correction hook failed after step 1: "
+                            "KeyError: 'K1'"] * 2)
+
+    record = report.as_json([outcome], provider="p", model="m", tries=2)["tasks"][0]
+    assert record["result"] == "0/0"
+    assert record["invalid_runs"] == 2
+    assert "correction hook failed" in record["why"]
+    assert record["invalid_reasons"][0].startswith("invalid run")
+    assert record["sequence"]["comparable"] is False
+    assert record["sequence"]["verdict"] == "invalid"
+    assert "correction hook failed" in record["sequence"]["invalid_reason"]
+    assert record["sequence"]["runs"] == 0 and record["sequence"]["invalid_runs"] == 2
+
+    markdown = report.as_markdown(report.as_json([outcome], provider="p", model="m", tries=2))
+    assert "0/0 (+2 invalid)" in markdown
+    assert "correction hook failed" in markdown
+
+
+def test_a_partially_invalid_task_lists_the_invalid_tries(tmp_path):
+    """Two valid passes and one invalid run: the rate is 2/2 and the invalid
+    try is listed beside it, not dropped."""
+    from bench.runner import Outcome
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok(), sequence=tuple(_steps(2)))
+    outcome = Outcome(task=task, sequence=True)
+    for run in (1, 2):
+        for _ in range(2):
+            attempt = _attempt(tmp_path)
+            attempt.sequence_run = run
+            outcome.attempts.append(attempt)
+        outcome.verdicts.append(Verdict.ok())
+    outcome.invalid.append("invalid run — the judge raised OSError: gone")
+
+    record = report.as_json([outcome], provider="p", model="m", tries=3)["tasks"][0]
+    assert record["result"] == "2/2"
+    assert record["invalid_runs"] == 1
+    assert record["invalid_reasons"] == ["invalid run — the judge raised OSError: gone"]
+    assert record["sequence"]["runs"] == 2
+    assert record["sequence"]["invalid_runs"] == 1
+    assert "judge raised" in record["why"], "nothing valid failed, so the invalid run is the why"
+    assert "2/2 (+1 invalid)" in report.as_markdown(
+        report.as_json([outcome], provider="p", model="m", tries=3))
+
+
+def test_a_valid_failure_outranks_an_invalid_run_as_the_why(tmp_path):
+    from bench.runner import Outcome
+
+    task = Task(name="s", category="careful", prompt="p", repo=tmp_path,
+                check=lambda attempt: Verdict.ok())
+    outcome = Outcome(task=task)
+    outcome.verdicts.append(Verdict(False, "the marker is missing"))
+    outcome.invalid.append("invalid run — hook failed")
+    assert outcome.why() == "the marker is missing"

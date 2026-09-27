@@ -205,6 +205,21 @@ def question(request_id: str, index: int, options: list[str],
     return rows(*lines)
 
 
+def decisions(open_decisions: list[tuple[str, str, list[str]]]) -> dict[str, Any]:
+    """A stopped turn's open decisions, one button per grounded option.
+
+    Each button carries the decision's own ref and the option's position —
+    `da:<decision_ref>:<n>`, well inside the sixty-four bytes — so tapping it
+    answers exactly that decision and nothing else. A written answer is the
+    `/answer <decision_ref> <text>` command the message names.
+    """
+    lines = []
+    for ref, _, options in open_decisions:
+        for slot, label in enumerate(options):
+            lines.append([button(f"{UNPICKED}  {label}"[:60], f"da:{ref}:{slot}")])
+    return rows(*lines[:MOST_ROWS])
+
+
 # --------------------------------------------------------------------------- #
 # lists
 # --------------------------------------------------------------------------- #

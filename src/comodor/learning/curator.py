@@ -57,7 +57,7 @@ STATE_KEY = "curator"
 class Action:
     """One thing the curator did, to be reported and counted."""
 
-    what: str          # lesson-stale | fact-merged | skill-stale | skill-archived
+    what: str          # <kind>-stale | fact-merged | skill-archived
     target: str        # human-readable name of the thing
     why: str
     restore: str = ""  # what a rollback puts back, when there is one
@@ -152,6 +152,7 @@ def run(store: BrainStore, config, skills_root=None,
 
     report = Report()
     _mark_stale_lessons(store, config, report)
+    _mark_fingerprint_stale(store, config, report)
     _merge_duplicate_facts(store, report)
     if skills_root is not None:
         _curate_skills(store, config, skills_root, report,
@@ -193,6 +194,29 @@ def _mark_stale_lessons(store: BrainStore, config, report: Report) -> None:
             what="lesson-stale", target=row["trigger_text"][:60] or "lesson",
             why="confidence decayed below the floor; hidden from recall, "
                 "kept in the database"))
+
+
+def _mark_fingerprint_stale(store: BrainStore, config, report: Report) -> None:
+    """Items whose source no longer supports them stop being recalled (FR-112).
+
+    The same deterministic check recall runs (`memory.stale_by_fingerprint`),
+    here as a sweep over this project's counted rules and tool-confirmed
+    facts. Marked, reported, kept: a stale item is inspectable in the
+    timeline and nothing is deleted.
+    """
+    from ..paths import project_key
+    from .memory import stale_by_fingerprint
+
+    try:
+        root = config.paths.project
+        scopes = ["global", f"project:{project_key(root)}"]
+        marked = stale_by_fingerprint(store, root, scopes)
+    except Exception:                      # noqa: BLE001 - the pass goes on
+        return
+    for item in marked:
+        report.actions.append(Action(
+            what=f"{item['table'].rstrip('s')}-stale", target=str(item["text"])[:60],
+            why=f"{item['why']}; hidden from recall, kept in the database"))
 
 
 def _merge_duplicate_facts(store: BrainStore, report: Report) -> None:

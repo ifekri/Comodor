@@ -34,8 +34,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .. import questions as forms
 from .._version import __version__
-from ..application import assemble
+from ..application import DecisionRejected, assemble, run_turn
 from ..config import Config
 from ..events import Event, Kind, Request
 from ..paths import Paths
@@ -232,6 +233,24 @@ class AcpSession:
     def _ask(self, request: Request) -> None:
         """Put a permission prompt to the editor and answer the worker."""
         self._pending[request.id] = request
+        if request.kind == "questions":
+            # A structured question form is not a permission prompt, and ACP
+            # has no request shape for one: the only thing the agent may ask a
+            # client is `session/request_permission`, whose options are
+            # allow/reject choices. Putting a form there would show the editor
+            # a yes/no question with no answer that means the options — and
+            # answering it with "yes" or "no" would invent a choice nobody
+            # made. There is nothing to transport, so this fails honestly:
+            # the request is resolved as unattended and the turn reports the
+            # decision as still needed (FR-033), rather than cancelled or
+            # silently answered.
+            self.agent.rpc.warn(
+                "acp: a question form has no ACP request shape — reporting it "
+                "as unattended rather than showing a yes/no prompt")
+            self._pending.pop(request.id, None)
+            if not request.answered:
+                request.answer(forms.UNATTENDED)
+            return
         if request.kind == "mode":
             # A proposed mode change: the modes are the options, labelled as
             # themselves. Every choice is "other" to ACP — none of them is an
@@ -278,29 +297,70 @@ class AcpSession:
     def refuse_everything_waiting(self) -> None:
         """Answer every open prompt, so no worker is left blocked."""
         for request in list(self._pending.values()):
-            if not request.answered:
+            if request.answered:
+                continue
+            # A question form answered with its last option would be a real
+            # answer to something nobody answered. Unattended is the honest
+            # resolution, and the only one that leaves the decision open.
+            if request.kind == "questions":
+                request.answer(forms.UNATTENDED)
+            else:
                 request.answer(request.options[-1] if request.options else "no")
         self._pending.clear()
 
     # -- a turn --------------------------------------------------------------- #
 
-    def prompt(self, blocks: list[Any]) -> None:
-        """Start a turn. Returns as soon as it is accepted, as ACP wants."""
+    def prompt(self, blocks: list[Any], decision_answers: Any = None) -> None:
+        """Start a turn. Returns as soon as it is accepted, as ACP wants.
+
+        `decision_answers` answers decisions this session stopped for, by
+        their `decision_ref`. The turn runs through `application.run_turn`,
+        which checks the whole batch before anything is applied; a refused
+        batch is an invalid-params error naming the refs, and nothing about
+        the session changes. There is no ACP-specific decision state.
+        """
         text = _as_text(blocks)
-        if not text.strip():
+        if not text.strip() and decision_answers is None:
             raise RpcError(INVALID_PARAMS, "there is nothing in that prompt")
         if not self._turn.acquire(blocking=False):
             raise RpcError(INVALID_PARAMS, "this session is already working")
 
-        if not self.meta.title:
+        if not self.meta.title and text.strip():
             self.meta.title = derive_title(text)
+
+        decided = threading.Event()
+        refused: list[DecisionRejected] = []
+
+        started: list[bool] = []
+
+        def begin() -> None:
+            # The editor hears of a turn only once it has been accepted: a
+            # refused batch is an error to the request, not a turn.
+            started.append(True)
+            decided.set()
+            self.update({"sessionUpdate": "state_update", "state": "running"})
 
         def work() -> None:
             self.busy = True
-            self.update({"sessionUpdate": "state_update", "state": "running"})
             stop = "end_turn"
             try:
-                self.loop.run(text)
+                try:
+                    result = run_turn(self.loop, text, decision_answers=decision_answers,
+                                      accepted=begin)
+                except DecisionRejected as problem:
+                    refused.append(problem)
+                    return
+                if getattr(result, "stopped", "") == "clarification_required":
+                    # The turn stopped for a decision; that is not a normal
+                    # completion (contracts §C5, FR-121, FR-123). The
+                    # structured payload, including `clarification.outcome`,
+                    # is preserved and nothing is selected on the user's
+                    # behalf.
+                    stop = "refusal"
+                    payload = getattr(result, "clarification", None)
+                    if isinstance(payload, dict) and payload:
+                        self.update({"sessionUpdate": "clarification_required",
+                                     **payload})
             except Exception as error:
                 stop = "refusal"
                 self.agent.rpc.warn(f"acp: {type(error).__name__}: {error}")
@@ -309,17 +369,25 @@ class AcpSession:
                              "content": {"type": "text",
                                          "text": f"\n\n{type(error).__name__}: {error}"}})
             finally:
+                decided.set()
                 if self._cancelled:
                     stop = "cancelled"
                 self._cancelled = False
                 self.busy = False
-                self._persist()
-                self.update({"sessionUpdate": "state_update", "state": "idle",
-                             "stopReason": stop})
+                if started or not refused:
+                    self._persist()
+                    self.update({"sessionUpdate": "state_update", "state": "idle",
+                                 "stopReason": stop})
                 self._turn.release()
 
         threading.Thread(target=work, name=f"comodor-acp-{self.id}",
                          daemon=True).start()
+        if decision_answers is not None:
+            decided.wait()
+            if refused:
+                raise RpcError(INVALID_PARAMS,
+                               f"decision answers refused ({refused[0].kind}): "
+                               f"{refused[0]}", data=refused[0].as_dict())
 
     _cancelled = False
 
@@ -541,7 +609,13 @@ class ComodorAgent:
     def session_prompt(self, params: dict[str, Any]) -> dict[str, Any]:
         session = self._session(params)
         blocks = params.get("prompt")
-        session.prompt(blocks if isinstance(blocks, list) else [])
+        # Decision answers ride the request's extension metadata, under the
+        # same name the API uses: `_meta.comodor.decision_answers`.
+        extension = params.get("_meta")
+        comodor = extension.get("comodor") if isinstance(extension, dict) else None
+        answers = comodor.get("decision_answers") if isinstance(comodor, dict) else None
+        session.prompt(blocks if isinstance(blocks, list) else [],
+                       decision_answers=answers)
         # Empty, and that is the whole point of the v2 shape: the turn reports
         # itself through notifications rather than by holding this open.
         return {}

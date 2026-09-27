@@ -59,6 +59,54 @@ a single boolean. Agents are not deterministic and a single run presented as
 Every published result names the model, the provider, the date and the machine.
 Nothing is estimated, projected or rounded up from a partial run.
 
+## Comparing a run with a published baseline (SC-012)
+
+A paired result (`--paired`) records, for every task, the `scenario_fingerprint`
+the run was judged by: the fingerprint `bench/integrity.py` takes of the
+prompt, the judge, the starting repository, the hidden files and the declared
+budgets. It is captured once when the run starts, the same value binds the
+checkpoint, and both the `current` and the `naive` arm carry it. A task whose
+two arms were judged by different scenarios is refused.
+
+```
+python -m bench --sc012 results/<candidate>.json \
+    --against results/paired-baseline-2026-09-20.json [--label NAME]
+```
+
+This reads the two result files and, where needed, local git history. It needs
+no provider and no model and calls none. It writes `results/sc012-<label>.json`
+and `.md`; the label defaults to the candidate file's name.
+
+- **Inputs**: two `kind: "paired-baseline"` documents.
+- **Fingerprints**: a result whose every task records `scenario_fingerprint`
+  is read as `recorded`. Any other result, such as the 2026-09-20 baseline,
+  which predates recording, is reconstructed in full from its own `commit`
+  (`reconstructed:<commit>`), by the same algorithm applied to that commit's
+  `bench/tasks`. That needs a checkout with full history. Recorded and
+  reconstructed values are never mixed in one result, and a result file is
+  never rewritten.
+- **Reference**: every candidate task has exactly one reference, chosen by
+  fingerprint digest alone, never by task name or by hand.
+  - `UNCHANGED`: the digest equals the baseline's. The reference is the
+    baseline's `current` rate (`PUBLISHED_BASELINE`).
+  - `CHANGED`: the digest differs, or the task is new to the candidate. The
+    reference is the candidate's own `naive` rate from the same run
+    (`SAME_RUN_NAIVE`).
+  - A harness change outside the fingerprint leaves a task unchanged.
+- **Rates** are compared as exact fractions, `passed / tries`. A task passes
+  when its rate is at least its reference, so an equal rate passes.
+- **Result**:
+  - `UNDECIDABLE` (exit `2`) when either input is not a paired baseline,
+    fingerprints cannot be established for either side, a baseline task is
+    missing from the candidate (listed in `baseline_only_tasks`), or any
+    task's candidate or reference arm is missing or has no valid tries.
+  - Otherwise `FAIL` (exit `1`) if any task fails.
+  - Otherwise `PASS` (exit `0`).
+- **Evidence**: each task row records both fingerprint digests, the scenario
+  status, the reference kind, both rates, the result and the reason. The
+  document also names both input files, their commits and where their
+  fingerprints came from.
+
 ## A judge can be wrong, and it looks exactly like a result
 
 The first `careful` task here asked for a `delete` operation across two storage

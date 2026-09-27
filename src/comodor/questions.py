@@ -70,6 +70,13 @@ class MalformedQuestions(ValueError):
 # --------------------------------------------------------------------------- #
 
 
+#: Where a candidate answer may come from (FR-015, FR-016). An option that
+#: names none of these, or names one the tool cannot confirm, is not
+#: presented as a grounded choice: it is dropped, and the person still has
+#: the write-your-own row.
+SOURCES = ("request", "repository", "configuration", "knowledge", "derivation")
+
+
 @dataclass
 class Option:
     """One row the user can pick."""
@@ -79,6 +86,14 @@ class Option:
     #: True for the appended write-your-own row, which is rendered differently
     #: and carries typed text instead of a fixed label.
     free: bool = False
+    #: Where this candidate came from — one of `SOURCES` — and what shows it:
+    #: the words in the request, the path that was read, the setting, the
+    #: learned item. Declared by the model, checked by the tool.
+    source: str = ""
+    evidence: str = ""
+    #: Set by the tool once the provenance was confirmed against what this
+    #: turn actually stated, read or recalled. Never set by the model.
+    grounded: bool = False
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -92,21 +107,57 @@ class Question:
     header: str
     options: list[Option]
     multi: bool = False
+    #: What the decision can change — the FR-007 classes it touches. `None`
+    #: means the model did not say, which the materiality test reads as
+    #: material; an empty list is the explicit statement that nothing
+    #: material turns on it.
+    affects: list[str] | None = None
+    #: Filled in by the tool (FR-034): which materiality class required the
+    #: question, and what was checked before asking, so the person is never
+    #: asked to repeat the agent's own inspection.
+    reason: str = ""
+    evidence_consulted: list[str] = field(default_factory=list)
+    decision_ref: str = ""
+
+    @property
+    def material(self) -> bool:
+        return bool(self.reason)
 
     def to_json(self) -> dict[str, Any]:
-        return {"prompt": self.prompt, "header": self.header,
-                "multi": self.multi,
-                "options": [option.to_json() for option in self.options]}
+        body: dict[str, Any] = {
+            "prompt": self.prompt, "header": self.header, "multi": self.multi,
+            "options": [option.to_json() for option in self.options],
+        }
+        # The clarification fields travel only when set: a form from before
+        # they existed reads back exactly as it was written.
+        if self.affects is not None:
+            body["affects"] = list(self.affects)
+        if self.reason:
+            body["reason"] = self.reason
+        if self.evidence_consulted:
+            body["evidence_consulted"] = list(self.evidence_consulted)
+        if self.decision_ref:
+            body["decision_ref"] = self.decision_ref
+        return body
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> "Question":
+        affects = data.get("affects")
         return cls(prompt=str(data.get("prompt", "")),
                    header=str(data.get("header", "")),
                    multi=bool(data.get("multi", False)),
                    options=[Option(label=str(entry.get("label", "")),
                                    description=str(entry.get("description", "")),
-                                   free=bool(entry.get("free", False)))
-                            for entry in data.get("options", [])])
+                                   free=bool(entry.get("free", False)),
+                                   source=str(entry.get("source", "")),
+                                   evidence=str(entry.get("evidence", "")),
+                                   grounded=bool(entry.get("grounded", False)))
+                            for entry in data.get("options", [])],
+                   affects=[str(a) for a in affects] if isinstance(affects, list) else None,
+                   reason=str(data.get("reason", "")),
+                   evidence_consulted=[str(e) for e in data.get("evidence_consulted", [])
+                                       if isinstance(data.get("evidence_consulted"), list)],
+                   decision_ref=str(data.get("decision_ref", "")))
 
 
 @dataclass
@@ -190,8 +241,18 @@ def _one(entry: Any, index: int, seen: set[str]) -> Question:
         suffix += 1
     seen.add(header.lower())
 
+    affects = entry.get("affects")
+    if isinstance(affects, str):
+        affects = [affects]
+    if isinstance(affects, list):
+        affects = [str(item).strip() for item in affects if str(item).strip()] \
+            if affects else []
+    else:
+        affects = None
+
     return Question(prompt=prompt, header=header, options=options,
-                    multi=bool(entry.get("multi") or entry.get("multiSelect")))
+                    multi=bool(entry.get("multi") or entry.get("multiSelect")),
+                    affects=affects)
 
 
 def _options(raw: Any, where: str) -> list[Option]:
@@ -200,12 +261,15 @@ def _options(raw: Any, where: str) -> list[Option]:
 
     options: list[Option] = []
     for entry in raw:
+        source = evidence = ""
         if isinstance(entry, str):
             label = entry.strip()
             description = ""
         elif isinstance(entry, dict):
             label = str(entry.get("label") or entry.get("value") or "").strip()
             description = str(entry.get("description") or "").strip()
+            source = str(entry.get("source") or "").strip().lower()
+            evidence = str(entry.get("evidence") or "").strip()
         else:
             continue
         if not label:
@@ -214,7 +278,8 @@ def _options(raw: Any, where: str) -> list[Option]:
         # them, one of which does not work.
         if _is_an_escape_hatch(label):
             continue
-        options.append(Option(label=label, description=description))
+        options.append(Option(label=label, description=description,
+                              source=source, evidence=evidence))
 
     if len(options) < MIN_OPTIONS:
         raise MalformedQuestions(
@@ -279,10 +344,41 @@ def decode(data: Any) -> list[Question]:
             if isinstance(entry, dict)]
 
 
+def invalid_answers(questions: list[Question], answers: list[Answer]) -> str:
+    """Why a set of answers cannot be applied to a form, or an empty string.
+
+    An answer that names a question the form does not have, or an option the
+    question does not offer, is rejected whole rather than trimmed to what
+    would fit (FR-026): a reply the person did not send must never be the one
+    the model reads. Text written into the free row is always valid; a blank
+    answer is a skipped question, not an invalid one.
+    """
+    by_header = {question.header: question for question in questions}
+    for answer in answers:
+        question = by_header.get(answer.header)
+        if question is None:
+            return f"{answer.header!r} is not a question on this form"
+        offered = {option.label for option in question.options if not option.free}
+        unknown = [choice for choice in answer.chosen if choice not in offered]
+        if unknown:
+            return (f"{unknown[0]!r} is not one of the choices for "
+                    f"{question.header!r}: {', '.join(sorted(offered)) or 'none'}")
+        if len(answer.chosen) > 1 and not question.multi:
+            return f"{question.header!r} takes one answer, not {len(answer.chosen)}"
+    return ""
+
+
 #: What an interface sends back when the user closed the form without
 #: finishing it. Distinct from an empty answer set, which would be
 #: indistinguishable from a form nobody has touched yet.
 CANCELLED = "cancelled"
+
+#: What a surface sends back when nobody can answer at all — a headless run,
+#: a client that said at the handshake it cannot draw a form. Read by the
+#: decoder exactly like a cancellation (no answers), and told apart by the
+#: tool, because "nobody was there" and "somebody declined" are different
+#: outcomes with different next steps (FR-035).
+UNATTENDED = "unattended"
 
 
 def encode_answers(answers: list[Answer]) -> str:
@@ -297,7 +393,7 @@ def decode_answers(raw: str) -> list[Answer] | None:
     difference: nothing came back at all, versus a form that came back with
     every question deliberately skipped.
     """
-    if not raw or raw in (CANCELLED, "no", "deny"):
+    if not raw or raw in (CANCELLED, UNATTENDED, "no", "deny"):
         return None
     try:
         data = json.loads(raw)
@@ -340,17 +436,28 @@ def summarise(questions: list[Question], answers: list[Answer]) -> str:
     by_header = {answer.header: answer for answer in answers}
     lines: list[str] = []
     skipped: list[str] = []
+    unresolved: list[str] = []
 
     for question in questions:
         answer = by_header.get(question.header)
         if answer is None or not answer.given:
-            skipped.append(question.prompt)
+            # A material question left blank stays a decision the user has
+            # not made. It is reported as unresolved, never handed to the
+            # model to decide (FR-019, FR-022); only a question the model
+            # itself marked as touching nothing material is its to settle.
+            (unresolved if question.material else skipped).append(question.prompt)
             continue
         lines.append(f"{question.prompt}\n  -> {answer.text}")
 
     parts: list[str] = []
     if lines:
         parts.append("The user answered:\n\n" + "\n".join(lines))
+    if unresolved:
+        parts.append(
+            "Left unanswered. These decisions remain unresolved: do not choose "
+            "a default, do not assume, and do not continue work that depends "
+            "on them — report that they are still open:\n"
+            + "\n".join(f"  - {prompt}" for prompt in unresolved))
     if skipped:
         parts.append(
             "Left unanswered, so the user has not constrained these — decide "

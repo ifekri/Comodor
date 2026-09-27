@@ -173,3 +173,41 @@ def test_the_view_names_the_window(tmp_path):
 
     text = render(collect(config, days=7))
     assert "7 days" in text
+
+
+def test_the_task_measurements_are_surfaced():
+    """The per-task record the product writes is readable from `insights`."""
+    from comodor.insights import Insights, render, to_json
+
+    result = Insights(
+        days=30, sessions=10, messages=100, episodes=5, measured_episodes=5,
+        task_input_tokens=1000, task_output_tokens=200, task_cached_tokens=500,
+        model_turns=12, tool_calls=42, clarifications_raised=3,
+        clarifications_answered=2, knowledge_hits=7, knowledge_stale=1,
+        validation_failures=1)
+
+    text = render(result)
+    assert "tool calls" in text and "questions" in text
+    assert "model turns" in text and "validation failures" in text
+
+    body = to_json(result)
+    assert body["tool_calls"] == 42
+    assert body["clarifications_raised"] == 3
+    assert body["knowledge_hits"] == 7 and body["knowledge_stale"] == 1
+    assert body["validation_failures"] == 1
+    assert body["task_cached_tokens"] == 500 and body["model_turns"] == 12
+
+
+def test_a_blocking_gate_counts_as_a_validation_failure():
+    """The gate's blocking verdict is `block`; only `failed`/`contradicted`
+    would leave the count at zero for every real block."""
+    import json
+
+    from comodor.insights import Insights, _measured
+
+    result = Insights(days=30)
+    _measured([{"measurement": json.dumps({"validation_outcome": "block"})}], result)
+    assert result.validation_failures == 1
+
+    _measured([{"measurement": json.dumps({"validation_outcome": "annotate"})}], result)
+    assert result.validation_failures == 1

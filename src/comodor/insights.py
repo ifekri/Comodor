@@ -48,6 +48,25 @@ class Insights:
     recent_corrections_per_ten: float = 0.0
     cron_runs: int = 0
     cron_failures: int = 0
+    #: From the paired record each episode carries (FR-072, FR-073): counts
+    #: over the window, zero when no episode recorded one.
+    measured_episodes: int = 0
+    task_input_tokens: int = 0
+    task_output_tokens: int = 0
+    task_cached_tokens: int = 0
+    task_written_tokens: int = 0
+    model_turns: int = 0
+    tool_calls: int = 0
+    clarifications_raised: int = 0
+    clarifications_answered: int = 0
+    knowledge_hits: int = 0
+    knowledge_stale: int = 0
+    validation_failures: int = 0
+
+    @property
+    def knowledge_stale_rate(self) -> float:
+        seen = self.knowledge_hits + self.knowledge_stale
+        return self.knowledge_stale / seen if seen else 0.0
 
     @property
     def cache_hit_rate(self) -> float:
@@ -129,11 +148,12 @@ def _episodes(config, since: float, result: Insights) -> None:
 
     store = BrainStore(config.paths.brain_db)
     rows = store.connection.execute(
-        "SELECT steps, corrections, created_at FROM episodes "
+        "SELECT steps, corrections, created_at, measurement FROM episodes "
         "WHERE created_at >= ? ORDER BY created_at", (since,)).fetchall()
     result.episodes = len(rows)
     if not rows:
         return
+    _measured(rows, result)
     total_steps = sum(max(1, row["steps"]) for row in rows)
     total_corrections = sum(row["corrections"] for row in rows)
     result.corrections_per_ten = total_corrections / total_steps * 10.0
@@ -145,6 +165,33 @@ def _episodes(config, since: float, result: Insights) -> None:
         recent_steps = sum(max(1, row["steps"]) for row in recent)
         result.recent_corrections_per_ten = (
             sum(row["corrections"] for row in recent) / recent_steps * 10.0)
+
+
+def _measured(rows, result: Insights) -> None:
+    """Sum the paired records the episodes carry. Counts only; an episode
+    from before the record existed contributes nothing."""
+    import json
+
+    for row in rows:
+        try:
+            record = json.loads(row["measurement"] or "{}")
+        except (ValueError, TypeError, KeyError, IndexError):
+            continue
+        if not isinstance(record, dict) or not record:
+            continue
+        result.measured_episodes += 1
+        result.task_input_tokens += int(record.get("input_tokens", 0) or 0)
+        result.task_output_tokens += int(record.get("output_tokens", 0) or 0)
+        result.task_cached_tokens += int(record.get("cached_tokens", 0) or 0)
+        result.task_written_tokens += int(record.get("written_tokens", 0) or 0)
+        result.model_turns += int(record.get("model_turns", 0) or 0)
+        result.tool_calls += int(record.get("tool_calls", 0) or 0)
+        result.clarifications_raised += int(record.get("clarifications_raised", 0) or 0)
+        result.clarifications_answered += int(record.get("clarifications_answered", 0) or 0)
+        result.knowledge_hits += int(record.get("knowledge_hits", 0) or 0)
+        result.knowledge_stale += int(record.get("knowledge_stale", 0) or 0)
+        if str(record.get("validation_outcome", "")) in ("block", "failed", "contradicted"):
+            result.validation_failures += 1
 
 
 def _cron(config, since: float, result: Insights) -> None:
@@ -199,6 +246,23 @@ def render(result: Insights) -> str:
         listed = " · ".join(f"**{model}** {share:.0%}"
                             for model, share in result.models[:3])
         lines.append(f"- workhorse models: {listed}")
+    if result.episodes:
+        # The per-task measurement the paired work records, surfaced here so a
+        # person can read it rather than only a benchmark report.
+        lines.append(
+            f"- tasks: {result.episodes:,} · tool calls: {result.tool_calls:,} · "
+            f"questions: {result.clarifications_raised:,} asked, "
+            f"{result.clarifications_answered:,} answered · "
+            f"knowledge: {result.knowledge_hits:,} recalled, "
+            f"{result.knowledge_stale:,} stale")
+    if result.measured_episodes:
+        lines.append(
+            f"- measured tasks: {result.measured_episodes:,} · tokens "
+            f"in/out/cached/written: {result.task_input_tokens:,}/"
+            f"{result.task_output_tokens:,}/{result.task_cached_tokens:,}/"
+            f"{result.task_written_tokens:,} · "
+            f"model turns: {result.model_turns:,} · validation failures: "
+            f"{result.validation_failures:,}")
     lines.append("")
     if result.episodes >= MIN_SESSIONS:
         verdict = {True: "fewer corrections per task than before — improving",
@@ -236,6 +300,20 @@ def to_json(result: Insights) -> dict:
         "recent_corrections_per_ten_steps":
             round(result.recent_corrections_per_ten, 3),
         "brain_improving": result.brain_improving,
+        # The per-task measurement the product records, exposed for scripts.
+        "measured_episodes": result.measured_episodes,
+        "task_input_tokens": result.task_input_tokens,
+        "task_output_tokens": result.task_output_tokens,
+        "task_cached_tokens": result.task_cached_tokens,
+        "task_written_tokens": result.task_written_tokens,
+        "model_turns": result.model_turns,
+        "tool_calls": result.tool_calls,
+        "clarifications_raised": result.clarifications_raised,
+        "clarifications_answered": result.clarifications_answered,
+        "knowledge_hits": result.knowledge_hits,
+        "knowledge_stale": result.knowledge_stale,
+        "knowledge_stale_rate": round(result.knowledge_stale_rate, 4),
+        "validation_failures": result.validation_failures,
         "cron_jobs": result.cron_runs,
         "cron_failures": result.cron_failures,
     }

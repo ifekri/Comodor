@@ -69,6 +69,35 @@ if TYPE_CHECKING:                      # a cycle at runtime, not to a type check
 # records
 # --------------------------------------------------------------------------- #
 
+#: Where a durable item may come from (FR-056, contracts/learning-record.md
+#: §L1). Nothing with any other provenance is storable; a model's own
+#: assertion is admissible only once corroborated into one of these.
+PROVENANCES = ("user_correction", "user_statement", "settled_decision",
+               "counted_convention", "validated_outcome", "tool_confirmed")
+
+#: The lifecycle every durable item moves through (data-model.md §5).
+#: `active` is recalled; the other three stay in the database, inspectable,
+#: and are never injected into a prompt.
+LIFECYCLES = ("active", "superseded", "stale", "removed")
+
+
+class InadmissibleRecord(ValueError):
+    """A durable item refused at the door: its provenance is not one the
+    store accepts, or it is missing what later invalidation needs."""
+
+
+def check_provenance(provenance: str, source_ref: str = "") -> str:
+    """The provenance, validated — or a refusal naming why (FR-056, FR-057)."""
+    if provenance not in PROVENANCES:
+        raise InadmissibleRecord(
+            f"{provenance!r} is not an admissible provenance; one of "
+            f"{', '.join(PROVENANCES)} is required, and a model assertion on "
+            f"its own is none of them")
+    if provenance in ("tool_confirmed", "counted_convention") and not source_ref:
+        raise InadmissibleRecord(
+            f"a {provenance} item must name what it was derived from")
+    return provenance
+
 
 @dataclass
 class Lesson:
@@ -92,10 +121,22 @@ class Lesson:
     #: stay in the database — inspectable, restorable — but are never
     #: injected into a prompt. Set by learning/curator.py, nothing else.
     status: str = "active"
+    #: How this came to be known (one of `PROVENANCES`), what it was derived
+    #: from, the fingerprint of that source where it is repository-derived,
+    #: and — once a newer item governs — which one (FR-057, FR-059, FR-060).
+    provenance: str = ""
+    source_ref: str = ""
+    fingerprint: str = ""
+    superseded_by: int = 0
 
     @property
     def text(self) -> str:
         return f"{self.trigger} {self.guidance}".strip()
+
+    @property
+    def established_at(self) -> float:
+        """When it was admitted — the ordering supersession uses."""
+        return self.created_at
 
     def effective_confidence(self, half_life_days: float = 45.0) -> float:
         """Confidence after decay, and after the win/loss record is folded in.
@@ -119,6 +160,9 @@ class Lesson:
             "confidence": round(self.effective_confidence(), 3),
             "uses": self.uses, "wins": self.wins, "losses": self.losses,
             "pinned": self.pinned,
+            "status": self.status, "provenance": self.provenance,
+            "source_ref": self.source_ref,
+            **({"superseded_by": self.superseded_by} if self.superseded_by else {}),
         }
 
 
@@ -177,10 +221,27 @@ class Rule:
     active: bool = True
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
+    #: Provenance and invalidation (FR-057, FR-059, FR-060). `lifecycle`
+    #: is the data model's status word; `active` above is the older on/off
+    #: switch the user toggles, and both must be true for a rule to apply.
+    provenance: str = ""
+    source_ref: str = ""
+    fingerprint: str = ""
+    lifecycle: str = "active"
+    superseded_by: int = 0
 
     @property
     def text(self) -> str:
         return f"{self.key} {self.statement} {self.detail}".strip()
+
+    @property
+    def established_at(self) -> float:
+        return self.created_at
+
+    @property
+    def applies(self) -> bool:
+        """On, and neither superseded nor stale nor removed."""
+        return self.active and self.lifecycle == "active"
 
     @property
     def total(self) -> int:
@@ -238,6 +299,13 @@ class Fact:
     status: str = "settled"          # settled | staged
     score: float = 0.5
     pinned: bool = False
+    #: Provenance and invalidation (FR-057, FR-059, FR-060). `status` above
+    #: is the review's approval state; `lifecycle` is the data model's word.
+    provenance: str = ""
+    source_ref: str = ""
+    fingerprint: str = ""
+    lifecycle: str = "active"
+    superseded_by: int = 0
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -259,6 +327,24 @@ class Signal:
     payload: str = ""                # the diff or detail, already redacted
     weight: float = 1.0
     created_at: float = field(default_factory=time.time)
+
+
+def _column(row: Any, name: str, default: Any) -> Any:
+    """A column that may predate this brain, with the value it would have had."""
+    try:
+        return row[name] if name in row.keys() else default
+    except (IndexError, KeyError):
+        return default
+
+
+def _measurement(row: Any) -> dict[str, Any]:
+    """The episode's paired record, or an empty dict for an older row."""
+    try:
+        raw = row["measurement"] if "measurement" in row.keys() else "{}"
+        loaded = json.loads(raw or "{}")
+        return loaded if isinstance(loaded, dict) else {}
+    except (ValueError, TypeError):
+        return {}
 
 
 @dataclass
@@ -287,6 +373,10 @@ class Episode:
     #: model publishes no price — the insights view shows a dash for that,
     #: never a guess.
     cost_usd: float = 0.0
+    #: The paired record behind the figures above — input/output/cached
+    #: tokens, context size, clarifications, knowledge hits — as counts only
+    #: (FR-072, FR-074). Empty for an episode written before it existed.
+    measurement: dict[str, Any] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------- #
@@ -519,12 +609,34 @@ class BrainStore:
                 ("tokens", "INTEGER NOT NULL DEFAULT 0"),
                 ("rules_active", "INTEGER NOT NULL DEFAULT 0"),
                 ("cost_usd", "REAL NOT NULL DEFAULT 0"),
+                ("measurement", "TEXT NOT NULL DEFAULT '{}'"),
             ],
             "lessons": [
                 # The curator's status: 'active' is the default and the only
                 # value recall pays attention to; 'stale' stays in the
                 # database, inspectable, but is never injected into a prompt.
                 ("status", "TEXT NOT NULL DEFAULT 'active'"),
+                ("provenance", "TEXT NOT NULL DEFAULT ''"),
+                ("source_ref", "TEXT NOT NULL DEFAULT ''"),
+                ("fingerprint", "TEXT NOT NULL DEFAULT ''"),
+                ("superseded_by", "INTEGER NOT NULL DEFAULT 0"),
+            ],
+            # Provenance and lifecycle on the other two durable tables; a
+            # brain written before these existed reads back with the empty
+            # provenance and an active lifecycle (FR-081).
+            "rules": [
+                ("provenance", "TEXT NOT NULL DEFAULT ''"),
+                ("source_ref", "TEXT NOT NULL DEFAULT ''"),
+                ("fingerprint", "TEXT NOT NULL DEFAULT ''"),
+                ("lifecycle", "TEXT NOT NULL DEFAULT 'active'"),
+                ("superseded_by", "INTEGER NOT NULL DEFAULT 0"),
+            ],
+            "facts": [
+                ("provenance", "TEXT NOT NULL DEFAULT ''"),
+                ("source_ref", "TEXT NOT NULL DEFAULT ''"),
+                ("fingerprint", "TEXT NOT NULL DEFAULT ''"),
+                ("lifecycle", "TEXT NOT NULL DEFAULT 'active'"),
+                ("superseded_by", "INTEGER NOT NULL DEFAULT 0"),
             ],
         }
         for table, columns in additions.items():
@@ -569,16 +681,22 @@ class BrainStore:
     # -- lessons: write --------------------------------------------------- #
 
     def add_lesson(self, lesson: Lesson) -> Lesson:
+        """Store one lesson. Refused without an admissible provenance (FR-056):
+        this is the single door to durable lessons, and a caller that has not
+        said how it knows does not get through it."""
+        check_provenance(lesson.provenance, lesson.source_ref)
         now = time.time()
         with self._lock, self.connection as connection:
             cursor = connection.execute(
                 """INSERT INTO lessons(kind, scope, trigger_text, guidance, confidence,
                                        uses, wins, losses, pinned, source,
-                                       created_at, updated_at, last_used)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                       created_at, updated_at, last_used,
+                                       provenance, source_ref, fingerprint)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (lesson.kind, lesson.scope, lesson.trigger, lesson.guidance,
                  lesson.confidence, lesson.uses, lesson.wins, lesson.losses,
-                 int(lesson.pinned), lesson.source, now, now, lesson.last_used),
+                 int(lesson.pinned), lesson.source, now, now, lesson.last_used,
+                 lesson.provenance, lesson.source_ref, lesson.fingerprint),
             )
             lesson.id = int(cursor.lastrowid or 0)
         lesson.created_at = lesson.updated_at = now
@@ -643,6 +761,10 @@ class BrainStore:
             created_at=row["created_at"], updated_at=row["updated_at"],
             last_used=row["last_used"],
             status=row["status"] if "status" in row.keys() else "active",
+            provenance=_column(row, "provenance", ""),
+            source_ref=_column(row, "source_ref", ""),
+            fingerprint=_column(row, "fingerprint", ""),
+            superseded_by=int(_column(row, "superseded_by", 0) or 0),
         )
 
     def all_lessons(self, scopes: list[str] | None = None) -> list[Lesson]:
@@ -812,25 +934,39 @@ class BrainStore:
             support=row["support"], against=row["against"], source=row["source"],
             pinned=bool(row["pinned"]), active=bool(row["active"]),
             created_at=row["created_at"], updated_at=row["updated_at"],
+            provenance=_column(row, "provenance", ""),
+            source_ref=_column(row, "source_ref", ""),
+            fingerprint=_column(row, "fingerprint", ""),
+            lifecycle=_column(row, "lifecycle", "active"),
+            superseded_by=int(_column(row, "superseded_by", 0) or 0),
         )
 
     def observe_rule(self, key: str, scope: str, *, agrees: bool = True,
                      category: str = "style", statement: str = "",
                      detail: str = "", source: str = "observation",
-                     weight: int = 1) -> Rule:
+                     weight: int = 1, provenance: str = "",
+                     source_ref: str = "", fingerprint: str = "") -> Rule:
         """Record one observation for a convention, creating it if it is new.
 
         Every observation of the same convention lands on the same row, so a
         rule's support count is a real tally rather than a pile of duplicates.
+        `provenance` says how the observation came to be known — a counted
+        convention, a user's correction, the user's own word — and is
+        validated at the door; the strongest provenance seen wins the row.
+        A rule that was marked stale comes back to life on a fresh
+        observation that agrees, because the observation is new evidence.
         """
+        check_provenance(provenance, source_ref or key)
         now = time.time()
         with self._lock, self.connection as connection:
             connection.execute(
                 """INSERT INTO rules(category, key, statement, detail, scope,
-                                     support, against, source, created_at, updated_at)
-                   VALUES(?,?,?,?,?,0,0,?,?,?)
+                                     support, against, source, created_at, updated_at,
+                                     provenance, source_ref, fingerprint)
+                   VALUES(?,?,?,?,?,0,0,?,?,?,?,?,?)
                    ON CONFLICT(key, scope) DO NOTHING""",
-                (category, key, statement, detail, scope, source, now, now),
+                (category, key, statement, detail, scope, source, now, now,
+                 provenance, source_ref, fingerprint),
             )
             column = "support" if agrees else "against"
             # A correction outranks a passive observation, so it also upgrades
@@ -840,10 +976,18 @@ class BrainStore:
                         statement = CASE WHEN ? <> '' THEN ? ELSE statement END,
                         detail = CASE WHEN ? <> '' THEN ? ELSE detail END,
                         source = CASE WHEN source = 'observation' AND ? <> 'observation'
-                                      THEN ? ELSE source END
+                                      THEN ? ELSE source END,
+                        provenance = CASE WHEN ? <> '' THEN ? ELSE provenance END,
+                        source_ref = CASE WHEN ? <> '' THEN ? ELSE source_ref END,
+                        fingerprint = CASE WHEN ? <> '' THEN ? ELSE fingerprint END,
+                        lifecycle = CASE WHEN ? AND lifecycle IN ('stale', 'superseded')
+                                         THEN 'active' ELSE lifecycle END,
+                        superseded_by = CASE WHEN ? AND lifecycle IN ('stale', 'superseded')
+                                             THEN 0 ELSE superseded_by END
                     WHERE key = ? AND scope = ?""",
                 (weight, now, statement, statement, detail, detail,
-                 source, source, key, scope),
+                 source, source, provenance, provenance, source_ref, source_ref,
+                 fingerprint, fingerprint, int(agrees), int(agrees), key, scope),
             )
             row = connection.execute(
                 "SELECT * FROM rules WHERE key = ? AND scope = ?", (key, scope)
@@ -863,10 +1007,66 @@ class BrainStore:
             params.extend(scopes)
         if active_only:
             clauses.append("active = 1")
+            clauses.append("lifecycle = 'active'")
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY support DESC, updated_at DESC"
         return [self._row_to_rule(row) for row in self.connection.execute(sql, params)]
+
+    # -- lifecycle: supersession and staleness (FR-059, FR-060) ------------- #
+
+    def set_lifecycle(self, table: str, record_id: int, lifecycle: str,
+                      superseded_by: int = 0) -> bool:
+        """Move one durable item along its lifecycle. Never deletes.
+
+        `superseded` records which item governs now; `stale` and `removed`
+        keep the row exactly as it was, so the timeline and the memory views
+        can still show what was learned and why it stopped applying.
+        """
+        if table not in ("lessons", "rules", "facts"):
+            raise ValueError(f"no durable table named {table!r}")
+        if lifecycle not in LIFECYCLES:
+            raise ValueError(f"{lifecycle!r} is not a lifecycle state")
+        column = "status" if table == "lessons" else "lifecycle"
+        if table == "lessons" and lifecycle == "removed":
+            lifecycle = "stale"        # the curator's vocabulary has no `removed`
+        with self._lock, self.connection as connection:
+            cursor = connection.execute(
+                f"UPDATE {table} SET {column} = ?, superseded_by = ?, updated_at = ? "
+                f"WHERE id = ?",
+                (lifecycle, superseded_by, time.time(), record_id))
+        if cursor.rowcount and lifecycle != "active":
+            self.hot.remove(table.rstrip("s"), record_id)
+        return bool(cursor.rowcount)
+
+    def supersede(self, table: str, older_id: int, newer_id: int) -> bool:
+        """The newer item governs; the older is kept, marked, and points at it."""
+        return self.set_lifecycle(table, older_id, "superseded", superseded_by=newer_id)
+
+    def mark_stale(self, table: str, record_id: int) -> bool:
+        return self.set_lifecycle(table, record_id, "stale")
+
+    def refresh_fingerprint(self, table: str, record_id: int, fingerprint: str,
+                            source_ref: str = "") -> bool:
+        """The source changed and a re-count still agrees: the item stays,
+        and now describes the source as it is (T111).
+
+        `source_ref` refreshes the recorded sample membership too, when the
+        item's evidence identity includes it (a counted convention).
+        """
+        if table not in ("lessons", "rules", "facts"):
+            raise ValueError(f"no durable table named {table!r}")
+        with self._lock, self.connection as connection:
+            if source_ref:
+                cursor = connection.execute(
+                    f"UPDATE {table} SET fingerprint = ?, source_ref = ?, "
+                    f"updated_at = ? WHERE id = ?",
+                    (fingerprint, source_ref, time.time(), record_id))
+            else:
+                cursor = connection.execute(
+                    f"UPDATE {table} SET fingerprint = ?, updated_at = ? WHERE id = ?",
+                    (fingerprint, time.time(), record_id))
+        return bool(cursor.rowcount)
 
     def confident_rules(self, scopes: list[str] | None = None) -> list[Rule]:
         """Rules that have earned their place in the prompt."""
@@ -911,6 +1111,11 @@ class BrainStore:
             origin_episode=row["origin_episode"], status=row["status"],
             score=row["score"], pinned=bool(row["pinned"]),
             created_at=row["created_at"], updated_at=row["updated_at"],
+            provenance=_column(row, "provenance", ""),
+            source_ref=_column(row, "source_ref", ""),
+            fingerprint=_column(row, "fingerprint", ""),
+            lifecycle=_column(row, "lifecycle", "active"),
+            superseded_by=int(_column(row, "superseded_by", 0) or 0),
         )
 
     def add_fact(self, fact: Fact) -> Fact | None:
@@ -921,15 +1126,18 @@ class BrainStore:
         Any other IntegrityError — there is only the one unique index — means
         the caller raced itself, and returning None is still the honest answer.
         """
+        check_provenance(fact.provenance, fact.source_ref)
         now = time.time()
         try:
             with self._lock, self.connection as connection:
                 cursor = connection.execute(
                     """INSERT INTO facts(scope, kind, text, origin_episode,
-                                         status, score, pinned, created_at, updated_at)
-                       VALUES(?,?,?,?,?,?,?,?,?)""",
+                                         status, score, pinned, created_at, updated_at,
+                                         provenance, source_ref, fingerprint)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (fact.scope, fact.kind, fact.text, fact.origin_episode,
-                     fact.status, fact.score, int(fact.pinned), now, now),
+                     fact.status, fact.score, int(fact.pinned), now, now,
+                     fact.provenance, fact.source_ref, fact.fingerprint),
                 )
                 fact.id = int(cursor.lastrowid or 0)
         except sqlite3.IntegrityError:
@@ -951,6 +1159,9 @@ class BrainStore:
             params.extend(kinds)
         if settled_only:
             clauses.append("status = 'settled'")
+            # Superseded, stale and removed facts stay in the table for the
+            # timeline, and are never injected (contracts §L4).
+            clauses.append("lifecycle = 'active'")
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
         # Pinned first — the user asked for those every time — then newest.
@@ -1024,13 +1235,14 @@ class BrainStore:
                 """INSERT INTO episodes(session_id, goal, scope, success, stopped,
                                         steps, elapsed, tools_used, error_kind, created_at,
                                         corrections, approvals_asked, retries, tokens,
-                                        rules_active, cost_usd)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                        rules_active, cost_usd, measurement)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (episode.session_id, episode.goal, episode.scope, int(episode.success),
                  episode.stopped, episode.steps, episode.elapsed,
                  json.dumps(episode.tools_used), episode.error_kind, episode.created_at,
                  episode.corrections, episode.approvals_asked, episode.retries,
-                 episode.tokens, episode.rules_active, episode.cost_usd),
+                 episode.tokens, episode.rules_active, episode.cost_usd,
+                 json.dumps(episode.measurement or {})),
             )
             episode.id = int(cursor.lastrowid or 0)
         return episode
@@ -1056,6 +1268,7 @@ class BrainStore:
                 retries=row["retries"], tokens=row["tokens"],
                 rules_active=row["rules_active"],
                 cost_usd=row["cost_usd"] if "cost_usd" in row.keys() else 0.0,
+                measurement=_measurement(row),
             )
             for row in reversed(rows)
         ]

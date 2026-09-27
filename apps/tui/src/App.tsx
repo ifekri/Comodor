@@ -58,6 +58,7 @@ import {
   begin,
   cancel as cancelOf,
   current as currentQuestion,
+  grounds as groundsOf,
   isSelected,
   move,
   optionAt,
@@ -1814,6 +1815,7 @@ function QuestionCard({ question, waiting, width, onChange }: {
       <text style={{ fg: theme["text.primary"] }}>
         {clip(asked.prompt, Math.max(8, width - 4))}
       </text>
+      {groundsLine(question, Math.max(8, width - 4))}
       {asked.options.map((option, index) => {
         const here = index === question.cursor;
         const chosen = isSelected(question, option.id);
@@ -1878,6 +1880,24 @@ function QuestionCard({ question, waiting, width, onChange }: {
         {hint(total > 1, allowsWriting(question), question.writing)}
       </text>
     </box>
+  );
+}
+
+/**
+ * One muted line under the prompt saying why the question is asked and what
+ * was checked first — only when the core said so. A form from an older core
+ * carries neither, and then nothing is drawn: no empty line, no placeholder.
+ */
+function groundsLine(state: FormState, width: number): React.ReactNode {
+  const { reason, evidence } = groundsOf(state);
+  if (!reason && evidence.length === 0) return null;
+  const parts: string[] = [];
+  if (reason) parts.push(`needed for: ${reason.replace(/_/g, " ")}`);
+  if (evidence.length > 0) parts.push(`checked: ${evidence.join(", ")}`);
+  return (
+    <text style={{ fg: theme["text.muted"], flexShrink: 0 }}>
+      {clip(parts.join("   "), width)}
+    </text>
   );
 }
 

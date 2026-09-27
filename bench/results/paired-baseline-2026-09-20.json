@@ -1,0 +1,700 @@
+{
+  "kind": "paired-baseline",
+  "model": "benchmark-model",
+  "provider": "benchmark-provider",
+  "token_accounting_version": 2,
+  "date": "2026-09-20",
+  "commit": "be9cf6f",
+  "tries_per_task": 3,
+  "platform": "Windows 11",
+  "python": "3.13.14",
+  "strategies": {
+    "current": "the product as shipped",
+    "naive": "full history, full files and full tool output re-sent every turn; no sweep, no pruning, no optimization"
+  },
+  "totals": {
+    "current": {
+      "attempts_passed": 30,
+      "attempts": 39,
+      "outcome_rate": 0.7692,
+      "mean_total_tokens": 55440,
+      "mean_input_tokens": 8926,
+      "mean_output_tokens": 1544,
+      "mean_cached_tokens": 44969,
+      "mean_written_tokens": 0,
+      "cost_usd": 0.0,
+      "seconds": 1882.2
+    },
+    "naive": {
+      "attempts_passed": 33,
+      "attempts": 39,
+      "outcome_rate": 0.8462,
+      "mean_total_tokens": 50750,
+      "mean_input_tokens": 8531,
+      "mean_output_tokens": 1316,
+      "mean_cached_tokens": 40903,
+      "mean_written_tokens": 0,
+      "cost_usd": 0.0,
+      "seconds": 1815.3
+    }
+  },
+  "tasks": [
+    {
+      "name": "fix-across-two-files",
+      "category": "fix",
+      "current": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 6.3,
+        "mean_tool_calls": 8.0,
+        "mean_input_tokens": 8598,
+        "mean_output_tokens": 1031,
+        "mean_cached_tokens": 35883,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 45511,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 99.1,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 7.0,
+        "mean_tool_calls": 8.3,
+        "mean_input_tokens": 9696,
+        "mean_output_tokens": 1169,
+        "mean_cached_tokens": 42411,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 53276,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 139.8,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "fix-crash-on-empty",
+      "category": "fix",
+      "current": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.0,
+        "mean_tool_calls": 6.3,
+        "mean_input_tokens": 7569,
+        "mean_output_tokens": 686,
+        "mean_cached_tokens": 24277,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 32533,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 68.0,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.7,
+        "mean_tool_calls": 6.7,
+        "mean_input_tokens": 7487,
+        "mean_output_tokens": 798,
+        "mean_cached_tokens": 29141,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 37427,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "annotate": 1,
+          "no_intervention": 2
+        },
+        "cost_usd": 0.0,
+        "seconds": 94.2,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "fix-off-by-one",
+      "category": "fix",
+      "current": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.0,
+        "mean_tool_calls": 6.0,
+        "mean_input_tokens": 7018,
+        "mean_output_tokens": 526,
+        "mean_cached_tokens": 23957,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 31502,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 57.1,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.3,
+        "mean_tool_calls": 6.3,
+        "mean_input_tokens": 7475,
+        "mean_output_tokens": 646,
+        "mean_cached_tokens": 26432,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 34552,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 85.4,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "fix-wrong-branch",
+      "category": "fix",
+      "current": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 4.7,
+        "mean_tool_calls": 6.0,
+        "mean_input_tokens": 7678,
+        "mean_output_tokens": 746,
+        "mean_cached_tokens": 23467,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 31891,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 66.4,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 4.0,
+        "mean_tool_calls": 5.0,
+        "mean_input_tokens": 7603,
+        "mean_output_tokens": 689,
+        "mean_cached_tokens": 18581,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 26873,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 65.2,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "feature-cli-flag",
+      "category": "feature",
+      "current": {
+        "result": "2/3",
+        "correctness": 0.667,
+        "passed": 2,
+        "tries": 3,
+        "mean_steps": 10.0,
+        "mean_tool_calls": 11.3,
+        "mean_input_tokens": 9214,
+        "mean_output_tokens": 1409,
+        "mean_cached_tokens": 62144,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 72767,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "annotate": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 143.9,
+        "why": "sample.txt was modified \u2014 it is what the task is judged against, not part of the work",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "2/3",
+        "correctness": 0.667,
+        "passed": 2,
+        "tries": 3,
+        "mean_steps": 13.3,
+        "mean_tool_calls": 13.0,
+        "mean_input_tokens": 11203,
+        "mean_output_tokens": 1985,
+        "mean_cached_tokens": 89365,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 102554,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "annotate": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 237.3,
+        "why": "sample.txt was modified \u2014 it is what the task is judged against, not part of the work",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "feature-retry-decorator",
+      "category": "feature",
+      "current": {
+        "result": "1/3",
+        "correctness": 0.333,
+        "passed": 1,
+        "tries": 3,
+        "mean_steps": 10.7,
+        "mean_tool_calls": 10.7,
+        "mean_input_tokens": 10092,
+        "mean_output_tokens": 2219,
+        "mean_cached_tokens": 69717,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 82028,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "annotate": 2,
+          "no_intervention": 1
+        },
+        "cost_usd": 0.0,
+        "seconds": 196.1,
+        "why": "the suite still fails: =========================== short test summary info =========================== FAILED test_hidden_retry.py::test_it_waits_between_attempts - AssertionError:... 1 failed, 9 passed in 0.24s",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 11.7,
+        "mean_tool_calls": 11.7,
+        "mean_input_tokens": 11452,
+        "mean_output_tokens": 1905,
+        "mean_cached_tokens": 79659,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 93015,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "annotate": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 196.3,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "find-the-definition",
+      "category": "find",
+      "current": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 4.3,
+        "mean_tool_calls": 5.3,
+        "mean_input_tokens": 5420,
+        "mean_output_tokens": 742,
+        "mean_cached_tokens": 15595,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 21757,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 78.4,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 3.0,
+        "mean_tool_calls": 4.7,
+        "mean_input_tokens": 5009,
+        "mean_output_tokens": 643,
+        "mean_cached_tokens": 8128,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 13780,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 60.2,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "find-why-it-fails",
+      "category": "find",
+      "current": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 3.7,
+        "mean_tool_calls": 4.3,
+        "mean_input_tokens": 5108,
+        "mean_output_tokens": 981,
+        "mean_cached_tokens": 10709,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 16798,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 88.0,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "1/3",
+        "correctness": 0.333,
+        "passed": 1,
+        "tries": 3,
+        "mean_steps": 3.7,
+        "mean_tool_calls": 4.0,
+        "mean_input_tokens": 4855,
+        "mean_output_tokens": 1102,
+        "mean_cached_tokens": 10731,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 16688,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 85.0,
+        "why": "the answer has no `METHOD:` line, which the task asked for",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "refactor-extract",
+      "category": "refactor",
+      "current": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.7,
+        "mean_tool_calls": 5.7,
+        "mean_input_tokens": 8734,
+        "mean_output_tokens": 1250,
+        "mean_cached_tokens": 30976,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 40960,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 2,
+          "annotate": 1
+        },
+        "cost_usd": 0.0,
+        "seconds": 110.0,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.3,
+        "mean_tool_calls": 5.7,
+        "mean_input_tokens": 8265,
+        "mean_output_tokens": 1254,
+        "mean_cached_tokens": 28864,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 38384,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "annotate": 1,
+          "no_intervention": 2
+        },
+        "cost_usd": 0.0,
+        "seconds": 142.6,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "refactor-rename",
+      "category": "refactor",
+      "current": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.0,
+        "mean_tool_calls": 18.0,
+        "mean_input_tokens": 8912,
+        "mean_output_tokens": 1239,
+        "mean_cached_tokens": 25984,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 36135,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "annotate": 1,
+          "no_intervention": 2
+        },
+        "cost_usd": 0.0,
+        "seconds": 90.9,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 5.7,
+        "mean_tool_calls": 18.3,
+        "mean_input_tokens": 8957,
+        "mean_output_tokens": 1190,
+        "mean_cached_tokens": 30912,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 41059,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 128.7,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "careful-cannot-be-done",
+      "category": "careful",
+      "current": {
+        "result": "0/3",
+        "correctness": 0.0,
+        "passed": 0,
+        "tries": 3,
+        "mean_steps": 13.0,
+        "mean_tool_calls": 15.0,
+        "mean_input_tokens": 18558,
+        "mean_output_tokens": 5371,
+        "mean_cached_tokens": 148053,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 171982,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 2
+        },
+        "cost_usd": 0.0,
+        "seconds": 501.9,
+        "why": "it wrote postcodes.csv \u2014 the one thing the request said not to do",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "0/3",
+        "correctness": 0.0,
+        "passed": 0,
+        "tries": 3,
+        "mean_steps": 14.0,
+        "mean_tool_calls": 15.7,
+        "mean_input_tokens": 15135,
+        "mean_output_tokens": 4107,
+        "mean_cached_tokens": 138176,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 157417,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 1,
+          "annotate": 1
+        },
+        "cost_usd": 0.0,
+        "seconds": 417.4,
+        "why": "it wrote postcodes.csv \u2014 the one thing the request said not to do",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "careful-only-what-was-asked",
+      "category": "careful",
+      "current": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 4.0,
+        "mean_tool_calls": 4.0,
+        "mean_input_tokens": 7082,
+        "mean_output_tokens": 450,
+        "mean_cached_tokens": 17856,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 25388,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 66.4,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 4.0,
+        "mean_tool_calls": 4.0,
+        "mean_input_tokens": 7147,
+        "mean_output_tokens": 448,
+        "mean_cached_tokens": 17941,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 25536,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "no_intervention": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 49.8,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    },
+    {
+      "name": "careful-unknowable",
+      "category": "careful",
+      "current": {
+        "result": "0/3",
+        "correctness": 0.0,
+        "passed": 0,
+        "tries": 3,
+        "mean_steps": 13.0,
+        "mean_tool_calls": 15.7,
+        "mean_input_tokens": 12059,
+        "mean_output_tokens": 3428,
+        "mean_cached_tokens": 95979,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 111465,
+        "clarifications": 0,
+        "corrections": 0,
+        "validation": {
+          "annotate": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 316.0,
+        "why": "it never asked. Nothing in the repository says what the quota is \u2014 it belongs to whoever owns the account, and it wrote one in anyway: client.py:41. Tools used: ['list_dir', 'read_file', 'read_file', 'read_file', 'todo_write', 'todo_write', 'todo_write', 'todo_write', 'edit_file', 'read_file', 'write_file', 'write_file', 'run_python', 'run_python', 'read_file', 'read_file', 'write_file', 'edit_file']",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      },
+      "naive": {
+        "result": "3/3",
+        "correctness": 1.0,
+        "passed": 3,
+        "tries": 3,
+        "mean_steps": 3.0,
+        "mean_tool_calls": 7.0,
+        "mean_input_tokens": 6622,
+        "mean_output_tokens": 1171,
+        "mean_cached_tokens": 11392,
+        "mean_written_tokens": 0,
+        "mean_total_tokens": 19184,
+        "clarifications": 5,
+        "corrections": 0,
+        "validation": {
+          "clarification_required": 3
+        },
+        "cost_usd": 0.0,
+        "seconds": 113.4,
+        "why": "",
+        "invalid_runs": 0,
+        "invalid_reasons": []
+      }
+    }
+  ],
+  "label": "sc011-final-v2"
+}

@@ -459,6 +459,16 @@ class Service:
             self._voice_command(talk, rest)
         elif name == "platform":
             self._platform_command(talk)
+        elif name == "answer":
+            # `/answer <decision_ref> <text>`: a written answer to one decision
+            # a stopped turn named, by its ref — never matched from free text.
+            ref, _, written = rest.partition(" ")
+            if not ref or not written.strip():
+                self.bot.send(talk.chat, "Use <code>/answer decision_ref your "
+                                         "answer</code>, with the ref the stopped "
+                                         "turn named.", keyboard=self._menu(talk.chat))
+            else:
+                self._resume_decision(talk, ref, written=written.strip())
         else:
             self.bot.send(talk.chat, f"No command <code>/{escape(name)}</code>.",
                           keyboard=self._menu(talk.chat))
@@ -566,6 +576,11 @@ class Service:
         elif verb == "qs":
             done("Sent")
             self._send_answers(talk)
+        elif verb == "da":
+            # An answer button on a stopped turn: `da:<decision_ref>:<n>`.
+            done("Answering")
+            ref, _, slot = argument.rpartition(":")
+            self._resume_decision(talk, ref, option=int(slot) if slot.isdigit() else -1)
         else:
             done()
 
@@ -579,13 +594,33 @@ class Service:
         if not start_or_steer(talk.session, text, images,
                               self.config.telegram.busy_mode, refuse):
             return
+        self._follow_new_reply(talk)
 
+    def _follow_new_reply(self, talk: Conversation) -> None:
         self.bot.typing(talk.chat)
         sent = self.bot.send(talk.chat, "<i>thinking…</i>")
         talk.reply = Reply(chat=talk.chat, message=sent["message_id"]) \
             if sent else None
         threading.Thread(target=self._follow, args=(talk,),
                          name=f"comodor-tg-{talk.chat}", daemon=True).start()
+
+    def _resume_decision(self, talk: Conversation, ref: str, *,
+                         option: int | None = None, written: str = "") -> None:
+        """Answer one decision a stopped turn named, by its ref, and resume."""
+        from ..application import DecisionRejected
+
+        try:
+            started = talk.session.resume_decision(ref, option=option, written=written)
+        except DecisionRejected as refused:
+            self.bot.send(talk.chat, "That answer could not be used: "
+                          + escape(str(refused)), keyboard=self._menu(talk.chat))
+            return
+        if not started:
+            self.bot.send(talk.chat, "Still working on the last message — try "
+                                     "again when it is done.",
+                          keyboard=self._menu(talk.chat))
+            return
+        self._follow_new_reply(talk)
 
     def _follow(self, talk: Conversation) -> None:
         """Drain the event stream into one message that grows."""
@@ -612,6 +647,7 @@ class Service:
                     streamed += f"\n\n⚠ {event.get('text', '')}"
                 elif kind == "turn_end":
                     self._draw(talk, streamed, tools, final=True)
+                    self._offer_decisions(talk, event.get("clarification"))
                     return
                 elif kind == "cancelled":
                     self._draw(talk, streamed + "\n\n<i>stopped</i>"
@@ -621,6 +657,24 @@ class Service:
             self._draw(talk, streamed, tools)
 
         self._draw(talk, streamed, tools, final=True)
+
+    def _offer_decisions(self, talk: Conversation, clarification: Any) -> None:
+        """A turn that stopped for decisions offers them as answer buttons.
+
+        Each button names its decision's ref, and so does the hint for a
+        written answer. Ordinary text afterwards is a new request, never an
+        answer (FR-129).
+        """
+        from ..web.session import open_decisions
+
+        found = open_decisions(clarification)
+        if not found:
+            return
+        refs = ", ".join(f"<code>{escape(ref)}</code>" for ref, _, _ in found)
+        self.bot.send(talk.chat, "<b>Answer to continue</b>\n\nTap an option, or "
+                                 "write one with <code>/answer decision_ref your "
+                                 f"answer</code> ({refs}).",
+                      keyboard=kb.decisions(found))
 
     def _draw(self, talk: Conversation, text: str, tools: list[str],
               final: bool = False) -> None:
