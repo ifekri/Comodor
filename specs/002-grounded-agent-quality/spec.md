@@ -1209,6 +1209,16 @@ missing nor a failing result blocks acceptance. Neither is claimed as met
 without such a run. The benchmark's deterministic guarantees remain required:
 scenario integrity, fingerprint provenance, the comparison rules and their
 tests. Published benchmark results are historical evidence, not requirements.
+This feature changes context construction, so Constitution 2.0.0 Principle
+XXI and its context-change gate apply. Feature 002 meets that gate by its
+second way (b): no fresh paired run is part of its acceptance, it claims no
+token reduction and no quality preservation, and it discloses its most recent
+paired evidence as **unresolved** — both published paired runs (T015, T155)
+fail SC-011, and T155 flags `feature-retry-decorator` and
+`careful-unknowable` as outcome regressions. The `careful-unknowable` judge
+was corrected after T155 (session 2026-09-25), and no paired run has measured
+either task since. Feature 002 is therefore accepted as **unmeasured** for
+token efficiency and quality, never as having passed SC-011 or SC-012.
 
 **Grounding and assumption prevention**
 

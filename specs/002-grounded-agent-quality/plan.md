@@ -417,7 +417,11 @@ historical runs fail it. SC-012 has no final passing evidence. Both are optional
 benchmark metrics (spec *Acceptance scope*, 2026-09-27): they are measured only
 when a developer runs the paired benchmark with a provider and model of their
 choosing, on a frozen candidate that passed T196, and neither is a condition of
-acceptance. SC-011 is unchanged by §G. SC-012 is computed by §G's per-task
+acceptance. Constitution 2.0.0 Principle XXI's context-change gate is met by
+its way (b): no token reduction or quality preservation is claimed, the
+paired-measurement mechanism stays deterministically tested (T208–T212,
+T196), and the failing T015/T155 evidence is disclosed as unresolved. The
+feature is accepted as unmeasured, not as passing. SC-011 is unchanged by §G. SC-012 is computed by §G's per-task
 reference rule.
 
 ### G. SC-012 comparability and baseline provenance (D10–D12, 2026-09-25)
@@ -578,13 +582,20 @@ checkout (the CI workflow already fetches with `fetch-depth: 0`).
 | XIV — Evidence before assumption | The refusal of sequence tasks was reproduced offline before any paid call; the cohort is derived from task metadata, not named. **PASS** |
 | XXI — Paired measurement | The SC-011 threshold and the D10–D12 reference rule are unchanged; only the population both are evaluated over is stated. **PASS** |
 
-### Constitution re-check (acceptance scope, 2026-09-27)
+### Constitution re-check (acceptance scope, 2026-09-27; against constitution 2.0.0)
+
+The owner's decision could not be implemented under constitution 1.1.0: its
+context-change gate required fresh paired quality-and-token evidence for any
+change to what is sent to a model, and a specification cannot override the
+constitution. The constitution is therefore amended in the same change
+(1.1.0 → 2.0.0, MAJOR, with a migration plan in its Sync Impact Report).
 
 | Principle | Result |
 | --- | --- |
-| X / XII — Gates and agreement | Spec *Acceptance scope*, §F, §G, plan Phase 10, tasks Phase 18 and the quickstart agree that no provider, model, paid call, secret or variable gates acceptance; the deterministic gates (T196) remain required. **PASS** |
+| Governance — amendment | Principle XXI and the context-change gate are redefined by a formal amendment carrying motivation, version classification and increment, and a migration plan for work in flight. **PASS** |
+| X / XII — Gates and agreement | Constitution 2.0.0, spec *Acceptance scope*, §F, §G, plan Phase 10, tasks Phase 18 and the quickstart agree that no provider, model, paid call, secret or variable gates acceptance; the deterministic gates (T196) remain required. **PASS** |
 | XVI — Token efficiency is a product requirement | Token use stays measurable: the benchmark, its token accounting, scenario fingerprints and the SC-012 evaluator are kept and tested. No token saving is claimed without a run. **PASS** |
-| XXI — Quality and token efficiency measured together | The paired comparison is kept as a tool and run "where practical"; the owner ruled a paid run is not a condition of acceptance. The maintained evidence is the published paired runs (T015, T155) and the blocked ablation (T096), none of which is presented as passing SC-011 or SC-012. **PASS** |
+| XXI — Quality and token efficiency measured together (2.0.0) | The context-change gate is met by way (b): no fresh paired run, no token-reduction or quality-preservation claim, the paired-measurement mechanism kept and deterministically tested (T208–T212, T196), and the most recent paired evidence disclosed as unresolved (T015 and T155 fail SC-011; T155 flags two outcome regressions). Feature 002 is recorded as unmeasured, not as passing. **PASS** |
 | XX — User control | No paid call, secret or variable is required; any benchmark run is the owner's choice. **PASS** |
 
 ## Current Data Flow (as built)

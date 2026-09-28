@@ -1,25 +1,48 @@
 <!--
 Sync Impact Report
-- Version change: 1.0.0 → 1.1.0 — nine new principles added, none removed or
-  redefined
-- Modified principles: none. Principles I–XII are preserved verbatim in
-  wording and intent
-- Added sections: Core Principles XIII–XXI (Quality-First Agent Behaviour;
-  Evidence Before Assumption; Interactive Clarification Is a Product
-  Invariant; Token Efficiency Is a Product Requirement; Progressive Learning
-  With Continued Use; Extend Existing Capabilities, Never Duplicate Them;
-  Grounded Tool Use; User Control Over Consequential Actions; Quality and
-  Token Efficiency Are Measured Together); one paragraph added to
-  "Compatibility Surfaces and Quality Gates" naming the benchmark evidence
-  required of context- and token-affecting changes
-- Removed sections: none
-- Other edits: one clarifying sentence added to the preamble distinguishing
-  the build-time principles (I–XII) from the agent-behaviour principles
-  (XIII–XXI); no existing rule changed
+- Version change: 1.1.0 → 2.0.0 (MAJOR). Principle XXI and the context-change
+  gate in "Compatibility Surfaces and Quality Gates" are redefined: a change
+  that alters what is sent to a model no longer has to produce a fresh
+  live-model paired run to be accepted, and no particular external provider
+  or model, paid call, or repository secret or variable may be required to
+  satisfy the gate. A guarantee earlier work could rely on (every such change
+  carries fresh paired evidence) no longer holds, so the change is classified
+  as a backward-incompatible redefinition.
+- Motivation: the owner decided (2026-09-27) that an external model is an
+  optional quality tool, not an acceptance requirement. Before this change,
+  meeting the gate meant paying a particular vendor, which made acceptance
+  depend on a bill rather than on the change. What is kept is the ability to
+  measure and the honesty of what is claimed.
+- Modified principles: XXI (Quality and Token Efficiency Are Measured
+  Together): "the project MUST maintain evidence …" becomes "no token
+  reduction or quality preservation may be claimed without paired evidence",
+  plus a paragraph on how paired evidence is produced and disclosed.
+- Modified sections: "Compatibility Surfaces and Quality Gates" — the
+  context-change gate is met either by a fresh paired run with a provider and
+  model the owner chooses, or, without one, by keeping the mechanism tested,
+  claiming nothing, and disclosing the latest paired evidence as unresolved.
+- Removed sections: none. Principles I–XX are unchanged.
+- Migration plan for work in flight:
+  - Feature 002 (`specs/002-grounded-agent-quality/`, PR #61) adopts the gate's
+    second way. Its spec, plan, tasks and quickstart state that no token
+    reduction or quality preservation is claimed and disclose its failing
+    paired evidence (T015 and T155 fail SC-011; T155 flags two outcome
+    regressions) as unresolved.
+  - Feature 001 (`specs/001-production-hardening/`) does not cite the gate and
+    is unaffected.
+  - Open PR #39 (trading core) changes no file that determines what is sent to
+    a model, so the gate does not apply to it.
+  - Work that already met the gate with a fresh paired run still meets it:
+    that is the first way, unchanged.
+  - The plan and checklist lines "Checked against … v1.1.0" record checks
+    made at that version and stay as records; later checks cite 2.0.0.
+  - `AGENTS.md` and `CLAUDE.md` are local, untracked guides. Where they
+    designate a model for live tests, that remains a testing preference and
+    never an acceptance requirement; where they diverge, this file governs.
 - Templates: dependent templates and commands read this file at runtime and
-  were not modified
-- Application source: not modified by this amendment
-- Follow-up TODOs: none — no placeholder tokens deferred
+  were not modified.
+- Application source: not modified by this amendment.
+- Follow-up TODOs: none.
 -->
 
 # Comodor Constitution
@@ -352,14 +375,22 @@ owns the consequences.
 ### XXI. Quality and Token Efficiency Are Measured Together
 
 Quality optimization and token optimization MUST be treated as one
-multi-objective engineering problem, never as independent goals. The project
-MUST maintain evidence that a token reduction does not introduce lower task
-success, more retries, more user corrections, more hallucinated assumptions,
-more failed tool calls, more regressions, weaker tests, or the loss of
-necessary context. Where practical, representative benchmark scenarios MUST
-compare input tokens, output tokens, number of model turns, number of tool
-calls, clarification count, task success, correction count and validation
-success, before and after the change.
+multi-objective engineering problem, never as independent goals. No token
+reduction may be claimed, and no change described as preserving quality,
+without paired evidence that it does not introduce lower task success, more
+retries, more user corrections, more hallucinated assumptions, more failed
+tool calls, more regressions, weaker tests, or the loss of necessary context.
+Where practical, representative benchmark scenarios MUST compare input
+tokens, output tokens, number of model turns, number of tool calls,
+clarification count, task success, correction count and validation success,
+before and after the change.
+
+Paired evidence comes from a benchmark run with a provider and model that the
+change's owner chooses. No particular external provider or model, no paid
+call, and no repository secret or variable may be required to produce it or
+to accept a change. The project MUST keep its paired-measurement mechanism
+working and deterministically tested, and MUST disclose the most recent
+paired results truthfully, including any that fail.
 
 Rationale: without a paired measurement, every token saved looks like a win
 and every quality loss it caused is invisible until a user reports it.
@@ -393,6 +424,15 @@ that determines what is sent to a model carries one additional gate: the
 paired quality-and-token evidence required by Principle XXI, measured on
 representative scenarios and reported with both halves. Token figures
 presented without the accompanying quality figures do not satisfy this gate.
+The gate is met in one of two ways, neither of which may require a particular
+external provider or model, a paid call, or a repository secret or variable:
+(a) a fresh paired run on the exact commit, with a provider and model the
+owner chooses, reported with both halves; or (b) without a fresh run, the
+paired-measurement mechanism the change relies on stays working and
+deterministically tested, the change claims no token reduction and no quality
+preservation, and the most recent paired evidence is disclosed as unresolved,
+including any failing result. A change accepted by way (b) is recorded as
+unmeasured, never as having passed a quality or token comparison.
 
 ## Development Workflow
 
@@ -443,4 +483,4 @@ guidance for agents and contributors lives in `AGENTS.md` and `CLAUDE.md`,
 which MUST remain consistent with this constitution; where they diverge,
 this constitution governs and the guide is corrected.
 
-**Version**: 1.1.0 | **Ratified**: 2026-09-14 | **Last Amended**: 2026-09-14
+**Version**: 2.0.0 | **Ratified**: 2026-09-14 | **Last Amended**: 2026-09-28
