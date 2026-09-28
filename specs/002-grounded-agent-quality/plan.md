@@ -44,7 +44,7 @@ measurement.
 
 **Constraints**: No new runtime dependency. No change to the cached system-prompt prefix mid-task (worth ~99% prefix-cache retention, measured; larger than anything this feature could recover). Protocol v2 stays compatible; any addition is negotiated. Secrets never enter state, snapshots, journals, checkpoints, logs or fixtures.
 
-**Scale/Scope**: 174 requirements (130 FR, 44 SC) across the original 8 delivery phases plus 2 explicit convergence/acceptance phases added after the final specification review. Estimated surface: ~11 Python modules extended, **one new product/runtime module** (`src/comodor/agent/evidence.py`), **two new benchmark-harness helper modules** (`bench/integrity.py`, `bench/baseline.py` — measurement infrastructure, never imported by `src/comodor/`), 1 schema addition, 1 shared TS package touched, the browser question surface (`src/comodor/web/`) characterized and verified, ~20 new deterministic test modules, benchmark harness extended.
+**Scale/Scope**: 174 requirements (130 FR, 44 SC) across the original 8 delivery phases plus 2 explicit phases added after the final specification review: convergence (plan Phase 9) and the SC-012 comparability work with the live benchmark (plan Phase 10; the benchmark run has been optional, not an acceptance gate, since 2026-09-27). Estimated surface: ~11 Python modules extended, **one new product/runtime module** (`src/comodor/agent/evidence.py`), **two new benchmark-harness helper modules** (`bench/integrity.py`, `bench/baseline.py` — measurement infrastructure, never imported by `src/comodor/`), 1 schema addition, 1 shared TS package touched, the browser question surface (`src/comodor/web/`) characterized and verified, ~20 new deterministic test modules, benchmark harness extended.
 
 ---
 
@@ -60,7 +60,7 @@ Checked against `.specify/memory/constitution.md` **v1.1.0** (21 principles).
 | II — Three platforms | Every phase validated on the CI matrix; no platform-conditional logic introduced | **PASS** |
 | III — Fix the invariant | No sleeps, no raised timeouts, no weakened assertions; clarification waiting uses the existing claim-and-expire primitive, not timing | **PASS** — see Clarification Architecture |
 | IV — Deterministic regression tests | Every guard gets a mutation-checked test (SC-025); Phase-gated | **PASS** |
-| V — Narrow scope | Bounded phases, including explicit D4/D9 convergence and final acceptance phases, each independently validatable and revertable | **PASS** |
+| V — Narrow scope | Bounded phases, including explicit D4/D9 convergence (plan Phase 9) and the SC-012 comparability and live-benchmark phase (plan Phase 10, whose benchmark run is optional since 2026-09-27), each independently validatable and revertable | **PASS** |
 | VI — Architectural boundaries | Evidence ledger lives in the core; frontends render it. Protocol change goes through the schema and codegen, never hand-edited | **PASS** |
 | VII — Reproducible artifacts | Terminal-interface bundle rebuilt and committed if TS changes | **PASS** — TS/TUI-affecting work lands in plan Phase 3 (clarification enforcement: protocol fields, overlay) and plan Phase 6 (surface wiring); the committed bundle rebuild is owned by T141 (tasks Phase 8), verified by T166 |
 | VIII — Security not weakened | Mode policy untouched; clarification never becomes a route to a forbidden action; no secret enters the ledger | **PASS** — explicit non-goal below |
