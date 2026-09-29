@@ -16,7 +16,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Callable, Iterable
 
 from ..providers.base import Message, Role, ToolSpec, Usage
 from .tokens import TokenCounter, estimate_text

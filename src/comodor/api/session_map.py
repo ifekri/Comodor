@@ -15,7 +15,7 @@ So the mapping is explicit, which is the only kind of state worth having:
   ``comodor.session``; a client that wants continuity echoes it.
 
 Sessions no client has spoken to for a while are closed, not kept: each one
-holds a live model gateway, a tool registry and the brain, and an endpoint
+holds a gateway to the model, a tool registry and the brain, and an endpoint
 that quietly accumulated those would leak a small program's worth of memory
 per abandoned tab.
 """

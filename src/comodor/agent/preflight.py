@@ -2,10 +2,9 @@
 
 The clarification architecture registers a material decision when the model
 calls `ask` (`tools/ask.py`) or a delegate hands one back. A model that simply
-forgets to ask can therefore change the project first, and the benchmark's
-`careful` tasks found exactly that: a value nothing in the repository states was
-invented and written, and the `ask` that should have come before it never
-happened.
+forgets to ask can therefore change the project first: a value nothing in the
+repository states is invented and written, and the `ask` that should have come
+before it never happens.
 
 So the Core makes the check itself, once per batch of mutating calls, before
 those calls run. It is not a second clarification mechanism: a missing decision

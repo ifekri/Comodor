@@ -634,13 +634,13 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
                 "input_tokens": result.usage.input_tokens,
                 "output_tokens": result.usage.output_tokens,
                 # What the provider served from its cache. Kept apart from
-                # `input_tokens` because it is billed differently and because
-                # the benchmark's paired report needs both halves (FR-076).
+                # `input_tokens` because it is billed differently, and the
+                # total needs both halves.
                 "cached_tokens": result.usage.cached_tokens,
                 # What the provider stored for next time. It is a separate,
                 # non-overlapping part of the prompt and is billed for cache
-                # creation, so a benchmark total that omits it understates the
-                # read for the providers that use it.
+                # creation, so a total that omits it understates the read for
+                # the providers that use it.
                 "written_tokens": result.usage.written_tokens,
                 "cost_usd": round(result.usage.cost_usd, 6),
             },

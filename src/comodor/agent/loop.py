@@ -209,7 +209,7 @@ class TurnResult:
     #: One sanitized record per mutation preflight: fingerprints and bounded
     #: excerpts, never unrestricted source content. It rides the result, not
     #: the counts-only measurement, so a wrong `allow` can be explained from a
-    #: benchmark/debug artifact without rerunning the model.
+    #: debug artifact without rerunning the model.
     preflight_traces: list[dict[str, Any]] = field(default_factory=list)
     #: Why a turn was cancelled, when it was ("stop" — the human pressed stop
     #: — or "interrupt" — a new message took over under the interrupt busy
@@ -445,8 +445,8 @@ class AgentLoop:
         #: with an empty message. In the interface that is invisible — the
         #: explanation was streamed as it arrived — but `comodor run` prints
         #: only the final message, so the caller gets a blank answer for a
-        #: turn that did the work. Found by the benchmark: two failures out of
-        #: eight were a completed task reported as nothing at all.
+        #: turn that did the work: a completed task reported as nothing at
+        #: all.
         spoken = ""
         asked_to_speak = False
         checked = False
@@ -1088,8 +1088,8 @@ class AgentLoop:
         """A safe trace, so a wrong `allow` can be explained without a rerun.
 
         Fingerprints and bounded excerpts only: no unrestricted source content,
-        no secret. It rides the turn's measurement, which the benchmark and the
-        headless JSON already carry.
+        no secret. It rides the turn's result, which the headless JSON already
+        carries.
         """
         try:
             self._preflight_traces.append({
@@ -1776,7 +1776,7 @@ class AgentLoop:
         ))
         # Counted here rather than in `compact`: the call happened even if the
         # caller later decides the brief is unusable, and the runtime owns the
-        # truth about what it spent. The benchmark consumes this.
+        # truth about what it spent.
         self.conversation.record_usage(completion.usage)
         return completion.text
 

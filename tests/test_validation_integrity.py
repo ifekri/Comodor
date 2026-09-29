@@ -2,9 +2,9 @@
 
 A failing check can be made to pass three ways. Fixing the implementation is
 valid. Correcting a demonstrably wrong expectation is valid. Weakening the check
-until it stops failing is not — and that is what the benchmark's
-`careful-cannot-be-done` task exposed: a model edited the failing test to skip
-it, reran pytest, and truthfully reported that the modified suite passed.
+until it stops failing is not — and a model has done exactly that: edited the
+failing test to skip it, reran pytest, and truthfully reported that the
+modified suite passed.
 
 These pin the two defenses. The preflight rejects a high-confidence validation
 bypass before it reaches disk, and a validation run made against a weakened

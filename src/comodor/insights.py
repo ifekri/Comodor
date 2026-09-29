@@ -247,8 +247,8 @@ def render(result: Insights) -> str:
                             for model, share in result.models[:3])
         lines.append(f"- workhorse models: {listed}")
     if result.episodes:
-        # The per-task measurement the paired work records, surfaced here so a
-        # person can read it rather than only a benchmark report.
+        # The per-task measurement the product records, surfaced here so a
+        # person can read it.
         lines.append(
             f"- tasks: {result.episodes:,} · tool calls: {result.tool_calls:,} · "
             f"questions: {result.clarifications_raised:,} asked, "

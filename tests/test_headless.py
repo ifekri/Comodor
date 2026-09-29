@@ -1,4 +1,4 @@
-"""`comodor run` — the path scripts, CI and the benchmark all go through.
+"""`comodor run` — the path scripts and CI go through.
 
 Nobody is watching a headless run, which is exactly why the two things checked
 here matter. A question with no one to answer it used to hold the process for
@@ -166,7 +166,7 @@ def test_the_json_result_names_the_tools_that_ran(scripted):
 def test_an_answer_with_an_arrow_in_it_does_not_kill_the_run(scripted, capsys):
     """A Windows console is cp1252, and `print` of anything outside it raises.
 
-    Found by the benchmark: a run did all its work, wrote its files, and then
+    A run did all its work, wrote its files, and then
     died on `json.dumps` because the answer contained `→`. Exit code 1, nothing
     on stdout, and no sign that the task had actually been done. An em dash, a
     Persian word or an emoji does it just as well.
@@ -389,7 +389,7 @@ def test_a_cancelled_or_expired_run_invents_no_value(scripted):
 
 def test_the_json_usage_reports_cache_creation_tokens(scripted):
     """A provider that bills cache creation reports it; the payload carries it
-    so a benchmark total does not understate what the model read."""
+    so a total does not understate what the model read."""
     config = scripted([Script(text="Done.")])
     out = io.StringIO()
     with redirect_stdout(out):
@@ -536,16 +536,6 @@ def test_a_keyed_interaction_reaches_the_form(scripted):
     replies = [message.content for call in scripted.providers[0].calls
                for message in call]
     assert any("DuckDB" in reply and "Django" in reply for reply in replies)
-
-
-def test_a_malformed_values_map_is_refused_when_the_scenario_loads():
-    from bench.task import TaskError, _interactions
-
-    with pytest.raises(TaskError):
-        _interactions([{"action": "answer", "values": ["Flask"]}])
-    with pytest.raises(TaskError):
-        _interactions([{"action": "answer", "values": {"Framework": 3}}])
-    assert _interactions([{"action": "answer", "values": {"Framework": "Flask"}}])
 
 
 # --------------------------------------------------------------------------- #

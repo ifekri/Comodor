@@ -1059,32 +1059,37 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
 
 **Purpose**: remove the dedicated files, tests, hooks and references inventoried in plan §H. Each task keeps the full deterministic suite green; nothing here changes product behaviour.
 
-- [ ] T223 Rework the tests that mix product assertions with the removed harness in `tests/test_learning_switch.py` and `tests/test_context_optimization_neutrality.py`
+- [X] T223 Rework the tests that mix product assertions with the removed harness in `tests/test_learning_switch.py` and `tests/test_context_optimization_neutrality.py`
+  - **Result (2026-09-30)**: `tests/test_context_optimization_neutrality.py` no longer imports the harness. Its named-switch test asserts against `OPTIMIZATIONS` only, and its summariser test became a seam test. The learning-switch documented-setting test never imported the harness; the helper that did went in T225.
   - **Req**: D14, FR-064, SC-025; plan §H.2 · **Dep**: T220 · **Evidence**:
     - `tests/test_learning_switch.py::test_the_switch_is_a_documented_setting_not_an_inference` drops its harness import (~199) and keeps its product assertion.
     - `tests/test_context_optimization_neutrality.py` drops the module-level harness import. `test_every_switchable_optimization_is_a_named_switch` asserts against `src/comodor/agent/context.py::OPTIMIZATIONS` only. `test_the_log_summariser_reads_the_same_field` becomes a test of the T220 seam.
   - **Done when**: both files pass and import nothing from the removed directory
 
-- [ ] T224 Apply the coverage rule before deleting any test, recorded in this task's evidence in `specs/002-grounded-agent-quality/tasks.md`
+- [X] T224 Apply the coverage rule before deleting any test, recorded in this task's evidence in `specs/002-grounded-agent-quality/tasks.md`
+  - **Result (2026-09-30)**: Only `tests/test_bench_baseline.py` imported product code (`AgentLoop`, `Conversation`, `Message`, `ToolCall`, `Script`, `Gateway`, `PermissionEngine`, `ToolRegistry`), to exercise the strategy T221 removed. Every symbol is covered by the product suites (`tests/test_agent_loop.py`, `tests/test_context_*.py`, `tests/test_protocol*.py`). The other harness tests and functions import no product symbol. Nothing needed moving.
   - **Req**: SC-025, Constitution IV; plan §H.2 · **Dep**: T223 · **Evidence**:
     - Every `comodor.*` symbol imported by the eight harness test modules and by the harness-only functions of plan §H.1 is listed here, each with the product test that still covers it.
     - Where no product test covers a symbol, its assertion moves into a product test first; that move is listed.
   - **Done when**: every symbol has a named product test
 
-- [ ] T225 Delete the harness-only tests under `tests/`
+- [X] T225 Delete the harness-only tests under `tests/`
+  - **Result (2026-09-30)**: Deleted: the harness-only functions in `tests/test_headless.py`, `tests/test_learning_switch.py` (two, plus their helper) and `tests/test_token_accounting.py`; the neutrality paired-runner test (T223); and the eight harness modules.
   - **Req**: D14; plan §H.1 · **Dep**: T224, T222 (`tests/test_token_accounting.py`), T237 and T241 (`tests/test_headless.py`) · **Evidence**:
     - These functions are deleted: `tests/test_headless.py::test_a_malformed_values_map_is_refused_when_the_scenario_loads`; `tests/test_learning_switch.py::test_both_benchmark_modes_are_selectable_and_written_explicitly` and `::test_two_runs_of_the_same_mode_produce_the_same_measurement_inputs`; `tests/test_token_accounting.py::test_the_report_documents_name_their_accounting_version`; `tests/test_context_optimization_neutrality.py::test_each_switch_is_what_the_paired_runner_writes`.
     - Then these modules are deleted: `tests/test_bench.py`, `tests/test_bench_baseline.py`, `tests/test_bench_blocked.py`, `tests/test_bench_integrity.py`, `tests/test_bench_interactions.py`, `tests/test_bench_observability.py`, `tests/test_bench_reproducibility.py` and `tests/test_bench_sequence.py`.
   - **Done when**: `python -m pytest -q` passes; the drop in the count equals the deleted functions
 
-- [ ] T226 Delete the dedicated directory `bench/` (`git rm -r bench`)
+- [X] T226 Delete the dedicated directory `bench/` (`git rm -r bench`)
+  - **Result (2026-09-30)**: `bench/` removed: 127 tracked files, plus the untracked `.pyc` caches. `git ls-files` lists nothing under it, `import bench` fails, and nothing under `src/`, `tests/` or `tools/` imports it.
   - **Req**: D14; plan §H.1 · **Dep**: T225 · **Evidence**:
     - `git ls-files bench` prints nothing.
     - No module under `src/`, `tests/` or `tools/` imports it.
     - `python -m ruff check src tests tools` and `python -m pytest -q` pass.
   - **Done when**: all three hold
 
-- [ ] T227 [P] Remove the hooks in CI and configuration: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `.github/labeler.yml`, `pyproject.toml`, `.gitignore`, `.dockerignore`
+- [X] T227 [P] Remove the hooks in CI and configuration: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `.github/labeler.yml`, `pyproject.toml`, `.gitignore`, `.dockerignore`
+  - **Result (2026-09-30)**: `ci.yml` and `release.yml` lint `src tests tools`. The labeler's rule for the removed directory is deleted, as are the two ruff excludes and their comment in `pyproject.toml` and the `.gitignore` block. The `.dockerignore` comment is reworded. All three workflow files parse as YAML.
   - **Req**: D14; Constitution IX; plan §H.4 · **Dep**: T226 · **Evidence**:
     - `.github/workflows/ci.yml` (~28–31) and `.github/workflows/release.yml` (~213) lint `src tests tools`; the comment goes with the path.
     - `.github/labeler.yml` (~20): the glob is removed; if its rule has no other glob, the rule is removed.
@@ -1094,7 +1099,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - The workflow YAML parses, and the release workflow's change is proved by the same CI run (T235).
   - **Done when**: the files are updated and ruff passes locally with the new path
 
-- [ ] T228 [P] Reword source comments that cite the removed harness, with no behaviour change, under `src/comodor/`
+- [X] T228 [P] Reword source comments that cite the removed harness, with no behaviour change, under `src/comodor/`
+  - **Result (2026-09-30)**: Harness references in comments are reworded in `cli.py`, `insights.py`, `config.py`, `tools/base.py`, `tools/fs.py`, `agent/constraints.py`, `agent/preflight.py`, `agent/verify.py` and `agent/loop.py`, with two unrelated false positives reworded so the gate needs no exceptions. Only comment and docstring lines changed.
   - **Req**: D14, FR-128; plan §H.3 · **Dep**: T218, T221, T241 (the last code edits to `src/comodor/agent/loop.py`, `context.py` and `cli.py`) · **Evidence**:
     - Reworded:
       - `src/comodor/cli.py` (~525–535; the `usage` and `measurement` fields stay);
@@ -1104,14 +1110,16 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - `git diff -U0 -- src` shows only comment and docstring lines for this task.
   - **Done when**: no source file matches the reference pattern, and `pytest -q` passes
 
-- [ ] T229 [P] Reword test prose and placeholder names under `tests/` and in `apps/tui/test/bun/measure.tsx`
+- [X] T229 [P] Reword test prose and placeholder names under `tests/` and in `apps/tui/test/bun/measure.tsx`
+  - **Result (2026-09-30)**: Prose reworded in the listed test files; the placeholder client names are now `measure`. The D17 compatibility test in `tests/test_config_save.py` is key-agnostic, because the loader ignores every unknown key alike. Retired-ID citations are removed from two test docstrings. Assertions are unchanged.
   - **Req**: D14; plan §H.3 · **Dep**: T225 · **Evidence**:
     - `tests/test_agent_loop.py`, `tests/test_baseline_headless.py`, `tests/test_baseline_tokens.py`, `tests/test_blind_writes.py`, `tests/test_constraints.py`, `tests/test_context_containment.py`, `tests/test_mutation_preflight.py`, `tests/test_performance.py`, `tests/test_project_check.py`, `tests/test_protocol_performance.py` (prose, and the placeholder client name), `tests/test_staleness.py`, `tests/test_validation_integrity.py`;
     - `apps/tui/test/bun/measure.tsx` (prose, and the placeholder client name).
     - Assertions are unchanged.
   - **Done when**: `pytest -q` passes, `python -m pytest -m performance -n 0 -q` keeps its T215 count, and `npm test` and both Bun suites pass
 
-- [ ] T230 [P] Update the documentation: `README.md`, `CONTRIBUTING.md`, `docs/README.md`
+- [X] T230 [P] Update the documentation: `README.md`, `CONTRIBUTING.md`, `docs/README.md`
+  - **Result (2026-09-30)**: `README.md`'s evaluation section and claim are removed, and its optimization sentence now describes the deterministic tests. `CONTRIBUTING.md` describes scripted-reply tests. The `docs/README.md` index row is gone. `tests/test_help.py`'s link checks pass.
   - **Req**: D14, FR-082; plan §H.5 · **Dep**: T226 · **Evidence**:
     - `README.md` (~240): the sentence is reworded.
     - `README.md` (~342–366): the section is removed, together with any contents entry.
@@ -1120,7 +1128,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - Every link still resolves.
   - **Done when**: none of the three files matches the reference pattern
 
-- [ ] T231 Remove the dated changelog passages in `CHANGELOG.md`
+- [X] T231 Remove the dated changelog passages in `CHANGELOG.md`
+  - **Result (2026-09-30)**: In `CHANGELOG.md`, the 1.1.1, 1.1.0, 0.21.0 and 0.6.1 entries are revised: harness results removed, surrounding text reworded, product fixes kept. The unreleased entry names FR-082 change 4 as breaking, with the four-step migration path, and no longer calls change 1 the single change.
   - **Req**: D14; plan §H.5 · **Dep**: T226, T217, T238, T241 · **Evidence**:
     - The dated entries 1.1.1 (~311–313), 1.1.0 (~319, ~356, and the result figures in ~367–455), 0.21.0 (~458–520) and 0.6.1 (~2269–2288) are each reviewed as a whole:
       - remove what reports the removed harness or its results;

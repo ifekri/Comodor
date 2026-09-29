@@ -1,7 +1,7 @@
 """Performance budgets, enforced as tests.
 
 Memory sits between the user pressing Enter and the first token arriving, so a
-regression here is felt on every single turn. These are not benchmarks to admire
+regression here is felt on every single turn. These are not numbers to admire
 — they are ceilings. A change that makes recall slow fails the suite.
 
 The budgets are deliberately loose compared to what the code actually achieves

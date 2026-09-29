@@ -1,6 +1,5 @@
 """End-to-end token accounting: every provider call a task makes is counted.
 
-Spec 002 SC-011 asks whether the same tasks complete with fewer total tokens.
 A total that omits a provider call is not a total. The compaction summary is a
 real provider call — it used to be spent and not counted, so a task that
 compacted reported less than it cost. These prove the runtime counts it
@@ -131,19 +130,6 @@ def test_a_failed_summary_adds_no_usage(config):
     assert removed == 0
     assert agent.conversation.compactions == 0
     assert agent.conversation.usage.total == 0
-
-
-def test_the_report_documents_name_their_accounting_version():
-    """A result is only comparable with one counted the same way, and the
-    counting changed; the version is how a reader tells a corrected total
-    from a historical one."""
-    from bench import report
-
-    assert report.TOKEN_ACCOUNTING_VERSION == 2
-    plain = report.as_json([], provider="fake", model="fake-1", tries=3)
-    paired = report.as_paired_json([], [], provider="fake", model="fake-1", tries=3)
-    assert plain["token_accounting_version"] == 2
-    assert paired["token_accounting_version"] == 2
 
 
 # --------------------------------------------------------------------------- #

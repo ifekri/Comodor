@@ -234,8 +234,7 @@ class LearningConfig:
     #: no correction signal, no vocabulary, and the model's own memory tool
     #: refuses to write — and no recall into the prompt. What was learned
     #: before stays readable (`comodor journey`) and a person may still
-    #: teach explicitly. The benchmark sets this off so a measurement cannot
-    #: depend on what the previous attempt taught (FR-064).
+    #: teach explicitly (FR-064).
     enabled: bool = True
     top_k: int = 6                       # lessons recalled per turn
     max_playbook_tokens: int = 800       # hard cap on injected memory
@@ -542,7 +541,7 @@ class WhatsAppConfig:
 
         Compared as digits. The same number reaches us written `+9715…`,
         `009715…` and `9715…` depending on where it came from, and three
-        spellings of one person is three people to a naive comparison.
+        spellings of one person is three people to a literal comparison.
         """
         wanted = _digits(wa_id)
         return bool(wanted) and wanted in {_digits(x) for x in self.allowed}

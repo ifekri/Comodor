@@ -14,11 +14,6 @@ Testing:
           - "workers/**/*.test.mjs"
           - "workers/**/*.test.js"
 
-Benchmark:
-  - changed-files:
-      - any-glob-to-any-file:
-          - "bench/**"
-
 CI:
   - changed-files:
       - any-glob-to-any-file:

@@ -79,9 +79,8 @@ class ToolContext:
     #:
     #: Kept so a write can tell the difference between replacing a file whose
     #: contents are known and replacing one sight unseen. The second is how the
-    #: rest of a file gets silently thrown away, and the benchmark caught it:
-    #: one task was failed for overwriting the sample it was being measured
-    #: against, in a run that was otherwise correct.
+    #: rest of a file gets silently thrown away: a run that was otherwise
+    #: correct once overwrote the sample it had been given to work from.
     seen: set[str] = field(default_factory=set)
 
     #: What this turn read, text included, by resolved path.

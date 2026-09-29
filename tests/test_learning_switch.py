@@ -1,12 +1,8 @@
-"""Learning is an explicit switch, and the benchmark's modes are explicit
-(T067, T068; FR-064, SC-026).
+"""Learning is an explicit switch (T067; FR-064).
 
 Off means no durable write from any automatic path — episode, reflection,
 review, correction signal, vocabulary, the model's memory tool — and no
-recall. The benchmark writes the mode into each attempt's own config, both
-modes are selectable, and two runs of the same mode produce the same
-measurement inputs: an empty home, a fresh copy of the repository, the
-same budgets.
+recall.
 """
 
 from __future__ import annotations
@@ -14,8 +10,6 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-
-import pytest
 
 from comodor.agent import AgentLoop, Conversation
 from comodor.learning import LearningEngine
@@ -188,60 +182,3 @@ def test_the_switch_is_a_documented_setting_not_an_inference(config):
     source = (Path(__file__).resolve().parents[1] / "src/comodor/config.py").read_text(
         encoding="utf-8")
     assert "Off means no durable" in source
-
-
-# --------------------------------------------------------------------------- #
-# T068 — the benchmark's modes
-# --------------------------------------------------------------------------- #
-
-
-def _task(tmp_path):
-    from bench.task import Task, Verdict
-
-    repo = tmp_path / "repo"
-    repo.mkdir(exist_ok=True)
-    (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
-    return Task(name="t", category="fix", prompt="p", repo=repo,
-                check=lambda attempt: Verdict.ok(), max_steps=5, timeout=30.0)
-
-
-@pytest.mark.parametrize("learning", [False, True])
-def test_both_benchmark_modes_are_selectable_and_written_explicitly(tmp_path, learning):
-    from bench.runner import _settings
-
-    home = tmp_path / f"home-{learning}"
-    home.mkdir()
-    _settings(home, _task(tmp_path), learning=learning)
-    written = json.loads((home / "config.json").read_text(encoding="utf-8"))
-    assert written["learning"]["enabled"] is learning
-    assert written["agent"]["max_steps"] == 5
-
-
-def test_two_runs_of_the_same_mode_produce_the_same_measurement_inputs(tmp_path, monkeypatch):
-    """Isolation asserted: each attempt gets an empty home, a fresh copy of
-    the repository, and the same config — whatever the previous one did."""
-    from bench import runner
-    from bench.task import Attempt
-
-    seen = []
-
-    def fake_invoke(task, workspace, home, provider, model):
-        seen.append({
-            "workspace_files": sorted(p.name for p in workspace.iterdir()),
-            "home_files": sorted(p.name for p in home.iterdir()),
-            "config": json.loads((home / "config.json").read_text(encoding="utf-8")),
-        })
-        # The attempt dirties its workspace and home; the next must not see it.
-        (workspace / "leftover.txt").write_text("x", encoding="utf-8")
-        (home / "brain.db").write_text("learned", encoding="utf-8")
-        return Attempt(workspace=workspace, ok=True, stopped="done", text="ok", steps=1)
-
-    monkeypatch.setattr(runner, "_invoke", fake_invoke)
-    for learning in (True, False):
-        seen.clear()
-        runner.run_task(_task(tmp_path), provider="fake", model="fake-1", tries=2,
-                        say=lambda *_: None, learning=learning)
-        assert seen[0] == seen[1], "the second attempt started from the same inputs"
-        assert seen[0]["workspace_files"] == ["a.py"]
-        assert seen[0]["home_files"] == ["config.json"]
-        assert seen[0]["config"]["learning"]["enabled"] is learning

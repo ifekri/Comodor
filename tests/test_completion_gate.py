@@ -1422,7 +1422,7 @@ def test_an_unrelated_tool_failure_does_not_become_a_validation_failure():
 
 
 def test_the_loop_forces_a_validation_status_before_finishing(config, bus):
-    """The careful-cannot-be-done shape: the user asked for the test result and
+    """A task that cannot be done honestly: the user asked for the test result and
     the answer omits it, so one correction turn is taken (FR-036, FR-125)."""
     from comodor.providers.base import ToolCall
     from comodor.providers.fake import Script

@@ -1,9 +1,9 @@
 """Characterization: the token estimator and its calibration (T003).
 
 The estimator is the number every context gauge, compaction decision and
-benchmark token figure rests on. Provider `Usage` is the truth; the estimate
+token figure rests on. Provider `Usage` is the truth; the estimate
 is what Comodor predicts before the reply arrives. This pins how far apart
-the two are allowed to be (FR-055, SC-011), with the tolerance written down
+the two are allowed to be (FR-055), with the tolerance written down
 rather than implied.
 """
 

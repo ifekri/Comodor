@@ -483,13 +483,15 @@ def test_the_saved_file_holds_its_bytes_before_the_rename(home, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# D17 — two runtime-only settings are gone; a file that still has them loads
+# D17 — settings a file still carries after they were removed load, and do nothing
 # --------------------------------------------------------------------------- #
 
 
-def test_a_config_that_still_names_the_removed_settings_loads_and_they_do_nothing(home):
-    """Neither setting was ever offered, but a file may still carry one. It
-    loads like any unknown key, and the product runs as it always does."""
+def test_a_config_that_still_carries_removed_settings_loads_and_they_do_nothing(home):
+    """A file may still carry agent settings this version no longer has. Every
+    unknown key is ignored the same way (`config._apply`), so any such key
+    stands in for all of them: the file loads, the rest of the section still
+    applies, and every context optimization runs."""
     from comodor.agent import AgentLoop, Conversation
     from comodor.agent.context import OPTIMIZATIONS
     from comodor.events import EventBus
@@ -497,13 +499,13 @@ def test_a_config_that_still_names_the_removed_settings_loads_and_they_do_nothin
     from comodor.safety import PermissionEngine
     from comodor.tools import ToolRegistry
 
-    mine(home, agent={"context_strategy": "naive",
-                      "optimizations_off": list(OPTIMIZATIONS) + ["log_summary"],
+    mine(home, agent={"retired_strategy": "minimal",
+                      "retired_switches": list(OPTIMIZATIONS),
                       "max_steps": 12})
     config = load(cwd=home / "project")
     assert config.agent.max_steps == 12, "the rest of the section still applies"
-    assert not hasattr(config.agent, "context_strategy")
-    assert not hasattr(config.agent, "optimizations_off")
+    assert not hasattr(config.agent, "retired_strategy")
+    assert not hasattr(config.agent, "retired_switches")
 
     bus = EventBus()
     agent = AgentLoop(config, Gateway(config, scripts=[]), ToolRegistry(), bus,
