@@ -524,8 +524,10 @@ function drawForm() {
   const many = form.questions.length > 1;
   const question = form.questions[form.at];
 
+  // One question at a time is the page: however many the reply raised, it is
+  // one form, sent once, and the title says where in it this question sits.
   $('form-title').textContent = many
-    ? `${form.questions.length} questions`
+    ? `Question ${form.at + 1} of ${form.questions.length}`
     : 'One question';
   els.form.querySelector('.count').textContent = many
     ? `${formGiven()} of ${form.questions.length} answered`

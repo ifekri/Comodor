@@ -50,8 +50,10 @@ ones are still outstanding without visiting each.
 
 ## In the browser
 
-The same form as a dialog. Click the tabs or use the arrow keys, click an
-option, and press **Send**. `Escape` closes it.
+The same form as a dialog, one question at a time, with its place in the
+form in the title — *Question 2 of 6*. Click the tabs or use the arrow keys,
+click an option, and press **Send** once for the whole form; moving between
+questions keeps what you chose. `Escape` closes it.
 
 ## The last row
 
@@ -121,6 +123,21 @@ wording, by recency or by position:
 Answers are checked whole before anything runs. An answer supplies
 information; it never grants a permission the mode does not allow.
 
+The API and ACP have no live form. A turn there ends in one
+`clarification_required` payload that lists every decision of that point —
+six, if there were six — each with its `decision_ref`. Answer them in one
+request or several: an answer resolves only the refs it names, and the rest
+stay open, with nothing that depends on them running, until they are
+answered too.
+
+**Changed in this release (breaking for clients and scripts that counted
+forms).** A reply that asked through several calls used to raise one form per
+call. It is now one form. A client that assumed at most four questions per
+form accepts any number and pages them; an API or ACP client that assumed at
+most four decisions in a payload accepts any number and answers by
+`decision_ref`; a scripted `--interactions` run follows the rules in
+[the CLI](cli.md#scripted-interactions).
+
 ## When it does not ask
 
 By design, not by accident:
@@ -133,10 +150,21 @@ By design, not by accident:
 
 ## Limits
 
-At most four questions, and at most four options each — plus the write-your-own
-row, which does not use up one of the four. More than that stops being a quick
-form and becomes an interview, and an agent that needs six answers should ask
-for the four that matter and work out the rest.
+One `ask` call carries at most four questions, with at most four options each
+— plus the write-your-own row, which does not use up one of the four.
+
+Everything the agent needs from you at one point reaches you as **one form**,
+however many `ask` calls it took. A model reply that needs six answers makes
+two calls, and you get one form of six: the terminal and the browser show it
+one question at a time with its place in the form, and you send it once. If
+any call in that reply is refused — too many questions in one call, a request
+for permission, two different questions under one header — none of them is
+put to you, nothing that may depend on them runs, and the agent asks the whole
+set again.
+
+A question the agent asks twice in one reply appears once. If two calls name
+it under different headers, you see the first, and each call gets your answer
+under its own.
 
 The form waits thirty minutes. After that it comes back with the `expired`
 outcome and the decision still open — a form left open on a machine nobody is

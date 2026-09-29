@@ -827,7 +827,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
 
 **Purpose**: fix the starting point for plan Phase 11 before anything changes. Planning artifacts only; no product or test change in this phase.
 
-- [ ] T215 Record the starting state of plan Phase 11 in this task's evidence in `specs/002-grounded-agent-quality/tasks.md`
+- [X] T215 Record the starting state of plan Phase 11 in this task's evidence in `specs/002-grounded-agent-quality/tasks.md`
+  - **Result (2026-09-30)**: Starting HEAD `7361c50`; the planning changes were audited and committed as `6c081fe`. The reference pattern, retired-ID list, §H.1 path list and §K reviewer list are copied outside the repository. Baseline: `pytest -q` 6110 passed, 49 skipped; performance 36; `npm test` 188; renderer 175; orphan 3. No provider was called.
   - **Req**: Constitution X, XII; plan §I (I-0), §J · **Dep**: none · **Evidence**:
     - The worktree HEAD SHA, and `git status --short`. The uncommitted planning changes are audited file by file and kept: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `quickstart.md`, `contracts/learning-record.md`, `tasks.md`, `checklists/requirements.md` and `.specify/memory/constitution.md`.
     - The owner's own checkout is left untouched.
@@ -846,7 +847,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
 
 **Independent test**: `python -m pytest -q tests/test_clarification_one_form.py tests/test_clarification_lifecycle.py` passes, and each listed mutation makes it fail.
 
-- [ ] T216 [US1] Write the SC-007 test in `tests/test_clarification_one_form.py` (new)
+- [X] T216 [US1] Write the SC-007 test in `tests/test_clarification_one_form.py` (new)
+  - **Result (2026-09-30)**: `tests/test_clarification_one_form.py`, 28 tests, covering C1–C13 plus the model-facing description. Against `7361c50`: 22 failed and 6 passed (C1, C3, C4, C6, C11, the spec stability check). The behavioural failures (C2, C5, C7–C10, C12, C13) confirm the gap; the rest target code that did not exist yet. With T218: 28 passed, and every listed mutation fails its test.
   - **Req**: FR-014, SC-007, SC-025, FR-018; D18, D19; plan §G.5 · **Dep**: T215 · **Materiality**: every case uses material decisions (`affects` set) · **Waiting**: the controlled `EventBus` answers on the emitting thread; no sleeps · **Outcomes**: answered and cancelled · **Dependent work**: none runs before its decision is answered
   - **Evidence**: fixtures follow `tests/test_clarification_lifecycle.py`: the scripted `Script` provider, `Gateway(config, scripts=...)`, `AgentLoop` and a subscriber that counts `Kind.REQUEST` events. Cases:
     - **C1**: one `ask` call with three material questions → exactly one form, carrying all three headers.
@@ -871,7 +873,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - SC-007 has a D16 audit row.
     - Release notes state changes 1 and 4 (T231).
   - **Done when**: D18 is recorded in `spec.md` — done
-- [ ] T218 [US1] Make every decision a batch raises reach the person as one form, in `src/comodor/agent/loop.py`
+- [X] T218 [US1] Make every decision a batch raises reach the person as one form, in `src/comodor/agent/loop.py`
+  - **Result (2026-09-30)**: `agent/loop.py`: the reply's `ask` calls are checked at batch start (`_refuse_asks`, with sibling withholding through `_refused_sibling`) and put as one form (`_ask_together`). The preflight's missing decisions ride on the same form, whether the mutation comes before or after the `ask`. `tools/ask.py`: `check`, `collision` and `ask_together`, with the per-call header rebinding in `_rebind`. The model-facing description is updated (N4). A resumed turn now carries still-open decisions as unresolved, so a partial resumption withholds dependent work (D19).
   - **Req**: FR-014, SC-007, FR-017, FR-018, FR-020, FR-129, SC-025; D18, D19 · **Dep**: T216, T217 · **Materiality**: unchanged; only material decisions become questions · **Waiting**: the existing `bus.resolve` claim-and-expire path, once per form · **Outcomes**: answered, cancelled, expired and unattended apply to every decision in the combined form · **Dependent work**: withheld exactly as today until each decision is answered
   - **Evidence**:
     - Within one sequential batch, the questions of every `ask` call are raised as one form through the existing shared clarification path in `tools/ask.py`. So are the batch preflight's missing decisions, if C5 failed in T216.
@@ -894,7 +897,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - the clarification, question, Web, API, ACP and channel suites pass;
     - T216 and T218 are committed together
 
-- [ ] T219 [US1] Add the SC-044 cancelled-question tests to `tests/test_clarification_lifecycle.py`
+- [X] T219 [US1] Add the SC-044 cancelled-question tests to `tests/test_clarification_lifecycle.py`
+  - **Result (2026-09-30)**: Seven tests in `tests/test_clarification_lifecycle.py`: the tool guard with its `_same` mutation; the loop batch; each layer alone still yielding one form; and every layer removed yielding a second form.
   - **Req**: SC-044, FR-129, SC-025, D16; plan §G.4 · **Dep**: T218 (the loop-level case is written against the loop as T218 leaves it) · **Materiality**: material · **Waiting**: controlled bus; no sleeps · **Outcomes**: cancelled only, answered with `forms.CANCELLED`, never a decline · **Dependent work**: the dependent write never runs
   - **Evidence**:
     - **Tool level**:
@@ -908,7 +912,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - A decline-only variant, if added, is a separate test and is not cited for SC-044.
   - **Done when**: both tests pass, each listed mutation fails them, and the guards are restored
 
-- [ ] T237 [US1] Cover D18 and D19 on every existing client surface: `apps/tui/test/bun/renderer.test.tsx`, `tests/test_web.py`, `tests/test_api.py`, `tests/test_acp.py`, `tests/test_headless.py`, `tests/test_channel_clarification.py`
+- [X] T237 [US1] Cover D18 and D19 on every existing client surface: `apps/tui/test/bun/renderer.test.tsx`, `tests/test_web.py`, `tests/test_api.py`, `tests/test_acp.py`, `tests/test_headless.py`, `tests/test_channel_clarification.py`
+  - **Result (2026-09-30)**: Surfaces covered: TUI (T240), Web (T239), reconnect of a six-question form (`tests/test_protocol_interactions.py`), API and ACP six-decision payloads resumed in parts (`tests/test_api.py`, `tests/test_acp.py`), headless (T241) and channels (`tests/test_channel_clarification.py`).
   - **Req**: FR-014, FR-020, FR-023, FR-079, FR-082 (change 4), FR-129, SC-007, SC-008, SC-009, SC-023, SC-042; D18, D19 · **Dep**: T218, T239, T240, T241 · **Evidence** (deterministic, scripted model responses, no sleeps):
     - **TUI**: a six-question form from three calls is shown one question at a time, with its position in the form, and submitted once. Every question has one custom-answer row, and the form is keyboard-operable at widths 160/120/100/80/60.
     - **Web**:
@@ -926,7 +931,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - **Channels**: an unattended reply that raised six questions through three calls ends in one clarification-required message, naming each decision and its `decision_ref`.
   - **Done when**: every listed test passes; each asserts the changed form count explicitly, and none claims that the old count still holds
 
-- [ ] T238 [P] [US1] Document FR-082 change 4 and its migration path (D18, D19) in `docs/questions.md` and `docs/cli.md`
+- [X] T238 [P] [US1] Document FR-082 change 4 and its migration path (D18, D19) in `docs/questions.md` and `docs/cli.md`
+  - **Result (2026-09-30)**: `docs/cli.md` gains a Scripted interactions section with the matching rules, examples and migration path. `docs/questions.md` covers one logical form of any length, the API/ACP payload with resumption in parts, and the breaking-change note.
   - **Req**: FR-082, D18, D19 · **Dep**: T218, T241 · **Evidence**:
     - `docs/questions.md` states:
       - one model reply's questions arrive as **one logical form of any length**, shown in pages of at most four and answered once;
@@ -945,7 +951,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - Both documents call change 4 **breaking** for form-count and scripted consumers. The CHANGELOG note is T231's.
   - **Done when**: both documents state the changed behaviour and the migration path, and neither claims the old form count
 
-- [ ] T239 [P] [US1] Page the Web form in groups of at most four, with one submission, in `src/comodor/web/ui.js`, tested in `tests/test_web.py`
+- [X] T239 [P] [US1] Page the Web form in groups of at most four, with one submission, in `src/comodor/web/ui.js`, tested in `tests/test_web.py`
+  - **Result (2026-09-30)**: The Web page already showed one question at a time (a page of one), with one Send and entries kept across moves. It now titles each question "Question k of n". Tested at the server level (six questions via `ask_together`: full, partial, dismissal) and in a real browser (`tests/test_real_web_ui.py`: navigation keeps entries, one submission, and a dismissal on page two sends one cancellation).
   - **Req**: FR-014, FR-017, FR-020, SC-007; D19 · **Dep**: T218 · **Evidence**:
     - A form of more than four questions shows pages of at most four, with next and previous controls. Moving between pages keeps every entry.
     - One submit sends every answered header; unanswered material questions stay open (partial answer).
@@ -954,7 +961,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - A form of at most four questions is unchanged: one page.
   - **Done when**: the Web tests pass, and a form of more than four questions round-trips in one request and one submission
 
-- [ ] T240 [US1] Show each question's position in the whole form in the TUI, and rebuild the bundle: `packages/questions/src/index.ts`, `apps/tui/src/App.tsx`, `apps/tui/test/bun/renderer.test.tsx`, `src/comodor/tui/dist/main.js`
+- [X] T240 [US1] Show each question's position in the whole form in the TUI, and rebuild the bundle: `packages/questions/src/index.ts`, `apps/tui/src/App.tsx`, `apps/tui/test/bun/renderer.test.tsx`, `src/comodor/tui/dist/main.js`
+  - **Result (2026-09-30)**: The TUI already shows "Question k of n" and a marker per question, so no TUI source changed and no bundle rebuild is needed. Six renderer tests are added: five widths, plus navigation that keeps entries and sends once. Renderer suite: 181 pass.
   - **Req**: FR-014, FR-031, SC-007, SC-008; D19; Constitution VII · **Dep**: T218 · **Evidence**:
     - The reducer keeps its one-question-at-a-time navigation, and the overlay shows "question k of n" for any n.
     - Entries survive navigation, and one submission answers the form.
@@ -963,7 +971,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` pass.
   - **Done when**: the renderer and frontend suites pass, and the rebuilt bundle leaves `git status --porcelain` clean
 
-- [ ] T241 [US1] Match scripted interactions to their form, and reject unmatched or leftover entries, in `src/comodor/cli.py`, tested in `tests/test_headless.py`
+- [X] T241 [US1] Match scripted interactions to their form, and reject unmatched or leftover entries, in `src/comodor/cli.py`, tested in `tests/test_headless.py`
+  - **Result (2026-09-30)**: `cli.py`: the script is validated whole at parse time (`_scripted_interactions`, `_entry`), entries are matched when a form appears (`_mismatch`), a mismatch closes the form as `unattended`, leftovers are rejected, and `_answers_from_form` answers exactly what is named. Help text updated. Two old tests that asserted the fill were replaced. Tests in `tests/test_headless.py`: 9 parse-time cases, bare answer on both form sizes, explicit first option, keyed partial, mismatch, unkeyed on two questions, leftover, no later application, and four mutation checks.
   - **Req**: FR-082 (change 4), FR-129; D19 · **Dep**: T218 · **Evidence**:
     - One `--interactions` entry applies to exactly one logical form. An entry that names headers — `values` keyed by header for `answer`, a `headers` list for `cancel`, `expire` and `unattended` — matches only a form containing every header it names.
     - Headers are optional only in a single-entry script. In a script with more than one entry, every entry must name headers, `cancel`, `expire` and `unattended` included.

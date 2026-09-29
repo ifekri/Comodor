@@ -632,3 +632,66 @@ def test_a_request_without_decision_answers_is_exactly_as_before(server, config,
     status, body = _ask_api(server, "api-plain", None, text="hello")
     assert status == 200 and seen == [{}]
     assert "decision_answers" not in json.dumps(body)
+
+
+# --------------------------------------------------------------------------- #
+# T237 — no live form on the API: six decisions, resumed in parts (D19)
+# --------------------------------------------------------------------------- #
+
+
+SIX_TOPICS = ["Database", "Queue", "Cache", "Region", "Licence", "Language"]
+
+
+def _stopped_six(server, session_id="api-six"):
+    """An API session stopped for six decisions of one reply, recorded as one form."""
+    from comodor.providers.base import Message, ToolCall
+
+    talk = server.map.for_session(session_id)
+    conversation = talk.session.conversation
+    conversation.add(Message.user("Set up the service"))
+    call = ToolCall(id="q1", name="ask", arguments={})
+    tool = Message.tool(call_id="q1", name="ask", content="unresolved")
+    tool.meta["question"] = {
+        "questions": [{"prompt": f"Which {topic.lower()}?", "header": topic, "multi": False,
+                       "reason": "persisted_state", "decision_ref": f"dr-six-{n}",
+                       "options": [{"label": "One"}, {"label": "Two"},
+                                   {"label": "Something else", "free": True}]}
+                      for n, topic in enumerate(SIX_TOPICS)],
+        "answers": [], "outcome": "unattended", "origin": "model_ask", "state": "blocked"}
+    conversation.extend([Message.assistant("Six questions.", tool_calls=[call]), tool])
+    return talk
+
+
+def test_six_decisions_resume_in_parts_and_the_rest_stay_withheld(server, config):
+    from comodor.providers.base import ToolCall
+    from comodor.providers.fake import Script
+    from comodor.session.store import decision_states
+
+    _setup(config)
+    talk = _stopped_six(server)
+    write = ToolCall(id="w1", name="write_file",
+                     arguments={"path": "service.py", "content": "READY = True\n"})
+    _scripted_talk(talk, [Script(text="Writing.", tool_calls=[write]),
+                          Script(text="unreachable")])
+    status, body = _ask_api(server, "api-six", [
+        {"decision_ref": "dr-six-0", "chosen": ["One"]},
+        {"decision_ref": "dr-six-1", "chosen": ["Two"]}])
+    assert status == 200, body
+    assert body["comodor"]["stopped"] == "clarification_required"
+    still = sorted(entry["decision_ref"] for entry in body["comodor"]["clarification"]["decisions"])
+    assert still == [f"dr-six-{n}" for n in range(2, 6)], "the other four, reported again"
+    assert not (config.paths.project / "service.py").exists(), "dependent work withheld"
+    states = decision_states(talk.session.conversation.messages)
+    assert states["dr-six-0"].status == states["dr-six-1"].status == "stale"
+
+    # The first turn's worker releases the session when it is finished.
+    assert talk.session._turn.acquire(timeout=10), "the first turn never finished"
+    talk.session._turn.release()
+    # Writing needs permission on an API session; granted here, so what is
+    # measured is the decisions, not the permission prompt.
+    talk.session.config.safety.auto_approve_writes = True
+    _scripted_talk(talk, [Script(text="Writing.", tool_calls=[write]), Script(text="Done.")])
+    status, body = _ask_api(server, "api-six", [
+        {"decision_ref": f"dr-six-{n}", "chosen": ["One"]} for n in range(2, 6)])
+    assert status == 200 and body["comodor"]["stopped"] == "done", body
+    assert (config.paths.project / "service.py").exists()

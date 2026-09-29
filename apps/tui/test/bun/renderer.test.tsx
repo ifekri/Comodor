@@ -1029,6 +1029,74 @@ describe("questions", () => {
   });
 });
 
+// One reply's questions arrive as one form, however many there are (D18, D19).
+// The overlay shows one at a time with its place in the whole form, keeps what
+// was chosen while moving, and sends the whole form once.
+describe("a form of six questions", () => {
+  const six = {
+    id: "ask-6",
+    session_id: "s1",
+    title: "6 questions before I start",
+    questions: [0, 1, 2, 3, 4, 5].map((n) => ({
+      header: `H${n}`, prompt: `Question number ${n}?`, multiple: false,
+      options: [
+        { id: `A${n}`, label: `A${n}` },
+        { id: `B${n}`, label: `B${n}` },
+        { id: "Something else", label: "Something else", free: true },
+      ],
+    })),
+  };
+
+  async function askedSix(width = 120) {
+    const view = await screen(width, 30);
+    view.core.push(event("question.requested", six as never));
+    await view.waitForFrame((frame) => frame.includes("Question number 0?"));
+    return view;
+  }
+
+  for (const width of [160, 120, 100, 80, 60]) {
+    test(`${width} columns shows its place in the form and does not spill`, async () => {
+      const view = await askedSix(width);
+      const frame = view.frame();
+      expect(frame).toContain("1 of 6");
+      for (const row of frame.split("\n")) {
+        expect(row.length).toBeLessThanOrEqual(width);
+      }
+      view.client.close();
+    });
+  }
+
+  test("walking all six keeps what was chosen and sends once", async () => {
+    const view = await askedSix();
+    view.mockInput.pressKey(" ");
+    for (let step = 0; step < 5; step += 1) view.mockInput.pressArrow("right");
+    await view.waitForFrame((frame) => frame.includes("Question number 5?"));
+    expect(view.frame()).toContain("6 of 6");
+
+    view.mockInput.pressArrow("down");
+    view.mockInput.pressKey(" ");
+    // The choice is state first and paint a frame later; send only once the
+    // form shows it, or Enter races the space.
+    await view.waitForFrame((frame) => frame.includes("(*) B5"));
+    view.mockInput.pressEnter();
+    await view.flush();
+    await view.waitForVisualIdle();
+
+    const sent = view.core.sent.filter((message) => message["method"] === "question.answer");
+    expect(sent.length).toBe(1);
+    const answers = (sent[0]!["params"] as { answers: Array<Record<string, unknown>> })
+      .answers;
+    const chosen = Object.fromEntries(
+      answers.map((answer) => [answer["header"], answer["chosen"]]));
+    expect(chosen["H0"]).toEqual(["A0"]);
+    expect(chosen["H5"]).toEqual(["B5"]);
+    for (const header of ["H1", "H2", "H3", "H4"]) {
+      expect(chosen[header] ?? []).toEqual([]);
+    }
+    view.client.close();
+  });
+});
+
 describe("at every width", () => {
   for (const width of [160, 120, 100, 80, 60]) {
     test(`${width} columns draws without spilling`, async () => {

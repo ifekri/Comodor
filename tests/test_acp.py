@@ -800,3 +800,57 @@ def test_a_refused_batch_is_invalid_params_and_nothing_runs(driven, config, answ
                if m.get("method") == "session/update"]
     assert not any(u.get("sessionUpdate") == "state_update" for u in updates), \
         "a refused batch is an error to the request, not a turn"
+
+
+# --------------------------------------------------------------------------- #
+# T237 — no live form on ACP: six decisions, resumed in parts (D19)
+# --------------------------------------------------------------------------- #
+
+
+def test_six_decisions_resume_in_parts_over_acp(driven, config):
+    from comodor.providers.base import Message, ToolCall
+    from comodor.providers.fake import Script
+    from comodor.providers.gateway import Gateway
+    from comodor.session.store import decision_states
+
+    agent, out = driven
+    made = agent.session_new({"cwd": str(config.paths.project)})
+    session = agent.sessions[made["sessionId"]]
+    topics = ["Database", "Queue", "Cache", "Region", "Licence", "Language"]
+    call = ToolCall(id="q1", name="ask", arguments={})
+    tool = Message.tool(call_id="q1", name="ask", content="unresolved")
+    tool.meta["question"] = {
+        "questions": [{"prompt": f"Which {topic.lower()}?", "header": topic, "multi": False,
+                       "reason": "persisted_state", "decision_ref": f"dr-acp6-{n}",
+                       "options": [{"label": "One"}, {"label": "Two"},
+                                   {"label": "Something else", "free": True}]}
+                      for n, topic in enumerate(topics)],
+        "answers": [], "outcome": "unattended", "origin": "model_ask", "state": "blocked"}
+    session.conversation.extend([Message.user("Set up the service"),
+                                 Message.assistant("Six questions.", tool_calls=[call]), tool])
+    write = ToolCall(id="w1", name="write_file",
+                     arguments={"path": "service.py", "content": "READY = True\n"})
+
+    def prompt(answers, scripts):
+        session.loop.gateway = Gateway(session.config, scripts=scripts)
+        agent.session_prompt({"sessionId": made["sessionId"], "prompt": [],
+                              "_meta": {"comodor": {"decision_answers": answers}}})
+        assert session._turn.acquire(timeout=10), "the turn did not finish"
+        session._turn.release()
+
+    prompt([{"decision_ref": "dr-acp6-0", "chosen": ["One"]},
+            {"decision_ref": "dr-acp6-1", "chosen": ["Two"]}],
+           [Script(text="Writing.", tool_calls=[write]), Script(text="unreachable")])
+    assert not (config.paths.project / "service.py").exists(), "dependent work withheld"
+    states = decision_states(session.conversation.messages)
+    assert [states[f"dr-acp6-{n}"].status for n in range(6)] == \
+        ["stale", "stale", "open", "open", "open", "open"]
+    updates = [message["params"]["update"] for message in out.messages
+               if message.get("method") == "session/update"]
+    reported = [update for update in updates
+                if update.get("sessionUpdate") == "clarification_required"]
+    assert reported, "the rest are reported again"
+
+    prompt([{"decision_ref": f"dr-acp6-{n}", "chosen": ["One"]} for n in range(2, 6)],
+           [Script(text="Writing.", tool_calls=[write]), Script(text="Done.")])
+    assert (config.paths.project / "service.py").exists()

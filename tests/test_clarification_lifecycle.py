@@ -418,3 +418,97 @@ def test_a_later_explicit_request_raises_the_same_decision_with_the_same_ref(
     refs = _form_refs(agent)
     assert len(refs) == 2 and refs[0] == refs[1]
     assert first.clarification["decision_ref"] == again.clarification["decision_ref"]
+
+
+# --------------------------------------------------------------------------- #
+# SC-044 — a cancelled mandatory question is not re-raised in the same attempt
+# (T219; FR-129, D16, plan §G.4). Cancelled, never declined.
+# --------------------------------------------------------------------------- #
+
+
+VARIANT = "which   DATABASE should this use?"
+
+
+def a_question_worded(call_id, prompt):
+    call = a_question(call_id)
+    call.arguments["questions"][0]["question"] = prompt
+    return call
+
+
+def test_sc044_the_tool_does_not_put_a_cancelled_question_again(tool_context):
+    answerer = Answerer(tool_context.bus, forms.CANCELLED)
+    tool = ask_tool.Ask()
+    first = tool.run(tool_context, questions=a_question("q1").arguments["questions"])
+    again = tool.run(tool_context, questions=a_question_worded("q2", VARIANT)
+                     .arguments["questions"])
+
+    assert len(answerer.requests) == 1, "zero repeat forms"
+    assert "asked again" in again.content
+    assert again.meta["outcome"] == "cancelled"
+    assert again.meta["clarification"]["decision_ref"] == \
+        first.meta["clarification"]["decision_ref"]
+    decision = tool_context.evidence.decisions[0]
+    assert decision.state == "unresolved"
+
+
+def test_sc044_the_tool_guard_is_the_match(tool_context, monkeypatch):
+    """Mutation check: with `_same` never matching, the question is put again."""
+    monkeypatch.setattr(ask_tool, "_same", lambda left, right: False)
+    answerer = Answerer(tool_context.bus, forms.CANCELLED)
+    tool = ask_tool.Ask()
+    tool.run(tool_context, questions=a_question("q1").arguments["questions"])
+    tool.run(tool_context, questions=a_question_worded("q2", VARIANT).arguments["questions"])
+    assert len(answerer.requests) == 2, "the mutation re-raises the cancelled question"
+
+
+def cancelled_batch(config, bus):
+    answerer = Answerer(bus, forms.CANCELLED)
+    agent = make_agent(config, bus, [
+        Script(text="Asking.", tool_calls=[a_question("q1"),
+                                           a_question_worded("q2", VARIANT), a_write()]),
+        Script(text="unreachable")])
+    return answerer, agent, agent.run(REQUEST)
+
+
+def test_sc044_a_reply_does_not_re_raise_a_cancelled_question(config, bus):
+    answerer, agent, result = cancelled_batch(config, bus)
+
+    assert len(answerer.requests) == 1, "zero repeat forms"
+    assert not (config.paths.project / "db.py").exists()
+    assert result.stopped == "clarification_required"
+    assert result.clarification["outcome"] == "cancelled"
+    shown = answerer.requests[0].meta["questions"][0]["decision_ref"]
+    assert result.clarification["decision_ref"] == shown
+    assert len(agent.gateway.provider("fake").calls) == 1, \
+        "no further model call in the attempt"
+
+
+LAYERS = {
+    "withholding": ("_withheld_by", lambda self, context, call: ""),
+    "match": ("_same", lambda left, right: False),
+    "one_form": ("_ask_as_one_form", lambda self: False),
+}
+
+
+def _disable(monkeypatch, layer):
+    from comodor.agent import loop as loop_module
+
+    name, replacement = LAYERS[layer]
+    owner = ask_tool if name == "_same" else loop_module.AgentLoop
+    monkeypatch.setattr(owner, name, replacement)
+
+
+@pytest.mark.parametrize("layer", list(LAYERS))
+def test_sc044_each_layer_alone_still_prevents_the_repeat(config, bus, monkeypatch, layer):
+    """The layers are independent: removing any one still leaves one form."""
+    _disable(monkeypatch, layer)
+    answerer, _agent, _result = cancelled_batch(config, bus)
+    assert len(answerer.requests) == 1
+
+
+def test_sc044_without_every_layer_the_question_is_raised_again(config, bus, monkeypatch):
+    """Mutation check: with the suppression removed entirely, a second form appears."""
+    for layer in LAYERS:
+        _disable(monkeypatch, layer)
+    answerer, _agent, _result = cancelled_batch(config, bus)
+    assert len(answerer.requests) == 2, "the mutation re-raises the cancelled question"

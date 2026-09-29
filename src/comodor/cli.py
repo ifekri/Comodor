@@ -78,9 +78,14 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-steps", type=int, help="override the step limit")
     run.add_argument(
         "--interactions", default="",
-        help="JSON list of answers to script for question forms, applied in "
-             "order: \"answer\" (with an optional value, or values keyed by "
-             "question header), \"cancel\", \"expire\" or \"unattended\". "
+        help="JSON list of what to do with each question form, one entry per "
+             "form, in order: {\"action\": \"answer\", \"value\": ...} for a "
+             "form of one question, {\"action\": \"answer\", \"values\": "
+             "{header: answer}} for any form, or \"cancel\", \"expire\", "
+             "\"unattended\". An answer must state its choice; nothing is "
+             "chosen for you. A script of more than one entry names each "
+             "entry's headers (\"values\", or \"headers\" for the other "
+             "actions). A script that does not fit fails with exit 1. "
              "Nothing is scripted without it.")
     run.add_argument(
         "--decision-answers", default=None, metavar="PATH",
@@ -267,49 +272,125 @@ def _load_plugins(config: Config, bus: Any) -> Any:
     return manager
 
 
-def _scripted_interactions(raw: Any) -> list[Any]:
-    """The caller's scripted answers, in order. Empty when none were given.
+#: What a scripted entry may do to a form — what a person could do to it.
+_ACTIONS = ("answer", "cancel", "expire", "unattended")
 
-    The contract is a JSON list whose entries are either an action string
-    (`"cancel"`, `"expire"`, `"unattended"`, `"answer"`) or an object with an
-    `action` and, for an answer, a `value`. A headless run with an empty
-    script behaves exactly as it always has: every form is unattended.
+
+class ScriptError(ValueError):
+    """A scripted interaction the run cannot use, said plainly (D19)."""
+
+
+def _scripted_interactions(raw: Any) -> list[dict[str, Any]]:
+    """The caller's scripted entries, checked whole. Empty when none were given.
+
+    The contract is a JSON list, one entry per question form, in order. An
+    entry is an action name (`"cancel"`, `"expire"`, `"unattended"`) or an
+    object with an `action`; an `answer` states its choice as a `value` (a
+    form of one question) or as `values` keyed by header. A script of more
+    than one entry names each entry's headers, so an entry cannot drift onto
+    a form it was not written for. Anything else is refused here, before the
+    run starts and before any model call: invalid JSON, a list that is not a
+    list, an unknown action, an answer with no choice in it (D19).
+
+    A headless run with no script behaves exactly as it always has: every form
+    is unattended.
     """
-    if not raw:
+    if raw is None or raw == "" or raw == []:
         return []
     if isinstance(raw, (list, tuple)):
-        return list(raw)
-    try:
-        parsed = json.loads(str(raw))
-    except ValueError:
-        return []
-    return list(parsed) if isinstance(parsed, list) else []
+        parsed: Any = list(raw)
+    else:
+        try:
+            parsed = json.loads(str(raw))
+        except ValueError as problem:
+            raise ScriptError(f"it is not valid JSON ({problem})") from None
+        if not isinstance(parsed, list):
+            raise ScriptError("it must be a JSON list, one entry per question form")
+    several = len(parsed) > 1
+    return [_entry(item, index, several) for index, item in enumerate(parsed, start=1)]
 
 
-def _apply_interaction(request: Any, action: Any, forms: Any) -> None:
+def _entry(item: Any, index: int, several: bool) -> dict[str, Any]:
+    """One scripted entry, normalised, or the reason it cannot be used."""
+    if isinstance(item, str):
+        item = {"action": item}
+    if not isinstance(item, dict):
+        raise ScriptError(f"entry {index} is neither an action name nor an object")
+    action = str(item.get("action", "")).strip().lower()
+    if action not in _ACTIONS:
+        raise ScriptError(f"entry {index} has the unknown action {item.get('action')!r}; "
+                          f"use one of {', '.join(_ACTIONS)}")
+    entry: dict[str, Any] = {"index": index, "action": action,
+                             "value": "", "values": {}, "headers": []}
+    value, values, headers = item.get("value"), item.get("values"), item.get("headers")
+    if value is not None:
+        if not isinstance(value, str) or not value.strip():
+            raise ScriptError(f"entry {index} has an empty `value`")
+        entry["value"] = value.strip()
+    if values is not None:
+        if not isinstance(values, dict) or not values:
+            raise ScriptError(f"entry {index}: `values` must map each question header "
+                              f"to its answer")
+        for header, answer in values.items():
+            if not isinstance(answer, str) or not answer.strip():
+                raise ScriptError(f"entry {index}: the answer for {header!r} is empty")
+        entry["values"] = {str(header): answer.strip() for header, answer in values.items()}
+    if headers is not None:
+        if not isinstance(headers, list) or not headers or not all(
+                isinstance(header, str) and header.strip() for header in headers):
+            raise ScriptError(f"entry {index}: `headers` must list the headers of the "
+                              f"form it is for")
+        entry["headers"] = [header.strip() for header in headers]
+    if action == "answer":
+        if not entry["value"] and not entry["values"]:
+            raise ScriptError(
+                f"entry {index} is an `answer` that states no choice; give a `value`, "
+                f"or `values` keyed by header — no option is ever chosen for you")
+        if entry["value"] and entry["values"]:
+            raise ScriptError(f"entry {index} gives both `value` and `values`; give one")
+        if entry["headers"]:
+            raise ScriptError(f"entry {index}: an `answer` names its headers through "
+                              f"`values`")
+    elif entry["value"] or entry["values"]:
+        raise ScriptError(f"entry {index}: `{action}` takes no answer")
+    if several and not (entry["values"] or entry["headers"]):
+        raise ScriptError(
+            f"entry {index} names no headers; in a script of more than one entry "
+            f"every entry names the headers of the form it is for (`values`, or "
+            f"`headers`)")
+    return entry
+
+
+def _mismatch(entry: dict[str, Any], request: Any, forms: Any) -> str:
+    """Why `entry` does not fit this form, or an empty string."""
+    shown = [question.header for question in forms.decode(request.meta.get("questions") or [])]
+    named = list(entry["values"]) or list(entry["headers"])
+    unknown = [header for header in named if header not in shown]
+    if unknown:
+        return (f"entry {entry['index']} names {unknown[0]!r}, which is not on the form "
+                f"that was raised (its headers: {', '.join(shown)})")
+    if entry["action"] == "answer" and not entry["values"] and len(shown) != 1:
+        return (f"entry {entry['index']} is an `answer` without headers, which fits only "
+                f"a form of one question; the form raised has {len(shown)}")
+    return ""
+
+
+def _apply_interaction(request: Any, entry: dict[str, Any], forms: Any) -> None:
     """Do to a form what a person would have done. The tool does the rest.
 
     Every branch resolves the *request* the way its surface would, so the ask
     tool, the ledger and the loop produce the same lifecycle they do for a
     real answer, a real dismissal, a real expiry or a real absence.
     """
-    values: dict[str, str] = {}
-    if isinstance(action, dict):
-        verb = str(action.get("action", "")).strip().lower()
-        value = str(action.get("value", "") or "")
-        keyed = action.get("values")
-        if isinstance(keyed, dict):
-            values = {str(header): str(answer or "") for header, answer in keyed.items()}
-    else:
-        verb, value = str(action).strip().lower(), ""
-
-    if verb == "cancel":
+    action = entry["action"]
+    if action == "cancel":
         request.answer(forms.CANCELLED)
-    elif verb == "expire":
+    elif action == "expire":
         request.expire()
-    elif verb == "answer":
-        request.answer(_answers_from_form(request, value, forms, values=values))
-    else:                                    # "unattended", or unrecognised
+    elif action == "answer":
+        request.answer(_answers_from_form(request, entry["value"], forms,
+                                          values=entry["values"]))
+    else:
         request.answer(forms.UNATTENDED)
 
 
@@ -317,25 +398,21 @@ def _answers_from_form(request: Any, value: str, forms: Any,
                        values: dict[str, str] | None = None) -> str:
     """A real answer document, built from the form the model actually raised.
 
-    The question headers are the model's, so an answer must bind to them by
-    header rather than guess. `values` answers each question by its header.
-    A lone `value` is one answer, not one answer per question: it picks the
-    option it names on every question that offers it, and otherwise is
-    written into the first question's write-your-own row only — a framework
-    answer must not also land in an unrelated database question. A question
-    left with nothing takes its first offered option, or stays unanswered.
+    The question headers are the model's, so an answer binds to them by
+    header rather than guess. It answers exactly what it names: `values`
+    answers each question by its header, and a lone `value` answers the one
+    question of a one-question form. A question it does not name stays
+    unanswered — never filled with a first option, and never handed a value
+    meant for another question (D19).
     """
     questions = forms.decode(request.meta.get("questions") or [])
     keyed = dict(values or {})
+    if value and not keyed:
+        if len(questions) != 1:
+            raise ScriptError("an `answer` without headers fits only a form of one "
+                              "question")
+        keyed = {questions[0].header: value}
     answers = []
-    # A lone value that names an option somewhere is that choice, and only
-    # that; one that names nothing is free text for the first question.
-    free_text_for = (
-        questions[0].header
-        if value and not keyed and questions and not any(
-            value in [option.label for option in question.options if not option.free]
-            for question in questions)
-        else None)
     for question in questions:
         offered = [option.label for option in question.options if not option.free]
         given = keyed.get(question.header, "")
@@ -343,18 +420,24 @@ def _answers_from_form(request: Any, value: str, forms: Any,
             chosen, written = [given], ""
         elif given:
             chosen, written = [], given
-        elif value and value in offered:
-            chosen, written = [value], ""
-        elif question.header == free_text_for:
-            chosen, written = [], value
-        elif offered:
-            chosen, written = [offered[0]], ""
         else:
             chosen, written = [], ""
         answers.append(forms.Answer(header=question.header,
                                     prompt=question.prompt,
                                     chosen=chosen, written=written))
     return forms.encode_answers(answers)
+
+
+def _report_script_error(problem: str, as_json: bool,
+                         clarification: dict[str, Any] | None = None) -> None:
+    """A scripted interaction that did not fit: what failed, said once."""
+    print(f"error: --interactions: {problem}", file=sys.stderr)
+    if as_json:
+        body: dict[str, Any] = {"text": "", "ok": False, "stopped": "error",
+                                "error": {"kind": "interactions", "message": problem}}
+        if clarification is not None:
+            body["clarification"] = clarification
+        print(json.dumps(body, ensure_ascii=False, indent=2))
 
 
 def run_headless(config: Config, args: argparse.Namespace) -> int:
@@ -401,6 +484,15 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
               "resume a run that stopped for a decision", file=sys.stderr)
         return 2
 
+    # The script is checked whole before anything runs: a script that cannot
+    # be used ends the run here, before any model call, rather than being
+    # quietly treated as no script at all (D19).
+    try:
+        interactions = _scripted_interactions(getattr(args, "interactions", ""))
+    except ScriptError as problem:
+        _report_script_error(str(problem), args.json)
+        return 1
+
     if args.yes:
         config.safety.auto_approve_writes = True
         config.safety.auto_approve_shell = True
@@ -434,7 +526,7 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
     # first edit, or that nothing was ever read. The count was already
     # reported; the names cost nothing and are what makes it checkable.
     used: list[str] = []
-    interactions = _scripted_interactions(getattr(args, "interactions", ""))
+    mismatched: list[str] = []
 
     def observe(event: Any) -> None:
         if event.kind is Kind.TOOL_START:
@@ -447,8 +539,19 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
                 # as unattended and the run ends needing it, rather than
                 # carrying on without it. The scripted paths drive the same
                 # tool and lifecycle the interactive surfaces do.
-                action = interactions.pop(0) if interactions else "unattended"
-                _apply_interaction(request, action, forms)
+                if mismatched or not interactions:
+                    request.answer(forms.UNATTENDED)
+                    return
+                why = _mismatch(interactions[0], request, forms)
+                if why:
+                    # The entry was written for another form. The form is
+                    # closed as nobody-answered — never as a cancellation the
+                    # person did not make — and nothing is applied to it; the
+                    # run ends reporting the script error (D19).
+                    mismatched.append(why)
+                    request.answer(forms.UNATTENDED)
+                    return
+                _apply_interaction(request, interactions.pop(0), forms)
 
     bus.subscribe(observe)
 
@@ -502,6 +605,16 @@ def run_headless(config: Config, args: argparse.Namespace) -> int:
         built.close()
         return 1
     memory.wait_for_reflection(timeout=20.0)
+
+    if mismatched or interactions:
+        # An entry that did not fit its form, or one no form ever used: the
+        # script was not what this run needed, and it is not quietly dropped.
+        problem = mismatched[0] if mismatched else (
+            f"entry {interactions[0]['index']} was never used: no form it fits "
+            f"was raised")
+        _report_script_error(problem, args.json, result.clarification)
+        built.close()
+        return 1
 
     if args.json:
         payload = {
