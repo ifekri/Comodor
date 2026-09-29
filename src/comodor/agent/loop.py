@@ -43,7 +43,7 @@ from ..questions import MAX_QUESTIONS as _MAX_QUESTIONS
 from ..safety import PermissionEngine, Risk
 from ..tools import ToolContext, ToolRegistry, ToolResult
 from . import plan, preflight, staleness
-from .context import Conversation, Optimizer
+from .context import Conversation
 from .prompts import COMPACT_PROMPT, build_system_prompt, project_instructions
 from .tokens import TaskMeasurement
 
@@ -235,10 +235,6 @@ class AgentLoop:
         self.bus = bus
         self.permissions = permissions
         self.conversation = conversation or Conversation()
-        # Which context optimizations run, from the settings — all of them
-        # unless switched off by name, none under the benchmark's naive
-        # strategy (`agent/context.py::OPTIMIZATIONS`).
-        self.conversation.optimizer = Optimizer.from_config(config)
         self.memory = memory                     # LearningEngine, or None
         self.skills = skills                     # SkillRegistry, or None
         #: The background-delegate manager, when this session has one. Read at
@@ -1678,19 +1674,12 @@ class AgentLoop:
 
     def _maybe_compact(self, system_prompt: str, specs: list[ToolSpec]) -> None:
         agent = self.config.agent
-        # The benchmark's comparison strategy: everything is re-sent as it
-        # was, so the cost of the product's context work can be measured
-        # against it. Compaction stays — a request larger than the window is
-        # refused by every provider, and a baseline that cannot finish a task
-        # measures nothing — but nothing below it runs.
-        naive = getattr(agent, "context_strategy", "current") == "naive"
 
         # Before measuring anything. Screenshots are the largest thing in a
         # desktop run's history and the fastest to go stale, and dropping them
         # is exact and free - where compaction is a model call. Doing it first
         # also means the measurement below is of what will actually be sent.
-        gone = 0 if naive else self.conversation.forget_old_pictures(
-            getattr(agent, "keep_screenshots", 2))
+        gone = self.conversation.forget_old_pictures(getattr(agent, "keep_screenshots", 2))
         if gone:
             self._emit_usage(system_prompt, specs)
 
@@ -1712,7 +1701,7 @@ class AgentLoop:
         # every step would have spent more than it saved. Doing it at the point
         # compaction would happen anyway costs nothing extra, because
         # compaction busts the same cache and pays a model call on top.
-        stale, freed = (0, 0) if naive else self.conversation.forget_superseded_reads()
+        stale, freed = self.conversation.forget_superseded_reads()
         if stale:
             self._note(f"Dropped {stale} file read{'s' if stale > 1 else ''} "
                        f"that later edits had already made out of date "
@@ -1727,19 +1716,17 @@ class AgentLoop:
         # Still under pressure. Before a model call summarises history away,
         # the budget manager moves retrievable, low-relevance tool results
         # aside — exact pointers, no summary, nothing lost (FR-096, FR-097).
-        if not naive:
-            head = self.conversation.counter.count(
-                [Message.system(system_prompt)], specs)
-            budget = max(0, int(limit * agent.compact_at) - head)
-            moved, freed = self.conversation.withhold(budget, self.conversation.last_user_text)
-            if moved:
-                self._note(f"Moved {moved} tool result{'s' if moved > 1 else ''} out "
-                           f"of the conversation to stay within the context budget "
-                           f"({freed:,} tokens); each is retrievable.")
-                self._emit_usage(system_prompt, specs)
-                if not self.conversation.needs_compaction(limit, agent.compact_at,
-                                                          system_prompt, specs):
-                    return
+        head = self.conversation.counter.count([Message.system(system_prompt)], specs)
+        budget = max(0, int(limit * agent.compact_at) - head)
+        moved, freed = self.conversation.withhold(budget, self.conversation.last_user_text)
+        if moved:
+            self._note(f"Moved {moved} tool result{'s' if moved > 1 else ''} out "
+                       f"of the conversation to stay within the context budget "
+                       f"({freed:,} tokens); each is retrievable.")
+            self._emit_usage(system_prompt, specs)
+            if not self.conversation.needs_compaction(limit, agent.compact_at,
+                                                      system_prompt, specs):
+                return
 
         removed = self.conversation.compact(self._summarise)
         if removed:

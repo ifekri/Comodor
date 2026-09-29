@@ -1022,7 +1022,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
 
 **Independent test**: `python -m pytest -q tests/test_context_*.py tests/test_overflow.py tests/test_config_save.py tests/test_token_accounting.py tests/test_baseline_headless.py tests/test_insights.py` passes, and `python -m pytest -m performance -n 0 -q` passes.
 
-- [ ] T220 [US3] Move the tests that use the two settings onto test-internal seams, before the settings are removed, in `tests/test_context_no_superseded.py`, `tests/test_context_no_validation_loss.py` and `tests/test_context_optimization_neutrality.py`
+- [X] T220 [US3] Move the tests that use the two settings onto test-internal seams, before the settings are removed, in `tests/test_context_no_superseded.py`, `tests/test_context_no_validation_loss.py` and `tests/test_context_optimization_neutrality.py`
+  - **Result (2026-09-30)**: `tests/test_context_no_superseded.py`, `tests/test_context_no_validation_loss.py` and `tests/test_context_optimization_neutrality.py` now switch optimizations off only through `Optimizer(enabled)`, or by monkeypatching `overflow._summarise_log`. 20 tests pass, and the sweep and settled-check mutation checks still fail with their guards removed.
   - **Req**: SC-013, SC-027, SC-028, D17, SC-025; plan §G.3 · **Dep**: T215 · **Evidence**:
     - `tests/test_context_no_superseded.py` (the setting at ~92), `tests/test_context_no_validation_loss.py` (~46–47, ~120) and the settings-driven tests of `tests/test_context_optimization_neutrality.py` (~82, ~133, ~145, ~162) switch optimizations off only through test-internal seams:
       - `Conversation(optimizer=Optimizer(enabled))`, or assigning `loop.conversation.optimizer = Optimizer(enabled)` after the loop is built;
@@ -1031,7 +1032,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - Every mutation check in these files still fails with its guard removed.
   - **Done when**: the three files pass with the settings still present, and no longer read `config.agent` for either setting
 
-- [ ] T221 [US3] Remove both settings from the configuration and the runtime in `src/comodor/config.py`, `src/comodor/agent/context.py`, `src/comodor/agent/loop.py` and `src/comodor/tools/overflow.py`
+- [X] T221 [US3] Remove both settings from the configuration and the runtime in `src/comodor/config.py`, `src/comodor/agent/context.py`, `src/comodor/agent/loop.py` and `src/comodor/tools/overflow.py`
+  - **Result (2026-09-30)**: Both fields are gone from `AgentConfig`. Removed with them: `Optimizer.from_config`, the loop's optimizer assignment, the alternative branches of `_maybe_compact` and `overflow._log_summaries_on`. The strategy test in `tests/test_context_recoverability.py` is deleted. `tests/test_config_save.py` shows that a file still naming both keys loads, with every optimization on. Context, overflow, loop and config suites: 176 pass; performance: 36.
   - **Req**: D17, FR-079, SC-024; Constitution I · **Dep**: T220, T218 (both edit `src/comodor/agent/loop.py`; T218 lands first) · **Evidence**:
     - `src/comodor/config.py`: both fields and their comments are removed.
     - `src/comodor/agent/context.py`: `Optimizer.from_config` and the comments that point at the settings are removed. `OPTIMIZATIONS` and the `Optimizer(enabled)` constructor stay as the test seam.
@@ -1041,7 +1043,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - A compatibility test is added to `tests/test_config_save.py`: a configuration file that still carries either key loads without error, and the key has no effect — every optimization is on, and log summarisation runs (`config._apply` ignores unknown keys).
   - **Done when**: the context, overflow, loop, config and performance suites pass
 
-- [ ] T222 [P] [US3] Pin production token accounting in `tests/test_token_accounting.py`
+- [X] T222 [P] [US3] Pin production token accounting in `tests/test_token_accounting.py`
+  - **Result (2026-09-30)**: `tests/test_token_accounting.py` pins the exact key sets of `TurnRecord.as_dict()` and `TaskMeasurement.as_dict()`. The accounting, metrics, insights and headless-report suites pass (50).
   - **Req**: FR-072, FR-073, FR-074, FR-075; Constitution XVI, XXI · **Dep**: T215 · **Evidence**:
     - A test pins the key set of `TaskMeasurement.as_dict()` and `TurnRecord.as_dict()` in `src/comodor/agent/tokens.py` as they are at T215's HEAD.
     - Unchanged and green: `tests/test_baseline_headless.py::test_today_the_json_report_has_exactly_these_fields` (`usage` and `measurement` in `comodor run --json`), `tests/test_token_accounting.py`, `tests/test_baseline_tokens.py`, `tests/test_metrics_locality.py`, `tests/test_metrics_overhead.py`, `tests/test_metrics_redaction.py` and `tests/test_insights.py`.

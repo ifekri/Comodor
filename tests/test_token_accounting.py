@@ -144,3 +144,30 @@ def test_the_report_documents_name_their_accounting_version():
     paired = report.as_paired_json([], [], provider="fake", model="fake-1", tries=3)
     assert plain["token_accounting_version"] == 2
     assert paired["token_accounting_version"] == 2
+
+
+# --------------------------------------------------------------------------- #
+# T222 — production token accounting is pinned (FR-072, FR-073; D14 keeps it)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_per_call_record_keeps_exactly_these_fields():
+    from comodor.agent.tokens import TurnRecord
+
+    assert set(TurnRecord().as_dict()) == {
+        "input_tokens", "output_tokens", "cached_tokens", "written_tokens",
+        "context_size", "estimated"}
+
+
+def test_the_per_task_record_keeps_exactly_these_fields():
+    """Cost and outcome together: what `comodor run --json` reports as
+    `measurement` and what insights aggregate. Removing or renaming a field
+    is a change to what the product accounts for, and must be deliberate."""
+    from comodor.agent.tokens import TaskMeasurement
+
+    assert set(TaskMeasurement().as_dict()) == {
+        "input_tokens", "output_tokens", "cached_tokens", "written_tokens",
+        "context_size", "estimated_turns", "model_turns", "tool_calls", "retries",
+        "clarifications_raised", "clarifications_answered", "corrections",
+        "knowledge_hits", "knowledge_stale", "preflight_calls", "preflight_tokens",
+        "outcome", "validation_outcome"}

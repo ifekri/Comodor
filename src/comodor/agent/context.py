@@ -46,12 +46,11 @@ Summariser = Callable[[list[Message]], str]
 # provider has cached, and the one moment that is worth paying for is the
 # moment compaction would bust the same cache anyway.
 #
-# Every optimization here has a switch (`OPTIMIZATIONS`), so the benchmark
-# can measure each one against the paired baseline, and the naive strategy
-# turns all of them off.
+# Every optimization here is named (`OPTIMIZATIONS`) and runs in the product.
+# A test can switch any of them off for itself, through the `Optimizer` a
+# conversation is given; no setting does that outside the tests.
 
-#: The optimizations behind the funnel, by the name the config switches them
-#: off with (`agent.optimizations_off`).
+#: The optimizations behind the funnel, by name.
 OPTIMIZATIONS = ("dedup", "delta", "budget", "ranking", "summary_provenance")
 
 #: Below this a reference or a delta saves less than the sentence costs.
@@ -97,18 +96,11 @@ class Withheld:
 
 
 class Optimizer:
-    """The switches, read once per conversation from the agent settings."""
+    """Which optimizations run in a conversation: all of them, unless a test
+    switches some off for itself."""
 
     def __init__(self, enabled: Iterable[str] | None = None) -> None:
         self.enabled = set(OPTIMIZATIONS if enabled is None else enabled)
-
-    @classmethod
-    def from_config(cls, config: Any) -> "Optimizer":
-        agent = getattr(config, "agent", None)
-        if getattr(agent, "context_strategy", "current") == "naive":
-            return cls(())
-        off = set(getattr(agent, "optimizations_off", None) or ())
-        return cls(name for name in OPTIMIZATIONS if name not in off)
 
     def on(self, name: str) -> bool:
         return name in self.enabled

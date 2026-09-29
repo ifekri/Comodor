@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from comodor import questions as forms
 from comodor.agent import AgentLoop, Conversation
-from comodor.agent.context import Optimizer
+from comodor.agent.context import OPTIMIZATIONS, Optimizer
 from comodor.events import Kind
 from comodor.providers.base import Message, Role, ToolCall
 from comodor.providers.fake import Script
@@ -44,7 +44,6 @@ def make_agent(config, bus, scripts):
 
 def test_a_clarification_is_raised_under_every_optimization_setting(config, bus):
     for off in ([], ["dedup"], ["budget"], ["delta", "ranking"], list(Optimizer().enabled)):
-        config.agent.optimizations_off = off
         raised: list = []
         fresh_bus = type(bus)()
 
@@ -56,6 +55,9 @@ def test_a_clarification_is_raised_under_every_optimization_setting(config, bus)
         fresh_bus.subscribe(dismiss)
         agent = make_agent(config, fresh_bus, [
             Script(text="Asking.", tool_calls=[a_question()]), Script(text="never")])
+        # Switched off inside the test only (D17).
+        agent.conversation.optimizer = Optimizer(
+            name for name in OPTIMIZATIONS if name not in off)
         result = agent.run("SQLite or PostgreSQL?")
         assert len(raised) == 1, off
         assert result.stopped == "clarification_required", off
@@ -113,11 +115,13 @@ def test_a_reference_never_stops_the_agent_reading_a_file_that_changed(config, b
 # --------------------------------------------------------------------------- #
 
 
-def test_a_failing_log_keeps_its_failure_under_every_setting(tool_context):
+def test_a_failing_log_keeps_its_failure_under_every_setting(tool_context, monkeypatch):
     log = "exit 1 in 2s\n" + "\n".join(f"case {n} PASSED" for n in range(300)) + \
           "\nFAILED tests/test_x.py::test_y - AssertionError: assert 1 == 2\n1 failed"
     for off in ([], ["log_summary"]):
-        tool_context.config.agent.optimizations_off = off
+        if off:
+            # Log summarisation switched off inside the test only (D17).
+            monkeypatch.setattr(overflow, "_summarise_log", lambda *args, **kwargs: None)
         carried = overflow.contain(ToolResult.success(log, exit_code=1), tool_context,
                                    "run_shell")
         assert "AssertionError: assert 1 == 2" in carried.content, off

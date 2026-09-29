@@ -480,3 +480,33 @@ def test_the_saved_file_holds_its_bytes_before_the_rename(home, monkeypatch):
     config.save()
 
     assert order.index("fsync") < order.index("rename")
+
+
+# --------------------------------------------------------------------------- #
+# D17 — two runtime-only settings are gone; a file that still has them loads
+# --------------------------------------------------------------------------- #
+
+
+def test_a_config_that_still_names_the_removed_settings_loads_and_they_do_nothing(home):
+    """Neither setting was ever offered, but a file may still carry one. It
+    loads like any unknown key, and the product runs as it always does."""
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.agent.context import OPTIMIZATIONS
+    from comodor.events import EventBus
+    from comodor.providers.gateway import Gateway
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+
+    mine(home, agent={"context_strategy": "naive",
+                      "optimizations_off": list(OPTIMIZATIONS) + ["log_summary"],
+                      "max_steps": 12})
+    config = load(cwd=home / "project")
+    assert config.agent.max_steps == 12, "the rest of the section still applies"
+    assert not hasattr(config.agent, "context_strategy")
+    assert not hasattr(config.agent, "optimizations_off")
+
+    bus = EventBus()
+    agent = AgentLoop(config, Gateway(config, scripts=[]), ToolRegistry(), bus,
+                      PermissionEngine(config, bus), Conversation())
+    assert agent.conversation.optimizer.enabled == set(OPTIMIZATIONS), \
+        "every optimization runs"

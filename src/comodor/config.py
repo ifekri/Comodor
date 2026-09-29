@@ -188,19 +188,6 @@ class AgentConfig:
     system_prompt_extra: str = ""
     prompt_cache: bool = True            # let the provider re-serve the prefix
     prompt_cache_ttl: str = "5m"         # "5m" or "1h"; the hour costs more to write
-    #: How the conversation is assembled for the model. `current` is the
-    #: product. `naive` is the benchmark's comparison strategy and nothing
-    #: else: full history, full file contents and full tool output re-sent on
-    #: every turn, with no superseded-read sweep, no screenshot pruning and
-    #: no context optimization — the cost of not having any of them, measured
-    #: rather than asserted. Set by `bench/baseline.py`; never a setting a
-    #: person is offered.
-    context_strategy: str = "current"
-    #: Context optimizations switched off, by name — see
-    #: `agent/context.py::OPTIMIZATIONS`. Empty means all of them run. The
-    #: benchmark uses this to measure each one against the paired baseline;
-    #: it is not a setting a person needs.
-    optimizations_off: list[str] = field(default_factory=list)
 
 
 @dataclass

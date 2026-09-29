@@ -93,13 +93,6 @@ def test_a_short_log_is_not_touched(tool_context):
     assert overflow.contain(result, tool_context, "run_shell").content == result.content
 
 
-def test_log_summaries_are_off_under_the_naive_strategy(tool_context):
-    tool_context.config.agent.context_strategy = "naive"
-    result = ToolResult.success(a_log(True), exit_code=0)
-    carried = overflow.contain(result, tool_context, "run_shell")
-    assert "log" not in carried.meta
-
-
 # --------------------------------------------------------------------------- #
 # T079 — spill dedup and pointer validity
 # --------------------------------------------------------------------------- #
