@@ -1,44 +1,46 @@
 <!--
 Sync Impact Report
-- Version change: 1.1.0 → 2.0.0 (MAJOR). Principle XXI and the context-change
-  gate in "Compatibility Surfaces and Quality Gates" are redefined: a change
-  that alters what is sent to a model no longer has to produce a fresh
-  live-model paired run to be accepted, and no particular external provider
-  or model, paid call, or repository secret or variable may be required to
-  satisfy the gate. A guarantee earlier work could rely on (every such change
-  carries fresh paired evidence) no longer holds, so the change is classified
-  as a backward-incompatible redefinition.
-- Motivation: the owner decided (2026-09-27) that an external model is an
-  optional quality tool, not an acceptance requirement. Before this change,
-  meeting the gate meant paying a particular vendor, which made acceptance
-  depend on a bill rather than on the change. What is kept is the ability to
-  measure and the honesty of what is claimed.
+- Version change: 1.1.0 → 2.0.0 (MAJOR). Principle XXI, the context-change
+  gate in "Compatibility Surfaces and Quality Gates", and the Development
+  Workflow rule on which tests may gate acceptance are redefined. Acceptance of
+  any change, including one that alters what is sent to a model, is
+  deterministic: it rests on correctness, safety, performance and accounting
+  checks that use scripted model responses wherever a model is involved, and
+  it requires no provider calls or paid tokens. A guarantee that work written
+  against 1.1.0 could rely on — that every change to what is sent to a model
+  carries fresh comparative quality-and-token figures — no longer holds, so
+  this is a backward-incompatible redefinition.
+- Motivation: the owner decided (2026-09-28) that acceptance must not depend
+  on paying for, or having access to, any model. What is kept is honesty — no
+  claim of reduced tokens or of preserved or improved quality without evidence
+  the change itself provides — and production token-usage accounting, so
+  spending stays measurable.
 - Modified principles: XXI (Quality and Token Efficiency Are Measured
-  Together): "the project MUST maintain evidence …" becomes "no token
-  reduction or quality preservation may be claimed without paired evidence",
-  plus a paragraph on how paired evidence is produced and disclosed.
-- Modified sections: "Compatibility Surfaces and Quality Gates" — the
-  context-change gate is met either by a fresh paired run with a provider and
-  model the owner chooses, or, without one, by keeping the mechanism tested,
-  claiming nothing, and disclosing the latest paired evidence as unresolved.
-- Removed sections: none. Principles I–XX are unchanged.
+  Together; title unchanged) — claims must be truthful and supportable;
+  acceptance is deterministic and requires no provider calls or paid tokens;
+  production token-usage accounting is required.
+- Modified sections:
+  - "Compatibility Surfaces and Quality Gates": the context-change gate
+    remains and is met by deterministic tests of the changed mechanism, run
+    with scripted model responses, plus truthful, supportable claims.
+  - "Development Workflow": every test in an acceptance gate is deterministic
+    and requires no provider calls or paid tokens.
+- Added sections: none. Removed sections: none. Principles I–XX are
+  unchanged.
 - Migration plan for work in flight:
-  - Feature 002 (`specs/002-grounded-agent-quality/`, PR #61) adopts the gate's
-    second way. Its spec, plan, tasks and quickstart state that no token
-    reduction or quality preservation is claimed and disclose its failing
-    paired evidence (T015 and T155 fail SC-011; T155 flags two outcome
-    regressions) as unresolved.
-  - Feature 001 (`specs/001-production-hardening/`) does not cite the gate and
-    is unaffected.
+  - Feature 002 (`specs/002-grounded-agent-quality/`, PR #61) is accepted on
+    its deterministic gates. Its decisions D14–D17 retire the criteria that no
+    deterministic test measures and claim no token-efficiency or quality
+    improvement.
+  - Feature 001 (`specs/001-production-hardening/`) does not cite the
+    redefined rules and is unaffected.
   - Open PR #39 (trading core) changes no file that determines what is sent to
-    a model, so the gate does not apply to it.
-  - Work that already met the gate with a fresh paired run still meets it:
-    that is the first way, unchanged.
-  - The plan and checklist lines "Checked against … v1.1.0" record checks
-    made at that version and stay as records; later checks cite 2.0.0.
-  - `AGENTS.md` and `CLAUDE.md` are local, untracked guides. Where they
-    designate a model for live tests, that remains a testing preference and
-    never an acceptance requirement; where they diverge, this file governs.
+    a model.
+  - The plan and checklist lines "Checked against … v1.1.0" record checks made
+    at that version and stay as records; later checks cite 2.0.0.
+  - `AGENTS.md` and `CLAUDE.md` are local, untracked guides. Where they name a
+    model for tests, that is never an acceptance requirement; where they
+    diverge, this file governs.
 - Templates: dependent templates and commands read this file at runtime and
   were not modified.
 - Application source: not modified by this amendment.
@@ -375,25 +377,27 @@ owns the consequences.
 ### XXI. Quality and Token Efficiency Are Measured Together
 
 Quality optimization and token optimization MUST be treated as one
-multi-objective engineering problem, never as independent goals. No token
-reduction may be claimed, and no change described as preserving quality,
-without paired evidence that it does not introduce lower task success, more
-retries, more user corrections, more hallucinated assumptions, more failed
-tool calls, more regressions, weaker tests, or the loss of necessary context.
-Where practical, representative benchmark scenarios MUST compare input
-tokens, output tokens, number of model turns, number of tool calls,
-clarification count, task success, correction count and validation success,
-before and after the change.
+multi-objective engineering problem, never as independent goals. Every claim
+that a change reduces tokens, or preserves or improves quality, MUST be
+truthful and supportable by evidence the change itself provides:
+deterministic tests, production token-usage accounting, or other checks that
+run without a model. No token reduction may be claimed, and no change
+described as preserving or improving quality, without such evidence that it
+does not introduce lower task success, more retries, more user corrections,
+more hallucinated assumptions, more failed tool calls, more regressions,
+weaker tests, or the loss of necessary context. Where that evidence does not
+exist, the claim is not made.
 
-Paired evidence comes from a benchmark run with a provider and model that the
-change's owner chooses. No particular external provider or model, no paid
-call, and no repository secret or variable may be required to produce it or
-to accept a change. The project MUST keep its paired-measurement mechanism
-working and deterministically tested, and MUST disclose the most recent
-paired results truthfully, including any that fail.
+Acceptance of a change MUST be deterministic: it rests on correctness,
+safety, performance and accounting checks that use scripted model responses
+wherever a model is involved, and it requires no provider calls or paid
+tokens. Production token-usage accounting MUST be kept, so that token
+consumption stays measurable (Principle XVI).
 
-Rationale: without a paired measurement, every token saved looks like a win
-and every quality loss it caused is invisible until a user reports it.
+Rationale: a claim nobody can check is marketing, and an acceptance gate that
+can only be met by paying for a model makes acceptance depend on a bill rather
+than on the change. What must never be lost is the honesty of what is claimed
+and the ability to count what the product spends.
 
 ## Compatibility Surfaces and Quality Gates
 
@@ -420,19 +424,12 @@ one exists.
 
 A change that alters context construction, prompt construction, retrieval,
 summarization, memory, learning, model orchestration or any other mechanism
-that determines what is sent to a model carries one additional gate: the
-paired quality-and-token evidence required by Principle XXI, measured on
-representative scenarios and reported with both halves. Token figures
-presented without the accompanying quality figures do not satisfy this gate.
-The gate is met in one of two ways, neither of which may require a particular
-external provider or model, a paid call, or a repository secret or variable:
-(a) a fresh paired run on the exact commit, with a provider and model the
-owner chooses, reported with both halves; or (b) without a fresh run, the
-paired-measurement mechanism the change relies on stays working and
-deterministically tested, the change claims no token reduction and no quality
-preservation, and the most recent paired evidence is disclosed as unresolved,
-including any failing result. A change accepted by way (b) is recorded as
-unmeasured, never as having passed a quality or token comparison.
+that determines what is sent to a model carries one additional gate:
+deterministic tests that exercise the changed mechanism with scripted model
+responses and show that it neither omits evidence an answer depends on nor
+weakens validation, and claims about tokens or quality that meet Principle
+XXI. Like every gate above, it is deterministic and requires no provider calls
+or paid tokens.
 
 ## Development Workflow
 
@@ -453,10 +450,10 @@ from green checks, review approval or the words "done" or "continue".
 Public commit and pull-request metadata uses neutral engineering language
 and carries no tool or model attribution. Review findings are classified,
 fixed where valid, answered with evidence, and resolved only after the fix
-is pushed and the checks on the new commit support it. A live model is
-invoked by tests only where a deterministic fake cannot exercise the
-behaviour, and then only the model the repository designates for that
-purpose; credentials are never exposed.
+is pushed and the checks on the new commit support it. Every test in an
+acceptance gate is deterministic, uses scripted model responses wherever a
+model is involved, and requires no provider calls or paid tokens; credentials
+are never exposed.
 
 ## Governance
 

@@ -7,11 +7,17 @@ description: "Dependency-ordered implementation tasks for the grounded high-qual
 
 **Input**: Design documents from `/specs/002-grounded-agent-quality/`
 
-**Prerequisites**: [spec.md](./spec.md) (130 FR, 44 SC) · [plan.md](./plan.md) (6 intervention points) · [research.md](./research.md) · [data-model.md](./data-model.md) · [contracts/](./contracts/) · [quickstart.md](./quickstart.md) · `.specify/memory/constitution.md` v2.0.0 (amended 2026-09-28; these tasks were first written against v1.1.0)
+**Prerequisites**: [spec.md](./spec.md) (130 FR, 44 SC; 166 active after D14) · [plan.md](./plan.md) (6 intervention points) · [research.md](./research.md) · [data-model.md](./data-model.md) · [contracts/](./contracts/) · [quickstart.md](./quickstart.md) · `.specify/memory/constitution.md` v2.0.0 (amended 2026-09-28; these tasks were first written against v1.1.0)
 
 **Revision**: regenerated 2026-09-14 against the remediated specification. Closes every CRITICAL, HIGH and MEDIUM finding from the prior `/speckit.analyze`.
 
 **Convergence (2026-09-24)**: reconciled against the final specification at `d911e3f` (specification quality gate 131/131) and the converged plan (plan Phases 9–10). Tasks T001–T171 keep their history and evidence. Wording that the final specification changed has been corrected in T009, T145, T155 and T156 (T156's own threshold-writing condition is now satisfied). T172–T207 are new: specification convergence (tasks Phases 12–17) and the live benchmark (tasks Phase 18, an optional benchmark and not an acceptance gate since 2026-09-27). They are derived from the converged plan as repaired after `/speckit.analyze` — one shared turn entry `run_turn` for all six application / surface turn-entry families, carrying `images` and delegate `decisions` through unchanged, a continuation bound to its workspace and mode, and a fresh vs resumed persistence lifecycle. Provisional task IDs drafted before the plan converged were not carried over. **SC-012 reconciliation (2026-09-25)**: T208–T214 (tasks Phase 16b) implement the SC-012 per-task reference rule and published-baseline provenance (spec D10–D12, plan §G), and T196, T198 and T199 are amended to them.
+
+**Acceptance scope (2026-09-29)**: amended for spec D14–D17, constitution 2.0.0 and plan Phase 11 (plan §F–§K).
+- Acceptance is deterministic. It needs no provider, credential, paid token or live run.
+- Tasks retired by D14 keep their IDs as neutral stubs — `- T### — retired (D14); completed before retirement.` or `…; not completed.` Their details stay in Git history. A stub is never re-run, re-checked or cited as evidence.
+- The former exact-HEAD gate task, T196, is superseded by T234; none of its earlier runs is acceptance evidence.
+- New work is T215–T241, in tasks Phases 19–24. T237–T238 (D18) and T239–T241 (D19) belong to tasks Phase 20.
 
 **Tests**: Required, not optional. SC-025 mandates a deterministic, mutation-checked regression test for every guard.
 
@@ -33,16 +39,17 @@ Clarification tasks additionally carry **Materiality · Waiting · Outcomes · D
 
 | Label | Story | Priority | Task phases |
 | --- | --- | --- | --- |
-| US1 | The agent asks instead of inventing | P1 | 2, 3 |
+| US1 | The agent asks instead of inventing | P1 | 2, 3, 20 |
 | US2 | "Done" means done, never claimed falsely | P1 | 7 |
-| US3 | The same work costs materially fewer tokens | P2 | 4, 5 |
+| US3 | The agent does not resend or lose what it has established | P2 | 4, 5, 21 |
 | US4 | It stops asking what it has already been told | P2 | 6 |
 | US5 | When it cannot do the thing, it says so | P3 | 2, 7 |
-| US6 | The improvement is measurable, not asserted | P3 | 1, 9 |
+| US6 | *Retired (D14)* | — | — |
 
 ## Standing constraints
 
-- **Extend, never duplicate.** One new **product/runtime** module only: `src/comodor/agent/evidence.py`. Benchmark-only helpers `bench/integrity.py` and `bench/baseline.py` are permitted by the plan ([plan.md §Complexity Tracking](./plan.md)) and must remain outside production runtime imports (`src/comodor/` never imports them — asserted by T154); no further benchmark helper without a new specification decision.
+- **Extend, never duplicate.** One new **product/runtime** module only: `src/comodor/agent/evidence.py`. Plan Phase 11 adds no module ([plan.md §Complexity Tracking](./plan.md)).
+- **Acceptance is deterministic** (D14; Constitution 2.0.0). Scripted model responses only. No provider call, credential, paid token or live run, in any task.
 - **Never alter the cached prompt head** — `build_system_prompt` output stays byte-identical across turns within a task (FR-050, FR-091).
 - **No release action of any kind** — no tag, workflow dispatch, publish or deploy (FR-084).
 - **PR #39 is read-only** (FR-085); no unrelated work (FR-128).
@@ -51,23 +58,32 @@ Clarification tasks additionally carry **Materiality · Waiting · Outcomes · D
 
 ## Plan-phase → task-phase crosswalk (normative)
 
-Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasing](./plan.md) numbers the architecture/implementation plan **0–10**; this file numbers the executable task phases **1–18**. A bare `Phase N` in one artifact is ambiguous in another, so every cross-artifact reference is written as `plan Phase N` or `tasks Phase N`. Within this file, an unqualified `Phase N` below this table means a **task** phase. The mapping is derived from task contents, not from the numbers:
+Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasing](./plan.md) numbers the architecture/implementation plan **0–11**; this file numbers the executable task phases **1–24**. A bare `Phase N` in one artifact is ambiguous in another, so every cross-artifact reference is written as `plan Phase N` or `tasks Phase N`. Within this file, an unqualified `Phase N` below this table means a **task** phase. The mapping is derived from task contents, not from the numbers:
 
 | Plan phase | Plan responsibility | Task phase(s) | Task IDs / notes |
 | --- | --- | --- | --- |
 | plan Phase 0 | Research — resolve or explicitly defer technical unknowns | *(none)* | Delivered as [research.md](./research.md). Its three deferred items are closed: T131 (CLI exit code `3`), T111 (fingerprint granularity), T156 (SC-011 threshold recorded in spec.md). R9–R14 record the convergence decisions |
-| plan Phase 1 | Foundation & baseline measurement — characterization (including the Web UI question round-trip), per-turn/per-task token record, paired baseline | tasks Phase 1, tasks Phase 4 | T001–T015 (characterization — T006 covers the shared question flow **and the Web UI round-trip** in `tests/test_web.py`; naive strategy; T015 baseline) · T061–T069 (token record, metrics tests, learning switch, benchmark learning mode). The T015 hard gate is the plan Phase 1 → plan Phase 4 gate |
+| plan Phase 1 | Foundation & token accounting — characterization (including the Web UI question round-trip), per-turn/per-task token record | tasks Phase 1, tasks Phase 4 | T001–T012 (characterization — T006 covers the shared question flow **and the Web UI round-trip** in `tests/test_web.py`) · T061–T067, T069 (token record, metrics tests, learning switch). T013–T015 and T068 are retired stubs (D14) |
 | plan Phase 2 | Grounded uncertainty contract — evidence ledger, materiality, escalation; no user-visible change | tasks Phase 2 | T016–T028 |
 | plan Phase 3 | Interactive clarification enforcement — lifecycles, `clarification_required`, additive protocol fields, renderer tests, delegates | tasks Phase 3 | T029–T060. Protocol schema/codegen T046–T048 and the overlay TS change T052 live here; the resulting bundle rebuild is T141 (tasks Phase 8) |
-| plan Phase 4 | Token accounting & context optimization behind IP-5 | tasks Phase 5 | T070–T098 (**token-efficient context**). Hard-blocked by T015. Not to be confused with tasks Phase 4 (observability), which belongs to plan Phase 1 |
+| plan Phase 4 | Token accounting & context optimization behind IP-5 | tasks Phase 5 | T070–T098 (**token-efficient context**); T096 is a retired stub (D14). Not to be confused with tasks Phase 4 (observability), which belongs to plan Phase 1 |
 | plan Phase 5 | Progressive-learning hardening — provenance, admission gate, supersession, fingerprint invalidation | tasks Phase 6 | T099–T119. Fingerprint granularity decision: T111. Not to be confused with tasks Phase 5 (token-efficient context) |
 | plan Phase 6 | Cross-surface integration — IP-4 completion gate; CLI/API/ACP/Web/channel wiring of the clarification-required outcome; docs; capability map; bundle | tasks Phase 7, tasks Phase 8 | T120–T129 (**completion gate**) · T130–T146 (surfaces — T131 exit code, **T133 API and Web session bridges**, T141 bundle rebuild, docs, release note; **T146 gate requires the Web clarification cases green**) |
-| plan Phase 7 | Regression & performance benchmark (historical) — paired reports, SC-011 threshold | tasks Phase 9 | T147–T158. T156 recorded the SC-011 threshold (D5); SC-011/SC-012 are measured by the optional T198/T199 in tasks Phase 18, which have not gated acceptance since 2026-09-27. Not to be confused with tasks Phase 7 (completion gate) |
+| plan Phase 7 | *Retired (D14)* | tasks Phase 9 | T147–T158 are retired stubs |
 | plan Phase 8 | Full validation on the exact final HEAD, three platforms | tasks Phase 10, tasks Phase 11 | T159–T170 (validation) · T171 (PR #39 read-only audit) |
-| plan Phase 9 | Specification convergence — stable `decision_ref`, the shared turn entry `run_turn`, continuation binding and lifecycle, surfaces, D7, FR-127, re-verification | tasks Phases 12–17 | T172–T175 (identity and index) · T177–T179 (output and protocol) · T180, T200, T176, T181, T201 (shared turn entry) · T182–T189, T202–T207 (surface adapters and cross-surface proofs) · T190–T195 (D7, FR-127, security, re-verification, docs) · T196 (exact-HEAD gates) |
-| plan Phase 10 | The SC-012 comparability rule, baseline provenance and candidate freeze (plan §G; tasks Phase 16b, **required**), and the live benchmark on the frozen candidate (tasks Phase 18, **optional, not an acceptance gate**) | tasks Phase 16b, tasks Phase 18 | Required: T208–T212 (SC-012 comparability and baseline provenance, D10–D12) · T213 (freeze the candidate) · T214 (checklist count). Not required: T197 (superseded) · T198 (optional SC-011 run; the paired run T199 reads) · T199 (optional SC-012) |
+| plan Phase 9 | Specification convergence — stable `decision_ref`, the shared turn entry `run_turn`, continuation binding and lifecycle, surfaces, D7, FR-127, re-verification | tasks Phases 12–17 | T172–T175 (identity and index) · T177–T179 (output and protocol) · T180, T200, T176, T181, T201 (shared turn entry) · T182–T189, T202–T207 (surface adapters and cross-surface proofs) · T190, T192–T195 (D7, FR-127, security, re-verification, docs; T191 is a retired stub) · T196 superseded by T234 |
+| plan Phase 10 | *Retired (D14)* | tasks Phase 16b, tasks Phase 18 | T208–T213 and T197–T199 are retired stubs. T214 (the clarification-count reconciliation) is kept |
+| plan Phase 11 | Acceptance-scope convergence (D14–D17) — evidence map, SC-007 and SC-044, the settings removal with test seams, accounting kept, removal work, neutral wording, checklists, exact-final-HEAD validation and review | tasks Phases 19–24 | T215 (setup) · T216–T219 (US1: one form, no re-raise) · T220–T222 (US3: settings, seams, accounting) · T223–T231 (removal work) · T232–T233 (neutral wording, checklists) · T234–T236 (validation, CI, review) |
 
-**Reading rule**: `plan Phase 5` = learning hardening = tasks Phase 6; `tasks Phase 5` = token-efficient context = plan Phase 4; `plan Phase 7` = benchmark = tasks Phase 9; `tasks Phase 7` = completion gate = plan Phase 6; `plan Phase 9` = convergence = tasks Phases 12–17; `plan Phase 10` = SC-012 comparability, provenance and freeze (tasks Phase 16b, required) plus the optional live benchmark (tasks Phase 18, not an acceptance gate); the final acceptance gate is T196 (tasks Phase 17). A phrase such as "deferred to Phase 5" without a `plan`/`tasks` qualifier is non-conforming and must be read against this table.
+**Reading rule**:
+- `plan Phase 5` = learning hardening = tasks Phase 6.
+- `tasks Phase 5` = token-efficient context = plan Phase 4.
+- `tasks Phase 7` = completion gate = plan Phase 6.
+- `plan Phase 9` = convergence = tasks Phases 12–17.
+- `plan Phase 11` = acceptance-scope convergence = tasks Phases 19–24.
+- Plan Phases 7 and 10, and tasks Phases 9 and 18, are retired (D14).
+- The final acceptance gate is T234, with T235 and T236.
+- A phrase such as "deferred to Phase 5" without a `plan`/`tasks` qualifier is non-conforming, and must be read against this table.
 
 ---
 
@@ -77,13 +93,13 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 **⚠️ Hard gate**: tasks Phase 5 (token-efficient context; plan Phase 4) may not begin until T015 publishes the paired baseline (SC-036, Constitution XXI).
 
-- [X] T001 [P] [US6] Characterize prompt-head stability in `tests/test_baseline_prompts.py`
+- [X] T001 [P] [US3] Characterize prompt-head stability in `tests/test_baseline_prompts.py`
   - **Req**: FR-050, FR-091, SC-015 · **Dep**: none · **Evidence**: assembled head byte-identical across three turns with differing recall · **Done when**: passes against unmodified `src/comodor/agent/prompts.py`
-- [X] T002 [P] [US6] Characterize context assembly and compaction boundaries in `tests/test_baseline_context.py`
+- [X] T002 [P] [US3] Characterize context assembly and compaction boundaries in `tests/test_baseline_context.py`
   - **Req**: FR-049, FR-051 · **Dep**: none · **Evidence**: `Conversation.render()` shape pinned; no orphaned tool call after `safe_cut`; original request always retained · **Done when**: current boundary rules are locked
-- [X] T003 [P] [US6] Characterize token-estimator calibration in `tests/test_baseline_tokens.py`
+- [X] T003 [P] [US3] Characterize token-estimator calibration in `tests/test_baseline_tokens.py`
   - **Req**: FR-055, SC-011 · **Dep**: none · **Evidence**: estimate vs recorded provider `Usage` within a tolerance constant that the test defines and justifies · **Done when**: tolerance is explicit, not implicit
-- [X] T004 [P] [US6] Characterize superseded-read removal in `tests/test_baseline_staleness.py`
+- [X] T004 [P] [US3] Characterize superseded-read removal in `tests/test_baseline_staleness.py`
   - **Req**: FR-045, FR-046, SC-013 · **Dep**: none · **Evidence**: newest read and reads of unedited files are never rewritten · **Done when**: `src/comodor/agent/staleness.py` rules pinned
 - [X] T005 [P] [US4] Characterize learning-cycle ordering and caps in `tests/test_baseline_learning.py`
   - **Req**: FR-063, FR-065 · **Dep**: none · **Evidence**: recall precedes storing the user message; at-cap add refuses and lists contents rather than evicting · **Done when**: ordering pinned
@@ -101,12 +117,9 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: none · **Evidence**: existing `tests/test_protocol_permissions.py` green; mode policy table read-only; unknown mode denies everything · **Done when**: this file becomes the per-phase permission gate referenced by T028, T060, T069, T098, T119, T129, T146
 - [X] T012 [P] [US1] Characterize capability advertisement per mode in `tests/test_baseline_capabilities.py`
   - **Req**: FR-117, FR-118, FR-120 · **Dep**: none · **Evidence**: write tools are not advertised in plan mode; advertisement and enforcement both derive from `src/comodor/safety/modes.py` · **Done when**: current filtering pinned
-- [X] T013 [P] [US6] Fingerprint every existing benchmark scenario in `bench/integrity.py`
-  - **Req**: SC-026, FR-077 · **Dep**: none · **Evidence**: record a content fingerprint of each `bench/tasks/*/task.md`, `check.py` and `repo/` tree so later weakening is detectable · **Done when**: fingerprints stored and a check command reports any drift
-- [X] T014 [US6] Implement the naive full-resend comparison strategy in `bench/baseline.py`
-  - **Req**: SC-011, SC-036 · **Dep**: T003 · **Evidence**: resends full history, full file contents and full tool output every turn, selectable by flag · **Done when**: runs the existing suite end to end
-- [X] T015 [US6] Publish the paired quality-and-cost baseline into `bench/results/` via `bench/report.py`
-  - **Req**: SC-036, FR-076 · **Dep**: T003, T013, T014 · **Evidence**: per task — outcome rate over three attempts, input/output/cached tokens, model turns, tool calls — for both current and naive strategies · **Done when**: report exists and is cited by `spec.md` §SC-011 as the threshold source
+- T013 — retired (D14); completed before retirement.
+- T014 — retired (D14); completed before retirement.
+- T015 — retired (D14); completed before retirement.
 
 **Checkpoint**: behaviour is executable, baseline published, nothing changed.
 
@@ -250,10 +263,9 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
   - **Req**: FR-075 · **Dep**: T062 · **Evidence**: this feature introduces no outbound transmission · **Done when**: no new network path exists
 - [X] T066 [P] [US3] Bound instrumentation overhead in `tests/test_metrics_overhead.py` under the `performance` marker
   - **Req**: SC-022 · **Dep**: T062 · **Evidence**: recall stays off the critical path; no added model call; existing ceilings hold · **Done when**: `pytest -m performance` green
-- [X] T067 [US6] Make learning explicitly switchable off in `src/comodor/config.py` and `src/comodor/learning/memory.py`
+- [X] T067 [US4] Make learning explicitly switchable off in `src/comodor/config.py` and `src/comodor/learning/memory.py`
   - **Req**: FR-064 · **Dep**: T005 · **Provenance**: n/a — this governs whether admission runs at all · **Scope**: process-wide · **Evidence**: an explicit, documented switch; with learning off, no durable write occurs from any path including reflection and review · **Reject**: a silent or incidental disable is not acceptable · **Done when**: the switch is explicit, not inferred
-- [X] T068 [US6] Make benchmark learning mode explicit and deterministic in `bench/runner.py`
-  - **Req**: FR-064, SC-026 · **Dep**: T067 · **Evidence**: learning-enabled and learning-disabled benchmark modes are both selectable and both deterministic; **reproduction does not depend on undocumented incidental behaviour**; isolation of workspace and `COMODOR_HOME` asserted · **Done when**: two runs of the same mode produce the same measurement inputs
+- T068 — retired (D14); completed before retirement.
 - [X] T069 **Permission regression gate — Phase 4** via `tests/test_baseline_permissions.py`
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T011, all of Phase 4 · **Evidence**: this phase touches agent orchestration; permission suite green here · **Done when**: suite green on the phase commit
 
@@ -323,8 +335,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
   - **Req**: FR-105, FR-101, FR-102, FR-103 · **Dep**: T072, T073, T076, T077, T083, T084 · **Evidence**: for each of content-hash change, source-file change, branch/worktree change, tool-output change, superseded repository fact and stale learned fact, assert **no cached or summarised representation survives the event** · **Done when**: all six events tested per applicable optimization
 - [X] T095 [P] [US3] Verify evidence recoverability in `tests/test_context_recoverability.py`
   - **Req**: FR-044, FR-047, FR-090, FR-098 · **Dep**: T079, T080, T075 · **Evidence**: for every optimization, correctness-critical evidence remains recoverable — nothing is lost, only relocated · **Done when**: recoverability asserted per optimization
-- [X] T096 [US3] Verify optimization neutrality in `tests/test_context_optimization_neutrality.py`
-  - **Req**: FR-044, SC-012 · **Dep**: all of Phase 5 · **Evidence**: run the benchmark with each optimization toggled; **no task's outcome rate falls** · **Done when**: every Phase 5 task has a recorded paired comparison
+- T096 — retired (D14); completed before retirement.
 - [X] T097 [US3] Verify no optimization weakens validation in `tests/test_context_no_validation_loss.py`
   - **Req**: FR-044 · **Dep**: all of Phase 5 · **Evidence**: no optimization suppresses a clarification, skips relevant inspection, or truncates critical evidence · **Done when**: mutation-checked
 - [X] T098 **Permission regression gate — Phase 5** via `tests/test_baseline_permissions.py`
@@ -457,38 +468,23 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 ---
 
-## Phase 9: Benchmarks
+## Phase 9: Retired (D14)
 
-**Purpose**: prove the claims with paired measurement. **Scenarios are never weakened to improve a score.**
+Every task in this phase is retired; the IDs are kept as stubs.
 
-- [X] T147 [P] [US6] Add the repository-settled-ambiguity scenario in `bench/tasks/careful-repo-settles-it/`
-  - **Req**: SC-006, FR-008 · **Dep**: T034 · **Evidence**: the agent must read and decide, **not** ask; the judge scores a line whose correct value is a path, a name or a number · **Done when**: a reference solution passes and `tests/test_bench.py` still passes
-- [X] T148 [P] [US6] Add the unattended-mandatory-clarification scenario in `bench/tasks/careful-unattended/`
-  - **Req**: SC-002, SC-040 · **Dep**: T044 · **Evidence**: run with no listener; passing requires the clarification-required outcome with `clarification.outcome = "unattended"` and zero invented values · **Done when**: the judge refuses the shortcut the task invites
-- [X] T149 [P] [US6] Add the cancelled-mandatory-clarification scenario in `bench/tasks/careful-cancelled/`
-  - **Req**: SC-037, SC-038, SC-041, SC-044 · **Dep**: T039, T041 · **Evidence**: the user cancels; passing requires zero fabricated values, zero dependent mutating actions, and no re-raise within the attempt · **Done when**: judge scores an exactly-readable line
-- [X] T150 [P] [US6] Add the expiry and answer-resumption scenario in `bench/tasks/careful-expired-then-answered/`
-  - **Req**: SC-039, SC-042 · **Dep**: T038 · **Evidence**: expiry fabricates nothing; a later answer resumes the dependent work to the same result as a first-time answer · **Done when**: both halves scored
-- [X] T151 [P] [US6] Add the long multi-file scenario in `bench/tasks/refactor-many-files/`
-  - **Req**: SC-011 · **Dep**: T015 · **Evidence**: resend cost dominates, so efficiency is measurable · **Done when**: baseline recorded
-- [X] T152 [P] [US6] Add the repeated-task-in-one-project scenario in `bench/tasks/learning-repeat/`
-  - **Req**: SC-021, SC-031 · **Dep**: T118 · **Sequence**: the **same N = 6** comparable-task sequence as T118 (tasks 1–3 initial window, tasks 4–6 learned window), with comparability of the six inputs asserted so an incomparable window invalidates the run · **Primary metrics (SC-021)**: mandatory clarifications raised and user corrections received, per window, using exactly the metric definitions T118 uses; rediscovery / knowledge-hit counts emitted only as secondary diagnostics · **Evidence**: the scenario emits both window totals for both primary metrics plus outcome success per task, so the SC-021 comparison is mechanical · **Done when**: the six-task sequence is reproducible (T157) and emits the same metric definitions used by T118
-- [X] T153 [US6] Extend per-task reporting with the full paired record in `bench/report.py`
-  - **Req**: FR-076 · **Dep**: T062 · **Evidence**: task, category, result, correctness, input/output/cached/total tokens, model turns, tool calls, clarifications, corrections and validation outcome in **one table** · **Done when**: a token figure cannot be published without its outcome rate
-- [X] T154 [US6] Enforce benchmark scenario integrity in `bench/integrity.py`
-  - **Req**: SC-026, FR-077 · **Dep**: T013 · **Evidence**: a check that **fails the run** if any existing scenario's prompt, judge, starting repository or step/time budget has been weakened, deleted, simplified, shortened or re-labelled relative to its recorded fingerprint; **a lower token result obtained by weakening the benchmark is invalid and reported as such** ; additionally a deterministic test asserts that no module under `src/comodor/` imports `bench.integrity` or `bench.baseline` (harness-only boundary, plan §Complexity Tracking) · **Done when**: tampering with any existing scenario fails the check, and the production-import guard passes
-- [X] T155 [US6] Produce the before/after comparison in `bench/report.py`
-  - **Req**: SC-011, SC-012, FR-077 · **Dep**: T015, T096, T153, T154 · **Evidence**: per-task deltas for both cost and quality; any outcome-rate fall flagged as a regression; the integrity check must have passed · **Done when**: comparison published
-  - **Published**: `bench/results/paired-baseline-2026-09-20.{json,md}` — the final 13-task × 3-try paired run at candidate HEAD `be9cf6f`, token-accounting version 2 (provider/model sanitized per repository policy). `as_paired_markdown` now carries an explicit **Regression** column (FR-077). Measured: current 30/39 attempts at 55,440 mean total tokens vs naive 33/39 at 50,750; the comparison flags `feature-retry-decorator` and `careful-unknowable`. **SC-011 is not satisfied by this measurement** — current uses more total tokens and its outcome rate is lower. *(2026-09-24: the SC-011 threshold has since been recorded in spec.md (D5), closing T156's writing condition; SC-011 acceptance itself remains open as T198.)*
-- [X] T156 [US6] Set the SC-011 numeric threshold from measured data and record it in `spec.md`
-  - **Req**: SC-011, SC-036 · **Dep**: T155 · **Evidence**: threshold derived from T015 and T155, **never chosen in advance** · **Done when**: `spec.md` §SC-011 names the figure and its baseline
-  - **Recorded** (owner decision D5, committed spec `d911e3f`): SC-011 passes only when current mean total tokens ≤ 0.90 × naive in one comparable paired run **and** every task's current outcome rate ≥ naive. §SC-011 names the figure, and its baselines are the T015 and T155 runs in the Benchmark evidence record. This closes the **threshold-writing** condition only. SC-011 is **not satisfied**; its acceptance is T198.
-- [X] T157 [P] [US6] Assert benchmark reproducibility in `tests/test_bench_reproducibility.py`
-  - **Req**: SC-026, FR-064 · **Dep**: T068 · **Evidence**: per-attempt isolation, explicit learning mode, results reported as rates across repeated attempts rather than single booleans · **Done when**: two identical runs agree on their measurement inputs
-- [X] T158 [P] [US6] Assert new scenarios meet the judge-honesty rules in `tests/test_bench.py`
-  - **Req**: SC-026 · **Dep**: T147 to T150 · **Evidence**: each new `careful`/`find` task turns on something the repository cannot answer and has at least one line whose correct value is a path, a name or a number; each judge refuses the shortcut its task invites · **Done when**: existing bench guard test extended and green
+- T147 — retired (D14); completed before retirement.
+- T148 — retired (D14); completed before retirement.
+- T149 — retired (D14); completed before retirement.
+- T150 — retired (D14); completed before retirement.
+- T151 — retired (D14); completed before retirement.
+- T152 — retired (D14); completed before retirement.
+- T153 — retired (D14); completed before retirement.
+- T154 — retired (D14); completed before retirement.
+- T155 — retired (D14); completed before retirement.
+- T156 — retired (D14); completed before retirement.
+- T157 — retired (D14); completed before retirement.
+- T158 — retired (D14); completed before retirement.
 
-**Checkpoint**: claims measured, paired, tamper-evident.
 
 ---
 
@@ -736,18 +732,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
     - No existing assertion is weakened.
     - **Audit result (2026-09-24)**: (b) was already covered by `test_only_read_only_tools_are_exempt_while_a_decision_is_open` and `test_a_mutating_call_in_the_same_batch_as_a_dismissed_question_does_not_run`; (c) by `test_a_mutation_before_a_material_question_is_preserved_and_reported`, `test_a_prior_mutation_is_preserved_across_every_ending` and `test_after_a_non_answer_the_turn_ends_so_nothing_dependent_can_follow`. Added in `tests/test_clarification_pause.py`: `test_d7_a_demonstrably_independent_write_is_permitted_and_is_no_failure` (a), `test_d7_a_write_whose_dependence_is_uncertain_is_withheld` (b, explicit), `test_d7_independent_work_is_not_required_and_nothing_starts_to_stay_active` (d). No existing assertion changed.
     **Done when**: each of (a)–(d) is covered by an existing or new test, recorded in the task evidence
-- [X] T191 [P] Audit the `careful-*` benchmark judges in `bench/tasks/*/check.py` for a blanket "no write before asking" rule
-  - **Req**: SC-002, SC-026, FR-077 · **Dep**: none · **Evidence**:
-    - The judges inspected so far assert specific fabricated or dependent artifacts: `careful-unattended` (no target written) and `careful-only-what-was-asked` (scope).
-    - Record each judge's rule. If one asserts that nothing at all was written, report it as a finding. Judges are fingerprinted by `bench/integrity.py` and are **not** edited or weakened by this task.
-    - **Audit result (2026-09-24)** — each judge's rule, read from `check()`:
-      - `careful-cancelled`, `careful-expired`, `careful-unattended`: `ask` was used; `stopped == "clarification_required"` with the matching `outcome`; no release target was chosen in `release.py` (the dependent artifact); `careful-cancelled` also refuses a second `ask` in the attempt. No blanket write rule.
-      - `careful-only-what-was-asked`: the importer's tests pass with `test_importer.py` unchanged, and nothing but `importer.py` changed — a scope rule, not a write-ordering rule.
-      - `careful-cannot-be-done`: `postcodes.csv` (the fabricated artifact) not written, no success claimed, the missing input named, `test_geocode.py` untouched. No blanket write rule.
-      - `careful-repo-settles-it`: must **not** ask; the port must be read from the unchanged `config.py`. No write rule.
-      - `careful-unknowable`: no hard-coded rate, and then on its "the model asked" path it fails any attempt whose **first** `edit_file`, `write_file`, `run_shell` or `run_python` call came before the first `ask`, regardless of whether that call depends on the missing rate.
-    - **Finding (reported, not resolved here)**: `careful-unknowable`'s path A is a blanket "no write before asking" ordering rule. It fails a demonstrably independent write before the question, which D7 / SC-002 permits, and counts every `run_shell` / `run_python` call as writing, read-only ones included. The judge was not edited (fingerprinted by `bench/integrity.py`); whether to change it is the owner's decision.
-    **Done when**: the audit is recorded, with any finding reported
+- T191 — retired (D14); completed before retirement.
 - [X] T192 [US2] Verify, and if needed implement, FR-127's unsupported-claim rule in the existing completion path (`src/comodor/agent/claims.py`, `src/comodor/agent/verify.py`, `src/comodor/agent/loop.py`)
   - **Req**: FR-125, FR-127, FR-036 · **Dep**: none · **Evidence**:
     - First establish current behaviour: when the gate cannot reach a verdict, or the one correction turn still produces an explicit completion claim, is the claim delivered marked as not confirmed, with the outstanding work named? Plan inspection found no such marking.
@@ -787,152 +772,16 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 ---
 
-## Phase 16b: SC-012 Comparability and Baseline Provenance (D10–D12)
+## Phase 16b: Clarification-Count Reconciliation
 
-**Purpose**: implement the SC-012 per-task reference rule and published-baseline provenance (spec SC-012, D10–D12; plan §G; research R17; data-model §9). Numbered 16b so every existing phase number and the crosswalk stay stable. Benchmark infrastructure only: nothing under `src/comodor/` changes, and no new benchmark file is added (`integrity.py`, `runner.py`, `report.py`, `__main__.py` are extended). The two scenarios that differ today (`careful-unknowable`, `careful-cannot-be-done`) are evidence only; nothing names a task.
+T208–T213 are retired (D14) and kept as stubs. T214 is kept.
 
-- [X] T208 [P] [US6] Add `fingerprint_at(commit)` and `digest(fingerprint)` to `bench/integrity.py`
-  - **Req**: SC-012, D11; plan §G "Scenario fingerprint" · **Dep**: none · **Evidence**:
-    - `fingerprint_at(commit)`:
-      - raises `ValueError`, naming the commit, unless `git cat-file -e <commit>^{commit}` succeeds;
-      - otherwise extracts `bench/tasks` at that commit with `git archive` into a temporary directory and returns the **current** `fingerprint_all(<tmp>/bench/tasks)`;
-      - removes the temporary directory.
-    - `digest(fingerprint)` returns `sha256(json.dumps(fingerprint, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()`.
-    - `fingerprint`, `_sha`, `_tree`, `_budgets`, `fingerprint_all` and `FINGERPRINTS.json` are unchanged. There is no second hashing definition.
-    - Tests in `tests/test_bench_integrity.py`, on a temporary git repository the test creates (never the project history):
-      - `fingerprint_at(<its HEAD>)` equals `fingerprint_all` of that tree;
-      - an unresolvable commit raises;
-      - `digest` is equal for equal fingerprints whatever the key order;
-      - `digest` changes when `task.md`, `check.py`, a `repo/` file, a `hidden/` file or a declared budget changes;
-      - a commit that changes only a harness file outside `bench/tasks` (e.g. `bench/runner.py`) leaves every task's digest unchanged.
-    **Done when**: tests pass, and hashing unsorted JSON fails the order-independence test (mutation-checked)
-- [X] T209 [P] [US6] Record each task's run-start `scenario_fingerprint` in published paired baselines (`bench/runner.py`, `bench/report.py`)
-  - **Req**: SC-012, SC-036, FR-076, D12; plan §G "Baseline provenance" · **Dep**: none · **Evidence**:
-    - **Run start**: `run_paired` computes `_paired_header(...)` exactly once per run and reuses it. It writes it as a new checkpoint's header, or checks an existing header against it on resume, so `_verify_paired_checkpoint` takes that expected header instead of recomputing. `integrity.fingerprint_all()` therefore runs once per paired run.
-    - **Outcome**: `Outcome` gains `scenario_fingerprint: dict | None = None`. `run_paired` sets it on **both** the `current` and `naive` outcome of each task from that header's `fingerprints`. The return value stays `(current, naive)`.
-    - **Report**: `as_paired_json` adds `"scenario_fingerprint": <full fingerprint, the same shape as a FINGERPRINTS.json entry>` to a task entry beside `current` and `naive`, when the outcomes carry one. It raises `ValueError` if a task's two arms carry different fingerprints. No other key changes. `as_paired_markdown`, `as_json` (single strategy) and `blocked_json` (blocked ablation) are unchanged.
-    - **Tests** in `tests/test_bench_baseline.py`:
-      - a paired run (fake provider, as the existing `run_paired` tests) publishes a `scenario_fingerprint` for every task equal to `integrity.fingerprint` of that task;
-      - `integrity.fingerprint_all` is called exactly once per run, fresh or resumed (spy);
-      - the recorded values equal the checkpoint header's;
-      - the markdown, single-strategy and blocked-ablation documents carry no `scenario_fingerprint` and are otherwise unchanged for a fixed fixture;
-      - outcomes without a fingerprint (the existing fixtures) publish no key.
-    **Done when**: tests pass, and a second `fingerprint_all` call at write time fails the once-per-run test (mutation-checked)
-- [X] T210 [US6] Read a published result's fingerprints: `scenario_fingerprints(report)` in `bench/report.py`
-  - **Req**: SC-012, D11, D12; plan §G "Reading provenance"; data-model §9 · **Dep**: T208, T209 · **Evidence**:
-    - `scenario_fingerprints(report) -> tuple[dict[str, dict], str]`:
-      - **recorded**: when **every** task entry carries `scenario_fingerprint`, returns those values with source `"recorded"`;
-      - **reconstructed**: otherwise, including when only some tasks carry one, returns `integrity.fingerprint_at(report["commit"])` restricted to the report's task names, with source `"reconstructed:<commit>"`;
-      - raises `Undecidable` (a `ValueError` subclass defined in `bench/report.py`, carrying the reason) when the report has neither complete recorded values nor a resolvable `commit`;
-      - raises `Undecidable`, naming the task, when reconstruction is needed and any task the report names has no scenario at the report's own commit. The whole report's provenance then cannot be reconstructed. The task is never borrowed from another commit or the working tree, never dropped, and never filled from a partial recorded value. The 2026-09-20 baseline is unaffected: all 13 of its tasks exist at `be9cf6f`.
-    - Never mixes sources within one report, never uses another commit, and never writes to the result file.
-    - Tests are in T212.
-    **Done when**: T212's reader tests pass
-- [X] T211 [US6] Implement the SC-012 comparison and its CLI (`bench/report.py`, `bench/__main__.py`, `bench/README.md`)
-  - **Req**: SC-012, FR-077, D10–D12; plan §G "SC-012 comparison", "Fail-closed", "Output"; data-model §9 · **Dep**: T210 · **Evidence**:
-    - `sc012_comparison(candidate, baseline, *, candidate_file, baseline_file) -> dict` over two parsed paired reports. For **every** task in the candidate:
-      - **UNCHANGED** when `digest(candidate fp) == digest(baseline fp)` for that task name. The reference is the baseline task's `current` arm, `reference_kind` is `"PUBLISHED_BASELINE"`, and the reference fingerprint is the baseline's.
-      - **CHANGED** otherwise, including a task absent from the baseline. The reference is the candidate task's own `naive` arm, `reference_kind` is `"SAME_RUN_NAIVE"`, and the reference fingerprint is the candidate's.
-      - The per-task `result` is `"PASS"` when `Fraction(cand.passed, cand.tries) >= Fraction(ref.passed, ref.tries)` and `"FAIL"` otherwise. Exact fractions, never floats or the rounded `outcome_rate`.
-    - **Per-task `"UNDECIDABLE"`**, with a `reason`, when the candidate `current` arm is missing or has `tries == 0`, or when the selected reference arm is missing or has `tries == 0`.
-    - **Overall `"UNDECIDABLE"`** when:
-      - either document's `kind` is not `"paired-baseline"`;
-      - `scenario_fingerprints` raises for either side;
-      - any baseline task is missing from the candidate (listed in `baseline_only_tasks`);
-      - any task is UNDECIDABLE.
-    - **Overall result** otherwise: `"FAIL"` if any task fails, else `"PASS"`.
-    - The denominator is every candidate task. No parameter selects a reference, excludes a task or supplies fingerprints.
-    - **Output document**:
-      - `kind: "sc012-comparison"`;
-      - `candidate` and `baseline`, each `{file, commit, fingerprint_source}`;
-      - `result` and `baseline_only_tasks`;
-      - `tasks[]`, each with `task`, `candidate_fingerprint` and `reference_fingerprint` (digests), `scenario_status` (`"CHANGED"` or `"UNCHANGED"`), `reference_kind`, `candidate_rate` and `reference_rate` (`{passed, tries}`), `result` and `reason`.
-    - `as_sc012_markdown(result)` renders the same table.
-    - **CLI**: `python -m bench --sc012 <candidate.json> --against <baseline.json> [--label NAME]` writes `bench/results/sc012-<label>.json` and `.md`. The label defaults to the candidate file's stem. It prints the overall result and exits `0` PASS, `1` FAIL, `2` UNDECIDABLE. `--sc012` without `--against` is a usage error with exit `2`. It is handled before task loading, the drift check and the `--provider`/`--model` requirement, so it needs and calls no provider or model.
-    - `bench/README.md` documents `scenario_fingerprint` and `--sc012`.
-    - Tests are in T212.
-    **Done when**: T212's comparison and CLI tests pass
-- [X] T212 [US6] Deterministic, mutation-checked tests for T210 and T211 in `tests/test_bench_baseline.py`
-  - **Req**: SC-012, SC-025, D10–D12; plan §G "Gate for this work" · **Dep**: T211 · **Evidence**: offline fixtures only, no model; reconstruction uses a temporary git repository the test creates. One test each:
-    - **Reference selection**:
-      - an unchanged scenario selects `PUBLISHED_BASELINE`;
-      - a changed judge (`check.py`), prompt (`task.md`), starting-repo file, `hidden/` file or declared budget each select `SAME_RUN_NAIVE`;
-      - a harness-only change (reports whose fingerprints are equal while their `commit` differs) stays `UNCHANGED`.
-    - **Name independence**: the same name with differing fingerprints is `CHANGED`, and any name with equal fingerprints is `UNCHANGED` (including a task named `careful-unknowable`).
-    - **Reading provenance**:
-      - a report whose every task records `scenario_fingerprint` reads as `recorded`, without calling `fingerprint_at`;
-      - one without reads as `reconstructed:<its commit>`;
-      - one with only some tasks recorded is fully reconstructed, never mixed;
-      - no commit, or an unresolvable commit, is `UNDECIDABLE`;
-      - a report naming a task that does not exist at its own commit is `UNDECIDABLE`, and nothing is borrowed from another commit or the working tree;
-      - the historical file's bytes are unchanged after reading.
-    - **Task-set completeness**:
-      - a task new to the candidate is `CHANGED` / `SAME_RUN_NAIVE`;
-      - a baseline task missing from the candidate makes the result `UNDECIDABLE` and is listed in `baseline_only_tasks`;
-      - a missing candidate `current` arm, a missing or `tries == 0` naive arm for a changed task, and a missing or `tries == 0` published `current` arm for an unchanged task are each `UNDECIDABLE`;
-      - a non-`paired-baseline` document is `UNDECIDABLE`.
-    - **Rate comparison**:
-      - equal rates pass, and a lower candidate rate fails;
-      - exact-fraction boundary: a candidate at 2/3 against a reference at 6667/10000 **fails**, where a 4-decimal comparison would pass;
-      - the overall result is `PASS` only when every task passes.
-    - **Evidence and CLI**:
-      - every per-task and aggregate evidence field is present;
-      - `--sc012` exits `0`, `1` or `2` accordingly, needs no `--provider`/`--model`, and writes `sc012-<label>.json` and `.md`.
-    - **Mutation checks**, each of which must fail at least one test:
-      1. selecting `PUBLISHED_BASELINE` for a changed task;
-      2. dropping a task whose reference is missing instead of UNDECIDABLE;
-      3. reading recorded fingerprints from one file and the other side's from another commit, or mixing recorded and reconstructed values;
-      4. `>` instead of at least;
-      5. comparing floats or `outcome_rate` instead of fractions;
-      6. treating a candidate-only task as `UNCHANGED`;
-      7. ignoring `baseline_only_tasks`.
-    - **Mutation evidence (2026-09-25)**: every mutation killed; each was restored and the restored file's hash re-checked. The killing test is in `tests/test_bench_baseline.py` unless noted.
-      - T208, unsorted JSON in `digest`: `test_a_digest_does_not_depend_on_key_order` (`tests/test_bench_integrity.py`).
-      - T209, fingerprints recomputed at write time: `test_the_scenarios_are_fingerprinted_once_per_run_and_never_at_write_time`.
-      - M1, a changed task selects `PUBLISHED_BASELINE`: `test_a_changed_scenario_is_compared_with_the_same_runs_naive_rate[judge]`.
-      - M2, an undecidable task dropped: `test_a_missing_candidate_current_arm_is_undecidable`.
-      - M3a, recorded and reconstructed values mixed: `test_a_partly_recorded_report_is_reconstructed_in_full_never_mixed`.
-      - M3b, reconstruction from another commit: `test_a_report_without_fingerprints_is_reconstructed_from_its_own_commit`.
-      - M4, `>` instead of `>=`: `test_an_unchanged_scenario_is_compared_with_the_published_rate`.
-      - M5a / M5b, float or rounded comparison instead of `Fraction`: `test_rates_are_compared_as_exact_fractions`.
-      - M6, a candidate-only task treated as `UNCHANGED`: `test_a_task_new_to_the_candidate_is_changed_and_uses_its_own_naive_rate`.
-      - M7, `baseline_only_tasks` ignored: `test_a_baseline_task_missing_from_the_candidate_is_undecidable`.
-    **Done when**: all pass and every listed mutation is killed, recorded in this task's evidence
-- [X] T213 Freeze the acceptance candidate: stage the exact D10–D12 set below (`specs/002-grounded-agent-quality/{spec,plan,research,data-model,quickstart,tasks}.md`, `checklists/requirements.md` T214 hunks, and the T208–T212 files), commit, and push branch `002-grounded-agent-quality` to PR #59
-  - **Req**: SC-022, Constitution VII, X, XII · **Dep**: T190–T195, T208–T212, T214 · **Evidence**:
-    - **Deterministic suites** pass locally first: `python -m pytest -q`, `python -m ruff check src tests bench tools`, `python -m bench.integrity check`, `git diff --check`.
-    - **Exact staging set**. Nothing else is staged:
-      - `specs/002-grounded-agent-quality/spec.md`: the D10–D12 hunks **only**. That is the SC-012 rule (items 1–6), the "Session 2026-09-25 (SC-012 comparability)" section, and the decision count and group table. The two older unrelated hunks stay unstaged and untouched: the D4 "Implementation gap, verified again during the 2026-09-24 alignment audit" note and the Q2 "Superseded scope note (2026-09-24)". Stage them out by hunk, e.g. an index-only blob holding the committed file plus the D10–D12 hunks, as done for `d911e3f`.
-      - `specs/002-grounded-agent-quality/plan.md`, `research.md`, `data-model.md`, `quickstart.md`, `tasks.md`: in full. Their uncommitted diffs are the D10–D12 plan and task work; confirm each diff contains nothing else before staging.
-      - `specs/002-grounded-agent-quality/checklists/requirements.md`: the T214 count-reconciliation hunks **only**. The other reviewer-owned edits in that file stay unstaged.
-      - The `bench/` and `tests/` files T208–T212 changed: `bench/integrity.py`, `bench/runner.py`, `bench/report.py`, `bench/__main__.py`, `bench/README.md`, `tests/test_bench_integrity.py`, `tests/test_bench_baseline.py`, exactly as those tasks produced them. Each is listed by `git status --short` and its diff read before staging. No other `bench/` or `tests/` file is staged.
-    - **Forbidden** while unrelated edits exist: directory-wide or all-files staging. That includes `git add specs/002-grounded-agent-quality/`, `git add -A`, `git add .` and `git commit -a`. Stage by explicit path, or by hunk where a file mixes owned and unrelated edits.
-    - **Verification before commit**: `git status --short`, `git diff` (the working tree), `git diff --cached --name-only`, `git diff --cached` and `git diff --cached --check`. Confirm and record that:
-      1. from `spec.md` only the D10–D12 hunks are staged, and the two older hunks remain unstaged;
-      2. from `checklists/requirements.md` only T214's hunks are staged;
-      3. every other unrelated local edit remains unstaged and byte-identical, including Feature 001, `checklists/spec-gate.md` and the unstaged remainder of `checklists/requirements.md`;
-      4. every D10–D12 planning artifact above is staged;
-      5. every T208–T212 implementation and test change is staged.
-    - **Freeze boundary**: commit with neutral, scoped messages and no AI attribution. The final commit is the candidate freeze boundary; record its SHA here as the frozen HEAD. Any tracked candidate change after it invalidates the freeze and requires T196 again.
-    - **Push** to PR #59 only after the owner's explicit authorization, with `gh` identity `ifekri`. No merge, auto-merge, tag or release.
-    - **Re-freeze.** T213 owns every freeze of the candidate, not only the first.
-      - **Current frozen HEAD**: the most recent authorized freeze commit. It is the one candidate SHA that T196–T199 use, and it supersedes every earlier freeze for them.
-      - **When**: if an authorized tracked change to the acceptance contract lands before final acceptance completes, this procedure runs again for exactly that change, with its own staging set and the same discipline: explicit paths or hunk staging only, the forbidden commands above, and the verification before commit.
-      - **Result**: one new, normal, additive commit whose SHA becomes the current frozen HEAD. The earlier frozen SHA remains historical evidence only.
-      - **Push**: normal push only, after the owner's explicit authorization, never forced.
-      - **Consequence**: once the new SHA is pushed, T196 reruns on it. The optional T198 and T199 run only on a SHA T196 passed, and T199 consumes that T198 artifact. No T196 result from an earlier freeze is evidence for a later one. Any tracked candidate change after a re-freeze invalidates this chain again. T197 is superseded (spec *Acceptance scope*, 2026-09-27).
-    - **D13 re-freeze** (2026-09-26): D13 and its alignment change the tracked contract after the freeze at `0337e40bee87b1c2c475231b81f12e8746a1d35c`. That SHA, and the T196 and T197 passes recorded on it, remain historical evidence only. The D13 staging set is exactly:
-      - `spec.md`: the six D13 edits only (SC-011 item 2 and the cohort definition; SC-012 item 4; the decision count and group table; "All twenty-two"; the "Session 2026-09-26 (paired-run population)" section). The older D4 "Implementation gap, verified again…" hunk and the Q2 "Superseded scope note (2026-09-24)" hunk stay unstaged.
-      - `plan.md`: the whole diff, after confirming it is only D13 alignment (§F, and §G's execution order, "Paired-run population" and D13 constitution re-check).
-      - `tasks.md`: the whole diff, after confirming it holds only the D13 alignment of T198, this re-freeze clause, T196's current-frozen-HEAD wording and T199's D13 traceability.
-      - `checklists/requirements.md`: the three D13 lines only ("22/22 … through 2026-09-26", "22 of 22 … through 2026-09-26" naming D13, "22/22 resolved, including D1–D13"), staged by line. At normal diff context the Notes line shares a hunk with an older reviewer edit. The six older reviewer-owned hunks stay unstaged.
-      - No other file belongs to this re-freeze merely because it is locally modified.
-    - **Acceptance-scope re-freeze** (2026-09-27): the owner removed every external provider/model dependency from acceptance. This changes the tracked contract after the freeze at `bacdafc420c3edbe2313592d9fa41cfbdb6a7d6e`; that SHA, and the T196 pass recorded on it, remain historical evidence only. The staging set is exactly:
-      - `spec.md`: the three acceptance-scope edits only (the *Acceptance scope* paragraph under "Measurable Outcomes", SC-011's closing sentence, and SC-012's opening sentence). The older D4 "Implementation gap, verified again…" hunk and the Q2 "Superseded scope note (2026-09-24)" hunk stay unstaged.
-      - `plan.md`, `tasks.md` and `quickstart.md`: the whole diff of each, after confirming it holds only this decision's edits.
-      - `.specify/memory/constitution.md`: the whole diff, which is the 1.1.0 → 2.0.0 amendment of Principle XXI and its context-change gate that this decision requires (a specification cannot override the constitution).
-      - No other file belongs to this re-freeze merely because it is locally modified.
-    **Done when**: the staged set is verified as above, the frozen HEAD SHA is recorded, and it is pushed; a re-freeze is done when its own staging set is verified and its commit is pushed as the current frozen HEAD
+- T208 — retired (D14); completed before retirement.
+- T209 — retired (D14); completed before retirement.
+- T210 — retired (D14); completed before retirement.
+- T211 — retired (D14); completed before retirement.
+- T212 — retired (D14); completed before retirement.
+- T213 — retired (D14); completed before retirement.
 - [X] T214 Reconcile the stale clarification count in the reviewer-owned `specs/002-grounded-agent-quality/checklists/requirements.md`
   - **Req**: Constitution X, XII · **Dep**: none; must complete **before T213**, because it changes a tracked file that belongs in the frozen candidate · **Evidence**:
     - **Stale locations** (current line numbers, identified by content):
@@ -947,76 +796,442 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
     - Performed through the reviewer's checklist step (`/speckit.checklist`), not by implementation work. Its hunks are staged by T213.
     **Done when**: all three locations state 21 decisions (or the reviewer records why one does not), before T213 begins
 
-**Checkpoint**: SC-012 can be decided mechanically. Every published paired baseline records its scenario fingerprints, the historical baseline is read through its own commit, and the candidate that T196–T199 act on contains all of it.
 
 ---
 
 ## Phase 17: Convergence Validation
 
-- [ ] T196 Run every deterministic gate on the exact convergence HEAD
-  - **Req**: SC-022, SC-023, SC-025, SC-035; Constitution VII · **Dep**: Phases 12–16, Phase 16b (T208–T213) · **Evidence**:
-    - Runs on the **current frozen HEAD**: the exact SHA produced by T213's freeze or re-freeze procedure, which is the candidate every later acceptance task uses. Any tracked candidate change after that freeze invalidates this task's result, and it is rerun on the new frozen HEAD. A pass on an earlier freeze is not evidence for a later one.
-    - `python -m ruff check src tests bench tools`; `python -m pytest -q`; `python -m pytest -m performance -n 0 -q`.
-    - `python tools/protocol-codegen.py --check`; `python tools/capability-map.py --check`; `python -m bench.integrity`; `git diff --check`.
-    - `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`; the renderer suite.
-    - The committed terminal bundle is rebuilt whenever **any bundle input** changed — TUI source, or any package it bundles, including the regenerated `packages/protocol/src/generated.ts` — and verified to match its source as in T166.
-    - The CI matrix is green on the exact HEAD on all three platforms.
-    **Done when**: every gate is green on one recorded HEAD
+- T196 — superseded by T234 (D14); not completed. None of its earlier runs is acceptance evidence.
 
 ---
 
-## Phase 18: Optional Live Benchmark (not an acceptance gate)
+## Phase 18: Retired (D14)
 
-**Purpose**: an optional, non-gating measurement of SC-011 and SC-012 (spec *Acceptance scope*, 2026-09-27). Accepting Feature 002 needs no provider, model, paid call, secret or variable. When a developer chooses to run it, it runs on a frozen candidate that passed T196, with a provider and model of their choosing given on the command line (`--provider`, `--model`, or `BENCH_PROVIDER` / `BENCH_MODEL`); its results are reported as diagnostic evidence, pass or fail, and never claimed without a run. Historical runs (T015, T155) are evidence but **do not** pass either criterion. The threshold is fixed (D5) and never adjusted after seeing results; timeouts, retries, judges, assertions and sample sizes are not weakened to obtain a pass.
+Every task in this phase is retired; the IDs are kept as stubs.
 
-- [ ] T197 [US6] **Superseded — not required** (2026-09-27): provider and model qualification is no longer part of acceptance
-  - **Req**: SC-026 · **Dep**: none · **Status**: superseded by the spec's *Acceptance scope*. No provider or model is qualified for acceptance, and no qualification result is recorded or claimed. `python -m bench.health` stays an optional developer tool for checking a provider before a benchmark run, with the provider and model given on the command line. · **Done when**: never; it stays unchecked, and nothing depends on it
-- [ ] T198 [US6] *(Optional, not an acceptance gate)* Run a comparable paired measurement and compute SC-011
-  - **Req**: SC-011, SC-036, FR-076, FR-077, D13; plan §G · **Dep**: T196 · **Evidence**:
-    - **Frozen SHA**: the exact current frozen HEAD that T196 passed on, run from a clean worktree detached at it. Every reference below to the frozen SHA means that commit.
-    - **Provider and model**: chosen by whoever runs it and passed as `--provider` / `--model` (or `BENCH_PROVIDER` / `BENCH_MODEL`). None is prescribed.
-    - **Cohort** (D13; plan §G "Paired-run population"), derived mechanically from the frozen SHA's task metadata immediately before the run:
-      - `ALL_TASKS`: every task `bench.task.load_tasks` loads from `bench/tasks`, with no selection;
-      - `PAIRED_TASKS`: every task in `ALL_TASKS` whose `task.sequence` is false;
-      - `SEQUENCE_TASKS`: every task in `ALL_TASKS` whose `task.sequence` is true. These are outside the paired experiment by type, because `run_paired` refuses them. Nothing else removes a task: never its name, expected or measured result, difficulty, cost, timeout risk, reviewer preference or a manual choice.
-    - **Command**: one fresh paired run over the complete paired-eligible cohort: `python -m bench --paired --provider <provider> --model <model> --tries 3 --only <the exact names of PAIRED_TASKS>`.
-      - It uses the same provider, model, task set, attempts, token-accounting version, counterbalancing and candidate semantics for both strategies.
-      - `--only` only carries the complete cohort to the command line; it does not define eligibility. The set of names it passes must equal `{task.name for task in PAIRED_TASKS}`.
-      - A smaller, partial, hand-picked or cherry-picked selection is forbidden. The name list is built from `PAIRED_TASKS` at run time, never copied from an earlier list.
-      - The result is published in `bench/results/`.
-    - **Paid-call boundary**: every check below passes before the first provider or model call. Any failure stops the task before that call; the selector list is not repaired by hand, and the mismatch is reported.
-      1. The worktree HEAD equals the frozen SHA, and `python -m bench.integrity check` passes.
-      2. `ALL_TASKS`, `PAIRED_TASKS` and `SEQUENCE_TASKS` are derived as above, independently of any `--only` result.
-      3. The `--only` selector set equals the `PAIRED_TASKS` name set.
-      4. **Loaded-cohort check**: `--only` matches by name *or prefix*, so checking the selector strings is not enough. Load the cohort with the same semantics the command uses, `load_tasks(<bench/tasks>, only=<selectors>)`, and require all of:
-         - the set of loaded names equals the `PAIRED_TASKS` name set;
-         - every loaded task has `task.sequence` false;
-         - the number of loaded tasks equals `len(PAIRED_TASKS)`;
-         - no loaded name repeats.
-      5. The expected artifact task set is recorded as the `PAIRED_TASKS` name set.
-    - **Current observation, not a rule**: at `0337e40` there are 19 tasks, 18 paired-eligible and one sequence task (`learning-repeat`), which is 18 × 3 tries × 2 strategies = 108 paid attempts. The 18 exact names load exactly those 18 tasks, with no prefix collision and no sequence task. The loaded-cohort check still runs on every execution.
-    - **Artifact**: the published artifact holds exactly the `PAIRED_TASKS` name set, with no missing task, no extra task and no sequence task. For **every** task in it:
-      - both the `current` and `naive` arm, each with the required tries;
-      - a `scenario_fingerprint` (D12, T209) that both arms share.
-    - **Fingerprint verification**, before the artifact is accepted as T198 or T199 evidence:
-      - for every task in the artifact, `digest(recorded scenario_fingerprint) == digest(fingerprint_at(<frozen SHA>)[task])`, using `bench.integrity.digest` and `bench.integrity.fingerprint_at` (T208) against the exact frozen SHA;
-      - the artifact's task set equals the `PAIRED_TASKS` name set derived from the frozen SHA, and every one of those tasks is present in `fingerprint_at(<frozen SHA>)`;
-      - never compared against the mutable working tree: the frozen commit is authoritative.
-    - A missing arm, a missing or mismatched fingerprint, a missing or extra task, or an incomplete comparison makes the run **invalid for acceptance**: a failed run, not a partial one.
-    - SC-011 is evaluated over the complete paired-eligible cohort of this run (D13). It **passes only if** current mean total tokens ≤ 0.90 × naive **and**, for every task in `PAIRED_TASKS`, the current outcome rate ≥ naive; otherwise it is reported as failing. A sequence task is not counted as PASS, FAIL, a regression or UNDECIDABLE in this denominator; it is measured under its own criteria (SC-021). SC-011 is decided here only; T199 reads the same artifact for SC-012 and does not change SC-011.
-    **Done when**: the result is published and reported, and the checkbox is marked only if SC-011 passes. Not running it, or a failing result, does not block acceptance
-- [ ] T199 [US6] *(Optional, not an acceptance gate)* Compute SC-012 from the same run against the immediately preceding published baseline, by the D10–D12 reference rule
-  - **Req**: SC-012, FR-077, D10–D13; plan §G · **Dep**: T198 (T214 is already in the frozen candidate through T213) · **Evidence**:
-    - Run `python -m bench --sc012 <the paired JSON T198 published in bench/results/> --against bench/results/paired-baseline-2026-09-20.json --label sc012-final`. It needs a full-history checkout and calls no provider or model.
-    - Each task's reference is selected mechanically (T211):
-      - an unchanged scenario fingerprint uses the 2026-09-20 `current` rate;
-      - a changed fingerprint, or a task new to the candidate, uses T198's own `naive` rate.
-    - No task is excluded. A baseline task missing from the candidate, or any missing arm, is `UNDECIDABLE`.
-    - The published `bench/results/sc012-sc012-final.json` and `.md` record, per task: the fingerprint digests, `CHANGED` or `UNCHANGED`, the reference kind, both `passed/tries` and the result with its reason. They also record the fingerprint source of each side (the baseline reads as `reconstructed:be9cf6f`), the overall result and `baseline_only_tasks`.
-    - A task-level fall is reported as a regression (FR-077).
-    **Done when**: the result is published, and the checkbox is marked only if the result is `PASS` (exit `0`); `FAIL` and `UNDECIDABLE` leave SC-012 open. Not running it, `FAIL` and `UNDECIDABLE` do not block acceptance
+- T197 — retired (D14); not completed.
+- T198 — retired (D14); not completed.
+- T199 — retired (D14); not completed.
 
-**Final checkpoint**: Feature 002 is acceptance-complete when every task from T001 to T214 is complete except T197 (superseded) and T198 and T199 (optional), that is T001–T196 and T200–T214, and the exact-HEAD deterministic gates (T196) are green on the current frozen HEAD. Acceptance needs no provider, model, paid call, secret or variable (spec *Acceptance scope*). Constitution 2.0.0 Principle XXI's context-change gate is met by its way (b): no token reduction or quality preservation is claimed, the paired-measurement mechanism stays deterministically tested (T208–T212, T196), and the most recent paired evidence is disclosed as unresolved, so the feature is accepted as unmeasured, not as passing. T198 and T199 are optional benchmark runs whose SC-011 and SC-012 results are reported as diagnostic evidence and never claimed without a run.
+**Final checkpoint**: Feature 002 is acceptance-complete **only** when:
+- every non-retired task from T001 to T241 is complete;
+- the exact-final-HEAD gates (T234) are green;
+- CI (T235) is green on that same SHA;
+- the fresh review (T236) of that same SHA has no unaddressed finding.
+
+Retired stubs, and T196 with any of its earlier runs, are never acceptance evidence. Acceptance needs no provider, model, paid call, secret or variable (D14; Constitution 2.0.0).
+
+---
+
+## Phase 19: Acceptance-Scope Setup (D14–D17)
+
+**Purpose**: fix the starting point for plan Phase 11 before anything changes. Planning artifacts only; no product or test change in this phase.
+
+- [ ] T215 Record the starting state of plan Phase 11 in this task's evidence in `specs/002-grounded-agent-quality/tasks.md`
+  - **Req**: Constitution X, XII; plan §I (I-0), §J · **Dep**: none · **Evidence**:
+    - The worktree HEAD SHA, and `git status --short`. The uncommitted planning changes are audited file by file and kept: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `quickstart.md`, `contracts/learning-record.md`, `tasks.md`, `checklists/requirements.md` and `.specify/memory/constitution.md`.
+    - The owner's own checkout is left untouched.
+    - The following are copied into **untracked files outside the repository**: the reference pattern, the retired-ID list of plan §H.8, the path list of plan §H.1, and plan §K's reviewer-owned cleanup list. T232 deletes §H and neutralises §K, so T232–T234 run the gates, and T233 its cleanup, from these copies.
+    - Baseline counts on this HEAD, in a clean detached worktree with an isolated virtual environment (`pip install -e ".[dev]"`): `python -m pytest -q`, `python -m pytest -m performance -n 0 -q`, `npm test`, and the two Bun suites (`bun test apps/tui/test/bun/renderer.test.tsx`, `bun test apps/tui/test/bun/orphan.test.ts`).
+    - No provider is called and no credential is read.
+  - **Done when**: the HEAD, the audited file list, the pattern file's location and the counts are recorded here
+
+**Checkpoint**: the start of plan Phase 11 is recorded; the reference gate can run after its source text is gone.
+
+---
+
+## Phase 20: One Form, No Re-Raise (User Story 1)
+
+**Goal**: SC-007 and SC-044 each have exact, deterministic, mutation-sensitive evidence (plan §G.4, §G.5).
+
+**Independent test**: `python -m pytest -q tests/test_clarification_one_form.py tests/test_clarification_lifecycle.py` passes, and each listed mutation makes it fail.
+
+- [ ] T216 [US1] Write the SC-007 test in `tests/test_clarification_one_form.py` (new)
+  - **Req**: FR-014, SC-007, SC-025, FR-018; D18, D19; plan §G.5 · **Dep**: T215 · **Materiality**: every case uses material decisions (`affects` set) · **Waiting**: the controlled `EventBus` answers on the emitting thread; no sleeps · **Outcomes**: answered and cancelled · **Dependent work**: none runs before its decision is answered
+  - **Evidence**: fixtures follow `tests/test_clarification_lifecycle.py`: the scripted `Script` provider, `Gateway(config, scripts=...)`, `AgentLoop` and a subscriber that counts `Kind.REQUEST` events. Cases:
+    - **C1**: one `ask` call with three material questions → exactly one form, carrying all three headers.
+    - **C2**: one model batch with two `ask` calls for two different material decisions, the first form answered → **exactly one form carrying both decisions**. At `7361c50` a probe raised **two** forms, so this case fails before T218. Record the failing run here.
+    - **C3**: one batch, two `ask` calls for the same decision, the first answered → one form. Mutation: with `comodor.agent.evidence.Ledger.settled` returning `None`, a second form appears.
+    - **C4**: as C3, but the first form is cancelled (`forms.CANCELLED`) → one form (the layers of plan §G.4).
+    - **C5**: one batch holding an `ask` for X and a mutating call whose scripted preflight response reports a missing material decision Y → X and Y reach the person in one form. Record the current count before T218.
+    - **C6**: the model asks in one call; after the answer, it asks a new question in its next model call → a second form is allowed, because that is a new decision point. This keeps the test from over-constraining.
+    - **C7** (D18): one reply with two `ask` calls whose combined form is **partially answered** → each answered question resolves; each unanswered material decision stays open and is reported once; each call's result names only its own questions.
+    - **C8** (D18): one reply with two `ask` calls whose combined form ends **cancelled**, **expired** or **unattended** (one case each) → every decision in it carries that outcome; the dependent work does not run; the turn ends `clarification_required`, with one payload naming every decision.
+    - **C9** (D19): one reply whose three `ask` calls raise **six** questions in total → **one** logical form: one `Kind.REQUEST` event carrying all six, with unique headers; one submission answers it; every answer reaches the call that asked.
+    - **C10** (D19, atomic refusal): one reply holding a valid `ask` and an invalid one — five questions in one call; malformed; permission-shaped; a header colliding with a different question (one case each), with a sibling `write_file` → **no form**; every `ask` call gets a tool error asking for the whole set again; no decision is registered; the write does not run. Then the next reply retries with a valid set → exactly one form. Mutations: without the atomicity, a partial form appears; without the withholding, the write runs.
+    - **C11** (D18, delegate): a delegate carries back an open decision → the parent's later combined form does not contain it, and no later form of that turn re-asks it.
+    - **C12** (D19, non-answers across pages): a six-question form, cancelled while the client is on its second page → every decision is `cancelled`; no entry from any page is applied; dependent work does not run.
+    - **C13** (D19, one decision under two headers): two `ask` calls in one reply name the same decision under headers `Database` and `Store` → the form shows one question, under `Database`. After one answer, the first call's result carries it under `Database` and the second's under `Store`, both with the same `decision_ref`. A cancellation returns `cancelled` to both calls, each under its own header. Mutation: returning the answer only under the shown header makes the second call's result fail the assertion.
+  - **Done when**: C1, C3, C4 and C6 pass; C2, C5 and C7–C13 are run and their current results are recorded before T218; the test file is committed together with T218, never alone in a failing state
+
+- [X] T217 [US1] Record the FR-082 classification of the one-form fix and SC-007's D16 row through `/speckit.clarify` in `specs/002-grounded-agent-quality/spec.md`
+  - **Req**: FR-082, FR-014, SC-007, D16 · **Dep**: none (resolved before T216) · **Evidence**:
+    - Resolved 2026-09-29 by **D18**. Combining the questions outstanding at one decision point into one form is FR-082's **fourth** intended user-visible change. Form count and presentation timing change; every question and its decision association are preserved.
+    - FR-082, FR-079, SC-007, SC-023, the edge case, the surface classification and the clarification count (27) are amended.
+    - SC-007 has a D16 audit row.
+    - Release notes state changes 1 and 4 (T231).
+  - **Done when**: D18 is recorded in `spec.md` — done
+- [ ] T218 [US1] Make every decision a batch raises reach the person as one form, in `src/comodor/agent/loop.py`
+  - **Req**: FR-014, SC-007, FR-017, FR-018, FR-020, FR-129, SC-025; D18, D19 · **Dep**: T216, T217 · **Materiality**: unchanged; only material decisions become questions · **Waiting**: the existing `bus.resolve` claim-and-expire path, once per form · **Outcomes**: answered, cancelled, expired and unattended apply to every decision in the combined form · **Dependent work**: withheld exactly as today until each decision is answered
+  - **Evidence**:
+    - Within one sequential batch, the questions of every `ask` call are raised as one form through the existing shared clarification path in `tools/ask.py`. So are the batch preflight's missing decisions, if C5 failed in T216.
+    - **One logical form, with no upper bound on its length** (D19). The per-call input rule (`forms.MAX_QUESTIONS`, 4 per `ask` call) is unchanged.
+    - **Atomic refusal** (D19): if any `ask` call in the reply is refused — more than four in one call, malformed, permission- or confirmation-shaped, or a header colliding with a different question — no form is raised. Every `ask` call gets a tool error asking for the whole set again. No decision is registered, dropped, inferred or applied. Every non-read-only call in the batch is withheld, and a preflight-flagged mutation is re-assessed on the next reply.
+    - Decisions carried back from a delegate are never put into the parent's form (D18).
+    - The same decision asked by two calls appears once, and both calls receive its answer or outcome (D18).
+    - Every original tool call id receives its own result. Each result carries only its own questions' answers, bound by `header`.
+    - **Same decision, different headers** (D19): the form shows the first asking call's header once. The answer or outcome is returned to each asking call under that call's own header, with one `decision_ref`. A header shared by two different questions is a collision, refused atomically.
+    - **Mutation check**: returning the answer only under the shown header fails C13.
+    - `decision_ref` minting stays one ref per decision. There is no protocol change and no new module.
+    - The custom-answer row stays exactly one per question (SC-005).
+    - **Model-facing description** (N4): the `ask` tool's description says that questions from every valid `ask` call in one reply reach the person as one form, and that one call carries at most four. This changes what is sent to the model, so it meets the constitution's context-change gate with deterministic tests: the description text is asserted, the tool specification stays stable across turns (the cached head is unchanged within a task), and a scripted reply with two calls still yields one form.
+    - **Mutation checks**:
+      - with the coalescing disabled, C2 and C9 fail;
+      - with the atomicity disabled, C10 sees a partial form;
+      - with the sibling withholding disabled, C10's write runs.
+  - **Done when**:
+    - `tests/test_clarification_one_form.py` passes in full;
+    - the clarification, question, Web, API, ACP and channel suites pass;
+    - T216 and T218 are committed together
+
+- [ ] T219 [US1] Add the SC-044 cancelled-question tests to `tests/test_clarification_lifecycle.py`
+  - **Req**: SC-044, FR-129, SC-025, D16; plan §G.4 · **Dep**: T218 (the loop-level case is written against the loop as T218 leaves it) · **Materiality**: material · **Waiting**: controlled bus; no sleeps · **Outcomes**: cancelled only, answered with `forms.CANCELLED`, never a decline · **Dependent work**: the dependent write never runs
+  - **Evidence**:
+    - **Tool level**:
+      - Steps: `Ask().run` is answered `CANCELLED`; a second `Ask().run` then asks for the same question, varied in case and whitespace.
+      - Asserts: exactly one form; the second result is the unresolved report ("asked again") with outcome `cancelled` and the same `decision_ref`; the decision stays `UNRESOLVED`.
+      - Mutation: with `comodor.tools.ask._same` monkeypatched never to match, a second form appears. Restored, the test passes.
+    - **Loop level**:
+      - Steps: one model batch holds `ask` X, a sibling `ask` X′ for the same question, then a dependent `write_file`; the first form is cancelled.
+      - Asserts: exactly one form for X; the write does not run; `stopped == "clarification_required"`, with `clarification.outcome == "cancelled"` and the same `decision_ref`; the scripted provider receives no further call in that turn.
+      - Mutation: disable every repeat-preventing layer at once — `AgentLoop._withheld_by` returning `""`, `_same` never matching, and T218's coalescing. A second form must then appear. Also assert that disabling any one layer alone still yields one form.
+    - A decline-only variant, if added, is a separate test and is not cited for SC-044.
+  - **Done when**: both tests pass, each listed mutation fails them, and the guards are restored
+
+- [ ] T237 [US1] Cover D18 and D19 on every existing client surface: `apps/tui/test/bun/renderer.test.tsx`, `tests/test_web.py`, `tests/test_api.py`, `tests/test_acp.py`, `tests/test_headless.py`, `tests/test_channel_clarification.py`
+  - **Req**: FR-014, FR-020, FR-023, FR-079, FR-082 (change 4), FR-129, SC-007, SC-008, SC-009, SC-023, SC-042; D18, D19 · **Dep**: T218, T239, T240, T241 · **Evidence** (deterministic, scripted model responses, no sleeps):
+    - **TUI**: a six-question form from three calls is shown one question at a time, with its position in the form, and submitted once. Every question has one custom-answer row, and the form is keyboard-operable at widths 160/120/100/80/60.
+    - **Web**:
+      - the same form is shown in pages of at most four;
+      - moving between pages keeps entries;
+      - one submission binds every answer by header to its own call;
+      - a dismissal on page two is `cancelled` for every decision.
+    - **Reconnect**: a six-question pending form returns whole through the snapshot's pending interaction, with no unsubmitted entry assumed.
+    - **OpenAI-compatible API and ACP**, which have no live form:
+      - a reply raising six decisions through three calls ends `clarification_required`, with **one** payload listing all six, each with its `decision_ref` (the API's `comodor.clarification`; ACP's `clarification_required` update);
+      - a later request with `decision_answers` for **two** of the six refs resolves exactly those two; the other four stay open, their dependent work stays withheld, and they are reported again;
+      - a third request answers the remaining four and the work resumes;
+      - message shapes are unchanged, and the existing conformance tests pass unchanged (SC-023).
+    - **Headless**: the matching rules of T241 hold end to end: one matching single entry, a matching multi-entry script, an unmatched entry, a leftover entry, and no application to a later form.
+    - **Channels**: an unattended reply that raised six questions through three calls ends in one clarification-required message, naming each decision and its `decision_ref`.
+  - **Done when**: every listed test passes; each asserts the changed form count explicitly, and none claims that the old count still holds
+
+- [ ] T238 [P] [US1] Document FR-082 change 4 and its migration path (D18, D19) in `docs/questions.md` and `docs/cli.md`
+  - **Req**: FR-082, D18, D19 · **Dep**: T218, T241 · **Evidence**:
+    - `docs/questions.md` states:
+      - one model reply's questions arrive as **one logical form of any length**, shown in pages of at most four and answered once;
+      - a same-decision repeat appears once;
+      - an invalid set of calls is refused as a whole;
+      - the TUI (a protocol v2 interactive client) and the Web page show a live paged form, answered once;
+      - the OpenAI-compatible API and ACP have no live form: they return one clarification-required payload listing every decision, resumed through `decision_answers` keyed by `decision_ref`, in parts if needed.
+    - `docs/cli.md` states the scripted-interaction rules and the migration path, with examples:
+      - one entry per logical form;
+      - multi-entry scripts name headers (`values` keyed by header, or `headers`);
+      - an unmatched or leftover entry ends the run with exit `1` and an error naming it;
+      - a single-entry script without headers keeps working for one form, but an `answer` without headers is valid only for a one-question form;
+      - a bare `answer` (no `value`, no keyed `values`) is invalid on every form: it is rejected before the run starts, with exit `1`, and a script that used it to accept the first option must name that option as its `value`;
+      - a keyed `answer` answers exactly the headers it names and never fills omitted questions, so a script that relied on filling must name every question it answers;
+      - an example of each case: a single unkeyed `cancel`; an explicit `answer` naming the first option; a keyed multi-entry script; a rejected bare `answer`; an unmatched entry, with its exit `1` error.
+    - Both documents call change 4 **breaking** for form-count and scripted consumers. The CHANGELOG note is T231's.
+  - **Done when**: both documents state the changed behaviour and the migration path, and neither claims the old form count
+
+- [ ] T239 [P] [US1] Page the Web form in groups of at most four, with one submission, in `src/comodor/web/ui.js`, tested in `tests/test_web.py`
+  - **Req**: FR-014, FR-017, FR-020, SC-007; D19 · **Dep**: T218 · **Evidence**:
+    - A form of more than four questions shows pages of at most four, with next and previous controls. Moving between pages keeps every entry.
+    - One submit sends every answered header; unanswered material questions stay open (partial answer).
+    - A dismissal from any page is `cancelled` for the whole form.
+    - Every page's custom-answer rows come from the core, never from the page.
+    - A form of at most four questions is unchanged: one page.
+  - **Done when**: the Web tests pass, and a form of more than four questions round-trips in one request and one submission
+
+- [ ] T240 [US1] Show each question's position in the whole form in the TUI, and rebuild the bundle: `packages/questions/src/index.ts`, `apps/tui/src/App.tsx`, `apps/tui/test/bun/renderer.test.tsx`, `src/comodor/tui/dist/main.js`
+  - **Req**: FR-014, FR-031, SC-007, SC-008; D19; Constitution VII · **Dep**: T218 · **Evidence**:
+    - The reducer keeps its one-question-at-a-time navigation, and the overlay shows "question k of n" for any n.
+    - Entries survive navigation, and one submission answers the form.
+    - Renderer tests cover a six-question form at 160/120/100/80/60.
+    - The committed bundle is rebuilt with `bun tools/build-tui-distribution.ts` and matches its source.
+    - `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` pass.
+  - **Done when**: the renderer and frontend suites pass, and the rebuilt bundle leaves `git status --porcelain` clean
+
+- [ ] T241 [US1] Match scripted interactions to their form, and reject unmatched or leftover entries, in `src/comodor/cli.py`, tested in `tests/test_headless.py`
+  - **Req**: FR-082 (change 4), FR-129; D19 · **Dep**: T218 · **Evidence**:
+    - One `--interactions` entry applies to exactly one logical form. An entry that names headers — `values` keyed by header for `answer`, a `headers` list for `cancel`, `expire` and `unattended` — matches only a form containing every header it names.
+    - Headers are optional only in a single-entry script. In a script with more than one entry, every entry must name headers, `cancel`, `expire` and `unattended` included.
+    - **Every `answer` states its choice**: a non-empty `value`, or non-empty keyed `values`.
+      - A bare `answer` — no value, or only empty ones — is invalid on every form, a one-question form included.
+      - It is rejected when `_scripted_interactions` parses the script, before the run starts and before any model call. The run exits `1`, with an error naming the entry; no decision is resolved and no dependent work runs.
+    - **Parse-time rejection** (N1), with exit `1` and a named error before any model call, of any script that:
+      - is not valid JSON, or is not a list;
+      - holds an unknown action;
+      - holds an empty or bare `answer`;
+      - is a multi-entry script with an entry that names no headers.
+      The old silent fallback — an invalid script becoming an empty script, and an unknown action becoming `unattended` — is removed.
+    - **Mismatch after a form appears** (N1): the run aborts. The pending interaction is closed internally as `unattended`, with no answer applied and no user cancellation reported. No dependent work runs, and the run exits `1` with the error.
+      - `_answers_from_form` never selects an option the entry did not name.
+    - Without headers, an `answer` with a `value` is valid only for a one-question form, and `cancel`, `expire` and `unattended` apply to the whole form.
+    - `_answers_from_form` answers exactly the headers an entry names:
+      - it removes the fill of omitted questions with the first offered option;
+      - it removes the spreading of a lone `value` across questions;
+      - an omitted question stays unanswered (a partial answer).
+    - Existing tests that relied on the fill, or on a bare `answer`, are updated to name their choice, and each is listed here.
+    - The `--interactions` help text states that an `answer` needs a value.
+    - **Tests** (deterministic, scripted responses, in `tests/test_headless.py`):
+      - a bare `answer` on a one-question form, and on a multi-question form: exit `1` before the run, no model call, no decision resolved, no dependent write;
+      - an explicit `answer` whose `value` names the first offered option, on a one-question form: accepted, and exactly that option is chosen;
+      - the same through keyed `values` on a multi-question form: that question gets the first option, and every other question stays open.
+    - An unmatched entry is rejected **before anything is applied**. The run ends with exit `1`; stderr names the entry index and the reason, and the `--json` output carries an additive `error` object together with any clarification payload that was reached.
+    - Entries left over when the run ends are rejected the same way.
+    - No entry is ever applied to a later, unrelated form.
+    - The `--interactions` help text states the rule.
+    - **Mutation checks**:
+      - without the matching check, an entry written for one form answers a later form;
+      - with the first-option fill restored, a keyed partial `answer` fills an omitted question;
+      - with lone-value spreading restored, one value lands on several questions;
+      - with an `answer` without headers accepted for a multi-question form, it applies;
+      - with a bare `answer` accepted again (the implicit first-option choice restored), the one-question bare case selects an option instead of exiting `1`;
+      - with the old silent fallback restored (invalid JSON treated as an empty script), the malformed-script test runs the model instead of exiting `1`.
+      Each makes a test fail.
+  - **Done when**: every case passes, and the mutation is killed
+
+**Checkpoint**: SC-007 and SC-044 are measured by exact, mutation-sensitive tests. One logical form per decision point is paged on the clients, matched by scripts, recorded as the breaking FR-082 change 4 with its migration path (D18, D19), and covered on every client surface.
+
+---
+
+## Phase 21: Settings Removed, Coverage and Accounting Kept (User Story 3)
+
+**Goal**: D17 — both runtime-only settings are gone, their safety and neutrality coverage survives through test-internal seams, and production token accounting is unchanged (plan §G.3, §Production Token-Usage Accounting).
+
+**Independent test**: `python -m pytest -q tests/test_context_*.py tests/test_overflow.py tests/test_config_save.py tests/test_token_accounting.py tests/test_baseline_headless.py tests/test_insights.py` passes, and `python -m pytest -m performance -n 0 -q` passes.
+
+- [ ] T220 [US3] Move the tests that use the two settings onto test-internal seams, before the settings are removed, in `tests/test_context_no_superseded.py`, `tests/test_context_no_validation_loss.py` and `tests/test_context_optimization_neutrality.py`
+  - **Req**: SC-013, SC-027, SC-028, D17, SC-025; plan §G.3 · **Dep**: T215 · **Evidence**:
+    - `tests/test_context_no_superseded.py` (the setting at ~92), `tests/test_context_no_validation_loss.py` (~46–47, ~120) and the settings-driven tests of `tests/test_context_optimization_neutrality.py` (~82, ~133, ~145, ~162) switch optimizations off only through test-internal seams:
+      - `Conversation(optimizer=Optimizer(enabled))`, or assigning `loop.conversation.optimizer = Optimizer(enabled)` after the loop is built;
+      - for log summarisation, a monkeypatch of the module-level summariser in `src/comodor/tools/overflow.py`.
+    - No production parameter, environment variable or hidden setting is added.
+    - Every mutation check in these files still fails with its guard removed.
+  - **Done when**: the three files pass with the settings still present, and no longer read `config.agent` for either setting
+
+- [ ] T221 [US3] Remove both settings from the configuration and the runtime in `src/comodor/config.py`, `src/comodor/agent/context.py`, `src/comodor/agent/loop.py` and `src/comodor/tools/overflow.py`
+  - **Req**: D17, FR-079, SC-024; Constitution I · **Dep**: T220, T218 (both edit `src/comodor/agent/loop.py`; T218 lands first) · **Evidence**:
+    - `src/comodor/config.py`: both fields and their comments are removed.
+    - `src/comodor/agent/context.py`: `Optimizer.from_config` and the comments that point at the settings are removed. `OPTIMIZATIONS` and the `Optimizer(enabled)` constructor stay as the test seam.
+    - `src/comodor/agent/loop.py`: the line that overwrites `conversation.optimizer` from the configuration (~225) goes, and so do the alternative branches of `_maybe_compact` (~1531–1580). Picture pruning, the superseded-read sweep and budget withholding always run.
+    - `src/comodor/tools/overflow.py`: the settings read (~189–193) goes; log summarisation always runs.
+    - The test in `tests/test_context_recoverability.py` that selects the alternative strategy (~97) is removed, because the product has no such strategy.
+    - A compatibility test is added to `tests/test_config_save.py`: a configuration file that still carries either key loads without error, and the key has no effect — every optimization is on, and log summarisation runs (`config._apply` ignores unknown keys).
+  - **Done when**: the context, overflow, loop, config and performance suites pass
+
+- [ ] T222 [P] [US3] Pin production token accounting in `tests/test_token_accounting.py`
+  - **Req**: FR-072, FR-073, FR-074, FR-075; Constitution XVI, XXI · **Dep**: T215 · **Evidence**:
+    - A test pins the key set of `TaskMeasurement.as_dict()` and `TurnRecord.as_dict()` in `src/comodor/agent/tokens.py` as they are at T215's HEAD.
+    - Unchanged and green: `tests/test_baseline_headless.py::test_today_the_json_report_has_exactly_these_fields` (`usage` and `measurement` in `comodor run --json`), `tests/test_token_accounting.py`, `tests/test_baseline_tokens.py`, `tests/test_metrics_locality.py`, `tests/test_metrics_overhead.py`, `tests/test_metrics_redaction.py` and `tests/test_insights.py`.
+    - T234 re-runs all of them on the final HEAD.
+  - **Done when**: the pin exists and every listed test passes
+
+**Checkpoint**: no runtime-only setting remains; every guard it once switched is still mutation-checked; accounting is pinned.
+
+---
+
+## Phase 22: D14 Removal Work
+
+**Purpose**: remove the dedicated files, tests, hooks and references inventoried in plan §H. Each task keeps the full deterministic suite green; nothing here changes product behaviour.
+
+- [ ] T223 Rework the tests that mix product assertions with the removed harness in `tests/test_learning_switch.py` and `tests/test_context_optimization_neutrality.py`
+  - **Req**: D14, FR-064, SC-025; plan §H.2 · **Dep**: T220 · **Evidence**:
+    - `tests/test_learning_switch.py::test_the_switch_is_a_documented_setting_not_an_inference` drops its harness import (~199) and keeps its product assertion.
+    - `tests/test_context_optimization_neutrality.py` drops the module-level harness import. `test_every_switchable_optimization_is_a_named_switch` asserts against `src/comodor/agent/context.py::OPTIMIZATIONS` only. `test_the_log_summariser_reads_the_same_field` becomes a test of the T220 seam.
+  - **Done when**: both files pass and import nothing from the removed directory
+
+- [ ] T224 Apply the coverage rule before deleting any test, recorded in this task's evidence in `specs/002-grounded-agent-quality/tasks.md`
+  - **Req**: SC-025, Constitution IV; plan §H.2 · **Dep**: T223 · **Evidence**:
+    - Every `comodor.*` symbol imported by the eight harness test modules and by the harness-only functions of plan §H.1 is listed here, each with the product test that still covers it.
+    - Where no product test covers a symbol, its assertion moves into a product test first; that move is listed.
+  - **Done when**: every symbol has a named product test
+
+- [ ] T225 Delete the harness-only tests under `tests/`
+  - **Req**: D14; plan §H.1 · **Dep**: T224, T222 (`tests/test_token_accounting.py`), T237 and T241 (`tests/test_headless.py`) · **Evidence**:
+    - These functions are deleted: `tests/test_headless.py::test_a_malformed_values_map_is_refused_when_the_scenario_loads`; `tests/test_learning_switch.py::test_both_benchmark_modes_are_selectable_and_written_explicitly` and `::test_two_runs_of_the_same_mode_produce_the_same_measurement_inputs`; `tests/test_token_accounting.py::test_the_report_documents_name_their_accounting_version`; `tests/test_context_optimization_neutrality.py::test_each_switch_is_what_the_paired_runner_writes`.
+    - Then these modules are deleted: `tests/test_bench.py`, `tests/test_bench_baseline.py`, `tests/test_bench_blocked.py`, `tests/test_bench_integrity.py`, `tests/test_bench_interactions.py`, `tests/test_bench_observability.py`, `tests/test_bench_reproducibility.py` and `tests/test_bench_sequence.py`.
+  - **Done when**: `python -m pytest -q` passes; the drop in the count equals the deleted functions
+
+- [ ] T226 Delete the dedicated directory `bench/` (`git rm -r bench`)
+  - **Req**: D14; plan §H.1 · **Dep**: T225 · **Evidence**:
+    - `git ls-files bench` prints nothing.
+    - No module under `src/`, `tests/` or `tools/` imports it.
+    - `python -m ruff check src tests tools` and `python -m pytest -q` pass.
+  - **Done when**: all three hold
+
+- [ ] T227 [P] Remove the hooks in CI and configuration: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `.github/labeler.yml`, `pyproject.toml`, `.gitignore`, `.dockerignore`
+  - **Req**: D14; Constitution IX; plan §H.4 · **Dep**: T226 · **Evidence**:
+    - `.github/workflows/ci.yml` (~28–31) and `.github/workflows/release.yml` (~213) lint `src tests tools`; the comment goes with the path.
+    - `.github/labeler.yml` (~20): the glob is removed; if its rule has no other glob, the rule is removed.
+    - `pyproject.toml` (~62–69): the two ruff excludes and their comment are removed; `src/comodor/_version.py` stays excluded.
+    - `.gitignore` (~63–72): the block is removed.
+    - `.dockerignore` (~3): the comment is reworded.
+    - The workflow YAML parses, and the release workflow's change is proved by the same CI run (T235).
+  - **Done when**: the files are updated and ruff passes locally with the new path
+
+- [ ] T228 [P] Reword source comments that cite the removed harness, with no behaviour change, under `src/comodor/`
+  - **Req**: D14, FR-128; plan §H.3 · **Dep**: T218, T221, T241 (the last code edits to `src/comodor/agent/loop.py`, `context.py` and `cli.py`) · **Evidence**:
+    - Reworded:
+      - `src/comodor/cli.py` (~525–535; the `usage` and `measurement` fields stay);
+      - `src/comodor/insights.py` (~250); `src/comodor/tools/base.py` (~82); `src/comodor/tools/fs.py` (~280);
+      - `src/comodor/agent/constraints.py` (~3); `src/comodor/agent/preflight.py` (~5); `src/comodor/agent/verify.py` (~4, ~1137, ~1205);
+      - the remaining hits in `src/comodor/agent/loop.py` and `src/comodor/agent/context.py`.
+    - `git diff -U0 -- src` shows only comment and docstring lines for this task.
+  - **Done when**: no source file matches the reference pattern, and `pytest -q` passes
+
+- [ ] T229 [P] Reword test prose and placeholder names under `tests/` and in `apps/tui/test/bun/measure.tsx`
+  - **Req**: D14; plan §H.3 · **Dep**: T225 · **Evidence**:
+    - `tests/test_agent_loop.py`, `tests/test_baseline_headless.py`, `tests/test_baseline_tokens.py`, `tests/test_blind_writes.py`, `tests/test_constraints.py`, `tests/test_context_containment.py`, `tests/test_mutation_preflight.py`, `tests/test_performance.py`, `tests/test_project_check.py`, `tests/test_protocol_performance.py` (prose, and the placeholder client name), `tests/test_staleness.py`, `tests/test_validation_integrity.py`;
+    - `apps/tui/test/bun/measure.tsx` (prose, and the placeholder client name).
+    - Assertions are unchanged.
+  - **Done when**: `pytest -q` passes, `python -m pytest -m performance -n 0 -q` keeps its T215 count, and `npm test` and both Bun suites pass
+
+- [ ] T230 [P] Update the documentation: `README.md`, `CONTRIBUTING.md`, `docs/README.md`
+  - **Req**: D14, FR-082; plan §H.5 · **Dep**: T226 · **Evidence**:
+    - `README.md` (~240): the sentence is reworded.
+    - `README.md` (~342–366): the section is removed, together with any contents entry.
+    - `CONTRIBUTING.md` (~43–46).
+    - `docs/README.md` (~125): the index row.
+    - Every link still resolves.
+  - **Done when**: none of the three files matches the reference pattern
+
+- [ ] T231 Remove the dated changelog passages in `CHANGELOG.md`
+  - **Req**: D14; plan §H.5 · **Dep**: T226, T217, T238, T241 · **Evidence**:
+    - The dated entries 1.1.1 (~311–313), 1.1.0 (~319, ~356, and the result figures in ~367–455), 0.21.0 (~458–520) and 0.6.1 (~2269–2288) are each reviewed as a whole:
+      - remove what reports the removed harness or its results;
+      - reword the surrounding text minimally, so each entry still reads correctly;
+      - keep every unrelated change the entry records.
+    - The unreleased Feature 002 entry is checked the same way. Its release note states FR-082 change 4 (D18, D19) beside change 1, names it **breaking** for form-count and scripted consumers, and gives the migration path (count decision points; name headers in multi-entry `--interactions` scripts; page any-length forms in API/ACP clients).
+  - **Done when**: `CHANGELOG.md` has no match for the reference pattern and every entry still reads correctly
+
+**Checkpoint**: the dedicated files, tests and hooks are gone; the suite is green; only planning text still names what was removed.
+
+---
+
+## Phase 23: Neutral Wording and Checklist Re-Judgement
+
+**Purpose**: resolve U-2 and U-3. The final tracked tree carries no reference to the removed subsystem; retired identifiers survive only as neutral stubs; Git history keeps every detail.
+
+- [ ] T232 Sweep every tracked file into neutral wording (U-2), except the reviewer-owned checklists, across `specs/`, `src/`, `tests/`, `docs/`, `apps/` and the root files
+  - **Req**: D14, D15, D17; Constitution XII · **Dep**: T216–T231 · **Evidence**:
+    - **Rule**:
+      - A clause that names what D14 or D17 removed is deleted, never replaced by a claim the text did not make.
+      - Where deleting the clause would leave a completed task's evidence empty or misleading, the task becomes a stub instead.
+      - Retired identifiers stay only as bare IDs.
+    - `spec.md` (neutral wording approved by the owner, 2026-09-29):
+      - D14 keeps its rule without example words for removed items;
+      - D15 describes the former requirement as "model-dependent evidence";
+      - D17 names neither setting ("two runtime-only context-assembly settings");
+      - the out-of-scope line on evaluation (~1727) becomes "Acceptance calls no provider (D14)".
+    - `plan.md`: delete §H and every cross-reference to it; §G.1, §I, §J's tree check and §K keep only neutral text.
+    - `research.md`, `data-model.md`, `contracts/`: whatever the gate finds.
+    - `quickstart.md`: delete the "Reference check (transient…)" subsection.
+    - `tasks.md` (U-3):
+      - T215–T231 become neutral: each task's objective and evidence name no removed file, command or setting. The completion state stays as it is.
+      - In completed tasks, the incidental clauses go:
+        - T003's retired requirement reference;
+        - the **Baseline** fields of T070–T091, and the "Baseline" entry of the Format line;
+        - T091's and T102's evidence clauses;
+        - T159's lint path;
+        - T214's references to the retired freeze.
+      - The phase purposes, checkpoints and hard-gate lines of tasks Phases 1, 4 and 5 are neutralised.
+      - So are the crosswalk, requirement coverage, dependencies and strategy text.
+      - Every retired task stays a stub: `- T### — retired (D14); completed before retirement.` or `…; not completed.`
+    - `.specify/memory/constitution.md`:
+      - its Sync Impact Report comment stays, and its account of the replaced guarantee is reworded neutrally;
+      - its "naive coding-agent workflow" (XVI) is unrelated and stays.
+    - Also named, so none is missed:
+      - `tasks.md`: the header's Convergence paragraph (~14); the crosswalk's plan Phase 0 row (~65); T118's retired requirement and task references; and the Phase 1 hard gate (~94) and Phase 5 rollback (~282) lines;
+      - `spec.md`: the retired User Story 6 heading (already neutral — keep it as `User Story 6 — retired (D14)`), and the spec-gate reconciliation note that cites a retired criterion (~1680).
+      - The Acceptance statement under Measurable Outcomes keeps its retired IDs as bare identifiers (allowed by plan §H.8).
+    - Every other tracked file the gate finds.
+  - **Done when**:
+    - with the copies from T215, `git grep -nIiE -f <pattern copy>` over the working tree reports nothing outside the reviewer-owned checklists and T232–T233's own evidence, which T233 neutralises last;
+    - the retired-ID gate holds: bare IDs only, in `spec.md`'s stubs, D14's list and D16's audit, `tasks.md`'s stubs, and `plan.md`'s header and §F
+
+- [ ] T233 Clean up and re-judge the reviewer-owned checklists through `/speckit.checklist`
+  - **Req**: Constitution X, XII; plan §K · **Dep**: T232 · **Evidence**:
+    - **Cleanup**, by the reviewer, of the items plan §K listed before T232 removed it (the list is kept in T215's copies):
+      - `checklists/requirements.md`: the XVI / XXI item (~48–49), the threshold note (~102–104), the range statement (~141), the inventory line (~161: 174 identifiers, 166 active, retirements as bare IDs), the note at ~165, the decision count at ~16, ~100 and ~162 (28, through D19), and the FR-082 notes at ~121 and ~164 and the wording of item I (~36–37) (four intended changes, D18, D19).
+      - `checklists/spec-gate.md`: CHK048, CHK049, CHK059, CHK098, CHK100 (notes ~171–172), CHK101, CHK105, CHK106 (notes ~180–181), CHK117 (notes ~195–196: FR-082 now names four intended changes, D18, D19), and the ~202–203 note.
+    - **Re-judgement**: every item in both files is judged from the **contents of the files at the time of judging** — the constitution text in the tree (2.0.0), `spec.md`, `plan.md` and the tests — and never from whether a change has been committed or pushed. The XVI / XXI item is judged the same way.
+    - The before/after pass counts and each changed item are recorded.
+    - **Last step**: the evidence of T232 and T233 is reduced to a neutral summary — "every tracked file swept to neutral wording; retired tasks kept as stubs" and "reviewer checklists cleaned and re-judged from file contents" — with the details left to Git history. The gates are then run again from T215's copies.
+  - **Done when**:
+    - both files have no match for the reference pattern;
+    - every item is judged, with the counts recorded;
+    - any item still unchecked is reported with its reason
+
+**Checkpoint**: the tree is reference-free, the checklists are re-judged from content, and the retired identifiers are stubs.
+
+---
+
+## Phase 24: Exact-Final-HEAD Validation and Review
+
+**Purpose**: prove the final tree on the exact SHA that is reviewed. This supersedes T196; no earlier run is acceptance evidence. **PR #61 stays open for the owner. Nothing is merged, auto-merged or approved on the owner's behalf.**
+
+- [ ] T234 Run every deterministic gate on the exact final HEAD of `002-acceptance-decoupling`, in a clean detached worktree
+  - **Req**: SC-022, SC-023, SC-025, SC-035; Constitution II, VII, X; plan §J · **Dep**: T233, and the owner's instruction to commit the work (neutral messages, no AI attribution, explicit-path staging only) · **Evidence**:
+    - Runs on the exact final HEAD, in a clean detached worktree with an isolated virtual environment.
+    - Python gates:
+      - `python -m ruff check src tests tools`;
+      - `python -m pytest -q`;
+      - `python -m pytest -m performance -n 0 -q` (not below T215's count);
+      - `python tools/capability-map.py --check`;
+      - `python tools/protocol-codegen.py --check`;
+      - `git diff --check`.
+    - Frontend gates:
+      - `npm ci`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`;
+      - `bun test apps/tui/test/bun/renderer.test.tsx` and `bun test apps/tui/test/bun/orphan.test.ts`;
+      - `bun tools/build-tui-distribution.ts`, followed by `git status --porcelain`, which prints nothing.
+    - Tree gates:
+      - the reference gate, the retired-ID gate and the path check, run from T215's copies, report nothing.
+    - T222's accounting tests pass.
+    - **Per-criterion evidence** (plan §G, §J): every §G module is run, and its result is recorded against each active success criterion, including SC-007 (T216, T237) and SC-044 (T219). A criterion without passing evidence blocks acceptance.
+    - Every count is recorded next to T215's; the differences are explained by the removed and added tests.
+    - No provider is called.
+  - **Done when**: every gate passes on one recorded SHA
+
+- [ ] T235 Push the exact final HEAD to `002-acceptance-decoupling` (PR #61) and confirm CI in `.github/workflows/ci.yml` on all three platforms
+  - **Req**: FR-078, SC-022; Constitution II, XX · **Dep**: T234, and the owner's explicit push authorization · **Evidence**:
+    - `gh auth status` and `gh api user --jq .login` return `ifekri` before any write.
+    - **Before the push**, the PR #61 description is updated with `gh pr edit`:
+      - a summary of D14–D19;
+      - the Surface Impact table, with exactly the ten rows and three statuses of CLAUDE.md §9, matching `spec.md`'s surface classification, including FR-082 change 4 as breaking, with its migration path.
+      The **Surface Contract** check must pass on the pushed SHA.
+    - A normal push to `002-acceptance-decoupling` (PR #61) — never forced.
+    - Every check of the workflow matrix passes on that exact SHA, on Windows, Linux and macOS.
+    - No workflow reads a provider secret.
+    - A flaky job is re-run once and reported, never hidden.
+  - **Done when**: every check passes on the pushed SHA, and the SHA equals T234's
+
+- [ ] T236 Obtain a fresh Codex bot review of the exact pushed SHA on PR #61 (`ifekri/Comodor`); fix, re-validate and re-review until clean; leave PR #61 open
+  - **Req**: owner's completion rule; Constitution X, XX · **Dep**: T235 · **Evidence**:
+    - The owner requires this review, so it is requested on PR #61 for the exact SHA of T235, with identity `ifekri`.
+    - Every finding is classified as valid or not-applicable, with evidence. A valid finding is fixed in the owning file, with a test where it guards behaviour.
+    - The reply to each thread gives its evidence. Only addressed threads are resolved.
+    - **After any change**: T234 runs on the new HEAD; the owner authorizes the push (T235); CI must pass on the new SHA; and a fresh review of that new exact SHA is obtained. This repeats until a review of the exact final SHA has no unaddressed finding and CI is green on it.
+    - The final SHA, CI status and review state are reported against that one SHA.
+    - PR #61 is left **open**: no merge, no auto-merge, no approval on the owner's behalf, no branch deletion.
+  - **Done when**:
+    - the latest review targets the exact final pushed SHA and every finding is addressed;
+    - CI is green on that SHA;
+    - PR #61 is open and awaiting the owner's decision
+
+**Checkpoint**: the final SHA is validated deterministically on three platforms, reviewed at that exact SHA, and handed to the owner unmerged.
 
 ---
 
@@ -1026,7 +1241,6 @@ Every implementation-relevant FR and SC maps to at least one task. The requireme
 
 | Requirement | Why no separate task | Enforced by |
 | --- | --- | --- |
-| FR-014 (all decisions in one form) | The existing `ask` tool is already one call for the whole set; there is nothing to build | T006 characterizes it; T033 preserves it |
 | FR-020 (stable identity, match by header) | Already implemented in `questions.py` and the protocol schema | T006, T042 |
 | FR-021 (single- and multi-choice) | Already implemented | T006 |
 | FR-046 (never rewrite newest/unedited reads) | A constraint on T081/T091, not separate work | T004, T091 |
@@ -1034,9 +1248,11 @@ Every implementation-relevant FR and SC maps to at least one task. The requireme
 | FR-071 (cancellation takes effect at the next existing cooperative step/tool boundary) | Existing cooperative cancellation preserved; this feature adds no new blocking path, polling or timer — T042 asserts turn cancellation still yields `stopped == "cancelled"` at the transport layer; T160 keeps the existing cancellation suite green | T042, T160 |
 | FR-085 (no PR mutation) | A prohibition, verified rather than built | T170, T171 |
 | FR-128 (no unrelated work) | A prohibition on the diff | T169 |
-| SC-001, SC-005, SC-007 | Measured by benchmark and property tests rather than built | T029, T147–T150, T153 |
+| SC-005 | Measured by the property test rather than built | T029 |
 | SC-016, SC-017, SC-018, SC-019, SC-020 | Each is the acceptance measure of a named learning task | T102, T105, T106, T113, T115 |
 | SC-025 (mutation checks) | A standard applied to every guard task, not a task itself | Every task marked mutation-checked |
+
+FR-014 and SC-007 are covered by T216, T218, T237, T239, T240 and T241 (one logical form per decision point; plan §G.5; D18, D19). FR-082 change 4 and its migration path are documented by T238 and T231, and SC-044 is covered by T219. D17 is covered by T220–T221, and production accounting by T222. Retired identifiers (D14) carry no task.
 
 **No coverage percentage is reported in place of this table.** Every requirement is either listed above with a justification or referenced by at least one task.
 
@@ -1047,70 +1263,89 @@ Every implementation-relevant FR and SC maps to at least one task. The requireme
 *Task-phase numbering throughout this section and the rest of this file; see the crosswalk above for plan-phase equivalents.*
 
 ```text
-Phase 1 (baseline) ──┬─────────────────────────────► Phase 5 (optimization) ──┐
-   T015 hard gate ───┘                                        │               │
-      │                                                       │               │
-      ▼                                                       │               │
-Phase 2 (ledger) ──► Phase 3 (clarification) ─────────────────┤               │
-      │                     │                                 │               ▼
-      │                     │                    Phase 4 (observability)  Phase 9
-      ▼                     ▼                                 │          (benchmark)
-Phase 7 (completion gate) ◄─┴─────────────────────────────────┘               │
-      │                                                                       │
-      └───────► Phase 6 (learning) ──► Phase 8 (surfaces) ────────────────────┤
-                                                                              ▼
-                                                                   Phase 10 (validation)
-                                                                              │
-                                                                              ▼
-                                                                   Phase 11 (PR #39, read-only)
-                                                                              │
-                                              (specification convergence, 2026-09-24)
-                                                                              ▼
+Phase 1 (characterization) ─────────────────────────► Phase 5 (optimization)
+      │                                                       │
+      ▼                                                       │
+Phase 2 (ledger) ──► Phase 3 (clarification) ─────────────────┤
+      │                     │                                 │
+      │                     │                    Phase 4 (observability)
+      ▼                     ▼                                 │
+Phase 7 (completion gate) ◄─┴─────────────────────────────────┘
+      │
+      └───────► Phase 6 (learning) ──► Phase 8 (surfaces) ──► Phase 10 (validation)
+                                                                      │
+                                                                      ▼
+                                                           Phase 11 (PR #39, read-only)
+                                                                      │
+                                      (specification convergence, 2026-09-24)
+                                                                      ▼
        Phase 12 (identity + index) ──► Phase 13 (output + protocol) ──► Phase 14 (run_turn)
-                                                                              │
-                                                                              ▼
-                                                    Phase 15 (surface adapters, six families)
-                                                                              │
-                                  Phase 16 (D7, FR-127, security, re-verify, docs) ┤
-                                                                              ▼
-                              Phase 16b (SC-012 comparability + provenance, freeze)
-                                                                              │
-                                                                              ▼
-                                                   Phase 17 (exact-HEAD deterministic gates)
-                                                                              │
-                                                                              ▼
-                                                       Phase 18 (optional benchmark: SC-011, SC-012)
+                                                                      │
+                                                                      ▼
+                                            Phase 15 (surface adapters, six families)
+                                                                      │
+                          Phase 16 (D7, FR-127, security, re-verify, docs) ┤
+                                                                      ▼
+                                      (acceptance-scope convergence, D14–D17)
+                                                                      ▼
+   Phase 19 (setup) ──► Phase 20 (US1: one form, no re-raise) ──┐
+          │                                                     │
+          └──────────► Phase 21 (US3: settings, accounting) ────┤
+                                                                ▼
+                                             Phase 22 (removal work)
+                                                                │
+                                                                ▼
+                                   Phase 23 (neutral wording, checklists)
+                                                                │
+                                                                ▼
+                           Phase 24 (exact-final-HEAD gates, CI, review)
 ```
 
-- **Phase 5 is hard-blocked by T015.** No optimization before the baseline (Constitution XXI).
+Tasks Phases 9 and 18 are retired, and tasks Phase 16b holds only T214 plus stubs.
+
 - **Phase 3 depends on Phase 2** — the ledger decides when to ask.
 - **Phase 7 depends on Phases 2 and 3** — the gate reads ledger entries and must respect unresolved decisions.
 - **Phase 8 depends on Phases 3, 6 and 7.**
 - **Resumption chain**: T172 → T173 → T175 (with T174) → T179 → T180 → T200 / T176 → T181. The open/stale derivation (T175) needs refs in form records (T173); `run_turn` (T180) needs the lookup (T175) and the emitted refs (T179); the SC-042 replay (T206) runs only after persistence (T176), the validation tests (T181) and the CLI adapter (T182) exist.
 - **Phase 15** depends on Phase 14. T183 depends on T202; T186–T188 depend on T185 and T202; T205 depends on every family adapter (T182, T184, T202, T203, T204, T207).
 - **Phase 16** items are independent of Phase 15, except T193 (T176, T182, T200) and T195 (the surfaces it documents).
-- **Phase 16b**:
-  - T208 and T209 are independent;
-  - T210 needs both, then T211, then T212;
-  - T214 (the reviewer's checklist count) completes before the freeze;
-  - T213 freezes and pushes the candidate only after T190–T195, T208–T212 and T214, staging exactly its listed set.
-- **Phase 17 depends on Phase 16b**: T196 runs on T213's frozen HEAD, and any tracked change after it requires T196 again.
-- **Phase 18 depends on Phase 17**: no benchmark measurement before every deterministic gate is green on the frozen HEAD. The required sequence is: T208 ∥ T209 → T210 → T211 → T212 → T214 → T213 (freeze and push) → T196, which completes acceptance. The optional T198 → T199 follow T196 on the same SHA; T197 is superseded.
+- **Phases 19–24**:
+  - T215 comes first.
+  - Phase 20:
+    - T217 is done (D18).
+    - T216 → T218, committed together.
+    - Then T219, T239, T240 and T241.
+    - T241 → T238.
+    - T237 comes last in the phase: it needs T239–T241.
+    - T219 is written against the loop as T218 leaves it.
+  - T221 needs T218 (both edit `agent/loop.py`), and T228 needs T218 and T221. T225 needs T222 (`tests/test_token_accounting.py`), and T237 and T241 (`tests/test_headless.py`).
+  - Phase 21 runs T220 → T221; T222 is independent.
+  - Phase 22:
+    - T223 needs T220;
+    - then T224 → T225 → T226;
+    - T227, T230 and T231 need T226;
+    - T228 needs T221;
+    - T229 needs T225;
+    - T231 also needs T217.
+  - T232 needs everything in Phases 20–22, T237–T241 included. T233 follows T232.
+  - T234 needs T233 and the owner's instruction to commit. T235 needs T234 and the owner's push authorization. T236 follows T235, and any change it makes sends the work back through T234 and T235 for a new exact SHA.
+  - Nothing merges: PR #61 stays open for the owner.
 - **A permission gate closes every phase that touches questions, ASK, modes, tool advertisement, session interaction, orchestration or protocol**: T028, T060, T069, T098, T119, T129, T146, confirmed finally by T167.
 
 ### Parallel opportunities
 
-- **Phase 1**: T001–T013 all `[P]` — thirteen independent characterization modules
+- **Phase 1**: T001–T012 all `[P]` — twelve independent characterization modules
 - **Phase 3**: T029/T030/T032 · T045 · T053 · T058/T059 · T049 (T034 and T035 share `tests/test_clarification_restraint.py`, so only T034 is `[P]`)
 - **Phase 5**: T070–T090 are **deliberately not `[P]`** — they touch overlapping regions of `context.py` and each needs an isolated token comparison against T015. Verification tasks T091–T095 are `[P]`
 - **Phase 6**: T102, T105, T106, T113, T115 are `[P]`
 - **Phase 8**: T133–T139, T142–T144 are `[P]`
-- **Phase 9**: T147–T152, T157, T158 are `[P]`
 - **Phase 10**: all but T166 are `[P]`
 - **Phase 12**: T172 and T174 are `[P]` (no dependency, different files); **Phase 13**: T177 is `[P]` with Phase 12
 - **Phase 15**: T202, T182, T184 and T204 are `[P]` once Phase 14 is done (different modules); T203 is `[P]` with those; T207 edits the same file as T203 (`application/__init__.py`), so it follows T203 and is not `[P]`; T186–T188 are `[P]` once T185 and T202 are done
-- **Phase 16**: T191, T193 and T195 are `[P]`; T190, T192 and T194 touch shared agent modules and run in sequence
-- **Phase 16b**: T208 (`bench/integrity.py`) and T209 (`bench/runner.py`, `bench/report.py`) are `[P]`; T210–T212 share `bench/report.py` and `tests/test_bench_baseline.py` and run in sequence
+- **Phase 16**: T193 and T195 are `[P]`; T190, T192 and T194 touch shared agent modules and run in sequence
+- **Phase 20**: T238 and T239 are `[P]` once their dependencies are met; T240 and T241 touch other files and can run beside T239
+- **Phase 21**: T222 is `[P]` with T220–T221 (a different test file)
+- **Phase 22**: T227, T228, T229 and T230 are `[P]` once their dependencies are met — different files
 
 ---
 
@@ -1124,13 +1359,17 @@ Phase 7 (completion gate) ◄─┴───────────────
 
 1. **Phases 1–3** → US1 complete. The agent stops guessing, and stops over-asking. *(MVP)*
 2. **Phase 7** → US2 and US5 complete. "Done" becomes truthful.
-3. **Phases 4–5** → US3 complete. Tokens fall, measured against the baseline, every cache invalidating correctly.
+3. **Phases 4–5** → US3 complete. Context is assembled without resending or losing what is established, and every cache invalidates correctly.
 4. **Phase 6** → US4 complete. It stops re-asking what it was told, and cannot be taught by untrusted text.
 5. **Phases 8–10** → every surface consistent, every gate green.
 6. **Phase 11** → PR #39 audited, decision handed to the user.
 7. **Phases 12–17** → specification convergence: stable `decision_ref`, the shared turn entry `run_turn`, continuation binding and lifecycle, six turn-entry families, D7, FR-127, gates green on one HEAD.
-8. **Phase 16b** → SC-012 decidable mechanically (D10–D12) and the candidate frozen.
-9. **Phase 18** → optional live benchmark on the frozen candidate: SC-011 and SC-012 computed and reported when run; not an acceptance gate.
+8. **Phases 19–24** → acceptance-scope convergence (D14–D17):
+   - one form per decision point, and no re-raise of a cancelled question, each with exact, mutation-sensitive evidence;
+   - the two settings removed, with test seams; accounting pinned;
+   - the removal work, then neutral wording and the re-judged checklists;
+   - every gate green on the exact final HEAD on three platforms, with a fresh review of that SHA.
+   PR #61 is left open for the owner.
 
 ---
 

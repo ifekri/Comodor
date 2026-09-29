@@ -1,6 +1,6 @@
 # Plan Phase 0 Research: Grounded High-Quality Agent
 
-**Feature**: 002-grounded-agent-quality | **Date**: 2026-09-14
+**Feature**: 002-grounded-agent-quality | **Date**: 2026-09-14, revised 2026-09-29 for D14–D17
 
 Every unknown below was resolved by reading the repository, not by assumption.
 Where a question could not be settled from source, it is marked deferred with the
@@ -163,16 +163,17 @@ recorded in `data-model.md` §5 with tests for the chosen granularity.
 
 ---
 
-## R6 — Does the provider layer already report what the benchmark needs?
+## R6 — Does the provider layer already report what production accounting needs?
 
 **Decision**: Yes. `Usage` carries it; no adapter change required.
 
 **Rationale**: `providers/base.py::Usage` already exposes `input_tokens`,
 `output_tokens`, `prompt_tokens`, `total`, `cache_hit_rate` and `merge`.
 `agent/tokens.py` already calibrates its estimate against the real
-`usage.input_tokens` on every reply. So the paired benchmark reports
-provider-truth for cost and uses the estimator only where a provider figure does
-not exist — which is the anti-gaming rule the plan states.
+`usage.input_tokens` on every reply. So production accounting
+(`TurnRecord`, `TaskMeasurement`) records provider-truth for cost and uses the
+estimator only where a provider figure does not exist, labelled as an estimate —
+the accounting rule the plan states.
 
 **Alternatives considered**: *Adding a tokenizer dependency* — rejected outright.
 The Python core has exactly one runtime dependency (`rich`), `tokens.py`
@@ -378,48 +379,86 @@ neither stale nor orphan a `decision_ref`.
 - *Duplicate `cwd` / provider / model inside `continuation`* — rejected: they
   already live on `SessionMeta`; only the mode is new.
 
-## R17 — How is SC-012 compared across a scenario change, and where does provenance live?
+## R18 — How is acceptance made deterministic, and what does it rest on? (D14–D16)
 
 **Decision**:
-- The per-task scenario fingerprint is `bench/integrity.py::fingerprint`
-  (D11). It is reused for recording, reconstruction and comparison, with no
-  second hashing algorithm.
-- A paired run records the run-start fingerprints, already computed for the
-  checkpoint header, into each task's entry of the published JSON as
-  `scenario_fingerprint` (D12).
-- A historical report without them is read by reconstructing from its own
-  recorded `commit` with the current algorithm (`fingerprint_at`).
-- `sc012_comparison` selects each task's reference mechanically: the published
-  `current` rate when the digests match, otherwise the same run's `naive`
-  rate (D10).
-- It fails closed as `UNDECIDABLE` when comparability cannot be established.
-- It is exposed as `python -m bench --sc012 … --against …`, in existing modules
-  only.
+- Acceptance rests only on deterministic gates that use scripted model
+  responses (`providers/fake.py`). No gate calls a provider, needs a
+  credential or spends a token (D14; Constitution 2.0.0).
+- Each retained success criterion names the test modules that measure it
+  (plan §G). Where they cover less than the criterion's wording, the criterion
+  was narrowed in the spec (D16) rather than claimed.
+- The retired identifiers are neither measured nor marked passed.
 
 **Rationale**:
-- One algorithm on both sides makes "changed" a byte-level fact, not a
-  reviewer's call.
-- Capturing at run start ties the recorded fingerprints to the scenarios
-  actually judged. The drift check and the checkpoint binding already
-  guarantee that.
-- Reconstructing from the report's own commit is the only way to read the
-  2026-09-20 baseline without rewriting it.
-- A fail-closed comparator makes a shrunken task set or a missing arm visible
-  instead of silently passing.
+- A gate that can only be met by paying for a model makes acceptance depend on
+  a bill, not on the change (Constitution 2.0.0, XXI rationale).
+- Naming the evidence per criterion makes "measured" checkable. Every row was
+  found in the repository at `7361c50`, not assumed.
 
 **Alternatives considered**:
-- *A second, reporting-only hash*: rejected. Two definitions of "changed"
-  could disagree.
-- *Recomputing fingerprints at write time*: rejected. It could differ from
-  what the run was judged with if the tree changed mid-run.
-- *Hashing the whole `bench/` tree*: rejected by D11. Harness changes would
-  make every task changed.
-- *A new `bench/compare.py`*: rejected under the standing limit on new
-  benchmark helpers; `report.py` already owns comparison output.
-- *Rewriting the 2026-09-20 artifact to add fingerprints*: rejected, because
-  historical artifacts are never altered (as with token accounting).
-- *Manual reference override flags*: rejected. Selection must be mechanical
-  (D10–D11).
+- *Accepting on a model-dependent measurement beside the deterministic
+  gates*: rejected by D14. Acceptance would then depend on a provider, and
+  the measurement would invite claims that no gate supports.
+- *Relabelling a retired comparative criterion as a unit test*: rejected by
+  D16. A finite fixture set cannot show a universal or comparative outcome.
+
+## R19 — How do tests switch optimizations off once the settings are gone? (D17)
+
+**Decision**:
+- The two settings are removed from `AgentConfig` and from every runtime
+  reader.
+- Tests use two internal seams:
+  - the existing `Optimizer(enabled)` constructor, passed to `Conversation`
+    or assigned to `loop.conversation.optimizer`;
+  - a monkeypatch of the module-level log summariser in `tools/overflow.py`.
+- A configuration file that still carries either key keeps loading, because
+  `config._apply` ignores unknown keys. A test pins this.
+
+**Rationale**:
+- Neither setting was offered to a person, so removing it changes no reachable
+  behaviour.
+- The seams keep the safety and neutrality tests exactly as sensitive as
+  before, without shipping a switch whose only user is a test.
+
+**Alternatives considered**:
+- *A hidden environment variable*: rejected. It is still a production switch,
+  just harder to see.
+- *Deleting the neutrality tests with the settings*: rejected. They are the
+  deterministic evidence for the constitution's context-change gate (plan
+  §G.2).
+
+## R20 — How are SC-044 and SC-007 made mutation-sensitive? (D16)
+
+**Decision**:
+- **SC-044**: test each repeat-preventing layer separately — the tool's
+  `already` check through `Ask().run`, and the loop's batch behaviour.
+  - At loop level, the test disables every layer at once and asserts that a
+    second form appears.
+  - It also asserts that no single layer's removal is enough (plan §G.4).
+- **SC-007**: add `tests/test_clarification_one_form.py`, covering cases C1–C6.
+  The failing batch case is then fixed in `agent/loop.py`, so that all of a
+  batch's decisions reach the person as one logical form. Clients page it in
+  groups of at most four, and it is answered once (D19; plan §G.5).
+
+**Rationale**:
+- A probe at `7361c50` showed that disabling `_same` alone changes nothing at
+  loop level, because `_withheld_by` withholds the sibling `ask` first. A test
+  that relies on one layer's mutation would therefore pass with that layer
+  removed.
+- A second probe showed that two `ask` calls in one batch raise two forms when
+  the first is answered. SC-007 is testable, and it currently fails in that
+  case.
+
+**Alternatives considered**:
+- *Narrowing SC-007 to one `ask` call*: rejected. The case is testable, and it
+  fails today. D16 narrows a criterion only where it cannot be measured
+  deterministically.
+- *A four-question form limit with an overflow refusal*: rejected by D19. It
+  would leave FR-014 unsatisfiable whenever more than four decisions are
+  outstanding at once. Pages keep each screen small, without splitting the
+  form.
+- *Relying on the decline test for SC-044*: rejected by D16.
 
 ## R11 — How does a later invocation deliver the answer?
 
@@ -476,13 +515,12 @@ existing error channel is additive, and the specification requires no new enum.
 | --- | --- | --- |
 | CLI exit code number for a clarification-required turn | Better decided against `cli.py`'s existing return conventions than guessed | T131 (tasks Phase 8; plan Phase 6) |
 | Fingerprint granularity for repository-derived learning | Should follow real `rules.py` observation shapes | T111 (tasks Phase 6; plan Phase 5) |
-| SC-011 numeric token threshold | Resolved by user decision: set from the plan Phase 1 baseline (T015), never in advance | T015 (tasks Phase 1; plan Phase 1) → T156 (tasks Phase 9; plan Phase 7) |
 
-No other `NEEDS CLARIFICATION` remains. The specification records eighteen
-clarification decisions (the latest on 2026-09-24) in its §Clarifications —
-Resolved.
+No other `NEEDS CLARIFICATION` remains. The specification records twenty-eight
+clarification decisions (the latest on 2026-09-29) in its §Clarifications —
+Resolved. Plan §K lists the issues this revision leaves open (U-1 to U-4).
 
 
 ### 2026-09-24 alignment note
 
-The three items originally carried forward are no longer open design questions: the headless clarification exit code is `3`; learning fingerprint granularity is represented by the provenance-specific evidence identities documented in `data-model.md` and implemented by the current learning rules; and SC-011 has the owner-selected 10% relative threshold plus the per-task quality conjunct. What remains open is empirical acceptance on a fresh exact candidate and implementation convergence for stable cross-turn `decision_ref` resumption (D4/D9).
+The three items originally carried forward are no longer open design questions: the headless clarification exit code is `3`; learning fingerprint granularity is represented by the provenance-specific evidence identities documented in `data-model.md` and implemented by the current learning rules. What remained open then was implementation convergence for stable cross-turn `decision_ref` resumption (D4/D9), which plan Phase 9 delivered; acceptance was later made fully deterministic (D14, R18).

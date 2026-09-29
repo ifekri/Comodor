@@ -100,5 +100,5 @@ becoming a belief about the world. Existing injection checks in
 | Project facts | 8 — unchanged by this feature |
 | User facts | 6 — unchanged |
 | At cap | Explicit refusal listing current contents; never silent eviction |
-| Benchmark runs | Learning disabled, as it already is — a measurement that learns measures the order its tasks ran in |
+| Learning switched off | No durable write from any automatic path, and what was learned before is still read (FR-064) |
 | Persistence boundary | Deterministic and testable; the async writer's batching is durability, not semantics (FR-063) |
