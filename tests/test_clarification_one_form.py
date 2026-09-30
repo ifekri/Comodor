@@ -525,6 +525,36 @@ def test_c10_one_decision_twice_in_one_call_is_one_question(config, bus):
     assert person.headers() == ["Database"]
 
 
+def repeated_in_one_of_two_calls():
+    return [ask("q1", question("Database"), question("Database")),
+            ask("q2", question("Cache"))]
+
+
+def test_c3_a_repeat_within_one_call_of_a_combined_form_is_answered_once(config, bus):
+    """The call's repeat is one question, answered to that call once, under
+    the header the person saw — not under the one parsing numbered it with."""
+    person = Person(bus, first_option_for_every_question)
+    agent = make_agent(config, bus, [Script(text="Asking.",
+                                            tool_calls=repeated_in_one_of_two_calls()),
+                                     Script(text="Done.")])
+    assert agent.run(REQUEST).ok
+    assert person.headers() == ["Database", "Cache"]
+    assert "Database 2" not in tool_text(agent, "q1")
+    assert tool_text(agent, "q1").count("SQLite") == 1
+
+
+def test_c3_a_cancelled_repeat_is_reported_once(config, bus):
+    Person(bus, forms.CANCELLED)
+    agent = make_agent(config, bus, [Script(text="Asking.",
+                                            tool_calls=repeated_in_one_of_two_calls()
+                                            + [write()]),
+                                     Script(text="Done.")])
+    result = agent.run(REQUEST)
+    assert result.stopped == "clarification_required"
+    named = sorted(entry["decision"] for entry in result.clarification["decisions"])
+    assert named == ["Which cache should this use?", "Which database should this use?"]
+
+
 def test_c10_the_refusal_is_atomic(config, bus, monkeypatch):
     """Mutation check: without the set-wide refusal, a partial form appears."""
     monkeypatch.setattr(loop_module.AgentLoop, "_refuse_asks", lambda self, asks: "")

@@ -383,8 +383,14 @@ def ask_together(ctx: ToolContext, calls: list[tuple[str, list[forms.Question]]]
                                            repeated=True)
             continue
         mine[call_id], settled[call_id], discretion[call_id] = [], [], []
+        here: set[str] = set()
         for question in questions:
             key = _key(question.prompt)
+            if key in here:
+                # A repeat within this call is the question it already holds;
+                # it is answered to the call once, under the header shown.
+                continue
+            here.add(key)
             if key in shown:
                 mine[call_id].append((question.header, key))
                 continue
