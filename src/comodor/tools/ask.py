@@ -349,7 +349,10 @@ def ask_together(ctx: ToolContext, calls: list[tuple[str, list[forms.Question]]]
 
     `calls` is `[(call id, questions)]`, already checked. `extra` holds the
     decisions the mutation preflight found missing for the same reply; they
-    are part of the same decision point, so they ride on the same form.
+    are part of the same decision point, so they ride on the same form. A
+    model question stating one of them stands for it on the form, and the
+    preflight's decision — material, as the Core found it — is the one it
+    resolves, whatever the model said the question affects (FR-013).
 
     The same decision asked by two calls is one question, shown under the
     first asking call's header, and each call is answered under its own
@@ -365,6 +368,7 @@ def ask_together(ctx: ToolContext, calls: list[tuple[str, list[forms.Question]]]
     settled: dict[str, list[str]] = {}
     discretion: dict[str, list[str]] = {}
     results: dict[str, ToolResult] = {}
+    found = {_key(decision.what): decision for _, decision in extra or []}
 
     for call_id, questions in calls:
         # A decision the person already declined this attempt is not put to
@@ -385,11 +389,14 @@ def ask_together(ctx: ToolContext, calls: list[tuple[str, list[forms.Question]]]
                 mine[call_id].append((question.header, key))
                 continue
             question.options = ground(question.options, ctx)
-            decision = book.open_decision(
-                question.prompt, affects=question.affects,
-                candidates=[option.label for option in question.options
-                            if not option.free],
-                evidence_consulted=consulted)
+            candidates = [option.label for option in question.options if not option.free]
+            decision = found.get(key)
+            if decision is not None:
+                decision.candidates = decision.candidates or candidates
+            else:
+                decision = book.open_decision(
+                    question.prompt, affects=question.affects,
+                    candidates=candidates, evidence_consulted=consulted)
             if decision.state == "answered":
                 settled[call_id].append(f"{question.prompt} — {decision.answer}")
                 continue
@@ -405,6 +412,7 @@ def ask_together(ctx: ToolContext, calls: list[tuple[str, list[forms.Question]]]
 
     # Compared without case, as `check()` and `collision()` compare them: two
     # headers differing only in case are one tab to the person.
+    by_model = bool(shown)
     headers = {question.header.lower() for question, _ in shown.values()}
     for question, decision in extra or []:
         key = _key(decision.what)
@@ -416,7 +424,9 @@ def ask_together(ctx: ToolContext, calls: list[tuple[str, list[forms.Question]]]
         order.append(key)
 
     pending = [shown[key] for key in order]
-    form = present(ctx, pending, origin="model_ask") if pending else None
+    # A form of the preflight's questions alone is the Core's, not the model's.
+    origin = "model_ask" if by_model else "mutation_preflight"
+    form = present(ctx, pending, origin=origin) if pending else None
     record = form.meta.get("form") if form is not None else None
     submitted = {entry["header"]: entry for entry in (record or {}).get("answers", [])}
     outcome = str((record or {}).get("outcome") or "")

@@ -228,6 +228,65 @@ def test_c5_an_ask_and_a_preflight_decision_share_one_form(config, bus, order):
     assert result.ok and (config.paths.project / "service.py").exists()
 
 
+RATE_AS_ASKED = {"question": "What rate limit should the service use?", "header": "Rate",
+                 "affects": [],
+                 "options": [{"label": "100/s", "source": "request", "evidence": "100/s"},
+                             {"label": "1000/s", "source": "request", "evidence": "1000/s"}]}
+
+
+@pytest.mark.parametrize("order", ["write_then_ask", "ask_then_write"])
+def test_c5_the_model_asking_the_preflight_decision_keeps_it_material(config, bus, order):
+    """The model asks the very decision the preflight found missing, but calls
+    it affecting nothing. The Core's finding stands: the decision stays
+    material, the model's question stands for it on the form, and without an
+    answer the write does not run (FR-013, FR-018)."""
+    person = Person(bus, forms.CANCELLED)
+    calls = [write(), ask("q1", RATE_AS_ASKED)]
+    if order == "ask_then_write":
+        calls.reverse()
+    agent = make_agent(config, bus, [Script(text="Working.", tool_calls=calls),
+                                     Script(text="Done.")])
+    agent.gateway.provider("fake").preflight = MISSING_RATE
+    result = agent.run(REQUEST)
+    assert len(person.forms) == 1 and person.headers() == ["Rate"]
+    assert result.stopped == "clarification_required"
+    assert not (config.paths.project / "service.py").exists()
+
+
+def test_c5_an_answer_to_the_merged_question_lets_the_write_run(config, bus):
+    person = Person(bus, first_option_for_every_question)
+    agent = make_agent(config, bus, [
+        Script(text="Working.", tool_calls=[write(), ask("q1", RATE_AS_ASKED)]),
+        Script(text="Done.")])
+    agent.gateway.provider("fake").preflight = MISSING_RATE
+    result = agent.run(REQUEST)
+    assert len(person.forms) == 1 and person.headers() == ["Rate"]
+    assert result.ok and (config.paths.project / "service.py").exists()
+
+
+def test_c5_the_preflight_decision_is_not_dropped_for_the_models(config, bus, monkeypatch):
+    """Mutation check: dropping the preflight's decision where the model asks
+    the same prompt lets the write run without an answer."""
+    real = ask_tool.ask_together
+
+    def drop_matching(ctx, calls, extra=None):
+        asked = {ask_tool._key(q.prompt) for _, questions in calls for q in questions}
+        kept = [(q, d) for q, d in extra or [] if ask_tool._key(d.what) not in asked]
+        for _, decision in extra or []:
+            if ask_tool._key(decision.what) in asked:
+                decision.state = "answered"      # as if it had never been opened
+        return real(ctx, calls, kept)
+
+    monkeypatch.setattr(ask_tool, "ask_together", drop_matching)
+    Person(bus, forms.CANCELLED)
+    agent = make_agent(config, bus, [
+        Script(text="Working.", tool_calls=[write(), ask("q1", RATE_AS_ASKED)]),
+        Script(text="Done.")])
+    agent.gateway.provider("fake").preflight = MISSING_RATE
+    agent.run(REQUEST)
+    assert (config.paths.project / "service.py").exists(), "the mutation lets it run"
+
+
 def test_c5_a_preflight_header_differing_only_in_case_is_numbered(config, bus):
     """`Behaviour` from the model and `behaviour` from the preflight are one
     tab to the person, as `check()` and `collision()` treat them, so the
@@ -278,6 +337,7 @@ def test_c5_a_form_of_only_preflight_decisions_stays_on_the_record(config, bus):
     ref = result.clarification["decision_ref"]
     recorded = decision_states(agent.conversation.messages)
     assert ref in recorded and recorded[ref].status == "open"
+    assert recorded[ref].origin == "mutation_preflight", "the Core raised it, not the model"
     assert not (config.paths.project / "service.py").exists()
 
 

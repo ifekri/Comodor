@@ -1157,19 +1157,17 @@ class AgentLoop:
         from ..tools import ask as ask_tool
 
         calls = []
-        asked: set[str] = set()
         for call in self._batch_asks:
             questions, _ = ask_tool.check((call.arguments or {}).get("questions"))
             calls.append((call.id, questions))
-            asked.update(" ".join(question.prompt.lower().split()) for question in questions)
-        # A decision the model is already asking about is not registered twice.
-        extra = (self._preflight_pending(context, self._batch_preflight, skip=asked)
+        # Every decision the preflight found is registered as it found it; a
+        # model question stating the same one stands for it on the form.
+        extra = (self._preflight_pending(context, self._batch_preflight)
                  if self._preflight_wants_a_form() else [])
         return ask_tool.ask_together(context, calls, extra)
 
     def _preflight_pending(self, context: ToolContext,
-                           assessment: preflight.MutationAssessment,
-                           skip: set[str] | None = None) -> list[tuple[Any, Any]]:
+                           assessment: preflight.MutationAssessment) -> list[tuple[Any, Any]]:
         """The preflight's missing decisions, registered and ready to be asked."""
         from ..questions import Question
 
@@ -1177,8 +1175,6 @@ class AgentLoop:
         pending: list[tuple[Any, Any]] = []
         taken: set[str] = set()
         for missing in assessment.missing_decisions:
-            if skip and " ".join(missing.what.lower().split()) in skip:
-                continue
             decision = book.open_decision(
                 missing.what, affects=missing.affects,
                 evidence_consulted=assessment.evidence_refs)
