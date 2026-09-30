@@ -579,6 +579,56 @@ def test_a_combined_form_result_is_redacted_like_any_tool_result(config, bus):
     assert "use " in tool_text(agent, "q1"), "the answer itself still arrives"
 
 
+class Events:
+    """Every tool event's metadata, as a browser or a hook receives it."""
+
+    def __init__(self, bus):
+        self.meta: list = []
+        bus.subscribe(self)
+
+    def __call__(self, event):
+        if event.kind is Kind.TOOL_END:
+            self.meta.append(json.dumps(event.get("meta") or {}, default=str))
+
+
+@pytest.mark.parametrize("calls", [
+    [ask("q1", question("Database")), ask("q2", question("Cache"))],
+    [ask("q1", question("Database"), question("Cache"))],
+], ids=["combined", "single"])
+def test_the_form_record_is_redacted_where_it_is_emitted_and_kept(config, bus, calls):
+    """The record rides on the tool event and is persisted with the message;
+    a written answer carrying a configured credential is masked there too."""
+    config.providers[config.provider].api_key = KEY
+    Person(bus, written_key)
+    events = Events(bus)
+    agent = make_agent(config, bus, [Script(text="Asking.", tool_calls=calls),
+                                     Script(text="Done.")])
+    agent.run(REQUEST)
+    records = [m.meta["question"] for m in agent.conversation.messages
+               if m.meta and isinstance(m.meta.get("question"), dict)]
+    assert records and all(KEY not in json.dumps(record) for record in records)
+    assert any("use " in json.dumps(record) for record in records)
+    assert events.meta and all(KEY not in meta for meta in events.meta)
+
+
+def test_a_long_written_answer_on_a_combined_form_is_bounded(config, bus):
+    """One logical form may join many calls and a written answer has no
+    length bound; each synthesized result is bounded as any tool result is,
+    and nothing is lost (FR-047, FR-048)."""
+    config.agent.max_tool_chars = 2000
+    long_answer = "detail " * 2000
+    Person(bus, lambda request: json.dumps([
+        {"header": entry["header"], "prompt": "", "chosen": [], "written": long_answer}
+        for entry in request.meta["questions"]]))
+    agent = make_agent(config, bus, [
+        Script(text="Asking.", tool_calls=[ask("q1", question("Database")),
+                                           ask("q2", question("Cache"))]),
+        Script(text="Done.")])
+    agent.run(REQUEST)
+    for call_id in ("q1", "q2"):
+        assert len(tool_text(agent, call_id)) < len(long_answer)
+
+
 @pytest.mark.parametrize("mode", ["ask", "chat", "no-such-mode"])
 def test_a_mode_without_the_ask_tool_refuses_the_whole_set(config, bus, mode):
     """Batching two `ask` calls does not get past the mode boundary a single

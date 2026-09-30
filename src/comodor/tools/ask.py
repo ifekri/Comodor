@@ -603,9 +603,14 @@ def present(ctx: ToolContext, pending: list[tuple[forms.Question, Any]], *,
         summary,
         display=shown or "Every question skipped.",
         answered=True, given=given, asked=len(asked))
-    result.meta["form"] = form_record(asked, answers,
-                                      "cancelled" if left_open else "answered",
-                                      origin=origin)
+    record = form_record(asked, answers, "cancelled" if left_open else "answered",
+                         origin=origin)
+    # The record is emitted with the tool event and persisted with the
+    # message, so an answer is redacted there as the result text is.
+    for entry in record["answers"]:
+        entry["chosen"] = [ctx.redact(label) for label in entry["chosen"]]
+        entry["written"] = ctx.redact(entry["written"])
+    result.meta["form"] = record
     if left_open:
         result.meta["outcome"] = "cancelled"
         result.meta["clarification"] = payload_for(left_open, "cancelled")

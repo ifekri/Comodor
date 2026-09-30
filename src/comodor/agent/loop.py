@@ -41,7 +41,7 @@ from ..providers.base import (
 from ..providers.gateway import Gateway
 from ..questions import MAX_QUESTIONS as _MAX_QUESTIONS
 from ..safety import PermissionEngine, Risk
-from ..tools import ToolContext, ToolRegistry, ToolResult
+from ..tools import ToolContext, ToolRegistry, ToolResult, overflow
 from . import plan, preflight, staleness
 from .context import Conversation
 from .prompts import COMPACT_PROMPT, build_system_prompt, project_instructions
@@ -1159,7 +1159,7 @@ class AgentLoop:
         The calls do not pass through `ToolRegistry.invoke`, so what it does
         around a tool is done here: each call passes the same gate first —
         the mode's tools, the permission policy (FR-117, FR-118) — and every
-        result is redacted as a tool's result is.
+        result is redacted and bounded as a tool's result is.
         """
         from ..tools import ask as ask_tool
 
@@ -1185,9 +1185,10 @@ class AgentLoop:
         extra = (self._preflight_pending(context, self._batch_preflight)
                  if self._preflight_wants_a_form() else [])
         results = ask_tool.ask_together(context, calls, extra)
-        for result in results.values():
+        for call_id, result in results.items():
             result.content = context.redact(result.content)
             result.display = context.redact(result.display)
+            results[call_id] = overflow.contain(result, context.for_call(call_id), "ask")
         return results
 
     def _preflight_pending(self, context: ToolContext,
@@ -1260,6 +1261,7 @@ class AgentLoop:
         result = ask_tool.present(context, pending, origin="mutation_preflight")
         result.content = context.redact(result.content)
         result.display = context.redact(result.display)
+        result = overflow.contain(result, context, "ask")
         if all(decision.resolved for _, decision in pending):
             # The person answered: the same decision is now KNOWN, and the
             # mutation may be reconsidered rather than withheld.
