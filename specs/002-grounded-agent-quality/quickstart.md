@@ -391,10 +391,3 @@ bun test apps/tui/test/bun/renderer.test.tsx
 bun test apps/tui/test/bun/orphan.test.ts
 bun tools/build-tui-distribution.ts && git status --porcelain   # prints nothing
 ```
-
-#### Reference check (transient — removed by the final scrub, plan §I I-7)
-
-Run the reference and retired-ID gates of plan §H.8 against the exact final
-HEAD, from a copy of the pattern kept outside the tree. Expected: no hit
-outside plan §H.8's allowlist. This subsection and plan §H are deleted in the
-same scrub.

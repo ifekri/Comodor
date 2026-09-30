@@ -400,8 +400,8 @@ neither stale nor orphan a `decision_ref`.
 - *Accepting on a model-dependent measurement beside the deterministic
   gates*: rejected by D14. Acceptance would then depend on a provider, and
   the measurement would invite claims that no gate supports.
-- *Relabelling a retired comparative criterion as a unit test*: rejected by
-  D16. A finite fixture set cannot show a universal or comparative outcome.
+- *Relabelling a retired criterion as a unit test*: rejected by D16. A finite
+  fixture set cannot show a universal outcome.
 
 ## R19 — How do tests switch optimizations off once the settings are gone? (D17)
 

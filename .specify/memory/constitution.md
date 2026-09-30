@@ -8,7 +8,7 @@ Sync Impact Report
   checks that use scripted model responses wherever a model is involved, and
   it requires no provider calls or paid tokens. A guarantee that work written
   against 1.1.0 could rely on — that every change to what is sent to a model
-  carries fresh comparative quality-and-token figures — no longer holds, so
+  carries model-dependent quality-and-token figures — no longer holds, so
   this is a backward-incompatible redefinition.
 - Motivation: the owner decided (2026-09-28) that acceptance must not depend
   on paying for, or having access to, any model. What is kept is honesty — no

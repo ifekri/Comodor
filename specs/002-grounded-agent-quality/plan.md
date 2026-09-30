@@ -69,10 +69,10 @@ tokens.
 | VI — Architectural boundaries | Evidence ledger lives in the core; frontends render it. Protocol change goes through the schema and codegen, never hand-edited | **PASS** |
 | VII — Reproducible artifacts | Terminal-interface bundle rebuilt and committed if TS changes | **PASS** — TS/TUI-affecting work lands in plan Phase 3 (clarification enforcement: protocol fields, overlay) and plan Phase 6 (surface wiring); the committed bundle rebuild is owned by T141 (tasks Phase 8), verified by T166; plan Phase 11 changes TUI source for D19 (T240), rebuilds the committed bundle, and re-runs the staleness check (§J) |
 | VIII — Security not weakened | Mode policy untouched; clarification never becomes a route to a forbidden action; no secret enters the ledger; no gate needs a credential | **PASS** — explicit non-goal below |
-| IX — Release infra is production code | No release action in this initiative at all; the lint path in the release workflow changes with the CI one and is proved by the same CI run (§H) | **PASS** — FR-084 |
+| IX — Release infra is production code | No release action in this initiative at all; the lint path in the release workflow changes with the CI one and is proved by the same CI run | **PASS** — FR-084 |
 | X — Quality gates mandatory | Full deterministic baseline per phase on the exact commit; every gate is deterministic and calls no provider | **PASS** |
 | XI — Specifications name surfaces | `spec.md` owns the normative ten-surface table using REQUIRED / UNCHANGED BUT VERIFIED / NOT APPLICABLE; this plan mirrors it and adds implementation/task evidence without overriding it | **PASS** — the table below is a convergence view of the authoritative spec classification; Web UI is REQUIRED and the planned desktop application is NOT APPLICABLE |
-| XII — Done means everything agrees | Phase not complete until implementation, tests, docs and evidence agree; plan Phase 11 ends with the Spec Kit and documentation scrub (§I, I-7) | **PASS** |
+| XII — Done means everything agrees | Phase not complete until implementation, tests, docs and evidence agree; plan Phase 11 ends with the neutral-wording sweep (§I, I-7) | **PASS** |
 | XIII — Quality-first | The whole feature | **PASS** |
 | XIV — Evidence before assumption | Evidence ledger is the mechanism; every retained criterion names its deterministic evidence (§G) | **PASS** |
 | XV — Clarification a product invariant | Phases 2–3; non-interactive blocking implements XV directly | **PASS** |
@@ -416,7 +416,7 @@ specification clarification is needed.
 ### F. Acceptance (D14–D16)
 
 Acceptance is deterministic. It needs no model call other than scripted
-responses, no paid evaluation, no provider credential and no live run (D14;
+responses, no paid tokens and no provider credential (D14;
 Constitution 2.0.0, Principle XXI and the Development Workflow rule). It rests
 on:
 
@@ -481,8 +481,7 @@ never claimed beyond its tests.
 #### G.1 FR-064
 
 FR-064 keeps its first clause: learning can be switched off entirely. Evidence:
-`tests/test_learning_switch.py`, after §H removes the functions that exist only
-for the removed harness.
+`tests/test_learning_switch.py`.
 
 #### G.2 The context-change gate (Constitution 2.0.0)
 
@@ -646,152 +645,6 @@ neither narrowed nor retired. The work is:
   and the deterministic coverage required across every existing client
   surface.
 
-## H. Removal work (D14, D17) — transient implementation inventory
-
-> **Transient.** This section names what D14 and D17 remove, so that
-> `/speckit.tasks` can schedule it. Step I-7 deletes this section, together with
-> every other passage in the tracked tree that names what was removed. Git
-> history is the record. Line numbers are at `7361c50` and are re-located
-> before editing.
-
-**H.1 — delete outright**
-
-- `bench/` — the whole directory: 127 tracked files, covering the harness,
-  task scenarios, judges, recorded results, the fingerprint record and its
-  README.
-- The eight harness test modules: `tests/test_bench.py`,
-  `tests/test_bench_baseline.py`, `tests/test_bench_blocked.py`,
-  `tests/test_bench_integrity.py`, `tests/test_bench_interactions.py`,
-  `tests/test_bench_observability.py`, `tests/test_bench_reproducibility.py`
-  and `tests/test_bench_sequence.py`. Together they hold 219 test functions,
-  none of which is a product test.
-- The test functions that exist only for the harness:
-  - `tests/test_headless.py::test_a_malformed_values_map_is_refused_when_the_scenario_loads`;
-  - `tests/test_learning_switch.py::test_both_benchmark_modes_are_selectable_and_written_explicitly`;
-  - `tests/test_learning_switch.py::test_two_runs_of_the_same_mode_produce_the_same_measurement_inputs`;
-  - `tests/test_token_accounting.py::test_the_report_documents_name_their_accounting_version`;
-  - `tests/test_context_optimization_neutrality.py::test_each_switch_is_what_the_paired_runner_writes`;
-  - the test in `tests/test_context_recoverability.py` that selects the
-    comparison strategy (~97).
-
-**H.2 — rework (keep the product assertion, drop the harness part)**
-
-- `tests/test_learning_switch.py::test_the_switch_is_a_documented_setting_not_an_inference`:
-  drop its harness import (~199).
-- `tests/test_context_optimization_neutrality.py`:
-  - drop the module-level harness import;
-  - `test_every_switchable_optimization_is_a_named_switch` asserts against
-    `agent/context.py::OPTIMIZATIONS` only;
-  - `test_the_log_summariser_reads_the_same_field` becomes a seam test;
-  - the scripted-task tests (~133, ~145, ~162) use the §G.3 seam.
-- **Coverage rule**: before a removed test goes, every `comodor.*` symbol it
-  imports is matched to a product test that still covers it. Where none
-  exists, the assertion moves into a product test first.
-
-**H.3 — runtime and comments**
-
-- D17 (§G.3):
-  - `config.py` — the two fields and their comments (~189–203);
-  - `agent/context.py` — the comments at ~48–56 and `Optimizer.from_config`
-    (~105–111);
-  - `agent/loop.py` — ~225, and the alternative branches of `_maybe_compact`
-    (~1531–1580);
-  - `tools/overflow.py` — ~189–193.
-- Comments that cite the harness are reworded, with no behaviour change, in:
-  - `cli.py` ~525–535 (the `usage` and `measurement` fields stay);
-  - `insights.py` ~250;
-  - `tools/base.py` ~82; `tools/fs.py` ~280;
-  - `agent/constraints.py` ~3; `agent/preflight.py` ~5;
-  - `agent/verify.py` ~4, ~1137, ~1205;
-  - the remaining hits in `agent/loop.py` and `agent/context.py`.
-- Test prose and placeholder names are reworded in:
-  - `tests/test_agent_loop.py`, `tests/test_baseline_headless.py`,
-    `tests/test_baseline_tokens.py`, `tests/test_blind_writes.py`;
-  - `tests/test_constraints.py`, `tests/test_context_containment.py`,
-    `tests/test_mutation_preflight.py`, `tests/test_performance.py`;
-  - `tests/test_project_check.py`, `tests/test_protocol_performance.py`
-    (prose and the placeholder client name), `tests/test_staleness.py`,
-    `tests/test_validation_integrity.py`;
-  - `apps/tui/test/bun/measure.tsx` (prose and the placeholder client name).
-
-**H.4 — CI and configuration**
-
-- `.github/workflows/ci.yml` ~28–31 and `.github/workflows/release.yml` ~213:
-  lint `src tests tools`. The comment goes with the path. This is release
-  infrastructure (Constitution IX), proved by the same CI run.
-- `.github/labeler.yml` ~20: remove the glob. If its rule has no other glob,
-  remove the rule.
-- `pyproject.toml` ~62–69: remove the two ruff excludes and their comment, and
-  keep `_version.py`.
-- `.gitignore` ~63–72: remove the block.
-- `.dockerignore` ~3: reword the comment.
-
-**H.5 — documentation and changelog**
-
-- `README.md` ~240: reword the sentence.
-- `README.md` ~342–366: remove the section, and its contents entry if any.
-- `CONTRIBUTING.md` ~43–46.
-- `docs/README.md` ~125: the index row.
-- `CHANGELOG.md`: the dated passages in 1.1.1 (~311–313), 1.1.0 (~319, ~356,
-  and the result figures in ~367–455), 0.21.0 (~458–520) and 0.6.1
-  (~2269–2288). Each dated section is reviewed as a whole, not line by line:
-  - remove what reports the harness or its results;
-  - reword the surrounding text minimally, so each entry still reads
-    correctly;
-  - keep every unrelated change the entry records.
-
-  The unreleased Feature 002 entry is checked the same way.
-
-**H.6 — Spec Kit artifacts (step I-7)**
-
-- `tasks.md`:
-  - every retired task becomes an ID-only stub, as the spec's retired criteria
-    are (open issue U-3);
-  - the crosswalk, phase notes, dependency graph and checkpoint text lose every
-    reference.
-- `plan.md`: this section (§H), every cross-reference to it, and every other
-  line the §H.8 gate finds (§G.1, §I, §J's tree check, §K's U-2).
-- `quickstart.md`: its transient subsection.
-- `spec.md`: D15's and D17's wording, the "no live-model evaluation" line
-  (~1727), and D14's example words. This needs owner confirmation (open issue
-  U-2).
-- The checklists are reviewer-owned (§K).
-- `contracts/learning-record.md` L6 was already neutralised in this plan
-  revision.
-- `.specify/memory/constitution.md`:
-  - its Sync Impact Report comment is included in the sweep: the report is
-    kept, but its account of the removed guarantee is reworded neutrally;
-  - its "naive coding-agent workflow" (XVI) is unrelated and stays.
-
-**H.7 — kept**
-
-- Production token-usage accounting (§Production Token-Usage Accounting).
-- The learning switch (FR-064).
-- `scripts/live_check.py` — unrelated to the removed subsystem, and outside
-  every gate.
-
-**H.8 — reference gate** (the pattern lives only here and in `tasks.md`, which
-I-7 scrubs; the final run uses a copy kept outside the tree)
-
-```text
-git grep -nIiE '<pattern>' <exact final HEAD> -- .
-pattern: benchmark|\bbench\b|paired[- ](run|report|baseline|arm|eval|measure|experiment|cohort|reporting)|paired-eligible|naive (full|strategy|baseline|arm|comparison)|full-resend|context_strategy|optimizations_off|careful-(unknowable|cannot|ambig|only)|learning-repeat|fingerprints\.json|fingerprint_at|scenario_fingerprint|sc012|outcome rate|live[- ]model
-```
-
-- **Expected**: zero hits.
-- **Deliberately not matched** (unrelated meanings that stay): *workbench*,
-  paired channel accounts ("paired" alone), "repaired", "judged" and
-  "judgement", content fingerprints in dedup and invalidation, "Acceptance
-  Scenarios", and the constitution's "naive coding-agent workflow".
-- **Retired-ID gate**: FR-076, FR-077, SC-001, SC-011, SC-012, SC-021, SC-026,
-  SC-036 and "User Story 6" appear only as bare identifiers, never with a
-  description of what they measured, in:
-  - `spec.md`'s retired stubs, D14's list, D16's audit rows and the
-    Acceptance statement under Measurable Outcomes;
-  - `tasks.md`'s ID-only stubs;
-  - this plan's header and §F.
-  The checklists are scrubbed by their reviewers (§K).
-
 ## I. Implementation sequence (plan Phase 11)
 
 Each step leaves the full deterministic suite green before the next begins.
@@ -803,10 +656,10 @@ Nothing is committed, pushed or merged without the owner's instruction.
 | I-1 | SC-007 (§G.5): the test first, then the loop fix (D18, D19), then the client paging and the scripted-interaction matching. SC-044 (§G.4): the tool-level and loop-level tests with their mutation checks | `pytest -q`; Bun tests; bundle rebuilt |
 | I-2 | Re-confirm every §G row on HEAD: run each named module, record the counts, and treat any gap as a finding | the named modules |
 | I-3 | D17 (§G.3): remove the settings and branches; migrate the tests to the seams; add the configuration-compatibility test; re-run the context, overflow, loop and performance suites | `pytest -q`; `pytest -m performance -n 0 -q` |
-| I-4 | Tests (§H.1, §H.2): rework the mixed functions; apply the coverage rule; delete the harness-only functions, then the eight modules | `pytest -q` |
-| I-5 | Delete `bench/`; CI and configuration (§H.4) | ruff over `src tests tools`; `pytest -q` |
-| I-6 | Comments and test prose (§H.3); documentation and changelog (§H.5) | ruff; `pytest -q`; Bun tests |
-| I-7 | Spec Kit scrub (§H.6), after the reviewer's `/speckit.checklist` cleanup (§K); delete §H and the quickstart's transient subsection last | reference gate and retired-ID gate (§H.8) |
+| I-4 | Clean-up of tests, after the coverage rule (tasks Phase 22) | `pytest -q` |
+| I-5 | Clean-up of files and configuration (tasks Phase 22) | ruff over `src tests tools`; `pytest -q` |
+| I-6 | Comments, test prose, documentation and changelog (tasks Phase 22) | ruff; `pytest -q`; Bun tests |
+| I-7 | Neutral-wording sweep, then the reviewer's checklist cleanup (T232, T233) | the reference gates, run from copies kept outside the tree |
 | I-8 | Final gates (§J) on the exact final HEAD | §J |
 
 Each step can be reverted on its own (Constitution V). I-3 and I-4 are
@@ -842,8 +695,8 @@ bun tools/build-tui-distribution.ts && git status --porcelain   # must print not
 
 **Tree**
 
-- the reference gate and the retired-ID gate of §H.8 report nothing;
-- `git ls-files bench` prints nothing.
+- the reference gate and the retired-ID gate, run from copies kept outside the
+  tree, report nothing.
 
 **CI**
 
@@ -880,8 +733,7 @@ here is merged, auto-merged or approved on the owner's behalf.
   user-visible change. It is breaking for form-count and scripted consumers,
   and it is release-noted with change 1 and D19's migration path.
 - **U-2 — the spec's own wording.** The owner approved neutral wording for
-  D14–D17 on 2026-09-29, with no remaining references. The I-7 scrub applies
-  it (T232).
+  D14–D17 on 2026-09-29, with no remaining references, and T232 applied it.
 - **U-3 — task history.** D14 says completed task history is not rewritten,
   and that the final tree carries no reference. This plan reads that as:
   - retired tasks become ID-only stubs;
@@ -894,27 +746,8 @@ here is merged, auto-merged or approved on the owner's behalf.
   of judging — the constitution text in the tree — not from commit or push
   state.
 
-**Reviewer-owned checklist cleanup** (for `/speckit.checklist`; not edited by
-this plan)
-
-- `checklists/requirements.md`:
-  - line ~48–49: the pending XVI / XXI item cites FR-076, FR-077, SC-011 and
-    SC-012;
-  - ~102–104: the Q1 threshold note;
-  - ~141: the "SC-001 to SC-026" range statement;
-  - ~161: the inventory line (130 FR / 44 SC, with no retirements);
-  - ~165: the SC-011 note;
-  - ~36–37 (item I), ~121 and ~164: FR-082 now names four intended changes (D18, D19);
-  - ~16, ~100 and ~162: the decision count becomes 28, through D19.
-- `checklists/spec-gate.md`:
-  - CHK048 and CHK049 (baseline and threshold);
-  - CHK059 (cites SC-012);
-  - CHK098 (cites SC-001);
-  - CHK100 with its notes (~171–172);
-  - CHK101 (cites SC-021);
-  - CHK105 and CHK106 with their notes (~180–181);
-  - CHK117 with its notes (~195–196): FR-082 names four intended changes (D18, D19);
-  - the ~202–203 note on the clarification count.
+**Reviewer-owned checklist cleanup**: done by the reviewer at T233, which
+re-judges every item from the files' contents.
 
 ## Current Data Flow (as built)
 
@@ -1273,7 +1106,7 @@ admitted ──► active ──┬── contradicted by newer correction ─�
 ## Production Token-Usage Accounting
 
 Kept unchanged by D14 (Constitution XVI, XXI; FR-072 to FR-075). It is product
-behaviour, not an evaluation:
+behaviour:
 
 - `agent/tokens.py` — `TurnRecord` per provider call (input, output, cached and
   cache-written tokens, context size, whether estimated) and `TaskMeasurement`
@@ -1384,7 +1217,7 @@ tasks.md; cross-artifact references use `plan Phase N` / `tasks Phase N`.
 | **8** | Full deterministic validation | Complete local/CI baseline on the integrated candidate, all three platforms | Every deterministic gate green; nothing claimed unverified |
 | **9** | Specification convergence (D4/D7/D9 and re-verification) | Stable semantic `decision_ref` minted in the evidence owner; unresolved set derived from the existing session form records; common DecisionAnswer path in the application layer; additive protocol fields; CLI/API/ACP/channel adapters; D7 validation cases; re-verification of FR-099/100/101/105/127/018/123 (§2026-09-24 Plan Convergence B–D) | The §B gate: invalid refs fail closed before any model call, no heuristic path, stable and distinct refs, SC-042 replay, old clients unaffected; D7 cases green; every re-verification either passes or has become a task; protocol codegen, capability map and full deterministic suite green |
 | **10** | *Retired (D14)* | — | — |
-| **11** | Acceptance-scope convergence (D14–D17) | Deterministic evidence confirmed for every retained criterion (§G); the SC-044 regression test (§G.4); D17's settings removed with test-internal seams (§G.3); the removal work of §H; the Spec Kit and documentation scrub (§I, I-7) | §J on the exact final HEAD, all three platforms |
+| **11** | Acceptance-scope convergence (D14–D17) | Deterministic evidence confirmed for every retained criterion (§G); the SC-044 regression test (§G.4); D17's settings removed with test-internal seams (§G.3); clean-up (tasks Phase 22); the neutral-wording sweep and checklist re-judgement (§I, I-7) | §J on the exact final HEAD, all three platforms |
 
 **Dependency note (plan-phase numbering)**: plan Phase 4 builds on plan
 Phase 1's accounting. Plan Phase 3 depends on plan Phase 2 (the ledger decides
@@ -1410,10 +1243,10 @@ one validation task, and concrete file evidence. Phase references use the
 | API / Protocols | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10; plan Phase 9 | Additive optional `QuestionField` properties and the negotiated clarification-required capability in `schemas/protocol/v2.json` (T046, T048); artifacts regenerated and `--check` green (T047, T164); old-client compatibility (T136); `api/server.py` maps the OpenAI-compatible envelope to standard `finish_reason: "stop"` while preserving the distinct Comodor state in `comodor.stopped` and `comodor.clarification` (T132); session bridge (T133); ACP (T134); capability honesty and mode authority (T138, T139); capability map (T140, T165); optional `decision_ref` on `ClarificationRequired` / `ClarificationDecision`, codegen, API `comodor.decision_answers` and ACP resumption (plan Phase 9, §B) D18, D19: a protocol v2 interactive client receives one live paged form, answered once. The OpenAI-compatible API and ACP return one clarification-required payload listing every decision, resumed through `decision_answers` keyed by `decision_ref`, in parts if needed (T216, T218, T237). |
 | Desktop | NOT APPLICABLE | — | No desktop application/client exists: `docs/desktop-architecture.md` opens "Planned, not built. Nothing in this document exists in the repository"; there is no `src-tauri/`, `apps/desktop/` or desktop client package. The existing `src/comodor/desktop/` package is the computer-use **tool's** screen-capture/pointer backend (consumed by `tools/computer.py`, gated in `tools/registry.py`), not a client or runtime: it renders no questions and reads no turn outcome (it imports none of the question, clarification or turn-outcome machinery; its uses of the words "question" and "stopped" are prose and the guard's own `Stopped` refusal). As a tool it is covered by the permission gates (T011, T167), not by this row |
 | Channels / Integrations | REQUIRED | plan Phase 3 / tasks Phase 3 (FR-121 blocking); plan Phase 6 / tasks Phase 8; plan Phase 9 | Non-interactive blocking applies to every channel (FR-121, T044); channel integrations under `src/comodor/channels/` report a needed decision instead of a result or a crash (T135); existing channel suites `tests/test_channel_service.py`, `tests/test_telegram.py`, `tests/test_slack.py`, `tests/test_whatsapp.py` stay green in T160; quickstart Web/channel checks; a later answer counts only as an explicit structured reply naming the `decision_ref`, routed through the common path; any other reply is a new request (plan Phase 9, §B) D18, D19: one logical form per decision point, paged in groups of at most four, answered once (T216, T218, T237, T239–T241). |
-| Docker / Packaged Runtime | REQUIRED | plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10; plan Phase 11 | **Docker configuration unchanged; packaged runtime artifact REQUIRED and verified.** `Dockerfile` / `docker-compose.yml` are not edited by any task (T169 scope review); the packaged terminal-interface bundle that the wheel, sdist and container ship is affected by the TS changes and is rebuilt (T141) and verified to match source (T166); existing Docker/packaging/release validation stays green (T160, T168, T170 confirms no release action); plan Phase 11 leaves the wheel and container contents unchanged, the sdist ships fewer test modules (§H), and the bundle staleness check is re-run (§J) D19 changes TUI source (T240), so the committed bundle is rebuilt and T234 checks that it is not stale. |
+| Docker / Packaged Runtime | REQUIRED | plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10; plan Phase 11 | **Docker configuration unchanged; packaged runtime artifact REQUIRED and verified.** `Dockerfile` / `docker-compose.yml` are not edited by any task (T169 scope review); the packaged terminal-interface bundle that the wheel, sdist and container ship is affected by the TS changes and is rebuilt (T141) and verified to match source (T166); existing Docker/packaging/release validation stays green (T160, T168, T170 confirms no release action); plan Phase 11 leaves the wheel and container contents unchanged, the sdist ships fewer test modules, and the bundle staleness check is re-run (§J) D19 changes TUI source (T240), so the committed bundle is rebuilt and T234 checks that it is not stale. |
 | Persistence / Shared State | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 5 / tasks Phase 6; plan Phase 6 / tasks Phase 8; plan Phase 9 | Learning records gain provenance, status, fingerprint, supersession in `src/comodor/learning/store.py` (T099, T110, T111, T112, T117); session pending-interaction round-trip characterized (T007) and an outstanding form persisted/restored across reconnect with full lifecycle in transcript/export (`src/comodor/session/store.py`, T050, T051); pre-change sessions and stored knowledge remain readable (T137); ledger never persisted (T026); the unresolved-decision set is derived from the form records the session transcript already stores (`message.meta["question"]`) — no new store, and the ledger is still never persisted; a headless run persists only when it ends `clarification_required`, as a `SessionStore` continuation marked by the optional `SessionMeta.continuation` object (`decision_refs`, `mode`), written only on continuations and excluded from `list_sessions()`; a resumed run appends to it whatever it ends in (plan Phase 9, §B, §B.2) |
 | Security / Authorization | REQUIRED | every task phase that touches questions, ASK, modes, tool advertisement, session interaction, orchestration or protocol | Permission and mode enforcement characterized first (T011, `tests/test_baseline_permissions.py`; T012 capability advertisement); per-phase permission regression gates T028, T060, T069, T098, T119, T129, T146 and final T167; unknown modes fail closed and advertised capabilities stay mode-authoritative (T138, T139); the ledger holds fingerprints, never secrets, and is never persisted (T026); clarification never becomes a route to a forbidden action (plan §Explicit non-goal) |
-| Tests / Documentation | REQUIRED | all task phases; plan Phase 8 / tasks Phase 10; plan Phase 11 | Characterization suite T001–T012; mutation-checked regression tests for every guard (SC-025) across Phases 2–8 and 11, including the SC-044 test (§G.4); `docs/questions.md` (T142), `docs/cli.md` (T143), `docs/learning.md` (T144); `CHANGELOG.md` unreleased note for the one backward-incompatible regression-by-design and documentation of the two additive visible changes in FR-082 (T145), and of change 4 (D18; T231, T238); full validation on the exact final HEAD, three platforms (T159–T170, and §J for plan Phase 11); the retained-criterion evidence map (§G); the D14 removal and scrub across tests, CI configuration, documentation, the changelog and the Spec Kit artifacts (§H, §I) |
+| Tests / Documentation | REQUIRED | all task phases; plan Phase 8 / tasks Phase 10; plan Phase 11 | Characterization suite T001–T012; mutation-checked regression tests for every guard (SC-025) across Phases 2–8 and 11, including the SC-044 test (§G.4); `docs/questions.md` (T142), `docs/cli.md` (T143), `docs/learning.md` (T144); `CHANGELOG.md` unreleased note for the one backward-incompatible regression-by-design and documentation of the two additive visible changes in FR-082 (T145), and of change 4 (D18; T231, T238); full validation on the exact final HEAD, three platforms (T159–T170, and §J for plan Phase 11); the retained-criterion evidence map (§G); the D14 clean-up and neutral-wording sweep across tests, CI configuration, documentation, the changelog and the Spec Kit artifacts (§I) |
 
 Traceability rule: every plan phase that changes a surface is traceable to this
 table — plan Phase 3 (TUI, CLI, API, Channels, Persistence, Security), plan
@@ -1577,11 +1410,11 @@ model and quickstart revisions.
 | II — Three platforms | §J runs on Windows, Linux and macOS on the exact final HEAD | **PASS** |
 | III — Fix the invariant | The SC-044 test pins the existing suppression; no sleep, timeout or retry is added; seams replace settings without weakening an assertion | **PASS** |
 | IV — Deterministic regression tests | Every retained criterion maps to deterministic tests (§G). The SC-044 test is mutation-checked. Migrated tests keep their mutation checks | **PASS** |
-| V — Narrow scope | Plan Phase 11 only removes, re-confirms, adds one test and scrubs; §I steps are separately revertable | **PASS** |
+| V — Narrow scope | Plan Phase 11 cleans up, re-confirms evidence, adds the one-form work and its tests, and sweeps wording; §I steps are separately revertable | **PASS** |
 | VII — Reproducible artifacts | D19 changes TUI source (T240); the bundle is rebuilt and its staleness check is in §J | **PASS** |
 | VIII — Security | No gate needs a credential; no workflow reads a provider secret; mode policy untouched | **PASS** |
 | IX — Release infrastructure | The release workflow's lint path changes with CI's and is proved by the same run | **PASS** |
-| X / XII — Gates and agreement | spec (D14–D17), constitution 2.0.0, this plan, research R18–R20, data-model §6 and the quickstart agree. Tasks follow via `/speckit.tasks`, checklist notes via `/speckit.checklist` (§K), and the scrub (I-7) leaves no reference behind | **PASS**; U-2 and U-3 are for the owner |
+| X / XII — Gates and agreement | spec (D14–D17), constitution 2.0.0, this plan, research R18–R20, data-model §6 and the quickstart agree. Tasks follow via `/speckit.tasks`, checklist notes via `/speckit.checklist` (§K), and the sweep (I-7) leaves no reference behind | **PASS** |
 | XIV — Evidence before assumption | Evidence names test modules and counts found in the repository; SC-007's missing evidence and failing case are reported (U-1, §G.5), not assumed | **PASS** |
 | XVI — Token efficiency | Production token-usage accounting kept and tested | **PASS** |
 | XVIII — Extend, never duplicate | No module, store or subsystem added; the seams reuse `Optimizer`'s existing constructor | **PASS** |

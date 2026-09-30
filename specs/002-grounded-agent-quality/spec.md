@@ -1190,8 +1190,8 @@ blanket rule would either lose evidence in one class or save nothing in another.
 ### Measurable Outcomes
 
 **Acceptance** (owner decisions D14 to D17, 2026-09-28). Accepting this feature
-requires no model call, no paid evaluation, no provider credential and no live
-evaluation run. It is accepted on its deterministic gates on the exact commit
+requires no model call other than scripted responses, no paid tokens and no
+provider credential. It is accepted on its deterministic gates on the exact commit
 under review (SC-022, SC-025, SC-035): the full test suite and its performance
 ceilings, lint, type checks, code-generation and capability-inventory checks,
 the frontend and renderer suites, and the three-platform matrix. SC-001,
@@ -1656,25 +1656,24 @@ presented (D19).
 The owner set the final acceptance scope of the feature.
 
 - Q: What does acceptance require, and what does it retire? → A: **D14.**
-  Acceptance requires no external or additional model call, no paid
-  evaluation, no provider credential and no live evaluation run. Retired:
+  Acceptance requires no model call other than scripted responses, no paid
+  tokens and no provider credential. Retired:
   FR-076, FR-077, SC-001, SC-011, SC-012, SC-021, SC-026, SC-036 and User
   Story 6; FR-064 keeps only its first clause. Kept: the product's
   capabilities, its production token-usage accounting, its deterministic
   behavioural and security tests, and its deterministic performance ceilings
   that call no model. Nothing retired is marked as passed, completed task
   history is not rewritten, and Git history is the record. The final tracked
-  tree carries no artifact of, or reference to, what this decision removes,
-  including dated text in the changelog and in the Spec Kit checklists; unrelated
-  uses of words such as *workbench* or paired channel accounts are unaffected.
+  tree carries nothing this decision removes, in any file, dated text
+  included.
   It supersedes the 2026-09-27 acceptance-scope decision and the acceptance
   effect of Q1, D5 and D10 to D13. *Binds*: FR-064, FR-076, FR-077; SC-001,
   SC-011, SC-012, SC-021, SC-026, SC-036; User Stories 3 and 6.
 - Q: How does constitution Principle XXI change? → A: **D15.** The unmerged
   amendment in this pull request is revised, and its final version stays
   2.0.0: `main` is still at 1.1.0, so one unmerged pull request does not take
-  two MAJOR increments. The former requirement for comparative, live-model
-  evidence is removed from Principle XXI and from the context-change gate. The
+  two MAJOR increments. The former requirement for model-dependent evidence
+  is removed from Principle XXI and from the context-change gate. The
   context-change gate remains: a change to what is sent to a model is accepted
   on deterministic tests that exercise the changed mechanism with scripted
   model responses, and on truthful, supportable claims about tokens and
@@ -1693,14 +1692,14 @@ The owner set the final acceptance scope of the feature.
     worded invariant, with its measurement stated as those tests;
   - where coverage is partial, narrowed to what the tests establish, or kept
     with a deterministic product regression test to be added;
-  - a comparative outcome or improvement criterion that needs a multi-task
-    evaluation is retired and never relabelled as a test;
+  - an outcome or improvement criterion that only a model-dependent
+    measurement could show is retired and never relabelled as a test;
   - a criterion that no deterministic test measures is retired;
   - no universal behaviour is claimed from a finite fixture set.
 
   The audit below records each decision. *Binds*: every criterion in the
   audit.
-- Q: Are `agent.context_strategy` and `agent.optimizations_off` removed?
+- Q: Are the two runtime-only context-assembly settings removed?
   → A: **D17.** Yes, from configuration and the runtime; neither was ever
   offered to a person. The deterministic safety and neutrality invariants that
   switched optimizations off stay covered by switching them off inside the
@@ -1862,7 +1861,7 @@ high-quality output); CHK005 (FR-038/FR-042 reconciled); CHK009 and CHK131
 (information origin separated from lifecycle state; VERIFIED and VALIDATED
 defined; Key Entities); CHK012 (FR-002's mechanical rule); CHK040 (FR-020
 question metadata); CHK051 and CHK123 (FR-099); CHK053 (FR-100, FR-101);
-CHK054 (FR-105 invalidation); CHK086 (FR-031; Appendix A); CHK107 (SC-036); CHK117 (FR-082); CHK119 (this section);
+CHK054 (FR-105 invalidation); CHK086 (FR-031; Appendix A); CHK107 (a criterion D14 later retired); CHK117 (FR-082); CHK119 (this section);
 CHK121 (User Story 1, scenario 1); CHK122 (FR-125, FR-127); CHK127
 (Edge Cases; FR-013). Earlier statements calling FR-082 "the one" intended
 user-visible behaviour change — the Q2 decision below included — are
@@ -1994,7 +1993,7 @@ is corrected before delivery, at a cost of at most one additional turn.
 - **The mandatory custom-answer row already exists** and is appended by the core
   rather than the model. This specification preserves that guarantee rather than
   creating it.
-- **No live-model evaluation is part of this feature** (D14).
+- **Acceptance calls no provider** (D14).
   Behaviour is established by deterministic tests with scripted model
   responses, and learning stays switchable off (FR-064).
 - **Token counting is estimated and calibrated against reported provider usage**;

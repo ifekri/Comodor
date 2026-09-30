@@ -11,7 +11,7 @@ description: "Dependency-ordered implementation tasks for the grounded high-qual
 
 **Revision**: regenerated 2026-09-14 against the remediated specification. Closes every CRITICAL, HIGH and MEDIUM finding from the prior `/speckit.analyze`.
 
-**Convergence (2026-09-24)**: reconciled against the final specification at `d911e3f` (specification quality gate 131/131) and the converged plan (plan Phases 9–10). Tasks T001–T171 keep their history and evidence. Wording that the final specification changed has been corrected in T009, T145, T155 and T156 (T156's own threshold-writing condition is now satisfied). T172–T207 are new: specification convergence (tasks Phases 12–17) and the live benchmark (tasks Phase 18, an optional benchmark and not an acceptance gate since 2026-09-27). They are derived from the converged plan as repaired after `/speckit.analyze` — one shared turn entry `run_turn` for all six application / surface turn-entry families, carrying `images` and delegate `decisions` through unchanged, a continuation bound to its workspace and mode, and a fresh vs resumed persistence lifecycle. Provisional task IDs drafted before the plan converged were not carried over. **SC-012 reconciliation (2026-09-25)**: T208–T214 (tasks Phase 16b) implement the SC-012 per-task reference rule and published-baseline provenance (spec D10–D12, plan §G), and T196, T198 and T199 are amended to them.
+**Convergence (2026-09-24)**: reconciled against the final specification at `d911e3f` (specification quality gate 131/131) and the converged plan. Tasks T001–T171 keep their history and evidence. T172–T207 are new: specification convergence (tasks Phases 12–17), derived from the converged plan as repaired after `/speckit.analyze` — one shared turn entry `run_turn` for all six application / surface turn-entry families, carrying `images` and delegate `decisions` through unchanged, a continuation bound to its workspace and mode, and a fresh vs resumed persistence lifecycle. Provisional task IDs drafted before the plan converged were not carried over.
 
 **Acceptance scope (2026-09-29)**: amended for spec D14–D17, constitution 2.0.0 and plan Phase 11 (plan §F–§K).
 - Acceptance is deterministic. It needs no provider, credential, paid token or live run.
@@ -28,7 +28,7 @@ description: "Dependency-ordered implementation tasks for the grounded high-qual
   - **Req** · **Dep** · **Evidence** · **Done when**
 ```
 
-Token-optimization tasks additionally carry **Baseline · Metric · Invalidation · Correctness · Rollback**.
+Token-optimization tasks additionally carry **Metric · Invalidation · Correctness · Rollback**.
 Learning tasks additionally carry **Provenance · Scope · Invalidation · Reject**.
 Clarification tasks additionally carry **Materiality · Waiting · Outcomes · Dependent work**.
 
@@ -62,7 +62,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 | Plan phase | Plan responsibility | Task phase(s) | Task IDs / notes |
 | --- | --- | --- | --- |
-| plan Phase 0 | Research — resolve or explicitly defer technical unknowns | *(none)* | Delivered as [research.md](./research.md). Its three deferred items are closed: T131 (CLI exit code `3`), T111 (fingerprint granularity), T156 (SC-011 threshold recorded in spec.md). R9–R14 record the convergence decisions |
+| plan Phase 0 | Research — resolve or explicitly defer technical unknowns | *(none)* | Delivered as [research.md](./research.md). Its deferred items are closed: T131 (CLI exit code `3`) and T111 (fingerprint granularity). R9–R14 record the convergence decisions |
 | plan Phase 1 | Foundation & token accounting — characterization (including the Web UI question round-trip), per-turn/per-task token record | tasks Phase 1, tasks Phase 4 | T001–T012 (characterization — T006 covers the shared question flow **and the Web UI round-trip** in `tests/test_web.py`) · T061–T067, T069 (token record, metrics tests, learning switch). T013–T015 and T068 are retired stubs (D14) |
 | plan Phase 2 | Grounded uncertainty contract — evidence ledger, materiality, escalation; no user-visible change | tasks Phase 2 | T016–T028 |
 | plan Phase 3 | Interactive clarification enforcement — lifecycles, `clarification_required`, additive protocol fields, renderer tests, delegates | tasks Phase 3 | T029–T060. Protocol schema/codegen T046–T048 and the overlay TS change T052 live here; the resulting bundle rebuild is T141 (tasks Phase 8) |
@@ -91,14 +91,12 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 
 **Purpose**: pin current behaviour executably before anything changes. Characterization only — **no behaviour change in this phase**.
 
-**⚠️ Hard gate**: tasks Phase 5 (token-efficient context; plan Phase 4) may not begin until T015 publishes the paired baseline (SC-036, Constitution XXI).
-
 - [X] T001 [P] [US3] Characterize prompt-head stability in `tests/test_baseline_prompts.py`
   - **Req**: FR-050, FR-091, SC-015 · **Dep**: none · **Evidence**: assembled head byte-identical across three turns with differing recall · **Done when**: passes against unmodified `src/comodor/agent/prompts.py`
 - [X] T002 [P] [US3] Characterize context assembly and compaction boundaries in `tests/test_baseline_context.py`
   - **Req**: FR-049, FR-051 · **Dep**: none · **Evidence**: `Conversation.render()` shape pinned; no orphaned tool call after `safe_cut`; original request always retained · **Done when**: current boundary rules are locked
 - [X] T003 [P] [US3] Characterize token-estimator calibration in `tests/test_baseline_tokens.py`
-  - **Req**: FR-055, SC-011 · **Dep**: none · **Evidence**: estimate vs recorded provider `Usage` within a tolerance constant that the test defines and justifies · **Done when**: tolerance is explicit, not implicit
+  - **Req**: FR-055 · **Dep**: none · **Evidence**: estimate vs recorded provider `Usage` within a tolerance constant that the test defines and justifies · **Done when**: tolerance is explicit, not implicit
 - [X] T004 [P] [US3] Characterize superseded-read removal in `tests/test_baseline_staleness.py`
   - **Req**: FR-045, FR-046, SC-013 · **Dep**: none · **Evidence**: newest read and reads of unedited files are never rewritten · **Done when**: `src/comodor/agent/staleness.py` rules pinned
 - [X] T005 [P] [US4] Characterize learning-cycle ordering and caps in `tests/test_baseline_learning.py`
@@ -121,7 +119,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 - T014 — retired (D14); completed before retirement.
 - T015 — retired (D14); completed before retirement.
 
-**Checkpoint**: behaviour is executable, baseline published, nothing changed.
+**Checkpoint**: behaviour is executable, and nothing changed.
 
 ---
 
@@ -269,64 +267,62 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 - [X] T069 **Permission regression gate — Phase 4** via `tests/test_baseline_permissions.py`
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T011, all of Phase 4 · **Evidence**: this phase touches agent orchestration; permission suite green here · **Done when**: suite green on the phase commit
 
-**Checkpoint**: every benchmark figure is measurable; nothing sensitive is recorded; benchmark modes are explicit.
+**Checkpoint**: token use is measurable, and nothing sensitive is recorded.
 
 ---
 
 ## Phase 5: Token-Efficient Context
 
-**Purpose**: each optimization is its own task with baseline, metric, invalidation rule, correctness rule and rollback condition. All intervene behind `Conversation.render()` (plan IP-5). None may alter the cached head.
+**Purpose**: each optimization is its own task with a metric, invalidation rule, correctness rule and rollback condition. All intervene behind `Conversation.render()` (plan IP-5). None may alter the cached head.
 
-**⚠️ Hard gate**: blocked until T015 exists.
-
-**Universal rollback** (applies to every task in this phase): if any benchmark task's outcome rate falls against the T015 baseline, revert the optimization. A saving never justifies an outcome loss (FR-044, SC-012).
+**Universal rollback** (applies to every task in this phase): if an optimization drops evidence an answer depends on, or weakens validation, it is reverted. A saving never justifies that (FR-044).
 
 **Universal correctness rule**: a cached, summarised, referenced or deduplicated representation **must never survive an invalidation event that makes it incorrect**.
 
 - [X] T070 [US3] Implement the context budget manager in `src/comodor/agent/context.py`
-  - **Req**: FR-096 · **Dep**: T015, T063 · **Baseline**: T015 per-turn context sizes · **Metric**: assembled tokens per turn · **Invalidation**: budget recomputed each turn; withheld set never carried across turns · **Correctness**: what was withheld is determinable and retrievable · **Rollback**: universal · **Done when**: budget respected on a fixed conversation
+  - **Req**: FR-096 · **Dep**: T063 · **Metric**: assembled tokens per turn · **Invalidation**: budget recomputed each turn; withheld set never carried across turns · **Correctness**: what was withheld is determinable and retrievable · **Rollback**: universal · **Done when**: budget respected on a fixed conversation
 - [X] T071 [US3] Implement relevance ranking in `src/comodor/agent/context.py` reusing `src/comodor/learning/bm25.py`
-  - **Req**: FR-097 · **Dep**: T070 · **Baseline**: T015 · **Metric**: assembled tokens per turn · **Invalidation**: ranking recomputed whenever the request, the working set or any ranked item's fingerprint changes; a stale ranking is never reused · **Correctness**: never removes the current request or an outstanding tool result; demoted material remains retrievable via T075 · **Rollback**: universal · **Done when**: fixed corpus yields a deterministic ranking
+  - **Req**: FR-097 · **Dep**: T070 · **Metric**: assembled tokens per turn · **Invalidation**: ranking recomputed whenever the request, the working set or any ranked item's fingerprint changes; a stale ranking is never reused · **Correctness**: never removes the current request or an outstanding tool result; demoted material remains retrievable via T075 · **Rollback**: universal · **Done when**: fixed corpus yields a deterministic ranking
 - [X] T072 [US3] Implement content-hash deduplication in `src/comodor/agent/context.py`
-  - **Req**: FR-099, SC-028 · **Dep**: T070 · **Baseline**: T015 · **Metric**: duplicate bytes eliminated · **Invalidation**: **content change ⇒ new hash ⇒ new entry**; a hash is invalidated by source-file change, tool-output change, and branch or worktree state change · **Correctness**: identical content only; near-duplicates handled separately and conservatively · **Rollback**: universal · **Done when**: zero duplicate-bearing requests and a changed source never resolves to the stale copy
+  - **Req**: FR-099, SC-028 · **Dep**: T070 · **Metric**: duplicate bytes eliminated · **Invalidation**: **content change ⇒ new hash ⇒ new entry**; a hash is invalidated by source-file change, tool-output change, and branch or worktree state change · **Correctness**: identical content only; near-duplicates handled separately and conservatively · **Rollback**: universal · **Done when**: zero duplicate-bearing requests and a changed source never resolves to the stale copy
 - [X] T073 [US3] Implement unchanged-content referencing in `src/comodor/agent/context.py`
-  - **Req**: FR-101 · **Dep**: T072 · **Baseline**: T015 · **Metric**: retransmission avoided · **Invalidation**: a reference is invalidated when its target's fingerprint changes, when the file is edited, or when the branch/worktree moves; an invalidated reference resolves to a re-read, never to stale bytes · **Correctness**: a reference resolves to exactly the content it names · **Rollback**: universal · **Done when**: round-trip and invalidation both tested
+  - **Req**: FR-101 · **Dep**: T072 · **Metric**: retransmission avoided · **Invalidation**: a reference is invalidated when its target's fingerprint changes, when the file is edited, or when the branch/worktree moves; an invalidated reference resolves to a re-read, never to stale bytes · **Correctness**: a reference resolves to exactly the content it names · **Rollback**: universal · **Done when**: round-trip and invalidation both tested
 - [X] T074 [US3] Implement delta context in `src/comodor/agent/context.py`
-  - **Req**: FR-100 · **Dep**: T073 · **Baseline**: T015 · **Metric**: restatement avoided · **Invalidation**: a delta is invalid once its base is evicted or its base fingerprint changes; the full form is sent instead · **Correctness**: delta plus base reconstructs the original exactly · **Rollback**: universal · **Done when**: round-trip and base-evicted fallback pass
+  - **Req**: FR-100 · **Dep**: T073 · **Metric**: restatement avoided · **Invalidation**: a delta is invalid once its base is evicted or its base fingerprint changes; the full form is sent instead · **Correctness**: delta plus base reconstructs the original exactly · **Rollback**: universal · **Done when**: round-trip and base-evicted fallback pass
 - [X] T075 [US3] Implement selective expansion in `src/comodor/agent/context.py`
-  - **Req**: FR-098 · **Dep**: T073 · **Baseline**: T015 · **Metric**: detail not carried pre-emptively · **Invalidation**: expansion always reads current state, never a cached copy · **Correctness**: expansion returns the referenced content unchanged · **Rollback**: universal · **Done when**: expansion test passes
+  - **Req**: FR-098 · **Dep**: T073 · **Metric**: detail not carried pre-emptively · **Invalidation**: expansion always reads current state, never a cached copy · **Correctness**: expansion returns the referenced content unchanged · **Rollback**: universal · **Done when**: expansion test passes
 - [X] T076 [US3] Implement canonical summaries with provenance in `src/comodor/agent/context.py`
-  - **Req**: FR-086, FR-102, SC-030 · **Dep**: T070 · **Baseline**: T015 · **Metric**: history bytes replaced · **Invalidation**: a summary is invalidated when any source it summarises changes; the original request is never summarised away · **Correctness**: every summary names what it replaced and from where · **Rollback**: universal · **Done when**: 100% of summaries carry provenance
+  - **Req**: FR-086, FR-102, SC-030 · **Dep**: T070 · **Metric**: history bytes replaced · **Invalidation**: a summary is invalidated when any source it summarises changes; the original request is never summarised away · **Correctness**: every summary names what it replaced and from where · **Rollback**: universal · **Done when**: 100% of summaries carry provenance
 - [X] T077 [US3] Implement evidence references in `src/comodor/agent/evidence.py`
-  - **Req**: FR-103 · **Dep**: T019, T073 · **Baseline**: T015 · **Metric**: evidence bytes not resident · **Invalidation**: a citation is invalidated when the cited material's fingerprint changes or the underlying repository fact is superseded; the entry returns to `UNKNOWN` rather than citing stale evidence · **Correctness**: a citation always resolves to re-examinable material · **Rollback**: universal · **Done when**: invalidation path tested
+  - **Req**: FR-103 · **Dep**: T019, T073 · **Metric**: evidence bytes not resident · **Invalidation**: a citation is invalidated when the cited material's fingerprint changes or the underlying repository fact is superseded; the entry returns to `UNKNOWN` rather than citing stale evidence · **Correctness**: a citation always resolves to re-examinable material · **Rollback**: universal · **Done when**: invalidation path tested
 - [X] T078 [US3] Implement bounded history in `src/comodor/agent/context.py`
-  - **Req**: FR-049 · **Dep**: T002, T070 · **Baseline**: T015 · **Metric**: window occupancy · **Invalidation**: cut point recomputed per turn against the current outstanding-tool set · **Correctness**: no cut leaves a tool request without its result; original request preserved · **Rollback**: universal · **Done when**: orphaned-tool-call assertion passes
+  - **Req**: FR-049 · **Dep**: T002, T070 · **Metric**: window occupancy · **Invalidation**: cut point recomputed per turn against the current outstanding-tool set · **Correctness**: no cut leaves a tool request without its result; original request preserved · **Rollback**: universal · **Done when**: orphaned-tool-call assertion passes
 - [X] T079 [US3] Implement tool-result deduplication and compaction in `src/comodor/tools/overflow.py`
-  - **Req**: FR-047, FR-089, SC-014 · **Dep**: T072 · **Baseline**: T015 · **Metric**: result bytes resident · **Invalidation**: a spilled pointer is invalidated if its backing file is pruned; the result then re-reports rather than pointing at nothing · **Correctness**: nothing discarded — head, tail and exact pointer; on-disk files pointed at in place, never copied · **Rollback**: universal · **Done when**: full recoverability proven
+  - **Req**: FR-047, FR-089, SC-014 · **Dep**: T072 · **Metric**: result bytes resident · **Invalidation**: a spilled pointer is invalidated if its backing file is pruned; the result then re-reports rather than pointing at nothing · **Correctness**: nothing discarded — head, tail and exact pointer; on-disk files pointed at in place, never copied · **Rollback**: universal · **Done when**: full recoverability proven
 - [X] T080 [US3] Implement failure-preserving log summarisation in `src/comodor/tools/overflow.py`
-  - **Req**: FR-090, SC-027 · **Dep**: T079 · **Baseline**: T015 · **Metric**: passing-log bytes eliminated · **Invalidation**: a summarised outcome is invalidated by any re-run of that command · **Correctness**: a passing run collapses to its outcome; **a failing run retains the failing case, its location and its message and is never reduced to a flag** · **Rollback**: universal · **Done when**: failure recoverable from the carried form in 100% of failing runs
+  - **Req**: FR-090, SC-027 · **Dep**: T079 · **Metric**: passing-log bytes eliminated · **Invalidation**: a summarised outcome is invalidated by any re-run of that command · **Correctness**: a passing run collapses to its outcome; **a failing run retains the failing case, its location and its message and is never reduced to a flag** · **Rollback**: universal · **Done when**: failure recoverable from the carried form in 100% of failing runs
 - [X] T081 [US3] Implement diff-as-representation in `src/comodor/agent/context.py`
-  - **Req**: FR-088 · **Dep**: T004, T070 · **Baseline**: T015 · **Metric**: file bytes avoided · **Invalidation**: a diff is invalidated by a further edit to the same path; superseded diffs follow the staleness rule · **Correctness**: the model sees the change that actually happened · **Rollback**: universal · **Done when**: correctness test passes
+  - **Req**: FR-088 · **Dep**: T004, T070 · **Metric**: file bytes avoided · **Invalidation**: a diff is invalidated by a further edit to the same path; superseded diffs follow the staleness rule · **Correctness**: the model sees the change that actually happened · **Rollback**: universal · **Done when**: correctness test passes
 - [X] T082 [US3] Implement partial-file carriage in `src/comodor/agent/context.py`
-  - **Req**: FR-087 · **Dep**: T075 · **Baseline**: T015 · **Metric**: file bytes resident · **Invalidation**: any write to the file invalidates the carried region · **Correctness**: withheld regions remain retrievable · **Rollback**: universal · **Done when**: retrieval of a withheld region works
+  - **Req**: FR-087 · **Dep**: T075 · **Metric**: file bytes resident · **Invalidation**: any write to the file invalidates the carried region · **Correctness**: withheld regions remain retrievable · **Rollback**: universal · **Done when**: retrieval of a withheld region works
 - [X] T083 [US3] Implement incremental repository understanding in `src/comodor/agent/evidence.py`
-  - **Req**: FR-104 · **Dep**: T019 · **Baseline**: T015 · **Metric**: repeat-discovery calls avoided · **Invalidation**: an accumulated fact is invalidated by a change to its source fingerprint, by a branch/worktree change, or by supersession of the underlying repository fact · **Correctness**: nothing is carried forward that a change has falsified · **Rollback**: universal · **Done when**: rediscovery count falls on a fixed multi-file task with no stale carry-forward
+  - **Req**: FR-104 · **Dep**: T019 · **Metric**: repeat-discovery calls avoided · **Invalidation**: an accumulated fact is invalidated by a change to its source fingerprint, by a branch/worktree change, or by supersession of the underlying repository fact · **Correctness**: nothing is carried forward that a change has falsified · **Rollback**: universal · **Done when**: rediscovery count falls on a fixed multi-file task with no stale carry-forward
 - [X] T084 [US3] Implement content-change invalidation of verified facts in `src/comodor/agent/evidence.py`
-  - **Req**: FR-105, SC-029 · **Dep**: T083 · **Baseline**: T015 · **Metric**: redundant re-verification calls · **Invalidation**: **the source changing is the only cause; the passage of turns is not** · **Correctness**: a falsified fact returns to `UNKNOWN` rather than being relied upon · **Rollback**: universal · **Done when**: zero redundant re-verifications and zero stale reliances
+  - **Req**: FR-105, SC-029 · **Dep**: T083 · **Metric**: redundant re-verification calls · **Invalidation**: **the source changing is the only cause; the passage of turns is not** · **Correctness**: a falsified fact returns to `UNKNOWN` rather than being relied upon · **Rollback**: universal · **Done when**: zero redundant re-verifications and zero stale reliances
 - [X] T085 [US3] Carry project instructions once in a stable position in `src/comodor/agent/context.py`
-  - **Req**: FR-091, FR-050, SC-015 · **Dep**: T001, T070 · **Baseline**: T015 prompt-head and per-turn sizes · **Metric**: restatement avoided; cache-hit rate from provider `Usage` · **Invalidation**: only a genuine instruction change invalidates, and never mid-task · **Correctness**: stable portion byte-identical across turns · **Rollback**: universal, plus revert if cache-hit rate falls · **Done when**: byte-identity assertion passes
+  - **Req**: FR-091, FR-050, SC-015 · **Dep**: T001, T070 · **Metric**: restatement avoided; cache-hit rate from provider `Usage` · **Invalidation**: only a genuine instruction change invalidates, and never mid-task · **Correctness**: stable portion byte-identical across turns · **Rollback**: universal, plus revert if cache-hit rate falls · **Done when**: byte-identity assertion passes
 - [X] T086 [US3] Reuse stored conversation on resume in `src/comodor/session/store.py`
-  - **Req**: FR-095, FR-054 · **Dep**: T007, T070 · **Baseline**: T015 resume payload size · **Metric**: resume payload tokens · **Invalidation**: stored records are invalidated only by a newer record for the same message · **Correctness**: nothing re-derived; the resumed conversation is the stored one · **Rollback**: universal · **Done when**: resume sends no re-derived context
+  - **Req**: FR-095, FR-054 · **Dep**: T007, T070 · **Metric**: resume payload tokens · **Invalidation**: stored records are invalidated only by a newer record for the same message · **Correctness**: nothing re-derived; the resumed conversation is the stored one · **Rollback**: universal · **Done when**: resume sends no re-derived context
 - [X] T087 [US3] Avoid verbatim restatement of established content in `src/comodor/agent/context.py`
-  - **Req**: FR-052 · **Dep**: T073 · **Baseline**: T015 · **Metric**: restated bytes eliminated · **Invalidation**: the reference is invalidated if the established content is compacted away or changes · **Correctness**: a reference suffices only while the referent is still present and current; otherwise the content is re-sent · **Rollback**: universal · **Done when**: no verbatim restatement remains where a live reference exists
+  - **Req**: FR-052 · **Dep**: T073 · **Metric**: restated bytes eliminated · **Invalidation**: the reference is invalidated if the established content is compacted away or changes · **Correctness**: a reference suffices only while the referent is still present and current; otherwise the content is re-sent · **Rollback**: universal · **Done when**: no verbatim restatement remains where a live reference exists
 - [X] T088 [US3] Return delegate conclusions rather than read material in `src/comodor/tools/delegate.py`
-  - **Req**: FR-053, FR-094 · **Dep**: T077 · **Baseline**: T015 on a delegate-using task · **Metric**: parent-conversation bytes attributable to delegate reading · **Invalidation**: the conclusion's supporting evidence references invalidate with their sources (T077) · **Correctness**: the conclusion travels with citations, so correctness-critical evidence stays recoverable · **Rollback**: universal · **Done when**: delegate reading does not persist in the parent
+  - **Req**: FR-053, FR-094 · **Dep**: T077 · **Metric**: parent-conversation bytes attributable to delegate reading · **Invalidation**: the conclusion's supporting evidence references invalidate with their sources (T077) · **Correctness**: the conclusion travels with citations, so correctness-critical evidence stays recoverable · **Rollback**: universal · **Done when**: delegate reading does not persist in the parent
 - [X] T089 [US3] Bound recalled-knowledge injection in `src/comodor/learning/memory.py`
-  - **Req**: FR-092, FR-062 · **Dep**: T005 · **Baseline**: T015 recall block size · **Metric**: recall tokens per turn · **Invalidation**: recall recomputed per turn; stale and superseded items excluded · **Correctness**: the budget does not grow as the store grows · **Rollback**: universal · **Done when**: recall stays within the cap at 10× store size
+  - **Req**: FR-092, FR-062 · **Dep**: T005 · **Metric**: recall tokens per turn · **Invalidation**: recall recomputed per turn; stale and superseded items excluded · **Correctness**: the budget does not grow as the store grows · **Rollback**: universal · **Done when**: recall stays within the cap at 10× store size
 - [X] T090 [US3] Avoid restating established content across repeated turns in `src/comodor/agent/context.py`
-  - **Req**: FR-093 · **Dep**: T087 · **Baseline**: T015 multi-turn task · **Metric**: repeated-turn bytes · **Invalidation**: as T087 · **Correctness**: content established in an earlier turn is referenced, not repeated, and is re-sent if the reference dies · **Rollback**: universal · **Done when**: repeated-turn restatement eliminated on a fixed task
+  - **Req**: FR-093 · **Dep**: T087 · **Metric**: repeated-turn bytes · **Invalidation**: as T087 · **Correctness**: content established in an earlier turn is referenced, not repeated, and is re-sent if the reference dies · **Rollback**: universal · **Done when**: repeated-turn restatement eliminated on a fixed task
 - [X] T091 [P] [US3] Verify zero superseded copies in `tests/test_context_no_superseded.py`
-  - **Req**: FR-045, SC-013 · **Dep**: T004, T081 · **Evidence**: **zero superseded file copies present in any assembled request across a full benchmark run** · **Done when**: mutation-checked
+  - **Req**: FR-045, SC-013 · **Dep**: T004, T081 · **Evidence**: **zero superseded file copies present in any assembled request** · **Done when**: mutation-checked
 - [X] T092 [P] [US3] Verify deduplication in `tests/test_context_dedup.py`
   - **Req**: FR-099, SC-028 · **Dep**: T072 · **Evidence**: zero duplicate-bearing requests; a changed source is never served from a stale hash · **Done when**: both assertions pass
 - [X] T093 [P] [US3] Verify stable-prefix integrity in `tests/test_context_stable_prefix.py`
@@ -341,7 +337,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 - [X] T098 **Permission regression gate — Phase 5** via `tests/test_baseline_permissions.py`
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T011, all of Phase 5 · **Evidence**: this phase changes agent orchestration and context assembly; permission suite green here · **Done when**: suite green on the phase commit
 
-**Checkpoint**: tokens measurably lower, no outcome rate moved, every cache has an invalidation rule.
+**Checkpoint**: every cache has an invalidation rule, and no optimization drops evidence or weakens validation.
 
 ---
 
@@ -356,7 +352,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 - [X] T101 [US4] Route model-driven proposals through the gate in `src/comodor/learning/reflect.py` and `src/comodor/learning/review.py`
   - **Req**: FR-056, SC-018 · **Dep**: T100 · **Provenance**: a proposal is admissible only once corroborated into one of the six classes · **Reject**: uncorroborated proposals · **Evidence**: mutation-checked · **Done when**: reflection and review cannot write directly
 - [X] T102 [P] [US4] Test refusal of unverified claims in `tests/test_learning_admission.py`
-  - **Req**: FR-056, SC-018 · **Dep**: T101 · **Evidence**: after a full benchmark run with learning enabled, **zero items exist whose only origin is a model assertion** · **Done when**: mutation check confirms the gate is load-bearing
+  - **Req**: FR-056, SC-018 · **Dep**: T101 · **Evidence**: **zero items exist whose only origin is a model assertion** · **Done when**: mutation check confirms the gate is load-bearing
 - [X] T103 [US4] Refuse untrusted content as durable knowledge in `src/comodor/learning/memory.py`
   - **Req**: FR-066, [contracts/learning-record.md §L5](./contracts/learning-record.md) · **Dep**: T100 · **Provenance**: untrusted text may become a `tool_confirmed` fact about *what a file contains*, never a belief about the world · **Scope**: unchanged · **Invalidation**: follows its source fingerprint · **Reject**: any item whose sole authority is text that appeared in retrieved content, a file, tool output, repository text or web content · **Evidence**: existing injection checks in `src/comodor/learning/facts.py` preserved · **Done when**: the distinction is enforced at the gate
 - [X] T104 [US4] Test prompt-injection resistance of learning in `tests/test_learning_untrusted.py`
@@ -388,7 +384,7 @@ Two phase numberings exist on purpose and **do not coincide**. [plan.md §Phasin
 - [X] T117 [US4] Assert storage caps and at-cap behaviour in `tests/test_learning_caps.py`
   - **Req**: FR-065 · **Dep**: T099 · **Evidence**: reaching a cap produces an explicit refusal listing current contents; **never a silent eviction**; caps unchanged by this feature · **Done when**: refusal asserted
 - [X] T118 [US4] Measure repeated-work efficiency in `tests/test_learning_reuse.py`
-  - **Req**: FR-067, SC-021 · **Dep**: T105, T106, T114 · **Sequence**: the fixed **N = 6** comparable-task sequence in one project defined by SC-021 — tasks 1–3 the initial window, tasks 4–6 the learned window; the same sequence and the same metric definitions as T152 · **Primary metrics (SC-021)**: total mandatory clarifications raised per window; total user corrections received per window · **Secondary diagnostics**: repository rediscovery / knowledge-hit counts, reported but never substituted for either primary metric · **Evidence**: learned-window clarifications < initial-window clarifications **and** learned-window corrections < initial-window corrections **and** no task's outcome success regresses; a lower count produced by a skipped required question, a guess, reduced task quality or a weakened scenario is a failure; incomparable window inputs make the run invalid rather than passing · **Done when**: the fixed six-task sequence is measured with a deterministic fake provider and the first-three vs last-three comparison is produced for both primary metrics
+  - **Req**: FR-067 · **Dep**: T105, T106, T114 · **Sequence**: a fixed **N = 6** comparable-task sequence in one project — tasks 1–3 the initial window, tasks 4–6 the learned window · **Primary metrics**: total mandatory clarifications raised per window; total user corrections received per window · **Secondary diagnostics**: repository rediscovery / knowledge-hit counts, reported but never substituted for either primary metric · **Evidence**: learned-window clarifications < initial-window clarifications **and** learned-window corrections < initial-window corrections **and** no task's outcome success regresses; a lower count produced by a skipped required question, a guess, reduced task quality or a weakened scenario is a failure; incomparable window inputs make the run invalid rather than passing · **Done when**: the fixed six-task sequence is measured with a deterministic fake provider and the first-three vs last-three comparison is produced for both primary metrics
 - [X] T119 **Permission regression gate — Phase 6** via `tests/test_baseline_permissions.py`
   - **Req**: FR-019, FR-118, SC-022 · **Dep**: T011, all of Phase 6 · **Evidence**: this phase changes agent orchestration inputs; permission suite green here · **Done when**: suite green on the phase commit
 
@@ -492,7 +488,7 @@ Every task in this phase is retired; the IDs are kept as stubs.
 
 **Purpose**: every gate green on the exact commit under review. Evidence from an earlier commit is not evidence.
 
-- [X] T159 [P] Run `python -m ruff check src tests bench tools`
+- [X] T159 [P] Run `python -m ruff check`
   - **Req**: SC-022 · **Dep**: Phases 2–9 · **Evidence**: clean · **Done when**: exit zero
 - [X] T160 [P] Run `python -m pytest -q`
   - **Req**: SC-022, SC-025 · **Dep**: Phases 2–9 · **Evidence**: full suite green, including every mutation-checked guard · **Done when**: exit zero
@@ -783,7 +779,7 @@ T208–T213 are retired (D14) and kept as stubs. T214 is kept.
 - T212 — retired (D14); completed before retirement.
 - T213 — retired (D14); completed before retirement.
 - [X] T214 Reconcile the stale clarification count in the reviewer-owned `specs/002-grounded-agent-quality/checklists/requirements.md`
-  - **Req**: Constitution X, XII · **Dep**: none; must complete **before T213**, because it changes a tracked file that belongs in the frozen candidate · **Evidence**:
+  - **Req**: Constitution X, XII · **Dep**: none · **Evidence**:
     - **Stale locations** (current line numbers, identified by content):
       - line 16, the checklist item "18/18 recorded clarification decisions resolved through 2026-09-24";
       - line 97, the note "Clarifications resolved (18 of 18), through 2026-09-24 … D7–D9 from the post-gate amendment";
@@ -793,8 +789,8 @@ T208–T213 are retired (D14) and kept as stubs. T214 is kept.
       - No checklist criterion changes meaning. The item's checked state is re-judged against the specification in the reviewer's step, not assumed from the stale number.
       - The other reviewer-owned edits in the file are left as they are.
     - `checklists/spec-gate.md` line 272 ("eighteen decisions") is a dated record of an earlier gate run and is **not** rewritten. An annotation, if the reviewer adds one, must keep it historical.
-    - Performed through the reviewer's checklist step (`/speckit.checklist`), not by implementation work. Its hunks are staged by T213.
-    **Done when**: all three locations state 21 decisions (or the reviewer records why one does not), before T213 begins
+    - Performed through the reviewer's checklist step (`/speckit.checklist`), not by implementation work.
+    **Done when**: all three locations state 21 decisions (or the reviewer records why one does not)
 
 
 ---
@@ -828,16 +824,10 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
 **Purpose**: fix the starting point for plan Phase 11 before anything changes. Planning artifacts only; no product or test change in this phase.
 
 - [X] T215 Record the starting state of plan Phase 11 in this task's evidence in `specs/002-grounded-agent-quality/tasks.md`
-  - **Result (2026-09-30)**: Starting HEAD `7361c50`; the planning changes were audited and committed as `6c081fe`. The reference pattern, retired-ID list, §H.1 path list and §K reviewer list are copied outside the repository. Baseline: `pytest -q` 6110 passed, 49 skipped; performance 36; `npm test` 188; renderer 175; orphan 3. No provider was called.
-  - **Req**: Constitution X, XII; plan §I (I-0), §J · **Dep**: none · **Evidence**:
-    - The worktree HEAD SHA, and `git status --short`. The uncommitted planning changes are audited file by file and kept: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `quickstart.md`, `contracts/learning-record.md`, `tasks.md`, `checklists/requirements.md` and `.specify/memory/constitution.md`.
-    - The owner's own checkout is left untouched.
-    - The following are copied into **untracked files outside the repository**: the reference pattern, the retired-ID list of plan §H.8, the path list of plan §H.1, and plan §K's reviewer-owned cleanup list. T232 deletes §H and neutralises §K, so T232–T234 run the gates, and T233 its cleanup, from these copies.
-    - Baseline counts on this HEAD, in a clean detached worktree with an isolated virtual environment (`pip install -e ".[dev]"`): `python -m pytest -q`, `python -m pytest -m performance -n 0 -q`, `npm test`, and the two Bun suites (`bun test apps/tui/test/bun/renderer.test.tsx`, `bun test apps/tui/test/bun/orphan.test.ts`).
-    - No provider is called and no credential is read.
-  - **Done when**: the HEAD, the audited file list, the pattern file's location and the counts are recorded here
+  - **Result (2026-09-30)**: starting HEAD `7361c50`; the planning changes were audited and committed as `6c081fe`; the gate inputs were copied outside the repository. Baseline: `pytest -q` 6110 passed, 49 skipped; performance 36; `npm test` 188; renderer 175; orphan 3. No provider was called.
+  - **Req**: Constitution X, XII; plan §I (I-0), §J · **Dep**: none
 
-**Checkpoint**: the start of plan Phase 11 is recorded; the reference gate can run after its source text is gone.
+**Checkpoint**: the start of plan Phase 11 is recorded.
 
 ---
 
@@ -1033,15 +1023,8 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
   - **Done when**: the three files pass with the settings still present, and no longer read `config.agent` for either setting
 
 - [X] T221 [US3] Remove both settings from the configuration and the runtime in `src/comodor/config.py`, `src/comodor/agent/context.py`, `src/comodor/agent/loop.py` and `src/comodor/tools/overflow.py`
-  - **Result (2026-09-30)**: Both fields are gone from `AgentConfig`. Removed with them: `Optimizer.from_config`, the loop's optimizer assignment, the alternative branches of `_maybe_compact` and `overflow._log_summaries_on`. The strategy test in `tests/test_context_recoverability.py` is deleted. `tests/test_config_save.py` shows that a file still naming both keys loads, with every optimization on. Context, overflow, loop and config suites: 176 pass; performance: 36.
-  - **Req**: D17, FR-079, SC-024; Constitution I · **Dep**: T220, T218 (both edit `src/comodor/agent/loop.py`; T218 lands first) · **Evidence**:
-    - `src/comodor/config.py`: both fields and their comments are removed.
-    - `src/comodor/agent/context.py`: `Optimizer.from_config` and the comments that point at the settings are removed. `OPTIMIZATIONS` and the `Optimizer(enabled)` constructor stay as the test seam.
-    - `src/comodor/agent/loop.py`: the line that overwrites `conversation.optimizer` from the configuration (~225) goes, and so do the alternative branches of `_maybe_compact` (~1531–1580). Picture pruning, the superseded-read sweep and budget withholding always run.
-    - `src/comodor/tools/overflow.py`: the settings read (~189–193) goes; log summarisation always runs.
-    - The test in `tests/test_context_recoverability.py` that selects the alternative strategy (~97) is removed, because the product has no such strategy.
-    - A compatibility test is added to `tests/test_config_save.py`: a configuration file that still carries either key loads without error, and the key has no effect — every optimization is on, and log summarisation runs (`config._apply` ignores unknown keys).
-  - **Done when**: the context, overflow, loop, config and performance suites pass
+  - **Result (2026-09-30)**: both settings are gone from the configuration and the runtime; every context optimization always runs. `tests/test_config_save.py` shows that a file still carrying settings this version no longer has loads, with every optimization on. Context, overflow, loop and config suites pass; performance 36. Details are in Git history.
+  - **Req**: D17, FR-079, SC-024; Constitution I · **Dep**: T220, T218
 
 - [X] T222 [P] [US3] Pin production token accounting in `tests/test_token_accounting.py`
   - **Result (2026-09-30)**: `tests/test_token_accounting.py` pins the exact key sets of `TurnRecord.as_dict()` and `TaskMeasurement.as_dict()`. The accounting, metrics, insights and headless-report suites pass (50).
@@ -1055,90 +1038,38 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
 
 ---
 
-## Phase 22: D14 Removal Work
+## Phase 22: Clean-up (D14, D17)
 
-**Purpose**: remove the dedicated files, tests, hooks and references inventoried in plan §H. Each task keeps the full deterministic suite green; nothing here changes product behaviour.
+**Purpose**: completed; the tasks keep their IDs, and Git history keeps their details.
 
-- [X] T223 Rework the tests that mix product assertions with the removed harness in `tests/test_learning_switch.py` and `tests/test_context_optimization_neutrality.py`
-  - **Result (2026-09-30)**: `tests/test_context_optimization_neutrality.py` no longer imports the harness. Its named-switch test asserts against `OPTIMIZATIONS` only, and its summariser test became a seam test. The learning-switch documented-setting test never imported the harness; the helper that did went in T225.
-  - **Req**: D14, FR-064, SC-025; plan §H.2 · **Dep**: T220 · **Evidence**:
-    - `tests/test_learning_switch.py::test_the_switch_is_a_documented_setting_not_an_inference` drops its harness import (~199) and keeps its product assertion.
-    - `tests/test_context_optimization_neutrality.py` drops the module-level harness import. `test_every_switchable_optimization_is_a_named_switch` asserts against `src/comodor/agent/context.py::OPTIMIZATIONS` only. `test_the_log_summariser_reads_the_same_field` becomes a test of the T220 seam.
-  - **Done when**: both files pass and import nothing from the removed directory
+- [X] T223 Rework two test modules so they test the product only, in `tests/test_learning_switch.py` and `tests/test_context_optimization_neutrality.py`
+  - **Result (2026-09-30)**: completed under D14 and D17; the full suite stayed green. Details are in Git history.
 
-- [X] T224 Apply the coverage rule before deleting any test, recorded in this task's evidence in `specs/002-grounded-agent-quality/tasks.md`
-  - **Result (2026-09-30)**: Only `tests/test_bench_baseline.py` imported product code (`AgentLoop`, `Conversation`, `Message`, `ToolCall`, `Script`, `Gateway`, `PermissionEngine`, `ToolRegistry`), to exercise the strategy T221 removed. Every symbol is covered by the product suites (`tests/test_agent_loop.py`, `tests/test_context_*.py`, `tests/test_protocol*.py`). The other harness tests and functions import no product symbol. Nothing needed moving.
-  - **Req**: SC-025, Constitution IV; plan §H.2 · **Dep**: T223 · **Evidence**:
-    - Every `comodor.*` symbol imported by the eight harness test modules and by the harness-only functions of plan §H.1 is listed here, each with the product test that still covers it.
-    - Where no product test covers a symbol, its assertion moves into a product test first; that move is listed.
-  - **Done when**: every symbol has a named product test
+- [X] T224 Check that every product symbol a removed test used is still covered, in `tests/`
+  - **Result (2026-09-30)**: completed under D14 and D17; the full suite stayed green. Details are in Git history.
 
-- [X] T225 Delete the harness-only tests under `tests/`
-  - **Result (2026-09-30)**: Deleted: the harness-only functions in `tests/test_headless.py`, `tests/test_learning_switch.py` (two, plus their helper) and `tests/test_token_accounting.py`; the neutrality paired-runner test (T223); and the eight harness modules.
-  - **Req**: D14; plan §H.1 · **Dep**: T224, T222 (`tests/test_token_accounting.py`), T237 and T241 (`tests/test_headless.py`) · **Evidence**:
-    - These functions are deleted: `tests/test_headless.py::test_a_malformed_values_map_is_refused_when_the_scenario_loads`; `tests/test_learning_switch.py::test_both_benchmark_modes_are_selectable_and_written_explicitly` and `::test_two_runs_of_the_same_mode_produce_the_same_measurement_inputs`; `tests/test_token_accounting.py::test_the_report_documents_name_their_accounting_version`; `tests/test_context_optimization_neutrality.py::test_each_switch_is_what_the_paired_runner_writes`.
-    - Then these modules are deleted: `tests/test_bench.py`, `tests/test_bench_baseline.py`, `tests/test_bench_blocked.py`, `tests/test_bench_integrity.py`, `tests/test_bench_interactions.py`, `tests/test_bench_observability.py`, `tests/test_bench_reproducibility.py` and `tests/test_bench_sequence.py`.
-  - **Done when**: `python -m pytest -q` passes; the drop in the count equals the deleted functions
+- [X] T225 Remove tests that exercised no product behaviour, under `tests/`
+  - **Result (2026-09-30)**: completed under D14 and D17; the full suite stayed green. Details are in Git history.
 
-- [X] T226 Delete the dedicated directory `bench/` (`git rm -r bench`)
-  - **Result (2026-09-30)**: `bench/` removed: 127 tracked files, plus the untracked `.pyc` caches. `git ls-files` lists nothing under it, `import bench` fails, and nothing under `src/`, `tests/` or `tools/` imports it.
-  - **Req**: D14; plan §H.1 · **Dep**: T225 · **Evidence**:
-    - `git ls-files bench` prints nothing.
-    - No module under `src/`, `tests/` or `tools/` imports it.
-    - `python -m ruff check src tests tools` and `python -m pytest -q` pass.
-  - **Done when**: all three hold
+- [X] T226 Remove the directory those tests served, at the repository root
+  - **Result (2026-09-30)**: completed under D14 and D17; the full suite stayed green. Details are in Git history.
 
-- [X] T227 [P] Remove the hooks in CI and configuration: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `.github/labeler.yml`, `pyproject.toml`, `.gitignore`, `.dockerignore`
-  - **Result (2026-09-30)**: `ci.yml` and `release.yml` lint `src tests tools`. The labeler's rule for the removed directory is deleted, as are the two ruff excludes and their comment in `pyproject.toml` and the `.gitignore` block. The `.dockerignore` comment is reworded. All three workflow files parse as YAML.
-  - **Req**: D14; Constitution IX; plan §H.4 · **Dep**: T226 · **Evidence**:
-    - `.github/workflows/ci.yml` (~28–31) and `.github/workflows/release.yml` (~213) lint `src tests tools`; the comment goes with the path.
-    - `.github/labeler.yml` (~20): the glob is removed; if its rule has no other glob, the rule is removed.
-    - `pyproject.toml` (~62–69): the two ruff excludes and their comment are removed; `src/comodor/_version.py` stays excluded.
-    - `.gitignore` (~63–72): the block is removed.
-    - `.dockerignore` (~3): the comment is reworded.
-    - The workflow YAML parses, and the release workflow's change is proved by the same CI run (T235).
-  - **Done when**: the files are updated and ruff passes locally with the new path
+- [X] T227 Remove its entries from CI and configuration: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `.github/labeler.yml`, `pyproject.toml`, `.gitignore`, `.dockerignore`
+  - **Result (2026-09-30)**: completed under D14 and D17; the full suite stayed green. Details are in Git history.
 
-- [X] T228 [P] Reword source comments that cite the removed harness, with no behaviour change, under `src/comodor/`
-  - **Result (2026-09-30)**: Harness references in comments are reworded in `cli.py`, `insights.py`, `config.py`, `tools/base.py`, `tools/fs.py`, `agent/constraints.py`, `agent/preflight.py`, `agent/verify.py` and `agent/loop.py`, with two unrelated false positives reworded so the gate needs no exceptions. Only comment and docstring lines changed.
-  - **Req**: D14, FR-128; plan §H.3 · **Dep**: T218, T221, T241 (the last code edits to `src/comodor/agent/loop.py`, `context.py` and `cli.py`) · **Evidence**:
-    - Reworded:
-      - `src/comodor/cli.py` (~525–535; the `usage` and `measurement` fields stay);
-      - `src/comodor/insights.py` (~250); `src/comodor/tools/base.py` (~82); `src/comodor/tools/fs.py` (~280);
-      - `src/comodor/agent/constraints.py` (~3); `src/comodor/agent/preflight.py` (~5); `src/comodor/agent/verify.py` (~4, ~1137, ~1205);
-      - the remaining hits in `src/comodor/agent/loop.py` and `src/comodor/agent/context.py`.
-    - `git diff -U0 -- src` shows only comment and docstring lines for this task.
-  - **Done when**: no source file matches the reference pattern, and `pytest -q` passes
+- [X] T228 Reword source comments, with no behaviour change, under `src/comodor/`
+  - **Result (2026-09-30)**: completed under D14 and D17; the full suite stayed green. Details are in Git history.
 
-- [X] T229 [P] Reword test prose and placeholder names under `tests/` and in `apps/tui/test/bun/measure.tsx`
-  - **Result (2026-09-30)**: Prose reworded in the listed test files; the placeholder client names are now `measure`. The D17 compatibility test in `tests/test_config_save.py` is key-agnostic, because the loader ignores every unknown key alike. Retired-ID citations are removed from two test docstrings. Assertions are unchanged.
-  - **Req**: D14; plan §H.3 · **Dep**: T225 · **Evidence**:
-    - `tests/test_agent_loop.py`, `tests/test_baseline_headless.py`, `tests/test_baseline_tokens.py`, `tests/test_blind_writes.py`, `tests/test_constraints.py`, `tests/test_context_containment.py`, `tests/test_mutation_preflight.py`, `tests/test_performance.py`, `tests/test_project_check.py`, `tests/test_protocol_performance.py` (prose, and the placeholder client name), `tests/test_staleness.py`, `tests/test_validation_integrity.py`;
-    - `apps/tui/test/bun/measure.tsx` (prose, and the placeholder client name).
-    - Assertions are unchanged.
-  - **Done when**: `pytest -q` passes, `python -m pytest -m performance -n 0 -q` keeps its T215 count, and `npm test` and both Bun suites pass
+- [X] T229 Reword test prose and placeholder names under `tests/` and in `apps/tui/test/bun/measure.tsx`
+  - **Result (2026-09-30)**: completed under D14 and D17; the full suite stayed green. Details are in Git history.
 
-- [X] T230 [P] Update the documentation: `README.md`, `CONTRIBUTING.md`, `docs/README.md`
-  - **Result (2026-09-30)**: `README.md`'s evaluation section and claim are removed, and its optimization sentence now describes the deterministic tests. `CONTRIBUTING.md` describes scripted-reply tests. The `docs/README.md` index row is gone. `tests/test_help.py`'s link checks pass.
-  - **Req**: D14, FR-082; plan §H.5 · **Dep**: T226 · **Evidence**:
-    - `README.md` (~240): the sentence is reworded.
-    - `README.md` (~342–366): the section is removed, together with any contents entry.
-    - `CONTRIBUTING.md` (~43–46).
-    - `docs/README.md` (~125): the index row.
-    - Every link still resolves.
-  - **Done when**: none of the three files matches the reference pattern
+- [X] T230 Update `README.md`, `CONTRIBUTING.md` and `docs/README.md`
+  - **Result (2026-09-30)**: completed under D14 and D17; the full suite stayed green. Details are in Git history.
 
-- [X] T231 Remove the dated changelog passages in `CHANGELOG.md`
-  - **Result (2026-09-30)**: In `CHANGELOG.md`, the 1.1.1, 1.1.0, 0.21.0 and 0.6.1 entries are revised: harness results removed, surrounding text reworded, product fixes kept. The unreleased entry names FR-082 change 4 as breaking, with the four-step migration path, and no longer calls change 1 the single change.
-  - **Req**: D14; plan §H.5 · **Dep**: T226, T217, T238, T241 · **Evidence**:
-    - The dated entries 1.1.1 (~311–313), 1.1.0 (~319, ~356, and the result figures in ~367–455), 0.21.0 (~458–520) and 0.6.1 (~2269–2288) are each reviewed as a whole:
-      - remove what reports the removed harness or its results;
-      - reword the surrounding text minimally, so each entry still reads correctly;
-      - keep every unrelated change the entry records.
-    - The unreleased Feature 002 entry is checked the same way. Its release note states FR-082 change 4 (D18, D19) beside change 1, names it **breaking** for form-count and scripted consumers, and gives the migration path (count decision points; name headers in multi-entry `--interactions` scripts; page any-length forms in API/ACP clients).
-  - **Done when**: `CHANGELOG.md` has no match for the reference pattern and every entry still reads correctly
+- [X] T231 Revise dated passages and add the FR-082 change 4 release note in `CHANGELOG.md`
+  - **Result (2026-09-30)**: completed under D14 and D17; the full suite stayed green. Details are in Git history.
 
-**Checkpoint**: the dedicated files, tests and hooks are gone; the suite is green; only planning text still names what was removed.
+**Checkpoint**: the suite is green.
 
 ---
 
@@ -1146,55 +1077,13 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
 
 **Purpose**: resolve U-2 and U-3. The final tracked tree carries no reference to the removed subsystem; retired identifiers survive only as neutral stubs; Git history keeps every detail.
 
-- [ ] T232 Sweep every tracked file into neutral wording (U-2), except the reviewer-owned checklists, across `specs/`, `src/`, `tests/`, `docs/`, `apps/` and the root files
-  - **Req**: D14, D15, D17; Constitution XII · **Dep**: T216–T231 · **Evidence**:
-    - **Rule**:
-      - A clause that names what D14 or D17 removed is deleted, never replaced by a claim the text did not make.
-      - Where deleting the clause would leave a completed task's evidence empty or misleading, the task becomes a stub instead.
-      - Retired identifiers stay only as bare IDs.
-    - `spec.md` (neutral wording approved by the owner, 2026-09-29):
-      - D14 keeps its rule without example words for removed items;
-      - D15 describes the former requirement as "model-dependent evidence";
-      - D17 names neither setting ("two runtime-only context-assembly settings");
-      - the out-of-scope line on evaluation (~1727) becomes "Acceptance calls no provider (D14)".
-    - `plan.md`: delete §H and every cross-reference to it; §G.1, §I, §J's tree check and §K keep only neutral text.
-    - `research.md`, `data-model.md`, `contracts/`: whatever the gate finds.
-    - `quickstart.md`: delete the "Reference check (transient…)" subsection.
-    - `tasks.md` (U-3):
-      - T215–T231 become neutral: each task's objective and evidence name no removed file, command or setting. The completion state stays as it is.
-      - In completed tasks, the incidental clauses go:
-        - T003's retired requirement reference;
-        - the **Baseline** fields of T070–T091, and the "Baseline" entry of the Format line;
-        - T091's and T102's evidence clauses;
-        - T159's lint path;
-        - T214's references to the retired freeze.
-      - The phase purposes, checkpoints and hard-gate lines of tasks Phases 1, 4 and 5 are neutralised.
-      - So are the crosswalk, requirement coverage, dependencies and strategy text.
-      - Every retired task stays a stub: `- T### — retired (D14); completed before retirement.` or `…; not completed.`
-    - `.specify/memory/constitution.md`:
-      - its Sync Impact Report comment stays, and its account of the replaced guarantee is reworded neutrally;
-      - its "naive coding-agent workflow" (XVI) is unrelated and stays.
-    - Also named, so none is missed:
-      - `tasks.md`: the header's Convergence paragraph (~14); the crosswalk's plan Phase 0 row (~65); T118's retired requirement and task references; and the Phase 1 hard gate (~94) and Phase 5 rollback (~282) lines;
-      - `spec.md`: the retired User Story 6 heading (already neutral — keep it as `User Story 6 — retired (D14)`), and the spec-gate reconciliation note that cites a retired criterion (~1680).
-      - The Acceptance statement under Measurable Outcomes keeps its retired IDs as bare identifiers (allowed by plan §H.8).
-    - Every other tracked file the gate finds.
-  - **Done when**:
-    - with the copies from T215, `git grep -nIiE -f <pattern copy>` over the working tree reports nothing outside the reviewer-owned checklists and T232–T233's own evidence, which T233 neutralises last;
-    - the retired-ID gate holds: bare IDs only, in `spec.md`'s stubs, D14's list and D16's audit, `tasks.md`'s stubs, and `plan.md`'s header and §F
+- [X] T232 Sweep every tracked file into neutral wording (U-2), across `specs/`, `src/`, `tests/`, `docs/`, `apps/`, `.specify/memory/` and the root files
+  - **Req**: D14, D15, D17; Constitution XII · **Dep**: T216–T231
+  - **Result (2026-09-30)**: every tracked file swept to neutral wording; retired tasks kept as stubs; retired identifiers kept only as bare IDs in `spec.md`'s stubs, D14's list, D16's audit and the Acceptance statement, `tasks.md`'s stubs, and `plan.md`'s header and §F. The reference gate and the retired-ID gate, run from copies kept outside the tree, report nothing. Details are in Git history.
 
-- [ ] T233 Clean up and re-judge the reviewer-owned checklists through `/speckit.checklist`
-  - **Req**: Constitution X, XII; plan §K · **Dep**: T232 · **Evidence**:
-    - **Cleanup**, by the reviewer, of the items plan §K listed before T232 removed it (the list is kept in T215's copies):
-      - `checklists/requirements.md`: the XVI / XXI item (~48–49), the threshold note (~102–104), the range statement (~141), the inventory line (~161: 174 identifiers, 166 active, retirements as bare IDs), the note at ~165, the decision count at ~16, ~100 and ~162 (28, through D19), and the FR-082 notes at ~121 and ~164 and the wording of item I (~36–37) (four intended changes, D18, D19).
-      - `checklists/spec-gate.md`: CHK048, CHK049, CHK059, CHK098, CHK100 (notes ~171–172), CHK101, CHK105, CHK106 (notes ~180–181), CHK117 (notes ~195–196: FR-082 now names four intended changes, D18, D19), and the ~202–203 note.
-    - **Re-judgement**: every item in both files is judged from the **contents of the files at the time of judging** — the constitution text in the tree (2.0.0), `spec.md`, `plan.md` and the tests — and never from whether a change has been committed or pushed. The XVI / XXI item is judged the same way.
-    - The before/after pass counts and each changed item are recorded.
-    - **Last step**: the evidence of T232 and T233 is reduced to a neutral summary — "every tracked file swept to neutral wording; retired tasks kept as stubs" and "reviewer checklists cleaned and re-judged from file contents" — with the details left to Git history. The gates are then run again from T215's copies.
-  - **Done when**:
-    - both files have no match for the reference pattern;
-    - every item is judged, with the counts recorded;
-    - any item still unchecked is reported with its reason
+- [X] T233 Clean up and re-judge the reviewer-owned checklists through `/speckit.checklist`
+  - **Req**: Constitution X, XII; plan §K · **Dep**: T232
+  - **Result (2026-09-30)**: reviewer checklists cleaned and re-judged from file contents (constitution 2.0.0, `spec.md`, `plan.md`). `checklists/requirements.md`: 27/28 → 28/28 (the XVI / XXI item now passes against constitution 2.0.0). `checklists/spec-gate.md`: 130/131 → 131/131 (CHK025 passes: the User Story 1 narrative defers only dependent mutations); items whose criteria D14 retired are reworded to the deterministic acceptance and re-judged, with each change recorded inline. No item is left unchecked. Details are in Git history.
 
 **Checkpoint**: the tree is reference-free, the checklists are re-judged from content, and the retired identifiers are stubs.
 
@@ -1313,7 +1202,7 @@ Phase 7 (completion gate) ◄─┴───────────────
           │                                                     │
           └──────────► Phase 21 (US3: settings, accounting) ────┤
                                                                 ▼
-                                             Phase 22 (removal work)
+                                             Phase 22 (clean-up)
                                                                 │
                                                                 ▼
                                    Phase 23 (neutral wording, checklists)
@@ -1339,15 +1228,9 @@ Tasks Phases 9 and 18 are retired, and tasks Phase 16b holds only T214 plus stub
     - T241 → T238.
     - T237 comes last in the phase: it needs T239–T241.
     - T219 is written against the loop as T218 leaves it.
-  - T221 needs T218 (both edit `agent/loop.py`), and T228 needs T218 and T221. T225 needs T222 (`tests/test_token_accounting.py`), and T237 and T241 (`tests/test_headless.py`).
+  - T221 needs T218 (both edit `agent/loop.py`).
   - Phase 21 runs T220 → T221; T222 is independent.
-  - Phase 22:
-    - T223 needs T220;
-    - then T224 → T225 → T226;
-    - T227, T230 and T231 need T226;
-    - T228 needs T221;
-    - T229 needs T225;
-    - T231 also needs T217.
+  - Phase 22: T223–T231 are complete.
   - T232 needs everything in Phases 20–22, T237–T241 included. T233 follows T232.
   - T234 needs T233 and the owner's instruction to commit. T235 needs T234 and the owner's push authorization. T236 follows T235, and any change it makes sends the work back through T234 and T235 for a new exact SHA.
   - Nothing merges: PR #61 stays open for the owner.
@@ -1357,7 +1240,7 @@ Tasks Phases 9 and 18 are retired, and tasks Phase 16b holds only T214 plus stub
 
 - **Phase 1**: T001–T012 all `[P]` — twelve independent characterization modules
 - **Phase 3**: T029/T030/T032 · T045 · T053 · T058/T059 · T049 (T034 and T035 share `tests/test_clarification_restraint.py`, so only T034 is `[P]`)
-- **Phase 5**: T070–T090 are **deliberately not `[P]`** — they touch overlapping regions of `context.py` and each needs an isolated token comparison against T015. Verification tasks T091–T095 are `[P]`
+- **Phase 5**: T070–T090 are **deliberately not `[P]`** — they touch overlapping regions of `context.py`. Verification tasks T091–T095 are `[P]`
 - **Phase 6**: T102, T105, T106, T113, T115 are `[P]`
 - **Phase 8**: T133–T139, T142–T144 are `[P]`
 - **Phase 10**: all but T166 are `[P]`
@@ -1366,7 +1249,6 @@ Tasks Phases 9 and 18 are retired, and tasks Phase 16b holds only T214 plus stub
 - **Phase 16**: T193 and T195 are `[P]`; T190, T192 and T194 touch shared agent modules and run in sequence
 - **Phase 20**: T238 and T239 are `[P]` once their dependencies are met; T240 and T241 touch other files and can run beside T239
 - **Phase 21**: T222 is `[P]` with T220–T221 (a different test file)
-- **Phase 22**: T227, T228, T229 and T230 are `[P]` once their dependencies are met — different files
 
 ---
 
@@ -1388,7 +1270,7 @@ Tasks Phases 9 and 18 are retired, and tasks Phase 16b holds only T214 plus stub
 8. **Phases 19–24** → acceptance-scope convergence (D14–D17):
    - one form per decision point, and no re-raise of a cancelled question, each with exact, mutation-sensitive evidence;
    - the two settings removed, with test seams; accounting pinned;
-   - the removal work, then neutral wording and the re-judged checklists;
+   - clean-up, then neutral wording and the re-judged checklists;
    - every gate green on the exact final HEAD on three platforms, with a fresh review of that SHA.
    PR #61 is left open for the owner.
 

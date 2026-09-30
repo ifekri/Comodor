@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain — **26/26 recorded clarification decisions resolved through 2026-09-28** (see Notes)
+- [x] No [NEEDS CLARIFICATION] markers remain — **28/28 recorded clarification decisions resolved through 2026-09-29** (see Notes)
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -31,10 +31,14 @@
 
 ## Constitution Alignment
 
-Checked against `.specify/memory/constitution.md` v1.1.0.
+Checked against `.specify/memory/constitution.md` v2.0.0 (re-judged 2026-09-30
+from the files' contents).
 
-- [x] I — Backward compatibility: FR-079 to FR-082; the single intended behaviour
-      change is named explicitly rather than shipped silently
+- [x] I — Backward compatibility: FR-079 to FR-082; FR-082 names its four
+      intended user-visible changes explicitly. Change 1 is the one
+      behavioural regression-by-design; change 4 is breaking for callers that
+      count forms or script one answer per form, and carries D19's migration
+      path; both MUST be release-noted
 - [x] II — Three platforms: FR-078, SC-022
 - [x] IV — Deterministic regression tests: SC-025 requires a mutation check per
       guard and forbids sleep-based correctness
@@ -45,8 +49,11 @@ Checked against `.specify/memory/constitution.md` v1.1.0.
       rule; FR-074 forbids credentials in measurements
 - [x] XIII to XV — Quality-first, evidence before assumption, clarification as a
       product invariant: User Stories 1 and 2, FR-001 to FR-035
-- [ ] XVI / XXI — Token efficiency measured jointly with quality: FR-044,
-      FR-076, FR-077, SC-011, SC-012
+- [x] XVI / XXI — Token efficiency and quality together: FR-044 forbids a
+      saving bought with lost correctness; production token-usage accounting
+      is kept and FR-074 keeps it redacted; D14 and D15 make acceptance
+      deterministic, with no provider call or paid tokens, and every claim
+      rests on deterministic evidence
 - [x] XVII — Progressive learning with provenance and staleness: FR-056 to FR-067
 - [x] XVIII — Extend, do not duplicate: Appendix A names the existing owner of
       every behaviour; no parallel subsystem is proposed
@@ -97,13 +104,11 @@ spec's own cross-references — remains valid.
 
 ## Notes
 
-**Clarifications resolved (26 of 26), through 2026-09-28.** The clarification record now contains the original three decisions, six 2026-09-14 remediation/outcome-encoding decisions, D1–D6 from the specification review, D7–D9 from the post-gate amendment, D10–D13 from the 2026-09-25 and 2026-09-26 sessions (superseded by D14), and D14–D17 from the 2026-09-28 acceptance-scope session. Every decision names the FR/SC/Constitution rule it binds or the decision that supersedes it. The specification carries no unresolved clarification markers.
+**Clarifications resolved (28 of 28), through 2026-09-29.** The clarification record now contains the original three decisions, six 2026-09-14 remediation/outcome-encoding decisions, D1–D6 from the specification review, D7–D9 from the post-gate amendment, D10–D13 from the 2026-09-25 and 2026-09-26 sessions (superseded by D14), D14–D17 from the 2026-09-28 acceptance-scope session, and D18–D19 from the
+2026-09-29 one-form session. Every decision names the FR/SC/Constitution rule it binds or the decision that supersedes it. The specification carries no unresolved clarification markers.
 
-- **Q1 — token threshold** (SC-011): *set the target after a baseline run.* The
-  threshold is derived from the baseline measurement now required by SC-036, and
-  no efficiency work is accepted against a target chosen before that baseline
-  exists. This honours the request's instruction that no arbitrary percentage be
-  invented.
+- **Q1 — token threshold**: superseded by D14; the criterion it set is retired
+  and no percentage target remains.
 - **Remediation session 2026-09-14** (C1/A1): a mandatory clarification may never
   be resolved by the agent. Cancellation, decline, expiry and absence are
   lifecycle outcomes, not information outcomes; only a real answer resolves the
@@ -117,15 +122,16 @@ spec's own cross-references — remains valid.
   question rather than leaving it open. Blocking is confined to decisions passing
   the FR-007 materiality test, and a clarification-required run ends in a distinct
   machine-readable outcome so callers route it for an answer rather than retrying
-  it as an error. This remains the initiative's one intended user-visible
-  behaviour change (FR-082).
+  it as an error. This is FR-082 change 1, the initiative's one behavioural
+  regression-by-design.
 - **Q3 — gate authority** (FR-124 to FR-127): *annotate by default; block only a
   contradicted completion claim.* An honest partial answer is never withheld; an
   explicit claim of completion contradicted by evidence is corrected before
   delivery, at a cost of at most one additional turn, with a fallback to
   annotation where the gate cannot reach a verdict.
 
-**Integrity check.** 130 functional requirements and 44 success criteria (174 in total); no
+**Integrity check.** 130 functional requirements and 44 success criteria (174 in total),
+of which eight are retired by D14 as ID-only stubs, leaving 166 active; no
 duplicate identifiers, no dangling cross-references, no placeholder text
 remaining.
 
@@ -137,9 +143,10 @@ deliberate and quarantined:
   extending it rather than building a parallel architecture, and the constitution
   makes that a principle (XVIII). A brownfield "extend, do not duplicate"
   constraint is uncheckable without naming what already exists.
-- Every numbered requirement (FR-001 to FR-085) and every success criterion
-  (SC-001 to SC-026) is written as observable behaviour with no module, path or
-  API named. The implementation references live only in the Context section,
+- Every numbered requirement and every success criterion is written as
+  observable behaviour with no module, path or internal API named. Where a
+  requirement is about a user-facing interface, it names that interface's
+  own command or flag (FR-082 change 4 names `--interactions`). The implementation references live only in the Context section,
   Appendix A and the Dependencies notes, all clearly labelled as evidence rather
   than design.
 
@@ -158,8 +165,7 @@ depended upon.
 
 ## Alignment update — 2026-09-24
 
-- Current specification inventory: **130 FR / 44 SC**; identifier ranges are FR-001…FR-130 and SC-001…SC-044.
-- Clarification record: **26/26 resolved**, including D1–D17. No active `[NEEDS CLARIFICATION]` marker remains in `spec.md`.
+- Current specification inventory: **130 FR / 44 SC**; identifiers run to FR-130 and SC-044; eight are retired by D14 as ID-only stubs, leaving 128 FR / 38 SC active.
+- Clarification record: **28/28 resolved**, including D1–D19. No active `[NEEDS CLARIFICATION]` marker remains in `spec.md`.
 - Constitution XI: `spec.md` itself owns the normative ten-surface classification; `plan.md` may add implementation evidence but cannot override it.
-- FR-082 now enumerates three intended user-visible changes. Only the removal of self-resolving mandatory non-answers is the backward-incompatible regression-by-design; the completion annotation/correction and same-decision re-raise suppression are additive.
-- SC-011 is measurable at **>=10% lower mean total tokens than naive in the same paired run plus zero task-level outcome-rate regression**. The historical paired runs do not satisfy it; specification clarity is not acceptance evidence.
+- FR-082 now enumerates four intended user-visible changes. The removal of self-resolving mandatory non-answers is the one behavioural regression-by-design; the completion annotation/correction and same-decision re-raise suppression are additive; one form per decision point (D18, D19) is breaking for callers that count forms or script one answer per form, with D19's migration path.
