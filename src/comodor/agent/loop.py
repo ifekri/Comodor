@@ -817,6 +817,10 @@ class AgentLoop:
                       summary=self._describe(call))
         if self.cancel.cancelled:
             result = ToolResult.failure("cancelled before the tool ran")
+        elif self._asked_together is not None and call.id in self._asked_together:
+            # Answered by the one form this reply's questions shared, or
+            # refused, all together, at the gate every tool call passes.
+            result = self._asked_together[call.id]
         elif self._ask_refusal and call.name == "ask":
             result = ToolResult.failure(
                 f"not asked: {self._ask_refusal}. No question in this reply was "
@@ -830,9 +834,6 @@ class AgentLoop:
                 "not run: an `ask` in this reply was refused, so the decisions "
                 "it held are still open. Nothing that may depend on them runs "
                 "until they are asked again and answered.", withheld=True)
-        elif self._asked_together is not None and call.id in self._asked_together:
-            # Answered by the one form this reply's questions shared.
-            result = self._asked_together[call.id]
         elif call.name == "ask" and self._ask_as_one_form() \
                 and not self._withheld_by(context, call):
             self._asked_together = self._ask_together(context)
@@ -1153,8 +1154,27 @@ class AgentLoop:
                 and bool(assessment.missing_decisions))
 
     def _ask_together(self, context: ToolContext) -> dict[str, ToolResult]:
-        """Put the reply's questions, and the preflight's, to the person once."""
+        """Put the reply's questions, and the preflight's, to the person once.
+
+        The calls do not pass through `ToolRegistry.invoke`, so what it does
+        around a tool is done here: each call passes the same gate first —
+        the mode's tools, the permission policy (FR-117, FR-118) — and every
+        result is redacted as a tool's result is.
+        """
         from ..tools import ask as ask_tool
+
+        for call in self._batch_asks:
+            refused = self.tools.refusal("ask", context.for_call(call.id),
+                                         call.arguments or {})
+            if refused is not None:
+                # One call the gate refuses refuses the set (D19): none is
+                # asked, and nothing that may depend on the set runs.
+                self._ask_refusal = (refused.content.removeprefix("Error: ")
+                                     or "not permitted")
+                return {each.id: ToolResult(ok=False, content=refused.content,
+                                            display=refused.display,
+                                            meta=dict(refused.meta))
+                        for each in self._batch_asks}
 
         calls = []
         for call in self._batch_asks:
@@ -1164,7 +1184,11 @@ class AgentLoop:
         # model question stating the same one stands for it on the form.
         extra = (self._preflight_pending(context, self._batch_preflight)
                  if self._preflight_wants_a_form() else [])
-        return ask_tool.ask_together(context, calls, extra)
+        results = ask_tool.ask_together(context, calls, extra)
+        for result in results.values():
+            result.content = context.redact(result.content)
+            result.display = context.redact(result.display)
+        return results
 
     def _preflight_pending(self, context: ToolContext,
                            assessment: preflight.MutationAssessment) -> list[tuple[Any, Any]]:
@@ -1215,6 +1239,11 @@ class AgentLoop:
             # together, now, rather than one form here and another at the
             # `ask` (FR-014, D18).
             self._asked_together = self._ask_together(context)
+            if self._ask_refusal:
+                return ToolResult.failure(
+                    "not run: an `ask` in this reply was refused, so the decisions "
+                    "it held are still open. Nothing that may depend on them runs "
+                    "until they are asked again and answered.", withheld=True)
             open_now = [decision for decision in context.evidence.withheld()
                         if decision.state in ("unresolved", "blocked", "asked")]
             if not open_now:
@@ -1229,6 +1258,8 @@ class AgentLoop:
         if not pending:
             return None
         result = ask_tool.present(context, pending, origin="mutation_preflight")
+        result.content = context.redact(result.content)
+        result.display = context.redact(result.display)
         if all(decision.resolved for _, decision in pending):
             # The person answered: the same decision is now KNOWN, and the
             # mutation may be reconsidered rather than withheld.

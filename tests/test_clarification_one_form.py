@@ -25,6 +25,7 @@ from comodor.providers.gateway import Gateway
 from comodor.safety import PermissionEngine
 from comodor.tools import ToolRegistry
 from comodor.tools import ask as ask_tool
+from comodor.tools.base import ToolResult
 
 REQUEST = ("Build the service. Which database: SQLite or PostgreSQL? Which cache: "
            "Redis or Memcached? Which queue: RabbitMQ or Kafka? Which language: "
@@ -546,6 +547,91 @@ def test_c10_the_write_waits_because_of_the_withholding(config, bus, monkeypatch
         Script(text="Done.")])
     agent.run(REQUEST)
     assert (config.paths.project / "service.py").exists(), "the mutation lets it run"
+
+
+# --------------------------------------------------------------------------- #
+# The combined form passes what every tool call passes: the gate and redaction
+# --------------------------------------------------------------------------- #
+
+
+KEY = "sk-live-0123456789abcdefghijklmnopqrstuv"
+
+
+def written_key(request):
+    return json.dumps([{"header": entry["header"], "prompt": "", "chosen": [],
+                        "written": f"use {KEY}"} for entry in request.meta["questions"]])
+
+
+def test_a_combined_form_result_is_redacted_like_any_tool_result(config, bus):
+    """A written answer carrying a configured credential reaches neither the
+    tool event nor the model, as with a single `ask` (Tool.invoke)."""
+    config.providers[config.provider].api_key = KEY
+    person = Person(bus, written_key)
+    agent = make_agent(config, bus, [
+        Script(text="Asking.", tool_calls=[ask("q1", question("Database")),
+                                           ask("q2", question("Cache"))]),
+        Script(text="Done.")])
+    agent.run(REQUEST)
+    assert len(person.forms) == 1
+    for call_id in ("q1", "q2"):
+        assert KEY not in tool_text(agent, call_id)
+        assert KEY not in person.displays[call_id]
+    assert "use " in tool_text(agent, "q1"), "the answer itself still arrives"
+
+
+@pytest.mark.parametrize("mode", ["ask", "chat", "no-such-mode"])
+def test_a_mode_without_the_ask_tool_refuses_the_whole_set(config, bus, mode):
+    """Batching two `ask` calls does not get past the mode boundary a single
+    call cannot pass (FR-117, FR-118): nothing is asked, nothing is recorded,
+    and each call is told why."""
+    config.agent.mode = mode
+    person = Person(bus, first_option_for_every_question)
+    agent = make_agent(config, bus, [
+        Script(text="Asking.", tool_calls=[ask("q1", question("Database")),
+                                           ask("q2", question("Cache"))]),
+        Script(text="Done.")])
+    agent.run(REQUEST)
+    assert person.forms == []
+    assert not agent.tool_context.evidence.decisions
+    for call_id in ("q1", "q2"):
+        assert f"not available in {mode} mode" in tool_text(agent, call_id)
+
+
+def test_the_set_passes_the_tool_gate_first(config, bus, monkeypatch):
+    """Mutation check: without the gate, the combined form is raised in a
+    mode that offers no tools."""
+    monkeypatch.setattr(ToolRegistry, "refusal", lambda self, name, ctx, args: None)
+    config.agent.mode = "chat"
+    person = Person(bus, first_option_for_every_question)
+    agent = make_agent(config, bus, [
+        Script(text="Asking.", tool_calls=[ask("q1", question("Database")),
+                                           ask("q2", question("Cache"))]),
+        Script(text="Done.")])
+    agent.run(REQUEST)
+    assert len(person.forms) == 1, "the mutation lets the batch past the mode"
+
+
+def test_a_permission_refusal_of_one_call_refuses_the_set(config, bus, monkeypatch):
+    """The permission policy is the gate's other half: a call it refuses
+    refuses the set, and the write beside it is withheld (D19)."""
+    real = ToolRegistry.refusal
+
+    def refuse_q2(self, name, ctx, args):
+        if ctx.call_id == "q2":
+            return ToolResult.failure("denied by policy", denied=True)
+        return real(self, name, ctx, args)
+
+    monkeypatch.setattr(ToolRegistry, "refusal", refuse_q2)
+    person = Person(bus, first_option_for_every_question)
+    agent = make_agent(config, bus, [
+        Script(text="Asking.", tool_calls=[ask("q1", question("Database")),
+                                           ask("q2", question("Cache")), write()]),
+        Script(text="Done.")])
+    agent.run(REQUEST)
+    assert person.forms == []
+    assert "denied by policy" in tool_text(agent, "q1")
+    assert "not run" in tool_text(agent, "w1")
+    assert not (config.paths.project / "service.py").exists()
 
 
 # --------------------------------------------------------------------------- #

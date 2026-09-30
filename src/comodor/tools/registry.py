@@ -266,6 +266,32 @@ class ToolRegistry:
     # -- dispatch ---------------------------------------------------------- #
 
     def invoke(self, name: str, ctx: ToolContext, args: dict) -> ToolResult:
+        refused = self._admit(name, ctx, args)
+        if refused is not None:
+            return refused
+        tool = self._tools[name]
+        # Bounded here rather than in each tool, so a tool added tomorrow —
+        # or one that arrived over MCP and was never written here at all — is
+        # covered by the same rule as the ones that exist today. The command
+        # travels too, so the validation-log summary only runs for validation
+        # output and not for a large `git diff` or JSON query (FR-090).
+        command = str(args.get("command") or "") if name in ("run_shell",) else ""
+        return overflow.contain(tool.invoke(ctx, args), ctx, name, command)
+
+    def refusal(self, name: str, ctx: ToolContext, args: dict) -> ToolResult | None:
+        """What `invoke` would refuse this call with before running it, or None.
+
+        The whole gate — an unknown tool, a tool the mode does not offer,
+        arguments that were not JSON, a permission the policy or the person
+        withholds — for a caller that runs the tool's work some other way and
+        must not skip the gate for it.
+        """
+        refused = self._admit(name, ctx, args)
+        if refused is not None:
+            return refused
+        return self._tools[name].refusal(ctx, args)
+
+    def _admit(self, name: str, ctx: ToolContext, args: dict) -> ToolResult | None:
         tool = self._tools.get(name)
         if tool is None:
             available = ", ".join(sorted(self._tools)) or "none"
@@ -286,14 +312,7 @@ class ToolRegistry:
         # loop into a correction.
         if "__raw__" in args:
             return ToolResult.failure(_teach(tool, str(args["__raw__"])))
-
-        # Bounded here rather than in each tool, so a tool added tomorrow —
-        # or one that arrived over MCP and was never written here at all — is
-        # covered by the same rule as the ones that exist today. The command
-        # travels too, so the validation-log summary only runs for validation
-        # output and not for a large `git diff` or JSON query (FR-090).
-        command = str(args.get("command") or "") if name in ("run_shell",) else ""
-        return overflow.contain(tool.invoke(ctx, args), ctx, name, command)
+        return None
 
 
 def _teach(tool: Any, raw: str) -> str:

@@ -275,9 +275,8 @@ class Tool:
 
     # -- invocation ------------------------------------------------------- #
 
-    def invoke(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
-        """Gate, run, and time one call."""
-        started = time.monotonic()
+    def refusal(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult | None:
+        """The permission gate alone: why this call may not run, or None."""
         decision = ctx.permissions.check(
             tool=self.name,
             risk=self.risk,
@@ -286,10 +285,16 @@ class Tool:
             key=self.permission_key(args),
         )
         if not decision:
-            result = ToolResult.failure(decision.reason or "not permitted",
-                                        denied=True)
-            result.elapsed = time.monotonic() - started
-            return result
+            return ToolResult.failure(decision.reason or "not permitted", denied=True)
+        return None
+
+    def invoke(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
+        """Gate, run, and time one call."""
+        started = time.monotonic()
+        refused = self.refusal(ctx, args)
+        if refused is not None:
+            refused.elapsed = time.monotonic() - started
+            return refused
 
         try:
             result = self.run(ctx, **args)
