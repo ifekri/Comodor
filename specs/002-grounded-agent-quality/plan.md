@@ -447,7 +447,7 @@ never claimed beyond its tests.
 | SC-004 | `tests/test_completion_assumptions.py`; `tests/test_evidence_decisions.py` (the assumption-path mutation check) | kept |
 | SC-005 | `tests/test_questions_invariant.py` (property test, mutation-checked); `tests/test_questions_custom_answer.py`; `packages/questions` tests | kept |
 | SC-006 | `tests/test_clarification_restraint.py` (10, including two mutation checks) | narrowed, D16 |
-| SC-007 | `tests/test_clarification_one_form.py` (to be added, §G.5); one case fails today and is fixed in `agent/loop.py` | kept; test and fix required |
+| SC-007 | `tests/test_clarification_one_form.py` (§G.5, with its mutation checks); the surface tests in `tests/test_web.py`, `tests/test_real_web_ui.py`, `tests/test_protocol_interactions.py`, `tests/test_channel_clarification.py`, `tests/test_headless.py`, `tests/test_api.py`, `tests/test_acp.py` and the Bun renderer; the case that failed before T218 passes | kept |
 | SC-008 | Bun renderer tests (`apps/tui/test/bun/renderer.test.tsx`) at widths 160/120/100/80/60 | kept |
 | SC-009 | `tests/test_clarification_persistence.py`; `tests/test_baseline_session.py` | kept |
 | SC-010 | `tests/test_clarification_lifecycle.py` cases 7 and 8 and its ended-form reference tests | kept |
@@ -476,7 +476,7 @@ never claimed beyond its tests.
 | SC-041 | `tests/test_clarification_pause.py` (its dismissed-batch and turn-ends tests); `tests/test_clarification_lifecycle.py` cases 3 to 6 | kept, D16 |
 | SC-042 | `tests/test_decision_resumption.py`; `tests/test_clarification_required.py::test_a_later_answer_in_the_next_turn_resumes_the_work` | kept, D16 |
 | SC-043 | `tests/test_clarification_pause.py`: its independent-work and D7 tests | kept, D16 |
-| SC-044 | **to be added** (§G.4) | kept, D16; test required |
+| SC-044 | `tests/test_clarification_lifecycle.py`: the §G.4 tests — tool guard, loop batch, each layer alone, all layers removed — with their mutation checks | kept, D16 |
 
 #### G.1 FR-064
 
@@ -727,7 +727,7 @@ here is merged, auto-merged or approved on the owner's behalf.
 **Open issues**
 
 - **U-1 — SC-007.** Resolved as a finding, not by narrowing: SC-007 is
-  testable, and one case fails today (§G.5). The test and the fix are tasked.
+  testable; the case that failed (§G.5) is fixed by T218, and its tests pass.
   **U-5**: resolved by D18 and D19 (2026-09-29). One logical form per
   decision point, paged in groups of at most four, is FR-082's fourth intended
   user-visible change. It is breaking for form-count and scripted consumers,

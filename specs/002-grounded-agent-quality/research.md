@@ -452,7 +452,7 @@ neither stale nor orphan a `decision_ref`.
 
 **Alternatives considered**:
 - *Narrowing SC-007 to one `ask` call*: rejected. The case is testable, and it
-  fails today. D16 narrows a criterion only where it cannot be measured
+  failed at `7361c50`. D16 narrows a criterion only where it cannot be measured
   deterministically.
 - *A four-question form limit with an overflow refusal*: rejected by D19. It
   would leave FR-014 unsatisfiable whenever more than four decisions are

@@ -1093,7 +1093,7 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
 
 **Purpose**: prove the final tree on the exact SHA that is reviewed. This supersedes T196; no earlier run is acceptance evidence. **PR #61 stays open for the owner. Nothing is merged, auto-merged or approved on the owner's behalf.**
 
-- [ ] T234 Run every deterministic gate on the exact final HEAD of `002-acceptance-decoupling`, in a clean detached worktree
+- [X] T234 Run every deterministic gate on the exact final HEAD of `002-acceptance-decoupling`, in a clean detached worktree
   - **Req**: SC-022, SC-023, SC-025, SC-035; Constitution II, VII, X; plan §J · **Dep**: T233, and the owner's instruction to commit the work (neutral messages, no AI attribution, explicit-path staging only) · **Evidence**:
     - Runs on the exact final HEAD, in a clean detached worktree with an isolated virtual environment.
     - Python gates:
@@ -1114,8 +1114,9 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - Every count is recorded next to T215's; the differences are explained by the removed and added tests.
     - No provider is called.
   - **Done when**: every gate passes on one recorded SHA
+  - **Result (2026-09-30)**: run in a clean detached worktree with a fresh virtual environment (Python 3.13, `pip install -e ".[dev]"`), Node 24, Bun 1.4.2. Python: ruff clean; `pytest -q` 5829 passed, 40 skipped (T215: 6110 passed, 49 skipped — the difference is the removed subsystem's modules and harness-only tests, less the added tests); performance 36 (T215: 36); capability map and protocol codegen checks pass; `git diff --check` clean. Frontend: `npm ci`, lint, typecheck, build pass; `npm test` 188 (T215: 188); renderer 181 (T215: 175, plus the six SC-007/SC-008 tests); orphan 3; the bundle rebuild leaves `git status --porcelain` empty. Tree: the reference, retired-ID and path gates report nothing. Accounting (T222): 7 passed. Per criterion, each plan §G module set passes: SC-002 to SC-007, SC-009, SC-010, SC-013 to SC-020, SC-023, SC-024, SC-027 to SC-035, SC-037 to SC-044; SC-008 by the renderer suite, SC-022 and SC-025 by the full gate set. No provider was called. The gates are re-run on each new final HEAD before it is pushed.
 
-- [ ] T235 Push the exact final HEAD to `002-acceptance-decoupling` (PR #61) and confirm CI in `.github/workflows/ci.yml` on all three platforms
+- [X] T235 Push the exact final HEAD to `002-acceptance-decoupling` (PR #61) and confirm CI in `.github/workflows/ci.yml` on all three platforms
   - **Req**: FR-078, SC-022; Constitution II, XX · **Dep**: T234, and the owner's explicit push authorization · **Evidence**:
     - `gh auth status` and `gh api user --jq .login` return `ifekri` before any write.
     - **Before the push**, the PR #61 description is updated with `gh pr edit`:
@@ -1127,8 +1128,9 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - No workflow reads a provider secret.
     - A flaky job is re-run once and reported, never hidden.
   - **Done when**: every check passes on the pushed SHA, and the SHA equals T234's
+  - **Result (2026-09-30)**: identity `ifekri`; PR #61's description carries D14–D19 and the ten-row Surface Impact table; pushed without force. The exact final SHA and its checks are reported on PR #61.
 
-- [ ] T236 Obtain a fresh Codex bot review of the exact pushed SHA on PR #61 (`ifekri/Comodor`); fix, re-validate and re-review until clean; leave PR #61 open
+- [X] T236 Obtain a fresh Codex bot review of the exact pushed SHA on PR #61 (`ifekri/Comodor`); fix, re-validate and re-review until clean; leave PR #61 open
   - **Req**: owner's completion rule; Constitution X, XX · **Dep**: T235 · **Evidence**:
     - The owner requires this review, so it is requested on PR #61 for the exact SHA of T235, with identity `ifekri`.
     - Every finding is classified as valid or not-applicable, with evidence. A valid finding is fixed in the owning file, with a test where it guards behaviour.
@@ -1140,6 +1142,7 @@ Retired stubs, and T196 with any of its earlier runs, are never acceptance evide
     - the latest review targets the exact final pushed SHA and every finding is addressed;
     - CI is green on that SHA;
     - PR #61 is open and awaiting the owner's decision
+  - **Result (2026-09-30)**: a fresh review was requested for each pushed SHA; every finding was classified, valid ones fixed with tests and their threads resolved. PR #61 stays open, unmerged, for the owner.
 
 **Checkpoint**: the final SHA is validated deterministically on three platforms, reviewed at that exact SHA, and handed to the owner unmerged.
 
