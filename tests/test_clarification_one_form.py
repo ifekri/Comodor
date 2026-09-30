@@ -228,6 +228,33 @@ def test_c5_an_ask_and_a_preflight_decision_share_one_form(config, bus, order):
     assert result.ok and (config.paths.project / "service.py").exists()
 
 
+def test_c5_a_preflight_header_differing_only_in_case_is_numbered(config, bus):
+    """`Behaviour` from the model and `behaviour` from the preflight are one
+    tab to the person, as `check()` and `collision()` treat them, so the
+    preflight's decision gets a header of its own."""
+    person = Person(bus, forms.CANCELLED)
+    agent = make_agent(config, bus, [
+        Script(text="Working.", tool_calls=[ask("q1", question("Behaviour")), write()]),
+        Script(text="Done.")])
+    agent.gateway.provider("fake").preflight = MISSING_RATE
+    agent.run(REQUEST)
+    headers = [header.lower() for header in person.headers()]
+    assert len(headers) == 2 and len(set(headers)) == 2, person.headers()
+
+
+def test_c5_the_preflight_header_is_allocated(config, bus, monkeypatch):
+    """Mutation check: without allocation, the two headers are one tab."""
+    monkeypatch.setattr(ask_tool, "_free_header", lambda header, taken: header)
+    person = Person(bus, forms.CANCELLED)
+    agent = make_agent(config, bus, [
+        Script(text="Working.", tool_calls=[ask("q1", question("Behaviour")), write()]),
+        Script(text="Done.")])
+    agent.gateway.provider("fake").preflight = MISSING_RATE
+    agent.run(REQUEST)
+    headers = [header.lower() for header in person.headers()]
+    assert len(set(headers)) == 1, "the mutation lets both through as one tab"
+
+
 def test_c5_a_form_of_only_preflight_decisions_stays_on_the_record(config, bus):
     """The `ask` beside the write needs nobody — its decision is settled — so
     the form holds only the preflight's decision. Left open, that decision

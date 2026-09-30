@@ -403,13 +403,15 @@ def ask_together(ctx: ToolContext, calls: list[tuple[str, list[forms.Question]]]
             order.append(key)
             mine[call_id].append((question.header, key))
 
-    headers = {question.header for question, _ in shown.values()}
+    # Compared without case, as `check()` and `collision()` compare them: two
+    # headers differing only in case are one tab to the person.
+    headers = {question.header.lower() for question, _ in shown.values()}
     for question, decision in extra or []:
         key = _key(decision.what)
         if key in shown:
             continue
         question.header = _free_header(question.header, headers)
-        headers.add(question.header)
+        headers.add(question.header.lower())
         shown[key] = (question, decision)
         order.append(key)
 
@@ -492,11 +494,13 @@ def _key(prompt: str) -> str:
 
 
 def _free_header(header: str, taken: set[str]) -> str:
-    """`header`, or the first numbered variant no other question uses."""
-    if header not in taken:
+    """`header`, or the first numbered variant no other question uses.
+
+    `taken` holds lower-cased headers; the comparison ignores case."""
+    if header.lower() not in taken:
         return header
     number = 2
-    while f"{header} {number}" in taken:
+    while f"{header} {number}".lower() in taken:
         number += 1
     return f"{header} {number}"
 

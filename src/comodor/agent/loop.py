@@ -1186,10 +1186,10 @@ class AgentLoop:
                 continue
             header = decision.materiality or "decision"
             number = 2
-            while header in taken:
+            while header.lower() in taken:
                 header = f"{decision.materiality or 'decision'} {number}"
                 number += 1
-            taken.add(header)
+            taken.add(header.lower())
             pending.append((Question(
                 prompt=decision.what,
                 header=header,
