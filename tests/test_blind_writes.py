@@ -1,9 +1,8 @@
 """Replacing a file nobody has looked at.
 
 `write_file` replaces everything. Doing that to a file whose contents are
-unknown is how the rest of it disappears, and the benchmark caught it twice in
-one run: a task was failed for overwriting the sample it was being measured
-against, in an attempt whose actual work was correct.
+unknown is how the rest of it disappears: a run whose actual work was correct
+once overwrote the sample it had been given to work from.
 
 The tool's own description already says to prefer `edit_file` for a change to
 an existing file. Saying it once at the top of a schema is not the same as

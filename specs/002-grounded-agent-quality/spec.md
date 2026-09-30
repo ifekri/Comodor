@@ -163,26 +163,25 @@ either backed by a run or visibly marked.
 
 ---
 
-### User Story 3 - The same work costs materially fewer tokens (Priority: P2)
+### User Story 3 - The agent does not resend or lose what it has established (Priority: P2)
 
 A developer works through an ordinary multi-step task. The agent does not resend
 what it has already established: superseded file reads are replaced by a note
 that they are stale, oversized tool output is spilled to a retrievable location
 rather than pasted or truncated, stable prefixes are arranged so the provider's
 cache keeps hitting, and history that has outgrown the window is compacted at a
-boundary that never separates a tool call from its result. The developer's bill
-for the task is materially lower than the same task run by a strategy that
-resends full history, full files and full tool output every turn — and the
-answers are no worse.
+boundary that never separates a tool call from its result. Token use is
+reported by the product's own usage accounting, and no token reduction is
+claimed (D15).
 
 **Why this priority**: P2 rather than P1 because a cheaper agent that is wrong is
 not a product. Efficiency is graded against a quality floor and is worthless
 without Stories 1 and 2 holding.
 
-**Independent Test**: Testable on its own by running the benchmark suite twice —
-once with the efficiency behaviours engaged and once against a naive
-full-resend baseline — on identical tasks, comparing token counts and task
-outcomes side by side. Delivers measurable value independently.
+**Independent Test**: Testable on its own with deterministic tests that drive
+the agent with scripted model responses and inspect every assembled request:
+the superseded-read sweep, the overflow spill, the stable head and the
+compaction boundary each have their own regression tests.
 
 **Acceptance Scenarios**:
 
@@ -202,8 +201,9 @@ outcomes side by side. Delivers measurable value independently.
    never separates a tool request from its result, and what was removed is
    represented by a summary rather than dropped.
 5. **Given** any token-reducing behaviour, **When** it would omit evidence that
-   changes the answer, **Then** it must not be applied — measured as no
-   regression in benchmark task outcomes (SC-011).
+   changes the answer, **Then** it must not be applied — measured by the
+   deterministic retention and neutrality tests, which switch optimizations
+   off inside the test (D17).
 
 ---
 
@@ -285,35 +285,10 @@ fabricated result.
 
 ---
 
-### User Story 6 - The improvement is measurable, not asserted (Priority: P3)
+### User Story 6 — retired (D14)
 
-A maintainer needs to know whether a change to context handling, prompting or
-learning actually helped. Running the benchmark produces, for each task, both the
-quality outcome and the token cost, and the two are reported together so a token
-saving that cost correctness is visible as the regression it is.
-
-**Why this priority**: P3 by delivery order — it measures the other stories — but
-it is the gate through which their claims become credible, and no efficiency or
-learning claim may be published without it.
-
-**Independent Test**: Testable on its own against the existing benchmark suite by
-producing a paired quality-and-cost report for an unchanged system, establishing
-the baseline every later comparison uses.
-
-**Acceptance Scenarios**:
-
-1. **Given** a benchmark run, **When** results are reported, **Then** each task
-   carries both its pass rate across repeated attempts and its token cost, in
-   one report.
-2. **Given** a change that reduces tokens and lowers any task's pass rate,
-   **When** the comparison is produced, **Then** it is identified as a
-   regression.
-3. **Given** a benchmark run, **When** results are reported, **Then** clarifying
-   questions asked, corrections received, tool calls and retries are reported per
-   task alongside the token figures.
-4. **Given** telemetry is collected, **When** it is recorded or displayed,
-   **Then** it contains no credentials and respects the product's existing
-   redaction and privacy boundaries.
+*Retired 2026-09-28 (D14).* Its telemetry-redaction scenario remains required
+by FR-074.
 
 ---
 
@@ -322,8 +297,10 @@ the baseline every later comparison uses.
 **Clarification lifecycle**
 
 - Several questions are outstanding at once: they are presented as one form in a
-  single round trip, not as a sequence of interruptions. A second form is not
-  raised while one is unanswered.
+  single round trip, not as a sequence of interruptions. That holds even when one
+  model reply raises them through several calls (D18). With more than four,
+  the client shows the one form in pages of at most four, and it is answered
+  once (D19). A second form is not raised while one is unanswered.
 - The developer cancels or declines a mandatory form: recorded as *cancelled*,
   which is distinct from *nobody was there* and from *answered*. Cancellation
   does **not** supply the missing information, so the decision stays unresolved,
@@ -395,8 +372,8 @@ the baseline every later comparison uses.
   applied.
 - The store reaches its cap: a further addition is refused with the current
   contents shown, rather than an existing item being silently evicted.
-- Learning is switched off, or the run is a benchmark attempt: no durable
-  learning occurs and behaviour is reproducible.
+- Learning is switched off: no durable learning occurs and behaviour is
+  reproducible.
 - Untrusted text (a file, a web page, a tool result) contains something shaped
   like an instruction or a fact: it is not admitted as learned knowledge on that
   basis.
@@ -427,16 +404,16 @@ override it.
 
 | Surface | Status | Requirements | Evidence |
 | --- | --- | --- | --- |
-| TUI | REQUIRED | FR-017, FR-020, FR-031 | The terminal question overlay (`apps/tui/src/App.tsx`, shared form reducer `packages/questions`) renders every form with the system-appended custom-answer row (FR-017). Where negotiated, it shows each question's reason and the evidence consulted (FR-020). It must be fully and deterministically keyboard-operable (FR-031). The committed terminal bundle it ships as must be rebuilt to match its source (Constitution VII). |
-| Web UI | REQUIRED | FR-017, FR-019, FR-035, FR-079, FR-123 | The browser page (`src/comodor/web/session.py`, `src/comodor/web/ui.js`) is a live question surface. It carries forms and the custom-answer row. A dismissal there is the clarification outcome `cancelled` and never lets the agent choose a default (FR-019, FR-035). A clarification-required stop is never shown as completion or as a cancelled turn (FR-123). Existing answered-question behaviour is preserved (FR-079). |
-| CLI / Headless | REQUIRED | FR-033, FR-034, FR-121, FR-123, FR-129 | A piped or scheduled `comodor run` blocks on a mandatory clarification and returns the structured clarification-required outcome, with its `decision_ref`, distinct from both success and failure (FR-033, FR-034, FR-121, FR-123). A later invocation resumes the decision only through an explicit `decision_ref`; an unresolvable one is rejected (FR-129). |
-| API / Protocols | REQUIRED | FR-020, FR-079, FR-080, FR-123, FR-129 | Protocol v2 gains only additive, negotiated question fields and the negotiated clarification-required outcome (FR-080), and no existing message changes meaning (FR-079). The OpenAI-compatible API keeps standard `finish_reason` values and carries the distinct state in Comodor's extension (FR-123). API and agent-to-agent resumption carries an explicit `decision_ref` (FR-129). A client that negotiates nothing behaves exactly as today (SC-023). |
+| TUI | REQUIRED | FR-017, FR-020, FR-031 | The terminal question overlay (`apps/tui/src/App.tsx`, shared form reducer `packages/questions`) renders every form with the system-appended custom-answer row (FR-017). Where negotiated, it shows each question's reason and the evidence consulted (FR-020). It must be fully and deterministically keyboard-operable (FR-031). The committed terminal bundle it ships as must be rebuilt to match its source (Constitution VII). D18, D19: one model reply's questions arrive as one form, shown one question at a time with its position in the form and submitted once (FR-082 change 4, breaking for form-count consumers). The overlay already pages a form this way, so D18 and D19 change no TUI source and leave the committed bundle as it is; renderer tests prove the behaviour. |
+| Web UI | REQUIRED | FR-017, FR-019, FR-035, FR-079, FR-123 | The browser page (`src/comodor/web/session.py`, `src/comodor/web/ui.js`) is a live question surface. It carries forms and the custom-answer row. A dismissal there is the clarification outcome `cancelled` and never lets the agent choose a default (FR-019, FR-035). A clarification-required stop is never shown as completion or as a cancelled turn (FR-123). Existing answered-question behaviour is preserved (FR-079). D18, D19: one model reply's questions arrive as one form, shown in pages of at most four and submitted once; answers bind by header (FR-082 change 4). |
+| CLI / Headless | REQUIRED | FR-033, FR-034, FR-121, FR-123, FR-129 | A piped or scheduled `comodor run` blocks on a mandatory clarification and returns the structured clarification-required outcome, with its `decision_ref`, distinct from both success and failure (FR-033, FR-034, FR-121, FR-123). A later invocation resumes the decision only through an explicit `decision_ref`; an unresolvable one is rejected (FR-129). D18, D19: a scripted `--interactions` entry applies to exactly one logical form. A multi-entry script names each entry's headers; a bare `answer` is rejected before the run; and an unmatched or leftover entry ends the run with exit `1` and a clear error — it is never applied to a later form (FR-082 change 4, breaking; migration in D19). |
+| API / Protocols | REQUIRED | FR-020, FR-079, FR-080, FR-123, FR-129 | Protocol v2 gains only additive, negotiated question fields and the negotiated clarification-required outcome (FR-080), and no existing message changes meaning (FR-079). The OpenAI-compatible API keeps standard `finish_reason` values and carries the distinct state in Comodor's extension (FR-123). API and agent-to-agent resumption carries an explicit `decision_ref` (FR-129). A client that negotiates nothing behaves as today, apart from FR-082's intended changes (SC-023). D18, D19 change no message shape or meaning. A protocol v2 interactive client receives a reply's questions as one live pending question of any length, which it pages and answers once. The OpenAI-compatible API and ACP have no live form: they return one clarification-required payload listing every decision, and resume through `decision_answers` keyed by `decision_ref`, in parts if needed (FR-082 change 4; clients that assumed at most four accept more). |
 | Desktop | NOT APPLICABLE | — | No desktop application exists: `docs/desktop-architecture.md` opens "Planned, not built. Nothing in this document exists in the repository", and there is no `src-tauri/` or `apps/desktop/`. `src/comodor/desktop/` is the computer-use tool's screen and pointer backend: it imports none of the question, clarification or turn-outcome machinery, and it presents no question and no turn outcome. As a tool it is governed by the Security / Authorization row. |
-| Channels / Integrations | REQUIRED | FR-121, FR-123 | Channel integrations (`src/comodor/channels/`) run turns with nobody at a form. A mandatory clarification ends in a message naming the open decision and its lifecycle outcome, never in an invented value or a crash (FR-121, FR-123). |
+| Channels / Integrations | REQUIRED | FR-121, FR-123 | Channel integrations (`src/comodor/channels/`) run turns with nobody at a form. A mandatory clarification ends in a message naming the open decision and its lifecycle outcome, never in an invented value or a crash (FR-121, FR-123). D18, D19: an unattended reply ends in one clarification-required payload naming every decision and its `decision_ref`, however many questions it holds. |
 | Docker / Packaged Runtime | REQUIRED | FR-078; Constitution VII | The wheel, sdist and container image ship the terminal bundle, which changes with the TUI row and must be rebuilt from source. This feature does not change the container configuration (`Dockerfile`, `docker-compose.yml`); the only `docker-compose.yml` change on this branch came from `main` with the retired-provider removal (PR #60). Everything works on Windows, Linux and macOS (FR-078). |
 | Persistence / Shared State | REQUIRED | FR-023, FR-030, FR-057, FR-059, FR-081, FR-112, FR-129 | Durable learned items gain provenance, scope, status and supersession (FR-057, FR-059, FR-112). An outstanding form survives reconnect through the session's pending-interaction state (FR-023) and appears in transcripts and exports (FR-030). An unresolved decision stays resolvable by its `decision_ref` (FR-129). Sessions and knowledge written before the change stay readable (FR-081, SC-024). |
 | Security / Authorization | REQUIRED | FR-066, FR-074, FR-117, FR-118, FR-120 | The authorization policy itself is preserved unchanged. Advertised and enforced capabilities derive from one rule, an unknown mode still fails closed, and clarification never becomes a route to an action the mode forbids (FR-117, FR-118, FR-120; Assumptions). The feature adds security requirements on top: untrusted text is never admitted as learned knowledge (FR-066), and recorded measurements carry no credentials (FR-074). |
-| Tests / Documentation | REQUIRED | SC-022, SC-025, FR-082 | Every guard needs a deterministic, mutation-checked regression test (SC-025), and the full suite must pass on all three platforms on the exact commit under review (SC-022). User documentation must describe the new question, headless-outcome and learning behaviour, and change 1 of FR-082 must be stated in release notes (FR-082). |
+| Tests / Documentation | REQUIRED | SC-022, SC-025, FR-082 | Every guard needs a deterministic, mutation-checked regression test (SC-025), and the full suite must pass on all three platforms on the exact commit under review (SC-022). User documentation must describe the new question, headless-outcome and learning behaviour, and changes 1 and 4 of FR-082 must be stated in release notes, change 4 with D19's migration path (FR-082, D18, D19). |
 
 No surface is classified UNCHANGED BUT VERIFIED. The one NOT APPLICABLE surface
 (Desktop) carries its evidence in its row.
@@ -453,9 +430,9 @@ term in this specification carries the meaning given here.
   in the session or whose results were supplied; (7) recorded validation
   evidence. Output is not high-quality merely because it compiles, because tests
   pass, or because it is stated confidently. Quality is observed through the
-  success criteria: zero fabricated values and unmarked pass-claims
-  (SC-001 to SC-004), clarification correctness (SC-005 to SC-010,
-  SC-037 to SC-044) and benchmark outcome rates (SC-011, SC-012).
+  success criteria: no fabricated values or unmarked pass-claims
+  (SC-002 to SC-004) and clarification correctness (SC-005 to SC-010,
+  SC-037 to SC-044).
 - **Material / materially** (FR-007): a decision is material only when there
   are at least two plausible, grounded resolutions and choosing one instead of
   another can produce a different observable or contractual outcome in at least
@@ -617,7 +594,9 @@ term in this specification carries the meaning given here.
 
 - **FR-014**: All clarifications outstanding at one decision point MUST be
   presented together as a single form in one round trip, rather than as
-  successive individual questions.
+  successive individual questions. A client MAY show the form in pages of at
+  most four questions. Pages are not separate forms, and the form is answered
+  in one submission (D19).
 - **FR-015**: Every question MUST present grounded candidate answers whenever
   meaningful alternatives can be enumerated, each with a label choosable at a
   glance and a description of what choosing it would mean.
@@ -997,8 +976,7 @@ blanket rule would either lose evidence in one class or save nothing in another.
 - **FR-063**: Learning MUST NOT occur during a turn in a way that changes that
   turn's behaviour mid-flight; persistence boundaries MUST be deterministic and
   testable.
-- **FR-064**: Learning MUST be able to be switched off entirely, and MUST be off
-  in benchmark runs so measurements are reproducible.
+- **FR-064**: Learning MUST be able to be switched off entirely.
 - **FR-065**: Storage MUST be bounded; reaching a cap MUST produce an explicit
   refusal showing current contents rather than a silent eviction.
 - **FR-066**: Text originating from untrusted content MUST NOT be admitted as
@@ -1079,24 +1057,22 @@ blanket rule would either lose evidence in one class or save nothing in another.
 - **FR-075**: Measurements MUST remain local to the user's own machine unless the
   user has explicitly chosen otherwise; this initiative introduces no new
   outbound transmission of user data.
-- **FR-076**: The benchmark MUST report quality outcomes and token cost together
-  in one report, per task.
-- **FR-077**: A change that reduces tokens while reducing any task's outcome rate
-  MUST be reportable as a regression.
+- **FR-076** *(retired 2026-09-28, D14)*.
+- **FR-077** *(retired 2026-09-28, D14)*.
 
 ### Compatibility
 
 - **FR-078**: All behaviour in this specification MUST work on Windows, Linux and
   macOS.
 - **FR-079**: Existing question, permission, session, streaming, delegate and
-  usage behaviour MUST be preserved; no existing protocol message may change
-  meaning.
+  usage behaviour MUST be preserved, apart from the intended changes FR-082
+  enumerates; no existing protocol message may change meaning.
 - **FR-080**: Any new protocol surface MUST be introduced as an additive,
   negotiated capability, so that a client which does not understand it continues
   to work exactly as before.
 - **FR-081**: Stored sessions and stored knowledge written by the current version
   MUST remain readable after this change.
-- **FR-082**: This initiative intends exactly **three** user-visible behaviour
+- **FR-082**: This initiative intends exactly **four** user-visible behaviour
   changes, and no other:
   1. **A mandatory clarification no longer resolves itself on a non-answer.**
      **A material clarification can no longer be resolved by default,
@@ -1115,12 +1091,28 @@ blanket rule would either lose evidence in one class or save nothing in another.
      FR-127).
   3. **A cancelled mandatory question is not re-raised** within the same
      decision attempt; the unresolved decision is reported instead (FR-129).
+  4. **Questions outstanding at one decision point arrive as one form**
+     (FR-014, SC-007; D18, D19). When one model reply raises questions through
+     several calls, the person receives them together in one form, instead of
+     one form per call. A form with more than four questions is shown in
+     pages and answered once.
 
   Change 1 is the only one that removes behaviour an existing caller may rely
   on. It is the only behavioural regression-by-design in this initiative and
   MUST be stated in release notes. Changes 2 and 3 are additive: they add a
   notice, a correction or a report, and remove nothing a caller was given
   before.
+
+  Change 4 removes no question, no answer and no decision association. It is
+  **breaking** for callers that count forms, or that script one answer per
+  form:
+  - the number of forms changes, and so does the moment each question is
+    presented;
+  - a later call's questions, which a non-answer to the first form used to
+    withhold, are now shown;
+  - a multi-entry `--interactions` script must name each entry's headers.
+
+  It MUST be stated in release notes with the migration path that D19 gives.
 
 ### Capability discovery
 
@@ -1190,7 +1182,6 @@ blanket rule would either lose evidence in one class or save nothing in another.
   work, listing unresolved elements and the evidence gathered; a transient value
   of the existing completion verification path (data-model.md §8), never durable
   state.
-- **Task measurement**: the paired quality and cost record for one task.
 
 ---
 
@@ -1198,16 +1189,24 @@ blanket rule would either lose evidence in one class or save nothing in another.
 
 ### Measurable Outcomes
 
+**Acceptance** (owner decisions D14 to D17, 2026-09-28). Accepting this feature
+requires no model call other than scripted responses, no paid tokens and no
+provider credential. It is accepted on its deterministic gates on the exact commit
+under review (SC-022, SC-025, SC-035): the full test suite and its performance
+ceilings, lint, type checks, code-generation and capability-inventory checks,
+the frontend and renderer suites, and the three-platform matrix. SC-001,
+SC-011, SC-012, SC-021, SC-026 and SC-036 are retired. A criterion whose
+guarantee deterministic tests cover is kept, worded as exactly what those tests
+establish (D16). No token-efficiency or quality improvement is claimed for this
+feature (D15).
+
 **Grounding and assumption prevention**
 
-- **SC-001**: Across the benchmark's deliberately-ambiguous and
-  cannot-be-completed-honestly tasks, the agent never invents a value that the
-  task holds back; measured as zero fabricated values across all attempts of
-  those tasks.
-- **SC-002**: On a request whose necessary material decision is unavailable
-  from every permitted source, the agent asks or reports that decision as
-  outstanding in **100%** of attempts. The criterion measures the clarification
-  safety invariant, per attempt:
+- **SC-001** *(retired 2026-09-28, D14)*.
+- **SC-002**: Once a necessary material decision is open — asked by the
+  agent, or recorded as unresolved because it is unavailable from every
+  permitted source — the agent loop enforces the clarification safety
+  invariant on every turn:
   1. From the moment the unresolved dependency is known, **zero** mutating
      actions that depend on the decision run before a valid answer. A mutation
      whose dependency on the decision is uncertain counts as dependent (FR-018).
@@ -1221,10 +1220,16 @@ blanket rule would either lose evidence in one class or save nothing in another.
      discovery, and 100% of those earlier changes are disclosed as prior
      changes in the outcome.
 
-  An attempt fails SC-002 if any of these does not hold, or if the decision is
-  neither asked nor reported.
-- **SC-003**: No answer claims a check passed without that check having run;
-  measured as zero unmarked pass-claims across a full benchmark run.
+  The open decision is either answered or reported as outstanding in the
+  turn's outcome, and a turn fails SC-002 if any of these does not hold.
+  Measured by its deterministic regression tests (D16). Whether the model
+  recognises a decision as material in the first place is model behaviour and
+  is not claimed.
+- **SC-003**: An answer that claims tests or checks pass when no command ran
+  in the turn is marked by the unverified-claim notice beside the answer, for
+  the claim forms the notice recognises; a claim backed by a command that ran,
+  a hedge, an instruction and a denial are not marked. Measured by its
+  deterministic regression tests (D16).
 - **SC-004**: Every assumption the agent takes appears in its answer as an
   assumption; measured as 100% of proceed-on-assumption cases. Separately,
   **zero** of those cases involve a decision that passed the materiality test —
@@ -1236,11 +1241,17 @@ blanket rule would either lose evidence in one class or save nothing in another.
 - **SC-005**: Every question presented carries a working custom-answer row;
   measured as 100% across all generated forms, including adversarial attempts by
   the model to author or suppress it.
-- **SC-006**: Questions answerable deterministically from the repository are not
-  put to the user; measured on a fixed set of repository-settled requests as zero
-  forms raised in a mode permitted to inspect.
+- **SC-006**: When a question's answer is already settled — by repository
+  evidence, project configuration, trustworthy learned knowledge, safe
+  implementation discretion or an established obvious default — no form is
+  raised in a mode permitted to inspect, and a permission- or
+  confirmation-shaped question is refused rather than asked; an unsettled
+  material decision is still asked. Measured by its deterministic regression
+  tests (D16).
 - **SC-007**: All decisions outstanding at one point reach the user as a single
-  form; measured as no case of two forms raised for one decision point.
+  form, whatever its number of questions. Measured as no case of two forms
+  raised for one decision point, and no decision dropped, inferred or
+  misapplied, by the deterministic regression tests D18 and D19 list.
 - **SC-008**: A developer can answer a full form using only the keyboard, and can
   see which questions remain outstanding without visiting each.
 - **SC-009**: An outstanding form survives disconnect and reconnect and is
@@ -1250,8 +1261,8 @@ blanket rule would either lose evidence in one class or save nothing in another.
 
 **Mandatory clarification is never self-resolved**
 
-Each criterion below is measured across every mandatory-clarification scenario in
-the benchmark, and each is independently mutation-checked.
+Each criterion below is measured by its deterministic regression tests (D16),
+and each is independently mutation-checked.
 
 - **SC-037**: Cancelling a mandatory question produces **zero fabricated
   values** — no invented value, no option selected on the user's behalf, no
@@ -1267,7 +1278,8 @@ the benchmark, and each is independently mutation-checked.
   invocation or external call occurred after the outcome.
 - **SC-042**: A real answer supplied after a cancelled or expired mandatory
   question resumes the dependent work and produces the same result as if it had
-  been answered the first time; measured on a fixed replay scenario.
+  been answered the first time; measured by its deterministic regression tests
+  (D16).
 - **SC-043**: Work that continues while a mandatory clarification is outstanding
   is demonstrably independent of it; measured by asserting that every continued
   action's inputs exclude the unresolved decision. Where dependency cannot be
@@ -1278,95 +1290,20 @@ the benchmark, and each is independently mutation-checked.
 
 **Token efficiency**
 
-- **SC-011**: Against a naive baseline that resends full history, full file
-  contents and full tool output every turn, the same benchmark tasks complete
-  with materially fewer total tokens and **no reduction in any task's outcome
-  rate**. "Materially fewer" means **at least 10% lower mean total tokens per
-  attempt than the naive strategy, measured in the same paired run**. SC-011
-  passes only when **both** conditions hold:
-  1. current mean total tokens ≤ 0.90 × naive mean total tokens; **and**
-  2. for **every** task in the measurement's complete paired-eligible cohort
-     (D13), the current outcome rate ≥ the naive outcome rate. A task-level
-     regression is never averaged away.
-
-  The **complete paired-eligible cohort** is every benchmark task that is not
-  declared a multi-turn sequence task in its own task definition. A sequence
-  task cannot take part in a paired measurement, so it is outside the paired
-  experiment by its type, never by choice, and is measured under its own
-  criteria (e.g. SC-021). Every other task is in the cohort; none is left out
-  for its name, result, difficulty, cost or timeout risk.
-
-  The two strategies are comparable only within one paired measurement that
-  uses the same provider, the same model, the same task set, the same number of
-  attempts, the same token-accounting version, the same counterbalancing
-  scheme and the same candidate runtime semantics. Absolute token totals are
-  never compared across token-accounting versions. The threshold is relative so
-  that it holds across providers. It was derived from the published paired
-  baselines (SC-036), not chosen in advance: in both runs the current strategy
-  used more total tokens than naive, so parity was not being met, and crossing
-  parity by a small margin is not "materially fewer". Recording the threshold
-  does not satisfy SC-011. Both historical runs **fail** it, and it is satisfied
-  only by a fresh qualifying paired measurement.
-- **SC-036**: A baseline measurement of the current system against the naive
-  full-resend strategy is published before any efficiency threshold is adopted.
-  It reports, per task, input tokens, output tokens, cached tokens, model turns,
-  tool calls and outcome rate for both strategies, measured as repeated attempts
-  per task in one paired run. The reduction target for SC-011 is then set from
-  that data and recorded in this specification, and no efficiency work is
-  accepted against a target that predates the baseline. The baselines published
-  so far are listed in the *Benchmark evidence record* below. That record is
-  evidence, not part of this criterion.
-- **SC-012**: No benchmark task's outcome rate falls relative to the immediately
-  preceding published baseline as a result of an efficiency change; any fall is
-  reported as a regression and blocks the change. The comparison is made per
-  task, between measurements judged by the same scenario (D10–D12):
-  1. A task's **scenario fingerprint** is the one the benchmark's integrity
-     record keeps: its prompt, judge, starting repository, hidden files and
-     declared budgets. A task is **unchanged** when its fingerprint at
-     the baseline's recorded commit equals its fingerprint at the candidate
-     under test, and **changed** otherwise. No reviewer judgement decides it.
-  2. An **unchanged** task's reference is its outcome rate under the current
-     strategy in the immediately preceding published baseline.
-  3. A **changed** task's reference is its outcome rate under the naive
-     strategy in the same fresh paired run as the candidate's measurement: same
-     judge, same product, efficiency switched off. The earlier published rate
-     is never compared across a scenario change.
-  4. Every task has exactly one reference. No task is excluded and the
-     denominator is always the whole task set of the fresh paired candidate
-     measurement: its complete paired-eligible cohort (SC-011, D13). SC-012
-     passes only when, for every task, the candidate's outcome rate is at
-     least its reference.
-  5. The published SC-012 result records, per task: the reference used
-     (published baseline or same-run naive), both fingerprints, and both
-     rates.
-  6. Every published baseline records the per-task scenario fingerprints it
-     was judged with, so the next comparison reads comparability from the
-     result itself. The 2026-09-20 baseline predates this rule; its
-     fingerprints are recomputed from its recorded commit.
-- **SC-013**: A superseded file read is never re-sent; measured as zero
-  superseded copies present in any assembled request across a benchmark run.
+- **SC-011** *(retired 2026-09-28, D14)*.
+- **SC-036** *(retired 2026-09-28, D14)*.
+- **SC-012** *(retired 2026-09-28, D14)*.
+- **SC-013**: Once a file read is superseded — the file was edited and read
+  again — no request assembled after the context sweep has run carries the
+  pre-edit copy in full, and the edit is represented by its change rather than
+  the whole file. Measured by its deterministic regression tests (D16).
 - **SC-014**: No tool output is lost to truncation; measured as every
   over-budget result remaining retrievable in full.
-- **SC-015**: The stable portion of the request is byte-identical across turns
-  within a task; measured as zero mid-task changes to it.
-
-*Benchmark evidence record (informative; not a success criterion).* These
-published paired runs are the data behind SC-036 and the SC-011 threshold.
-Their figures are comparable only within each run.
-
-- **Tasks Phase 1 baseline (T015)**: `bench/results/paired-baseline-2026-09-14.json`
-  and `.md`, measured at commit `5b611e4` with
-  `python -m bench --paired --provider <provider> --model <model> --tries 3`
-  (the provider/model the run was configured with; the artifact is sanitized
-  rather than naming it) — 13 tasks × 3 attempts × 2 strategies; current 31/39
-  attempts at a mean of 62,673 total tokens per attempt, naive 32/39 at 53,480
-  (current ≈ 17.2% higher).
-- **Candidate paired run (T155, token-accounting version 2)**:
-  `bench/results/paired-baseline-2026-09-20.json` and `.md`, measured at
-  commit `be9cf6f` — 13 tasks × 3 attempts × 2 strategies; current 30/39
-  attempts at a mean of 55,440 total tokens, naive 33/39 at 50,750
-  (current ≈ 9.24% higher); the comparison flags `feature-retry-decorator` and
-  `careful-unknowable` as outcome regressions.
+- **SC-015**: Within one turn, the request head — the system prompt with the
+  project instructions carried once in a fixed position — is identical on
+  every model call, and a change to the project instructions saved during the
+  turn takes effect from the next turn. Measured by its deterministic
+  regression tests (D16).
 
 **Progressive learning**
 
@@ -1374,74 +1311,74 @@ Their figures are comparable only within each run.
   without restatement, in 100% of tested correction cases.
 - **SC-017**: A decision settled through a form is not re-asked within the same
   project; measured as zero repeat forms for a settled decision.
-- **SC-018**: No durable item exists whose sole origin is an unverified model
-  assertion; measured as zero such items after a full benchmark run with learning
-  enabled.
+- **SC-018**: The learning store's admission gate refuses to persist any new
+  lesson, fact or rule whose provenance is not one of the admissible classes,
+  whether it arrives through the service, reflection, review, curation or a
+  direct store write; a model's own assertion, assistant text and an
+  instruction arriving as untrusted content are not admissible. Measured by
+  its deterministic regression tests (D16).
 - **SC-019**: Project-scoped knowledge is never applied in an unrelated project;
   measured as zero cross-project applications in a two-project test.
 - **SC-020**: Every durable item is listable with its origin and individually
   deletable; measured as 100% coverage.
-- **SC-021**: Over a fixed sequence of **N = 6 comparable tasks in the same
-  project** — tasks 1–3 the *initial window*, tasks 4–6 the *learned window* —
-  the total number of mandatory clarifications raised in the learned window is
-  lower than in the initial window, **and** the total number of user corrections
-  received in the learned window is lower than in the initial window, **and** no
-  task's correctness/outcome success regresses between the windows. N = 6 is
-  fixed because the benchmark already measures in three-attempt windows; six
-  gives two equal three-task windows at bounded cost. A lower count obtained by
-  skipping a required question, guessing, reduced task quality or a weakened
-  scenario (SC-026) does not count. If the two windows' task inputs are not
-  comparable, the measurement is **invalid**, not passing. Repository
-  rediscovery / knowledge-hit figures may be reported as secondary diagnostics
-  but never substitute for the clarification or correction counts.
+- **SC-021** *(retired 2026-09-28, D14, D16)*.
 
 **Compatibility, determinism and regression prevention**
 
 - **SC-022**: The full existing test suite, lint, type checks, code-generation
   freshness checks and the renderer suite pass on all three platforms on the
   exact commit under review.
-- **SC-023**: A client that does not negotiate any new capability behaves exactly
-  as it does today; measured by running the existing protocol conformance tests
-  unchanged.
+- **SC-023**: A client that does not negotiate any new capability behaves as it
+  does today, apart from the intended changes FR-082 enumerates. For example, a
+  reply's questions reach it in one form (D18). Measured by running the
+  existing protocol conformance tests unchanged.
 - **SC-024**: Sessions and stored knowledge written before the change remain
   readable after it, in 100% of fixture cases.
 - **SC-025**: Every behaviour in this specification that guards an invariant has
   a deterministic regression test that fails when the guard is removed and passes
   when it is restored, with no test relying on sleeps or timing for correctness.
-- **SC-026**: Benchmark attempts are reproducible: learning disabled, isolated
-  storage, and a fixed per-attempt budget, with every result reported as a rate
-  across repeated attempts rather than a single boolean.
+- **SC-026** *(retired 2026-09-28, D14)*.
 
 **Per-class efficiency and evidence retention**
 
 - **SC-027**: A failing build or test run never loses its failure to
   compression; measured as the failing case, its location and its message being
   recoverable from the carried representation in 100% of failing runs.
-- **SC-028**: No duplicate content appears twice in one assembled context;
-  measured as zero duplicate-bearing requests across a benchmark run.
-- **SC-029**: A fact verified once in a session is not re-verified without a
-  change to its source; measured as zero redundant re-verifications across a
-  benchmark run.
+- **SC-028**: Tool-result material identical to a result still resident in
+  the assembled context is admitted as a reference to the call that holds it,
+  never as a second full copy; a changed source is never served from a stale
+  copy, and a near-duplicate is not collapsed on similarity alone. Measured by
+  its deterministic regression tests (D16).
+- **SC-029**: In the evidence ledger, recording an unchanged source again
+  reuses the existing verified entry instead of creating a second
+  verification; a change to the source returns the earlier fact to unknown and
+  moves its citation; and the passage of turns alone invalidates nothing.
+  Measured by its deterministic regression tests (D16).
 - **SC-030**: Every canonical summary and every derived assertion can be traced
   to the material it rests on; measured as 100% of summaries carrying provenance.
 
 **Learning coverage and honesty**
 
-- **SC-031**: A recurring instruction given repeatedly is applied without being
-  requested again, while a one-off instruction scoped to a single task is not
-  carried into unrelated later tasks; both measured on fixed test sequences.
+- **SC-031**: An instruction given twice becomes a rule that is applied
+  without being requested again, a single mention does not, a one-off
+  instruction never becomes durable, and a contradicting instruction
+  supersedes the earlier rule. Measured by its deterministic regression tests
+  (D16).
 - **SC-032**: A stored item contradicted by current repository fact stops being
   applied, and the contradiction is surfaced; measured as zero silent
   applications of a contradicted item.
-- **SC-033**: A low-confidence conclusion on a material decision is escalated to
-  a clarification rather than delivered as a hedge; measured as zero hedged
-  material conclusions across the benchmark's ambiguity tasks.
+- **SC-033**: A material conclusion recorded with confidence below the
+  threshold is escalated to a clarification rather than delivered, and
+  hedging language in the answer does not substitute for that escalation; a
+  non-material low-confidence point is reported, not asked. Measured by its
+  deterministic regression tests (D16).
 
 **Capability honesty**
 
-- **SC-034**: The agent never claims or attempts a capability not advertised in
-  the current mode; measured as zero such claims across a full benchmark run
-  including plan-mode and conversation-only tasks.
+- **SC-034**: In plan mode and conversation-only mode, a tool the mode does
+  not advertise is refused before it runs, with the mode named as the reason,
+  and no tool the mode would refuse is advertised. Measured by its
+  deterministic regression tests (D16).
 - **SC-035**: The generated capability inventory regenerates cleanly and its
   check passes on the exact commit under review.
 
@@ -1449,92 +1386,362 @@ Their figures are comparable only within each run.
 
 ## Clarifications — Resolved
 
-**Twenty-two** clarification decisions are recorded below, in seven groups.
+**Twenty-eight** clarification decisions are recorded below, in nine groups.
 Each decision is binding on the requirements it names:
 
 | Group | Decisions |
 | --- | --- |
-| Session 2026-09-26 (paired-run population) | 1 — D13 |
-| Session 2026-09-25 (SC-012 comparability) | 3 — D10 to D12 |
+| Session 2026-09-29 (one form per decision point) | 2 — D18, D19 |
+| Session 2026-09-28 (acceptance scope) | 4 — D14 to D17 |
+| Session 2026-09-26 | 1 — D13, superseded by D14 |
+| Session 2026-09-25 | 3 — D10 to D12, superseded by D14 |
 | Session 2026-09-24 (post-gate amendment) | 3 — D7 to D9 |
-| Session 2026-09-24 (specification review) | 6 — D1 to D6 |
+| Session 2026-09-24 (specification review) | 6 — D1 to D6; D5 superseded by D14 |
 | Session 2026-09-14 (remediation) | 3 |
 | Session 2026-09-14 (outcome encoding) | 3 |
 | Original clarifications, 2026-09-14 | 3 — Q1 to Q3 |
 
-All twenty-two were put to, or decided by, the repository owner, and every one
-lists the FR/SC requirements or Constitution principle it binds. No unresolved
+All twenty-eight were put to, or decided by, the repository owner. Every one
+lists the FR/SC requirements or Constitution principle it binds, or the later
+decision that supersedes it. No unresolved
 clarification markers remain in this specification.
 
-### Session 2026-09-26 (paired-run population)
+### Session 2026-09-29 (one form per decision point)
 
-Before the final paired run, the benchmark held 19 tasks, one of them a
-multi-turn sequence task (`learning-repeat`). The paired runner refuses a
-cohort that contains a sequence task, so a paired run over "every benchmark
-task" could not execute, and SC-011's "every benchmark task" and SC-012's
-"whole task set" could be read as the whole catalogue or as the tasks a paired
-run can hold. The owner decided which.
+The owner decided how questions raised through several calls in one model
+reply reach the person (D18), and how a form larger than one page is
+presented (D19).
 
-- Q: For acceptance criteria decided by a paired benchmark run, which tasks
-  form the population? → A: **D13.** The **complete paired-eligible cohort**:
-  every loaded benchmark task whose definition does not declare it a sequence
-  task (`task.sequence` is false), derived mechanically from task metadata.
-  - A sequence task is outside the paired experiment by its type, because
-    the paired runner does not run sequence tasks. It is never dropped for
-    its name, expected or measured result, difficulty, cost, timeout risk,
-    reviewer preference or any manual choice.
-  - In SC-011's paired measurement, "every benchmark task" means every task
-    in that measurement's complete paired-eligible cohort. In SC-012, "the
-    whole task set" means the whole paired-eligible task set of the fresh
-    paired candidate artifact. A sequence task is not counted there as PASS,
-    FAIL, a regression or UNDECIDABLE; it is measured under its own criteria
-    (e.g. SC-021).
-  - Execution: when the command line would otherwise load a sequence task, a
-    task-selection option (`--only`) may be used solely to enumerate the
-    complete cohort, and only when the set of names it passes equals the set
-    of loaded tasks whose `task.sequence` is false. Any smaller, hand-picked
-    subset remains forbidden. The option is a transport, not the definition:
-    task metadata is authoritative.
-  - The paired runner's refusal of a sequence task is unchanged. The
-    2026-09-20 baseline is not rewritten; its tasks are compared under D10,
-    and a candidate task absent from it takes the same-run naive reference.
-  - Current observation, not a rule: 19 tasks, 18 paired-eligible, 1 sequence
-    task (`learning-repeat`), so a paired run at three attempts per strategy
-    is 108 attempts. These figures follow the catalogue if it changes.
-  *Binds*: SC-011, SC-012, SC-036.
+- Q: When one model reply raises questions through several calls, are they
+  presented as one form, and is that a user-visible change? → A: **D18.** Yes,
+  and yes. It is the fourth intended user-visible change under FR-082, and it
+  is required by FR-014 and SC-007.
+  - **Decision point**: one model reply of one agent loop. The decisions that
+    the mutation preflight finds missing for that reply's calls belong to the
+    same decision point. A delegate's own replies are its own decision points.
+    Decisions a delegate carries back enter the parent turn unresolved. They
+    are never re-asked in the parent's form or in any later form of that turn.
+  - **Preserved**:
+    - every question, with its header, options, custom-answer row (FR-017),
+      materiality and grounding;
+    - its decision association: one `decision_ref` per decision (FR-020,
+      FR-129);
+    - answers bound by header to the call that asked;
+    - the lifecycle outcomes (FR-035);
+    - the shape and meaning of every protocol message (FR-079, FR-080).
 
-### Session 2026-09-25 (SC-012 comparability)
+    No question is dropped, answered by default, or merged into a different
+    decision. The same decision asked by two calls in one reply appears once,
+    and both calls receive its answer or outcome.
+  - **Changed**:
+    - The number of forms: one per decision point, instead of one per call.
+    - When a question is presented. A question from a later call in the same
+      reply is shown at once, beside the earlier calls' questions, instead of
+      after the first form is answered.
+    - Where the first form would have been cancelled, declined, expired or
+      unattended, the later calls' questions were previously withheld and
+      never shown. They are now shown, and they share that outcome.
+    - A caller that counts forms, or that scripts one answer per form, sees the
+      difference. `comodor run --interactions`, for example, applies one entry
+      per form, in order: the combined form consumes one entry. D19 defines how
+      entries match forms, and gives the migration path.
+  - **Limit**: *superseded by D19 (2026-09-29).* A form has no upper bound;
+    a client pages it in groups of at most four, and an invalid set of calls is
+    refused atomically.
+  - **Outcomes**:
+    - A partial answer resolves the answered questions. Each unanswered
+      material decision stays open and is reported once.
+    - Cancellation, decline, expiry or absence of the combined form applies
+      that outcome to every decision in it.
+    - Each call receives its own result, naming only its own questions.
+  - **Coverage** (deterministic, with scripted model responses, and
+    mutation-checked):
+    - one reply with several `ask` calls — answered, partially answered,
+      cancelled, expired and unattended;
+    - the same decision asked twice in one reply;
+    - an `ask` beside a mutation whose preflight finds another missing
+      decision;
+    - the atomic refusal (D19);
+    - successive replies, where a new form at a new decision point is allowed;
+    - every existing client surface that presents, scripts or reports a form:
+      - the live forms of the TUI renderer and the Web session round trip;
+      - headless `--interactions`;
+      - the clarification-required payload, and its later `decision_answers`
+        resumption, on the OpenAI-compatible API and ACP;
+      - channels (one clarification-required payload naming every decision).
+  - **Release note**: stated in the release notes together with change 1,
+    with D19's migration path.
+  - SC-044's two-guard test design (plan §G.4) is kept.
 
-The `careful-unknowable` judge was corrected to the D7 rule, and the
-`careful-cannot-be-done` prompt and judge changed. Both changes came after the
-2026-09-20 published baseline (`be9cf6f`), so for those tasks that baseline and
-a final run are not judged by the same scenario. SC-011 is unaffected, because
-both of its strategies share one run's judges. The owner decided how SC-012
-compares across such a change.
+  *Binds*: FR-014, FR-079, FR-082, SC-007, SC-023; the surface classification
+  rows for TUI, Web UI, CLI / Headless, API / Protocols, Channels /
+  Integrations and Tests / Documentation.
+- Q: How is a decision point with more than four material questions
+  presented, if a page shows at most four? → A: **D19.** As one logical form,
+  shown in client-side pages of at most four questions. On a live surface — a
+  protocol v2 interactive client, such as the TUI, and the Web page — it is
+  delivered in one interaction and answered in one submission. FR-014 and
+  SC-007 are not narrowed. D19 supersedes D18's **Limit** item (a combined form of at most
+  four questions, with an overflow call refused).
+  - **One logical form**:
+    - Every material question outstanding at one decision point (D18) is
+      carried in one form. On a live surface, that is one pending question
+      request, answered by one submission.
+    - The OpenAI-compatible API and ACP have no live form. The same set is one
+      clarification-required payload, resumed later (see Surfaces).
+    - The form has no upper bound on its number of questions.
+  - **Pages**:
+    - A client presents the form in pages of at most four questions. Pages are
+      presentation only: never separate forms, requests or submissions.
+    - Moving between pages loses nothing already entered.
+    - A client that presents one question at a time, such as the TUI, meets
+      the rule, and shows each question's position in the whole form.
+    - A client that does not page still receives the whole form.
+  - **Per-call input rule** (not a form limit): one `ask` call still carries at
+    most four questions. A reply that needs more uses several calls, which the
+    loop combines into one logical form (D18).
+  - **Atomic refusal**:
+    - If any `ask` call in a reply is refused — too many questions in the call,
+      malformed input, a permission- or confirmation-shaped question, or a
+      header that collides with a different question — no form is raised for
+      that reply.
+    - Every `ask` call in the reply receives a tool error, which says the set
+      must be asked again together.
+    - No decision is registered, dropped, inferred or applied.
+    - Every non-read-only call in the same batch is withheld, and a mutation
+      whose missing decision came from the preflight is re-assessed on the next
+      reply.
+    - The model may retry at its next reply, and a valid set then arrives as
+      one form.
+  - **Binding**:
+    - Each question keeps a header that is unique within the logical form, and
+      its own `decision_ref`.
+    - Answers bind by header (FR-020), never by page or position, and each
+      reaches the call that asked.
+    - A question the same decision raises twice appears once (D18). When two
+      calls name it under different headers, the form shows the first asking
+      call's header, once. The answer or outcome is returned to **each** asking
+      call under that call's own header.
+    - A header shared by two different questions is a collision, and it is
+      refused atomically (above).
+  - **Partial answers**: the answered questions resolve. Each unanswered
+    material decision stays open and is reported once, and the work that
+    depends on it is withheld until a real answer exists (FR-018, FR-129).
+  - **Non-answers**: cancellation, decline, expiry and absence apply to the
+    whole logical form, and so to every decision in it, whatever page was
+    showing. Entries on pages that were never submitted are discarded, never
+    applied.
+  - **Reconnect**: the whole form returns through the pending interaction
+    (FR-023). A client may restore its page position. Unsubmitted entries are
+    never assumed.
+  - **Surfaces**:
+    - **Protocol v2 interactive clients (the TUI)**: a live form, one question
+      at a time, with its position in the form; one submission.
+    - **Web**: a live form, in pages of at most four questions; one submission.
+    - **OpenAI-compatible API and ACP**: no live form.
+      - The turn ends `clarification_required`, with one payload listing every
+        decision of the decision point, whatever their number, each with its
+        `decision_ref`.
+      - A later request resumes through `decision_answers`, keyed by
+        `decision_ref` (FR-129), never by header or position.
+      - A partial `decision_answers` resolves only the decisions it names. The
+        others stay open, and their dependent work stays withheld.
+    - **CLI**: see scripted interactions below.
+    - **Channels**: an unattended run ends in one clarification-required
+      message that names every decision and its `decision_ref`. A later
+      structured reply resolves a decision only by that ref (FR-129).
+  - **Scripted interactions** (`comodor run --interactions`):
+    - One entry applies to exactly one logical form.
+    - An entry that names headers matches a form only if every header it names
+      belongs to that form. `answer` names its headers through `values` keyed
+      by header; `cancel`, `expire` and `unattended` name theirs through a
+      `headers` list.
+    - Headers are optional only in a single-entry script. When a script has
+      more than one entry, every entry must name the headers of its form, and
+      that includes `cancel`, `expire` and `unattended`.
+    - The whole script is validated when it is parsed, before the run starts
+      and before any model call. A script is rejected there, with exit code
+      `1` and an error naming the problem, when it:
+      - is not valid JSON, or is not a list;
+      - holds an entry with an unknown action;
+      - holds an `answer` without a non-empty choice;
+      - is a multi-entry script with an entry that names no headers.
+    - Every `answer` states its choice. It carries either a non-empty
+      `value` or non-empty keyed `values`.
+      - A **bare** `answer` — no `value` and no keyed `values`, or only empty
+        ones — is invalid on every form, a one-question form included.
+      - The script is validated when it is parsed, before the run starts, and
+        a bare `answer` is rejected there as an input error. The run exits
+        with code `1`, having resolved no decision and run no dependent work.
+      - No option is ever selected implicitly. To choose the first offered
+        option, a script names it (`{"action": "answer", "value": "<first
+        option>"}`).
+    - Without headers:
+      - an `answer` with a `value` is valid only for a form with exactly one
+        question;
+      - `cancel`, `expire` and `unattended` apply to the whole form.
+    - A keyed `answer` answers exactly the headers it names. It never fills an
+      omitted question — not with a first option, a default or anything else —
+      and a single value is never spread across questions. An omitted question
+      stays unanswered: a partial answer.
+    - An entry that does not match the form it would apply to is rejected
+      before anything is applied. That covers an unknown header, a missing
+      header list in a multi-entry script, and an `answer` without headers for
+      a form of more than one question. The run then ends with exit code `1` and an
+      error naming the entry and why it did not match; `--json` carries the
+      error, and any clarification payload that was reached.
+    - A mismatch can only be found once the form has appeared, which is
+      after the model has raised it. The run then aborts, and the pending
+      interaction is closed internally without applying any answer:
+      - it is closed as `unattended`, the outcome a run with no script
+        reaches, and never reported as a user cancellation;
+      - no dependent work runs;
+      - the run exits `1` with the error.
+    - Entries left over when the run ends are rejected the same way. A
+      scripted entry is never applied to an unrelated later form.
+  - **FR-082 change 4 is breaking** for callers that count forms, or that
+    script one entry per form. The migration path:
+    1. Count decision points, not calls. There is one form per decision point,
+       and its length is its number of questions.
+    2. In an `--interactions` script with more than one entry, give each entry
+       the headers of its form (`values` keyed by header for `answer`,
+       `headers` for the other actions), one entry per decision point. A
+       single-entry script without headers keeps working for a run with one
+       form, but its `answer` must key its values when that form has more than
+       one question. A script that relied on an `answer` filling omitted
+       questions must now name every question it answers. A script that used
+       a bare `answer` to accept the first option must now name that option
+       as its `value`.
+    3. An OpenAI-compatible API or ACP client that assumed at most four
+       decisions in a clarification payload accepts any number. It resumes
+       them through `decision_answers`, keyed by `decision_ref`, and may
+       resume them in parts.
+    4. The release notes (with change 1), `docs/cli.md` and
+       `docs/questions.md` state these steps.
+  - **Coverage** (deterministic, with scripted model responses,
+    mutation-checked where a guard exists):
+    - a reply whose calls raise more than four questions: one form, one
+      request event, one submission, every header bound;
+    - pages on the TUI and on the Web, including page navigation that keeps
+      entries;
+    - partial answers across pages;
+    - cancellation, expiry and absence on any page;
+    - reconnect with more than four questions;
+    - each atomic-refusal reason, with its sibling mutation withheld and a
+      valid retry;
+    - a header collision;
+    - scripted interactions:
+      - a matching single entry, and matching multi-entry scripts;
+      - an unmatched entry, and a leftover entry;
+      - an `answer` without headers for a form of several questions;
+      - a bare `answer`, on a one-question and on a multi-question form:
+        rejected before the run, exit `1`, no decision resolved;
+      - an explicit `answer` whose `value` names the first option: accepted,
+        and it selects exactly that option;
+      - a keyed partial `answer` that leaves omitted questions open;
+      - no application to a later form;
+    - the same decision under two headers: one question shown, each call
+      answered under its own header;
+    - the OpenAI-compatible API and ACP: a payload listing six decisions, a
+      partial `decision_answers` resumption, and the rest still open;
+    - channel payloads.
 
-- Q: For SC-012, when a task's benchmark scenario is not identical between the
-  published baseline and the final run, what is that task compared against?
-  → A: **D10.** The naive strategy of the same fresh paired run: same judge,
-  same product, efficiency switched off. That is exactly a fall "as a result of
-  an efficiency change". An unchanged task keeps the published baseline's
-  current-strategy rate. No task is excluded, and no rate is compared across a
-  scenario change. Rejected: a new baseline run, which would measure either the
-  candidate against itself or the old product, which lacks the evidence the
-  current judge reads; excluding changed tasks, which would drop the tasks this
-  feature targets; and comparing historical figures unchanged. *Binds*: SC-012,
-  FR-077, SC-026.
-- Q: How is a task's scenario decided to have changed since the baseline? → A:
-  **D11.** Mechanically: its `bench/integrity.py` scenario fingerprint (prompt,
-  judge, starting repository, hidden files, budgets) at the baseline's recorded
-  commit differs from the candidate's. Harness changes outside the fingerprint
-  do not make a task changed. At the 2026-09-20 baseline this makes
-  `careful-unknowable` and `careful-cannot-be-done` changed. *Binds*: SC-012.
-- Q: Must every published baseline record the scenario fingerprints it was
-  judged with? → A: **D12.** Yes. Every published baseline carries its per-task
-  scenario fingerprints, and the SC-012 result records, per task, the reference
-  used, both fingerprints and both rates. The 2026-09-20 baseline predates the
-  rule; its fingerprints are recomputed from `be9cf6f`. *Binds*: SC-012, SC-036,
-  FR-076.
+  *Binds*: FR-014, FR-018, FR-020, FR-023, FR-082, SC-007, SC-008, SC-009,
+  SC-023; D18 (supersedes its **Limit** item); the surface classification rows
+  for TUI, Web UI, CLI / Headless, API / Protocols, Channels / Integrations and
+  Tests / Documentation.
+
+### Session 2026-09-28 (acceptance scope)
+
+The owner set the final acceptance scope of the feature.
+
+- Q: What does acceptance require, and what does it retire? → A: **D14.**
+  Acceptance requires no model call other than scripted responses, no paid
+  tokens and no provider credential. Retired:
+  FR-076, FR-077, SC-001, SC-011, SC-012, SC-021, SC-026, SC-036 and User
+  Story 6; FR-064 keeps only its first clause. Kept: the product's
+  capabilities, its production token-usage accounting, its deterministic
+  behavioural and security tests, and its deterministic performance ceilings
+  that call no model. Nothing retired is marked as passed, completed task
+  history is not rewritten, and Git history is the record. The final tracked
+  tree carries nothing this decision removes, in any file, dated text
+  included.
+  It supersedes the 2026-09-27 acceptance-scope decision and the acceptance
+  effect of Q1, D5 and D10 to D13. *Binds*: FR-064, FR-076, FR-077; SC-001,
+  SC-011, SC-012, SC-021, SC-026, SC-036; User Stories 3 and 6.
+- Q: How does constitution Principle XXI change? → A: **D15.** The unmerged
+  amendment in this pull request is revised, and its final version stays
+  2.0.0: `main` is still at 1.1.0, so one unmerged pull request does not take
+  two MAJOR increments. The former requirement for model-dependent evidence
+  is removed from Principle XXI and from the context-change gate. The
+  context-change gate remains: a change to what is sent to a model is accepted
+  on deterministic tests that exercise the changed mechanism with scripted
+  model responses, and on truthful, supportable claims about tokens and
+  quality. The Development Workflow rule is aligned, so every acceptance gate
+  is deterministic and requires no provider calls or paid tokens. Kept: the
+  rule against unsupported token-efficiency or quality-improvement claims,
+  production token-usage accounting, and the deterministic correctness,
+  security and performance gates. The Sync Impact Report records the motivation and the migration plan,
+  and Git history is not rewritten. Until the amendment is implemented, the
+  requirements checklist's Principle XVI / XXI item stays pending. *Binds*:
+  Constitution Principle XXI and "Compatibility Surfaces and Quality Gates";
+  the *Acceptance* statement under Measurable Outcomes.
+- Q: How is each affected success criterion decided? → A: **D16.** Per
+  criterion:
+  - kept only where existing deterministic tests cover its complete, precisely
+    worded invariant, with its measurement stated as those tests;
+  - where coverage is partial, narrowed to what the tests establish, or kept
+    with a deterministic product regression test to be added;
+  - an outcome or improvement criterion that only a model-dependent
+    measurement could show is retired and never relabelled as a test;
+  - a criterion that no deterministic test measures is retired;
+  - no universal behaviour is claimed from a finite fixture set.
+
+  The audit below records each decision. *Binds*: every criterion in the
+  audit.
+- Q: Are the two runtime-only context-assembly settings removed?
+  → A: **D17.** Yes, from configuration and the runtime; neither was ever
+  offered to a person. The deterministic safety and neutrality invariants that
+  switched optimizations off stay covered by switching them off inside the
+  tests only. *Binds*: SC-013, SC-027, SC-028; User Story 3 acceptance
+  scenario 5.
+
+**D16 audit** (evidence at the PR #61 head `7361c50`; counts are test
+functions in each file):
+
+| Criterion | Decision | Deterministic evidence |
+| --- | --- | --- |
+| SC-001 | Retire | — |
+| SC-002 | Rewrite (narrow) | `tests/test_clarification_pause.py` (19, including the withheld-check mutation check and the three D7 cases) and `tests/test_clarification_required.py` (6). The clause that the agent asks in 100% of attempts is model behaviour and is not claimed. |
+| SC-003 | Rewrite (narrow) | `tests/test_claims.py` (11) and `tests/test_baseline_loop.py::test_an_unverified_pass_claim_is_noticed_but_not_blocked`. The notice covers the claim forms it recognises, not every phrasing. |
+| SC-007 | Keep (measurement) | `tests/test_clarification_one_form.py`, to be added with the product fix; the batch case fails at `7361c50` (D18). Added by T216 and fixed by T218; it passes. |
+| SC-006 | Rewrite (narrow) | `tests/test_clarification_restraint.py` (10, including two mutation checks). Whether the model treats a question as settled is not claimed. |
+| SC-011, SC-012, SC-036 | Retire | — |
+| SC-013 | Rewrite (narrow) | `tests/test_context_no_superseded.py` (3, including the sweep mutation check) and `tests/test_baseline_staleness.py`. Holds once the sweep has run. |
+| SC-015 | Rewrite (narrow) | `tests/test_context_stable_prefix.py`: the three head tests, including the read-once mutation check. Covers the head within one turn. |
+| SC-018 | Rewrite (narrow) | `tests/test_learning_admission.py` (31) and `tests/test_learning_untrusted.py` (9), both with mutation checks. Covers new items through the admission gate. |
+| SC-021 | Retire | — |
+| SC-026 | Retire | — |
+| SC-028 | Rewrite (narrow) | `tests/test_context_dedup.py` (14). Covers tool-result material admitted to the context. |
+| SC-029 | Rewrite (narrow) | `tests/test_context_invalidation.py`: its three ledger tests. Covers the evidence ledger, not whether the model calls a tool again. |
+| SC-031 | Rewrite (measurement) | `tests/test_learning_recurring.py` (7, including the recurrence-guard mutation check). |
+| SC-033 | Rewrite (narrow) | `tests/test_evidence_decisions.py`: its four confidence tests; `tests/test_failure_states.py`: its two low-confidence tests. |
+| SC-034 | Rewrite (narrow) | `tests/test_capability_honesty.py` (3). Covers attempts and advertisement; a claim made in prose is not measured. |
+| SC-037 to SC-040 | Keep (measurement) | `tests/test_clarification_no_fabrication.py`, parametrised over the four non-answer outcomes, with a guard mutation check per outcome. |
+| SC-041 | Keep (measurement) | `tests/test_clarification_pause.py` (its dismissed-batch and turn-ends tests) and `tests/test_clarification_lifecycle.py` cases 3 to 6. |
+| SC-042 | Keep (measurement) | `tests/test_decision_resumption.py` and `tests/test_clarification_required.py::test_a_later_answer_in_the_next_turn_resumes_the_work`. |
+| SC-043 | Keep (measurement) | `tests/test_clarification_pause.py`: its independent-work and D7 tests. |
+| SC-044 | Keep; test required | No existing deterministic test shows that a **cancelled** mandatory question is not re-raised within the same decision attempt before an explicit user resumption. A deterministic, mutation-sensitive test of exactly that is required: it fails when the re-raise suppression is removed. A test of a declined question alone does not satisfy SC-044. Added by T219 in `tests/test_clarification_lifecycle.py`, mutation-checked; it passes. |
+
+### Session 2026-09-26
+
+- **D13** — superseded by D14 (2026-09-28).
+
+### Session 2026-09-25
+
+- **D10** — superseded by D14 (2026-09-28).
+- **D11** — superseded by D14 (2026-09-28).
+- **D12** — superseded by D14 (2026-09-28).
 
 ### Session 2026-09-24 (post-gate amendment)
 
@@ -1558,7 +1765,8 @@ as follows.
 
   The no-fabrication and no-dependent-mutation invariant is unchanged.
   *Binds*: SC-002, FR-013, FR-018, FR-123 (and the User Story 1 Independent
-  Test, aligned to SC-002).
+  Test, aligned to SC-002). *SC-002's measure is narrowed by D16
+  (2026-09-28).*
 - Q: May the specification delegate its ten-surface classification to
   plan.md? → A: **D8.** No. Constitution XI requires the specification itself
   to classify every canonical surface and to give concrete evidence for every
@@ -1633,19 +1841,7 @@ decision; the owner decided them as follows.
   `decision_ref` — only a per-decision `id` inside `decisions[]`. No headless or
   API resumption input carries a `decision_ref`. Whether the decision id stays
   stable across lifecycle instances and turns has not been verified.
-- Q: What numeric threshold defines "materially fewer total tokens" in SC-011?
-  (CHK100; the owner decision behind T156) → A: **D5.** At least **10% lower
-  mean total tokens** than the naive strategy in the same paired run
-  (current ≤ 0.90 × naive), **and**, for every task, a current outcome rate at
-  least equal to naive — a task-level regression is never averaged away. The
-  comparison is valid only within one paired run that holds provider, model,
-  task set, attempts, token-accounting version, counterbalancing and candidate
-  semantics constant; absolute totals are never compared across accounting
-  versions. It was derived from the published paired baselines (T015:
-  current ≈ 17.2% higher; T155 accounting v2: ≈ 9.24% higher). It is relative so
-  that it holds across providers. A tiny crossing of parity is not material.
-  Recording the threshold does not satisfy SC-011: both historical runs fail it.
-  *Binds*: SC-011, SC-036 (and the specification-writing condition of T156).
+- **D5** — superseded by D14 (2026-09-28).
 - Q: What do "material", "relevant", "proportionate validation" and
   "trustworthy stored knowledge" mean? (CHK124; supports CHK005) → A: **D6.**
   They are defined operationally in §Requirements, Operational definitions:
@@ -1665,12 +1861,11 @@ high-quality output); CHK005 (FR-038/FR-042 reconciled); CHK009 and CHK131
 (information origin separated from lifecycle state; VERIFIED and VALIDATED
 defined; Key Entities); CHK012 (FR-002's mechanical rule); CHK040 (FR-020
 question metadata); CHK051 and CHK123 (FR-099); CHK053 (FR-100, FR-101);
-CHK054 (FR-105 invalidation); CHK086 (FR-031; Appendix A); CHK107 (SC-036;
-Benchmark evidence record); CHK117 (FR-082); CHK119 (this section);
+CHK054 (FR-105 invalidation); CHK086 (FR-031; Appendix A); CHK107 (a criterion D14 later retired); CHK117 (FR-082); CHK119 (this section);
 CHK121 (User Story 1, scenario 1); CHK122 (FR-125, FR-127); CHK127
 (Edge Cases; FR-013). Earlier statements calling FR-082 "the one" intended
 user-visible behaviour change — the Q2 decision below included — are
-superseded by FR-082's current text, which names three.
+superseded by FR-082's current text, which names four (D18).
 
 ### Session 2026-09-14 (remediation)
 
@@ -1729,24 +1924,7 @@ they describe is now forbidden for mandatory clarifications on every surface.
 
 ### Q1: What token reduction counts as success?
 
-**Context**: FR-044, SC-011. The initiative requires "materially fewer" tokens
-than a naive baseline. The repository establishes the *method* — a paired
-quality-and-cost benchmark, with reductions gated on no quality regression — but
-no numeric target is recorded anywhere in the project.
-
-**What we need to know**: The threshold that defines success for SC-011.
-
-| Option | Answer | Implications |
-| ------ | ------ | ------------ |
-| A | Set a target after a baseline run | Measure the current system first, then commit to a number grounded in real data. Delays the number; guarantees it is achievable and meaningful. |
-| B | Commit to a specific figure now (e.g. 50% fewer input tokens) | Gives an unambiguous gate immediately, but the figure is chosen before the baseline is known and may be either trivial or impossible. |
-| C | No fixed threshold; require only a statistically significant reduction with zero quality regression | Keeps the quality gate absolute and avoids an arbitrary number, but "success" becomes harder to declare and compare across releases. |
-| Custom | Provide your own answer | State the threshold, the metric it applies to (input, output, or total tokens), and the baseline it is measured against. |
-
-**Decision (2026-09-14)**: **Option A — set the target after a baseline run.**
-The threshold for SC-011 is derived from the baseline measurement required by
-SC-036 and recorded here once that run exists. No efficiency work is accepted
-against a target chosen before the baseline is known.
+**Superseded by D14 (2026-09-28).**
 
 ### Q2: Which surfaces block on a mandatory clarification?
 
@@ -1815,17 +1993,12 @@ is corrected before delivery, at a cost of at most one additional turn.
 - **The mandatory custom-answer row already exists** and is appended by the core
   rather than the model. This specification preserves that guarantee rather than
   creating it.
-- **The benchmark is the measurement instrument.** The existing suite — with its
-  isolation rules, its repeated-attempt reporting, and its category of tasks that
-  specifically reward *not* doing the wrong thing — is extended with paired token
-  reporting rather than replaced by a new harness.
-- **Learning is off during measurement**, as it already is, so benchmark figures
-  remain reproducible.
+- **Acceptance calls no provider** (D14).
+  Behaviour is established by deterministic tests with scripted model
+  responses, and learning stays switchable off (FR-064).
 - **Token counting is estimated and calibrated against reported provider usage**;
   figures are treated as calibrated estimates, and no success criterion depends
   on exact tokenizer parity with any single provider.
-- **"Materially fewer tokens" is measured against a defined naive baseline**
-  implemented for the comparison, not against a competitor product.
 - **No new outbound network transmission is introduced.** Observability is
   aggregation over records the product already writes locally.
 - **Security and permission invariants are unchanged.** Mode capabilities, the
@@ -1889,7 +2062,7 @@ can check that no parallel subsystem was introduced.
 | Constraint recall | `src/comodor/agent/constraints.py` | User prohibitions restated on write results without touching the cached system prompt | Reuse for decision constraints |
 | Context and compaction | `src/comodor/agent/context.py` | Compaction past a configured fraction, only at boundaries with no outstanding tool call; original request always preserved | Relevance-based selection against an explicit budget |
 | Stale-read removal | `src/comodor/agent/staleness.py` | Superseded reads replaced by a note; never the newest read; never an unedited file | Measurement and coverage |
-| Token accounting | `src/comodor/agent/tokens.py` | Estimation calibrated against reported provider usage | Per-task paired reporting |
+| Token accounting | `src/comodor/agent/tokens.py` | Estimation calibrated against reported provider usage | — |
 | Prefix caching | `src/comodor/providers/caching.py` | Cache marks and byte-identical prefix discipline | Preserve under every new behaviour |
 | Oversized results | `src/comodor/tools/overflow.py` | Spill to file with head, tail and an exact pointer; originals pointed at in place, never copied | Measurement |
 | Delegated work | `src/comodor/tools/delegate.py`, `src/comodor/agent/background.py` | Sub-agent reading stays in the sub-conversation; completions land at turn boundaries; origin-tagged events | Clarifications raised by delegates |
@@ -1901,7 +2074,6 @@ can check that no parallel subsystem was introduced.
 | Learning visibility | `src/comodor/learning/journey.py`, `progress.py`, `tools/memory.py` | Timeline, improvement measures with honesty rules, user curation | Hit-rate and stale-rate reporting |
 | Session persistence | `src/comodor/session/store.py` | Append-only records surviving a crash; redacted exports | Outstanding forms across reconnect |
 | Local metrics | `src/comodor/insights.py` | Aggregation over records already written; no new collection; no guessed figures | Token and clarification metrics |
-| Benchmark | `bench/` | Thirteen tasks in five categories including `careful`; per-attempt isolation; learning disabled; rates not booleans; judges that refuse the shortcut each task invites | Paired token-and-quality reporting |
 | Capability discovery | `src/comodor/tools/registry.py` | Tools filtered by mode at advertisement as well as at enforcement, both reading one rule, so a forbidden capability is never offered to the model | Extend to any capability this initiative adds |
 | Capability inventory | `tools/capability-map.py`, `CAPABILITIES.md` | Inventory generated from the code, with a check form for CI, rather than hand-maintained | Register new capabilities; keep the check green |
 | Project instructions | `src/comodor/agent/prompts.py` | System prompt assembled in a fixed order chosen so stable parts come first and provider prefix caching keeps hitting; learned material injected as a separate, visibly distinct block | Keep instructions stable per task; keep recalled knowledge budgeted and traceable |

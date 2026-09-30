@@ -103,7 +103,7 @@ def contain(result: ToolResult, ctx: ToolContext, tool: str,
     the same rule as the ones that exist today.
     """
     content = result.content or ""
-    if tool in COMMANDS and len(content) > _LOG_WORTH and _log_summaries_on(ctx) \
+    if tool in COMMANDS and len(content) > _LOG_WORTH \
             and _is_validation(tool, command, content):
         # A validation log first: a passing run collapses to its outcome, a
         # failing run to its failing cases — before the size rule, which would
@@ -184,13 +184,6 @@ def _full_fingerprint(content: str) -> str:
     import hashlib
 
     return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:16]
-
-
-def _log_summaries_on(ctx: ToolContext) -> bool:
-    agent = getattr(ctx.config, "agent", None)
-    if getattr(agent, "context_strategy", "current") == "naive":
-        return False
-    return "log_summary" not in set(getattr(agent, "optimizations_off", None) or ())
 
 
 def _summarise_log(result: ToolResult, content: str, ctx: ToolContext,

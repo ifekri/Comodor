@@ -1,6 +1,6 @@
 # Quickstart: Validating the Grounded Agent
 
-**Feature**: 002-grounded-agent-quality | **Date**: 2026-09-14
+**Feature**: 002-grounded-agent-quality | **Date**: 2026-09-14, revised 2026-09-29 for D14–D17
 
 How to prove each phase works. This is a validation guide, not an implementation
 guide — entity details are in [data-model.md](./data-model.md), interface rules
@@ -18,32 +18,26 @@ python -m pip install -e ".[dev]"
 npm ci
 ```
 
-A benchmark run needs a provider key in the environment or in a `.env` beside the
-source. The benchmark never reads your own Comodor configuration: every attempt
-gets its own workspace, its own `COMODOR_HOME`, and learning switched off.
-
-**Model rule**: where a test genuinely requires a live model, use only the model
-the project designates for that purpose. Deterministic fakes cover every case
-listed below except the benchmark itself.
+**Every check below is deterministic.** Model responses are scripted
+(`providers/fake.py`); no check calls a provider, needs a credential or spends a
+token (D14; Constitution 2.0.0). A manual check is a convenience for a person,
+never an acceptance gate.
 
 ---
 
-## The baseline everything else is measured against
-
-**Run this first. Context optimization — plan Phase 4 / tasks Phase 5 — must
-not begin until it exists** (SC-036, Constitution XXI).
+## Production token-usage accounting
 
 ```bash
-python -m bench --dry-run                     # list the suite, run nothing
-python -m bench --provider <provider> --model <model> --tries 3
+python -m pytest -q tests/test_token_accounting.py tests/test_baseline_tokens.py \
+    tests/test_metrics_locality.py tests/test_metrics_overhead.py \
+    tests/test_metrics_redaction.py tests/test_insights.py
 ```
 
-Expected: a report in `bench/results/` carrying, per task, the outcome rate
-across three attempts **and** its token cost. A token figure without its outcome
-rate is not a result.
-
-Record the naive full-resend comparison alongside it. The SC-011 threshold is set
-from these numbers and never chosen in advance.
+Expected: per provider call and per task, input, output, cached and
+cache-written tokens with the provider's figure as the truth and any estimate
+labelled; the task's outcome and counts beside them; no credential in any
+field; nothing sent off the machine. `comodor run --json` carries `usage` and
+`measurement`. No figure is presented as a saving.
 
 ---
 
@@ -173,19 +167,23 @@ permission to fill the gap itself.
 ### Plan Phase 4 (tasks Phase 5) — context optimization
 
 ```bash
-python -m pytest tests/test_context_budget.py tests/test_context_dedup.py -q
+python -m pytest -q tests/test_context_budget.py tests/test_context_dedup.py \
+    tests/test_context_optimization_neutrality.py tests/test_context_no_validation_loss.py \
+    tests/test_context_recoverability.py tests/test_context_no_superseded.py \
+    tests/test_context_stable_prefix.py
 python -m pytest -m performance -n 0 -q        # ceilings hold
-python -m bench --provider <provider> --model <model> --tries 3
 ```
 
-Expected: token figures fall against the plan Phase 1 baseline (T015) and **no task's outcome
-rate falls**. A drop in any outcome rate is a regression and blocks the change,
-however large the saving.
+Expected: with each optimization switched off inside the test, the same
+scripted task delivers the same work; failing evidence survives every setting;
+nothing withheld is lost; the request head stays byte-identical within a turn.
+This is the constitution's context-change gate (plan §G.2). No token saving is
+claimed (D14).
 
 ### Plan Phase 5 (tasks Phase 6) — learning hardening
 
 ```bash
-python -m pytest tests/test_learning_admission.py tests/test_learning_staleness.py -q
+python -m pytest tests/test_learning_admission.py tests/test_learning_fingerprint.py tests/test_learning_lifecycle.py -q
 ```
 
 Manual check — a correction is reused:
@@ -235,10 +233,10 @@ Manual check in the browser, on the served page:
 7. Existing non-clarification Web behaviour — permission prompts, streaming,
    mode changes — still works (`python -m pytest tests/test_web.py -q`).
 
-### Plan Phases 7–8 (tasks Phases 9–11) — full validation
+### Plan Phase 8 (tasks Phases 10–11) — full validation
 
 ```bash
-python -m ruff check src tests bench tools
+python -m ruff check src tests tools
 python -m pytest -q
 python -m pytest -m performance -n 0 -q
 python tools/capability-map.py --check
@@ -257,22 +255,24 @@ Evidence from an earlier commit is not evidence.
 
 | Claim | Accepted only with |
 | --- | --- |
-| Tokens went down | A paired report showing outcome rates did not |
+| A context change is safe | Its deterministic tests with scripted responses — neutrality, no validation loss, recoverability (plan §G.2); no token-reduction claim is made (D14) |
 | Clarification works | The clarification-required outcome (`outcome: unattended`) observed on a surface with no listener, plus the custom row present on every generated form — TUI and Web |
-| Learning improved things | Clarifications and corrections trending down over a repeated series, reported only where the sample supports a trend |
+| Learning is reused | A correction or a settled decision applied on the next relevant turn without restatement (SC-016, SC-017), shown deterministically |
 | Nothing regressed | The full baseline green on the exact final HEAD, all three platforms |
 | A guard holds | Its test fails when the guard is removed and passes when restored |
 
 Anything not demonstrated this way is reported as **NOT VERIFIED**, which is an
 acceptable and expected answer.
 
-### Plan Phase 9 — convergence (planned, not yet implemented)
+### Plan Phase 9 — convergence
 
 **Current behaviour at `d911e3f`**: the clarification-required outcome carries
 `decisions[].id` — a turn-local value such as `d1` — and no top-level
 `decision_ref`, and no surface accepts an answer keyed by `decision_ref`. The
-checks below describe what plan Phase 9 must make true (plan.md §2026-09-24 Plan
-Convergence; contracts/clarification.md §C7). They are not current behaviour.
+checks below describe what plan Phase 9 had to make true (plan.md §2026-09-24
+Plan Convergence; contracts/clarification.md §C7). Plan Phase 9 has since
+delivered them, and plan §G maps SC-042 and SC-043 to the tests that pin
+them.
 
 **Cross-turn resumption (D4/D9)** — deterministic, no provider:
 
@@ -314,34 +314,80 @@ Expected once implemented:
 - late discovery: the earlier change persists, appears in `prior_changes`, and
   nothing dependent runs afterwards.
 
-> **Acceptance note:** SC-011/SC-012 are live acceptance gates. Passing the deterministic suite, protocol checks or specification gate does not satisfy them. Final evidence must come from a fresh comparable paired run on the exact frozen candidate.
+### Plan Phase 11 — acceptance-scope convergence (D14–D17)
 
-### Plan Phase 10 — SC-012 comparison (D10–D12, planned, not yet implemented)
+Deterministic; no provider is called.
 
-Offline and deterministic; no provider or model is called:
-
-```bash
-python -m pytest tests/test_bench_integrity.py tests/test_bench_baseline.py -q
-python -m bench.integrity check
-```
-
-After T198 has published the fresh paired run, with its per-task
-`scenario_fingerprint`:
+**SC-044 — a cancelled mandatory question is not asked again in the same
+attempt** (plan §G.4):
 
 ```bash
-python -m bench --sc012 bench/results/<T198 artifact>.json \
-    --against bench/results/paired-baseline-2026-09-20.json --label sc012-final
+python -m pytest -q tests/test_clarification_lifecycle.py
 ```
 
 Expected:
-- Exit `0` (PASS), `1` (FAIL) or `2` (UNDECIDABLE).
-- `bench/results/sc012-sc012-final.json` and `.md`, with one row per task:
-  its scenario status, its reference kind, both fingerprint digests and both
-  rates.
-- The 2026-09-20 baseline reads as `reconstructed:be9cf6f`; this needs a
-  full-history checkout.
-- The candidate reads as `recorded`.
-- A task whose scenario changed since `be9cf6f` shows `CHANGED` and
-  `SAME_RUN_NAIVE`; every other task shows `UNCHANGED` and
-  `PUBLISHED_BASELINE`.
-- SC-012 is marked only on `PASS`.
+- **Tool level**: a second `ask` for a cancelled question raises no form and
+  reports the decision as unresolved.
+- **Loop level**: one batch that asks the same question twice after a
+  cancellation raises exactly one form; the dependent write does not run; the
+  turn ends `clarification_required` / `cancelled`, carrying the same
+  `decision_ref`.
+- **Mutation**: with the repeat-preventing layers disabled inside the tests, a
+  second form appears and the tests fail (plan §G.4).
+
+**SC-007 — one form per decision point** (plan §G.5):
+
+```bash
+python -m pytest -q tests/test_clarification_one_form.py
+```
+
+Expected:
+- Every decision a batch raises reaches the person in one logical form. That
+  includes two `ask` calls in one batch, and an `ask` beside a mutation whose
+  preflight finds another missing decision.
+- On the TUI and the Web, a form of more than four questions is one request
+  and one submission. The Web page shows it in pages of at most four; the TUI
+  shows each question's position in the form.
+- On the OpenAI-compatible API and ACP, the same set is one
+  clarification-required payload, resumed through `decision_answers` keyed by
+  `decision_ref`, in parts if needed.
+- An invalid set of calls is refused atomically, with sibling mutations
+  withheld.
+- A scripted `--interactions` entry that does not match its form, or is left
+  over, ends the run with exit `1` and a clear error. That includes an
+  unkeyed `answer` for a form of several questions. A bare `answer`, with no
+  value, is rejected before the run starts, with exit `1`, even for a
+  one-question form. A keyed `answer` leaves omitted questions open, and an
+  explicit `value` naming the first option selects exactly that option.
+- A new form appears only at a new decision point (D18, D19).
+
+**D17 — settings removed, coverage kept** (plan §G.3):
+
+```bash
+python -m pytest -q tests/test_context_optimization_neutrality.py \
+    tests/test_context_no_validation_loss.py tests/test_context_no_superseded.py
+```
+
+Expected:
+- the same assertions as before, with optimizations switched off inside the
+  tests only;
+- a configuration file that still carries either removed key loads, and the
+  key has no effect.
+
+**Every retained criterion**: run each module plan §G names, on the exact
+final HEAD; a criterion without passing evidence is reported, never assumed.
+
+**Final gates**: plan §J, on the exact final HEAD, on Windows, Linux and macOS:
+
+```bash
+python -m ruff check src tests tools
+python -m pytest -q
+python -m pytest -m performance -n 0 -q
+python tools/capability-map.py --check
+python tools/protocol-codegen.py --check
+git diff --check
+npm ci && npm run lint && npm run typecheck && npm test && npm run build
+bun test apps/tui/test/bun/renderer.test.tsx
+bun test apps/tui/test/bun/orphan.test.ts
+bun tools/build-tui-distribution.ts && git status --porcelain   # prints nothing
+```

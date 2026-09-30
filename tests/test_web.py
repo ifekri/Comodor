@@ -2171,3 +2171,97 @@ def test_a_refused_decision_answer_changes_nothing_and_frees_the_session(config)
         _turn_done(session)
     finally:
         session.close()
+
+
+# --------------------------------------------------------------------------- #
+# T239 — one form of any length, one submission (D18, D19). The page shows one
+# question at a time with its position; entries survive moving between them.
+# --------------------------------------------------------------------------- #
+
+
+def _six():
+    topics = [("Database", "SQLite", "PostgreSQL"), ("Languages", "Python", "Go"),
+              ("Cache", "Redis", "Memcached"), ("Queue", "RabbitMQ", "Kafka"),
+              ("Region", "Europe", "Asia"), ("Licence", "MIT", "GPL")]
+    return [{"question": f"Which {header.lower()}?", "header": header,
+             "affects": ["architecture"],
+             "options": [{"label": first, "source": "request", "evidence": first},
+                         {"label": second, "source": "request", "evidence": second}]}
+            for header, first, second in topics]
+
+
+def _ask_six_together(served):
+    """Three `ask` calls of one reply, put as one form by the shared path."""
+    from comodor import questions as forms
+    from comodor.events import Cancellation
+    from comodor.safety import CheckpointStore, PermissionEngine, Redactor
+    from comodor.tools.ask import ask_together
+    from comodor.tools.base import ToolContext
+
+    config = served.config
+    context = ToolContext(
+        config=config, permissions=PermissionEngine(config, served.session.bus),
+        checkpoints=CheckpointStore(config.paths.checkpoints),
+        bus=served.session.bus, redact=Redactor([]), cancel=Cancellation(),
+        cwd=config.paths.project,
+        request_text="SQLite PostgreSQL Python Go Redis Memcached RabbitMQ Kafka "
+                     "Europe Asia MIT GPL")
+    six = forms.parse(_six()[:2]), forms.parse(_six()[2:4]), forms.parse(_six()[4:])
+    out: dict = {}
+    worker = threading.Thread(target=lambda: out.update(result=ask_together(
+        context, [("q1", six[0]), ("q2", six[1]), ("q3", six[2])])), daemon=True)
+    worker.start()
+    return worker, out
+
+
+def test_six_questions_reach_the_page_as_one_form(served):
+    worker, out = _ask_six_together(served)
+    frame = _the_request_frame(served)
+    assert [q["header"] for q in frame["questions"]] == \
+        ["Database", "Languages", "Cache", "Queue", "Region", "Licence"]
+
+    answers = [{"header": q["header"], "prompt": q["prompt"],
+                "chosen": [q["options"][0]["label"]], "written": ""}
+               for q in frame["questions"]]
+    status, body = call(served, "/api/answer", method="POST", token=served.token,
+                        body={"id": frame["id"], "choice": json.dumps(answers)})
+    assert status == 200 and body["answered"] is True
+
+    results = _wait(worker, out)
+    assert "-> SQLite" in results["q1"].content and "-> RabbitMQ" not in results["q1"].content
+    assert "-> RabbitMQ" in results["q2"].content
+    assert "-> MIT" in results["q3"].content
+
+
+def test_a_partial_submission_from_the_page_leaves_the_rest_open(served):
+    worker, out = _ask_six_together(served)
+    frame = _the_request_frame(served)
+    answers = [{"header": q["header"], "prompt": q["prompt"],
+                "chosen": [q["options"][0]["label"]] if index < 2 else [],
+                "written": ""}
+               for index, q in enumerate(frame["questions"])]
+    call(served, "/api/answer", method="POST", token=served.token,
+         body={"id": frame["id"], "choice": json.dumps(answers)})
+
+    results = _wait(worker, out)
+    assert "-> SQLite" in results["q1"].content
+    assert results["q2"].meta["outcome"] == "cancelled"
+    assert "remain unresolved" not in results["q1"].content
+    open_now = results["q3"].meta["clarification"]["decisions"]
+    assert [entry["decision"] for entry in open_now] == ["Which region?", "Which licence?"]
+
+
+def test_a_dismissal_on_any_page_ends_the_whole_form(served):
+    worker, out = _ask_six_together(served)
+    frame = _the_request_frame(served)
+    call(served, "/api/answer", method="POST", token=served.token,
+         body={"id": frame["id"], "choice": "cancelled"})
+    results = _wait(worker, out)
+    for call_id in ("q1", "q2", "q3"):
+        assert results[call_id].meta["outcome"] == "cancelled"
+
+
+def test_the_page_shows_where_in_the_form_a_question_sits():
+    ui = (Path(__file__).resolve().parents[1] / "src/comodor/web/ui.js").read_text(
+        encoding="utf-8")
+    assert "Question ${form.at + 1} of ${form.questions.length}" in ui

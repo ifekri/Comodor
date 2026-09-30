@@ -235,9 +235,7 @@ The constraint is non-negotiable:
 
 A cheaper answer that becomes less correct is a regression.
 
-Context optimizations are evaluated against baselines together with correctness, validation success and user correction rate.
-
-Benchmarks are not weakened to manufacture attractive percentages.
+Context optimizations are accepted only on deterministic tests showing that they never drop evidence an answer depends on and never weaken validation.
 
 [Read about cost and context →](docs/cost.md)
 
@@ -332,37 +330,6 @@ Among other things:
 * unresolved decisions do not become implicit authorization.
 
 [Safety and permissions →](docs/safety.md)
-
----
-
-## Measured, not narrated
-
-Agent quality is easy to claim.
-
-It is harder to measure.
-
-Comodor includes a benchmark harness for evaluating work against real repositories with executable checks instead of relying only on subjective output review.
-
-The benchmark system can evaluate:
-
-* whether the requested change actually works;
-* whether existing behavior remains intact;
-* how often clarification was required;
-* whether unnecessary clarification decreased over repeated work;
-* whether user corrections decreased;
-* how much context was consumed;
-* whether context optimizations preserved quality;
-* whether learning improved subsequent tasks.
-
-Benchmark scenarios are treated as test assets.
-
-They are not weakened to improve a score.
-
-```bash
-python -m bench
-```
-
-Methodology and recorded benchmark results are maintained under [`bench/`](bench/README.md).
 
 ---
 

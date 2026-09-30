@@ -38,21 +38,14 @@ ceiling in the same commit, so the trade is visible in review.
 
 ### If you changed how the agent behaves
 
-The prompts, the tool descriptions, the agent loop, the edit tool: none of
-these have a unit test that can tell you whether you made them better or worse.
-[`bench/`](bench/README.md) can.
+The prompts, the tool descriptions, the agent loop, the edit tool: pin the
+behaviour you changed with a deterministic test that drives the loop with
+scripted model replies (`comodor.providers.fake.Script`) and asserts what the
+agent did — the calls it made, what it withheld, what it reported. A change to
+what is sent to a model also shows, the same way, that it drops no evidence an
+answer depends on and weakens no validation.
 
-```bash
-python -m bench --provider xiaomi --model mimo-v2.5-pro --tries 1
-```
-
-Thirteen coding tasks in real repositories, judged by programs. Run it before
-and after, and put both numbers in the pull request. A change that moves it
-down is not automatically wrong — but it should be a trade somebody chose,
-not one nobody noticed.
-
-**Every bug fixed here should become a task.** That is the only way the suite
-is meant to grow; a task written to make a number look good measures nothing.
+No test here calls a real model, needs a key or spends a token.
 
 ## What gets merged quickly
 

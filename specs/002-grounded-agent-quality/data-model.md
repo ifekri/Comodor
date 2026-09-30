@@ -120,6 +120,17 @@ unchanged: `id`, `session_id`, `title`, `questions[]`, and per question `header`
 | `evidence_consulted` | list of text | What was checked first |
 | `decision_ref` | opaque stable id | The decision's semantic `ref` (§3). At `d911e3f` it carries the turn-local `OpenDecision.id`; plan Phase 9 replaces that value with the minted `ref`. The field and its optionality are unchanged |
 
+**One logical form per decision point (D18, D19)**: `questions[]` carries every
+material question of one model reply. It has no upper bound on its length, and
+headers are unique within it. A client presents it in pages of at most four
+questions; pages are presentation, not data. On a live surface (protocol v2
+interactive clients and the Web), one submission answers it, and answers bind by
+`header`. The same decision asked by two calls under different headers appears
+once, under the first header, and each call receives the answer under its own
+header. The OpenAI-compatible API and ACP carry the same set as one
+clarification-required payload, resumed by `decision_ref`. The per-call input rule, at most four questions per
+`ask` call, is a tool input rule, not a form field.
+
 **Invariant preserved, not rebuilt**: the final `QuestionOption` with `free =
 true` is appended centrally by `questions.py::_options()`, which also strips
 model-authored escape hatches. No caller may add or remove it.
@@ -268,12 +279,14 @@ active --user deletes--------------------> removed
 
 ## 6. TaskMeasurement — **exists in part, extended**
 
-Benchmark and local metrics. Extends `bench/` reporting and `insights.py`
-aggregation.
+Production token-usage accounting and local metrics (`agent/tokens.py`
+`TurnRecord` and `TaskMeasurement`), carried by `comodor run --json` as `usage`
+and `measurement`, kept on the brain's episode record and aggregated by
+`insights.py`. It is product behaviour, kept unchanged by D14.
 
 | Field | Source |
 | --- | --- |
-| `task`, `category`, `result`, `correctness` | benchmark judge |
+| `outcome` | `TurnResult` |
 | `input_tokens`, `output_tokens`, `cached_tokens`, `total_tokens` | provider `Usage` (truth), estimator only where absent |
 | `context_size` | `Conversation.used_tokens()` |
 | `model_turns`, `tool_calls`, `retries` | `TurnResult` |
@@ -281,10 +294,15 @@ aggregation.
 | `corrections` | `learning/signals.py` detectors |
 | `knowledge_hits`, `knowledge_stale` | recall path |
 | `validation_outcome` | completion gate |
+| `preflight_calls`, `preflight_tokens` | the mutation preflight, kept apart from the turn's figures |
+
+The input, output, cached and cache-written token figures are held per provider
+call on `TurnRecord` and summed per task.
 
 **Rules**
 
-- A token figure is never published without its outcome rate (FR-076).
+- Provider-reported usage is the truth; an estimate is used only where a
+  provider reports nothing, and is marked as an estimate.
 - No credential may appear in any field (FR-074).
 - Figures stay local unless the user explicitly chooses otherwise (FR-075).
 
@@ -370,46 +388,6 @@ TaskMeasurement.
    (FR-042, FR-043).
 
 ---
-
-## 9. Benchmark comparability records — **new, benchmark only** (D10–D12)
-
-Benchmark infrastructure under `bench/`; nothing under `src/comodor/` reads or
-writes these.
-
-**Scenario fingerprint** (existing shape, now also published)
-
-| Field | Rule |
-| --- | --- |
-| `task.md`, `check.py` | SHA-256 of the file, line endings normalised; `null` when absent |
-| `repo`, `hidden` | path → SHA-256 for every file in the tree, noise directories excluded |
-| `budgets` | the judge's declared `MAX_STEPS`, `TIMEOUT`, `WRITES`, `CATEGORY` (those present), read as text |
-
-Produced only by `bench/integrity.py::fingerprint`. The **digest** is the
-SHA-256 of its canonical JSON (sorted keys, compact separators). Two scenarios
-are the same exactly when their digests are equal.
-
-**Published paired baseline** (`kind: "paired-baseline"`): one additive key
-per task entry, `scenario_fingerprint`. It holds the full fingerprint the run
-was judged with, captured at run start, and is shared by that task's
-`current` and `naive` arms. A document whose tasks lack it is historical; its
-fingerprints are reconstructed from its own `commit`.
-
-**SC-012 comparison** (`kind: "sc012-comparison"`)
-
-| Field | Rule |
-| --- | --- |
-| `candidate`, `baseline` | `file`, `commit`, `fingerprint_source`: `recorded` or `reconstructed:<commit>` |
-| `result` | `PASS` \| `FAIL` \| `UNDECIDABLE`. `UNDECIDABLE` when comparability cannot be established; otherwise `FAIL` when any task fails |
-| `baseline_only_tasks` | baseline tasks missing from the candidate; any entry makes the result `UNDECIDABLE` |
-| `tasks[]` | one per candidate task: `task`, `candidate_fingerprint` and `reference_fingerprint` (digests), `scenario_status` (`CHANGED` \| `UNCHANGED`), `reference_kind` (`PUBLISHED_BASELINE` \| `SAME_RUN_NAIVE`), `candidate_rate` and `reference_rate` (`passed`, `tries`), `result` (`PASS` \| `FAIL` \| `UNDECIDABLE`), `reason` |
-
-**Selection rule**:
-- UNCHANGED: the digests are equal. The reference is the baseline's
-  `current` rate, and the reference fingerprint is the baseline's.
-- CHANGED: the digests differ, or the task is new to the candidate. The
-  reference is the candidate's own `naive` rate, and the reference fingerprint
-  is the candidate's.
-- A task passes when candidate rate ≥ reference rate, as exact fractions.
 
 ## Entity relationships
 

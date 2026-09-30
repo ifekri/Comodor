@@ -293,3 +293,52 @@ def test_discord_free_text_is_a_new_request_never_a_decision_answer(monkeypatch)
 
     start_or_steer(Recording(), "PostgreSQL", None, "queue", lambda note: None)
     assert sent == [("PostgreSQL", None)]
+
+
+# --------------------------------------------------------------------------- #
+# T237 — an unattended reply of several calls ends in one message (D18, D19)
+# --------------------------------------------------------------------------- #
+
+
+def test_six_questions_from_three_calls_end_in_one_message_naming_each(config, monkeypatch):
+    from comodor.agent import evidence
+    from comodor.events import EventBus
+
+    refs = iter([f"dr-six-{n}" for n in range(6)])
+    monkeypatch.setattr(evidence, "mint_ref", lambda: next(refs))
+    option = lambda label: {"label": label, "source": "request", "evidence": label}  # noqa: E731
+    topics = ["database", "queue", "cache", "region", "licence", "language"]
+
+    def question(topic):
+        return {"question": f"Which {topic} should we use?", "header": topic.title(),
+                "affects": ["persistence"], "options": [option("One"), option("Two")]}
+
+    calls = [ToolCall(id=f"q{n}", name="ask", arguments={"questions": [
+        question(topics[2 * n]), question(topics[2 * n + 1])]}) for n in range(3)]
+    bus = EventBus()
+    ends: list[str] = []
+    forms_seen: list = []
+
+    def channel(event):
+        # A channel run: nobody at a form. A subscriber makes the bus
+        # listening, so the form is answered the way a headless run answers it.
+        if event.kind is Kind.REQUEST:
+            forms_seen.append(event.payload["request"])
+            event.payload["request"].answer(forms.UNATTENDED)
+        elif event.kind is Kind.ASSISTANT_END:
+            ends.append(str(event.payload.get("text") or ""))
+
+    bus.subscribe(channel)
+    agent = AgentLoop(config, Gateway(config, scripts=[
+        Script(text="Asking.", tool_calls=calls), Script(text="never")]),
+        ToolRegistry(), bus, PermissionEngine(config, bus), AgentConversation())
+
+    result = agent.run("One or Two?")
+
+    assert result.stopped == "clarification_required"
+    assert result.clarification["outcome"] == "unattended"
+    assert len(result.clarification["decisions"]) == 6
+    for n, topic in enumerate(topics):
+        assert f"- Which {topic} should we use? (decision_ref: dr-six-{n})" in result.text
+    assert len(forms_seen) == 1, "one form for the reply"
+    assert ends[-1] == result.text, "one closing message carries every decision"

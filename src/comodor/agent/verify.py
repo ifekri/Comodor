@@ -1,8 +1,8 @@
 """Running the project's own check when the agent says it is finished.
 
 The system prompt asks the model to run the tests after a change. Asking is not
-getting: the benchmark found a task reported as complete by a model that had
-run nothing, and that is the ordinary case rather than the exceptional one.
+getting: a task can be reported as complete by a model that ran nothing, and
+that is the ordinary case rather than the exceptional one.
 
 `agent.verify_command` closes it. Whatever the project's own check is — `pytest
 -q`, `npm test`, `cargo check`, `make` — it runs once at the end of a turn that
@@ -1134,7 +1134,7 @@ _VALIDATION_DIRS = frozenset({"tests", "test", "__tests__"})
 _SNAPSHOT_DIRS = frozenset({"__snapshots__", "snapshots", "golden", "goldens"})
 
 #: Filename shapes that are a check by convention, across the languages the
-#: benchmark and the product actually use.
+#: product is used with.
 _VALIDATION_FILE = re.compile(
     r"(?i)^(?:"
     r"test_.*\.(?:py|js|jsx|ts|tsx|mjs|cjs|rb|go|java|kt|cs|rs|php)|"
@@ -1202,8 +1202,8 @@ def mentions_validation_artifact(text: str) -> bool:
 
 #: Constructs that weaken a check: a skip, an expected failure, a collection
 #: exclusion. High-confidence and bounded — each is a deliberate way to stop a
-#: failing check from failing, and each is what the observed benchmark failure
-#: used. They are evidence for the preflight, not a complete policy engine.
+#: failing check from failing, and each has been seen in a real run. They
+#: are evidence for the preflight, not a complete policy engine.
 _WEAKENING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("skip", re.compile(r"(?i)\bpytest\s*\.\s*mark\s*\.\s*skip(?:if)?\b")),
     ("skip", re.compile(r"(?i)\bpytestmark\s*=\s*[^\n]*\bpytest\s*\.\s*mark\s*\.\s*skip")),

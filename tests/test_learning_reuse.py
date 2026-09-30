@@ -1,10 +1,10 @@
-"""Repeated work costs less the second time (T118; FR-067, SC-021).
+"""Repeated work costs less the second time (T118; FR-067).
 
 The fixed N = 6 sequence of comparable tasks in one project: tasks 1–3 are
 the initial window, tasks 4–6 the learned window. Two primary metrics are
-counted with the same definitions T152 uses — mandatory clarifications raised
-and user corrections received — and the learned window must be strictly lower
-on both with no task's outcome success regressing.
+counted — mandatory clarifications raised and user corrections received —
+and the learned window must be strictly lower on both with no task's outcome
+success regressing.
 
 The measurement is deterministic: a fixed question and a fixed correction
 drive the same real learning mechanism the product uses, with no model call

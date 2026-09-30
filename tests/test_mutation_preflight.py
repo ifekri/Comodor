@@ -1,9 +1,8 @@
 """The mutation preflight: a material decision cannot be skipped by not asking.
 
 The clarification architecture registers a decision only when the model calls
-`ask`. A model that forgets can change the project first — the benchmark's
-`careful-unknowable` task found exactly that, an invented rate written without a
-question. These pin the Core's own check: it sees the mutation's actual content
+`ask`. A model that forgets can change the project first — an invented rate
+written without a question. These pin the Core's own check: it sees the mutation's actual content
 and the turn's actual evidence, requires each material choice to name its
 source, withholds a missing one, and fails closed when it cannot decide.
 """

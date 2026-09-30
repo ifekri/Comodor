@@ -15,8 +15,9 @@
 ## Quality & Completion Semantics
 
 - [x] CHK001 Is "high-quality output" defined in observable terms rather than as an adjective, with the evidence classes quality is judged against enumerated? [Clarity, Spec §User Story 1 / §Epistemic state and grounding]
-    - Reviewer finding: spec.md never defines "high-quality output" — the phrase appears only in the title and the Input line. No section enumerates the evidence classes quality is judged against (Constitution XIII lists them — the user's request, repository evidence, project conventions, the specification, runtime behaviour, tests, recorded validation evidence — but spec.md does not adopt them), and SC-001 to SC-004 measure specific failures rather than defining quality.
-    - Re-review 2026-09-24: SATISFIED — Operational definitions, "High-quality output": defined in observable terms against seven enumerated evidence classes, observed through SC-001 to SC-004, SC-005 to SC-010, SC-037 to SC-044, SC-011 and SC-012.
+    - Reviewer finding: spec.md never defines "high-quality output" — the phrase appears only in the title and the Input line. No section enumerates the evidence classes quality is judged against (Constitution XIII lists them — the user's request, repository evidence, project conventions, the specification, runtime behaviour, tests, recorded validation evidence — but spec.md does not adopt them), and the success criteria measure specific failures rather than defining quality.
+    - Re-review 2026-09-24: SATISFIED — Operational definitions, "High-quality output": defined in observable terms against seven enumerated evidence classes, observed through the success criteria.
+    - Re-review 2026-09-30: SATISFIED — Operational definitions, "High-quality output", still lists the seven evidence classes and names the active criteria that observe it (SC-002 to SC-004, SC-005 to SC-010, SC-037 to SC-044).
 - [x] CHK002 Are FR-001's information-provenance categories enumerated as a closed set, so a premise cannot be held in an unlisted classification? [Completeness, Spec §Epistemic state and grounding FR-001]
 - [x] CHK131 Are FR-001's provenance categories kept distinct from the runtime `EvidenceState` lifecycle, so the two vocabularies are not conflated or given a shared count? [Clarity, Spec §Epistemic state FR-001 vs data-model.md §2]
     - Reviewer finding: spec.md never states that FR-001's provenance categories are distinct from the runtime evidence lifecycle, and never names that lifecycle. §Key Entities "Evidence item" gives how it became known as "(stated, verified, derived, unknown)" — four values, omitting FR-001's "established project or user knowledge", in the same words as the lifecycle states VERIFIED/DERIVED/UNKNOWN — so the two vocabularies are conflated in spec.md; data-model.md §1/§2 then fold two FR-001 categories (stated by the user; established knowledge) into the single state KNOWN. The "not the same thing" statement exists only in plan.md §Quality Architecture.
@@ -59,10 +60,11 @@
 ## Interactive Clarification — Requirement Completeness
 
 - [x] CHK024 Is an explicit waiting state defined for a clarification, distinct from answered, declined, cancelled and expired? [Completeness, Spec §The clarification interaction FR-018, FR-022]
-- [ ] CHK025 Is it specified that dependent work must not continue before an answer, while independent work must not be blocked? [Clarity, Spec §The clarification interaction FR-018]
+- [x] CHK025 Is it specified that dependent work must not continue before an answer, while independent work must not be blocked? [Clarity, Spec §The clarification interaction FR-018]
     - NEEDS CLARIFICATION: FR-018 forbids dependent work (satisfied) but only permits independent work ("MAY continue only where it is demonstrably independent"); nothing requires that independent work not be blocked, and FR-123 ends the run on a clarification-required outcome, which blocks independent work on non-interactive surfaces. Whether independent work MUST proceed while a clarification is outstanding, or merely MAY, is an owner decision.
     - Re-review 2026-09-24: SATISFIED — FR-018: independent work is permitted, not mandatory, and not prohibited by the outstanding clarification alone; dependent work pauses; uncertain dependency counts as dependent; the clarification is never bypassed. FR-123: a non-interactive run may finish identified, bounded independent work but starts no speculative work to delay the stop; D3.
     - Post-D7–D9 re-review 2026-09-24: FAILED — FR-018, FR-123 and the D7 SC-002 now specify that demonstrably independent work is permitted (not mandatory) and that late-discovered decisions keep earlier mutations, but User Story 1's narrative still states the old blanket rule: "if a genuine decision remains it puts a short multiple-choice form on screen before it writes anything" (spec.md §User Story 1, first paragraph). Taken literally it forbids independent writes before the form and contradicts FR-013 late discovery, so spec.md is internally inconsistent on this criterion. The narrative needs to say that no write depending on the decision happens before the form.
+    - Re-review 2026-09-30: SATISFIED — User Story 1's narrative now puts the form on screen "before it performs any mutation that depends on that unresolved decision", which agrees with FR-013 late discovery, FR-018, FR-123 and SC-002.
 - [x] CHK026 Are option semantics defined — what an option must carry, and the difference between single-choice and multiple-choice? [Completeness, Spec §The clarification interaction FR-015, FR-021]
 - [x] CHK027 Is the mandatory final custom-answer row specified as a system-appended invariant the model can neither author nor remove, rather than as an instruction to the model? [Clarity, Spec §The clarification interaction FR-017]
 - [x] CHK028 Is it specified that free text entered into the custom row is carried back as the answer to that specific question? [Completeness, Spec §The clarification interaction FR-017]
@@ -77,6 +79,7 @@
 - [x] CHK037 Is the "no automatic answer selection" rule stated absolutely, with the specific bypasses it forbids enumerated? [Completeness, Spec §The clarification interaction FR-019]
 - [x] CHK038 Is behaviour specified for a model change occurring while a form is outstanding? [Edge Case, Spec §The clarification interaction FR-028]
 - [x] CHK039 Are requirements defined for grouping all decisions outstanding at one point into a single form rather than successive questions? [Clarity, Spec §The clarification interaction FR-014]
+    - Re-review 2026-09-30: SATISFIED — FR-014, FR-082 change 4 and D18/D19: questions raised through several calls in one reply form one logical form, shown in pages of at most four and submitted once on live surfaces; surfaces without a live form return them in one clarification-required outcome.
 - [x] CHK040 Is the source/reason for a clarification specified as information the question must carry? [Completeness, Spec §The clarification interaction; §Non-interactive surfaces FR-034]
     - Reviewer finding: spec.md does not require an interactive question to carry its reason or the evidence consulted. FR-034 applies only to the non-interactive outcome and lists decision, candidates and evidence consulted but no reason (materiality class); the question fields `reason` / `evidence_consulted` exist only in plan.md, data-model.md §4 and contracts §C1.
     - Re-review 2026-09-24: SATISFIED — FR-020: wherever the clarification capability is negotiated, each question for a material decision carries its decision_ref, its reason (FR-007 materiality class) and the evidence consulted; FR-034 carries the same for the non-interactive outcome.
@@ -95,8 +98,10 @@
 ## Token Efficiency — Requirement Completeness
 
 - [x] CHK047 Is token efficiency stated as a measurable requirement with a defined unit and scope, rather than as an aspiration? [Measurability, Spec §Token efficiency FR-055]
-- [x] CHK048 Is the baseline against which reduction is measured defined, including what the comparison strategy does? [Clarity, Spec §Success Criteria SC-011, SC-036]
-- [x] CHK049 Is it specified that the numeric threshold is derived from the baseline rather than chosen in advance, so no arbitrary figure enters the spec? [Consistency, Spec §Clarifications — Resolved Q1]
+- [x] CHK048 Is it stated how token use is measured and accepted without a model — production token-usage accounting, and acceptance that needs no provider call and no paid tokens? [Clarity, Spec §Token efficiency FR-055; §Measurable Outcomes, Acceptance; D14]
+    - Re-review 2026-09-30: SATISFIED — FR-055 makes token consumption measurable per task and per turn (sent, generated, cached); the Acceptance statement requires no model call other than scripted responses, no paid tokens and no provider credential.
+- [x] CHK049 Is it specified that no numeric token-reduction target is set, so no arbitrary figure enters the spec? [Consistency, Spec §Clarifications — Resolved D14, D15]
+    - Re-review 2026-09-30: SATISFIED — D14 retires the criterion that carried a target and D15 states that no token-efficiency improvement is claimed; no percentage target remains in spec.md.
 - [x] CHK050 Are context-selection requirements specified — budget, relevance ranking, and the determinability of what was withheld? [Completeness, Spec §Token efficiency: techniques FR-096 to FR-098]
 - [x] CHK051 Are deduplication semantics specified, including how identity is established and how near-duplicates are treated? [Clarity, Spec §Token efficiency: techniques FR-099]
     - Reviewer finding: FR-099 does not state how content identity is established (byte identity, hash, normalisation), requires near-duplicate material to be "carried once" without defining near-duplicate or which variant survives, and so permits collapsing two differing items into one — which can drop the difference and conflicts with FR-044 (see CHK123). plan.md T7 limits deduplication to hash equality and handles near-duplicates "separately and conservatively"; spec.md does not.
@@ -112,7 +117,8 @@
 - [x] CHK056 Is history compaction specified with its structural constraints — no orphaned tool call, original request always preserved? [Completeness, Spec §Token efficiency FR-049]
 - [x] CHK057 Is it explicitly specified that a failing build or test log must retain the failure itself rather than collapse to a pass/fail flag? [Edge Case, Spec §Token efficiency: per class FR-090]
 - [x] CHK058 Is the prohibition on losing critical evidence to compression stated as an absolute constraint on all optimizations? [Clarity, Spec §Token efficiency FR-044]
-- [x] CHK059 Is it stated that token reduction may not substitute for correctness, with the consequence defined (a reduction that costs correctness is a regression)? [Consistency, Spec §Token efficiency FR-044; §Success Criteria SC-012]
+- [x] CHK059 Is it stated that token reduction may not substitute for correctness, with the consequence defined (a reduction that costs correctness is a regression)? [Consistency, Spec §Token efficiency FR-044]
+    - Re-review 2026-09-30: SATISFIED — FR-044 forbids a reduction bought with lost correctness, weakened validation, skipped inspection, a suppressed clarification, truncated evidence or an unsupported summary.
 - [x] CHK060 Are per-content-class requirements defined for every class the feature carries — history, file contents, diffs, tool results, build/test logs, project instructions, learned knowledge, repeated turns, delegated work, resume? [Coverage, Spec §Token efficiency: per class FR-086 to FR-095]
 - [x] CHK061 Are canonical summaries required to carry provenance, so a claim resting on one can be traced? [Completeness, Spec §Token efficiency: techniques FR-102, FR-103]
 - [x] CHK062 Is incremental repository understanding specified, including the rule on not re-verifying a fact without cause? [Clarity, Spec §Token efficiency: techniques FR-104, FR-105]
@@ -165,20 +171,23 @@
 
 ## Acceptance Criteria Quality
 
-- [x] CHK098 Are quality acceptance criteria expressed with measurable targets rather than qualitative claims? [Measurability, Spec §Success Criteria SC-001 to SC-004]
+- [x] CHK098 Are quality acceptance criteria expressed with measurable targets rather than qualitative claims? [Measurability, Spec §Success Criteria SC-002 to SC-004]
+    - Re-review 2026-09-30: SATISFIED — SC-002 to SC-004 state measurable, deterministic targets.
 - [x] CHK099 Are clarification acceptance criteria measurable, including the custom-row invariant under adversarial conditions? [Measurability, Spec §Success Criteria SC-005 to SC-010]
-- [x] CHK100 Are token-efficiency acceptance criteria measurable *and* paired with a quality condition, so a saving alone cannot pass? [Measurability, Spec §Success Criteria SC-011 to SC-015]
-    - NEEDS CLARIFICATION: SC-011 pairs cost with a quality condition (satisfied), but "materially fewer total tokens" has no numeric target. SC-036 says the target "is then set from that data and recorded in this specification"; the baseline was published 2026-09-14 (T015), yet no threshold is recorded, so SC-011 is not measurable as written. The later paired run (bench/results/paired-baseline-2026-09-20) shows the current strategy using more total tokens than the naive one, so a threshold cannot be derived mechanically; the decision is owner-held under T156.
-    - Re-review 2026-09-24: SATISFIED — SC-011 now defines the measurable threshold — current mean total tokens <= 0.90 x naive in the same comparable paired run — and keeps the quality conjunct: every task's current outcome rate >= naive, never averaged away. The criterion is well specified; SC-011 acceptance itself remains NOT satisfied (both historical runs fail it).
-- [x] CHK101 Are learning acceptance criteria measurable, including criteria for what must *not* be learned? [Measurability, Spec §Success Criteria SC-016 to SC-021]
+- [x] CHK100 Are token-efficiency acceptance criteria measurable *and* paired with a quality condition, so a saving alone cannot pass? [Measurability, Spec §Success Criteria SC-013 to SC-015]
+    - Re-review 2026-09-30: SATISFIED — SC-013 to SC-015 each state an evidence-preserving guarantee measured by deterministic regression tests (a superseded read represented by its change, no tool output lost, a stable request head); none can pass by saving tokens alone, FR-044 binds every optimization, and D15 claims no improvement.
+- [x] CHK101 Are learning acceptance criteria measurable, including criteria for what must *not* be learned? [Measurability, Spec §Success Criteria SC-016 to SC-020]
+    - Re-review 2026-09-30: SATISFIED — SC-016 to SC-020 are measurable, and SC-018 names what must not be learned.
 - [x] CHK102 Are regression criteria measurable and tied to the exact commit under review rather than to an earlier one? [Measurability, Spec §Success Criteria SC-022]
 - [x] CHK103 Is determinism specified as an acceptance property, including the prohibition on sleep- or timing-based correctness? [Measurability, Spec §Success Criteria SC-025]
 - [x] CHK104 Is mutation-checking specified as the standard of proof for every guard? [Measurability, Spec §Success Criteria SC-025]
-- [x] CHK105 Is benchmark methodology specified so quality and token usage are reported together, with a single-metric result explicitly insufficient? [Consistency, Spec §Observability FR-076, FR-077]
-- [x] CHK106 Is benchmark reproducibility specified (isolation, learning disabled, rates rather than single booleans)? [Measurability, Spec §Success Criteria SC-026]
+- [x] CHK105 Is it specified that no token claim is made without correctness evidence, so a single-metric result is insufficient? [Consistency, Spec §Token efficiency FR-044; §Measurable Outcomes, Acceptance; D15]
+    - Re-review 2026-09-30: SATISFIED — FR-044 makes correctness a precondition of every reduction, and D15 with the Acceptance statement allows no token or quality claim without deterministic evidence.
+- [x] CHK106 Is acceptance specified as reproducible — scripted model responses, no provider, and no dependence on timing? [Measurability, Spec §Measurable Outcomes, Acceptance; SC-025]
+    - Re-review 2026-09-30: SATISFIED — the Acceptance statement allows only scripted model responses and names the deterministic gates on the exact commit; SC-025 forbids sleep- or timing-based correctness.
 - [x] CHK107 Do measurable outcomes avoid naming implementation technologies, so they remain verifiable without knowing the design? [Clarity, Spec §Success Criteria]
-    - Reviewer finding: SC-036 embeds implementation detail — the path `bench/results/paired-baseline-2026-09-14.json`, commit `5b611e4`, and the command `python -m bench --paired --provider <provider> --model <model> --tries 3`. That published-evidence record belongs with plan/tasks evidence, leaving the success criterion verifiable without knowing the design.
-    - Re-review 2026-09-24: SATISFIED — SC-036 now states the measurable outcome and methodology only; the result paths, commits and commands moved, undeleted, to the informative "Benchmark evidence record" outside the criteria.
+    - Reviewer finding 2026-09-24: a success criterion named a result path, a commit and a command; it was reworded to its outcome.
+    - Re-review 2026-09-30: SATISFIED — no active success criterion names a path, commit, command or module.
 - [x] CHK108 Are observability requirements defined with an enumerated metric set and a privacy constraint? [Completeness, Spec §Observability FR-072 to FR-075]
 
 ## Scope, Dependencies & Exclusions
@@ -191,9 +200,10 @@
 - [x] CHK114 Is it specified that no pending pull request may be merged, closed, rebased or incorporated? [Coverage, Spec §Scope exclusions FR-085]
 - [x] CHK115 Are unrelated refactors, cleanup, formatting churn and dependency bumps explicitly excluded, with the rule for a genuinely unavoidable coupling stated? [Gap-probe — failed on first review 2026-09-14, closed by FR-128, Spec §Scope exclusions FR-128]
 - [x] CHK116 Are all assumptions documented in one place and marked as assumptions rather than embedded in requirements? [Traceability, Spec §Assumptions]
-- [x] CHK117 Is the single intended user-visible behaviour change identified explicitly and bounded to one change? [Clarity, Spec §Compatibility FR-082]
+- [x] CHK117 Are the intended user-visible behaviour changes identified explicitly as a closed list, with the regression-by-design and any breaking change bounded? [Clarity, Spec §Compatibility FR-082]
     - Reviewer finding: FR-082 names "the one intended user-visible behaviour change" and then bounds it as "the only behavioural regression-by-design"; the two scopes differ, and other intended user-visible changes exist — FR-125 corrects a contradicted completion claim before delivery at the cost of an extra turn, FR-124/FR-037 annotate answers with named unresolved work, FR-129 suppresses a re-raise. FR-082 needs to be bounded to one precisely named class (e.g. the only backward-incompatible change) rather than to every user-visible change.
     - Re-review 2026-09-24: SATISFIED — FR-082 enumerates a closed list of three intended user-visible changes ("and no other") and bounds the single regression-by-design — the one change that removes caller-relied behaviour and is release-noted — to change 1.
+    - Re-review 2026-09-30: SATISFIED — FR-082 now enumerates four changes "and no other". Change 1 stays the one behavioural regression-by-design; change 4 (one form per decision point, D18/D19) removes no question, answer or decision association, is breaking for callers that count forms or script one answer per form, and must be release-noted with D19's migration path.
 
 ## Ambiguities, Conflicts & Traceability
 
@@ -201,6 +211,7 @@
 - [x] CHK119 Are all three resolved clarifications recorded with their decision and the requirements they bind? [Traceability, Spec §Clarifications — Resolved]
     - Reviewer finding: Q1, Q2 and Q3 each record a decision and the requirements they bind. But the section opens "Three decisions … All three were put to the user" while it now records nine Q&As across three sessions, and the six Q&As under "Session 2026-09-14 (remediation)" and "(outcome encoding)" do not cite the requirements they bind (FR-018, FR-019, FR-022, FR-035, FR-080, FR-123, FR-129, FR-130).
     - Re-review 2026-09-24: SATISFIED — Clarifications — Resolved now counts fifteen decisions in four groups (D1-D6, three remediation, three outcome-encoding, Q1-Q3); every one cites the FR/SC it binds (Binds lines, or the Q1-Q3 decision references).
+    - Re-review 2026-09-30: SATISFIED — the section now counts twenty-eight decisions in nine groups, through D18 and D19 (2026-09-29); each binds named FR/SC requirements or names the decision that supersedes it.
 - [x] CHK120 Is a requirement identifier scheme established, with every identifier unique and every cross-reference resolving to a defined item? [Traceability, Spec §Requirements]
 - [x] CHK121 Are there no conflicts between Constitution XV's prohibition on "proceeding and documenting the assumption afterwards" and every non-answer path (cancelled, declined, expired, unattended)? [Conflict-check — failed on first review 2026-09-14 as C1, closed by FR-018/FR-019/FR-022/FR-035/FR-129/FR-130, Spec §The clarification interaction vs §Non-interactive surfaces]
     - Reviewer finding: the named requirements (FR-018, FR-019, FR-022, FR-035, FR-129, FR-130) do reconcile every non-answer path with Constitution XV, but User Story 1 acceptance scenario 1 still reads "no file is written until the form is answered, dismissed, or cancelled" — making dismissal or cancellation the end of the write-wait, which contradicts FR-018 ("Only a valid answer may resume that dependent work") and FR-019. The conflict is not fully closed in spec.md.
@@ -278,3 +289,22 @@
   "Status: Draft" are not contradictory and pass.
 - Final specification gate: FAIL — the prior 131/131 result (704e47d) does not
   carry over to this amended text.
+
+## Fresh Re-Review — 2026-09-30
+
+- Reviewed: `spec.md` in the PR #61 worktree after D14–D19, judged from the
+  file's contents.
+- Criteria reviewed: 131
+- Satisfied: 131
+- Failed: 0
+- Needs clarification: 0
+- CHK025: PASS — the User Story 1 narrative now defers only mutations that
+  depend on the unresolved decision.
+- Items whose criteria D14 retired (CHK048, CHK049, CHK105, CHK106) are
+  reworded to the deterministic acceptance that replaced them and re-judged;
+  CHK059, CHK098, CHK100 and CHK101 now cite active criteria only.
+- CHK117 and CHK119: PASS — FR-082 names four changes, and the clarification
+  record holds twenty-eight decisions.
+- Metadata sanity audit: PASS — line 3 names the branch
+  `002-grounded-agent-quality`; the post-D7–D9 finding is closed.
+- Final specification gate: PASS (131/131).

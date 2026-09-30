@@ -101,19 +101,19 @@ def test_today_the_json_report_has_exactly_these_fields(scripted):
     _, report = run_json(config)
     assert {"text", "ok", "stopped", "steps", "tool_calls",
             "tools", "error", "usage", "elapsed"} <= set(report)
-    # Additions since: `usage.cached_tokens` (T015), the paired `measurement`
-    # record (T061), the completion `annotation` (T123) and the mutation
-    # preflight's `preflight_traces` (spec 002, FR-013); nothing a pre-change
-    # caller read moved.
+    # Additions since: `usage.cached_tokens`, the `measurement` record (T061),
+    # the completion `annotation` (T123) and the mutation preflight's
+    # `preflight_traces` (spec 002, FR-013); nothing a pre-change caller read
+    # moved.
     assert set(report) == {"text", "ok", "stopped", "steps", "tool_calls",
                            "tools", "error", "usage", "elapsed", "measurement",
                            "annotation", "preflight_traces"}
-    # `cached_tokens` is the one addition Phase 1 makes (T015 needs it for the
-    # paired baseline); everything a pre-change caller read is still there.
+    # `cached_tokens` is the one addition Phase 1 makes; everything a
+    # pre-change caller read is still there.
     assert {"input_tokens", "output_tokens", "cost_usd"} <= set(report["usage"])
     # `written_tokens` is a later additive field: cache-creation tokens are a
     # separate, non-overlapping part of the prompt for the providers that bill
-    # them, so a benchmark total that omits it understates what was read.
+    # them, so a total that omits it understates what was read.
     assert set(report["usage"]) == {"input_tokens", "output_tokens",
                                     "cached_tokens", "written_tokens", "cost_usd"}
 

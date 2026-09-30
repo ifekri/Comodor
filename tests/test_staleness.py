@@ -10,8 +10,8 @@ file any more, beside the diff that changed them, and left to work out which of
 the two to believe.
 
 Measured on a file the size of `agent/loop.py`, read twice with one edit
-between: **8,346 tokens freed, half the history**. On the benchmark's
-thirty-line fixtures it correctly does nothing at all.
+between: **8,346 tokens freed, half the history**. On thirty-line files it
+correctly does nothing at all.
 
 Most of what is checked here is what it must *not* touch.
 """

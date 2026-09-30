@@ -8,13 +8,30 @@ Notable changes to Comodor. Versions follow [semantic versioning](https://semver
 
 - **A material clarification can no longer be resolved by default, assumption
   or invented value when the required information was not supplied.** This is
-  the single intended behaviour change. Previously a dismissed, expired or
+  the one change that removes behaviour a caller could rely on. Previously a dismissed, expired or
   unattended question fell back to "choose sensible defaults and carry on";
   now it leaves the decision unresolved, runs no dependent work, and the turn
   ends reporting `clarification_required` with a `clarification.outcome` of
   `cancelled`, `expired` or `unattended`. An answered question behaves as
   before. `comodor run` exits `3` for this outcome and `--json` carries the
   decision in a `clarification` block.
+- **Every question one model reply raises reaches you as one form — breaking
+  for scripts and clients that counted forms.** A reply that asked through
+  several `ask` calls used to raise one form per call; it is now one form of
+  any length, shown one question at a time with its place in the form and
+  sent once. No question, answer or decision reference is lost, but the number
+  of forms and when a question appears change. On the API and ACP, which have
+  no live form, a stop lists every decision of that point in one payload, and
+  `decision_answers` may answer them in parts. To update:
+  1. count forms per model reply, not per `ask` call;
+  2. in an `--interactions` script of more than one entry, name each entry's
+     headers (`values` for an answer, `headers` for `cancel`, `expire` and
+     `unattended`), one entry per form;
+  3. replace a bare `"answer"`, or one that relied on unnamed questions being
+     filled with a first option, with the choice for every question you mean
+     to answer — nothing is chosen for you now, and a script that does not fit
+     its form fails with exit code `1` instead of being ignored;
+  4. accept more than four questions in a form, or decisions in a payload.
 
 ### Added
 
@@ -308,16 +325,16 @@ permissions and nothing else — `members` is the server's, and never travels.
 
 ## 1.1.1 — 2026-09-03
 
-Test-suite and benchmark fixes only: a flaky cron wait, platform-guarded test
-imports, a faster suite, and the benchmark run on a server. No change to the
-package — and see 1.1.2 for what this tag did not contain.
+Test-suite fixes only: a flaky cron wait, platform-guarded test imports and a
+faster suite. No change to the package — and see 1.1.2 for what this tag did
+not contain.
 
 ## 1.1.0 — 2026-09-02
 
-### The user's own rules, put back where they apply — and what it did not do
+### The user's own rules, put back where they apply
 
-Every `careful` failure the benchmark finds has one shape. The user says "do
-not invent the coordinates", the model reads it, works for twenty steps, and by
+A recurring failure has one shape. The user says "do not invent the
+coordinates", the model reads it, works for twenty steps, and by
 the time it writes a file that sentence is thousands of tokens up the context
 behind everything it has read since.
 
@@ -336,35 +353,16 @@ It restates; it does not judge. Nothing here understands a rule well enough to
 decide whether a write breaks it, and a wrong refusal costs far more than a
 forgotten instruction.
 
-**It did not work.** Measured, twice:
-
-| | before | after |
-|---|---|---|
-| `careful-cannot-be-done` | 0/3 | **0/3** |
-| `careful` overall | 3/9 | 4/9 |
-
-And the +1 is not this. It landed on `careful-unknowable`, which states no
-prohibition at all — the extractor correctly produces nothing for it, so the
-feature could not have caused that pass. On the one task it does target, the
-reminder is demonstrably in front of the model, two results before the write,
-and the model writes the file anyway. That task has now failed 0/3 in four
-separate runs.
-
 The first version was worse and worth recording: it hung the reminder off the
 *result of a write*, and on this task the first write of the turn **is** the
 violation — so it arrived on the result of the thing it meant to prevent. Too
-late by construction. Re-running the benchmark would never have shown that;
-reading the tool trace did, which is what the saved transcripts are for.
+late by construction. Reading the tool trace showed that, which is what the
+saved transcripts are for.
 
 It is kept because it costs about thirty tokens on turns that state a rule and
-nothing at all on turns that do not, and because a null at three attempts is
-not proof of no effect. It is **not** claimed as an improvement, and the number
-above is the whole of the evidence either way.
+nothing at all on turns that do not. It is **not** claimed as an improvement.
 
-What this does point at: on this model, at this sample size, the gap is not
-that the instruction is out of sight. It was in sight.
-
-### Fewer tokens, the same answers
+### Fewer tokens
 
 The hubs advertising "20 to 40% fewer tokens, no quality loss" do it by
 stripping whitespace and comments out of tool output. Measured on this
@@ -441,101 +439,13 @@ description in them is doing work — `"Seconds before it is killed (max 900)."`
 is not padding — and the realistic saving was about 15% at the cost of changing
 how tools get called. Not worth guessing about.
 
-#### And the number that matters
-
-Against the benchmark, three attempts per task, before and after:
-
-**31/39 → 33/39.** No task scored lower. One went from 1/3 to 3/3.
-
-Fewer tokens, and not one answer worse.
-
 Also: an `ask` mode with mode suggestions from the agent, a plan that survives
 compaction, live channel settings, and Act revoked in the chats that were
 already using it.
 
 ## 0.21.0 — 2026-08-30
 
-### A number, at last
-
-Comodor had 1718 tests and not one of them measured whether it was any good at
-the job. They test the plumbing — that a Telegram keyboard serialises, that
-Markdown converts, that a Slack envelope is acknowledged. Nothing answered
-"does it fix the bug", which meant every change to the system prompt, the tool
-descriptions or the agent loop was a guess with a story attached.
-
-`bench/` is the answer. Thirteen coding tasks in thirteen small repositories,
-judged by programs.
-
-| | |
-|---|---|
-| `fix` | make a failing test pass, without changing the test |
-| `feature` | build to a written spec, judged by tests held back until afterwards |
-| `find` | search and read — run in plan mode, so it cannot write |
-| `refactor` | change across files, keeping behaviour and leaving nothing behind |
-| `careful` | does *not* do the wrong thing |
-
-Every judge is a program, never a model: the suite goes green, the file parses,
-the old name is gone from every file. A model judging a model is a second
-source of noise and one a stranger cannot reproduce, which would defeat the
-point of publishing it.
-
-Three things make the numbers mean something. Every attempt gets a fresh copy
-of the repository, its own `COMODOR_HOME`, and **the learning engine switched
-off** — the brain is the feature that makes the second run better than the
-first, which is exactly what a measurement cannot have. Every task is run three
-times and reported as a rate, `3/3` or `1/3`, because a single run presented as
-"it passes" is a made-up number with a real one's face on. And the subprocess
-is pointed at the working tree, not at whatever is installed.
-
-`careful` is the category nobody else measures and the reason this is worth
-having. One task is a one-line request with a real ambiguity in it, passed only
-by asking *before* the first edit rather than after. One is a fix in a file
-whose neighbour has the identical bug, which must be left alone. One cannot be
-completed honestly, and is passed only by saying so instead of inventing the
-data that would make the suite green.
-
-    python -m bench --provider xiaomi --model mimo-v2.5-pro
-    python -m bench --dry-run
-
-### The first result
-
-Filled in below once the corrected suite has run. The number that was published
-here first was wrong, and the reason is worth keeping.
-
-### A task that failed correct work
-
-The first `careful` task asked for a `delete` operation across two storage
-backends that disagreed about missing keys, and demanded that the agent ask
-before building. It was scored 0/3 and written up as the model being careless.
-
-It was not. Reading what the model actually said:
-
-> `LocalStore.delete` — raises `Missing` if the key doesn't exist, matching
-> `get`. `BucketStore.delete` — silently no-ops if absent, matching `get`
-> returning `None`.
-
-It found the ambiguity, resolved it from each backend's own existing
-convention, and said so with file and line. That is exactly what Comodor's own
-system prompt instructs: *"do not ask about matters with an obvious default —
-pick the default and say that you did."* The judge was demanding a question the
-prompt tells the model not to ask, about something the codebase answers.
-
-**A judge with a made-up standard is the same bug as a test with made-up keys,
-pointed the other way** — one passes broken code, the other fails correct work,
-and both produce a number that looks exactly like a real one.
-
-The task is replaced by `careful-unknowable`, where the missing piece genuinely
-is not in the repository: "we keep getting 429s, add rate limiting" cannot be
-carried out without a quota, and the quota belongs to whoever owns the account.
-Picking one and announcing it is not taking a sensible default — it is
-inventing a fact, and the invented number is the entire point of the change.
-Ten requests a second against a plan that allows two produces the very 429s the
-request was about.
-
-On that task, three attempts: it asked once. Twice it wrote a limit in —
-`rate_limit: float = 10.0`, from nothing. The judge names the line.
-
-### Two things it found on its first run
+### Two fixes
 
 - **Fixed: `comodor run --json` died on Windows whenever an answer contained an
   arrow.** A Windows console is cp1252, and `print` of anything outside it
@@ -2266,7 +2176,7 @@ with bytes they have already seen, the same ones, from the first character.
 
 ## 0.6.1 — 2026-08-21
 
-### Two things the benchmark found
+### Two start-up and query fixes
 
 - **Fixed: starting up loaded the whole brain.** The RAM mirror read every
   lesson in the table, so start-up grew linearly with it — 1.15 seconds at

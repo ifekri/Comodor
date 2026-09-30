@@ -402,3 +402,60 @@ def test_the_choice_is_remembered(opened):
     assert page.evaluate("readTheme()") == "light"
     page.evaluate("localStorage.clear()")
     assert page.evaluate("readTheme()") == "system"
+
+
+# --------------------------------------------------------------------------- #
+# one form of any length (T239; D18, D19)
+# --------------------------------------------------------------------------- #
+
+
+SIX_QUESTIONS = """(() => {
+  window.__posts = [];
+  post = (path, body) => { window.__posts.push({path, body}); return Promise.resolve({}); };
+  const qs = [0, 1, 2, 3, 4, 5].map(i => ({
+    prompt: 'Question ' + i + '?', header: 'H' + i, multi: false,
+    options: [{label: 'A' + i}, {label: 'B' + i},
+              {label: 'Something else', free: true}]}));
+  askQuestions({id: 'form-6', questions: qs});
+  return qs.length;
+})()"""
+
+
+def _press(page, key):
+    page.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', "
+                  f"{{key: '{key}', bubbles: true}}))")
+
+
+@needs_browser
+def test_six_questions_are_one_form_paged_and_sent_once(opened):
+    page, _ = opened
+    assert page.evaluate(SIX_QUESTIONS) == 6
+
+    titles = [page.evaluate("document.getElementById('form-title').textContent")]
+    page.evaluate("form.chosen[0].add(0)")
+    for _ in range(5):
+        _press(page, "ArrowRight")
+        titles.append(page.evaluate("document.getElementById('form-title').textContent"))
+    assert titles == [f"Question {n} of 6" for n in range(1, 7)]
+    assert page.evaluate("form.chosen[0].has(0)"), "an entry survives moving on"
+
+    page.evaluate("form.chosen[5].add(1); sendForm()")
+    posts = page.evaluate("window.__posts")
+    assert len(posts) == 1, "one submission"
+    sent = __import__("json").loads(posts[0]["body"]["choice"])
+    assert [answer["header"] for answer in sent] == [f"H{n}" for n in range(6)]
+    assert sent[0]["chosen"] == ["A0"] and sent[5]["chosen"] == ["B5"]
+    assert all(answer["chosen"] == [] for answer in sent[1:5]), "nothing filled in"
+
+
+@needs_browser
+def test_a_dismissal_on_the_second_page_cancels_the_whole_form(opened):
+    page, _ = opened
+    page.evaluate(SIX_QUESTIONS)
+    _press(page, "ArrowRight")
+    page.evaluate("form.chosen[1].add(0)")
+    _press(page, "Escape")
+    posts = page.evaluate("window.__posts")
+    assert posts == [{"path": "/api/answer",
+                      "body": {"id": "form-6", "choice": "cancelled"}}], \
+        "one cancellation, and no entry applied"

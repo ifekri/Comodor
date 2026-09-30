@@ -79,9 +79,8 @@ class ToolContext:
     #:
     #: Kept so a write can tell the difference between replacing a file whose
     #: contents are known and replacing one sight unseen. The second is how the
-    #: rest of a file gets silently thrown away, and the benchmark caught it:
-    #: one task was failed for overwriting the sample it was being measured
-    #: against, in a run that was otherwise correct.
+    #: rest of a file gets silently thrown away: a run that was otherwise
+    #: correct once overwrote the sample it had been given to work from.
     seen: set[str] = field(default_factory=set)
 
     #: What this turn read, text included, by resolved path.
@@ -276,9 +275,8 @@ class Tool:
 
     # -- invocation ------------------------------------------------------- #
 
-    def invoke(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
-        """Gate, run, and time one call."""
-        started = time.monotonic()
+    def refusal(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult | None:
+        """The permission gate alone: why this call may not run, or None."""
         decision = ctx.permissions.check(
             tool=self.name,
             risk=self.risk,
@@ -287,10 +285,16 @@ class Tool:
             key=self.permission_key(args),
         )
         if not decision:
-            result = ToolResult.failure(decision.reason or "not permitted",
-                                        denied=True)
-            result.elapsed = time.monotonic() - started
-            return result
+            return ToolResult.failure(decision.reason or "not permitted", denied=True)
+        return None
+
+    def invoke(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
+        """Gate, run, and time one call."""
+        started = time.monotonic()
+        refused = self.refusal(ctx, args)
+        if refused is not None:
+            refused.elapsed = time.monotonic() - started
+            return refused
 
         try:
             result = self.run(ctx, **args)

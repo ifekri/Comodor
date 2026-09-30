@@ -1,6 +1,5 @@
 """End-to-end token accounting: every provider call a task makes is counted.
 
-Spec 002 SC-011 asks whether the same tasks complete with fewer total tokens.
 A total that omits a provider call is not a total. The compaction summary is a
 real provider call — it used to be spent and not counted, so a task that
 compacted reported less than it cost. These prove the runtime counts it
@@ -133,14 +132,28 @@ def test_a_failed_summary_adds_no_usage(config):
     assert agent.conversation.usage.total == 0
 
 
-def test_the_report_documents_name_their_accounting_version():
-    """A result is only comparable with one counted the same way, and the
-    counting changed; the version is how a reader tells a corrected total
-    from a historical one."""
-    from bench import report
+# --------------------------------------------------------------------------- #
+# T222 — production token accounting is pinned (FR-072, FR-073; D14 keeps it)
+# --------------------------------------------------------------------------- #
 
-    assert report.TOKEN_ACCOUNTING_VERSION == 2
-    plain = report.as_json([], provider="fake", model="fake-1", tries=3)
-    paired = report.as_paired_json([], [], provider="fake", model="fake-1", tries=3)
-    assert plain["token_accounting_version"] == 2
-    assert paired["token_accounting_version"] == 2
+
+def test_the_per_call_record_keeps_exactly_these_fields():
+    from comodor.agent.tokens import TurnRecord
+
+    assert set(TurnRecord().as_dict()) == {
+        "input_tokens", "output_tokens", "cached_tokens", "written_tokens",
+        "context_size", "estimated"}
+
+
+def test_the_per_task_record_keeps_exactly_these_fields():
+    """Cost and outcome together: what `comodor run --json` reports as
+    `measurement` and what insights aggregate. Removing or renaming a field
+    is a change to what the product accounts for, and must be deliberate."""
+    from comodor.agent.tokens import TaskMeasurement
+
+    assert set(TaskMeasurement().as_dict()) == {
+        "input_tokens", "output_tokens", "cached_tokens", "written_tokens",
+        "context_size", "estimated_turns", "model_turns", "tool_calls", "retries",
+        "clarifications_raised", "clarifications_answered", "corrections",
+        "knowledge_hits", "knowledge_stale", "preflight_calls", "preflight_tokens",
+        "outcome", "validation_outcome"}

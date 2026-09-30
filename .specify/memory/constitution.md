@@ -1,25 +1,50 @@
 <!--
 Sync Impact Report
-- Version change: 1.0.0 → 1.1.0 — nine new principles added, none removed or
-  redefined
-- Modified principles: none. Principles I–XII are preserved verbatim in
-  wording and intent
-- Added sections: Core Principles XIII–XXI (Quality-First Agent Behaviour;
-  Evidence Before Assumption; Interactive Clarification Is a Product
-  Invariant; Token Efficiency Is a Product Requirement; Progressive Learning
-  With Continued Use; Extend Existing Capabilities, Never Duplicate Them;
-  Grounded Tool Use; User Control Over Consequential Actions; Quality and
-  Token Efficiency Are Measured Together); one paragraph added to
-  "Compatibility Surfaces and Quality Gates" naming the benchmark evidence
-  required of context- and token-affecting changes
-- Removed sections: none
-- Other edits: one clarifying sentence added to the preamble distinguishing
-  the build-time principles (I–XII) from the agent-behaviour principles
-  (XIII–XXI); no existing rule changed
+- Version change: 1.1.0 → 2.0.0 (MAJOR). Principle XXI, the context-change
+  gate in "Compatibility Surfaces and Quality Gates", and the Development
+  Workflow rule on which tests may gate acceptance are redefined. Acceptance of
+  any change, including one that alters what is sent to a model, is
+  deterministic: it rests on correctness, safety, performance and accounting
+  checks that use scripted model responses wherever a model is involved, and
+  it requires no provider calls or paid tokens. A guarantee that work written
+  against 1.1.0 could rely on — that every change to what is sent to a model
+  carries model-dependent quality-and-token figures — no longer holds, so
+  this is a backward-incompatible redefinition.
+- Motivation: the owner decided (2026-09-28) that acceptance must not depend
+  on paying for, or having access to, any model. What is kept is honesty — no
+  claim of reduced tokens or of preserved or improved quality without evidence
+  the change itself provides — and production token-usage accounting, so
+  spending stays measurable.
+- Modified principles: XXI (Quality and Token Efficiency Are Measured
+  Together; title unchanged) — claims must be truthful and supportable;
+  acceptance is deterministic and requires no provider calls or paid tokens;
+  production token-usage accounting is required.
+- Modified sections:
+  - "Compatibility Surfaces and Quality Gates": the context-change gate
+    remains and is met by deterministic tests of the changed mechanism, run
+    with scripted model responses, plus truthful, supportable claims.
+  - "Development Workflow": every test in an acceptance gate is deterministic
+    and requires no provider calls or paid tokens.
+- Added sections: none. Removed sections: none. Principles I–XX are
+  unchanged.
+- Migration plan for work in flight:
+  - Feature 002 (`specs/002-grounded-agent-quality/`, PR #61) is accepted on
+    its deterministic gates. Its decisions D14–D17 retire the criteria that no
+    deterministic test measures and claim no token-efficiency or quality
+    improvement.
+  - Feature 001 (`specs/001-production-hardening/`) does not cite the
+    redefined rules and is unaffected.
+  - Open PR #39 (trading core) changes no file that determines what is sent to
+    a model.
+  - The plan and checklist lines "Checked against … v1.1.0" record checks made
+    at that version and stay as records; later checks cite 2.0.0.
+  - `AGENTS.md` and `CLAUDE.md` are local, untracked guides. Where they name a
+    model for tests, that is never an acceptance requirement; where they
+    diverge, this file governs.
 - Templates: dependent templates and commands read this file at runtime and
-  were not modified
-- Application source: not modified by this amendment
-- Follow-up TODOs: none — no placeholder tokens deferred
+  were not modified.
+- Application source: not modified by this amendment.
+- Follow-up TODOs: none.
 -->
 
 # Comodor Constitution
@@ -352,17 +377,27 @@ owns the consequences.
 ### XXI. Quality and Token Efficiency Are Measured Together
 
 Quality optimization and token optimization MUST be treated as one
-multi-objective engineering problem, never as independent goals. The project
-MUST maintain evidence that a token reduction does not introduce lower task
-success, more retries, more user corrections, more hallucinated assumptions,
-more failed tool calls, more regressions, weaker tests, or the loss of
-necessary context. Where practical, representative benchmark scenarios MUST
-compare input tokens, output tokens, number of model turns, number of tool
-calls, clarification count, task success, correction count and validation
-success, before and after the change.
+multi-objective engineering problem, never as independent goals. Every claim
+that a change reduces tokens, or preserves or improves quality, MUST be
+truthful and supportable by evidence the change itself provides:
+deterministic tests, production token-usage accounting, or other checks that
+run without a model. No token reduction may be claimed, and no change
+described as preserving or improving quality, without such evidence that it
+does not introduce lower task success, more retries, more user corrections,
+more hallucinated assumptions, more failed tool calls, more regressions,
+weaker tests, or the loss of necessary context. Where that evidence does not
+exist, the claim is not made.
 
-Rationale: without a paired measurement, every token saved looks like a win
-and every quality loss it caused is invisible until a user reports it.
+Acceptance of a change MUST be deterministic: it rests on correctness,
+safety, performance and accounting checks that use scripted model responses
+wherever a model is involved, and it requires no provider calls or paid
+tokens. Production token-usage accounting MUST be kept, so that token
+consumption stays measurable (Principle XVI).
+
+Rationale: a claim nobody can check is marketing, and an acceptance gate that
+can only be met by paying for a model makes acceptance depend on a bill rather
+than on the change. What must never be lost is the honesty of what is claimed
+and the ability to count what the product spends.
 
 ## Compatibility Surfaces and Quality Gates
 
@@ -389,10 +424,12 @@ one exists.
 
 A change that alters context construction, prompt construction, retrieval,
 summarization, memory, learning, model orchestration or any other mechanism
-that determines what is sent to a model carries one additional gate: the
-paired quality-and-token evidence required by Principle XXI, measured on
-representative scenarios and reported with both halves. Token figures
-presented without the accompanying quality figures do not satisfy this gate.
+that determines what is sent to a model carries one additional gate:
+deterministic tests that exercise the changed mechanism with scripted model
+responses and show that it neither omits evidence an answer depends on nor
+weakens validation, and claims about tokens or quality that meet Principle
+XXI. Like every gate above, it is deterministic and requires no provider calls
+or paid tokens.
 
 ## Development Workflow
 
@@ -413,10 +450,10 @@ from green checks, review approval or the words "done" or "continue".
 Public commit and pull-request metadata uses neutral engineering language
 and carries no tool or model attribution. Review findings are classified,
 fixed where valid, answered with evidence, and resolved only after the fix
-is pushed and the checks on the new commit support it. A live model is
-invoked by tests only where a deterministic fake cannot exercise the
-behaviour, and then only the model the repository designates for that
-purpose; credentials are never exposed.
+is pushed and the checks on the new commit support it. Every test in an
+acceptance gate is deterministic, uses scripted model responses wherever a
+model is involved, and requires no provider calls or paid tokens; credentials
+are never exposed.
 
 ## Governance
 
@@ -443,4 +480,4 @@ guidance for agents and contributors lives in `AGENTS.md` and `CLAUDE.md`,
 which MUST remain consistent with this constitution; where they diverge,
 this constitution governs and the guide is corrected.
 
-**Version**: 1.1.0 | **Ratified**: 2026-09-14 | **Last Amended**: 2026-09-14
+**Version**: 2.0.0 | **Ratified**: 2026-09-14 | **Last Amended**: 2026-09-28

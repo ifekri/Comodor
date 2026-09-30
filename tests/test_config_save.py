@@ -480,3 +480,35 @@ def test_the_saved_file_holds_its_bytes_before_the_rename(home, monkeypatch):
     config.save()
 
     assert order.index("fsync") < order.index("rename")
+
+
+# --------------------------------------------------------------------------- #
+# D17 — settings a file still carries after they were removed load, and do nothing
+# --------------------------------------------------------------------------- #
+
+
+def test_a_config_that_still_carries_removed_settings_loads_and_they_do_nothing(home):
+    """A file may still carry agent settings this version no longer has. Every
+    unknown key is ignored the same way (`config._apply`), so any such key
+    stands in for all of them: the file loads, the rest of the section still
+    applies, and every context optimization runs."""
+    from comodor.agent import AgentLoop, Conversation
+    from comodor.agent.context import OPTIMIZATIONS
+    from comodor.events import EventBus
+    from comodor.providers.gateway import Gateway
+    from comodor.safety import PermissionEngine
+    from comodor.tools import ToolRegistry
+
+    mine(home, agent={"retired_strategy": "minimal",
+                      "retired_switches": list(OPTIMIZATIONS),
+                      "max_steps": 12})
+    config = load(cwd=home / "project")
+    assert config.agent.max_steps == 12, "the rest of the section still applies"
+    assert not hasattr(config.agent, "retired_strategy")
+    assert not hasattr(config.agent, "retired_switches")
+
+    bus = EventBus()
+    agent = AgentLoop(config, Gateway(config, scripts=[]), ToolRegistry(), bus,
+                      PermissionEngine(config, bus), Conversation())
+    assert agent.conversation.optimizer.enabled == set(OPTIMIZATIONS), \
+        "every optimization runs"

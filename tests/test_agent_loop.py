@@ -180,7 +180,7 @@ def test_provider_failure_surfaces_as_an_error_event(config, bus):
 
 
 def test_a_turn_that_fails_halfway_still_reports_the_work_it_did(config, bus):
-    """Found by the benchmark: a task whose files had been changed came back
+    """A task whose files had been changed came back
     saying `steps: 0, tool_calls: 0`.
 
     The result used to be built on the way out of the loop, so an exception
@@ -267,11 +267,11 @@ def test_todo_tool_publishes_the_task_list(config, bus):
 # --------------------------------------------------------------------------- #
 # a turn that ends saying nothing
 #
-# Found by the benchmark: two of eight failures were a completed task reported
-# as an empty string. The model ran its tools, explained itself along the way,
-# and closed with a blank message. In the interface that is invisible, because
-# the explanation was streamed as it arrived — but `comodor run` prints only
-# the final message, so a caller gets nothing for a turn that did the work.
+# A completed task was reported as an empty string. The model ran its tools,
+# explained itself along the way, and closed with a blank message. In the
+# interface that is invisible, because the explanation was streamed as it
+# arrived — but `comodor run` prints only the final message, so a caller gets
+# nothing for a turn that did the work.
 # --------------------------------------------------------------------------- #
 
 

@@ -68,7 +68,11 @@ class Ask(Tool):
         "Ask the user to settle things you cannot settle yourself, as a short "
         "multiple-choice form. Call this ONCE, with every question you have, "
         "before you start building — not one question at a time, and not after "
-        "the work is done.\n"
+        "the work is done. One call carries at most "
+        f"{forms.MAX_QUESTIONS} questions; if you need more, make several "
+        "`ask` calls in the same reply. Every valid `ask` call in one reply "
+        "reaches the user together as one form, and if any of them is refused, "
+        "none is asked and you ask the whole set again.\n"
         "\n"
         "Ask when a reasonable person would read the request two different ways "
         "and the two readings lead to materially different work: which "
@@ -107,8 +111,8 @@ class Ask(Tool):
                 "maxItems": forms.MAX_QUESTIONS,
                 "description": (
                     f"Every question you need answered, at most "
-                    f"{forms.MAX_QUESTIONS}. They are shown together as one "
-                    f"form."),
+                    f"{forms.MAX_QUESTIONS} in this call. The questions of every "
+                    f"`ask` call in one reply are shown together as one form."),
                 "items": {
                     "type": "object",
                     "required": ["question", "header", "options"],
@@ -207,18 +211,15 @@ class Ask(Tool):
         return "\n".join(lines)
 
     def run(self, ctx: ToolContext, **args: Any) -> ToolResult:
-        try:
-            questions = forms.parse(args.get("questions"))
-        except forms.MalformedQuestions as problem:
-            return ToolResult.failure(str(problem))
-
-        # A form is for a decision the person has to make, never for leave to
-        # proceed or for a plan to be read back and approved (FR-011). Refused
-        # as a tool error, so the model is told to get on with it.
+        questions, why = check(args.get("questions"))
+        if why:
+            return ToolResult.failure(why)
+        # The same decision asked twice is one question, as it is across
+        # calls (D18).
+        unique: dict[str, forms.Question] = {}
         for question in questions:
-            why = not_a_decision(question.prompt)
-            if why:
-                return ToolResult.failure(why)
+            unique.setdefault(_key(question.prompt), question)
+        questions = list(unique.values())
 
         book = ctx.evidence
 
@@ -284,6 +285,254 @@ class Ask(Tool):
 #: Where a clarification came from. Preserved so a transcript can tell a
 #: question the model chose to ask from one the Core discovered.
 ORIGINS = ("model_ask", "mutation_preflight", "delegate")
+
+
+def check(raw: Any) -> tuple[list[forms.Question], str]:
+    """One call's questions, or why the call is refused.
+
+    A form is for a decision the person has to make, never for leave to
+    proceed or for a plan to be read back and approved (FR-011), and never a
+    shape the form cannot hold — more than the per-call limit, no options.
+    The loop runs this over every `ask` in a reply before any of them is put
+    to the person, so one refused call refuses the whole set (D19).
+    """
+    try:
+        questions = forms.parse(raw)
+    except forms.MalformedQuestions as problem:
+        return [], str(problem)
+    for question in questions:
+        why = not_a_decision(question.prompt)
+        if why:
+            return [], why
+    # `parse` numbers a repeated header so the tabs stay apart; a header the
+    # model itself gave two different questions is refused instead, as it is
+    # across calls (D19). The headers it supplied are checked, not the renamed.
+    supplied = [(str(entry.get("header") or "").strip(), question.prompt)
+                for entry, question in zip(raw, questions, strict=True)]
+    why = _shared_header([(header, prompt) for header, prompt in supplied if header])
+    if why:
+        return [], why
+    return questions, ""
+
+
+def collision(calls: list[list[forms.Question]]) -> str:
+    """A header two different questions share across one reply, or "".
+
+    Answers bind by header (FR-020), so one header naming two decisions
+    would put one answer on both. The same decision asked twice under the
+    same header is not a collision; it is one question (D18).
+    """
+    return _shared_header([(question.header, question.prompt)
+                           for questions in calls for question in questions])
+
+
+def _shared_header(pairs: list[tuple[str, str]]) -> str:
+    """The refusal for a header naming two different questions, or "".
+
+    Headers differing only in case are the same tab to the person (`parse`
+    treats them so), so they are compared that way.
+    """
+    owner: dict[str, str] = {}
+    for header, prompt in pairs:
+        key = _key(prompt)
+        earlier = owner.setdefault(header.lower(), key)
+        if earlier != key:
+            return (f"the header {header!r} names two different questions in "
+                    f"this reply; each question needs a header of its own")
+    return ""
+
+
+def ask_together(ctx: ToolContext, calls: list[tuple[str, list[forms.Question]]],
+                 extra: list[tuple[forms.Question, Any]] | None = None
+                 ) -> dict[str, ToolResult]:
+    """Every `ask` of one reply, put to the person as one form (FR-014, D18, D19).
+
+    `calls` is `[(call id, questions)]`, already checked. `extra` holds the
+    decisions the mutation preflight found missing for the same reply; they
+    are part of the same decision point, so they ride on the same form. A
+    model question stating one of them stands for it on the form, and the
+    preflight's decision — material, as the Core found it — is the one it
+    resolves, whatever the model said the question affects (FR-013).
+
+    The same decision asked by two calls is one question, shown under the
+    first asking call's header, and each call is answered under its own
+    header. Each call gets back a result naming only its own questions. The
+    form record rides on the first call's result, so the transcript holds the
+    form once and the answers are learned once.
+    """
+    book = ctx.evidence
+    consulted = consulted_sources(ctx)
+    shown: dict[str, tuple[forms.Question, Any]] = {}
+    order: list[str] = []
+    mine: dict[str, list[tuple[str, str]]] = {}
+    settled: dict[str, list[str]] = {}
+    discretion: dict[str, list[str]] = {}
+    results: dict[str, ToolResult] = {}
+    found = {_key(decision.what): decision for _, decision in extra or []}
+
+    for call_id, questions in calls:
+        # A decision the person already declined this attempt is not put to
+        # them again (FR-129).
+        already = [decision for question in questions
+                   for decision in book.decisions
+                   if _same(decision.what, question.prompt)
+                   and decision.material
+                   and decision.state in ("unresolved", "blocked")]
+        if already:
+            results[call_id] = _unresolved(already, already[0].outcome or "cancelled",
+                                           repeated=True)
+            continue
+        mine[call_id], settled[call_id], discretion[call_id] = [], [], []
+        here: set[str] = set()
+        for question in questions:
+            key = _key(question.prompt)
+            if key in here:
+                # A repeat within this call is the question it already holds;
+                # it is answered to the call once, under the header shown.
+                continue
+            here.add(key)
+            if key in shown:
+                mine[call_id].append((question.header, key))
+                continue
+            question.options = ground(question.options, ctx)
+            candidates = [option.label for option in question.options if not option.free]
+            decision = found.get(key)
+            if decision is not None:
+                decision.candidates = decision.candidates or candidates
+            else:
+                decision = book.open_decision(
+                    question.prompt, affects=question.affects,
+                    candidates=candidates, evidence_consulted=consulted)
+            if decision.state == "answered":
+                settled[call_id].append(f"{question.prompt} — {decision.answer}")
+                continue
+            if not decision.material:
+                discretion[call_id].append(question.prompt)
+                continue
+            question.reason = decision.materiality
+            question.evidence_consulted = list(decision.evidence_consulted)
+            question.decision_ref = decision.ref
+            shown[key] = (question, decision)
+            order.append(key)
+            mine[call_id].append((question.header, key))
+
+    # Compared without case, as `check()` and `collision()` compare them: two
+    # headers differing only in case are one tab to the person.
+    by_model = bool(shown)
+    headers = {question.header.lower() for question, _ in shown.values()}
+    for question, decision in extra or []:
+        key = _key(decision.what)
+        if key in shown:
+            continue
+        question.header = _free_header(question.header, headers)
+        headers.add(question.header.lower())
+        shown[key] = (question, decision)
+        order.append(key)
+
+    pending = [shown[key] for key in order]
+    # A form of the preflight's questions alone is the Core's, not the model's.
+    origin = "model_ask" if by_model else "mutation_preflight"
+    form = present(ctx, pending, origin=origin) if pending else None
+    record = form.meta.get("form") if form is not None else None
+    submitted = {entry["header"]: entry for entry in (record or {}).get("answers", [])}
+    outcome = str((record or {}).get("outcome") or "")
+    given_total = sum(1 for entry in submitted.values()
+                      if entry.get("chosen") or str(entry.get("written") or "").strip())
+    first = True
+
+    for call_id, entries in mine.items():
+        if not entries:
+            results[call_id] = _nothing_to_ask(settled[call_id], discretion[call_id])
+            continue
+        questions = []
+        answers = []
+        decisions = []
+        for own, key in entries:
+            question, decision = shown[key]
+            questions.append(forms.Question(
+                prompt=question.prompt, header=own, options=question.options,
+                multi=question.multi, affects=question.affects,
+                reason=question.reason,
+                evidence_consulted=list(question.evidence_consulted),
+                decision_ref=question.decision_ref))
+            decisions.append(decision)
+            given = submitted.get(question.header)
+            if given is not None:
+                answers.append(_rebind(given, own, question.prompt))
+        if not submitted:
+            result = _unresolved(decisions, outcome or "cancelled")
+        else:
+            left_open = [decision for decision in decisions
+                         if decision.material and decision.state != "answered"]
+            given_count = sum(1 for answer in answers if answer.given)
+            result = ToolResult.success(
+                forms.summarise(questions, answers),
+                display="\n".join(f"{answer.header}: {answer.text}"
+                                  for answer in answers if answer.given)
+                or "Every question skipped.",
+                answered=True, given=given_count, asked=len(questions))
+            if left_open:
+                result.meta["outcome"] = "cancelled"
+                result.meta["clarification"] = payload_for(left_open, "cancelled")
+        # Counted once: the whole form rides on the first call.
+        if first and record is not None:
+            result.meta["form"] = record
+            result.meta["asked"] = len(pending)
+            result.meta["given"] = given_total
+            first = False
+        else:
+            result.meta["asked"] = 0
+            result.meta["given"] = 0
+        results[call_id] = _with_discretion(result, discretion[call_id])
+    if first and record is not None and calls:
+        # No asking call kept a question on the form — only the preflight's
+        # are there. The record still rides on a result, or the decisions it
+        # leaves open are missing from the transcript and a later resumption
+        # by their `decision_ref` is refused as unknown (FR-129).
+        carrier = results[calls[0][0]]
+        carrier.meta["form"] = record
+        carrier.meta["asked"] = len(pending)
+        carrier.meta["given"] = given_total
+    return results
+
+
+def _rebind(given: dict[str, Any], own: str, prompt: str) -> forms.Answer:
+    """The answer given under the form's header, returned under `own` — the
+    header the asking call used — so every call reads its own answer (D19)."""
+    return forms.Answer(header=own, prompt=prompt,
+                        chosen=list(given.get("chosen") or []),
+                        written=str(given.get("written") or ""))
+
+
+def _key(prompt: str) -> str:
+    """The same decision stated the same way, whatever the spacing or case."""
+    return " ".join(str(prompt).lower().split())
+
+
+def _free_header(header: str, taken: set[str]) -> str:
+    """`header`, or the first numbered variant no other question uses.
+
+    `taken` holds lower-cased headers; the comparison ignores case."""
+    if header.lower() not in taken:
+        return header
+    number = 2
+    while f"{header} {number}".lower() in taken:
+        number += 1
+    return f"{header} {number}"
+
+
+def _nothing_to_ask(settled: list[str], discretion: list[str]) -> ToolResult:
+    """What `ask` says when none of its questions needed the person."""
+    if discretion:
+        listed = "\n".join(f"  - {prompt}" for prompt in discretion)
+        return ToolResult.success(
+            "Nothing here needs the person — these are yours to decide, "
+            "and you must say which way you went:\n" + listed,
+            display="Decided here.", answered=False, given=0, asked=0)
+    return ToolResult.success(
+        "No question was needed — every one is already settled by what "
+        "this turn read or was told:\n" + "\n".join(f"  - {line}" for line in settled),
+        display="Already settled.", answered=True, given=0, asked=0)
 
 
 def present(ctx: ToolContext, pending: list[tuple[forms.Question, Any]], *,
@@ -360,9 +609,14 @@ def present(ctx: ToolContext, pending: list[tuple[forms.Question, Any]], *,
         summary,
         display=shown or "Every question skipped.",
         answered=True, given=given, asked=len(asked))
-    result.meta["form"] = form_record(asked, answers,
-                                      "cancelled" if left_open else "answered",
-                                      origin=origin)
+    record = form_record(asked, answers, "cancelled" if left_open else "answered",
+                         origin=origin)
+    # The record is emitted with the tool event and persisted with the
+    # message, so an answer is redacted there as the result text is.
+    for entry in record["answers"]:
+        entry["chosen"] = [ctx.redact(label) for label in entry["chosen"]]
+        entry["written"] = ctx.redact(entry["written"])
+    result.meta["form"] = record
     if left_open:
         result.meta["outcome"] = "cancelled"
         result.meta["clarification"] = payload_for(left_open, "cancelled")

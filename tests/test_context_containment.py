@@ -1,14 +1,11 @@
 """Containment can force a recovery read — the mechanism, not a history.
 
 A tool result larger than the budget keeps its head and tail and drops the
-middle. If the model needs the middle, it must ask again, and the benchmark's
+middle. If the model needs the middle, it must ask again, and the task's
 end-to-end total pays for that extra turn *on top of* the containment.
 
 This proves the architectural possibility with a deterministic provider that
-decides from what it can actually see. It does **not** prove that any
-historical benchmark run behaved this way: the committed T015/T096 artifacts
-carry no truncation or overflow record, so historical causation is not
-established here.
+decides from what it can actually see.
 """
 
 from __future__ import annotations

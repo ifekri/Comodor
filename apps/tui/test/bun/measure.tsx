@@ -2,7 +2,7 @@
  * What the interface costs, measured rather than asserted.
  *
  * Not a test. There are no thresholds here, because a ceiling on a
- * microbenchmark measures whichever runner it landed on — the Python suite
+ * micro-measurement measures whichever runner it landed on — the Python suite
  * already learned that lesson, and its performance ceilings are the loose
  * ones that survive it. This prints numbers, and a person reads them.
  *
@@ -41,7 +41,7 @@ class Loop implements Transport {
     const params = (m["params"] ?? {}) as Record<string, unknown>;
     if (method === "client.hello") {
       this.push(response(id, { protocol_version: PROTOCOL_VERSION,
-        core: { name: "bench", version: "0" },
+        core: { name: "measure", version: "0" },
         capabilities: ["streaming", "questions", "permissions", "modes",
                        "tool_events", "tasks", "delegates"] }));
     } else if (method === "session.create") {

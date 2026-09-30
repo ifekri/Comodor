@@ -2,8 +2,8 @@
 
 Marked `performance` so it runs alone, like the rest of the timing suite. The
 thresholds are deliberately loose — an order of magnitude above what the
-machine here does — because a benchmark that fails on a loaded CI runner is a
-benchmark people learn to ignore. What they catch is a regression that changes
+machine here does — because a timing test that fails on a loaded CI runner is
+one people learn to ignore. What they catch is a regression that changes
 the shape of the cost, not a slow afternoon.
 
 The actual numbers from a run are printed, so a person reading CI output sees
@@ -42,7 +42,7 @@ def _serve(service: CoreService, lines: list[dict]) -> tuple[list[dict], float]:
 def _hello() -> dict:
     return P.request("h", "client.hello", {
         "protocol_version": P.PROTOCOL_VERSION,
-        "client": {"name": "bench", "version": "0"}})
+        "client": {"name": "measure", "version": "0"}})
 
 
 def test_encoding_and_decoding_one_message_is_cheap():

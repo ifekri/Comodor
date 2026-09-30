@@ -1,4 +1,4 @@
-"""`comodor run` — the path scripts, CI and the benchmark all go through.
+"""`comodor run` — the path scripts and CI go through.
 
 Nobody is watching a headless run, which is exactly why the two things checked
 here matter. A question with no one to answer it used to hold the process for
@@ -13,7 +13,7 @@ import argparse
 import io
 import json
 import time
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 import pytest
 
@@ -166,7 +166,7 @@ def test_the_json_result_names_the_tools_that_ran(scripted):
 def test_an_answer_with_an_arrow_in_it_does_not_kill_the_run(scripted, capsys):
     """A Windows console is cp1252, and `print` of anything outside it raises.
 
-    Found by the benchmark: a run did all its work, wrote its files, and then
+    A run did all its work, wrote its files, and then
     died on `json.dumps` because the answer contained `→`. Exit code 1, nothing
     on stdout, and no sign that the task had actually been done. An em dash, a
     Persian word or an emoji does it just as well.
@@ -389,7 +389,7 @@ def test_a_cancelled_or_expired_run_invents_no_value(scripted):
 
 def test_the_json_usage_reports_cache_creation_tokens(scripted):
     """A provider that bills cache creation reports it; the payload carries it
-    so a benchmark total does not understate what the model read."""
+    so a total does not understate what the model read."""
     config = scripted([Script(text="Done.")])
     out = io.StringIO()
     with redirect_stdout(out):
@@ -486,22 +486,31 @@ def _decoded(document: str) -> dict:
             for answer in forms.decode_answers(document)}
 
 
-def test_a_lone_value_answers_the_questions_that_offer_it_and_no_other():
-    """One scripted `value` is one answer: it picks the option it names where
-    offered and does not spill into an unrelated question (review 4045469373)."""
+def test_a_lone_value_answers_the_one_question_of_a_one_question_form():
+    """An explicit choice, and exactly that choice (D19)."""
     from comodor import questions as forms
 
-    answers = _decoded(cli._answers_from_form(_Form(a_two_question_form()), "Flask", forms))
-    assert answers["Framework"] == (["Flask"], "")
-    assert answers["Database"] == (["SQLite"], ""), "the default, not the framework answer"
+    answers = _decoded(cli._answers_from_form(_Form(a_question()), "Flask", forms))
+    assert answers == {"Framework": (["Flask"], "")}
 
 
-def test_a_lone_free_text_value_lands_in_the_first_question_only():
+def test_a_lone_value_does_not_fit_a_form_of_several_questions():
+    """One value is never spread across questions, and never lands in the
+    first question by default (D19)."""
     from comodor import questions as forms
 
-    answers = _decoded(cli._answers_from_form(_Form(a_two_question_form()), "FastAPI", forms))
-    assert answers["Framework"] == ([], "FastAPI")
-    assert answers["Database"] == (["SQLite"], "")
+    with pytest.raises(cli.ScriptError):
+        cli._answers_from_form(_Form(a_two_question_form()), "Flask", forms)
+
+
+def test_keyed_values_answer_exactly_the_headers_they_name():
+    """An omitted question stays unanswered: no first option is filled in."""
+    from comodor import questions as forms
+
+    answers = _decoded(cli._answers_from_form(
+        _Form(a_two_question_form()), "", forms, values={"Framework": "Django"}))
+    assert answers["Framework"] == (["Django"], "")
+    assert answers["Database"] == ([], ""), "left open, not defaulted"
 
 
 def test_values_keyed_by_header_answer_each_question():
@@ -527,16 +536,6 @@ def test_a_keyed_interaction_reaches_the_form(scripted):
     replies = [message.content for call in scripted.providers[0].calls
                for message in call]
     assert any("DuckDB" in reply and "Django" in reply for reply in replies)
-
-
-def test_a_malformed_values_map_is_refused_when_the_scenario_loads():
-    from bench.task import TaskError, _interactions
-
-    with pytest.raises(TaskError):
-        _interactions([{"action": "answer", "values": ["Flask"]}])
-    with pytest.raises(TaskError):
-        _interactions([{"action": "answer", "values": {"Framework": 3}}])
-    assert _interactions([{"action": "answer", "values": {"Framework": "Flask"}}])
 
 
 # --------------------------------------------------------------------------- #
@@ -710,3 +709,215 @@ def test_a_finished_run_keeps_nothing_and_a_stopped_one_keeps_it_hidden(scripted
     store = SessionStore(config.paths.user / "sessions")
     assert store.list_sessions() == []
     assert store.find_continuation(ref) is not None
+
+
+# --------------------------------------------------------------------------- #
+# T241 — scripted interactions match their form, or the run fails clearly
+# (D19). Structural errors are refused before the run and before any model
+# call; a mismatch is found when the form appears and closes it unattended.
+# --------------------------------------------------------------------------- #
+
+
+#: A task that names the options, so the form offers them (FR-016).
+GROUNDED = "Which framework: Flask or Django? Which database: SQLite or PostgreSQL?"
+
+
+def _script_run(scripted, scripts, interactions, *, json_out=True):
+    config = scripted(scripts)
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        code = cli.run_headless(config, run(config, json=json_out, task=GROUNDED,
+                                            interactions=interactions))
+    return code, out.getvalue(), err.getvalue(), config
+
+
+def _writes(path="app.py"):
+    return ToolCall(id="w1", name="write_file",
+                    arguments={"path": path, "content": "x = 1\n"})
+
+
+BEFORE_THE_RUN = {
+    "not_json": "[{answer",
+    "not_a_list": json.dumps({"action": "cancel"}),
+    "unknown_action": json.dumps(["cancell"]),
+    "bare_answer_string": json.dumps(["answer"]),
+    "bare_answer_object": json.dumps([{"action": "answer"}]),
+    "empty_value": json.dumps([{"action": "answer", "value": "  "}]),
+    "empty_keyed_value": json.dumps([{"action": "answer", "values": {"Framework": ""}}]),
+    "values_not_a_map": json.dumps([{"action": "answer", "values": ["Flask"]}]),
+    "several_without_headers": json.dumps([
+        {"action": "answer", "values": {"Framework": "Flask"}}, "cancel"]),
+}
+
+
+@pytest.mark.parametrize("case", list(BEFORE_THE_RUN))
+def test_an_unusable_script_fails_before_any_model_call(scripted, case):
+    code, out, err, _ = _script_run(
+        scripted, [Script(text="One thing first.", tool_calls=[a_question()])],
+        BEFORE_THE_RUN[case])
+    assert code == 1
+    assert "--interactions" in err
+    assert scripted.providers == [], "no gateway, no model call"
+    assert json.loads(out)["error"]["kind"] == "interactions"
+
+
+@pytest.mark.parametrize("form", ["one_question", "two_questions"])
+def test_a_bare_answer_is_refused_whatever_the_form(scripted, form):
+    call = a_question() if form == "one_question" else a_two_question_form()
+    code, _out, err, config = _script_run(
+        scripted, [Script(text="Asking.", tool_calls=[call]),
+                   Script(text="Writing.", tool_calls=[_writes()])],
+        json.dumps(["answer"]))
+    assert code == 1 and "states no choice" in err
+    assert scripted.providers == []
+    assert not (config.paths.project / "app.py").exists()
+
+
+def test_an_explicit_first_option_is_that_option_and_nothing_else(scripted):
+    code, out, _err, _ = _script_run(
+        scripted, [Script(text="Asking.", tool_calls=[a_question()]),
+                   Script(text="Flask it is.")],
+        json.dumps([{"action": "answer", "value": "Flask"}]))
+    assert code == 0 and json.loads(out)["ok"]
+    replies = [m.content for call in scripted.providers[0].calls for m in call]
+    assert any("-> Flask" in reply for reply in replies)
+
+
+def test_a_keyed_first_option_leaves_the_other_question_open(scripted):
+    code, out, _err, _ = _script_run(
+        scripted, [Script(text="Asking.", tool_calls=[a_two_question_form()]),
+                   Script(text="unreachable")],
+        json.dumps([{"action": "answer", "values": {"Framework": "Flask"}}]))
+    report = json.loads(out)
+    assert code == 3 and report["stopped"] == "clarification_required"
+    assert [entry["decision"] for entry in report["clarification"]["decisions"]] \
+        == ["Which database?"]
+
+
+def test_a_mismatched_entry_closes_the_form_unattended_and_fails(scripted):
+    code, out, err, config = _script_run(
+        scripted, [Script(text="Asking.", tool_calls=[a_question()]),
+                   Script(text="Writing.", tool_calls=[_writes()])],
+        json.dumps([{"action": "answer", "values": {"Database": "SQLite"}},
+                    {"action": "cancel", "headers": ["Framework"]}]))
+    report = json.loads(out)
+    assert code == 1
+    assert "'Database', which is not on the form" in err
+    assert report["error"]["kind"] == "interactions"
+    assert report["clarification"]["outcome"] == "unattended", "never a false cancellation"
+    assert not (config.paths.project / "app.py").exists(), "no dependent work"
+
+
+def test_an_unkeyed_answer_does_not_fit_a_form_of_two_questions(scripted):
+    code, _out, err, _ = _script_run(
+        scripted, [Script(text="Asking.", tool_calls=[a_two_question_form()])],
+        json.dumps([{"action": "answer", "value": "Flask"}]))
+    assert code == 1 and "fits only a form of one question" in err
+
+
+def test_a_leftover_entry_fails_the_run(scripted):
+    code, _out, err, _ = _script_run(
+        scripted, [Script(text="Asking.", tool_calls=[a_question()]),
+                   Script(text="Flask it is.")],
+        json.dumps([{"action": "answer", "values": {"Framework": "Flask"}},
+                    {"action": "cancel", "headers": ["Database"]}]))
+    assert code == 1 and "entry 2 was never used" in err
+
+
+def test_an_entry_is_never_applied_to_a_later_form(scripted):
+    """Entry 1 was written for a Database form; the first form is Framework.
+    The run stops there, and entry 1 never answers anything."""
+    later = ToolCall(id="call-3", name="ask", arguments={"questions": [{
+        "question": "Which database?", "header": "Database",
+        "options": [{"label": "SQLite"}, {"label": "PostgreSQL"}]}]})
+    code, _out, _err, _ = _script_run(
+        scripted, [Script(text="Asking.", tool_calls=[a_question()]),
+                   Script(text="Then.", tool_calls=[later]),
+                   Script(text="SQLite it is.")],
+        json.dumps([{"action": "answer", "values": {"Database": "SQLite"}},
+                    {"action": "cancel", "headers": ["Framework"]}]))
+    assert code == 1
+    replies = [m.content for call in scripted.providers[0].calls for m in call]
+    assert not any("-> SQLite" in reply for reply in replies)
+
+
+# -- mutation checks: each guard is load-bearing ------------------------------ #
+
+
+def _old_silent_script(raw):
+    """The removed fallback: an unusable script became no script at all."""
+    try:
+        parsed = raw if isinstance(raw, list) else json.loads(str(raw))
+    except ValueError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    entries = []
+    for item in parsed:
+        item = {"action": item} if isinstance(item, str) else dict(item)
+        entries.append({"index": len(entries) + 1,
+                        "action": str(item.get("action", "")).lower(),
+                        "value": str(item.get("value") or ""),
+                        "values": dict(item.get("values") or {}), "headers": []})
+    return entries
+
+
+def _old_filling_answers(request, value, forms, values=None):
+    """The removed fill: a question nobody named took its first option."""
+    questions = forms.decode(request.meta.get("questions") or [])
+    keyed = dict(values or {})
+    answers = []
+    for question in questions:
+        offered = [o.label for o in question.options if not o.free]
+        given = keyed.get(question.header) or (value if value in offered else "")
+        if given in offered:
+            chosen, written = [given], ""
+        elif given:
+            chosen, written = [], given
+        else:
+            chosen, written = offered[:1], ""
+        answers.append(forms.Answer(header=question.header, prompt=question.prompt,
+                                    chosen=chosen, written=written))
+    return forms.encode_answers(answers)
+
+
+def test_the_silent_fallback_is_what_the_check_removes(scripted, monkeypatch):
+    """Mutation check: with the old fallback, a malformed script runs the model."""
+    monkeypatch.setattr(cli, "_scripted_interactions", _old_silent_script)
+    code, _out, _err, _ = _script_run(
+        scripted, [Script(text="Done.")], BEFORE_THE_RUN["not_json"])
+    assert code != 1 and scripted.providers, "the mutation runs the model"
+
+
+def test_the_fill_is_what_exact_answering_removes(scripted, monkeypatch):
+    """Mutation check: with the first-option fill restored, an omitted
+    question is answered for the user."""
+    monkeypatch.setattr(cli, "_answers_from_form", _old_filling_answers)
+    code, _out, _err, _ = _script_run(
+        scripted, [Script(text="Asking.", tool_calls=[a_two_question_form()]),
+                   Script(text="Done.")],
+        json.dumps([{"action": "answer", "values": {"Framework": "Flask"}}]))
+    assert code == 0, "the mutation fills the database question"
+
+
+def test_the_bare_answer_check_is_load_bearing(scripted, monkeypatch):
+    """Mutation check: accept a bare answer again, with the fill, and the
+    one-question form gets an option nobody chose instead of exit 1."""
+    monkeypatch.setattr(cli, "_scripted_interactions", _old_silent_script)
+    monkeypatch.setattr(cli, "_answers_from_form", _old_filling_answers)
+    code, _out, _err, _ = _script_run(
+        scripted, [Script(text="Asking.", tool_calls=[a_question()]),
+                   Script(text="Done.")], json.dumps(["answer"]))
+    assert code == 0, "the mutation selects the first option"
+
+
+def test_the_unkeyed_answer_check_is_load_bearing(scripted, monkeypatch):
+    """Mutation check: without the form check, an unkeyed value on a
+    two-question form would be applied."""
+    monkeypatch.setattr(cli, "_mismatch", lambda entry, request, forms: "")
+    monkeypatch.setattr(cli, "_answers_from_form", _old_filling_answers)
+    code, _out, _err, _ = _script_run(
+        scripted, [Script(text="Asking.", tool_calls=[a_two_question_form()]),
+                   Script(text="Done.")],
+        json.dumps([{"action": "answer", "value": "Flask"}]))
+    assert code == 0, "the mutation applies it"

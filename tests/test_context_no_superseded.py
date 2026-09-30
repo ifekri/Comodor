@@ -10,6 +10,7 @@ and the guard is the sweep itself — remove it and the stale copy reappears.
 from __future__ import annotations
 
 from comodor.agent import AgentLoop, Conversation, staleness
+from comodor.agent.context import OPTIMIZATIONS, Optimizer
 from comodor.providers.base import Role, ToolCall
 from comodor.providers.fake import Script
 from comodor.providers.gateway import Gateway
@@ -37,12 +38,15 @@ def scripts():
     ]
 
 
-def _run(config, bus):
+def _run(config, bus, off=()):
     (config.paths.project / "a.py").write_text(big(), encoding="utf-8")
     config.agent.compact_at = 0.0001            # pressure on every step
     gateway = Gateway(config, scripts=scripts())
     agent = AgentLoop(config, gateway, ToolRegistry(), bus,
                       PermissionEngine(config, bus), Conversation())
+    # Optimizations are switched off inside the test only (D17).
+    agent.conversation.optimizer = Optimizer(
+        name for name in OPTIMIZATIONS if name not in off)
     agent._window = lambda: 50_000_000
     agent._summarise = lambda middle: "brief"
     agent.run("read, edit, read again")
@@ -89,10 +93,9 @@ def test_the_guard_is_the_sweep(config, bus, monkeypatch):
     """
     monkeypatch.setattr(staleness, "forget_superseded_reads",
                         lambda messages, estimate, worth_it=0: (0, 0))
-    config.agent.optimizations_off = ["budget"]
-    agent, gateway = _run(config, bus)
+    agent, gateway = _run(config, bus, off=("budget",))
     assert [i for i in _stale_copies(gateway) if i >= 3], \
         "the mutation leaves the stale copy in the request"
     monkeypatch.undo()
-    agent, gateway = _run(config, bus)
+    agent, gateway = _run(config, bus, off=("budget",))
     assert [i for i in _stale_copies(gateway) if i >= 3] == []

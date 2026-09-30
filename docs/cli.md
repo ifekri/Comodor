@@ -81,7 +81,7 @@ comodor run "refactor the parser" --max-steps 40
 | `--yes` | approve writes and commands automatically |
 | `--json` | a machine-readable result on stdout |
 | `--max-steps N` | override the step limit for this run |
-| `--interactions JSON` | script answers to question forms, in order: `"answer"` (or `{"action":"answer","value":"…"}`, or `{"action":"answer","values":{"<header>":"…"}}` for a form with several questions), `"cancel"`, `"expire"`, `"unattended"`. A lone `value` picks the option it names wherever it is offered and otherwise answers the first question only. Without it, a form nobody can answer is `unattended` |
+| `--interactions JSON` | script what happens to each question form, one entry per form, in order — see [Scripted interactions](#scripted-interactions). Without it, a form nobody can answer is `unattended` |
 
 Without `--yes` it will ask, on stderr, and refuse rather than assume if nothing
 can answer. That is deliberate: a script that silently self-approves is a script
@@ -160,6 +160,65 @@ jq -e '.stopped == "done"' result.json
 `comodor run` exits `3` when a decision is still needed, distinct from `0`
 (done), `1` (an error) and `130` (interrupted). A script can therefore tell
 "waiting on a human" apart from "it failed".
+
+### Scripted interactions
+
+`--interactions` plays the person at the form, for tests and automation. It is
+a JSON list with **one entry per form**, in order. Every question one model
+reply raises — however many `ask` calls it took — arrives as **one** form, so
+one entry covers them all.
+
+| Entry | Does |
+|---|---|
+| `{"action": "answer", "values": {"<header>": "<choice>"}}` | answers exactly the questions it names; the others stay open |
+| `{"action": "answer", "value": "<choice>"}` | answers a form of **one** question |
+| `"cancel"`, `"expire"`, `"unattended"` | end the whole form that way |
+| `{"action": "cancel", "headers": ["<header>", …]}` | the same, naming the form it is for |
+
+The rules, all checked so a script cannot quietly do something else:
+
+- **An answer states its choice.** A bare `"answer"`, or one with an empty
+  value, is refused — nothing is ever chosen for you. To take the first
+  option, name it: `{"action": "answer", "value": "SQLite"}`.
+- **An answer names what it answers.** `values` answers exactly the headers it
+  lists; a question it does not name stays open, and is never filled with a
+  default or with a value meant for another question. A `value` without
+  headers fits only a form of one question.
+- **Several entries name their forms.** In a script of more than one entry,
+  every entry — `cancel`, `expire` and `unattended` included — names the
+  headers of the form it is for, through `values` or `headers`. A single entry
+  may leave them out.
+- **A script that does not fit fails, with exit code `1`.** Invalid JSON, a
+  value that is not a list, an unknown action or an answer with no choice is
+  refused before the run starts and before any model is called. An entry
+  whose headers are not on the form that appears is refused when that form
+  appears: the form is closed as `unattended` — never reported as your
+  cancellation — nothing is applied to it, no dependent work runs, and the run
+  ends with the error (and `--json` carries it as `error.kind:
+  "interactions"`). An entry still unused when the run ends is refused the same
+  way. An entry is never applied to a form it was not written for.
+
+```bash
+# one form, one question
+comodor run "set up the database" --interactions '[{"action": "answer", "value": "SQLite"}]'
+
+# two forms, each entry naming its own
+comodor run "set up the service" --interactions '[
+  {"action": "answer", "values": {"Database": "SQLite", "Queue": "Redis"}},
+  {"action": "cancel", "headers": ["Region"]}
+]'
+```
+
+**Changed in this release (breaking for scripts that counted forms).** A
+model reply that asks through several calls used to raise one form per call,
+and a script answered them with one entry each. They are now one form. To
+update a script:
+
+1. Count forms per model reply, not per `ask` call.
+2. Give each entry of a multi-entry script the headers of its form
+   (`values` for an answer, `headers` for the other actions).
+3. Replace a bare `"answer"`, or one that relied on unnamed questions being
+   filled in, with the choice for every question you mean to answer.
 
 ### Answering later: `--decision-answers`
 

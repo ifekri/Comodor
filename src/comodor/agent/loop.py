@@ -39,10 +39,11 @@ from ..providers.base import (
     Usage,
 )
 from ..providers.gateway import Gateway
+from ..questions import MAX_QUESTIONS as _MAX_QUESTIONS
 from ..safety import PermissionEngine, Risk
-from ..tools import ToolContext, ToolRegistry, ToolResult
+from ..tools import ToolContext, ToolRegistry, ToolResult, overflow
 from . import plan, preflight, staleness
-from .context import Conversation, Optimizer
+from .context import Conversation
 from .prompts import COMPACT_PROMPT, build_system_prompt, project_instructions
 from .tokens import TaskMeasurement
 
@@ -145,6 +146,21 @@ def _answered_pairs(form: dict[str, Any]) -> list[tuple[str, str]]:
     return pairs
 
 
+def _still_open(ref: str, recorded: Any) -> dict[str, Any]:
+    """A decision the transcript records as open, as a carried payload."""
+    question = recorded.question
+    return {
+        "decision": str(question.get("prompt") or ""),
+        "decision_ref": ref,
+        "reason": str(question.get("reason") or "behaviour"),
+        "outcome": recorded.outcome if recorded.outcome in (
+            "cancelled", "expired", "unattended") else "cancelled",
+        "candidates": [str(option.get("label", "")) for option in question.get("options") or []
+                       if isinstance(option, dict) and not option.get("free")],
+        "evidence_consulted": list(question.get("evidence_consulted") or []),
+    }
+
+
 def _carried_decisions(carried: dict[str, Any]) -> list[dict[str, Any]]:
     """Every open decision a carried clarification payload names, in order.
 
@@ -193,7 +209,7 @@ class TurnResult:
     #: One sanitized record per mutation preflight: fingerprints and bounded
     #: excerpts, never unrestricted source content. It rides the result, not
     #: the counts-only measurement, so a wrong `allow` can be explained from a
-    #: benchmark/debug artifact without rerunning the model.
+    #: debug artifact without rerunning the model.
     preflight_traces: list[dict[str, Any]] = field(default_factory=list)
     #: Why a turn was cancelled, when it was ("stop" — the human pressed stop
     #: — or "interrupt" — a new message took over under the interrupt busy
@@ -219,10 +235,6 @@ class AgentLoop:
         self.bus = bus
         self.permissions = permissions
         self.conversation = conversation or Conversation()
-        # Which context optimizations run, from the settings — all of them
-        # unless switched off by name, none under the benchmark's naive
-        # strategy (`agent/context.py::OPTIMIZATIONS`).
-        self.conversation.optimizer = Optimizer.from_config(config)
         self.memory = memory                     # LearningEngine, or None
         self.skills = skills                     # SkillRegistry, or None
         #: The background-delegate manager, when this session has one. Read at
@@ -272,6 +284,13 @@ class AgentLoop:
         #: that can change anything (FR-013). `None` until then; an assessment
         #: whose status is `allow` lets every mutating call this turn proceed.
         self._batch_preflight: preflight.MutationAssessment | None = None
+        #: The current batch's `ask` calls, why the set was refused (empty when
+        #: it was not), and — once the form has been put — each call's result.
+        #: One reply is one decision point: its questions reach the person as
+        #: one form, or, if any call is refused, none do (FR-014, D18, D19).
+        self._batch_asks: list[ToolCall] = []
+        self._ask_refusal = ""
+        self._asked_together: dict[str, ToolResult] | None = None
         #: Whether this turn changed a validation artifact without a grounded
         #: reason. A validation run after that is not authoritative: its oracle
         #: no longer means what the task asked it to mean (FR-036, FR-125).
@@ -426,8 +445,8 @@ class AgentLoop:
         #: with an empty message. In the interface that is invisible — the
         #: explanation was streamed as it arrived — but `comodor run` prints
         #: only the final message, so the caller gets a blank answer for a
-        #: turn that did the work. Found by the benchmark: two failures out of
-        #: eight were a completed task reported as nothing at all.
+        #: turn that did the work: a completed task reported as nothing at
+        #: all.
         spoken = ""
         asked_to_speak = False
         checked = False
@@ -637,6 +656,12 @@ class AgentLoop:
     def _execute(self, calls: list[ToolCall]) -> None:
         context = self._tool_context()
         parallel = self._can_parallelise(calls)
+        # Every `ask` in the reply is checked before any is put to the person:
+        # one refused call refuses the set, and nothing that may depend on it
+        # runs (D19).
+        self._batch_asks = [call for call in calls if call.name == "ask"]
+        self._ask_refusal = self._refuse_asks(self._batch_asks)
+        self._asked_together = None
         # Once, single-threaded, before any worker reads it: the turn's
         # pre-mutation check (FR-013). A batch that cannot change anything
         # costs no call.
@@ -792,6 +817,28 @@ class AgentLoop:
                       summary=self._describe(call))
         if self.cancel.cancelled:
             result = ToolResult.failure("cancelled before the tool ran")
+        elif self._asked_together is not None and call.id in self._asked_together:
+            # Answered by the one form this reply's questions shared, or
+            # refused, all together, at the gate every tool call passes.
+            result = self._asked_together[call.id]
+        elif self._ask_refusal and call.name == "ask":
+            result = ToolResult.failure(
+                f"not asked: {self._ask_refusal}. No question in this reply was "
+                f"put to the user, and no decision was recorded. Ask the whole "
+                f"set again together in your next reply — at most "
+                f"{_MAX_QUESTIONS} questions in each `ask` call.")
+        elif self._refused_sibling(call):
+            # The refused questions are still open, whatever they were: uncertain
+            # dependency is dependent (FR-018).
+            result = ToolResult.failure(
+                "not run: an `ask` in this reply was refused, so the decisions "
+                "it held are still open. Nothing that may depend on them runs "
+                "until they are asked again and answered.", withheld=True)
+        elif call.name == "ask" and self._ask_as_one_form() \
+                and not self._withheld_by(context, call):
+            self._asked_together = self._ask_together(context)
+            result = self._asked_together.get(call.id) or ToolResult.failure(
+                "not asked: this call was not part of the reply's form")
         elif self._withheld_by(context, call):
             # A mutating action after a mandatory question went unanswered.
             # Whether it depends on the open decision cannot be known from
@@ -1042,8 +1089,8 @@ class AgentLoop:
         """A safe trace, so a wrong `allow` can be explained without a rerun.
 
         Fingerprints and bounded excerpts only: no unrestricted source content,
-        no secret. It rides the turn's measurement, which the benchmark and the
-        headless JSON already carry.
+        no secret. It rides the turn's result, which the headless JSON already
+        carries.
         """
         try:
             self._preflight_traces.append({
@@ -1061,6 +1108,119 @@ class AgentLoop:
         except Exception:
             pass
 
+    def _refuse_asks(self, asks: list[ToolCall]) -> str:
+        """Why the reply's `ask` set is refused, or "" (D19).
+
+        Checked before any question is put: a call the form cannot hold, a
+        request for permission or plan approval, or one header naming two
+        different questions refuses every `ask` in the reply, and no decision
+        is recorded for any of them.
+        """
+        if not asks:
+            return ""
+        from ..tools import ask as ask_tool
+
+        checked = []
+        for call in asks:
+            questions, why = ask_tool.check((call.arguments or {}).get("questions"))
+            if why:
+                return why
+            checked.append(questions)
+        return ask_tool.collision(checked)
+
+    def _refused_sibling(self, call: ToolCall) -> bool:
+        """Whether `call` waits because an `ask` beside it was refused (D19)."""
+        return bool(self._ask_refusal) and call.name != "ask" \
+            and call.name not in READ_ONLY_TOOLS
+
+    def _ask_as_one_form(self) -> bool:
+        """Whether this batch's decisions must be gathered into one form.
+
+        Always when the reply holds more than one `ask`, and when one `ask`
+        shares the batch with a mutation whose preflight found a decision
+        missing: all of them are outstanding at the same decision point
+        (FR-014, D18).
+        """
+        if self._ask_refusal or self._asked_together is not None:
+            return False
+        if len(self._batch_asks) > 1:
+            return True
+        return bool(self._batch_asks) and self._preflight_wants_a_form()
+
+    def _preflight_wants_a_form(self) -> bool:
+        assessment = self._batch_preflight
+        return (assessment is not None and not assessment.allows
+                and not assessment.rejected
+                and bool(assessment.missing_decisions))
+
+    def _ask_together(self, context: ToolContext) -> dict[str, ToolResult]:
+        """Put the reply's questions, and the preflight's, to the person once.
+
+        The calls do not pass through `ToolRegistry.invoke`, so what it does
+        around a tool is done here: each call passes the same gate first —
+        the mode's tools, the permission policy (FR-117, FR-118) — and every
+        result is redacted and bounded as a tool's result is.
+        """
+        from ..tools import ask as ask_tool
+
+        for call in self._batch_asks:
+            refused = self.tools.refusal("ask", context.for_call(call.id),
+                                         call.arguments or {})
+            if refused is not None:
+                # One call the gate refuses refuses the set (D19): none is
+                # asked, and nothing that may depend on the set runs.
+                self._ask_refusal = (refused.content.removeprefix("Error: ")
+                                     or "not permitted")
+                return {each.id: ToolResult(ok=False, content=refused.content,
+                                            display=refused.display,
+                                            meta=dict(refused.meta))
+                        for each in self._batch_asks}
+
+        calls = []
+        for call in self._batch_asks:
+            questions, _ = ask_tool.check((call.arguments or {}).get("questions"))
+            calls.append((call.id, questions))
+        # Every decision the preflight found is registered as it found it; a
+        # model question stating the same one stands for it on the form.
+        extra = (self._preflight_pending(context, self._batch_preflight)
+                 if self._preflight_wants_a_form() else [])
+        results = ask_tool.ask_together(context, calls, extra)
+        for call_id, result in results.items():
+            result.content = context.redact(result.content)
+            result.display = context.redact(result.display)
+            results[call_id] = overflow.contain(result, context.for_call(call_id), "ask")
+        return results
+
+    def _preflight_pending(self, context: ToolContext,
+                           assessment: preflight.MutationAssessment) -> list[tuple[Any, Any]]:
+        """The preflight's missing decisions, registered and ready to be asked."""
+        from ..questions import Question
+
+        book = context.evidence
+        pending: list[tuple[Any, Any]] = []
+        taken: set[str] = set()
+        for missing in assessment.missing_decisions:
+            decision = book.open_decision(
+                missing.what, affects=missing.affects,
+                evidence_consulted=assessment.evidence_refs)
+            if decision.resolved:
+                continue
+            header = decision.materiality or "decision"
+            number = 2
+            while header.lower() in taken:
+                header = f"{decision.materiality or 'decision'} {number}"
+                number += 1
+            taken.add(header.lower())
+            pending.append((Question(
+                prompt=decision.what,
+                header=header,
+                options=[],
+                affects=list(missing.affects),
+                reason=decision.materiality,
+                evidence_consulted=list(decision.evidence_consulted),
+                decision_ref=decision.ref), decision))
+        return pending
+
     def _withhold_for_preflight(self, context: ToolContext,
                                 assessment: preflight.MutationAssessment) -> ToolResult | None:
         """Register the missing decision and put it to the person (FR-013, FR-018).
@@ -1073,28 +1233,35 @@ class AgentLoop:
         client is asked, never `cancelled`; a client with no listener is
         `unattended`.
         """
-        from ..questions import Question
         from ..tools import ask as ask_tool
 
-        book = context.evidence
-        pending: list[tuple[Any, Any]] = []
-        for missing in assessment.missing_decisions:
-            decision = book.open_decision(
-                missing.what, affects=missing.affects,
-                evidence_consulted=assessment.evidence_refs)
-            if decision.resolved:
-                continue
-            pending.append((Question(
-                prompt=decision.what,
-                header=(decision.materiality or "decision"),
-                options=[],
-                affects=list(missing.affects),
-                reason=decision.materiality,
-                evidence_consulted=list(decision.evidence_consulted),
-                decision_ref=decision.ref), decision))
+        if self._batch_asks and not self._ask_refusal and self._asked_together is None:
+            # The reply also asks: this decision point's questions are put
+            # together, now, rather than one form here and another at the
+            # `ask` (FR-014, D18).
+            self._asked_together = self._ask_together(context)
+            if self._ask_refusal:
+                return ToolResult.failure(
+                    "not run: an `ask` in this reply was refused, so the decisions "
+                    "it held are still open. Nothing that may depend on them runs "
+                    "until they are asked again and answered.", withheld=True)
+            open_now = [decision for decision in context.evidence.withheld()
+                        if decision.state in ("unresolved", "blocked", "asked")]
+            if not open_now:
+                return None
+            failure = ToolResult.failure(
+                "not run: a material decision this change depends on is still "
+                "open. Nothing that may depend on it runs until it is answered.",
+                withheld=True)
+            failure.meta["native_decision"] = True
+            return failure
+        pending = self._preflight_pending(context, assessment)
         if not pending:
             return None
         result = ask_tool.present(context, pending, origin="mutation_preflight")
+        result.content = context.redact(result.content)
+        result.display = context.redact(result.display)
+        result = overflow.contain(result, context, "ask")
         if all(decision.resolved for _, decision in pending):
             # The person answered: the same decision is now KNOWN, and the
             # mutation may be reconsidered rather than withheld.
@@ -1218,6 +1385,13 @@ class AgentLoop:
                                            answer=decision.guidance)
             if answered:
                 self._seed_answers(context, answered)
+                # A resumption that answered only some of them: the rest are
+                # still open in this turn too, so nothing that may depend on
+                # them runs, and the turn reports them again (FR-018, FR-129,
+                # D19).
+                for ref, recorded in decision_states(self.conversation.messages).items():
+                    if recorded.status == "open":
+                        self._carry_open_decision(context, _still_open(ref, recorded))
             for carried in decisions or []:
                 self._carry_open_decision(context, carried)
         except Exception:
@@ -1529,19 +1703,12 @@ class AgentLoop:
 
     def _maybe_compact(self, system_prompt: str, specs: list[ToolSpec]) -> None:
         agent = self.config.agent
-        # The benchmark's comparison strategy: everything is re-sent as it
-        # was, so the cost of the product's context work can be measured
-        # against it. Compaction stays — a request larger than the window is
-        # refused by every provider, and a baseline that cannot finish a task
-        # measures nothing — but nothing below it runs.
-        naive = getattr(agent, "context_strategy", "current") == "naive"
 
         # Before measuring anything. Screenshots are the largest thing in a
         # desktop run's history and the fastest to go stale, and dropping them
         # is exact and free - where compaction is a model call. Doing it first
         # also means the measurement below is of what will actually be sent.
-        gone = 0 if naive else self.conversation.forget_old_pictures(
-            getattr(agent, "keep_screenshots", 2))
+        gone = self.conversation.forget_old_pictures(getattr(agent, "keep_screenshots", 2))
         if gone:
             self._emit_usage(system_prompt, specs)
 
@@ -1563,7 +1730,7 @@ class AgentLoop:
         # every step would have spent more than it saved. Doing it at the point
         # compaction would happen anyway costs nothing extra, because
         # compaction busts the same cache and pays a model call on top.
-        stale, freed = (0, 0) if naive else self.conversation.forget_superseded_reads()
+        stale, freed = self.conversation.forget_superseded_reads()
         if stale:
             self._note(f"Dropped {stale} file read{'s' if stale > 1 else ''} "
                        f"that later edits had already made out of date "
@@ -1578,19 +1745,17 @@ class AgentLoop:
         # Still under pressure. Before a model call summarises history away,
         # the budget manager moves retrievable, low-relevance tool results
         # aside — exact pointers, no summary, nothing lost (FR-096, FR-097).
-        if not naive:
-            head = self.conversation.counter.count(
-                [Message.system(system_prompt)], specs)
-            budget = max(0, int(limit * agent.compact_at) - head)
-            moved, freed = self.conversation.withhold(budget, self.conversation.last_user_text)
-            if moved:
-                self._note(f"Moved {moved} tool result{'s' if moved > 1 else ''} out "
-                           f"of the conversation to stay within the context budget "
-                           f"({freed:,} tokens); each is retrievable.")
-                self._emit_usage(system_prompt, specs)
-                if not self.conversation.needs_compaction(limit, agent.compact_at,
-                                                          system_prompt, specs):
-                    return
+        head = self.conversation.counter.count([Message.system(system_prompt)], specs)
+        budget = max(0, int(limit * agent.compact_at) - head)
+        moved, freed = self.conversation.withhold(budget, self.conversation.last_user_text)
+        if moved:
+            self._note(f"Moved {moved} tool result{'s' if moved > 1 else ''} out "
+                       f"of the conversation to stay within the context budget "
+                       f"({freed:,} tokens); each is retrievable.")
+            self._emit_usage(system_prompt, specs)
+            if not self.conversation.needs_compaction(limit, agent.compact_at,
+                                                      system_prompt, specs):
+                return
 
         removed = self.conversation.compact(self._summarise)
         if removed:
@@ -1640,7 +1805,7 @@ class AgentLoop:
         ))
         # Counted here rather than in `compact`: the call happened even if the
         # caller later decides the brief is unusable, and the runtime owns the
-        # truth about what it spent. The benchmark consumes this.
+        # truth about what it spent.
         self.conversation.record_usage(completion.usage)
         return completion.text
 

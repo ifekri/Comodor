@@ -339,7 +339,7 @@ def test_a_redelivered_message_does_not_become_a_second_turn():
 
 def test_the_same_number_written_three_ways_is_one_person(config):
     """It reaches us as +9715…, 009715… and 9715… depending on where it came
-    from, and three spellings is three people to a naive comparison."""
+    from, and three spellings is three people to a literal comparison."""
     config.whatsapp.allowed = ["+1 (555) 000-1111"]
 
     for spelling in ("15550001111", "+15550001111", "0015550001111",

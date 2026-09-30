@@ -1,39 +1,35 @@
-"""Optimization neutrality (T096; FR-044, SC-012).
+"""Optimization neutrality (FR-044; the constitution's context-change gate).
 
 Two things are asserted here.
 
-*The comparison exists.* Every Phase 5 context optimization has a switch the
-benchmark can turn off (`OPTIMIZATIONS`, plus the log summariser), and each
-switch is what the paired runner writes into an attempt's own config. A
-comparison with no switch would measure nothing.
+*Every optimization can be switched off.* Each Phase 5 context optimization is
+named in `OPTIMIZATIONS`, plus the log summariser, and a test can switch any of
+them off for itself — through the `Optimizer` a conversation is given, or by
+standing the summariser aside. No setting exists for this outside the tests
+(D17).
 
 *The outcome does not move.* Run the same fixed multi-turn task under every
-optimization setting and the delivered work is identical: the same turn
-result, the same tool calls, the same bytes on disk. The optimization that
-is on is shown to be load-bearing — with it off, the same work costs more
-context — so the parity is a real measurement rather than a vacuous one.
-
-The full per-task paired *rates* are the benchmark's record (T155); this is
-the deterministic guard that the machinery those rates rest on is sound.
+setting and the delivered work is identical: the same turn result, the same
+tool calls, the same bytes on disk. The optimization that is on is shown to be
+load-bearing — with it off, the same work costs more context — so the parity
+is a real measurement rather than a vacuous one.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from bench import baseline
 from comodor.agent import AgentLoop, Conversation
-from comodor.agent.context import OPTIMIZATIONS
+from comodor.agent.context import OPTIMIZATIONS, Optimizer
 from comodor.providers.base import ToolCall
 from comodor.providers.fake import Script
 from comodor.providers.gateway import Gateway
 from comodor.safety import PermissionEngine
 from comodor.tools import ToolRegistry, overflow
+from comodor.tools.base import ToolResult
 
-#: Every Phase 5 optimization, the task that owns it, and the switch the
-#: benchmark turns it off with. The log summariser lives in `tools/overflow`
-#: rather than `context.py`, so it is listed here too — a comparison missing
-#: it would leave T080 unmeasured.
+#: Every Phase 5 optimization, and the task that owns it. The log summariser
+#: lives in `tools/overflow` rather than `context.py`, so it is listed here too.
 PHASE_5_SWITCHES = {
     "T070": "budget",
     "T071": "ranking",
@@ -44,9 +40,15 @@ PHASE_5_SWITCHES = {
     "T080": "log_summary",
 }
 
-#: The log summariser is switched by the same config field but is not part of
-#: `context.py`'s tuple; the benchmark knows it (see `bench/__main__.py`).
 ALL_SWITCHES = tuple(OPTIMIZATIONS) + ("log_summary",)
+
+
+def switch_off(agent, off, monkeypatch) -> None:
+    """Switch `off` off for this test only: the seam that replaced the settings."""
+    agent.conversation.optimizer = Optimizer(
+        name for name in OPTIMIZATIONS if name not in off)
+    if "log_summary" in off:
+        monkeypatch.setattr(overflow, "_summarise_log", lambda *args, **kwargs: None)
 
 
 def big(marker: str, lines: int = 300) -> str:
@@ -60,7 +62,7 @@ def make_agent(config, bus, scripts):
 
 
 # --------------------------------------------------------------------------- #
-# the paired comparison exists for every optimization
+# every optimization can be switched off, inside a test
 # --------------------------------------------------------------------------- #
 
 
@@ -72,17 +74,15 @@ def test_every_switchable_optimization_is_a_named_switch():
         "names a switch")
 
 
-def test_each_switch_is_what_the_paired_runner_writes():
-    for name in ALL_SWITCHES:
-        written = baseline.settings(baseline.CURRENT, [name])
-        assert written["optimizations_off"] == [name], name
-    assert baseline.settings(baseline.CURRENT)["optimizations_off"] == []
-
-
-def test_the_log_summariser_reads_the_same_field(tool_context):
-    for off in ([], ["log_summary"]):
-        tool_context.config.agent.optimizations_off = off
-        assert overflow._log_summaries_on(tool_context) is (off == [])
+def test_the_log_summariser_is_switched_off_only_inside_a_test(tool_context, monkeypatch):
+    log = ("exit 0 in 2s\n" + "\n".join(f"case {n} PASSED" for n in range(300))
+           + "\n300 passed in 2.0s")
+    collapsed = overflow.contain(ToolResult.success(log, exit_code=0), tool_context,
+                                 "run_shell")
+    assert collapsed.meta.get("log") == "passed", "on by default: no setting to turn it off"
+    monkeypatch.setattr(overflow, "_summarise_log", lambda *args, **kwargs: None)
+    kept = overflow.contain(ToolResult.success(log, exit_code=0), tool_context, "run_shell")
+    assert "log" not in kept.meta
 
 
 # --------------------------------------------------------------------------- #
@@ -130,9 +130,10 @@ def _delta_scenario(config, bus):
     ["log_summary"],
     list(ALL_SWITCHES),
 ])
-def test_the_same_task_delivers_the_same_work_under_every_setting(config, bus, off):
-    config.agent.optimizations_off = list(off)
+def test_the_same_task_delivers_the_same_work_under_every_setting(config, bus, off,
+                                                                  monkeypatch):
     agent, target, changed = _delta_scenario(config, bus)
+    switch_off(agent, off, monkeypatch)
     result = agent.run("read a.py, then read it again after it changes")
 
     assert result.ok, off
@@ -142,14 +143,13 @@ def test_the_same_task_delivers_the_same_work_under_every_setting(config, bus, o
         f"the delivered state must not depend on the optimization setting ({off})")
 
 
-def test_delta_is_load_bearing_so_the_parity_is_measured(config, bus):
-    config.agent.optimizations_off = ["delta", "dedup", "ranking", "budget",
-                                      "summary_provenance", "log_summary"]
+def test_delta_is_load_bearing_so_the_parity_is_measured(config, bus, monkeypatch):
     agent, _, _ = _delta_scenario(config, bus)
+    switch_off(agent, ALL_SWITCHES, monkeypatch)
     agent.run("read a.py, then read it again after it changes")
     without = agent.conversation.bytes_saved
 
-    config.agent.optimizations_off = []
+    monkeypatch.undo()
     agent, _, _ = _delta_scenario(config, bus)
     agent.run("read a.py, then read it again after it changes")
     with_delta = agent.conversation.bytes_saved
@@ -161,7 +161,6 @@ def test_delta_is_load_bearing_so_the_parity_is_measured(config, bus):
 
 def test_a_reference_is_never_offered_for_material_that_is_gone(config, bus):
     """A setting that withheld a base must not leave a live reference to it."""
-    config.agent.optimizations_off = []
     agent, _, _ = _delta_scenario(config, bus)
     result = agent.run("read a.py, then read it again after it changes")
     assert result.stopped == "done"

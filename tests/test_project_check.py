@@ -1,8 +1,8 @@
 """`agent.verify_command` — the project's own check, run before "done".
 
 The system prompt asks the model to run the tests after a change. Asking is not
-getting, and the benchmark found the gap: a task reported as complete by a model
-that had run nothing at all.
+getting: a task can be reported as complete by a model that ran nothing at
+all.
 
 With this set, "done" means "done, and the project still works" — a different
 claim, and the one people actually want.

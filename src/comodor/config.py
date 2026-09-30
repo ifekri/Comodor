@@ -188,19 +188,6 @@ class AgentConfig:
     system_prompt_extra: str = ""
     prompt_cache: bool = True            # let the provider re-serve the prefix
     prompt_cache_ttl: str = "5m"         # "5m" or "1h"; the hour costs more to write
-    #: How the conversation is assembled for the model. `current` is the
-    #: product. `naive` is the benchmark's comparison strategy and nothing
-    #: else: full history, full file contents and full tool output re-sent on
-    #: every turn, with no superseded-read sweep, no screenshot pruning and
-    #: no context optimization — the cost of not having any of them, measured
-    #: rather than asserted. Set by `bench/baseline.py`; never a setting a
-    #: person is offered.
-    context_strategy: str = "current"
-    #: Context optimizations switched off, by name — see
-    #: `agent/context.py::OPTIMIZATIONS`. Empty means all of them run. The
-    #: benchmark uses this to measure each one against the paired baseline;
-    #: it is not a setting a person needs.
-    optimizations_off: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -247,8 +234,7 @@ class LearningConfig:
     #: no correction signal, no vocabulary, and the model's own memory tool
     #: refuses to write — and no recall into the prompt. What was learned
     #: before stays readable (`comodor journey`) and a person may still
-    #: teach explicitly. The benchmark sets this off so a measurement cannot
-    #: depend on what the previous attempt taught (FR-064).
+    #: teach explicitly (FR-064).
     enabled: bool = True
     top_k: int = 6                       # lessons recalled per turn
     max_playbook_tokens: int = 800       # hard cap on injected memory
@@ -555,7 +541,7 @@ class WhatsAppConfig:
 
         Compared as digits. The same number reaches us written `+9715…`,
         `009715…` and `9715…` depending on where it came from, and three
-        spellings of one person is three people to a naive comparison.
+        spellings of one person is three people to a literal comparison.
         """
         wanted = _digits(wa_id)
         return bool(wanted) and wanted in {_digits(x) for x in self.allowed}

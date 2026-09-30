@@ -277,9 +277,8 @@ class WriteFile(Tool):
                 # replacing something read in an earlier session are all
                 # ordinary. But `write_file` replaces everything, and doing
                 # that to a file whose contents are unknown is how the rest of
-                # it disappears. The benchmark caught exactly this: a task
-                # failed for overwriting the sample it was measured against, in
-                # a run whose actual work was correct.
+                # it disappears: a run whose actual work was correct once
+                # overwrote the sample it had been given to work from.
                 blind = (f"{len(before.splitlines())} lines were replaced in a "
                          f"file this session had not read. If you meant to "
                          f"change part of it, read it and use edit_file"

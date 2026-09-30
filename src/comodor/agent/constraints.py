@@ -1,6 +1,6 @@
 """What the user said not to do, put back in front of the model.
 
-Every failure the benchmark finds in the `careful` category has the same shape.
+A common failure has the same shape every time.
 The user says "do not invent the coordinates" or "only `importer.py`", the model
 reads it, works for twenty steps, and by the time it is about to write a file
 that instruction is four thousand tokens up the context behind everything it

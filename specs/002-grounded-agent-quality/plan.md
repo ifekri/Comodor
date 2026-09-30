@@ -1,14 +1,14 @@
 # Implementation Plan: Grounded High-Quality Agent with Token-Efficient Context and Progressive Learning
 
-**Branch**: `002-grounded-agent-quality` | **Date**: 2026-09-14 | **Spec**: [spec.md](./spec.md)
+**Branch**: `002-grounded-agent-quality` | **Date**: 2026-09-14, re-planned 2026-09-29 for D14–D17 | **Spec**: [spec.md](./spec.md)
 
-**Input**: Feature specification from `/specs/002-grounded-agent-quality/spec.md` (130 functional requirements, 44 success criteria — 174 in total; 18 clarification decisions resolved through 2026-09-24)
+**Input**: Feature specification from `/specs/002-grounded-agent-quality/spec.md` (174 identifiers — 130 FR, 44 SC — of which FR-076, FR-077, SC-001, SC-011, SC-012, SC-021, SC-026 and SC-036 are retired by D14, leaving 166 active: 128 FR, 38 SC; 28 clarification decisions resolved through 2026-09-29)
 
 ---
 
 ## Summary
 
-The specification's 174 requirements (130 FR, 44 SC) map onto an existing product that already
+The specification's 166 active requirements (128 FR, 38 SC) map onto an existing product that already
 implements most of the machinery. The audit below found that **the dominant work
 is not construction but enforcement, measurement and connection**: the
 clarification transport exists end to end, the custom-answer invariant is already
@@ -34,7 +34,7 @@ measurement.
 
 **Storage**: SQLite at `~/.comodor/brain.db` (learning; FTS5 where the build has it, pure-Python BM25 fallback). Sessions as JSON Lines under the user directory, one record per message, appended.
 
-**Testing**: `pytest` under `tests/` (`-n auto --dist loadfile`, `performance` marker excluded by default); Bun renderer tests for the terminal interface; `bench/` for quality-and-cost measurement.
+**Testing**: `pytest` under `tests/` (`-n auto --dist loadfile`, `performance` marker excluded by default); Bun renderer tests for the terminal interface. Every test in an acceptance gate is deterministic and uses scripted model responses (`providers/fake.py`) wherever a model is involved; no gate calls a provider or needs a credential (D14; Constitution 2.0.0).
 
 **Target Platform**: Windows, Linux, macOS — equally supported (Constitution II).
 
@@ -44,7 +44,7 @@ measurement.
 
 **Constraints**: No new runtime dependency. No change to the cached system-prompt prefix mid-task (worth ~99% prefix-cache retention, measured; larger than anything this feature could recover). Protocol v2 stays compatible; any addition is negotiated. Secrets never enter state, snapshots, journals, checkpoints, logs or fixtures.
 
-**Scale/Scope**: 174 requirements (130 FR, 44 SC) across the original 8 delivery phases plus 2 explicit convergence/acceptance phases added after the final specification review. Estimated surface: ~11 Python modules extended, **one new product/runtime module** (`src/comodor/agent/evidence.py`), **two new benchmark-harness helper modules** (`bench/integrity.py`, `bench/baseline.py` — measurement infrastructure, never imported by `src/comodor/`), 1 schema addition, 1 shared TS package touched, the browser question surface (`src/comodor/web/`) characterized and verified, ~20 new deterministic test modules, benchmark harness extended.
+**Scale/Scope**: 166 active requirements (128 FR, 38 SC) across the original 8 delivery phases, the convergence phase (plan Phase 9) and the acceptance-scope convergence (plan Phase 11, D14–D17). Estimated surface: ~11 Python modules extended, **one new product/runtime module** (`src/comodor/agent/evidence.py`), 1 schema addition, 1 shared TS package touched, the browser question surface (`src/comodor/web/`) characterized and verified, ~20 new deterministic test modules. Plan Phase 11 adds no module.
 
 ---
 
@@ -52,31 +52,36 @@ measurement.
 
 *GATE: evaluated before plan Phase 0 and re-evaluated after plan Phase 1 design (below).*
 
-Checked against `.specify/memory/constitution.md` **v1.1.0** (21 principles).
+First checked against `.specify/memory/constitution.md` v1.1.0 on 2026-09-14.
+Re-checked on 2026-09-29, before the D14–D17 design, against **v2.0.0** (21
+principles), as amended in this pull request: Principle XXI, the context-change
+gate and the Development Workflow rule now make every acceptance gate
+deterministic, with scripted model responses and no provider calls or paid
+tokens.
 
 | Principle | Gate | Status |
 | --- | --- | --- |
-| I — Backward compatibility | FR-082 enumerates three intended user-visible changes; only removal of self-resolving mandatory non-answers is backward-incompatible/regression-by-design and release-noted, while completion correction/annotation and same-decision re-raise suppression are additive | **PASS** — FR-082; plan Phase 3 (enforcement) / Phase 6 (surface wiring) — tasks Phase 3 / tasks Phase 8 |
+| I — Backward compatibility | FR-082 enumerates four intended user-visible changes. Only the removal of self-resolving mandatory non-answers is backward-incompatible/regression-by-design, and it is release-noted. Completion correction/annotation and same-decision re-raise suppression are additive. One form per decision point (D18, D19) removes no question. It is **breaking** for callers that count forms or script one entry per form, and it is release-noted with D19's migration path. D17 removes two settings that were never offered to a person; a configuration file that still carries either key keeps loading, because unknown keys are ignored (`config._apply`) | **PASS** — FR-082; plan Phase 3 (enforcement) / Phase 6 (surface wiring) — tasks Phase 3 / tasks Phase 8; plan Phase 11 (§G.3) |
 | II — Three platforms | Every phase validated on the CI matrix; no platform-conditional logic introduced | **PASS** |
 | III — Fix the invariant | No sleeps, no raised timeouts, no weakened assertions; clarification waiting uses the existing claim-and-expire primitive, not timing | **PASS** — see Clarification Architecture |
-| IV — Deterministic regression tests | Every guard gets a mutation-checked test (SC-025); Phase-gated | **PASS** |
-| V — Narrow scope | Bounded phases, including explicit D4/D9 convergence and final acceptance phases, each independently validatable and revertable | **PASS** |
+| IV — Deterministic regression tests | Every guard gets a mutation-checked test (SC-025), including the re-raise suppression SC-044 measures (§G.4) | **PASS** |
+| V — Narrow scope | Bounded phases, including explicit D4/D9 convergence (plan Phase 9) and the D14–D17 acceptance-scope convergence (plan Phase 11), each independently validatable and revertable; plan Phase 11 adds no module, store or subsystem | **PASS** |
 | VI — Architectural boundaries | Evidence ledger lives in the core; frontends render it. Protocol change goes through the schema and codegen, never hand-edited | **PASS** |
-| VII — Reproducible artifacts | Terminal-interface bundle rebuilt and committed if TS changes | **PASS** — TS/TUI-affecting work lands in plan Phase 3 (clarification enforcement: protocol fields, overlay) and plan Phase 6 (surface wiring); the committed bundle rebuild is owned by T141 (tasks Phase 8), verified by T166 |
-| VIII — Security not weakened | Mode policy untouched; clarification never becomes a route to a forbidden action; no secret enters the ledger | **PASS** — explicit non-goal below |
-| IX — Release infra is production code | No release action in this initiative at all | **N/A** — FR-084 |
-| X — Quality gates mandatory | Full baseline runs per phase on the exact commit | **PASS** |
+| VII — Reproducible artifacts | Terminal-interface bundle rebuilt and committed if TS changes | **PASS** — TS/TUI-affecting work lands in plan Phase 3 (clarification enforcement: protocol fields, overlay) and plan Phase 6 (surface wiring); the committed bundle rebuild is owned by T141 (tasks Phase 8), verified by T166; plan Phase 11 changes TUI source for D19 (T240), rebuilds the committed bundle, and re-runs the staleness check (§J) |
+| VIII — Security not weakened | Mode policy untouched; clarification never becomes a route to a forbidden action; no secret enters the ledger; no gate needs a credential | **PASS** — explicit non-goal below |
+| IX — Release infra is production code | No release action in this initiative at all; the lint path in the release workflow changes with the CI one and is proved by the same CI run | **PASS** — FR-084 |
+| X — Quality gates mandatory | Full deterministic baseline per phase on the exact commit; every gate is deterministic and calls no provider | **PASS** |
 | XI — Specifications name surfaces | `spec.md` owns the normative ten-surface table using REQUIRED / UNCHANGED BUT VERIFIED / NOT APPLICABLE; this plan mirrors it and adds implementation/task evidence without overriding it | **PASS** — the table below is a convergence view of the authoritative spec classification; Web UI is REQUIRED and the planned desktop application is NOT APPLICABLE |
-| XII — Done means everything agrees | Phase not complete until implementation, tests, docs and evidence agree | **PASS** |
+| XII — Done means everything agrees | Phase not complete until implementation, tests, docs and evidence agree; plan Phase 11 ends with the neutral-wording sweep (§I, I-7) | **PASS** |
 | XIII — Quality-first | The whole feature | **PASS** |
-| XIV — Evidence before assumption | Evidence ledger is the mechanism | **PASS** |
+| XIV — Evidence before assumption | Evidence ledger is the mechanism; every retained criterion names its deterministic evidence (§G) | **PASS** |
 | XV — Clarification a product invariant | Phases 2–3; non-interactive blocking implements XV directly | **PASS** |
-| XVI — Token efficiency | plan Phase 4 (tasks Phase 5), gated on the plan Phase 1 baseline (T015) | **PASS** |
+| XVI — Token efficiency | Production token-usage accounting kept (§Production Token-Usage Accounting); optimizations accepted on deterministic tests of their mechanism (plan Phase 4 / tasks Phase 5, §G.2) | **PASS** |
 | XVII — Progressive learning | plan Phase 5 (tasks Phase 6) | **PASS** |
-| XVIII — Extend, don't duplicate | Audit below names the existing owner of every behaviour; one new product/runtime module total (`agent/evidence.py`), plus two harness-only benchmark helpers never imported by `src/comodor/`, all justified in Complexity Tracking | **PASS** |
+| XVIII — Extend, don't duplicate | Audit below names the existing owner of every behaviour; one new product/runtime module total (`agent/evidence.py`), justified in Complexity Tracking | **PASS** |
 | XIX — Grounded tool use | Evidence ledger + completion gate | **PASS** |
-| XX — User control | No merge, tag, publish or deploy | **PASS** — FR-084, FR-085 |
-| XXI — Quality and tokens measured together | plan Phase 1 baseline (T015) precedes all optimization; plan Phase 7 (tasks Phase 9) paired report | **PASS** — the ordering is a gate, not a convention |
+| XX — User control | No merge, tag, publish, deploy or provider call | **PASS** — FR-084, FR-085 |
+| XXI — Quality and tokens measured together (2.0.0) | Acceptance is deterministic, with scripted model responses, and needs no provider calls or paid tokens (D14, D15); the context-change gate is met by the deterministic tests in §G.2; the feature claims no token reduction and no quality improvement; production accounting is kept | **PASS** |
 
 **Gate result: PASS.** One justified addition recorded in Complexity Tracking.
 
@@ -122,17 +127,18 @@ the existing owners; it adds no clarification subsystem, no decision store, and
 no persisted evidence ledger. Task IDs for the work below are derived later by
 `/speckit.tasks`; this plan names the work, its owner and its gate.
 
-### A. The three intended user-visible changes (FR-082)
+### A. The four intended user-visible changes (FR-082)
 
 | # | Change | Class | Requirements | Delivered by |
 | --- | --- | --- | --- | --- |
 | 1 | A mandatory clarification no longer resolves itself on a non-answer; non-interactive runs report `clarification_required` | **Backward-incompatible — the only regression-by-design**, release-noted | FR-019, FR-035, FR-121 to FR-123 | plan Phases 3 and 6 (implemented) |
 | 2 | Completion claims are checked: unresolved work is annotated; a contradicted claim is corrected; an unsupported claim is never delivered as completed | **Additive** — adds a notice or correction, removes nothing a caller had | FR-036, FR-037, FR-124 to FR-127 | plan Phase 6 (implemented); FR-127's unsupported-claim rule re-verified in plan Phase 9 |
 | 3 | A cancelled mandatory question is not re-raised within the same decision attempt | **Additive** — adds a report, removes nothing | FR-129 | plan Phase 3 (implemented) |
+| 4 | Questions outstanding at one decision point arrive as one form, even when one model reply raises them through several calls (D18) | **Breaking for form-count and scripted consumers** — no question, answer or decision association is lost, but the number of forms and the moment each question is presented change; a multi-entry `--interactions` script must name its headers. Release-noted with D19's migration path | FR-014, SC-007, FR-079, SC-023 | plan Phase 11 (§G.5; not yet implemented) |
 
 Everything else in this feature is compatibility-preserving: every protocol
 addition is optional and negotiated (FR-080), and no existing message changes
-meaning (FR-079). No fourth user-visible change is intended.
+meaning (FR-079), apart from the changes above. No fifth user-visible change is intended.
 
 ### B. Stable `decision_ref` and later resumption (D4, D9)
 
@@ -360,8 +366,9 @@ Protocol codegen `--check` and the capability map stay green.
 
 The mechanisms already exist: the dependent-work guard in `agent/loop.py`, the
 mutation preflight in `agent/preflight.py`, and `prior_changes` for late
-discovery. Validation measures SC-002 as written, per attempt, never as a
-blanket "no write before asking" rule:
+discovery. Validation measures SC-002 as narrowed by D16 — the clause that the agent
+asks in 100% of attempts is model behaviour and is not claimed — per attempt,
+never as a blanket "no write before asking" rule:
 
 | Scenario class | What a deterministic test asserts |
 | --- | --- |
@@ -375,9 +382,7 @@ The existing clarification suites (`test_clarification_lifecycle.py`,
 `test_mutation_preflight.py`) assert that the **specific dependent artifact**
 is absent, not that nothing at all was written — consistent with D7. Plan
 Phase 9 adds the missing positive cases (independent work permitted; late
-discovery with prior changes), and audits the benchmark judges in
-`bench/tasks/careful-*` for a blanket no-write assertion without weakening any
-of them.
+discovery with prior changes).
 
 ### D. Requirements sharpened by the 2026-09-24 sessions — re-verification
 
@@ -396,7 +401,7 @@ a gap becomes a task rather than an assumption:
 - **FR-018 / FR-123**: bounded independent work before a non-interactive stop;
   no speculative work.
 
-### E. FR-082 — the headless continuation adds no fourth user-visible change
+### E. FR-082 — the headless continuation is not a user-visible change
 
 Headless later resumption is FR-129's own requirement, and its CLI
 representation (`--decision-answers`) and the `decision_ref` fields are that
@@ -405,171 +410,344 @@ written only when a stateless run (`comodor run`, a scheduled job or a webhook
 event) already ends needing a decision, it never
 appears in any session list, UI or insights, it leaves the global `--resume`
 contract untouched, and it leaves ordinary sessions' stored files unchanged. No
-behaviour a user sees today changes beyond the three FR-082 changes, so no
+behaviour a user sees today changes beyond the FR-082 changes, so no
 specification clarification is needed.
 
-### F. Acceptance
+### F. Acceptance (D14–D16)
 
-SC-011 passes only when current mean total tokens ≤ 0.90 × naive in one
-comparable paired run **and** every task's current outcome rate ≥ naive, where
-"every task" is that run's complete paired-eligible cohort (D13, §G). Both
-historical runs fail it. SC-012 has no final passing evidence. Both are settled
-only in plan Phase 10, on the exact frozen candidate, after plan Phase 9. SC-011
-is unchanged by §G. SC-012 is decided by §G's per-task reference rule.
+Acceptance is deterministic. It needs no model call other than scripted
+responses, no paid tokens and no provider credential (D14;
+Constitution 2.0.0, Principle XXI and the Development Workflow rule). It rests
+on:
 
-### G. SC-012 comparability and baseline provenance (D10–D12, 2026-09-25)
+- the gates of §J, run on the exact final HEAD, on Windows, Linux and macOS;
+- the per-criterion evidence of §G;
+- the constitution's context-change gate, met by the deterministic tests of
+  §G.2.
 
-**Repository facts** (inspected at `77b765b`):
+The retired identifiers — FR-076, FR-077, SC-001, SC-011, SC-012, SC-021,
+SC-026, SC-036 and User Story 6 — are neither measured nor marked passed. The
+feature claims no token reduction and no quality improvement. It keeps
+production token-usage accounting (§Production Token-Usage Accounting).
 
-- `bench/integrity.py::fingerprint(directory)` is the one scenario
-  fingerprint: the hashes of `task.md` and `check.py`, the `repo/` and
-  `hidden/` trees, and the declared budgets, with line endings normalised.
-  `fingerprint_all(root)` applies it to every scenario under a root, and
-  `FINGERPRINTS.json` is its committed record.
-- `bench/runner.py::_paired_header` already computes `fingerprint_all()` once
-  at the start of a paired run and binds it into the checkpoint, and a resume
-  is refused if it moved. `python -m bench` refuses to run on a drifted suite.
-- `bench/report.py::as_paired_json` publishes, per task, `current` and `naive`
-  records carrying `passed` and `tries`, and a top-level short `commit`. It
-  records **no** fingerprint. The 2026-09-20 baseline
-  (`bench/results/paired-baseline-2026-09-20.json`, `commit: "be9cf6f"`) has
-  none either.
-- `commit` comes from `git rev-parse --short HEAD`, with no dirty-tree
-  marker. Recorded fingerprints (D12) remove the dependence on it for future
-  results.
-- Recomputing `fingerprint_all()` over `bench/tasks` at `be9cf6f` and at HEAD
-  gives 19 scenarios each, of which exactly two differ:
-  `careful-cannot-be-done` (`check.py`, `task.md`) and `careful-unknowable`
-  (`check.py`). This is **current evidence only**. Nothing names these tasks;
-  the rule below is fingerprint-driven.
+### G. Retained success criteria and their deterministic evidence (D16)
 
-**Design:**
+Every retained criterion is measured by deterministic tests that use scripted
+model responses. The counts are test functions at the PR #61 head `7361c50`
+and come from the spec's D16 audit. Criteria outside that audit take their
+evidence from the test modules that cite them at `7361c50`. Plan Phase 11
+re-confirms every row on the final HEAD (§I, I-2). A row whose evidence covers
+less than the criterion's wording has been narrowed in the spec (D16); it is
+never claimed beyond its tests.
 
-| Concern | Owner (extended, not replaced) | Design |
+| Criterion | Deterministic evidence | Basis |
 | --- | --- | --- |
-| Scenario fingerprint (D11) | `bench/integrity.py` | The canonical producer stays `fingerprint(directory)`, with no second algorithm. Two additions. `fingerprint_at(commit)` extracts `bench/tasks` from that commit (`git archive`) into a temporary directory and applies the **current** `fingerprint_all` to it, so both sides are hashed by one algorithm. It fails if the commit cannot be resolved (`git cat-file -e <commit>^{commit}`). `digest(fingerprint)` is the SHA-256 of the fingerprint's canonical JSON (`sort_keys`, compact separators), a fixed-length identity for evidence. Two fingerprints are equal exactly when their digests are equal. Harness code outside the fingerprint (`runner.py`, `task.py`, `report.py`) is not part of a scenario and never makes a task changed. |
-| Baseline provenance (D12) | `bench/runner.py`, `bench/report.py` | Captured **once, at run start**: the `fingerprint_all()` result the paired header already computes, verified unchanged on resume, is passed to `write_paired` / `as_paired_json`. There is no second computation at write time. Stored per task in the published paired JSON as an additive key `"scenario_fingerprint"`, holding the full fingerprint (the same shape as a `FINGERPRINTS.json` entry), inside the task's entry beside `current` and `naive`. Both arms of a task come from one run and one fingerprint. The Markdown report gains no column. Only the paired baseline kind (`kind: "paired-baseline"`) is a published baseline for SC-012 and SC-036. The single-strategy and blocked-ablation reports are unchanged. |
-| Reading provenance | `bench/report.py` | One reader, `scenario_fingerprints(report)`. It returns `(per-task fingerprints, source)`. It uses the recorded `scenario_fingerprint` values when **every** task carries one (source `recorded`). Otherwise it reconstructs from the report's own `commit` via `fingerprint_at` (source `reconstructed:<commit>`). A report with no usable commit and no recorded values is undecidable. It never mixes: fingerprints come either from the file or from that file's own commit, never another commit, and never partly each. Historical artifacts are read, never rewritten. |
-| SC-012 comparison (D10) | `bench/report.py`, CLI in `bench/__main__.py` | `sc012_comparison(candidate, baseline)` over two paired reports. For every task in the candidate: **UNCHANGED** when `digest(candidate fp) == digest(baseline fp)` for that task. The reference is then the baseline's `current` rate, kind `PUBLISHED_BASELINE`, and the reference fingerprint is the baseline's. Otherwise **CHANGED**: the reference is the candidate's own `naive` rate from the same run, kind `SAME_RUN_NAIVE`, and the reference fingerprint is the candidate's. A candidate task absent from the baseline is CHANGED. The per-task result is `PASS` when `Fraction(passed, tries)` of the candidate `current` is at least the reference's, `FAIL` otherwise. The selection is fixed: no option, parameter or file can choose a reference, exclude a task or supply fingerprints. |
-| Fail-closed (undecidable) | `bench/report.py` | The overall result is `UNDECIDABLE`, never PASS, when: either document is not `kind: "paired-baseline"`; fingerprints cannot be obtained for either side; a baseline task is missing from the candidate (the task set may not shrink to hide a fall; the tasks are listed); a candidate `current` arm has `tries == 0`; or the selected reference arm is missing or has `tries == 0`. The overall result is otherwise `FAIL` if any task fails, else `PASS`. The denominator is every task in the candidate. |
-| Output (T199 evidence) | `bench/report.py`, `bench/results/` | `python -m bench --sc012 <candidate.json> --against <baseline.json> [--label NAME]` writes `bench/results/sc012-<label>.json` and `.md`. It needs no provider or model, calls none, and exits `0` PASS, `1` FAIL, `2` UNDECIDABLE. The JSON has `kind: "sc012-comparison"`; `candidate` and `baseline` objects (file, commit, fingerprint source); `result`; `baseline_only_tasks`; and one entry per candidate task with: `task`, `candidate_fingerprint` and `reference_fingerprint` (digests), `scenario_status` (`CHANGED` or `UNCHANGED`), `reference_kind` (`PUBLISHED_BASELINE` or `SAME_RUN_NAIVE`), `candidate_rate` and `reference_rate` (`passed`, `tries`), `result` (`PASS`, `FAIL` or `UNDECIDABLE`) and `reason`. The Markdown shows the same table. |
+| SC-002 | `tests/test_clarification_pause.py` (19, including the withheld-check mutation check and the three D7 cases); `tests/test_clarification_required.py` (6) | narrowed, D16 |
+| SC-003 | `tests/test_claims.py` (11); `tests/test_baseline_loop.py::test_an_unverified_pass_claim_is_noticed_but_not_blocked` | narrowed, D16 |
+| SC-004 | `tests/test_completion_assumptions.py`; `tests/test_evidence_decisions.py` (the assumption-path mutation check) | kept |
+| SC-005 | `tests/test_questions_invariant.py` (property test, mutation-checked); `tests/test_questions_custom_answer.py`; `packages/questions` tests | kept |
+| SC-006 | `tests/test_clarification_restraint.py` (10, including two mutation checks) | narrowed, D16 |
+| SC-007 | `tests/test_clarification_one_form.py` (§G.5, with its mutation checks); the surface tests in `tests/test_web.py`, `tests/test_real_web_ui.py`, `tests/test_protocol_interactions.py`, `tests/test_channel_clarification.py`, `tests/test_headless.py`, `tests/test_api.py`, `tests/test_acp.py` and the Bun renderer; the case that failed before T218 passes | kept |
+| SC-008 | Bun renderer tests (`apps/tui/test/bun/renderer.test.tsx`) at widths 160/120/100/80/60 | kept |
+| SC-009 | `tests/test_clarification_persistence.py`; `tests/test_baseline_session.py` | kept |
+| SC-010 | `tests/test_clarification_lifecycle.py` cases 7 and 8 and its ended-form reference tests | kept |
+| SC-013 | `tests/test_context_no_superseded.py` (3, including the sweep mutation check); `tests/test_baseline_staleness.py` | narrowed, D16; §G.3 seam |
+| SC-014 | `tests/test_context_recoverability.py`; `tests/test_overflow.py` | kept |
+| SC-015 | `tests/test_context_stable_prefix.py`: the three head tests, including the read-once mutation check | narrowed, D16 |
+| SC-016 | `tests/test_learning_corrections.py` | kept |
+| SC-017 | `tests/test_learning_lifecycle.py`; `tests/test_learning_reuse.py` | kept |
+| SC-018 | `tests/test_learning_admission.py` (31); `tests/test_learning_untrusted.py` (9), both with mutation checks | narrowed, D16 |
+| SC-019 | `tests/test_learning_scope.py` | kept |
+| SC-020 | `tests/test_learning_surfacing.py` | kept |
+| SC-022 | the full gate set of §J | kept |
+| SC-023 | `tests/test_protocol_backcompat.py`; `tests/test_clarification_protocol.py` | kept |
+| SC-024 | `tests/test_persistence_backcompat.py`; `tests/test_baseline_session.py`; the configuration-compatibility test of §G.3 | kept |
+| SC-025 | the mutation check of every guard in this table, SC-044 included | kept |
+| SC-027 | `tests/test_context_recoverability.py`; `tests/test_context_no_validation_loss.py::test_a_failing_log_keeps_its_failure_under_every_setting` | kept; §G.3 seam |
+| SC-028 | `tests/test_context_dedup.py` (14) | narrowed, D16; §G.3 seam |
+| SC-029 | `tests/test_context_invalidation.py`: its three ledger tests | narrowed, D16 |
+| SC-030 | `tests/test_context_budget.py` | kept |
+| SC-031 | `tests/test_learning_recurring.py` (7, including the recurrence-guard mutation check) | measurement rewritten, D16 |
+| SC-032 | `tests/test_learning_fingerprint.py`; `tests/test_learning_configuration.py` | kept |
+| SC-033 | `tests/test_evidence_decisions.py`: its four confidence tests; `tests/test_failure_states.py`: its two low-confidence tests | narrowed, D16 |
+| SC-034 | `tests/test_capability_honesty.py` (3) | narrowed, D16 |
+| SC-035 | `python tools/capability-map.py --check`; `tests/test_capability_map.py` | kept |
+| SC-037 to SC-040 | `tests/test_clarification_no_fabrication.py`, parametrised over the four non-answer outcomes, with a guard mutation check per outcome | kept, D16 |
+| SC-041 | `tests/test_clarification_pause.py` (its dismissed-batch and turn-ends tests); `tests/test_clarification_lifecycle.py` cases 3 to 6 | kept, D16 |
+| SC-042 | `tests/test_decision_resumption.py`; `tests/test_clarification_required.py::test_a_later_answer_in_the_next_turn_resumes_the_work` | kept, D16 |
+| SC-043 | `tests/test_clarification_pause.py`: its independent-work and D7 tests | kept, D16 |
+| SC-044 | `tests/test_clarification_lifecycle.py`: the §G.4 tests — tool guard, loop batch, each layer alone, all layers removed — with their mutation checks | kept, D16 |
 
-**Execution order.** The D12 recording and the comparator are benchmark-only
-changes, implemented and tested before T196. The candidate HEAD therefore
-already carries them when:
-- T196 runs its gates;
-- T197 qualifies the provider;
-- T198 runs the complete paired suite: the complete paired-eligible cohort
-  of the frozen candidate (D13, below), producing both arms for every task in
-  it under one set of recorded fingerprints;
-- T199 runs `python -m bench --sc012 <T198 artifact> --against
-  bench/results/paired-baseline-2026-09-20.json`, publishes the result, and
-  marks SC-012 only on `PASS`.
+#### G.1 FR-064
 
-No new baseline run is required. The 2026-09-20 artifact is not rewritten; its
-fingerprints are reconstructed from `be9cf6f`, which requires a full-history
-checkout (the CI workflow already fetches with `fetch-depth: 0`).
+FR-064 keeps its first clause: learning can be switched off entirely. Evidence:
+`tests/test_learning_switch.py`.
 
-**Paired-run population (D13, 2026-09-26).**
-- **Cohort**: derived mechanically from the frozen candidate's task metadata
-  immediately before T198:
-  - `ALL_TASKS` = every task `bench.task.load_tasks` loads from `bench/tasks`;
-  - `PAIRED_TASKS` = every task in `ALL_TASKS` whose `task.sequence` is false.
-- **Sequence tasks** are outside the paired experiment by type: `run_paired`
-  refuses a cohort containing one, and that refusal is unchanged. No task is
-  left out for its name, expected or measured result, difficulty, cost,
-  timeout risk, reviewer preference or a manual choice.
-- **Command**: `python -m bench --paired` with no task selection loads
-  `ALL_TASKS` and is refused when it contains a sequence task. T198 then runs
-  `python -m bench --paired --provider <provider> --model <model> --tries 3
-  --only <PAIRED_TASKS>`.
-  - `--only` is a transport for the complete cohort, not its definition: the
-    set of names passed must equal the set of `PAIRED_TASKS` names.
-  - A smaller, partial or hand-picked selection is forbidden.
-  - The name list is derived at run time and is never a fixed list in any
-    artifact.
-- **Artifact**: the T198 paired artifact holds exactly `PAIRED_TASKS` of the
-  exact SHA it ran on. For every task in it:
-  - both the `current` and `naive` arms, each with the required tries;
-  - one `scenario_fingerprint` shared by both arms;
-  - that fingerprint's digest equal to
-    `digest(fingerprint_at(<that SHA>)[task])`.
-  A sequence task has no paired row and none is required.
-- **Acceptance**:
-  - SC-011 is evaluated over the complete paired-eligible cohort of the T198
-    run. Current mean total tokens ≤ 0.90 × naive, and for every task in
-    that cohort current outcome rate ≥ naive.
-  - SC-012 (T199) reads the same artifact, so its candidate task set, and
-    its denominator, is that cohort. D10 selects each task's reference
-    unchanged: a task new to the candidate takes the same-run naive rate, and
-    missing evidence is `UNDECIDABLE`.
-  - A sequence task is counted in neither denominator; it is measured under
-    its own criteria (SC-021).
-- **Current observation, not a constant**: 19 tasks, 18 paired-eligible, one
-  sequence task (`learning-repeat`), so 18 × 3 tries × 2 strategies = 108
-  paid attempts. The cohort is derived again if the catalogue changes.
+#### G.2 The context-change gate (Constitution 2.0.0)
 
-**What this prevents.**
-- A changed task compared with its old published rate: selection is by digest
-  only.
-- An excluded task: a missing arm or a shrunken task set is `UNDECIDABLE`.
-- A manually chosen reference: no override exists.
-- Fingerprints from a different commit: each report is read from itself or its
-  own commit.
-- A naive result under a different scenario: both arms and the fingerprint
-  come from the same paired document and run.
+The feature changes what is sent to a model through IP-5 (budget, dedup,
+delta, ranking, summary provenance), log summarisation and the superseded-read
+sweep. The gate is met by deterministic tests that run a scripted task and show
+that no change omits evidence an answer depends on or weakens validation:
 
-**Gate for this work** (deterministic, no model, mutation-checked):
-- `tests/test_bench_integrity.py`:
-  - `fingerprint_at(commit)` on a temporary git repository equals
-    `fingerprint_all` of the same tree;
-  - an unresolvable commit raises;
-  - `digest` is order-independent and changes when any fingerprint part
-    changes.
-- `tests/test_bench_baseline.py`, recording:
-  - a paired report records a `scenario_fingerprint` per task equal to the
-    run-start fingerprint;
-  - one computation feeds both the checkpoint header and the report.
-- `tests/test_bench_baseline.py`, reading:
-  - a report whose tasks all carry `scenario_fingerprint` reads as
-    `recorded`;
-  - one without reads as `reconstructed:<commit>` through `fingerprint_at`;
-  - one with neither is undecidable.
-- `tests/test_bench_baseline.py`, comparison:
-  - an unchanged task is compared with the published `current` rate;
-  - a changed task with the same-run `naive` rate;
-  - a task new to the candidate is CHANGED;
-  - equal rates pass and a lower rate fails;
-  - PASS only when every task passes;
-  - each UNDECIDABLE condition is reported, and none can yield PASS;
-  - every evidence field is present;
-  - `--sc012` exits `0` / `1` / `2` and needs no provider.
-- Mutations that must fail these tests:
-  - selecting `PUBLISHED_BASELINE` for a changed task;
-  - excluding a task whose reference is missing;
-  - reading recorded fingerprints from one file and the baseline from another
-    commit;
-  - comparing with `>` instead of at least;
-  - treating a candidate-only task as UNCHANGED.
+- `tests/test_context_optimization_neutrality.py`: the same scripted task
+  delivers the same work with each optimization switched off;
+- `tests/test_context_no_validation_loss.py`: failing evidence survives every
+  setting, and forms are never deduplicated or withheld;
+- `tests/test_context_recoverability.py`: nothing withheld is lost;
+- `tests/test_context_no_superseded.py`, `tests/test_context_dedup.py`,
+  `tests/test_context_stable_prefix.py`, `tests/test_context_budget.py`.
 
-### Constitution re-check (post-clarification, 2026-09-25)
+No token or quality claim is made beyond what these tests show.
 
-| Principle | Result |
+#### G.3 D17 — the two settings are removed; tests switch optimizations off internally
+
+**Runtime change** (behaviour-preserving for every configuration a person
+could reach, because neither setting was ever offered):
+
+- `AgentConfig` loses both fields.
+- `agent/context.py`: `Optimizer.from_config` is removed. The
+  `Conversation` default — every optimization on — is the product.
+- `agent/loop.py`: the loop no longer overwrites `conversation.optimizer` from
+  the configuration. `_maybe_compact` loses its alternative branch, so picture
+  pruning, the superseded-read sweep and budget withholding always run.
+- `tools/overflow.py`: the settings read is removed; log summarisation always
+  runs.
+
+**Test-internal seams** (no new production parameter, environment variable or
+hidden setting):
+
+- Optimizations inside the funnel: construct `Conversation(optimizer=
+  Optimizer(enabled))` — the existing constructor parameter already used by
+  `tests/test_context_budget.py` and `tests/test_context_dedup.py` — or assign
+  `loop.conversation.optimizer = Optimizer(enabled)` after the loop is built.
+  `OPTIMIZATIONS` stays the named inventory the tests iterate.
+- Log summarisation: switched off inside a test by monkeypatching the
+  module-level summariser in `tools/overflow.py`.
+
+**Tests migrated to the seams**:
+
+- `tests/test_context_no_superseded.py` (the setting at ~92);
+- `tests/test_context_no_validation_loss.py` (~46–47, ~120);
+- `tests/test_context_optimization_neutrality.py` — its settings-driven tests.
+
+**Compatibility test (added)**: a configuration file that still carries either
+key loads without error, and the key has no effect, because `config._apply`
+ignores unknown keys (Constitution I; SC-024).
+
+**Mutation sensitivity is kept**: each migrated test still fails when its guard
+is removed, and still passes when the guard is restored.
+
+#### G.4 SC-044 — cancelled mandatory question, not re-raised in the same attempt
+
+**The guards**, as found at `7361c50`. A decision attempt is the turn that
+raised the form. After a non-answer, the turn ends `clarification_required`
+once the current batch finishes, so a repeat can only come from a sibling call
+in that same batch. Two independent layers stop it:
+
+1. `agent/loop.py::_withheld_by` withholds every non-read-only call, `ask`
+   included, while a decision is `unresolved`, `blocked` or `asked`.
+2. `tools/ask.py::AskTool.run` returns `_unresolved(..., repeated=True)`
+   without posting a form when a question matches (`_same`) a material
+   decision already `unresolved` or `blocked`.
+
+A probe at `7361c50` showed that disabling `_same` alone leaves one form in a
+loop-level batch, because layer 1 withholds the sibling first. A single-layer
+mutation is therefore not decisive at loop level, and the test is built per
+layer.
+
+**Required tests**, extending `tests/test_clarification_lifecycle.py` with its
+existing scripted `Script` provider and controlled `EventBus`. Each case
+cancels with `forms.CANCELLED` — a cancellation, not a decline.
+
+- **Tool level (layer 2).**
+  - Steps: `Ask().run` is answered `CANCELLED`; `Ask().run` is then called
+    again for the same question, varied only in case and whitespace.
+  - Asserts: exactly one form; the second result is the unresolved report
+    ("asked again"), with outcome `cancelled` and the same `decision_ref`; the
+    decision stays `UNRESOLVED`.
+  - Mutation: with `_same` monkeypatched never to match, a second form appears
+    and the test fails. Restored, it passes.
+- **Loop level (the layers together, and whatever T218 adds).**
+  - Steps: one model batch holds `ask` X and a sibling `ask` X′ (the same
+    question), followed by a dependent write; the first form is cancelled.
+  - Asserts:
+    - exactly one form for X reaches the bus;
+    - the dependent write does not run;
+    - the turn ends `clarification_required`, with outcome `cancelled` and the
+      same `decision_ref`;
+    - the scripted provider is not called again in that turn.
+  - Mutation: with every repeat-preventing layer disabled at once, a second
+    form appears and the test fails. Each layer's own mutation is also
+    asserted: disabling any one layer alone still yields one form. That
+    records that the layers are independent.
+
+**Scope**:
+
+- The attempt boundary is already covered by
+  `test_a_later_explicit_request_raises_the_same_decision_with_the_same_ref`
+  and `tests/test_decision_resumption.py`. After an explicit user resumption,
+  the decision is raised or resolved again under the same `decision_ref`.
+- A declined-only variant does not satisfy SC-044 (D16). If one is added, it is
+  asserted separately.
+
+#### G.5 SC-007 — one form per decision point (U-1)
+
+**Finding.** No test covered SC-007. The previous coverage note ("the `ask`
+tool is already one call for the whole set") holds for one `ask` call only. A
+probe at `7361c50` found:
+
+| Case | Forms |
 | --- | --- |
-| IV — Deterministic regression tests | Comparator, reader and recording tested offline on fixtures and a temporary git repository; the listed mutations are required to fail. **PASS** |
-| X / XII — Gates and agreement | Spec SC-012 (D10–D12), this section, research R17, data-model §9 and quickstart agree; tasks follow via `/speckit.tasks`. **PASS** |
-| XIV — Evidence before assumption | The two changed scenarios were computed, not assumed; the rule is fingerprint-driven, not name-driven. **PASS** |
-| XVIII — Extend, never duplicate | One fingerprint algorithm (`bench/integrity.py`), reused for recording, reconstruction and comparison; no new module (the standing benchmark-helper limit holds). **PASS** |
-| XXI — Paired measurement | SC-011 unchanged; SC-012's reference for a changed scenario is the same-run paired arm, so quality is never compared across two decision functions. **PASS** |
-| XX — User control | No run, push, merge or release is part of this planning; T197–T199 remain the owner's paid runs. **PASS** |
+| one model batch, two `ask` calls for two decisions, first form **answered** | **2** — SC-007 is not met |
+| same decision in two calls, first answered | 1 (`Ledger.settled`) |
+| same decision, first cancelled | 1 (§G.4 layers) |
 
-### Constitution re-check (D13, 2026-09-26)
+SC-007 is therefore testable, and it currently fails in one case. It is
+neither narrowed nor retired. The work is:
 
-| Principle | Result |
-| --- | --- |
-| X / XII — Gates and agreement | Spec D13 and §G agree on the paired-run population; tasks follow via `/speckit.tasks`, and the requirements checklist's decision count via `/speckit.checklist`. **PASS** |
-| XIV — Evidence before assumption | The refusal of sequence tasks was reproduced offline before any paid call; the cohort is derived from task metadata, not named. **PASS** |
-| XXI — Paired measurement | The SC-011 threshold and the D10–D12 reference rule are unchanged; only the population both are evaluated over is stated. **PASS** |
+- A deterministic test, `tests/test_clarification_one_form.py`, covers:
+  - C1 — one `ask` with several questions;
+  - C2 — two `ask` calls for two decisions in one batch;
+  - C3 — the same decision twice;
+  - C4 — cancellation;
+  - C5 — an `ask` with a mutation whose scripted preflight finds another
+    missing decision, in one batch;
+  - C6 — successive model calls, where a new form at a new decision point is
+    allowed.
+- A fix in `agent/loop.py`, through the existing shared clarification path:
+  all decisions a batch raises reach the person as **one logical form**, with no
+  upper bound on its length (D19).
+  - Clients page it in groups of at most four, and it is answered once.
+  - The per-call input rule (`forms.MAX_QUESTIONS`, 4 per `ask` call) stays.
+  - An invalid set of calls is refused atomically, with every sibling
+    non-read-only call withheld.
+  - Headers stay unique within the form, and every call gets its own result.
+- Client paging: the Web page shows pages of at most four; the TUI shows its
+  position in the form; neither is a protocol change.
+- The OpenAI-compatible API and ACP have no live form. A decision point there
+  ends in one clarification-required payload listing every decision, resumed
+  through `decision_answers` keyed by `decision_ref`.
+- Headless scripted interactions:
+  - an entry matches its form by header, and headers are optional only in a
+    single-entry script;
+  - an `answer` without headers is valid only for a one-question form;
+  - a bare `answer` (no `value`, no keyed `values`) is invalid on every form,
+    and is rejected before the run starts, with exit `1`; no option is ever
+    selected implicitly;
+  - a keyed `answer` never fills omitted questions and never spreads one value;
+  - an unmatched or leftover entry ends the run with exit `1` and a clear
+    error.
+- The same decision under two headers is shown once, under the first header,
+  and each call is answered under its own header.
+- D18 records the fix as FR-082's fourth intended user-visible change. It
+  lists the preserved and changed behaviour, the per-form cap, the outcomes,
+  and the deterministic coverage required across every existing client
+  surface.
+
+## I. Implementation sequence (plan Phase 11)
+
+Each step leaves the full deterministic suite green before the next begins.
+Nothing is committed, pushed or merged without the owner's instruction.
+
+| Step | Work | Leaves green |
+| --- | --- | --- |
+| I-0 | Preflight: record HEAD; audit the worktree's uncommitted spec, plan and constitution changes; leave the owner's own checkout untouched | — |
+| I-1 | SC-007 (§G.5): the test first, then the loop fix (D18, D19), then the client paging and the scripted-interaction matching. SC-044 (§G.4): the tool-level and loop-level tests with their mutation checks | `pytest -q`; Bun tests; bundle rebuilt |
+| I-2 | Re-confirm every §G row on HEAD: run each named module, record the counts, and treat any gap as a finding | the named modules |
+| I-3 | D17 (§G.3): remove the settings and branches; migrate the tests to the seams; add the configuration-compatibility test; re-run the context, overflow, loop and performance suites | `pytest -q`; `pytest -m performance -n 0 -q` |
+| I-4 | Clean-up of tests, after the coverage rule (tasks Phase 22) | `pytest -q` |
+| I-5 | Clean-up of files and configuration (tasks Phase 22) | ruff over `src tests tools`; `pytest -q` |
+| I-6 | Comments, test prose, documentation and changelog (tasks Phase 22) | ruff; `pytest -q`; Bun tests |
+| I-7 | Neutral-wording sweep, then the reviewer's checklist cleanup (T232, T233) | the reference gates, run from copies kept outside the tree |
+| I-8 | Final gates (§J) on the exact final HEAD | §J |
+
+Each step can be reverted on its own (Constitution V). I-3 and I-4 are
+separate because I-3 changes runtime behaviour for no reachable configuration,
+while I-4 removes only tests.
+
+## J. Final verification gates
+
+**Where**: run on the exact final HEAD, in a clean detached worktree with an
+isolated virtual environment (`pip install -e ".[dev]"`, because
+`comodor/_version.py` is generated at install time).
+
+**Python**
+
+```bash
+python -m ruff check src tests tools
+python -m pytest -q
+python -m pytest -m performance -n 0 -q
+python tools/capability-map.py --check
+python tools/protocol-codegen.py --check
+git diff --check
+```
+
+**Frontend**
+
+```bash
+npm ci
+npm run lint && npm run typecheck && npm test && npm run build
+bun test apps/tui/test/bun/renderer.test.tsx
+bun test apps/tui/test/bun/orphan.test.ts
+bun tools/build-tui-distribution.ts && git status --porcelain   # must print nothing
+```
+
+**Tree**
+
+- the reference gate and the retired-ID gate, run from copies kept outside the
+  tree, report nothing.
+
+**CI**
+
+- Every check of the workflow matrix — Windows, Linux and macOS — is green on
+  the same exact SHA.
+- No workflow reads a provider secret.
+
+**Per-criterion evidence**: every §G row is re-run on the exact final HEAD, and
+its result is recorded against its criterion. A criterion without passing
+evidence blocks acceptance.
+
+**Counts** are recorded, not predicted. At `7361c50`:
+
+- `pytest -q`: 6110 passed, 49 skipped;
+- `pytest -m performance -n 0 -q`: 36;
+- `npm test`: 188; Bun renderer: 175; Bun orphan: 3.
+
+The final `pytest -q` count falls by the removed tests and rises by the added
+ones. The performance count must not fall, because no performance test is
+removed.
+
+**Owner's completion rule** (outside this plan's authority): after the owner
+authorises the push, the review bot reviews the exact final PR HEAD. Nothing
+here is merged, auto-merged or approved on the owner's behalf.
+
+## K. Open issues and reviewer-owned cleanup
+
+**Open issues**
+
+- **U-1 — SC-007.** Resolved as a finding, not by narrowing: SC-007 is
+  testable; the case that failed (§G.5) is fixed by T218, and its tests pass.
+  **U-5**: resolved by D18 and D19 (2026-09-29). One logical form per
+  decision point, paged in groups of at most four, is FR-082's fourth intended
+  user-visible change. It is breaking for form-count and scripted consumers,
+  and it is release-noted with change 1 and D19's migration path.
+- **U-2 — the spec's own wording.** The owner approved neutral wording for
+  D14–D17 on 2026-09-29, with no remaining references, and T232 applied it.
+- **U-3 — task history.** D14 says completed task history is not rewritten,
+  and that the final tree carries no reference. This plan reads that as:
+  - retired tasks become ID-only stubs;
+  - completion marks on tasks that remain are not changed;
+  - Git history is the record.
+
+  The owner confirms this reading.
+- **U-4 — the constitution checklist item.** Resolved: the reviewer
+  re-judges it, like every checklist item, from the file contents at the time
+  of judging — the constitution text in the tree — not from commit or push
+  state.
+
+**Reviewer-owned checklist cleanup**: done by the reviewer at T233, which
+re-judges every item from the files' contents.
 
 ## Current Data Flow (as built)
 
@@ -742,11 +920,14 @@ into a session snapshot, journal or checkpoint (Constitution VIII).
 
 ## Token-Efficiency Architecture
 
-**Ordering is a gate, not a preference.** Plan Phase 1 (T015) publishes the baseline; no
-optimization is accepted before it exists (SC-036, Constitution XXI). Each entry
-below carries the five facts the request demanded.
+**Acceptance is deterministic.** Each optimization is accepted on tests that
+exercise its mechanism with scripted model responses and show that it neither
+omits evidence an answer depends on nor weakens validation (Constitution 2.0.0,
+context-change gate; §G.2). The column "What it avoids resending" describes each
+mechanism's purpose, not a measured saving: this feature claims no token
+reduction (D14).
 
-| # | Optimization | Exists? | Tokens saved | Information at risk | What prevents correctness loss | Invalidation | Test |
+| # | Optimization | Exists? | What it avoids resending | Information at risk | What prevents correctness loss | Invalidation | Test |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | T1 | **Superseded-read removal** | Yes (`staleness.py`) | A stale file copy × every remaining step | The pre-edit contents | Never the newest read; never an unedited file; the diff that superseded it is retained plus a re-read instruction | On write to that path | Assert zero superseded copies in any assembled request (SC-013) |
 | T2 | **Oversized-result spill** | Yes (`overflow.py`) | Result size − (head+tail) × remaining steps | The middle of the output | Nothing discarded — spilled to a retrievable file with an exact pointer; on-disk files pointed at in place | Turn end / pruning | Assert full recoverability (SC-014) |
@@ -762,10 +943,10 @@ below carries the five facts the request demanded.
 | T12 | **Compact structured session state** | Partial (`session/store.py`) | Resume re-derivation | Nuance of original phrasing | Resume reuses stored conversation; nothing re-derived | Session write | Resume sends no re-derived context |
 | T13 | **Learned project facts** | Yes (`facts.py`, caps 8+6) | Re-explaining known project facts | Nuance behind a short fact | Hard caps; visible in the briefing; deletable | Curator + repo-fact invalidation | Recall-budget assertion (FR-062) |
 
-**Anti-gaming rule.** No optimization is accepted on the estimator alone. Every
-claim is validated against providers' reported `usage` (already carried on every
-reply and already used to calibrate the counter), and paired with the outcome
-rate. An estimator-only improvement is not a result.
+**Accounting rule.** Token figures come from providers' reported `usage`
+(already carried on every reply and already used to calibrate the counter); the
+estimator is used only where a provider reports nothing, and is marked as an
+estimate. No figure is presented as a saving (Constitution XXI).
 
 ---
 
@@ -922,41 +1103,27 @@ admitted ──► active ──┬── contradicted by newer correction ─�
 
 ---
 
-## Quality/Token Benchmark
+## Production Token-Usage Accounting
 
-Extends `bench/` rather than replacing it. The existing harness already has the
-isolation properties a measurement needs: per-attempt workspace and
-`COMODOR_HOME`, learning switched off, hard timeout, repeated attempts reported
-as rates.
+Kept unchanged by D14 (Constitution XVI, XXI; FR-072 to FR-075). It is product
+behaviour:
 
-### Per-scenario record
+- `agent/tokens.py` — `TurnRecord` per provider call (input, output, cached and
+  cache-written tokens, context size, whether estimated) and `TaskMeasurement`
+  per task (turns, tool calls, retries, clarifications raised and answered,
+  corrections, knowledge hits and stale items, preflight calls and tokens,
+  outcome, validation outcome).
+- `comodor run --json` carries `usage` and `measurement` beside the outcome.
+- The brain's episode record keeps `measurement`; `insights.py` aggregates it
+  locally.
+- Rules: provider-reported figures are the truth, the estimate is labelled;
+  no credential in any field (FR-074); nothing leaves the machine unless the
+  user chooses (FR-075).
 
-`task` · `category` · `result` · `correctness` · `input_tokens` ·
-`output_tokens` · `cached_tokens` · `total_tokens` · `model_turns` ·
-`tool_calls` · `clarifications` · `corrections` · `validation_outcome`
-
-### Scenarios
-
-The existing thirteen tasks across five categories, plus additions this feature
-requires:
-
-| Scenario | Measures |
-| --- | --- |
-| Existing `fix` / `feature` / `find` / `refactor` | outcome rate must not fall |
-| Existing `careful` (ambiguity, only-what-was-asked, unknowable) | assumption prevention — already the category nobody else measures |
-| **New**: repository-settled ambiguity | the agent reads and decides, **does not ask** (SC-006) |
-| **New**: unattended mandatory clarification | clarification-required outcome with `outcome: unattended` (evidence state `BLOCKED`), no invented value (SC-002) |
-| **New**: long multi-file task | token efficiency where resend cost dominates |
-| **New**: repeated task in one project | fixed N = 6 sequence (tasks 1–3 vs 4–6): mandatory clarifications and user corrections both lower in the learned window, no outcome regression; rediscovery reported as a secondary diagnostic (SC-021) |
-| **New**: naive full-resend baseline | the comparison denominator for SC-011 |
-
-### Reporting rule
-
-Token and quality figures are published **in one table**. A token figure without
-its outcome rate is not a result (FR-076, Constitution XXI). The judge-honesty
-rules already written into `bench/README.md` apply to every new task: a `careful`
-or `find` task must turn on something the repository cannot answer, and must have
-at least one line whose correct value is a path, a name or a number.
+Deterministic evidence: `tests/test_token_accounting.py`,
+`tests/test_baseline_tokens.py`, `tests/test_metrics_locality.py`,
+`tests/test_metrics_overhead.py`, `tests/test_metrics_redaction.py`,
+`tests/test_insights.py`.
 
 ---
 
@@ -983,9 +1150,10 @@ when the guard is removed and pass when restored (SC-025).
 | 14 | Context deduplication works | Same content twice; assert one copy in the assembled request | 4 |
 | 15 | Unchanged context not resent | Assert stable portion byte-identical across turns | 4 |
 | 16 | Token metrics accurate enough | Compare estimate against provider-reported usage within calibration tolerance | 1 |
-| 17 | Optimization does not change results | Benchmark outcome rates before/after each optimization | 4, 7 |
+| 17 | Optimization does not change results | Scripted task delivers the same work with each optimization switched off inside the test (§G.3 seam); failing evidence survives every setting | 4, 11 |
 | 18 | Permissions intact | Existing permission suite unchanged and green | every phase |
 | 19 | Renderer behaviour deterministic | Bun renderer tests at widths 160/120/100/80/60 | 3 |
+| 20 | A cancelled mandatory question is not re-raised in the same attempt (SC-044) | Scripted `ask` twice in one turn; controlled bus cancels the first; assert one form, the unresolved report, no dependent write; mutation-checked (§G.4) | 11 |
 
 ---
 
@@ -1002,7 +1170,7 @@ PR #39. Compared against this plan's intervention points:
 
 | This feature touches | PR #39 touches | Conflict |
 | --- | --- | --- |
-| `agent/`, `learning/`, `tools/`, `session/`, `providers/`, `questions.py`, `schemas/protocol/`, `packages/`, `bench/` | `src/comodor/trading/` only | **None** |
+| `agent/`, `learning/`, `tools/`, `session/`, `providers/`, `questions.py`, `schemas/protocol/`, `packages/` | `src/comodor/trading/` only | **None** |
 | `tests/` (new modules, distinct names) | `tests/test_trading_*.py` | **None** — disjoint filenames |
 | `docs/` (feature docs) | `docs/trading.md`, `docs/README.md` | **Textual only** on `docs/README.md` |
 
@@ -1030,32 +1198,32 @@ phase begins before its predecessor's gate is green on the exact commit.**
 
 **Numbering**: the phases below are **plan phases (0–10)**. The executable task
 list in [tasks.md](./tasks.md) uses its own **task phases**, and the two do not
-coincide (plan Phase 5 = learning = tasks Phase 6; plan Phase 7 = the historical
-benchmark phase = tasks Phase 9). Plan Phases 9 and 10 were added by the
-2026-09-24 convergence; their task phases and task IDs are derived by
-`/speckit.tasks`. The normative mapping is the crosswalk table at the top of
+coincide (plan Phase 5 = learning = tasks Phase 6). Plan Phase 9 was added by
+the 2026-09-24 convergence and plan Phase 11 by the 2026-09-28 acceptance-scope
+decisions; their task phases and task IDs are derived by `/speckit.tasks`. Plan
+Phases 7 and 10 are retired (D14). The normative mapping is the crosswalk table at the top of
 tasks.md; cross-artifact references use `plan Phase N` / `tasks Phase N`.
 
 | Plan phase | Name | Delivers | Gate |
 | --- | --- | --- | --- |
 | **0** | Research | Resolve open technical unknowns → `research.md` | All unknowns resolved or explicitly deferred |
-| **1** | Foundation & baseline measurement | Per-turn/per-task token record; benchmark extended with paired reporting; **naive full-resend baseline published** | Baseline exists; SC-036 satisfied; estimator validated against provider usage (test 16) |
+| **1** | Foundation & token accounting | Per-turn/per-task token record; characterization suite | Estimator validated against provider usage (test 16) |
 | **2** | Grounded uncertainty contract | Evidence ledger on `ToolContext` (IP-1); the complete closed `EvidenceState` set from data-model.md §2; materiality test; **no user-visible change yet** | Tests 1, 2, 9; full suite green; zero behaviour change observable |
 | **3** | Interactive clarification enforcement | IP-2 + IP-3; answered / cancelled-declined / expired / unattended clarification lifecycles; `clarification_required` outcome (FR-082 enforcement); additive protocol fields; renderer tests | Tests 3–8, 19; protocol codegen `--check` green; old client unaffected |
-| **4** | Token accounting & context optimization | IP-5; budget manager, dedup, delta, references, log summarisation | Tests 14, 15, 17; **no outcome-rate fall vs Phase 1 baseline** |
+| **4** | Token accounting & context optimization | IP-5; budget manager, dedup, delta, references, log summarisation | Tests 14, 15, 17, all deterministic with scripted responses |
 | **5** | Progressive-learning hardening | IP-6; provenance, admission gate, supersession, fingerprint invalidation | Tests 10–13; caps unchanged |
 | **6** | Cross-surface integration | IP-4 completion gate; CLI/API/ACP/Web/channel wiring of the clarification-required outcome (FR-082 surface wiring); docs; capability map; bundle rebuild (T141) | Surface impact table complete with evidence; the backward-incompatible FR-082 change is release-noted and the two additive visible changes are documented |
-| **7** | Regression & performance benchmark (historical) | Full paired benchmark reports (tasks-phase-1 baseline T015; candidate run T155); the SC-011 threshold derived from them and recorded in spec.md (D5) | Paired reports published; threshold recorded. SC-011 and SC-012 acceptance moved to plan Phase 10 — both historical runs fail SC-011 |
+| **7** | *Retired (D14)* | — | — |
 | **8** | Full deterministic validation | Complete local/CI baseline on the integrated candidate, all three platforms | Every deterministic gate green; nothing claimed unverified |
 | **9** | Specification convergence (D4/D7/D9 and re-verification) | Stable semantic `decision_ref` minted in the evidence owner; unresolved set derived from the existing session form records; common DecisionAnswer path in the application layer; additive protocol fields; CLI/API/ACP/channel adapters; D7 validation cases; re-verification of FR-099/100/101/105/127/018/123 (§2026-09-24 Plan Convergence B–D) | The §B gate: invalid refs fail closed before any model call, no heuristic path, stable and distinct refs, SC-042 replay, old clients unaffected; D7 cases green; every re-verification either passes or has become a task; protocol codegen, capability map and full deterministic suite green |
-| **10** | Final live acceptance | Provider qualification, then a fresh comparable paired run on the exact frozen candidate, recording its scenario fingerprints; then the SC-012 comparison against the 2026-09-20 baseline (§G) | SC-011 (≤ 0.90 × naive mean total tokens **and** no task-level outcome-rate fall) has fresh passing evidence; SC-012 is `PASS` in the published `python -m bench --sc012` result, with every task compared against its fingerprint-selected reference (D10–D12) |
+| **10** | *Retired (D14)* | — | — |
+| **11** | Acceptance-scope convergence (D14–D17) | Deterministic evidence confirmed for every retained criterion (§G); the SC-044 regression test (§G.4); D17's settings removed with test-internal seams (§G.3); clean-up (tasks Phase 22); the neutral-wording sweep and checklist re-judgement (§I, I-7) | §J on the exact final HEAD, all three platforms |
 
-**Dependency note (plan-phase numbering)**: plan Phase 4 cannot start before
-plan Phase 1 (no baseline, no optimization — Constitution XXI). Plan Phase 3
-depends on plan Phase 2 (the ledger decides *when* to ask). Plan Phase 6 depends
-on plan Phases 2–5. Plan Phase 9 follows the final specification review and
-closes D4/D9 before any final provider acceptance; plan Phase 10 depends on
-plan Phase 9 and on exact-head deterministic validation.
+**Dependency note (plan-phase numbering)**: plan Phase 4 builds on plan
+Phase 1's accounting. Plan Phase 3 depends on plan Phase 2 (the ledger decides
+*when* to ask). Plan Phase 6 depends on plan Phases 2–5. Plan Phase 9 follows the
+final specification review and closes D4/D9. Plan Phase 11 follows plan Phase 9
+and its order is fixed in §I.
 
 ---
 
@@ -1069,22 +1237,23 @@ one validation task, and concrete file evidence. Phase references use the
 
 | Surface | Status | Affected plan/task phases | Evidence / validation |
 | --- | --- | --- | --- |
-| TUI | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10 | Existing question overlay in `apps/tui/src/App.tsx` and the shared reducer in `packages/questions/src/index.ts` render the new optional `reason` / `evidence_consulted` (T052); deterministic keyboard/input behaviour and the custom-answer row characterized at widths 160/120/100/80/60 (T008) and re-run (T163); committed bundle rebuilt (T141) and verified against source (T166); frontend lint/typecheck/tests/build (T162) |
-| Web UI | REQUIRED | plan Phase 1 / tasks Phase 1 (characterization); plan Phase 6 / tasks Phase 8 (wiring, verification); plan Phase 8 / tasks Phase 10 | Live browser question surface: `src/comodor/web/session.py` carries question forms to the page (`request.meta["questions"]`) and routes a dismissal as `CANCELLED` into `tools/ask.py`; `src/comodor/web/ui.js` renders options including the core-appended `free: true` row (`drawOwn`). Characterized before any change — question round-trip, option order, custom-answer row, single/multi-choice, header binding, current dismissal path (T006, `tests/test_web.py`); outcome wiring and regression — `clarification_required` never shown as completion, `clarification.outcome` preserved for cancelled/expired/unattended, dismissal ≠ turn cancellation, custom answer survives, no duplicate free row (T133); Phase 8 gate requires the Web clarification cases green alongside the permission suite (T146); full suite (T160) |
-| CLI / Headless | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8; plan Phase 9 | Today's no-listener behaviour pinned (T009); `comodor run --json` reports `stopped = "clarification_required"` with the nested `clarification` payload (T130, contracts §C3); distinct exit code 3 ≠ generic error/cancellation (T131); non-interactive blocking test (T044); `docs/cli.md` (T143); exact-`decision_ref` resumption via `comodor run --decision-answers` through `run_turn` (the global `--resume` is not reused); invalid refs and workspace or mode mismatches refused before any model call with exit `1` (plan Phase 9, §B, §B.1) |
-| API / Protocols | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10; plan Phase 9 | Additive optional `QuestionField` properties and the negotiated clarification-required capability in `schemas/protocol/v2.json` (T046, T048); artifacts regenerated and `--check` green (T047, T164); old-client compatibility (T136); `api/server.py` maps the OpenAI-compatible envelope to standard `finish_reason: "stop"` while preserving the distinct Comodor state in `comodor.stopped` and `comodor.clarification` (T132); session bridge (T133); ACP (T134); capability honesty and mode authority (T138, T139); capability map (T140, T165); optional `decision_ref` on `ClarificationRequired` / `ClarificationDecision`, codegen, API `comodor.decision_answers` and ACP resumption (plan Phase 9, §B) |
+| TUI | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10 | Existing question overlay in `apps/tui/src/App.tsx` and the shared reducer in `packages/questions/src/index.ts` render the new optional `reason` / `evidence_consulted` (T052); deterministic keyboard/input behaviour and the custom-answer row characterized at widths 160/120/100/80/60 (T008) and re-run (T163); committed bundle rebuilt (T141) and verified against source (T166); frontend lint/typecheck/tests/build (T162) D18, D19: one logical form per decision point, paged in groups of at most four, answered once (T216, T218, T237, T239–T241). |
+| Web UI | REQUIRED | plan Phase 1 / tasks Phase 1 (characterization); plan Phase 6 / tasks Phase 8 (wiring, verification); plan Phase 8 / tasks Phase 10 | Live browser question surface: `src/comodor/web/session.py` carries question forms to the page (`request.meta["questions"]`) and routes a dismissal as `CANCELLED` into `tools/ask.py`; `src/comodor/web/ui.js` renders options including the core-appended `free: true` row (`drawOwn`). Characterized before any change — question round-trip, option order, custom-answer row, single/multi-choice, header binding, current dismissal path (T006, `tests/test_web.py`); outcome wiring and regression — `clarification_required` never shown as completion, `clarification.outcome` preserved for cancelled/expired/unattended, dismissal ≠ turn cancellation, custom answer survives, no duplicate free row (T133); Phase 8 gate requires the Web clarification cases green alongside the permission suite (T146); full suite (T160) D18, D19: one logical form per decision point, paged in groups of at most four, answered once (T216, T218, T237, T239–T241). |
+| CLI / Headless | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8; plan Phase 9 | Today's no-listener behaviour pinned (T009); `comodor run --json` reports `stopped = "clarification_required"` with the nested `clarification` payload (T130, contracts §C3); distinct exit code 3 ≠ generic error/cancellation (T131); non-interactive blocking test (T044); `docs/cli.md` (T143); exact-`decision_ref` resumption via `comodor run --decision-answers` through `run_turn` (the global `--resume` is not reused); invalid refs and workspace or mode mismatches refused before any model call with exit `1` (plan Phase 9, §B, §B.1) D18, D19: one logical form per decision point, paged in groups of at most four, answered once (T216, T218, T237, T239–T241). |
+| API / Protocols | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10; plan Phase 9 | Additive optional `QuestionField` properties and the negotiated clarification-required capability in `schemas/protocol/v2.json` (T046, T048); artifacts regenerated and `--check` green (T047, T164); old-client compatibility (T136); `api/server.py` maps the OpenAI-compatible envelope to standard `finish_reason: "stop"` while preserving the distinct Comodor state in `comodor.stopped` and `comodor.clarification` (T132); session bridge (T133); ACP (T134); capability honesty and mode authority (T138, T139); capability map (T140, T165); optional `decision_ref` on `ClarificationRequired` / `ClarificationDecision`, codegen, API `comodor.decision_answers` and ACP resumption (plan Phase 9, §B) D18, D19: a protocol v2 interactive client receives one live paged form, answered once. The OpenAI-compatible API and ACP return one clarification-required payload listing every decision, resumed through `decision_answers` keyed by `decision_ref`, in parts if needed (T216, T218, T237). |
 | Desktop | NOT APPLICABLE | — | No desktop application/client exists: `docs/desktop-architecture.md` opens "Planned, not built. Nothing in this document exists in the repository"; there is no `src-tauri/`, `apps/desktop/` or desktop client package. The existing `src/comodor/desktop/` package is the computer-use **tool's** screen-capture/pointer backend (consumed by `tools/computer.py`, gated in `tools/registry.py`), not a client or runtime: it renders no questions and reads no turn outcome (it imports none of the question, clarification or turn-outcome machinery; its uses of the words "question" and "stopped" are prose and the guard's own `Stopped` refusal). As a tool it is covered by the permission gates (T011, T167), not by this row |
-| Channels / Integrations | REQUIRED | plan Phase 3 / tasks Phase 3 (FR-121 blocking); plan Phase 6 / tasks Phase 8; plan Phase 9 | Non-interactive blocking applies to every channel (FR-121, T044); channel integrations under `src/comodor/channels/` report a needed decision instead of a result or a crash (T135); existing channel suites `tests/test_channel_service.py`, `tests/test_telegram.py`, `tests/test_slack.py`, `tests/test_whatsapp.py` stay green in T160; quickstart Web/channel checks; a later answer counts only as an explicit structured reply naming the `decision_ref`, routed through the common path; any other reply is a new request (plan Phase 9, §B) |
-| Docker / Packaged Runtime | REQUIRED | plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10 | **Docker configuration unchanged; packaged runtime artifact REQUIRED and verified.** `Dockerfile` / `docker-compose.yml` are not edited by any task (T169 scope review); the packaged terminal-interface bundle that the wheel, sdist and container ship is affected by the TS changes and is rebuilt (T141) and verified to match source (T166); existing Docker/packaging/release validation stays green (T160, T168, T170 confirms no release action) |
+| Channels / Integrations | REQUIRED | plan Phase 3 / tasks Phase 3 (FR-121 blocking); plan Phase 6 / tasks Phase 8; plan Phase 9 | Non-interactive blocking applies to every channel (FR-121, T044); channel integrations under `src/comodor/channels/` report a needed decision instead of a result or a crash (T135); existing channel suites `tests/test_channel_service.py`, `tests/test_telegram.py`, `tests/test_slack.py`, `tests/test_whatsapp.py` stay green in T160; quickstart Web/channel checks; a later answer counts only as an explicit structured reply naming the `decision_ref`, routed through the common path; any other reply is a new request (plan Phase 9, §B) D18, D19: one logical form per decision point, paged in groups of at most four, answered once (T216, T218, T237, T239–T241). |
+| Docker / Packaged Runtime | REQUIRED | plan Phase 6 / tasks Phase 8; plan Phase 8 / tasks Phase 10; plan Phase 11 | **Docker configuration unchanged; packaged runtime artifact REQUIRED and verified.** `Dockerfile` / `docker-compose.yml` are not edited by any task (T169 scope review); the packaged terminal-interface bundle that the wheel, sdist and container ship is affected by the TS changes and is rebuilt (T141) and verified to match source (T166); existing Docker/packaging/release validation stays green (T160, T168, T170 confirms no release action); plan Phase 11 leaves the wheel and container contents unchanged, the sdist ships fewer test modules, and the bundle staleness check is re-run (§J) D19 changes TUI source (T240), so the committed bundle is rebuilt and T234 checks that it is not stale. |
 | Persistence / Shared State | REQUIRED | plan Phase 3 / tasks Phase 3; plan Phase 5 / tasks Phase 6; plan Phase 6 / tasks Phase 8; plan Phase 9 | Learning records gain provenance, status, fingerprint, supersession in `src/comodor/learning/store.py` (T099, T110, T111, T112, T117); session pending-interaction round-trip characterized (T007) and an outstanding form persisted/restored across reconnect with full lifecycle in transcript/export (`src/comodor/session/store.py`, T050, T051); pre-change sessions and stored knowledge remain readable (T137); ledger never persisted (T026); the unresolved-decision set is derived from the form records the session transcript already stores (`message.meta["question"]`) — no new store, and the ledger is still never persisted; a headless run persists only when it ends `clarification_required`, as a `SessionStore` continuation marked by the optional `SessionMeta.continuation` object (`decision_refs`, `mode`), written only on continuations and excluded from `list_sessions()`; a resumed run appends to it whatever it ends in (plan Phase 9, §B, §B.2) |
 | Security / Authorization | REQUIRED | every task phase that touches questions, ASK, modes, tool advertisement, session interaction, orchestration or protocol | Permission and mode enforcement characterized first (T011, `tests/test_baseline_permissions.py`; T012 capability advertisement); per-phase permission regression gates T028, T060, T069, T098, T119, T129, T146 and final T167; unknown modes fail closed and advertised capabilities stay mode-authoritative (T138, T139); the ledger holds fingerprints, never secrets, and is never persisted (T026); clarification never becomes a route to a forbidden action (plan §Explicit non-goal) |
-| Tests / Documentation | REQUIRED | all task phases; plan Phase 8 / tasks Phase 10 | Characterization suite T001–T013; mutation-checked regression tests for every guard (SC-025) across Phases 2–8; benchmark scenarios and integrity (T147–T158); `docs/questions.md` (T142), `docs/cli.md` (T143), `docs/learning.md` (T144); `CHANGELOG.md` unreleased note for the one backward-incompatible regression-by-design and documentation of the two additive visible changes in FR-082 (T145); full validation on the exact final HEAD, three platforms (T159–T170); benchmark provenance and the SC-012 comparator — per-task scenario fingerprints recorded in published paired baselines and a fingerprint-driven comparison (§G, D10–D12), tested offline |
+| Tests / Documentation | REQUIRED | all task phases; plan Phase 8 / tasks Phase 10; plan Phase 11 | Characterization suite T001–T012; mutation-checked regression tests for every guard (SC-025) across Phases 2–8 and 11, including the SC-044 test (§G.4); `docs/questions.md` (T142), `docs/cli.md` (T143), `docs/learning.md` (T144); `CHANGELOG.md` unreleased note for the one backward-incompatible regression-by-design and documentation of the two additive visible changes in FR-082 (T145), and of change 4 (D18; T231, T238); full validation on the exact final HEAD, three platforms (T159–T170, and §J for plan Phase 11); the retained-criterion evidence map (§G); the D14 clean-up and neutral-wording sweep across tests, CI configuration, documentation, the changelog and the Spec Kit artifacts (§I) |
 
 Traceability rule: every plan phase that changes a surface is traceable to this
 table — plan Phase 3 (TUI, CLI, API, Channels, Persistence, Security), plan
 Phase 5 (Persistence), plan Phase 6 (TUI, Web UI, CLI, API, Channels, Docker /
 Packaged Runtime, Persistence, Tests / Documentation), plan Phase 1 (Web UI
-characterization, Tests), plan Phases 7–8 (Tests / Documentation).
+characterization, Tests), plan Phase 8 (Tests / Documentation), plan Phase 11
+(Docker / Packaged Runtime, Tests / Documentation).
 
 ---
 
@@ -1095,7 +1264,7 @@ characterization, Tests), plan Phases 7–8 (Tests / Documentation).
 ```text
 specs/002-grounded-agent-quality/
 ├── plan.md              # This file
-├── spec.md              # 174 requirements: 130 FR, 44 SC
+├── spec.md              # 174 identifiers; 166 active: 128 FR, 38 SC
 ├── research.md          # plan Phase 0 output
 ├── data-model.md        # plan Phase 1 output
 ├── quickstart.md        # plan Phase 1 output
@@ -1104,14 +1273,15 @@ specs/002-grounded-agent-quality/
 │   ├── clarification.md
 │   └── learning-record.md
 ├── checklists/
-│   └── requirements.md
+│   ├── requirements.md
+│   └── spec-gate.md
 └── tasks.md             # NOT created by /speckit-plan
 ```
 
 ### Source Code (repository root)
 
-Existing layout; this feature adds one product/runtime module, two
-benchmark-harness helpers, and extends eleven product modules.
+Existing layout; this feature adds one product/runtime module and extends
+eleven product modules.
 
 ```text
 src/comodor/
@@ -1142,12 +1312,6 @@ src/comodor/
 schemas/protocol/v2.json     # EXTEND — additive, negotiated
 packages/questions/          # EXTEND — optional new fields
 apps/tui/                    # EXTEND — render reason/evidence; rebuild bundle
-bench/
-├── integrity.py             # NEW (harness only) — scenario fingerprinting / tamper detection (T013, T154)
-├── baseline.py              # NEW (harness only) — deliberately naive full-resend comparison strategy (T014)
-├── report.py                # EXTEND — paired reporting
-├── runner.py                # EXTEND — explicit learning mode
-└── tasks/                   # EXTEND — new scenarios
 tests/                       # NEW — ~20 deterministic modules; tests/test_web.py EXTENDED
 ```
 
@@ -1168,38 +1332,20 @@ or subsystem.
 new **product/runtime** file is `src/comodor/agent/evidence.py`, placed in
 `agent/` because the ledger's lifetime is the agent turn and its only consumers
 are the loop, the ask tool and the completion gate — all of which already live
-there or call into it. The two new files under `bench/` are benchmark-harness
-helpers: development/measurement infrastructure that is **never imported by the
-production runtime** (`src/comodor/`), creates no agent/context/learning
-subsystem, and is permitted only because each carries a distinct benchmark
-responsibility (see Complexity Tracking). No further benchmark helper module may
-be added without a new specification decision.
+there or call into it.
 
 ---
 
 ## Complexity Tracking
 
 One product/runtime addition requires justification under Constitution XVIII.
-Two benchmark-harness helpers are recorded alongside it so that "one new module"
-is read precisely: one new **product/runtime** module, not one new Python file.
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 | --- | --- | --- |
 | New module `agent/evidence.py` | FR-001 requires classifying every consequential premise into one of its information-provenance categories, and the feature additionally requires a deterministic runtime lifecycle over the closed `EvidenceState` set (data-model.md §2). No existing module owns epistemic state: `claims.py` inspects answer text after the fact, `ToolContext.note_read` records only reads, and `learning/` is about durable knowledge across turns, not within one | **Extending `claims.py`** rejected: it is a post-hoc text inspector with a deliberately high firing bar; the ledger must be populated during the turn by tool results, and conflating them would make one module both a bookkeeper and a heuristic. **Extending `ToolContext`** rejected for the transition table only — the context *does* carry the ledger (IP-1), but a frozen-lifetime context object holding a state machine mixes transport with policy. **Reusing `learning/store.py`** rejected: durable cross-session knowledge and within-turn epistemic state have different lifetimes, different persistence rules (the ledger is never persisted) and different security properties |
 
-**Benchmark-harness helpers (not product/runtime subsystems)**
-
-| File | Why a separate file | Boundary |
-| --- | --- | --- |
-| `bench/integrity.py` (T013, T154) | Scenario fingerprinting and tamper detection have a separate lifecycle from scenario execution (`runner.py`) and reporting (`report.py`): fingerprints are taken before any change and checked after, and a weakened scenario must be detectable independently of the run that used it | Harness only; never imported by `src/comodor/` |
-| `bench/baseline.py` (T014) | The deliberately naive full-resend comparison strategy must stay isolated from the optimized production context path (`agent/context.py`), so benchmark code cannot accidentally become runtime behaviour and the baseline cannot silently inherit an optimization it is meant to measure against | Harness only; never imported by `src/comodor/` |
-
-Validation: a deterministic test asserts that no module under `src/comodor/`
-imports `bench.integrity` or `bench.baseline` (owned by T154; enforced again in
-T169's scope review). No other new subsystem. The SC-012 provenance and
-comparison work (§G) adds no benchmark file: it extends `integrity.py`,
-`runner.py`, `report.py` and `__main__.py`. Every remaining change extends a
-module that already owns the behaviour, as recorded in the Architecture Audit.
+No other new subsystem. Every remaining change extends a module that already
+owns the behaviour, as recorded in the Architecture Audit.
 
 ---
 
@@ -1217,11 +1363,13 @@ Re-evaluated after the plan Phase 1 design artifacts below.
   **PASS**
 - **I (compatibility)**: all protocol additions are optional and negotiated; the
   one backward-incompatible regression-by-design in FR-082 is isolated to plan
-  Phase 3 (enforcement) / Phase 6 (surface wiring) and release-noted; the two
-  other intended visible changes are additive and documented.
+  Phase 3 (enforcement) / Phase 6 (surface wiring) and release-noted; changes 2
+  and 3 are additive and documented; change 4 (D18, D19, plan Phase 11) is breaking for form-count and scripted consumers, has a migration path, and changes the
+  number of forms and when questions are presented, and is release-noted.
   **PASS**
-- **XXI (paired measurement)**: enforced structurally — plan Phase 4 (tasks
-  Phase 5) cannot begin before plan Phase 1 (T015) publishes the baseline. **PASS**
+- **XXI (2.0.0)**: every optimization is accepted on deterministic tests of its
+  mechanism with scripted responses (§G.2); no token-reduction claim is made.
+  **PASS**
 
 **Gate result after design: PASS.** No unjustified complexity.
 
@@ -1231,7 +1379,7 @@ Re-evaluated against the converged plan and the specification at `d911e3f`.
 
 | Principle | Check | Status |
 | --- | --- | --- |
-| I — Backward compatibility | Exactly one backward-incompatible change (FR-082 #1), release-noted. The new `decision_ref` fields and resumption inputs are optional, and `decisions[].id` is kept. `SessionMeta.continuation` is written only on continuations, so ordinary session files are unchanged and older readers skip continuations. The global `--resume` contract is untouched | **PASS** |
+| I — Backward compatibility | Exactly one backward-incompatible change (FR-082 #1), release-noted. FR-082 #4 (D18, D19, added later) removes no question; it is named breaking for form-count and scripted consumers, and it carries a migration path and a release note. The new `decision_ref` fields and resumption inputs are optional, and `decisions[].id` is kept. `SessionMeta.continuation` is written only on continuations, so ordinary session files are unchanged and older readers skip continuations. The global `--resume` contract is untouched | **PASS** |
 | III — Fix the invariant | The turn-local id is replaced as semantic identity by a minted `ref`, not patched with matching heuristics; no sleeps, timeouts or retries | **PASS** |
 | IV — Deterministic regression tests | The ref minting function is injectable; every new guard (rejection classes, no-fallback, D7 cases) is mutation-checked | **PASS** |
 | V — Narrow scope | Plan Phase 9 is limited to the spec's D4/D7/D9 deltas and the named re-verifications; no surface is moved onto `CoreService`; one function is added above the loop, and the six existing callers switch to it; delegate child loops are left as they are | **PASS** |
@@ -1243,10 +1391,35 @@ Re-evaluated against the converged plan and the specification at `d911e3f`.
 | XII — Done means everything agrees | data-model, contracts, quickstart and research updated with this plan (including the H1/H2/M1/L2 repair); tasks follow via `/speckit.tasks` | **PASS** |
 | XIV — Evidence before assumption | The design rests on inspected code (§B facts); FR-127 is flagged as a probable gap rather than assumed done | **PASS** |
 | XV — Interactive clarification | Only an explicit answer bound to its `decision_ref` resolves a decision; invalid input changes nothing; channels without a structured reply route report the decision instead of guessing | **PASS** |
-| XVI / XXI — Token efficiency measured with quality | No context change in plan Phase 9; SC-011/SC-012 remain paired acceptance in plan Phase 10 | **PASS** |
+| XVI / XXI — Token efficiency measured with quality | No context change in plan Phase 9; acceptance is deterministic (D14, Constitution 2.0.0) | **PASS** |
 | XVII — Progressive learning | Unchanged; a resumed answer is a `settled_decision` only when it is a real answer | **PASS** |
 | XVIII — Extend, never duplicate | No new store, subsystem or matcher: the evidence owner, `SessionStore` (one optional meta field, a listing filter, an exact lookup) and existing request extensions are extended; `run_turn` removes the duplication six direct loop calls would otherwise force, while carrying `images` and delegate `decisions` through unchanged | **PASS** |
 | XIX — Grounded tool use | Unchanged | **PASS** |
 | XX — User control | No merge, tag, publish or deploy | **PASS** |
 
 **Gate result after convergence: PASS.**
+
+### Constitution Re-Check (post-design, D14–D17, 2026-09-29; against 2.0.0)
+
+Re-evaluated after the plan Phase 11 design (§F–§K) and its research, data
+model and quickstart revisions.
+
+| Principle | Check | Status |
+| --- | --- | --- |
+| I — Backward compatibility | No protocol, session or learning format changes. D18/D19's one logical form is FR-082 change 4: named breaking for form-count and scripted consumers, with D19's migration path and a release note. Message shapes are unchanged. The two D17 settings were never offered, and a configuration file that still carries either one loads unchanged (§G.3 compatibility test). `comodor run --json` keeps `usage` and `measurement` | **PASS** |
+| II — Three platforms | §J runs on Windows, Linux and macOS on the exact final HEAD | **PASS** |
+| III — Fix the invariant | The SC-044 test pins the existing suppression; no sleep, timeout or retry is added; seams replace settings without weakening an assertion | **PASS** |
+| IV — Deterministic regression tests | Every retained criterion maps to deterministic tests (§G). The SC-044 test is mutation-checked. Migrated tests keep their mutation checks | **PASS** |
+| V — Narrow scope | Plan Phase 11 cleans up, re-confirms evidence, adds the one-form work and its tests, and sweeps wording; §I steps are separately revertable | **PASS** |
+| VII — Reproducible artifacts | D19 changes TUI source (T240); the bundle is rebuilt and its staleness check is in §J | **PASS** |
+| VIII — Security | No gate needs a credential; no workflow reads a provider secret; mode policy untouched | **PASS** |
+| IX — Release infrastructure | The release workflow's lint path changes with CI's and is proved by the same run | **PASS** |
+| X / XII — Gates and agreement | spec (D14–D17), constitution 2.0.0, this plan, research R18–R20, data-model §6 and the quickstart agree. Tasks follow via `/speckit.tasks`, checklist notes via `/speckit.checklist` (§K), and the sweep (I-7) leaves no reference behind | **PASS** |
+| XIV — Evidence before assumption | Evidence names test modules and counts found in the repository; SC-007's missing evidence and failing case are reported (U-1, §G.5), not assumed | **PASS** |
+| XVI — Token efficiency | Production token-usage accounting kept and tested | **PASS** |
+| XVIII — Extend, never duplicate | No module, store or subsystem added; the seams reuse `Optimizer`'s existing constructor | **PASS** |
+| XX — User control | No commit, push, merge, provider call or paid token in this planning | **PASS** |
+| XXI — Quality and tokens (2.0.0) | Deterministic acceptance; the context-change gate is met by §G.2; no token-reduction or quality-improvement claim | **PASS** |
+
+**Gate result after the D14–D17 design: PASS.** No unjustified complexity; four
+open issues (§K) are recorded rather than resolved by assumption.

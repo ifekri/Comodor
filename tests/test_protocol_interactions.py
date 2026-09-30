@@ -483,3 +483,22 @@ def test_an_answer_and_a_timeout_produce_one_resolution(config):
         assert request.choice in ("allow", "deny")
     finally:
         service.close()
+
+
+# --------------------------------------------------------------------------- #
+# T237 — reconnect restores a form of any length whole (D19; FR-023)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_six_question_form_comes_back_whole_on_reconnect(service):
+    session = service.create_session()["id"]
+    questions = [{"header": f"H{n}", "prompt": f"Question {n}?",
+                  "options": [{"label": f"A{n}"}, {"label": f"B{n}"}]} for n in range(6)]
+    service.session(session).assembly.bus.emit(Kind.REQUEST, request=Request(
+        id="ask-6", prompt="6 questions before I start", options=[], kind="questions",
+        meta={"questions": json.dumps(questions)}))
+
+    restored = service.snapshot(session)["question"]
+    assert restored["id"] == "ask-6"
+    assert [question["header"] for question in restored["questions"]] == \
+        [f"H{n}" for n in range(6)], "every page of it, in order"
