@@ -214,6 +214,12 @@ class Ask(Tool):
         questions, why = check(args.get("questions"))
         if why:
             return ToolResult.failure(why)
+        # The same decision asked twice is one question, as it is across
+        # calls (D18).
+        unique: dict[str, forms.Question] = {}
+        for question in questions:
+            unique.setdefault(_key(question.prompt), question)
+        questions = list(unique.values())
 
         book = ctx.evidence
 
@@ -298,6 +304,14 @@ def check(raw: Any) -> tuple[list[forms.Question], str]:
         why = not_a_decision(question.prompt)
         if why:
             return [], why
+    # `parse` numbers a repeated header so the tabs stay apart; a header the
+    # model itself gave two different questions is refused instead, as it is
+    # across calls (D19). The headers it supplied are checked, not the renamed.
+    supplied = [(str(entry.get("header") or "").strip(), question.prompt)
+                for entry, question in zip(raw, questions, strict=True)]
+    why = _shared_header([(header, prompt) for header, prompt in supplied if header])
+    if why:
+        return [], why
     return questions, ""
 
 
@@ -308,15 +322,23 @@ def collision(calls: list[list[forms.Question]]) -> str:
     would put one answer on both. The same decision asked twice under the
     same header is not a collision; it is one question (D18).
     """
+    return _shared_header([(question.header, question.prompt)
+                           for questions in calls for question in questions])
+
+
+def _shared_header(pairs: list[tuple[str, str]]) -> str:
+    """The refusal for a header naming two different questions, or "".
+
+    Headers differing only in case are the same tab to the person (`parse`
+    treats them so), so they are compared that way.
+    """
     owner: dict[str, str] = {}
-    for questions in calls:
-        for question in questions:
-            key = _key(question.prompt)
-            earlier = owner.setdefault(question.header, key)
-            if earlier != key:
-                return (f"the header {question.header!r} names two different "
-                        f"questions in this reply; each question needs a header "
-                        f"of its own")
+    for header, prompt in pairs:
+        key = _key(prompt)
+        earlier = owner.setdefault(header.lower(), key)
+        if earlier != key:
+            return (f"the header {header!r} names two different questions in "
+                    f"this reply; each question needs a header of its own")
     return ""
 
 
@@ -396,6 +418,8 @@ def ask_together(ctx: ToolContext, calls: list[tuple[str, list[forms.Question]]]
     record = form.meta.get("form") if form is not None else None
     submitted = {entry["header"]: entry for entry in (record or {}).get("answers", [])}
     outcome = str((record or {}).get("outcome") or "")
+    given_total = sum(1 for entry in submitted.values()
+                      if entry.get("chosen") or str(entry.get("written") or "").strip())
     first = True
 
     for call_id, entries in mine.items():
@@ -436,14 +460,21 @@ def ask_together(ctx: ToolContext, calls: list[tuple[str, list[forms.Question]]]
         if first and record is not None:
             result.meta["form"] = record
             result.meta["asked"] = len(pending)
-            result.meta["given"] = sum(
-                1 for entry in submitted.values()
-                if entry.get("chosen") or str(entry.get("written") or "").strip())
+            result.meta["given"] = given_total
             first = False
         else:
             result.meta["asked"] = 0
             result.meta["given"] = 0
         results[call_id] = _with_discretion(result, discretion[call_id])
+    if first and record is not None and calls:
+        # No asking call kept a question on the form — only the preflight's
+        # are there. The record still rides on a result, or the decisions it
+        # leaves open are missing from the transcript and a later resumption
+        # by their `decision_ref` is refused as unknown (FR-129).
+        carrier = results[calls[0][0]]
+        carrier.meta["form"] = record
+        carrier.meta["asked"] = len(pending)
+        carrier.meta["given"] = given_total
     return results
 
 

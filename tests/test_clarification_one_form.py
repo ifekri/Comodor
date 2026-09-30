@@ -228,6 +228,32 @@ def test_c5_an_ask_and_a_preflight_decision_share_one_form(config, bus, order):
     assert result.ok and (config.paths.project / "service.py").exists()
 
 
+def test_c5_a_form_of_only_preflight_decisions_stays_on_the_record(config, bus):
+    """The `ask` beside the write needs nobody — its decision is settled — so
+    the form holds only the preflight's decision. Left open, that decision
+    must still be on the transcript's record, or a later resumption by its
+    `decision_ref` is rejected as unknown (FR-129)."""
+    from comodor.session.store import decision_states
+
+    person = Person(bus, lambda request: (
+        forms.CANCELLED if len(person.forms) > 1
+        else first_option_for_every_question(request)))
+    agent = make_agent(config, bus, [
+        Script(text="Asking.", tool_calls=[ask("q1", question("Database"))]),
+        Script(text="Working.", tool_calls=[ask("q2", question("Database")), write()]),
+        Script(text="Done.")])
+    agent.gateway.provider("fake").preflight = MISSING_RATE
+    result = agent.run(REQUEST)
+    assert len(person.forms) == 2
+    assert [entry["prompt"] for entry in person.forms[1].meta["questions"]] == [
+        "What rate limit should the service use?"]
+    assert result.stopped == "clarification_required"
+    ref = result.clarification["decision_ref"]
+    recorded = decision_states(agent.conversation.messages)
+    assert ref in recorded and recorded[ref].status == "open"
+    assert not (config.paths.project / "service.py").exists()
+
+
 # --------------------------------------------------------------------------- #
 # C6: a later model call is a new decision point
 # --------------------------------------------------------------------------- #
@@ -349,6 +375,8 @@ REFUSALS = {
         "question": "Should I proceed?", "header": "Go",
         "options": [{"label": "Yes"}, {"label": "No"}]}]}),
     "collision": ask("q2", question("Database", prompt="Which store should this use?")),
+    "collision_in_one_call": ask("q2", question("Cache"),
+                                 question("Cache", prompt="Which store should this use?")),
 }
 
 
@@ -368,6 +396,45 @@ def test_c10_one_refused_ask_refuses_the_set_and_withholds_the_write(config, bus
     assert "not asked" in tool_text(agent, "q2")
     assert "not run" in tool_text(agent, "w1")
     assert not (config.paths.project / "service.py").exists()
+
+
+def shared_header_in_one_call():
+    return ask("q1", question("Database"),
+               question("database", prompt="Which store should this use?"))
+
+
+def test_c10_one_call_giving_one_header_two_questions_is_refused(config, bus):
+    """The header the model gave, not the one `parse` renamed it to, is what
+    collides — within one call as across calls, whatever its case (D19)."""
+    person = Person(bus, first_option_for_every_question)
+    agent = make_agent(config, bus, [
+        Script(text="Asking.", tool_calls=[shared_header_in_one_call()]),
+        Script(text="Done.")])
+    agent.run(REQUEST)
+    assert person.forms == []
+    assert "names two different questions" in tool_text(agent, "q1")
+    assert not agent.tool_context.evidence.decisions
+
+
+def test_c10_the_header_check_reads_what_the_model_gave(config, bus, monkeypatch):
+    """Mutation check: without it, the renamed header slips onto a form."""
+    monkeypatch.setattr(ask_tool, "_shared_header", lambda pairs: "")
+    person = Person(bus, first_option_for_every_question)
+    agent = make_agent(config, bus, [
+        Script(text="Asking.", tool_calls=[shared_header_in_one_call()]),
+        Script(text="Done.")])
+    agent.run(REQUEST)
+    assert person.headers() == ["Database", "database 2"], "the mutation renames"
+
+
+def test_c10_one_decision_twice_in_one_call_is_one_question(config, bus):
+    person = Person(bus, first_option_for_every_question)
+    agent = make_agent(config, bus, [
+        Script(text="Asking.", tool_calls=[ask("q1", question("Database"),
+                                               question("Database"))]),
+        Script(text="Done.")])
+    assert agent.run(REQUEST).ok
+    assert person.headers() == ["Database"]
 
 
 def test_c10_the_refusal_is_atomic(config, bus, monkeypatch):
