@@ -175,7 +175,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     env:
       # Named rather than assumed, as in the renderer job.
-      COMODOR_PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+      COMODOR_PYTHON: ${{ matrix.os == 'windows-latest' && 'python' || 'python3' }}
     steps:
       - uses: actions/checkout@v4
 
