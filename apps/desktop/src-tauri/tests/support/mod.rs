@@ -11,9 +11,14 @@
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::time::Duration;
 
 use comodor_desktop::platform::CoreCommand;
+use comodor_desktop::supervisor::{Failure, Options, PageSink, Supervisor};
+use serde_json::Value;
 
 /// The repository root, from this crate's manifest directory.
 pub fn repo_root() -> PathBuf {
@@ -185,5 +190,103 @@ impl HoldPoint {
             stream.write_all(&(body.len() as i32).to_be_bytes()).expect("length");
             stream.write_all(body).expect("release the hold");
         }
+    }
+}
+
+/// How long any one wait may take before the test fails. A bound on failure,
+/// never a delay: every wait returns as soon as its condition holds.
+pub const DEADLINE: Duration = Duration::from_secs(60);
+
+/// A supervisor for one test, whose Core is `command`, in `home`.
+pub fn launch(command: CoreCommand, home: &CoreHome) -> Supervisor {
+    launch_with_env(command, home, vec![])
+}
+
+/// The same, with variables added for this test's Cores only.
+pub fn launch_with_env(command: CoreCommand, home: &CoreHome,
+                       extra: Vec<(OsString, OsString)>) -> Supervisor {
+    let mut env = home.env();
+    env.extend(extra);
+    Supervisor::launch(Options { locate: Box::new(move || Ok(command.clone())), test_env: env })
+}
+
+/// A supervisor whose locating has already happened, successfully or not.
+pub fn launch_located(located: Result<CoreCommand, Failure>, home: &CoreHome) -> Supervisor {
+    Supervisor::launch(Options { locate: Box::new(move || located.clone()), test_env: home.env() })
+}
+
+/// A page, as far as the native side can tell: everything sent to it, in
+/// order.
+pub struct Page {
+    sender: Sender<Value>,
+    receiver: Receiver<Value>,
+    seen: RefCell<Vec<Value>>,
+}
+
+struct PageEnd(Sender<Value>);
+
+impl PageSink for PageEnd {
+    fn send(&self, message: Value) {
+        let _ = self.0.send(message);
+    }
+}
+
+impl Page {
+    pub fn new() -> Self {
+        let (sender, receiver) = channel();
+        Self { sender, receiver, seen: RefCell::new(vec![]) }
+    }
+
+    pub fn sink(&self) -> Box<dyn PageSink> {
+        Box::new(PageEnd(self.sender.clone()))
+    }
+
+    /// The next message, by the failure deadline.
+    fn next(&self) -> Value {
+        let message = self.receiver.recv_timeout(DEADLINE).expect("a message by the deadline");
+        self.seen.borrow_mut().push(message.clone());
+        message
+    }
+
+    /// Wait for the message satisfying `wanted`, keeping every earlier one.
+    pub fn until(&self, wanted: impl Fn(&Value) -> bool) -> Value {
+        if let Some(found) = self.seen.borrow().iter().find(|m| wanted(m)) {
+            return found.clone();
+        }
+        loop {
+            let message = self.next();
+            if wanted(&message) {
+                return message;
+            }
+        }
+    }
+
+    /// The protocol answer to the page's request `id`.
+    pub fn answer(&self, id: &str) -> Value {
+        let line = self.until(|m| m["kind"] == "line" && serde_json::from_str::<Value>(
+            m["line"].as_str().unwrap_or("")).map(|l| l["id"] == id).unwrap_or(false));
+        serde_json::from_str(line["line"].as_str().unwrap()).unwrap()
+    }
+
+    /// Every protocol line received so far, after waiting for one that
+    /// satisfies `wanted`.
+    pub fn lines_until(&self, wanted: impl Fn(&Value) -> bool) -> Vec<Value> {
+        self.until(|m| m["kind"] == "line"
+            && serde_json::from_str::<Value>(m["line"].as_str().unwrap_or("")).map(|l| wanted(&l)).unwrap_or(false));
+        self.seen.borrow().iter().filter(|m| m["kind"] == "line")
+            .map(|m| serde_json::from_str(m["line"].as_str().unwrap()).unwrap()).collect()
+    }
+
+    /// The status states received, in order, once `state` has been seen
+    /// `count` times.
+    pub fn states_until(&self, count: usize, state: &str) -> Vec<String> {
+        let states = || -> Vec<String> {
+            self.seen.borrow().iter().filter(|m| m["kind"] == "status")
+                .map(|m| m["status"]["state"].as_str().unwrap_or("").to_string()).collect()
+        };
+        while states().iter().filter(|s| *s == state).count() < count {
+            self.next();
+        }
+        states()
     }
 }

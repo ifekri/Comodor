@@ -25,7 +25,7 @@ export interface ScenarioContext {
   /** Hand the harness something to do, and wait for its reply. */
   checkpoint(name: string, data?: Data): Promise<Data>;
   /** Ask the native test build what only it can see. */
-  query(what: "listeners" | "core_pid"): Promise<Data>;
+  query(what: "listeners" | "core_pid" | "chooser"): Promise<Data>;
   /** Resolve once `find` returns something, re-checking on every DOM change. */
   waitFor<T>(find: () => T | null | undefined | false): Promise<T>;
   /** The element matching `selector`, once there is one. */

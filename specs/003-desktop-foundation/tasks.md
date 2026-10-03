@@ -201,32 +201,32 @@ exact chooser start directory (SC-017).
 
 ### Tests for User Story 1 ⚠️ (write first; they must fail)
 
-- [ ] T018 [P] [US1] Write Core discovery tests (**U**) in `apps/desktop/src-tauri/src/locate.rs`:
+- [X] T018 [P] [US1] Write Core discovery tests (**U**) in `apps/desktop/src-tauri/src/locate.rs`:
   - with `COMODOR_BIN` set, it is used with `COMODOR_ARGS` split on whitespace;
   - otherwise `comodor` on `PATH`;
   - when neither exists, the `not_found` message lists every location tried and names `COMODOR_BIN` and how to install Comodor (FR-002).
-- [ ] T019 [P] [US1] Write command-construction tests (**U**) in `apps/desktop/src-tauri/src/supervisor.rs` (test module): the arguments are exactly `[<COMODOR_ARGS…>, "core", "--stdio"]` with no value from the Core home's configuration, and the environment passed equals the parent's (FR-003).
-- [ ] T020 [P] [US1] Write state-machine tests (**U**) in `apps/desktop/src-tauri/src/supervisor.rs` (test module), covering every transition of [data-model.md](./data-model.md) §1:
+- [X] T019 [P] [US1] Write command-construction tests (**U**) in `apps/desktop/src-tauri/src/supervisor.rs` (test module): the arguments are exactly `[<COMODOR_ARGS…>, "core", "--stdio"]` with no value from the Core home's configuration, and the environment passed equals the parent's (FR-003).
+- [X] T020 [P] [US1] Write state-machine tests (**U**) in `apps/desktop/src-tauri/src/supervisor.rs` (test module), covering every transition of [data-model.md](./data-model.md) §1:
   - `absent → starting → handshaking → ready`;
   - each failure class — `not_found`, `spawn_failed`, `workspace_unavailable`, `exited_before_ready`, `protocol_mismatch` and `protocol_fault` — lands in `failed` with its own message;
   - `ready` only when `protocol_version` is 2;
   - "Try again" moves `failed` to `starting`;
   - there is no handshake timeout, and no stop action while handshaking — only a window close (stop sequence) or a workspace change.
-- [ ] T021 [P] [US1] Write diagnostic-tail tests (**U**) in `apps/desktop/src-tauri/src/diag.rs`: "at most 200 lines and at most 64 KiB, dropping the oldest first"; plain text; never parsed as protocol (FR-006, FR-007).
-- [ ] T022 [P] [US1] Write preferences tests (**U**) in `apps/desktop/src-tauri/src/prefs.rs`:
+- [X] T021 [P] [US1] Write diagnostic-tail tests (**U**) in `apps/desktop/src-tauri/src/diag.rs`: "at most 200 lines and at most 64 KiB, dropping the oldest first"; plain text; never parsed as protocol (FR-006, FR-007).
+- [X] T022 [P] [US1] Write preferences tests (**U**) in `apps/desktop/src-tauri/src/prefs.rs`:
   - the serialised type has exactly `version` (integer, starting at 1), `window` (`{width, height, x, y, maximized}`) and `last_selected_folder` (string or absent);
   - an unknown field is ignored;
   - a malformed file is treated as absent and replaced through a temporary file and rename;
   - a round trip writes no other field (FR-032).
-- [ ] T023 [P] [US1] Write launch-workspace tests (**U**) in `apps/desktop/src-tauri/src/workspace.rs` per [data-model.md](./data-model.md) §8, with a fake chooser adapter that records the start directory:
+- [X] T023 [P] [US1] Write launch-workspace tests (**U**) in `apps/desktop/src-tauri/src/workspace.rs` per [data-model.md](./data-model.md) §8, with a fake chooser adapter that records the start directory:
   - a valid command-line path is used with no chooser;
   - an invalid one is reported and the chooser opens;
   - no path makes the chooser adapter receive **exactly** `last_selected_folder`, or the system default when that folder is gone;
   - a choice stores `last_selected_folder`;
   - a dismissal starts no Core and reports "no workspace chosen";
   - a missing or unreadable directory is `workspace_unavailable` (FR-021, FR-022, SC-017).
-- [ ] T024 [P] [US1] Write handshake tests (**U**) in `apps/desktop/src-tauri/src/relay.rs` (test module): the native `client.hello` declares exactly `["questions", "permissions"]` with protocol version 2, and the answer is cached.
-- [ ] T025 [US1] Write startup integration tests (**I**, all platforms) in `apps/desktop/src-tauri/tests/startup.rs`:
+- [X] T024 [P] [US1] Write handshake tests (**U**) in `apps/desktop/src-tauri/src/relay.rs` (test module): the native `client.hello` declares exactly `["questions", "permissions"]` with protocol version 2, and the answer is cached.
+- [X] T025 [US1] Write startup integration tests (**I**, all platforms) in `apps/desktop/src-tauri/tests/startup.rs`:
   - the offline Core reaches `ready`; `model.get` reports `fake`, `fake-1` and configured, and `workspace.get` the workspace;
   - `not_found`;
   - `spawn_failed`, with `COMODOR_BIN` pointing at `tests/fixtures/not-executable`;
@@ -235,28 +235,28 @@ exact chooser start directory (SC-017).
   - `protocol_fault`;
   - `workspace_unavailable` before any spawn;
   - `stderr-flood` never blocks the handshake (FR-006, FR-009).
-- [ ] T026 [P] [US1] Write status and failure view tests (**W**) in `apps/desktop/test/status.test.tsx`:
+- [X] T026 [P] [US1] Write status and failure view tests (**W**) in `apps/desktop/test/status.test.tsx`:
   - the ready strip shows workspace, provider, model and configured state as reported;
   - each failure class has its own message, with the tail as inert text, and "Try again" calls `retry`;
   - "no workspace chosen" offers "Choose workspace…", which calls `choose_workspace`.
-- [ ] T027 [US1] Write the scenario `ready` (**S**, all platforms) in `apps/desktop/e2e/scenarios/ready.ts`:
+- [X] T027 [US1] Write the scenario `ready` (**S**, all platforms) in `apps/desktop/e2e/scenarios/ready.ts`:
   - elapsed time from launch to the ready strip is recorded and fails above 10 s (SC-001);
   - the test build's network-listener report for the application process is empty (FR-010).
-- [ ] T028 [US1] Write the scenario `workspace-launch` (**S**, all platforms) in `apps/desktop/e2e/scenarios/workspace-launch.ts`, with the chooser double:
+- [X] T028 [US1] Write the scenario `workspace-launch` (**S**, all platforms) in `apps/desktop/e2e/scenarios/workspace-launch.ts`, with the chooser double:
   - a fresh launch without a path gives the chooser exactly the stored folder, and no Core starts before a choice;
   - a valid path starts the Core there with no chooser;
   - a dismissal leaves "no workspace chosen" (SC-017, automated part).
 
 ### Implementation for User Story 1
 
-- [ ] T029 [P] [US1] Implement Core discovery in `apps/desktop/src-tauri/src/locate.rs` to pass T018.
-- [ ] T030 [P] [US1] Implement the diagnostic tail in `apps/desktop/src-tauri/src/diag.rs`, read on its own thread, to pass T021.
-- [ ] T031 [P] [US1] Implement preferences in `apps/desktop/src-tauri/src/prefs.rs`, in the application's per-user configuration directory, to pass T022.
-- [ ] T032 [US1] Implement launch-workspace resolution in `apps/desktop/src-tauri/src/workspace.rs`, held in memory for the whole launch. The chooser adapter is a thin wrapper that passes the start directory to the dialog plugin, used from Rust only; the `e2e` feature swaps in the double. T023 must pass.
-- [ ] T033 [US1] Implement the supervisor state machine, command construction and failure classification in `apps/desktop/src-tauri/src/supervisor.rs`, to pass T019 and T020.
-- [ ] T034 [US1] Implement the native handshake, its cache, and the stdout bad-line check that raises `protocol_fault` in `apps/desktop/src-tauri/src/relay.rs`, to pass T024 and T025.
+- [X] T029 [P] [US1] Implement Core discovery in `apps/desktop/src-tauri/src/locate.rs` to pass T018.
+- [X] T030 [P] [US1] Implement the diagnostic tail in `apps/desktop/src-tauri/src/diag.rs`, read on its own thread, to pass T021.
+- [X] T031 [P] [US1] Implement preferences in `apps/desktop/src-tauri/src/prefs.rs`, in the application's per-user configuration directory, to pass T022.
+- [X] T032 [US1] Implement launch-workspace resolution in `apps/desktop/src-tauri/src/workspace.rs`, held in memory for the whole launch. The chooser adapter is a thin wrapper that passes the start directory to the dialog plugin, used from Rust only; the `e2e` feature swaps in the double. T023 must pass.
+- [X] T033 [US1] Implement the supervisor state machine, command construction and failure classification in `apps/desktop/src-tauri/src/supervisor.rs`, to pass T019 and T020.
+- [X] T034 [US1] Implement the native handshake, its cache, and the stdout bad-line check that raises `protocol_fault` in `apps/desktop/src-tauri/src/relay.rs`, to pass T024 and T025.
 - [ ] T035 [US1] Implement `connect`, `status`, `diagnostics`, `choose_workspace` and `retry` in `apps/desktop/src-tauri/src/commands.rs`, per [native-bridge.md](./contracts/native-bridge.md). Every name comes from the single command constant.
-- [ ] T036 [US1] Implement the window shell in `apps/desktop/src/main.tsx`, `apps/desktop/src/app.tsx`, `apps/desktop/src/view/StatusStrip.tsx`, `apps/desktop/src/view/FailureView.tsx` and `apps/desktop/src/view/WorkspaceGate.tsx`, with colours only from `cssVariables()`. T026 must pass.
+- [X] T036 [US1] Implement the window shell in `apps/desktop/src/main.tsx`, `apps/desktop/src/app.tsx`, `apps/desktop/src/view/StatusStrip.tsx`, `apps/desktop/src/view/FailureView.tsx` and `apps/desktop/src/view/WorkspaceGate.tsx`, with colours only from `cssVariables()`. T026 must pass.
 - [ ] T037 [US1] Push the branch normally (no force) and run the `desktop` job of `.github/workflows/ci.yml` with `workflow_dispatch`. T025, T027 and T028 must pass on all three platforms. Keep the run link, per-platform results and the SC-001 time for the PR description.
 
 **Checkpoint**: US1 works alone on Windows, Linux and macOS.
@@ -277,7 +277,7 @@ a permission answered exactly, cancel, and a mode change shown only after
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T038 [P] [US2] Write relay tests (**U**) in `apps/desktop/src-tauri/src/relay.rs` (test module):
+- [X] T038 [P] [US2] Write relay tests (**U**) in `apps/desktop/src-tauri/src/relay.rs` (test module):
   - `7` from generation 3 becomes `g3:7`, and its answer maps back;
   - stale-generation and unknown-id answers are dropped;
   - the page's `client.hello` is answered from the cache with the page's id;
@@ -310,7 +310,7 @@ a permission answered exactly, cancel, and a mode change shown only after
 
 ### Implementation for User Story 2
 
-- [ ] T044 [US2] Implement the relay in `apps/desktop/src-tauri/src/relay.rs`: generations, id mapping, drops, the method allowlist, refusals and order. T038 must pass.
+- [X] T044 [US2] Implement the relay in `apps/desktop/src-tauri/src/relay.rs`: generations, id mapping, drops, the method allowlist, refusals and order. T038 must pass.
 - [ ] T045 [US2] Implement `send_line` in `apps/desktop/src-tauri/src/commands.rs`, wiring the relay to the supervisor's stdin and stdout. T039 must pass.
 - [ ] T046 [US2] Implement session bootstrap and state in `apps/desktop/src/state.ts`:
   - `connect`, then `CoreClient.start()`, then subscribe, then `session.create`, then `session.snapshot`;

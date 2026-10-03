@@ -33,6 +33,8 @@ static WRITE: Mutex<()> = Mutex::new(());
 static CHECKPOINT: Mutex<()> = Mutex::new(());
 static CORE_PID: AtomicU32 = AtomicU32::new(0);
 static CHOICES_TAKEN: AtomicUsize = AtomicUsize::new(0);
+/// Every start directory the chooser double was given, in order.
+static CHOOSER_STARTS: Mutex<Vec<Option<String>>> = Mutex::new(Vec::new());
 
 fn append(variable: &str, value: &Value) {
     let Some(path) = std::env::var_os(variable) else { return };
@@ -74,10 +76,9 @@ pub fn init_script() -> String {
 /// running out of choices.
 pub fn choose_folder(start: Option<&Path>) -> Option<PathBuf> {
     let index = CHOICES_TAKEN.fetch_add(1, Ordering::SeqCst);
-    record("chooser", &json!({
-        "start": start.map(|path| path.to_string_lossy().into_owned()),
-        "index": index,
-    }));
+    let start = start.map(|path| path.to_string_lossy().into_owned());
+    record("chooser", &json!({ "start": start, "index": index }));
+    CHOOSER_STARTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(start);
     let choices: Vec<Option<String>> = std::env::var("COMODOR_E2E_CHOOSE").ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
@@ -111,6 +112,9 @@ pub fn e2e_report(app: tauri::AppHandle, result: Value) -> Result<Value, String>
         Some("query") => match result.get("what").and_then(Value::as_str) {
             Some("listeners") => Ok(json!({ "listeners": network_listeners() })),
             Some("core_pid") => Ok(json!({ "pid": CORE_PID.load(Ordering::SeqCst) })),
+            Some("chooser") => Ok(json!({
+                "starts": *CHOOSER_STARTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+            })),
             Some(other) => Err(format!("unknown query {other}")),
             None => Err("a query names what it wants".into()),
         },
@@ -261,5 +265,30 @@ mod listeners {
             .filter(|line| line.contains("(LISTEN)") || line.contains(" UDP "))
             .map(str::to_string)
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The report sees a listener when there is one, so an empty report
+    /// means there is none (FR-010).
+    #[test]
+    fn the_listener_report_sees_this_process_listening() {
+        let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let udp = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let tcp_port = tcp.local_addr().unwrap().port();
+        let udp_port = udp.local_addr().unwrap().port();
+        let during = network_listeners();
+        let names = |port: u16| during.iter().any(|entry| {
+            entry.contains(&format!("port {port}"))
+                || entry.contains(&format!(":{port:04X}"))
+                || entry.contains(&format!(":{port} "))
+                || entry.ends_with(&format!(":{port}"))
+        });
+        assert!(names(tcp_port), "TCP {tcp_port} in {during:?}");
+        assert!(names(udp_port), "UDP {udp_port} in {during:?}");
+        drop((tcp, udp));
     }
 }

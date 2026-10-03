@@ -1,0 +1,967 @@
+//! The Core's lifecycle (data-model.md §1, contracts/core-supervision.md).
+//!
+//! `Machine` is the whole policy and nothing else: it takes one observed
+//! input at a time — a spawn result, a line, an exit, a person's action — and
+//! answers with the effects to carry out. It never touches a process, a pipe
+//! or a clock, so every transition is tested directly, deadlines included.
+//! The driver (below) owns the process and turns effects into I/O.
+
+use std::collections::{HashMap, VecDeque};
+use std::ffi::OsString;
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::{ChildStdin, Command};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+use serde_json::{json, Value};
+
+use crate::diag::{self, DiagnosticTail};
+use crate::platform::{build_command, spawn_core, CoreCommand, Stopper};
+use crate::relay;
+use crate::workspace;
+
+pub type CoreId = u64;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum State {
+    Absent,
+    Starting,
+    Handshaking,
+    Ready,
+    Restarting,
+    Failed,
+    Stopping,
+    Stopped,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureClass {
+    NotFound,
+    SpawnFailed,
+    WorkspaceUnavailable,
+    ExitedBeforeReady,
+    ProtocolMismatch,
+    ProtocolFault,
+    Crashed,
+}
+
+/// A failure as the window shows it: its class and its own message.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Failure {
+    pub class: FailureClass,
+    pub message: String,
+}
+
+impl Failure {
+    pub fn new(class: FailureClass, message: impl Into<String>) -> Self {
+        Self { class, message: message.into() }
+    }
+}
+
+/// What the machine is told.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Input {
+    /// A workspace is decided: start a Core there.
+    Start { workspace: PathBuf },
+    /// The launch chooser was dismissed, or a command-line path was refused.
+    NoWorkspace { notice: String },
+    /// The driver started the Core for `core`.
+    Spawned { core: CoreId, pid: u32 },
+    /// The driver could not start it: `not_found`, `spawn_failed` or
+    /// `workspace_unavailable`.
+    SpawnFailed { core: CoreId, failure: Failure },
+    /// One line from the Core's stdout.
+    Line { core: CoreId, line: String },
+    /// The Core's process exited.
+    Exited { core: CoreId, code: Option<i32> },
+    /// The person's "Try again".
+    Retry,
+}
+
+/// What the driver is asked to do.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Effect {
+    Spawn { core: CoreId, workspace: PathBuf },
+    Write { core: CoreId, line: String },
+    CloseStdin { core: CoreId },
+    ForceStop { core: CoreId },
+    /// The status changed: tell the page.
+    StatusChanged,
+    /// A protocol line for the page of `generation`.
+    ToPage { generation: u64, line: String },
+    /// The page of `generation` lost its Core: it must reconnect.
+    PageClosed { generation: u64, reason: String },
+}
+
+/// The `status` command's answer and the channel's `status` message.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Status {
+    pub state: State,
+    pub workspace: Option<String>,
+    pub failure: Option<Failure>,
+    pub restart_count: u32,
+    pub restart_limit: u32,
+    pub closing: Option<Value>,
+    pub stop_outcome: Option<String>,
+    pub core: Option<CoreIdentity>,
+    pub notice: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CoreIdentity {
+    pub name: String,
+    pub version: String,
+}
+
+/// The restart limit (OD-1): automatic restarts stop at this crash.
+pub const RESTART_LIMIT: u32 = 3;
+
+pub struct Machine {
+    state: State,
+    workspace: Option<PathBuf>,
+    /// The Core whose observations count; anything from another is stale.
+    core: Option<CoreId>,
+    next_core: CoreId,
+    failure: Option<Failure>,
+    notice: Option<String>,
+    identity: Option<CoreIdentity>,
+    restart_count: u32,
+    relay: relay::Relay,
+}
+
+impl Default for Machine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Machine {
+    pub fn new() -> Self {
+        Self {
+            state: State::Absent,
+            workspace: None,
+            core: None,
+            next_core: 1,
+            failure: None,
+            notice: None,
+            identity: None,
+            restart_count: 0,
+            relay: relay::Relay::new(),
+        }
+    }
+
+    pub fn state(&self) -> State {
+        self.state
+    }
+
+    pub fn status(&self) -> Status {
+        Status {
+            state: self.state,
+            workspace: self.workspace.as_ref().map(|path| path.display().to_string()),
+            failure: self.failure.clone(),
+            restart_count: self.restart_count,
+            restart_limit: RESTART_LIMIT,
+            closing: None,
+            stop_outcome: None,
+            core: self.identity.clone(),
+            notice: self.notice.clone(),
+        }
+    }
+
+    /// The cached `client.hello` result, once the Core is ready.
+    pub fn handshake(&self) -> Option<&Value> {
+        self.relay.handshake()
+    }
+
+    /// A page connects: its generation.
+    pub fn connect(&mut self) -> u64 {
+        self.relay.connect()
+    }
+
+    /// One protocol request from the page of `generation`.
+    pub fn send_line(&mut self, generation: u64, line: &str) -> Result<Vec<Effect>, String> {
+        let ready = self.state == State::Ready;
+        match self.relay.from_page(generation, line, ready)? {
+            relay::FromPage::Answer(answer) => Ok(vec![Effect::ToPage { generation, line: answer }]),
+            relay::FromPage::ToCore { line, observed } => {
+                let core = self.core.filter(|_| ready).ok_or("the Core is not ready")?;
+                let _ = observed;
+                Ok(vec![Effect::Write { core, line }])
+            }
+        }
+    }
+
+    /// A protocol line from a ready Core.
+    fn core_line(&mut self, line: &str) -> Vec<Effect> {
+        let answers_native = serde_json::from_str::<Value>(line).ok()
+            .and_then(|envelope| envelope.get("id").and_then(Value::as_str).map(str::to_owned))
+            .is_some_and(|id| id.starts_with("native:"));
+        if answers_native {
+            return vec![];
+        }
+        let relayed = self.relay.from_core(line);
+        relayed.to_page.map(|(generation, line)| vec![Effect::ToPage { generation, line }])
+            .unwrap_or_default()
+    }
+
+    /// One input, its effects; a person's action that does not apply now is
+    /// refused with the reason.
+    pub fn handle(&mut self, input: Input) -> Result<Vec<Effect>, String> {
+        match input {
+            Input::Start { workspace } => {
+                if !matches!(self.state, State::Absent | State::Failed | State::Stopped) {
+                    return Err("a Core is already running in this window".into());
+                }
+                self.workspace = Some(workspace);
+                self.notice = None;
+                Ok(self.start())
+            }
+            Input::NoWorkspace { notice } => {
+                if self.workspace.is_some() {
+                    return Ok(vec![]);
+                }
+                self.state = State::Absent;
+                self.notice = Some(notice);
+                Ok(vec![Effect::StatusChanged])
+            }
+            Input::Spawned { core, .. } => {
+                if !self.is_current(core) || self.state != State::Starting {
+                    return Ok(vec![]);
+                }
+                self.state = State::Handshaking;
+                Ok(vec![Effect::Write { core, line: relay::hello_request() }, Effect::StatusChanged])
+            }
+            Input::SpawnFailed { core, failure } => {
+                if !self.is_current(core) {
+                    return Ok(vec![]);
+                }
+                self.core = None;
+                Ok(self.fail(failure))
+            }
+            Input::Line { core, line } => {
+                if !self.is_current(core) {
+                    return Ok(vec![]);
+                }
+                Ok(match self.state {
+                    State::Handshaking => self.handshake_line(core, &line),
+                    State::Ready if !relay::is_envelope(&line) => self.fault(core, &line),
+                    State::Ready => self.core_line(&line),
+                    _ => vec![],
+                })
+            }
+            Input::Exited { core, code } => {
+                if !self.is_current(core) {
+                    return Ok(vec![]);
+                }
+                self.core = None;
+                Ok(match self.state {
+                    State::Starting | State::Handshaking => self.fail(Failure::new(
+                        FailureClass::ExitedBeforeReady,
+                        format!("The Core exited before it was ready ({}). Its last output is \
+                                 below.", describe_exit(code)))),
+                    State::Ready => self.fail(Failure::new(
+                        FailureClass::Crashed,
+                        format!("The Core stopped unexpectedly ({}).", describe_exit(code)))),
+                    _ => vec![],
+                })
+            }
+            Input::Retry => {
+                if self.state != State::Failed || self.workspace.is_none() {
+                    return Err("\"Try again\" applies only after a failure".into());
+                }
+                Ok(self.start())
+            }
+        }
+    }
+
+    fn is_current(&self, core: CoreId) -> bool {
+        self.core == Some(core)
+    }
+
+    /// A new Core in the current workspace.
+    fn start(&mut self) -> Vec<Effect> {
+        let core = self.next_core;
+        self.next_core += 1;
+        self.core = Some(core);
+        self.state = State::Starting;
+        self.failure = None;
+        self.identity = None;
+        let workspace = self.workspace.clone().expect("a start has a workspace");
+        vec![Effect::Spawn { core, workspace }, Effect::StatusChanged]
+    }
+
+    fn handshake_line(&mut self, core: CoreId, line: &str) -> Vec<Effect> {
+        match relay::read_handshake(line) {
+            relay::Handshake::Ready(result) => {
+                self.identity = Some(CoreIdentity {
+                    name: result["core"]["name"].as_str().unwrap_or("").to_string(),
+                    version: result["core"]["version"].as_str().unwrap_or("").to_string(),
+                });
+                self.relay.cache_handshake(result);
+                self.state = State::Ready;
+                vec![Effect::StatusChanged]
+            }
+            relay::Handshake::Mismatch(message) | relay::Handshake::Refused(message) => {
+                self.fail_and_stop(core, Failure::new(FailureClass::ProtocolMismatch, message))
+            }
+            relay::Handshake::NotYet => vec![],
+            relay::Handshake::Fault => self.fault(core, line),
+        }
+    }
+
+    /// A line that is not protocol (FR-007): the Core cannot be trusted to
+    /// keep talking, so it is stopped.
+    fn fault(&mut self, core: CoreId, line: &str) -> Vec<Effect> {
+        let excerpt: String = line.chars().take(120).collect();
+        self.fail_and_stop(core, Failure::new(FailureClass::ProtocolFault, format!(
+            "The Core wrote a line that is not protocol on its output: {excerpt}")))
+    }
+
+    fn fail(&mut self, failure: Failure) -> Vec<Effect> {
+        self.state = State::Failed;
+        let mut effects = vec![];
+        if let Some(generation) = self.relay.core_gone() {
+            effects.push(Effect::PageClosed { generation, reason: failure.message.clone() });
+        }
+        self.failure = Some(failure);
+        effects.push(Effect::StatusChanged);
+        effects
+    }
+
+    fn fail_and_stop(&mut self, core: CoreId, failure: Failure) -> Vec<Effect> {
+        self.core = None;
+        let mut effects = vec![Effect::CloseStdin { core }, Effect::ForceStop { core }];
+        effects.extend(self.fail(failure));
+        effects
+    }
+}
+
+fn describe_exit(code: Option<i32>) -> String {
+    match code {
+        Some(code) => format!("exit code {code}"),
+        None => "ended by a signal".into(),
+    }
+}
+
+/// The command a located Core is started with in `workspace`: exactly
+/// `[<COMODOR_ARGS…>, core, --stdio]`, the environment inherited unchanged.
+pub fn core_command(located: &CoreCommand, workspace: &Path) -> Command {
+    build_command(located, workspace, &[])
+}
+
+// -- the driver ----------------------------------------------------------- //
+
+/// Where the page's inbound channel messages go (`line`, `status`,
+/// `closed`). The application's is the page's IPC channel; tests record.
+pub trait PageSink: Send {
+    fn send(&self, message: Value);
+}
+
+pub struct Options {
+    /// Finds the Core to start, each time one is started.
+    pub locate: Box<dyn Fn() -> Result<CoreCommand, Failure> + Send>,
+    /// Empty in the application. Tests give their Cores a temporary home
+    /// this way, without changing their own environment.
+    pub test_env: Vec<(OsString, OsString)>,
+}
+
+enum Event {
+    Input(Input, Option<Sender<Result<(), String>>>),
+    Connect(Box<dyn PageSink>, Sender<u64>),
+    SendLine { generation: u64, line: String, reply: Sender<Result<(), String>> },
+}
+
+struct Shared {
+    status: Mutex<Status>,
+    changed: Condvar,
+    tail: Arc<Mutex<DiagnosticTail>>,
+    pid: Mutex<Option<u32>>,
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The running supervisor: one thread that owns the Core, and this handle to
+/// it. Every call is answered by that thread, in order.
+#[derive(Clone)]
+pub struct Supervisor {
+    events: Sender<Event>,
+    shared: Arc<Shared>,
+}
+
+impl Supervisor {
+    /// Start the supervisor's thread. Every Core is started from it, for the
+    /// application's whole life (the parent-death signal follows it).
+    pub fn launch(options: Options) -> Self {
+        let (events, receiver) = channel();
+        let shared = Arc::new(Shared {
+            status: Mutex::new(Machine::new().status()),
+            changed: Condvar::new(),
+            tail: Arc::new(Mutex::new(DiagnosticTail::new())),
+            pid: Mutex::new(None),
+        });
+        let driver = Driver {
+            machine: Machine::new(),
+            options,
+            events: events.clone(),
+            shared: shared.clone(),
+            running: HashMap::new(),
+            page: None,
+            pending: VecDeque::new(),
+        };
+        std::thread::Builder::new()
+            .name("core-supervisor".into())
+            .spawn(move || driver.run(receiver))
+            .expect("start the supervisor thread");
+        Self { events, shared }
+    }
+
+    fn input(&self, input: Input) -> Result<(), String> {
+        let (reply, answer) = channel();
+        self.events.send(Event::Input(input, Some(reply)))
+            .map_err(|_| "the supervisor has stopped".to_string())?;
+        answer.recv().map_err(|_| "the supervisor has stopped".to_string())?
+    }
+
+    pub fn start(&self, workspace: PathBuf) -> Result<(), String> {
+        self.input(Input::Start { workspace })
+    }
+
+    pub fn no_workspace(&self, notice: String) {
+        let _ = self.input(Input::NoWorkspace { notice });
+    }
+
+    pub fn retry(&self) -> Result<(), String> {
+        self.input(Input::Retry)
+    }
+
+    pub fn status(&self) -> Status {
+        lock(&self.shared.status).clone()
+    }
+
+    /// Wait until the status satisfies `until`, or `deadline` passes. It
+    /// returns as soon as the condition holds.
+    pub fn wait_for(&self, until: impl Fn(&Status) -> bool, deadline: Duration) -> Option<Status> {
+        let ends = Instant::now() + deadline;
+        let mut status = lock(&self.shared.status);
+        loop {
+            if until(&status) {
+                return Some(status.clone());
+            }
+            let now = Instant::now();
+            if now >= ends {
+                return None;
+            }
+            status = self.shared.changed.wait_timeout(status, ends - now)
+                .unwrap_or_else(|poisoned| poisoned.into_inner()).0;
+        }
+    }
+
+    pub fn diagnostics(&self) -> String {
+        lock(&self.shared.tail).text()
+    }
+
+    pub fn core_pid(&self) -> Option<u32> {
+        *lock(&self.shared.pid)
+    }
+
+    /// A page connects through `sink`: its generation. It is sent the status
+    /// at once, and from then on every status change, line and closing.
+    pub fn connect(&self, sink: Box<dyn PageSink>) -> u64 {
+        let (reply, answer) = channel();
+        if self.events.send(Event::Connect(sink, reply)).is_err() {
+            return 0;
+        }
+        answer.recv().unwrap_or(0)
+    }
+
+    pub fn send_line(&self, generation: u64, line: String) -> Result<(), String> {
+        let (reply, answer) = channel();
+        self.events.send(Event::SendLine { generation, line, reply })
+            .map_err(|_| "the supervisor has stopped".to_string())?;
+        answer.recv().map_err(|_| "the supervisor has stopped".to_string())?
+    }
+}
+
+/// One Core process the driver started and has not yet seen exit.
+struct Running {
+    stdin: Option<ChildStdin>,
+    stopper: Stopper,
+}
+
+struct Driver {
+    machine: Machine,
+    options: Options,
+    events: Sender<Event>,
+    shared: Arc<Shared>,
+    running: HashMap<CoreId, Running>,
+    page: Option<(u64, Box<dyn PageSink>)>,
+    /// Inputs the driver itself produced (a spawn's result), handled after
+    /// the effects that led to them, so status changes are told in order.
+    pending: VecDeque<Input>,
+}
+
+impl Driver {
+    fn run(mut self, events: Receiver<Event>) {
+        while let Ok(event) = events.recv() {
+            match event {
+                Event::Input(input, reply) => {
+                    if let Input::Exited { core, .. } = &input {
+                        self.running.remove(core);
+                        self.set_pid(None);
+                    }
+                    let outcome = self.machine.handle(input).map(|effects| self.apply(effects));
+                    if let Some(reply) = reply {
+                        let _ = reply.send(outcome);
+                    }
+                }
+                Event::Connect(sink, reply) => {
+                    let generation = self.machine.connect();
+                    sink.send(json!({ "kind": "status", "status": self.machine.status() }));
+                    self.page = Some((generation, sink));
+                    let _ = reply.send(generation);
+                }
+                Event::SendLine { generation, line, reply } => {
+                    let outcome = self.machine.send_line(generation, &line)
+                        .map(|effects| self.apply(effects));
+                    let _ = reply.send(outcome);
+                }
+            }
+            while let Some(input) = self.pending.pop_front() {
+                if let Ok(effects) = self.machine.handle(input) {
+                    self.apply(effects);
+                }
+            }
+            self.publish();
+        }
+    }
+
+    fn apply(&mut self, effects: Vec<Effect>) {
+        for effect in effects {
+            match effect {
+                Effect::Spawn { core, workspace } => {
+                    let result = self.spawn(core, &workspace);
+                    self.pending.push_back(result);
+                }
+                Effect::Write { core, line } => {
+                    if let Some(stdin) = self.running.get_mut(&core).and_then(|r| r.stdin.as_mut()) {
+                        // A broken pipe means the Core is going; its exit is
+                        // observed by the waiter, not inferred here.
+                        let _ = stdin.write_all(line.as_bytes())
+                            .and_then(|()| stdin.write_all(b"\n"))
+                            .and_then(|()| stdin.flush());
+                    }
+                }
+                Effect::CloseStdin { core } => {
+                    if let Some(running) = self.running.get_mut(&core) {
+                        running.stdin = None;
+                    }
+                }
+                Effect::ForceStop { core } => {
+                    if let Some(running) = self.running.get(&core) {
+                        let _ = running.stopper.terminate();
+                    }
+                }
+                Effect::StatusChanged => {
+                    self.publish();
+                    let status = self.machine.status();
+                    if let Some((_, sink)) = &self.page {
+                        sink.send(json!({ "kind": "status", "status": status }));
+                    }
+                }
+                Effect::ToPage { generation, line } => {
+                    if let Some((current, sink)) = &self.page {
+                        if *current == generation {
+                            sink.send(json!({ "kind": "line", "line": line }));
+                        }
+                    }
+                }
+                Effect::PageClosed { generation, reason } => {
+                    if let Some((current, sink)) = &self.page {
+                        if *current == generation {
+                            sink.send(json!({ "kind": "closed", "reason": reason }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Start a Core: the workspace is checked and the Core located first, so
+    /// each of those failures has its own class.
+    fn spawn(&mut self, core: CoreId, workspace: &Path) -> Input {
+        if let Err(failure) = workspace::check(workspace) {
+            return Input::SpawnFailed { core, failure };
+        }
+        let command = match (self.options.locate)() {
+            Ok(command) => command,
+            Err(failure) => return Input::SpawnFailed { core, failure },
+        };
+        let mut spawned = match spawn_core(&command, workspace, &self.options.test_env) {
+            Ok(spawned) => spawned,
+            Err(problem) => return Input::SpawnFailed { core, failure: Failure::new(
+                FailureClass::SpawnFailed,
+                format!("Comodor could not be started from {}: {problem}",
+                        Path::new(&command.program).display())) },
+        };
+        lock(&self.shared.tail).clear();
+        let (stdin, stdout, stderr) = spawned.take_streams();
+        let stopper = spawned.stopper();
+        let pid = spawned.pid;
+        let mut child = spawned.child;
+
+        let errors = diag::read_into(stderr, self.shared.tail.clone());
+        let lines = self.events.clone();
+        let output = std::thread::Builder::new().name("core-stdout".into()).spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut buffer = Vec::new();
+            loop {
+                buffer.clear();
+                match reader.read_until(b'\n', &mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+                let line = String::from_utf8_lossy(&buffer)
+                    .trim_end_matches(['\n', '\r']).to_string();
+                if lines.send(Event::Input(Input::Line { core, line }, None)).is_err() {
+                    break;
+                }
+            }
+        }).expect("start the stdout reader");
+
+        // The exit is told only after every line the Core wrote, so a last
+        // answer is never mistaken for an exit before it.
+        let exits = self.events.clone();
+        let leftovers = stopper.clone();
+        std::thread::Builder::new().name("core-waiter".into()).spawn(move || {
+            let code = child.wait().ok().and_then(|status| status.code());
+            // Whatever the Core left running goes with it, which also closes
+            // any copy of its pipes a descendant still held.
+            let _ = leftovers.terminate();
+            let _ = output.join();
+            let _ = errors.join();
+            let _ = exits.send(Event::Input(Input::Exited { core, code }, None));
+        }).expect("start the exit waiter");
+
+        self.running.insert(core, Running { stdin: Some(stdin), stopper });
+        self.set_pid(Some(pid));
+        Input::Spawned { core, pid }
+    }
+
+    fn set_pid(&self, pid: Option<u32>) {
+        *lock(&self.shared.pid) = pid;
+        #[cfg(feature = "e2e")]
+        crate::e2e::set_core_pid(pid.unwrap_or(0));
+    }
+
+    fn publish(&self) {
+        let status = self.machine.status();
+        let mut shared = lock(&self.shared.status);
+        if *shared != status {
+            *shared = status;
+            self.shared.changed.notify_all();
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn args_of(command: &Command) -> Vec<OsString> {
+    command.get_args().map(|arg| arg.to_owned()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashSet;
+
+    const WS: &str = "/work/project";
+
+    fn hello_answer(version: i64) -> String {
+        json!({"version": 2, "type": "response", "id": relay::HELLO_ID,
+               "result": {"protocol_version": version,
+                          "core": {"name": "comodor-core", "version": "9.9"},
+                          "capabilities": ["streaming"]}}).to_string()
+    }
+
+    fn refused(supported: Value) -> String {
+        json!({"version": 2, "type": "error", "id": relay::HELLO_ID,
+               "error": {"code": "unsupported_version", "message": "no",
+                         "data": {"supported": supported}}}).to_string()
+    }
+
+    fn started() -> (Machine, CoreId) {
+        let mut machine = Machine::new();
+        let effects = machine.handle(Input::Start { workspace: WS.into() }).unwrap();
+        let core = match effects.as_slice() {
+            [Effect::Spawn { core, workspace }, Effect::StatusChanged] => {
+                assert_eq!(workspace, Path::new(WS));
+                *core
+            }
+            other => panic!("expected a spawn, then a status: {other:?}"),
+        };
+        assert_eq!(machine.state(), State::Starting);
+        (machine, core)
+    }
+
+    fn handshaking() -> (Machine, CoreId) {
+        let (mut machine, core) = started();
+        let effects = machine.handle(Input::Spawned { core, pid: 41 }).unwrap();
+        assert_eq!(machine.state(), State::Handshaking);
+        match effects.as_slice() {
+            [Effect::Write { core: to, line }, Effect::StatusChanged] => {
+                assert_eq!(*to, core);
+                assert_eq!(line, &relay::hello_request());
+            }
+            other => panic!("expected the hello, then a status: {other:?}"),
+        }
+        (machine, core)
+    }
+
+    fn ready() -> (Machine, CoreId) {
+        let (mut machine, core) = handshaking();
+        let effects = machine.handle(Input::Line { core, line: hello_answer(2) }).unwrap();
+        assert_eq!(effects, vec![Effect::StatusChanged]);
+        assert_eq!(machine.state(), State::Ready);
+        (machine, core)
+    }
+
+    fn failed_with(mut machine: Machine, input: Input) -> (Machine, Failure, Vec<Effect>) {
+        let effects = machine.handle(input).unwrap();
+        assert_eq!(machine.state(), State::Failed);
+        let failure = machine.status().failure.expect("a failure is reported");
+        (machine, failure, effects)
+    }
+
+    // -- T019: the command ----------------------------------------------------
+
+    #[test]
+    fn the_command_is_exactly_the_located_one_plus_core_stdio_with_the_environment_inherited() {
+        let located = CoreCommand { program: "/venv/bin/python".into(),
+                                    args: vec!["/fixtures/core.py".into(), "echo".into()] };
+        let command = core_command(&located, Path::new(WS));
+        assert_eq!(command.get_program(), "/venv/bin/python");
+        assert_eq!(args_of(&command),
+                   ["/fixtures/core.py", "echo", "core", "--stdio"].map(OsString::from).to_vec());
+        assert_eq!(command.get_envs().count(), 0,
+                   "nothing is added to, changed in or removed from the environment");
+        assert_eq!(command.get_current_dir(), Some(Path::new(WS)));
+    }
+
+    #[test]
+    fn the_command_carries_nothing_from_the_core_home_configuration() {
+        let home = std::env::temp_dir().join(format!("comodor-cmd-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("config.json"),
+                       r#"{"providers":{"fake":{"api_key":"CANARY-CMD-1"}}}"#).unwrap();
+        let located = CoreCommand { program: "comodor".into(), args: vec![] };
+        let command = core_command(&located, &home);
+        let everything = format!("{:?} {:?}", command.get_program(), args_of(&command));
+        std::fs::remove_dir_all(&home).unwrap();
+        assert!(!everything.contains("CANARY-CMD-1"));
+        assert_eq!(args_of(&command), ["core", "--stdio"].map(OsString::from).to_vec());
+    }
+
+    // -- T020: the states -----------------------------------------------------
+
+    #[test]
+    fn absent_starting_handshaking_ready() {
+        let (machine, _) = ready();
+        let status = machine.status();
+        assert_eq!(status.state, State::Ready);
+        assert_eq!(status.workspace.as_deref(), Some(WS));
+        assert_eq!(status.core, Some(CoreIdentity { name: "comodor-core".into(), version: "9.9".into() }));
+        assert_eq!(status.failure, None);
+        assert_eq!(machine.handshake().unwrap()["protocol_version"], 2);
+    }
+
+    #[test]
+    fn each_failure_class_lands_in_failed_with_its_own_message() {
+        let mut messages = HashSet::new();
+        for class in [FailureClass::NotFound, FailureClass::SpawnFailed,
+                      FailureClass::WorkspaceUnavailable] {
+            let (machine, core) = started();
+            let given = Failure::new(class, format!("{class:?} happened"));
+            let (_, failure, _) = failed_with(machine, Input::SpawnFailed { core, failure: given.clone() });
+            assert_eq!(failure, given);
+            messages.insert(failure.message);
+        }
+
+        let (machine, core) = handshaking();
+        let (_, failure, _) = failed_with(machine, Input::Exited { core, code: Some(3) });
+        assert_eq!(failure.class, FailureClass::ExitedBeforeReady);
+        assert!(failure.message.contains('3'), "{}", failure.message);
+        messages.insert(failure.message);
+
+        let (machine, core) = handshaking();
+        let (_, failure, effects) = failed_with(machine, Input::Line { core, line: hello_answer(3) });
+        assert_eq!(failure.class, FailureClass::ProtocolMismatch);
+        assert!(failure.message.contains('2') && failure.message.contains('3'), "{}", failure.message);
+        assert!(effects.contains(&Effect::ForceStop { core }), "an incompatible Core is stopped");
+        messages.insert(failure.message);
+
+        let (machine, core) = handshaking();
+        let (_, failure, _) = failed_with(machine, Input::Line { core, line: refused(json!([3])) });
+        assert_eq!(failure.class, FailureClass::ProtocolMismatch);
+        assert!(failure.message.contains("[3]"), "{}", failure.message);
+        messages.insert(failure.message);
+
+        let (machine, core) = handshaking();
+        let (_, failure, effects) = failed_with(machine, Input::Line { core, line: "Traceback (most recent call last):".into() });
+        assert_eq!(failure.class, FailureClass::ProtocolFault);
+        assert!(effects.contains(&Effect::ForceStop { core }), "a faulty Core is stopped");
+        messages.insert(failure.message);
+
+        assert_eq!(messages.len(), 7, "every class has its own message");
+    }
+
+    #[test]
+    fn a_bad_line_while_ready_is_a_protocol_fault_and_the_core_is_stopped() {
+        let (machine, core) = ready();
+        let (_, failure, effects) = failed_with(machine, Input::Line { core, line: "{not json".into() });
+        assert_eq!(failure.class, FailureClass::ProtocolFault);
+        assert!(effects.contains(&Effect::ForceStop { core }));
+    }
+
+    #[test]
+    fn ready_needs_protocol_version_two_exactly() {
+        for version in [1, 3, 20] {
+            let (mut machine, core) = handshaking();
+            machine.handle(Input::Line { core, line: hello_answer(version) }).unwrap();
+            assert_eq!(machine.state(), State::Failed, "version {version}");
+            assert_eq!(machine.handshake(), None);
+        }
+    }
+
+    #[test]
+    fn try_again_moves_failed_to_starting_in_the_same_workspace() {
+        let (machine, core) = handshaking();
+        let (mut machine, _, _) = failed_with(machine, Input::Exited { core, code: Some(1) });
+        let effects = machine.handle(Input::Retry).unwrap();
+        assert_eq!(machine.state(), State::Starting);
+        match effects.as_slice() {
+            [Effect::Spawn { core: next, workspace }, Effect::StatusChanged] => {
+                assert_ne!(*next, core, "a new Core has a new id");
+                assert_eq!(workspace, Path::new(WS));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(machine.status().failure, None);
+    }
+
+    #[test]
+    fn try_again_is_refused_unless_failed() {
+        let (mut machine, _) = started();
+        assert!(machine.handle(Input::Retry).is_err());
+        let (mut machine, _) = handshaking();
+        assert!(machine.handle(Input::Retry).is_err());
+        let (mut machine, _) = ready();
+        assert!(machine.handle(Input::Retry).is_err());
+        assert_eq!(machine.state(), State::Ready);
+    }
+
+    #[test]
+    fn there_is_no_handshake_timeout() {
+        let (mut machine, core) = handshaking();
+        // Lines that are protocol but not the answer leave it handshaking;
+        // nothing but the answer, an exit or a bad line moves it.
+        let event = json!({"version": 2, "type": "event", "event": "session.updated",
+                           "seq": 1, "params": {}}).to_string();
+        assert_eq!(machine.handle(Input::Line { core, line: event }).unwrap(), vec![]);
+        assert_eq!(machine.state(), State::Handshaking);
+        assert_eq!(machine.status().state, State::Handshaking);
+    }
+
+    #[test]
+    fn a_stale_core_cannot_move_the_current_one() {
+        let (machine, old) = handshaking();
+        let (mut machine, _, _) = failed_with(machine, Input::Exited { core: old, code: None });
+        machine.handle(Input::Retry).unwrap();
+        assert_eq!(machine.handle(Input::Exited { core: old, code: Some(9) }).unwrap(), vec![]);
+        assert_eq!(machine.handle(Input::Line { core: old, line: hello_answer(2) }).unwrap(), vec![]);
+        assert_eq!(machine.state(), State::Starting);
+    }
+
+    #[test]
+    fn a_dismissed_chooser_starts_nothing_and_says_so() {
+        let mut machine = Machine::new();
+        let effects = machine.handle(Input::NoWorkspace { notice: "No workspace chosen.".into() }).unwrap();
+        assert_eq!(effects, vec![Effect::StatusChanged]);
+        let status = machine.status();
+        assert_eq!(status.state, State::Absent);
+        assert_eq!(status.workspace, None);
+        assert_eq!(status.notice.as_deref(), Some("No workspace chosen."));
+        assert!(machine.handle(Input::Retry).is_err(), "there is nothing to try again");
+    }
+
+    // -- the page's connection through the machine ----------------------------
+
+    const MODEL_GET: &str = r#"{"version":2,"type":"request","id":"1","method":"model.get","params":{}}"#;
+
+    #[test]
+    fn a_page_line_reaches_the_core_only_while_ready() {
+        let (mut machine, core) = handshaking();
+        let generation = machine.connect();
+        assert!(machine.send_line(generation, MODEL_GET).is_err(), "not ready yet");
+        machine.handle(Input::Line { core, line: hello_answer(2) }).unwrap();
+        let effects = machine.send_line(generation, MODEL_GET).unwrap();
+        match effects.as_slice() {
+            [Effect::Write { core: to, line }] => {
+                assert_eq!(*to, core);
+                assert!(line.contains(&format!("\"g{generation}:1\"")), "{line}");
+            }
+            other => panic!("{other:?}"),
+        }
+        let answer = format!(r#"{{"version":2,"type":"response","id":"g{generation}:1","result":{{"model":"fake-1"}}}}"#);
+        assert_eq!(machine.handle(Input::Line { core, line: answer }).unwrap(),
+                   vec![Effect::ToPage { generation,
+                                         line: r#"{"version":2,"type":"response","id":"1","result":{"model":"fake-1"}}"#.into() }]);
+    }
+
+    #[test]
+    fn the_page_hello_is_answered_without_the_core() {
+        let (mut machine, _) = ready();
+        let generation = machine.connect();
+        let hello = r#"{"version":2,"type":"request","id":"h","method":"client.hello","params":{}}"#;
+        match machine.send_line(generation, hello).unwrap().as_slice() {
+            [Effect::ToPage { generation: to, line }] => {
+                assert_eq!(*to, generation);
+                assert!(line.contains(r#""id":"h""#) && line.contains("comodor-core"), "{line}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_failure_closes_the_page_connection_and_a_new_one_is_needed() {
+        let (mut machine, core) = ready();
+        let generation = machine.connect();
+        let effects = machine.handle(Input::Line { core, line: "garbage".into() }).unwrap();
+        assert!(effects.iter().any(|effect| matches!(effect,
+            Effect::PageClosed { generation: g, .. } if *g == generation)), "{effects:?}");
+        assert!(machine.send_line(generation, MODEL_GET).is_err());
+        machine.handle(Input::Retry).unwrap();
+        assert!(machine.connect() > generation, "generations only grow across Cores");
+    }
+
+    #[test]
+    fn the_core_answers_to_the_native_side_never_reach_the_page() {
+        let (mut machine, core) = ready();
+        machine.connect();
+        let native = format!(r#"{{"version":2,"type":"response","id":"{}","result":{{}}}}"#, relay::HELLO_ID);
+        assert_eq!(machine.handle(Input::Line { core, line: native }).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn status_reports_the_restart_limit() {
+        let machine = Machine::new();
+        assert_eq!(machine.status().restart_limit, RESTART_LIMIT);
+        assert_eq!(RESTART_LIMIT, 3);
+    }
+}

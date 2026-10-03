@@ -3,7 +3,15 @@
 // called only where an enabled capability grants its generated permission.
 include!("src/command_names.rs");
 
+use std::path::Path;
+
+/// The protocol's canonical schema, the one source of the version and the
+/// method list (CLAUDE.md §4). Read here so the native side has no copy.
+const SCHEMA: &str = "../../../schemas/protocol/v2.json";
+
 fn main() {
+    write_protocol_constants();
+
     let mut names: Vec<&'static str> = COMMANDS.to_vec();
     if std::env::var_os("CARGO_FEATURE_E2E").is_some() {
         names.push(E2E_COMMAND);
@@ -24,4 +32,21 @@ fn main() {
             .app_manifest(tauri_build::AppManifest::new().commands(names)),
     )
     .expect("tauri-build failed");
+}
+
+fn write_protocol_constants() {
+    println!("cargo:rerun-if-changed={SCHEMA}");
+    let text = std::fs::read_to_string(SCHEMA).expect("the protocol schema");
+    let schema: serde_json::Value = serde_json::from_str(&text).expect("the schema is JSON");
+    let version = schema["x-protocol-version"].as_i64().expect("x-protocol-version");
+    let methods: Vec<String> = schema["x-methods"].as_object().expect("x-methods")
+        .keys().map(|name| format!("{name:?}")).collect();
+    let generated = format!(
+        "/// The protocol version, from `schemas/protocol/v2.json`.\n\
+         pub const PROTOCOL_VERSION: i64 = {version};\n\
+         /// Every protocol method, from `schemas/protocol/v2.json`.\n\
+         pub const METHODS: [&str; {}] = [{}];\n",
+        methods.len(), methods.join(", "));
+    let out = Path::new(&std::env::var("OUT_DIR").unwrap()).join("protocol.rs");
+    std::fs::write(out, generated).expect("write protocol.rs");
 }

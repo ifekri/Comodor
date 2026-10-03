@@ -10,6 +10,7 @@ use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::Arc;
 
 #[cfg(unix)]
 #[path = "unix.rs"]
@@ -39,7 +40,18 @@ impl CoreCommand {
 pub struct SpawnedCore {
     pub child: Child,
     pub pid: u32,
-    tree: imp::Tree,
+    tree: Stopper,
+}
+
+/// Ends the Core and every process it started. Shared, so it can be used
+/// while another thread waits on the Core's exit.
+#[derive(Clone)]
+pub struct Stopper(Arc<imp::Tree>);
+
+impl Stopper {
+    pub fn terminate(&self) -> io::Result<()> {
+        self.0.terminate()
+    }
 }
 
 impl SpawnedCore {
@@ -52,9 +64,13 @@ impl SpawnedCore {
         )
     }
 
+    pub fn stopper(&self) -> Stopper {
+        self.tree.clone()
+    }
+
     /// End the Core and every process it started, now.
     pub fn force_stop(&mut self) -> io::Result<()> {
-        self.tree.terminate(&mut self.child)
+        self.tree.terminate()
     }
 }
 
@@ -89,5 +105,5 @@ pub fn spawn_core(command: &CoreCommand, workspace: &Path,
         }
     };
     let pid = child.id();
-    Ok(SpawnedCore { child, pid, tree })
+    Ok(SpawnedCore { child, pid, tree: Stopper(Arc::new(tree)) })
 }

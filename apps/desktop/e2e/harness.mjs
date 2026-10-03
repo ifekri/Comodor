@@ -80,7 +80,7 @@ function writeCoreHome(home, setup) {
     config.model = "fake-1";
     config.providers = {
       fake: { name: "fake", kind: "fake", base_url: "offline",
-              api_key: setup.apiKey ?? "", model: "fake-1", label: "Fake" },
+              api_key: setup.apiKey ?? "test", model: "fake-1", label: "Fake" },
     };
   }
   fs.writeFileSync(path.join(home, "config.json"), JSON.stringify(config));
@@ -102,8 +102,14 @@ function releaseHold(address) {
   if (result.status !== 0) throw new Error(`releasing the hold failed: ${result.stderr}`);
 }
 
-function resolvePlaceholder(value, workspace) {
-  return value === "$workspace" ? workspace : value;
+/** `$workspace` and `$stored` in a setup value, at any depth. */
+function resolve(value, places) {
+  if (typeof value === "string" && value in places) return places[value];
+  if (Array.isArray(value)) return value.map((item) => resolve(item, places));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolve(item, places)]));
+  }
+  return value;
 }
 
 /** Answer one checkpoint from the page. */
@@ -134,12 +140,14 @@ async function runScenario(name) {
   const home = path.join(root, "home");
   const workspace = path.join(root, "workspace");
   const data = path.join(root, "desktop-data");
-  for (const directory of [home, workspace, data]) fs.mkdirSync(directory);
+  const stored = path.join(root, "stored");
+  for (const directory of [home, workspace, data, stored]) fs.mkdirSync(directory);
   writeCoreHome(home, setup);
+  const places = { $workspace: workspace, $stored: stored };
 
   if (setup.lastSelectedFolder !== undefined) {
     fs.writeFileSync(path.join(data, "preferences.json"), JSON.stringify({
-      version: 1, last_selected_folder: resolvePlaceholder(setup.lastSelectedFolder, workspace),
+      version: 1, last_selected_folder: resolve(setup.lastSelectedFolder, places),
     }));
   }
 
@@ -149,21 +157,21 @@ async function runScenario(name) {
     return { scenario: name, ok: false,
              error: `COMODOR_ARGS is split on whitespace; move the checkout: ${fixturePath}` };
   }
+  const coreArgs = setup.realCore ? "-m comodor" : `${fixturePath} ${argument}`;
   const run = { hold: setup.hold ? holdAddress(root, name) : undefined };
   const record = path.join(root, "record.jsonl");
   const env = {
     ...process.env,
     COMODOR_HOME: home,
     COMODOR_BIN: PYTHON,
-    COMODOR_ARGS: `${fixturePath} ${argument}`,
+    COMODOR_ARGS: coreArgs,
     PYTHONPATH: path.join(REPO, "src"),
     PYTHONIOENCODING: "utf-8",
     COMODOR_DESKTOP_DATA_DIR: data,
     COMODOR_E2E_SCENARIO: name,
-    COMODOR_E2E_PARAMS: JSON.stringify(setup.params ?? {}),
+    COMODOR_E2E_PARAMS: JSON.stringify(resolve(setup.params ?? {}, places)),
     COMODOR_E2E_RECORD: record,
-    COMODOR_E2E_CHOOSE: JSON.stringify(
-      (setup.choose ?? []).map((choice) => resolvePlaceholder(choice, workspace))),
+    COMODOR_E2E_CHOOSE: JSON.stringify(resolve(setup.choose ?? [], places)),
     COMODOR_E2E_CONFIRM: setup.confirm ? "yes" : "no",
   };
   if (run.hold) env.COMODOR_TEST_HOLD = run.hold;
@@ -222,6 +230,15 @@ async function runScenario(name) {
   copyIfPresent(data, path.join(kept, "desktop-data"));
   fs.writeFileSync(path.join(kept, "output.txt"), output.join(""));
   const summary = { scenario: name, elapsedMs: Date.now() - started, ...outcome };
+  // SC-001: from the process start to the page's ready moment.
+  if (setup.maxReadyMs !== undefined && summary.ok) {
+    const readyAt = Number(summary.details?.readyAt);
+    summary.readyMs = Math.round(readyAt - started);
+    if (!Number.isFinite(summary.readyMs) || summary.readyMs > setup.maxReadyMs) {
+      summary.ok = false;
+      summary.error = `ready after ${summary.readyMs} ms; the bound is ${setup.maxReadyMs} ms`;
+    }
+  }
   fs.writeFileSync(path.join(kept, "result.json"), JSON.stringify(summary, null, 2));
   fs.rmSync(root, { recursive: true, force: true });
   return summary;
@@ -243,7 +260,8 @@ let failed = 0;
 for (const name of scenarios) {
   const summary = await runScenario(name);
   const verdict = summary.ok ? "PASS" : "FAIL";
-  console.log(`${verdict} ${name} (${summary.elapsedMs ?? 0} ms)${summary.ok ? "" : `: ${summary.error ?? "see result.json"}`}`);
+  const ready = summary.readyMs === undefined ? "" : `, ready in ${summary.readyMs} ms`;
+  console.log(`${verdict} ${name} (${summary.elapsedMs ?? 0} ms${ready})${summary.ok ? "" : `: ${summary.error ?? "see result.json"}`}`);
   if (!summary.ok) failed += 1;
 }
 fs.writeFileSync(path.join(ARTIFACTS, "summary.json"),
