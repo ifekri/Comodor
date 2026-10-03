@@ -226,7 +226,7 @@ jobs:
       # listener when there is one, or its empty answer proves nothing.
       - name: Test-build support
         working-directory: apps/desktop/src-tauri
-        run: cargo test --features e2e --lib e2e::
+        run: cargo test --features e2e --lib e2e::tests
 
       - name: Window tests
         run: npm run -w apps/desktop test
