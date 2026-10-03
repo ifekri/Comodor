@@ -1,0 +1,18 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build:e2e"
+  },
+  "app": {
+    "security": {
+      "capabilities": [
+        "main",
+        {
+          "identifier": "e2e-test",
+          "description": "Test build only: lets the scenario runner report its result.",
+          "windows": ["main"],
+          "permissions": ["allow-e2e-report"]
+        }
+      ]
+    }
+  }
+}

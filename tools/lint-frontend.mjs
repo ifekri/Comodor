@@ -16,7 +16,12 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const ROOTS = ["packages", "apps"];
-const SKIP = new Set(["node_modules", "dist", ".git"]);
+// `target` and `gen` are the desktop application's Rust build output and
+// tauri-build's generated schemas: neither is TypeScript anyone wrote.
+const SKIP = new Set(["node_modules", "dist", ".git", "target", "gen"]);
+
+/** Where a fixed delay may never stand in for an observed state (FR-035). */
+const DESKTOP_TESTS = [join("apps", "desktop", "test"), join("apps", "desktop", "e2e")];
 
 /** Files that are written by a generator and are not ours to style. */
 const GENERATED = /generated\.ts$/;
@@ -88,6 +93,18 @@ function packageRoot(directory) {
   }
 }
 
+rules.push({
+  name: "no-fixed-delay",
+  why: "A test that waits a fixed time is a race made rarer, not a race "
+     + "fixed. Wait on what the code relies on — a process exit, a line, a "
+     + "DOM change, an injected clock — and give the wait a named failure "
+     + "deadline, never a literal delay.",
+  test: (line) => !comment(line)
+    && (/\bsetTimeout\s*\(.*,\s*\d+\s*\)/.test(line)
+        || /\b(?:Bun\.)?sleep(?:Sync)?\s*\(\s*\d/.test(line)),
+  skipIn: (path) => !DESKTOP_TESTS.some((root) => path.startsWith(root + sep)),
+});
+
 const fileRules = [
   {
     name: "ends-with-a-newline",
@@ -113,6 +130,10 @@ function* walk(directory) {
     const path = join(directory, entry);
     if (statSync(path).isDirectory()) yield* walk(path);
     else if (/\.(ts|tsx|mts)$/.test(entry)) yield path;
+    // The desktop's scenario harnesses are plain Node modules, and they are
+    // exactly where a fixed delay would hide a race.
+    else if (/\.mjs$/.test(entry)
+             && path.includes(join("apps", "desktop", "e2e"))) yield path;
   }
 }
 

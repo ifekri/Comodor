@@ -163,6 +163,80 @@ jobs:
       - name: What it costs
         run: bun apps/tui/test/bun/measure.tsx
 
+  desktop:
+    name: Desktop on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The desktop window owns a Core process and talks to a real WebView,
+        # and both differ per platform: process trees, the WebView engine, the
+        # single-instance channel. All three are the evidence (FR-033).
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      # Named rather than assumed, as in the renderer job.
+      COMODOR_PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - run: npm ci
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      # WebKitGTK is the Linux WebView; the window needs a display and the
+      # single-instance plugin a D-Bus session, which the harness starts.
+      - name: Linux WebView and display
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libsoup-3.0-dev libxdo-dev libssl-dev pkg-config build-essential \
+            xvfb xauth dbus dbus-x11
+
+      # The toolchain pinned in apps/desktop/src-tauri/rust-toolchain.toml.
+      - name: Rust
+        shell: bash
+        run: |
+          channel=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' apps/desktop/src-tauri/rust-toolchain.toml)
+          test -n "$channel"
+          rustup toolchain install "$channel" --profile minimal
+
+      # The native crate embeds the built page, so the page is built first.
+      - name: Build the page
+        run: npm run -w apps/desktop build
+
+      - name: Native unit and integration tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
+
+      - name: Window tests
+        run: npm run -w apps/desktop test
+
+      # The test build in a real WebView, against the scripted Core.
+      - name: In-application scenarios
+        run: npm run -w apps/desktop e2e
+
+      - name: Keep what the scenarios left
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-${{ matrix.os }}
+          path: apps/desktop/e2e/out
+          if-no-files-found: ignore
+
   packaged:
     name: Installed package on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
