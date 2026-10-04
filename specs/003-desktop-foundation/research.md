@@ -300,7 +300,10 @@ itself.
 The watchdog (added for a review finding on PR #62) is the application's own
 executable, started with each Core in a process group of its own. It waits for
 the application or the Core to exit (`pidfd` on Linux, `kqueue` on macOS),
-then signals the Core's group.
+then signals the Core's group. On macOS nothing else ends a Core that ignores
+EOF, so a Core whose watchdog cannot start is ended at once and reported as a
+failed start; on Linux the parent-death signal still covers the Core, and the
+watchdog is best effort.
 
 **Rationale**: The Core already exits on EOF. The OS mechanisms and the
 watchdog add a guarantee that does not depend on the Core noticing. **Risk**:

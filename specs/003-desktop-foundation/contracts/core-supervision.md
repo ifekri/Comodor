@@ -120,7 +120,8 @@ Core a moment before the application's exit is seen); Linux
 also arms the parent-death signal; all platforms, stdin reaches EOF and the
 Core's `serve()` loop ends into `close()`. (The watchdog was added for a
 review finding on PR #62: the parent-death signal reaches the Core alone,
-and macOS has none.)
+and macOS has none. On macOS a Core never runs without its watchdog: if the
+watchdog cannot start, the Core is ended and the start fails.)
 
 ## 6. Single instance (FR-019)
 

@@ -25,9 +25,18 @@ pub struct Tree {
 impl Tree {
     pub fn adopt(child: &Child) -> io::Result<Self> {
         let group = child.id() as libc::pid_t;
-        // Best effort: without its watchdog the Core still has stdin EOF and,
-        // on Linux, the parent-death signal.
-        let watchdog = super::watchdog::start(group).ok();
+        let watchdog = super::watchdog::start(group);
+        // On Linux the parent-death signal still ends the Core itself, so the
+        // watchdog is best effort there. On macOS nothing else would end a
+        // Core that ignores EOF: no Core runs without one, and the caller
+        // ends the Core it just started.
+        #[cfg(target_os = "macos")]
+        let watchdog = watchdog
+            .map_err(|problem| io::Error::other(format!("the Core's watchdog could not start: {problem}")))?;
+        #[cfg(not(target_os = "macos"))]
+        let watchdog = watchdog.ok();
+        #[cfg(target_os = "macos")]
+        let watchdog = Some(watchdog);
         Ok(Tree { group, watchdog: std::sync::Mutex::new(watchdog) })
     }
 
