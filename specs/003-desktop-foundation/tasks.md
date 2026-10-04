@@ -505,7 +505,7 @@ the same and a different path — on each platform (SC-007, SC-008, SC-016).
   - the `e2e` double replaces the dialog.
 
   T073 must pass.
-- [ ] T079 [US4] Run the `desktop` job of `.github/workflows/ci.yml` by `workflow_dispatch`. T070, T071 and T074 must pass on all three platforms. Keep the results for the PR description.
+- [X] T079 [US4] Run the `desktop` job of `.github/workflows/ci.yml` by `workflow_dispatch`. T070, T071 and T074 must pass on all three platforms. Keep the results for the PR description.
 
 **Checkpoint**: nothing is left behind, no forced stop is reported as saved,
 and second launches behave as specified, on every platform.
@@ -587,7 +587,7 @@ then delivery on one exact SHA.
   - prerequisites per platform;
   - `COMODOR_BIN` and `COMODOR_ARGS` (a path with spaces goes in `COMODOR_BIN`, plan K8);
   - that D1 is not packaged.
-- [ ] T090 Mark `[X]` in `specs/003-desktop-foundation/tasks.md` each of T001–T089 whose evidence exists from the development runs, leaving any without evidence open. Commit with a neutral message and no attribution. From here, a commit is made only to fix a valid Codex finding (T098), a failing local gate (T092–T096) or a failing CI check (T097). Each fix commit changes code, tests or docs only — never evidence — and sends the work back to T092 on the new exact head SHA.
+- [X] T090 Mark `[X]` in `specs/003-desktop-foundation/tasks.md` each of T001–T089 whose evidence exists from the development runs, leaving any without evidence open. Commit with a neutral message and no attribution. From here, a commit is made only to fix a valid Codex finding (T098), a failing local gate (T092–T096) or a failing CI check (T097). Each fix commit changes code, tests or docs only — never evidence — and sends the work back to T092 on the new exact head SHA.
 - [ ] T091 Push `003-desktop-foundation` normally (never forced) and open one PR against `main`, as the owner's stated D1 workflow authorizes. First confirm the identity: `gh auth status` and `gh api user --jq .login` must show `ifekri`. The PR body, from `.github/PULL_REQUEST_TEMPLATE.md`, has:
   - a neutral description with no tool or model attribution;
   - the Surface Impact table with the ten canonical rows and statuses from [plan.md](./plan.md) §Surface Impact, each with evidence;
