@@ -20,6 +20,28 @@ mod imp;
 mod imp;
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(unix)]
+mod watchdog;
+
+/// Use `program` to run each Core's watchdog (Linux and macOS); by default,
+/// this executable. Tests that start Cores from a test binary name the
+/// application's.
+#[cfg(unix)]
+pub fn set_watchdog_program(program: std::path::PathBuf) {
+    watchdog::set_program(program);
+}
+
+/// The application's entry point checks this first: when started as a
+/// watchdog, this watches and returns the exit code.
+pub fn watchdog_main(args: &[std::ffi::OsString]) -> Option<i32> {
+    #[cfg(unix)]
+    return watchdog::main_if_watchdog(args);
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        None
+    }
+}
 
 /// The executable and the leading arguments; `core --stdio` is appended.
 #[derive(Clone, Debug, PartialEq, Eq)]

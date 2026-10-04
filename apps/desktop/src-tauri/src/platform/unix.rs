@@ -12,14 +12,20 @@ pub fn configure(command: &mut Command) {
     super::linux::arm_parent_death(command);
 }
 
-/// The Core's process group.
+/// The Core's process group, and the watchdog that ends it if the
+/// application dies (`watchdog.rs`).
 pub struct Tree {
     group: libc::pid_t,
+    watchdog: std::sync::Mutex<Option<Child>>,
 }
 
 impl Tree {
     pub fn adopt(child: &Child) -> io::Result<Self> {
-        Ok(Tree { group: child.id() as libc::pid_t })
+        let group = child.id() as libc::pid_t;
+        // Best effort: without its watchdog the Core still has stdin EOF and,
+        // on Linux, the parent-death signal.
+        let watchdog = super::watchdog::start(group).ok();
+        Ok(Tree { group, watchdog: std::sync::Mutex::new(watchdog) })
     }
 
     /// Signal the whole group to end, now.
@@ -32,5 +38,16 @@ impl Tree {
             }
         }
         Ok(())
+    }
+}
+
+impl Drop for Tree {
+    /// The Core is gone with this handle: so is its watchdog, reaped.
+    fn drop(&mut self) {
+        let watchdog = self.watchdog.get_mut().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(mut watchdog) = watchdog.take() {
+            let _ = watchdog.kill();
+            let _ = watchdog.wait();
+        }
     }
 }

@@ -44,13 +44,11 @@ export const SETUPS = {
     lifetime: true, core: ["doubles.py", "ignore-stop"], childPid: true, workspaceArgument: true, forced: true,
   },
   "lifetime-kill": { lifetime: true, workspaceArgument: true },
-  // A Core that ignores EOF: only the job object (Windows) or the
-  // parent-death signal (Linux) ends it; macOS has neither (FR-018). The
-  // job ends the Core's own children too; the parent-death signal reaches
-  // the Core only, so on Linux its child is not part of the guarantee.
+  // A Core that ignores EOF, with a child: only the job object (Windows) or
+  // the Core's watchdog (Linux, macOS) ends them both when the application
+  // is killed outright (FR-018).
   "lifetime-kill-stubborn": {
-    lifetime: true, core: ["doubles.py", "ignore-stop"], childPid: ["win32"], workspaceArgument: true,
-    platforms: ["win32", "linux"],
+    lifetime: true, core: ["doubles.py", "ignore-stop"], childPid: true, workspaceArgument: true,
   },
   "lifetime-second-same": { lifetime: true, workspaceArgument: true },
   "lifetime-second-declined": { lifetime: true, workspaceArgument: true, confirm: false },

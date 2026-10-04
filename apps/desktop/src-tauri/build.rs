@@ -59,12 +59,21 @@ fn write_protocol_constants() {
     let version = schema["x-protocol-version"].as_i64().expect("x-protocol-version");
     let methods: Vec<String> = schema["x-methods"].as_object().expect("x-methods")
         .keys().map(|name| format!("{name:?}")).collect();
+    // The fields each envelope type must carry, from `x-envelope`.
+    let envelope = &schema["x-envelope"];
+    let shapes: Vec<String> = ["request", "response", "error", "event"].iter().map(|kind| {
+        let fields: Vec<String> = envelope[*kind].as_array().expect("x-envelope fields")
+            .iter().map(|field| format!("{:?}", field.as_str().expect("a field name"))).collect();
+        format!("({kind:?}, &[{}])", fields.join(", "))
+    }).collect();
     let generated = format!(
         "/// The protocol version, from `schemas/protocol/v2.json`.\n\
          pub const PROTOCOL_VERSION: i64 = {version};\n\
          /// Every protocol method, from `schemas/protocol/v2.json`.\n\
-         pub const METHODS: [&str; {}] = [{}];\n",
-        methods.len(), methods.join(", "));
+         pub const METHODS: [&str; {}] = [{}];\n\
+         /// The fields each envelope type requires, from `schemas/protocol/v2.json`.\n\
+         pub const ENVELOPE_FIELDS: [(&str, &[&str]); 4] = [{}];\n",
+        methods.len(), methods.join(", "), shapes.join(", "));
     let out = Path::new(&std::env::var("OUT_DIR").unwrap()).join("protocol.rs");
     std::fs::write(out, generated).expect("write protocol.rs");
 }

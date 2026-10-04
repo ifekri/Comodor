@@ -115,8 +115,10 @@ to exit — at most 10 seconds, with "Closing…" and "Quit now" in the window.
 Then the Core and everything it started are ended (the job object on Windows,
 the process group elsewhere). A forced stop is logged as "stopped before it
 finished" and is never reported as saved. Abrupt death of the application is
-covered too: the job closes (Windows), the parent-death signal fires (Linux),
-and stdin reaches EOF (everywhere).
+covered too: the job closes (Windows); on Linux and macOS a small watchdog
+started with each Core — the application's own executable, in a group of its
+own — sees the application exit (`kqueue`, `pidfd`) and ends the Core's whole
+group; Linux adds the parent-death signal; and stdin reaches EOF everywhere.
 
 **OD-3 — the workspace.** A path on the command line is used directly.
 Otherwise every fresh launch opens the system folder chooser at the folder

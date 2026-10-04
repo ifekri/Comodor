@@ -79,8 +79,9 @@ pub fn read_handshake(line: &str) -> Handshake {
     }
 }
 
-/// Is this line a protocol envelope the Core may send: a JSON object whose
-/// `type` is `response`, `error` or `event`?
+/// Is this line a protocol v2 envelope the Core may send: a JSON object at
+/// this protocol version, whose `type` is `response`, `error` or `event`,
+/// carrying every field the schema requires of that type?
 pub fn is_envelope(line: &str) -> bool {
     envelope(line).is_some()
 }
@@ -88,8 +89,12 @@ pub fn is_envelope(line: &str) -> bool {
 fn envelope(line: &str) -> Option<Value> {
     let value: Value = serde_json::from_str(line).ok()?;
     let kind = value.get("type")?.as_str()?;
-    (value.get("version").is_some() && matches!(kind, "response" | "error" | "event"))
-        .then_some(value)
+    if !matches!(kind, "response" | "error" | "event")
+        || value.get("version").and_then(Value::as_i64) != Some(PROTOCOL_VERSION) {
+        return None;
+    }
+    let (_, fields) = ENVELOPE_FIELDS.iter().find(|(shape, _)| *shape == kind)?;
+    fields.iter().all(|field| value.get(*field).is_some()).then_some(value)
 }
 
 /// What the relay saw, for the restart counter (data-model.md §3). These are
@@ -646,6 +651,31 @@ mod tests {
         assert_eq!(links_in("<http://a.example/x>"), ["http://a.example/x"]);
         assert!(links_in("https:// alone").is_empty());
         assert_eq!(links_in("a\x1bhttps://b.example/c\x1b[2J"), ["https://b.example/c"]);
+    }
+
+    /// Review finding (PR #62): an envelope of another version, or missing a
+    /// field its type requires, is not protocol v2 and is a fault (FR-007).
+    #[test]
+    fn only_complete_v2_envelopes_are_protocol() {
+        for bad in [
+            r#"{"version":3,"type":"event","event":"x","seq":1,"params":{}}"#,
+            r#"{"version":"2","type":"event","event":"x","seq":1,"params":{}}"#,
+            r#"{"version":2,"type":"event","event":"x","params":{}}"#,
+            r#"{"version":2,"type":"event","event":"x","seq":1}"#,
+            r#"{"version":2,"type":"event","seq":1,"params":{}}"#,
+            r#"{"version":2,"type":"response","id":"1"}"#,
+            r#"{"version":2,"type":"error","id":"1"}"#,
+            r#"{"version":2,"type":"response","result":{}}"#,
+        ] {
+            assert!(!is_envelope(bad), "{bad}");
+        }
+        for good in [
+            r#"{"version":2,"type":"event","event":"x","seq":1,"params":{}}"#,
+            r#"{"version":2,"type":"response","id":"1","result":{}}"#,
+            r#"{"version":2,"type":"error","id":"1","error":{"code":"x","message":"y"}}"#,
+        ] {
+            assert!(is_envelope(good), "{good}");
+        }
     }
 
     #[test]

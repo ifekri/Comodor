@@ -99,9 +99,14 @@ The orderly sequence, for every `ShutdownRequest` reason:
 5. `stopped`. For `quit` and `window_closed` the application then exits; for
    `workspace_change` and `check_again` a new Core starts.
 
-Abrupt application death (FR-018): Windows, the job closes; Linux, the
-parent-death signal; all platforms, stdin reaches EOF and the Core's
-`serve()` loop ends into `close()`.
+Abrupt application death (FR-018): Windows, the job closes; Linux and
+macOS, a watchdog started with each Core (the application's own executable
+in a process group of its own) waits on the application's exit — `kqueue` on
+macOS, `pidfd` on Linux — and then signals the Core's whole group; Linux
+also arms the parent-death signal; all platforms, stdin reaches EOF and the
+Core's `serve()` loop ends into `close()`. (The watchdog was added for a
+review finding on PR #62: the parent-death signal reaches the Core alone,
+and macOS has none.)
 
 ## 6. Single instance (FR-019)
 

@@ -1077,6 +1077,21 @@ mod tests {
         assert!(notice.contains("not protocol"), "{notice}");
     }
 
+    /// Review finding (PR #62): an incomplete or other-version envelope
+    /// from a ready Core is a protocol fault, not something to relay.
+    #[test]
+    fn a_malformed_envelope_while_ready_is_a_protocol_fault() {
+        for line in [r#"{"version":3,"type":"event","event":"message.completed","seq":4,"params":{}}"#,
+                     r#"{"version":2,"type":"event","event":"session.updated"}"#] {
+            let (mut machine, core) = ready();
+            let generation = machine.connect();
+            let effects = machine.handle(Input::Line { core, line: line.into() }).unwrap();
+            assert!(effects.contains(&Effect::ForceStop { core }), "{line}: {effects:?}");
+            assert!(!effects.iter().any(|e| matches!(e, Effect::ToPage { generation: g, .. } if *g == generation)),
+                    "never relayed: {line}");
+        }
+    }
+
     #[test]
     fn ready_needs_protocol_version_two_exactly() {
         for version in [1, 3, 20] {

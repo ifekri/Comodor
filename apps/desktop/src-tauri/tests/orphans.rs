@@ -54,36 +54,56 @@ fn unix_a_forced_stop_signals_the_whole_process_group() {
     assert!(wait_gone(child), "and so is its child, through the group");
 }
 
-/// The "application" for the parent-death test: a copy of this test binary
-/// that starts a Core, says which, and waits to be killed.
-#[cfg(target_os = "linux")]
+/// The "application" for the abrupt-death tests: a copy of this test binary
+/// that starts a stubborn Core, says which (and its child), and waits to be
+/// killed. The Core's watchdog is the real application binary.
+#[cfg(unix)]
 #[test]
-#[ignore = "run only as the parent-death test's helper process"]
-fn pdeathsig_helper() {
+#[ignore = "run only as the abrupt-death tests' helper process"]
+fn abrupt_death_helper() {
     let Some(out) = std::env::var_os("COMODOR_ORPHAN_HELPER") else { return };
-    let (home, _scratch, env) = ignore_stop("orphans-helper");
+    comodor_desktop::platform::set_watchdog_program(env!("CARGO_BIN_EXE_comodor-desktop").into());
+    let (home, scratch, env) = ignore_stop("orphans-helper");
     let mut core = spawn_core(&fixture_command("doubles.py", "ignore-stop"), &home.workspace, &env).unwrap();
     greet(&mut core);
-    std::fs::write(&out, core.pid.to_string()).unwrap();
-    // Blocks until this process is killed; the Core must not outlive it.
+    let child = read_pid(&scratch.root.join("child.pid"), None);
+    // Renamed into place, so the test never reads half of it.
+    let staging = std::path::PathBuf::from(&out).with_extension("tmp");
+    std::fs::write(&staging, format!("{} {child}", core.pid)).unwrap();
+    std::fs::rename(&staging, &out).unwrap();
+    // Blocks until this process is killed; nothing of the Core may outlive it.
     loop {
         std::thread::park();
     }
 }
 
-#[cfg(target_os = "linux")]
+/// Review finding (PR #62): an application killed outright leaves neither
+/// its Core nor the Core's children, even when they ignore EOF — the
+/// parent-death signal on Linux, the watchdog on Linux and macOS.
+#[cfg(unix)]
 #[test]
-fn linux_the_core_ends_when_the_application_dies() {
-    let scratch = Scratch::new("orphans-pdeathsig");
-    let out = scratch.root.join("core.pid");
+fn unix_a_killed_application_leaves_no_core_and_no_child() {
+    let scratch = Scratch::new("orphans-abrupt");
+    let out = scratch.root.join("pids");
     let mut helper = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["pdeathsig_helper", "--exact", "--ignored", "--nocapture"])
+        .args(["abrupt_death_helper", "--exact", "--ignored", "--nocapture"])
         .env("COMODOR_ORPHAN_HELPER", &out)
         .spawn().unwrap();
-    let core = read_pid(&out, None);
+    let ends = std::time::Instant::now() + support::DEADLINE;
+    let pids = loop {
+        if let Ok(text) = std::fs::read_to_string(&out) {
+            let pids: Vec<u32> = text.split_whitespace().filter_map(|p| p.parse().ok()).collect();
+            if pids.len() == 2 {
+                break pids;
+            }
+        }
+        assert!(std::time::Instant::now() < ends, "the helper never named its Core");
+        std::thread::yield_now();
+    };
     helper.kill().unwrap();
     let _ = helper.wait();
-    assert!(wait_gone(core), "the parent-death signal ended the Core");
+    assert!(wait_gone(pids[0]), "the Core is gone");
+    assert!(wait_gone(pids[1]), "and so is its child");
 }
 
 #[cfg(target_os = "macos")]
