@@ -69,27 +69,71 @@ const context = (params: Data): ScenarioContext => ({
   now: () => performance.now(),
 });
 
+/** How long a scenario may run in the page; the harness allows longer. */
+const PAGE_DEADLINE_MS = 120_000;
+
+/** What the page showed, for a failure's report. */
+function page(): string {
+  return (document.body?.innerHTML ?? "").slice(0, 4000);
+}
+
 /** Run the scenario the native side named, then report its verdict. */
 export async function runScenario(): Promise<void> {
   const given = window.__COMODOR_E2E__;
   const name = given?.scenario ?? "";
+  // One verdict per run. An error anywhere in the page ends the run at once,
+  // with what the page showed, rather than leaving it to the deadline.
+  let ended = false;
+  const verdict = async (result: Data) => {
+    if (ended) return;
+    ended = true;
+    await report({ phase: "result", scenario: name, ...result });
+  };
+  window.addEventListener("error", (event) => {
+    void verdict({ ok: false, error: `page error: ${event.message}`, page: page() });
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    void verdict({ ok: false, error: `unhandled rejection: ${String(event.reason)}`, page: page() });
+  });
+  // Ahead of the harness's own deadline, so a stalled run says what the page
+  // showed instead of being killed blind. A bound on failure, never a delay.
+  setTimeout(() => {
+    void verdict({ ok: false, error: "the page did not finish by its deadline", page: page() });
+  }, PAGE_DEADLINE_MS);
   const scenario = SCENARIOS[name];
   if (!scenario) {
-    await report({ phase: "result", scenario: name, ok: false,
-                   error: `no scenario named "${name}"` });
+    await verdict({ ok: false, error: `no scenario named "${name}"` });
     return;
   }
   try {
     const details = await scenario(context(given?.params ?? {}));
-    await report({ phase: "result", scenario: name, ok: true, details: details ?? {} });
+    await verdict({ ok: true, details: details ?? {} });
   } catch (problem) {
-    await report({ phase: "result", scenario: name, ok: false,
-                   error: problem instanceof Error ? `${problem.message}\n${problem.stack ?? ""}`
-                                                   : String(problem) });
+    await verdict({ ok: false, page: page(),
+                    error: problem instanceof Error ? `${problem.message}\n${problem.stack ?? ""}`
+                                                    : String(problem) });
   }
 }
 
 /** A failed expectation inside a scenario. */
 export function expect(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+/** Type into a text field as a person does, so React sees the input. */
+export function typeInto(element: Element, text: string): void {
+  const field = element as HTMLInputElement | HTMLTextAreaElement;
+  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field) as object, "value")?.set;
+  setter?.call(field, text);
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+export function pressKey(element: Element, key: string): void {
+  element.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+}
+
+/** The first `selector` match whose text includes `text`. */
+export function withText(selector: string, text: string, root: ParentNode = document): HTMLElement | null {
+  return [...root.querySelectorAll<HTMLElement>(selector)]
+    .find((element) => (element.textContent ?? "").includes(text)) ?? null;
 }

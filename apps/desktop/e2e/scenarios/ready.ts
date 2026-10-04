@@ -9,8 +9,12 @@
 import { expect, type Scenario } from "../runner.ts";
 
 export const ready: Scenario = async (context) => {
-  const strip = await context.element('[data-testid="status-strip"][data-state="ready"]');
-  await context.waitFor(() => strip.querySelector(".status-model")?.textContent === "fake-1");
+  // Looked up afresh each time: the strip is redrawn once the session opens.
+  const selector = '[data-testid="status-strip"][data-state="ready"]';
+  const strip = await context.waitFor(() => {
+    const found = document.querySelector<HTMLElement>(selector);
+    return found?.querySelector(".status-model")?.textContent === "fake-1" && found;
+  });
   const readyAt = performance.timeOrigin + context.now();
 
   const text = strip.textContent ?? "";

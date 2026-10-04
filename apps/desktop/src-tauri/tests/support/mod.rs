@@ -290,3 +290,21 @@ impl Page {
         states()
     }
 }
+
+impl Page {
+    /// The params of the first `event` satisfying `wanted`, waiting for it.
+    pub fn event(&self, name: &str, wanted: impl Fn(&Value) -> bool) -> Value {
+        let line = self.until(|m| m["kind"] == "line" && serde_json::from_str::<Value>(
+            m["line"].as_str().unwrap_or(""))
+            .map(|l| l["type"] == "event" && l["event"] == name && wanted(&l["params"]))
+            .unwrap_or(false));
+        let line: Value = serde_json::from_str(line["line"].as_str().unwrap()).unwrap();
+        line["params"].clone()
+    }
+}
+
+/// One protocol request line from the page.
+pub fn request(id: &str, method: &str, params: Value) -> String {
+    serde_json::json!({ "version": 2, "type": "request", "id": id, "method": method,
+                        "params": params }).to_string()
+}

@@ -257,7 +257,7 @@ exact chooser start directory (SC-017).
 - [X] T034 [US1] Implement the native handshake, its cache, and the stdout bad-line check that raises `protocol_fault` in `apps/desktop/src-tauri/src/relay.rs`, to pass T024 and T025.
 - [ ] T035 [US1] Implement `connect`, `status`, `diagnostics`, `choose_workspace` and `retry` in `apps/desktop/src-tauri/src/commands.rs`, per [native-bridge.md](./contracts/native-bridge.md). Every name comes from the single command constant.
 - [X] T036 [US1] Implement the window shell in `apps/desktop/src/main.tsx`, `apps/desktop/src/app.tsx`, `apps/desktop/src/view/StatusStrip.tsx`, `apps/desktop/src/view/FailureView.tsx` and `apps/desktop/src/view/WorkspaceGate.tsx`, with colours only from `cssVariables()`. T026 must pass.
-- [ ] T037 [US1] Push the branch normally (no force) and run the `desktop` job of `.github/workflows/ci.yml` with `workflow_dispatch`. T025, T027 and T028 must pass on all three platforms. Keep the run link, per-platform results and the SC-001 time for the PR description.
+- [X] T037 [US1] Push the branch normally (no force) and run the `desktop` job of `.github/workflows/ci.yml` with `workflow_dispatch`. T025, T027 and T028 must pass on all three platforms. Keep the run link, per-platform results and the SC-001 time for the PR description.
 
 **Checkpoint**: US1 works alone on Windows, Linux and macOS.
 
@@ -286,39 +286,39 @@ a permission answered exactly, cancel, and a mode change shown only after
   - every envelope is byte-identical after relaying except its `id`.
 
   Mutation check: removing the generation drop fails a test.
-- [ ] T039 [US2] Write relay integration tests (**I**, all platforms) in `apps/desktop/src-tauri/tests/conversation.rs`, against the scripted Core:
+- [X] T039 [US2] Write relay integration tests (**I**, all platforms) in `apps/desktop/src-tauri/tests/conversation.rs`, against the scripted Core:
   - `echo` streams in the Core's order;
   - `question` delivers every option, including the `free` row, and the chosen answer reaches the Core exactly;
   - `permission` delivers `options`, `tool` and `risk`, and the reply reaches the Core exactly;
   - an unanswered request is resolved by the Core, never by the relay;
   - `session.cancel` sent during `hold-mid-turn` returns `cancelled: true` (the schema's `CancelResult`) and the turn ends cancelled;
   - `session.cancel` sent while idle returns `cancelled: false` (SC-014).
-- [ ] T040 [P] [US2] Write conversation tests (**W**) in `apps/desktop/test/conversation.test.tsx`:
+- [X] T040 [P] [US2] Write conversation tests (**W**) in `apps/desktop/test/conversation.test.tsx`:
   - deltas render in `seq` order, and tool activity lines by `call_id`;
   - a gap triggers `session.snapshot`, and a duplicate is ignored (FR-012);
   - send and cancel are single `@comodor/commands` commands, reached by button and keyboard.
-- [ ] T041 [P] [US2] Write form and permission tests (**W**) in `apps/desktop/test/interactions.test.tsx`:
+- [X] T041 [P] [US2] Write form and permission tests (**W**) in `apps/desktop/test/interactions.test.tsx`:
   - every option is shown, with the write-your-own row as a text field;
   - nothing is sent without the person's action, and the answer equals the selection;
   - an unanswered form stays until `question.resolved`;
   - a permission shows `allow`, `allow_always` and `deny` (FR-015).
-- [ ] T042 [P] [US2] Write mode tests (**W**) in `apps/desktop/test/mode.test.tsx`:
+- [X] T042 [P] [US2] Write mode tests (**W**) in `apps/desktop/test/mode.test.tsx`:
   - the control sends `session.set_mode` and keeps the old label until `mode.changed`;
   - a refusal keeps the Core's mode;
   - no view branches on whether an action is allowed (FR-014, FR-024).
-- [ ] T043 [US2] Write the scenario `conversation` (**S**, all platforms) in `apps/desktop/e2e/scenarios/conversation.ts`: prompt, stream, a form answered, a permission answered, a mode change, and cancel during `hold-mid-turn` (FR-013, SC-014).
+- [X] T043 [US2] Write the scenario `conversation` (**S**, all platforms) in `apps/desktop/e2e/scenarios/conversation.ts`: prompt, stream, a form answered, a permission answered, a mode change, and cancel during `hold-mid-turn` (FR-013, SC-014).
 
 ### Implementation for User Story 2
 
 - [X] T044 [US2] Implement the relay in `apps/desktop/src-tauri/src/relay.rs`: generations, id mapping, drops, the method allowlist, refusals and order. T038 must pass.
-- [ ] T045 [US2] Implement `send_line` in `apps/desktop/src-tauri/src/commands.rs`, wiring the relay to the supervisor's stdin and stdout. T039 must pass.
-- [ ] T046 [US2] Implement session bootstrap and state in `apps/desktop/src/state.ts`:
+- [X] T045 [US2] Implement `send_line` in `apps/desktop/src-tauri/src/commands.rs`, wiring the relay to the supervisor's stdin and stdout. T039 must pass.
+- [X] T046 [US2] Implement session bootstrap and state in `apps/desktop/src/state.ts`:
   - `connect`, then `CoreClient.start()`, then subscribe, then `session.create`, then `session.snapshot`;
   - fed into the unchanged `@comodor/session` reducer;
   - holding `stored_id` and `unsent_turn`.
-- [ ] T047 [P] [US2] Implement `apps/desktop/src/view/Conversation.tsx` and `apps/desktop/src/view/Composer.tsx`, with commands in `apps/desktop/src/commands.ts`. T040 must pass.
-- [ ] T048 [P] [US2] Implement `apps/desktop/src/view/FormCard.tsx`, with `@comodor/questions`, and `apps/desktop/src/view/PermissionCard.tsx`. T041 must pass.
-- [ ] T049 [P] [US2] Implement `apps/desktop/src/view/ModeControl.tsx` from `@comodor/modes`. T042 must pass.
+- [X] T047 [P] [US2] Implement `apps/desktop/src/view/Conversation.tsx` and `apps/desktop/src/view/Composer.tsx`, with commands in `apps/desktop/src/commands.ts`. T040 must pass.
+- [X] T048 [P] [US2] Implement `apps/desktop/src/view/FormCard.tsx`, with `@comodor/questions`, and `apps/desktop/src/view/PermissionCard.tsx`. T041 must pass.
+- [X] T049 [P] [US2] Implement `apps/desktop/src/view/ModeControl.tsx` from `@comodor/modes`. T042 must pass.
 - [ ] T050 [US2] Run the `desktop` job of `.github/workflows/ci.yml` by `workflow_dispatch`. T039 and T043 must pass on all three platforms. Keep the results for the PR description.
 
 **Checkpoint**: US1 and US2 work — a usable single-session window.

@@ -3,12 +3,14 @@
  * report. Nothing here decides anything the Core owns (FR-024).
  */
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import type { NativeApi } from "./bridge.ts";
 import { Connection } from "./connection.ts";
+import type { Kept } from "./state.ts";
 import { FailureView } from "./view/FailureView.tsx";
-import { type ModelInfo, StatusStrip } from "./view/StatusStrip.tsx";
+import { SessionView } from "./view/SessionView.tsx";
+import { StatusStrip } from "./view/StatusStrip.tsx";
 import { WorkspaceGate } from "./view/WorkspaceGate.tsx";
 
 export function App({ api }: { api: NativeApi }) {
@@ -18,23 +20,8 @@ export function App({ api }: { api: NativeApi }) {
     return () => connection.dispose();
   }, [connection]);
   const { status, client } = useSyncExternalStore(connection.subscribe, () => connection.snapshot);
-
-  // What answers: asked once per client. Best effort — a Core that cannot
-  // answer still has a working session; the strip then shows no model.
-  const [model, setModel] = useState<ModelInfo | null>(null);
-  useEffect(() => {
-    setModel(null);
-    if (!client) return;
-    let alive = true;
-    client.call("model.get")
-      .then((info) => {
-        if (alive) setModel(info as unknown as ModelInfo);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [client]);
+  // Kept for the window's whole life, across Core restarts (R12).
+  const kept = useRef<Kept>({ storedId: undefined, unsentTurn: undefined }).current;
 
   const [diagnostics, setDiagnostics] = useState("");
   const failed = status?.state === "failed";
@@ -57,9 +44,16 @@ export function App({ api }: { api: NativeApi }) {
   if (status === null) {
     return <main className="window" data-testid="window"><p className="quiet">Starting…</p></main>;
   }
+  if (status.state === "ready" && client !== null) {
+    return (
+      <main className="window" data-testid="window">
+        <SessionView client={client} kept={kept} status={status} />
+      </main>
+    );
+  }
   return (
     <main className="window" data-testid="window">
-      <StatusStrip status={status} model={status.state === "ready" ? model : null} />
+      <StatusStrip status={status} model={null} />
       {status.state === "absent" && <WorkspaceGate notice={status.notice} onChoose={choose} />}
       {status.state === "failed" && status.failure !== null && (
         <FailureView failure={status.failure} diagnostics={diagnostics}

@@ -25,6 +25,11 @@
 
 export const SETUPS = {
   empty: { workspaceArgument: true },
+  conversation: { core: ["scripted_core.py", "question"], workspaceArgument: true },
+  "conversation-permission": { core: ["scripted_core.py", "permission"], workspaceArgument: true },
+  "conversation-cancel": {
+    core: ["scripted_core.py", "hold-mid-turn"], hold: true, workspaceArgument: true,
+  },
   ready: {
     realCore: true,
     workspaceArgument: true,

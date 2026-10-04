@@ -4,11 +4,15 @@
 
 import type { Scenario } from "../runner.ts";
 
+import { conversation, conversationCancel, conversationPermission } from "./conversation.ts";
 import { empty } from "./empty.ts";
 import { ready } from "./ready.ts";
 import { workspaceLaunch, workspaceLaunchPath } from "./workspace-launch.ts";
 
 export const SCENARIOS: Readonly<Record<string, Scenario>> = {
+  conversation,
+  "conversation-cancel": conversationCancel,
+  "conversation-permission": conversationPermission,
   empty,
   ready,
   "workspace-launch": workspaceLaunch,

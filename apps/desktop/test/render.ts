@@ -57,3 +57,21 @@ export function byText(container: HTMLElement, selector: string, text: string): 
   return [...container.querySelectorAll<HTMLElement>(selector)]
     .find((element) => (element.textContent ?? "").includes(text)) ?? null;
 }
+
+/** Type into a text field the way a person does: React sees an input event. */
+export async function typeInto(element: Element, text: string): Promise<void> {
+  const field = element as HTMLInputElement | HTMLTextAreaElement;
+  const prototype = Object.getPrototypeOf(field) as object;
+  const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+  await act(async () => {
+    setter?.call(field, text);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+export async function press(element: Element, key: string,
+                            modifiers: { shiftKey?: boolean; ctrlKey?: boolean } = {}): Promise<void> {
+  await act(async () => {
+    element.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...modifiers }));
+  });
+}

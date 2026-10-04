@@ -240,7 +240,13 @@ async function runScenario(name) {
     }
   }
   fs.writeFileSync(path.join(kept, "result.json"), JSON.stringify(summary, null, 2));
-  fs.rmSync(root, { recursive: true, force: true });
+  // Best effort: on Windows the Core may still be ending (its job closes
+  // with the application) and holds its working folder until it has.
+  try {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (problem) {
+    console.error(`left ${root} behind: ${problem.message}`);
+  }
   return summary;
 }
 

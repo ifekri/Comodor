@@ -85,3 +85,15 @@ export class FakeNative {
     channel: (onMessage) => onMessage,
   };
 }
+
+/** A window whose Core is ready and whose session has been opened. */
+export async function openWindow(
+  render: (native: FakeNative) => Promise<{ container: HTMLElement }>,
+  until: <T>(found: () => T | null | undefined | false, what?: string) => Promise<T>,
+  native: FakeNative = new FakeNative(),
+): Promise<{ native: FakeNative; container: HTMLElement }> {
+  const view = await render(native);
+  await until(() => native.core.requests("session.snapshot").length > 0, "the session snapshot");
+  await until(() => view.container.querySelector('[data-testid="composer"]'), "the composer");
+  return { native, container: view.container };
+}
