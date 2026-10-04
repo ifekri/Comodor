@@ -1,7 +1,7 @@
 //! The native handshake, and the relay between one page and the Core
 //! (contracts/native-bridge.md, data-model.md §2).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use serde_json::{json, Value};
@@ -140,6 +140,9 @@ pub struct Relay {
     generation: u64,
     live: bool,
     in_flight: HashMap<String, InFlight>,
+    /// Every link in a line delivered to the current page: what `open_external`
+    /// may open.
+    links: HashSet<String>,
 }
 
 impl Relay {
@@ -156,12 +159,27 @@ impl Relay {
         self.handshake.as_ref()
     }
 
+    /// Was `url` among the links in lines delivered to the current page?
+    pub fn displayed(&self, url: &str) -> bool {
+        self.live && self.links.contains(url)
+    }
+
+    fn remember_links(&mut self, value: &Value) {
+        match value {
+            Value::String(text) => self.links.extend(links_in(text)),
+            Value::Array(items) => items.iter().for_each(|item| self.remember_links(item)),
+            Value::Object(fields) => fields.values().for_each(|item| self.remember_links(item)),
+            _ => {}
+        }
+    }
+
     /// A page connects: a new generation, and nothing from an older one can
     /// reach it.
     pub fn connect(&mut self) -> u64 {
         self.generation += 1;
         self.live = true;
         self.in_flight.clear();
+        self.links.clear();
         self.generation
     }
 
@@ -177,6 +195,7 @@ impl Relay {
         self.live = false;
         self.handshake = None;
         self.in_flight.clear();
+        self.links.clear();
         was
     }
 
@@ -227,10 +246,13 @@ impl Relay {
     pub fn from_core(&mut self, line: &str) -> FromCore {
         let Ok(envelope) = serde_json::from_str::<Value>(line) else { return FromCore::default() };
         match envelope.get("type").and_then(Value::as_str) {
-            Some("event") => FromCore {
-                to_page: self.current().map(|generation| (generation, line.to_string())),
-                observed: observe_event(&envelope),
-            },
+            Some("event") => {
+                let to_page = self.current().map(|generation| (generation, line.to_string()));
+                if to_page.is_some() {
+                    self.remember_links(&envelope["params"]);
+                }
+                FromCore { to_page, observed: observe_event(&envelope) }
+            }
             Some("response") | Some("error") => {
                 let Some(native) = envelope.get("id").and_then(Value::as_str) else {
                     return FromCore::default();
@@ -246,11 +268,35 @@ impl Relay {
                 }
                 let span = id_span(line).expect("a parsed answer with a string id has an id");
                 let restored = format!("{}{}{}", &line[..span.start], waiting.page_id, &line[span.end..]);
-                FromCore { to_page: self.current().map(|generation| (generation, restored)), observed }
+                let to_page = self.current().map(|generation| (generation, restored));
+                if to_page.is_some() {
+                    self.remember_links(&envelope);
+                }
+                FromCore { to_page, observed }
             }
             _ => FromCore::default(),
         }
     }
+}
+
+/// The links in a text, by the rule the page's inert renderer uses too
+/// (`src/text.ts`): `http://` or `https://`, up to whitespace, a quote, an
+/// angle bracket or a control character, without trailing punctuation.
+pub fn links_in(text: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut rest = text;
+    while let Some(at) = ["http://", "https://"].iter().filter_map(|scheme| rest.find(scheme)).min() {
+        let tail = &rest[at..];
+        let end = tail.find(|c: char| c.is_whitespace() || c.is_control()
+                                     || matches!(c, '"' | '\'' | '<' | '>'))
+            .unwrap_or(tail.len());
+        let link = tail[..end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}']);
+        if link.len() > link.find("://").unwrap() + 3 {
+            found.push(link.to_string());
+        }
+        rest = &tail[end.max(1)..];
+    }
+    found
 }
 
 fn observe_event(envelope: &Value) -> Vec<Observation> {
@@ -557,6 +603,17 @@ mod tests {
         let cancel = r#"{"version":2,"type":"request","id":"6","method":"session.cancel","params":{}}"#;
         let FromPage::ToCore { observed, .. } = relay.from_page(generation, cancel, true).unwrap() else { panic!() };
         assert_eq!(observed, vec![Observation::Cancel]);
+    }
+
+    /// The same cases as `test/inert.test.tsx`: the page and the native side
+    /// agree on what a link is.
+    #[test]
+    fn links_are_found_by_the_rule_the_page_uses() {
+        assert_eq!(links_in("see https://example.com/docs, then javascript:alert(1)"),
+                   ["https://example.com/docs"]);
+        assert_eq!(links_in("<http://a.example/x>"), ["http://a.example/x"]);
+        assert!(links_in("https:// alone").is_empty());
+        assert_eq!(links_in("a\x1bhttps://b.example/c\x1b[2J"), ["https://b.example/c"]);
     }
 
     #[test]

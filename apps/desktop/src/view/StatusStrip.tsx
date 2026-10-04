@@ -4,6 +4,7 @@
  */
 
 import type { CoreStatus } from "../bridge.ts";
+import { InertText } from "./InertText.tsx";
 
 export interface ModelInfo {
   readonly provider: string;
@@ -34,12 +35,12 @@ export function StatusStrip({ status, model }: {
     <header className="status-strip" data-testid="status-strip" data-state={status.state}>
       <span className={`status-state state-${status.state}`}>{stateLabel(status.state)}</span>
       {status.workspace !== null && (
-        <span className="status-workspace" title={status.workspace}>{status.workspace}</span>
+        <span className="status-workspace" title={status.workspace}><InertText text={status.workspace} /></span>
       )}
       {model !== null && (
         <>
-          <span className="status-provider">{model.provider || "no provider"}</span>
-          <span className="status-model">{model.model || "no model"}</span>
+          <span className="status-provider"><InertText text={model.provider || "no provider"} /></span>
+          <span className="status-model"><InertText text={model.model || "no model"} /></span>
           <span className={model.configured ? "status-configured" : "status-unconfigured"}>
             {model.configured ? "Configured" : "Not configured"}
           </span>

@@ -56,6 +56,16 @@ pub fn record(kind: &str, value: &Value) {
     append("COMODOR_E2E_RECORD", &json!({ "kind": kind, "value": value }));
 }
 
+/// Every navigation and new window the application refused, in order.
+static REFUSED: Mutex<Vec<Value>> = Mutex::new(Vec::new());
+
+/// A navigation or new window the application refused.
+pub fn refused(kind: &str, url: &str) {
+    let entry = json!({ "kind": kind, "url": url });
+    record("refused", &entry);
+    REFUSED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(entry);
+}
+
 /// The supervisor reports each Core it starts, and 0 when none runs.
 pub fn set_core_pid(pid: u32) {
     CORE_PID.store(pid, Ordering::SeqCst);
@@ -112,6 +122,9 @@ pub fn e2e_report(app: tauri::AppHandle, result: Value) -> Result<Value, String>
         Some("query") => match result.get("what").and_then(Value::as_str) {
             Some("listeners") => Ok(json!({ "listeners": network_listeners() })),
             Some("core_pid") => Ok(json!({ "pid": CORE_PID.load(Ordering::SeqCst) })),
+            Some("refused") => Ok(json!({
+                "refused": *REFUSED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+            })),
             Some("chooser") => Ok(json!({
                 "starts": *CHOOSER_STARTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
             })),

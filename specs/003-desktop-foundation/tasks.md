@@ -339,7 +339,7 @@ SC-010, SC-011 (early).
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T051 [P] [US5] Write the early command-list test (**U**) in `apps/desktop/src-tauri/src/commands.rs` (test module), run without the `e2e` feature:
+- [X] T051 [P] [US5] Write the early command-list test (**U**) in `apps/desktop/src-tauri/src/commands.rs` (test module), run without the `e2e` feature:
   - the command constant contains no name outside the nine of [native-bridge.md](./contracts/native-bridge.md);
   - every registered handler comes from the constant;
   - `e2e_report` exists only with `e2e`;
@@ -347,27 +347,27 @@ SC-010, SC-011 (early).
   - `tauri.conf.json` has the CSP of T004, and devtools off in release.
 
   Mutation check: adding a name outside the contract fails the test (SC-011).
-- [ ] T052 [P] [US5] Write `open_external` tests (**U**) in `apps/desktop/src-tauri/src/commands.rs` (test module): `http` and `https` links the current generation displayed are opened; any other scheme, or a URL not displayed, is refused.
-- [ ] T053 [P] [US5] Write inert-display tests (**W**) in `apps/desktop/test/inert.test.tsx`. With `<script>`, `<img onerror>`, `javascript:` links, `\x1b[2J`, `\x1b[H`, an OSC title sequence, `[Connected]` and `[Ready]` in messages, tool output, file names, model names and errors:
+- [X] T052 [P] [US5] Write `open_external` tests (**U**) in `apps/desktop/src-tauri/src/commands.rs` (test module): `http` and `https` links the current generation displayed are opened; any other scheme, or a URL not displayed, is refused.
+- [X] T053 [P] [US5] Write inert-display tests (**W**) in `apps/desktop/test/inert.test.tsx`. With `<script>`, `<img onerror>`, `javascript:` links, `\x1b[2J`, `\x1b[H`, an OSC title sequence, `[Connected]` and `[Ready]` in messages, tool output, file names, model names and errors:
   - all render as text;
   - control characters appear as visible symbols;
   - no script runs, no navigation happens, and the status strip is unchanged (FR-029, SC-010).
-- [ ] T054 [US5] Write the scenario `canary-early` (**S**, all platforms) in `apps/desktop/e2e/scenarios/canary-early.ts`. The Core home has a unique `api_key`; the ready, conversation and adversarial flows run; then each of these has zero occurrences of the canary (SC-009, early part):
+- [X] T054 [US5] Write the scenario `canary-early` (**S**, all platforms) in `apps/desktop/e2e/scenarios/canary-early.ts`. The Core home has a unique `api_key`; the ready, conversation and adversarial flows run; then each of these has zero occurrences of the canary (SC-009, early part):
   - every recorded inbound IPC message of every kind;
   - every bridge command's arguments and return value;
   - local storage, session storage, IndexedDB and the document text;
   - the Core's recorded arguments;
   - the application log, the preferences file, and the diagnostic tail.
-- [ ] T055 [US5] Write the scenario `boundary` (**S**, all platforms) in `apps/desktop/e2e/scenarios/boundary.ts`:
+- [X] T055 [US5] Write the scenario `boundary` (**S**, all platforms) in `apps/desktop/e2e/scenarios/boundary.ts`:
   - a plugin command from the page is refused;
   - `window.location` navigation and `window.open` are refused;
   - the `adversarial` scenario renders inertly in the real WebView (SC-010, SC-011).
 
 ### Implementation for User Story 5
 
-- [ ] T056 [P] [US5] Implement inert rendering in `apps/desktop/src/text.ts`, used by every view that shows outside text. T053 must pass.
-- [ ] T057 [P] [US5] Implement `open_external` in `apps/desktop/src-tauri/src/commands.rs`. T052 must pass.
-- [ ] T058 [US5] Implement the navigation and new-window refusals in `apps/desktop/src-tauri/src/main.rs`, and the log writer in `apps/desktop/src-tauri/src/logfile.rs` (no credential, environment or session content). T051, T054 and T055 must pass.
+- [X] T056 [P] [US5] Implement inert rendering in `apps/desktop/src/text.ts`, used by every view that shows outside text. T053 must pass.
+- [X] T057 [P] [US5] Implement `open_external` in `apps/desktop/src-tauri/src/commands.rs`. T052 must pass.
+- [X] T058 [US5] Implement the navigation and new-window refusals in `apps/desktop/src-tauri/src/main.rs`, and the log writer in `apps/desktop/src-tauri/src/logfile.rs` (no credential, environment or session content). T051, T054 and T055 must pass.
 
 **Checkpoint**: all P1 stories pass on three platforms. T084–T086 later
 extend the boundary checks to every command and flow.

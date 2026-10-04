@@ -20,6 +20,9 @@ import {
 } from "@comodor/questions";
 import type { Interaction } from "@comodor/session";
 
+import { InertText } from "./InertText.tsx";
+import { visible } from "../text.ts";
+
 /** The same state, looking at question `index`. */
 function at(state: FormState, index: number): FormState {
   return { ...state, at: index, writing: false };
@@ -37,29 +40,29 @@ export function FormCard({ interaction, onAnswer }: {
   const submitting = interaction.state === "submitting";
   return (
     <section className="card form-card" data-testid="form" data-id={request.id}>
-      <h2>{request.title}</h2>
+      <h2><InertText text={request.title} /></h2>
       {request.questions.map((question, index) => {
         const free = question.options.find((option) => option.free);
         return (
           <fieldset key={question.header} className="question">
-            <legend>{question.header}</legend>
-            <p className="prompt">{question.prompt}</p>
+            <legend><InertText text={question.header} /></legend>
+            <p className="prompt"><InertText text={question.prompt} /></p>
             <div className="options">
               {question.options.filter((option) => !option.free).map((option) => (
                 <button key={option.id} type="button" disabled={submitting}
                         className={isSelected(at(form, index), option.id) ? "option chosen" : "option"}
                         aria-pressed={isSelected(at(form, index), option.id)}
                         onClick={() => setForm({ ...select(at(form, index), option.id), at: form.at })}>
-                  <span className="option-label">{option.label}</span>
+                  <span className="option-label">{visible(option.label)}</span>
                   {option.description !== undefined && (
-                    <span className="option-description">{option.description}</span>
+                    <span className="option-description">{visible(option.description)}</span>
                   )}
                 </button>
               ))}
             </div>
             {free !== undefined && (
               <label className="free">
-                <span>{free.label}</span>
+                <span>{visible(free.label)}</span>
                 <input type="text" disabled={submitting} value={form.written[index] ?? ""}
                        onChange={(event) => {
                          const chosen = select(at(form, index), free.id);
@@ -70,7 +73,7 @@ export function FormCard({ interaction, onAnswer }: {
           </fieldset>
         );
       })}
-      {interaction.state === "failed" && <p className="card-error">{interaction.error}</p>}
+      {interaction.state === "failed" && <p className="card-error"><InertText text={interaction.error} /></p>}
       <div className="actions">
         <button type="button" disabled={submitting || !answerable(form)}
                 onClick={() => onAnswer(answer(form) as unknown as Record<string, unknown>)}>

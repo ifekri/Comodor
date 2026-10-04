@@ -5,6 +5,8 @@
 
 import type { Interaction } from "@comodor/session";
 
+import { InertText } from "./InertText.tsx";
+
 const CHOICE_LABELS: Readonly<Record<string, string>> = {
   allow: "Allow",
   allow_always: "Always allow",
@@ -21,13 +23,13 @@ export function PermissionCard({ interaction, onReply }: {
   return (
     <section className="card permission-card" data-testid="permission"
              data-id={String(request["id"] ?? "")}>
-      <h2>{String(request["title"] ?? "")}</h2>
+      <h2><InertText text={String(request["title"] ?? "")} /></h2>
       <dl>
-        {typeof request["tool"] === "string" && (<><dt>Tool</dt><dd>{request["tool"]}</dd></>)}
-        {typeof request["risk"] === "string" && (<><dt>Risk</dt><dd>{request["risk"]}</dd></>)}
+        {typeof request["tool"] === "string" && (<><dt>Tool</dt><dd><InertText text={request["tool"]} /></dd></>)}
+        {typeof request["risk"] === "string" && (<><dt>Risk</dt><dd><InertText text={request["risk"]} /></dd></>)}
       </dl>
-      {typeof request["detail"] === "string" && <pre className="detail">{request["detail"]}</pre>}
-      {interaction.state === "failed" && <p className="card-error">{interaction.error}</p>}
+      {typeof request["detail"] === "string" && <pre className="detail"><InertText text={request["detail"]} /></pre>}
+      {interaction.state === "failed" && <p className="card-error"><InertText text={interaction.error} /></p>}
       <div className="actions">
         {options.map((choice) => (
           <button key={choice} type="button" data-choice={choice} disabled={submitting}

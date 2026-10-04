@@ -334,3 +334,15 @@ button:focus-visible {
   flex-direction: column;
   gap: 6px;
 }
+
+/* A link from outside text: a button, so nothing in the page navigates. */
+button.link {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--semantic-info);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}

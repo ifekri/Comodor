@@ -152,6 +152,14 @@ pub struct HoldPoint {
     pub address: String,
 }
 
+#[cfg(unix)]
+impl Drop for HoldPoint {
+    /// A socket left by a fixture that was killed would refuse the next bind.
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.address);
+    }
+}
+
 impl HoldPoint {
     pub fn new(label: &str, scratch: &Scratch) -> Self {
         let n = NEXT.fetch_add(1, Ordering::SeqCst);
@@ -160,9 +168,13 @@ impl HoldPoint {
             let _ = scratch;
             format!(r"\\.\pipe\comodor-hold-{label}-{}-{n}", std::process::id())
         };
+        // A Unix socket path is limited to about 100 bytes (104 on macOS),
+        // which a test's temporary folder can exceed: a short name in /tmp.
         #[cfg(unix)]
-        let address = scratch.root.join(format!("hold-{label}-{n}.sock"))
-            .to_string_lossy().into_owned();
+        let address = {
+            let _ = (scratch, label);
+            format!("/tmp/comodor-hold-{}-{n}.sock", std::process::id())
+        };
         Self { address }
     }
 
@@ -207,12 +219,13 @@ pub fn launch_with_env(command: CoreCommand, home: &CoreHome,
                        extra: Vec<(OsString, OsString)>) -> Supervisor {
     let mut env = home.env();
     env.extend(extra);
-    Supervisor::launch(Options { locate: Box::new(move || Ok(command.clone())), test_env: env })
+    Supervisor::launch(Options { locate: Box::new(move || Ok(command.clone())), test_env: env, log: None })
 }
 
 /// A supervisor whose locating has already happened, successfully or not.
 pub fn launch_located(located: Result<CoreCommand, Failure>, home: &CoreHome) -> Supervisor {
-    Supervisor::launch(Options { locate: Box::new(move || located.clone()), test_env: home.env() })
+    Supervisor::launch(Options { locate: Box::new(move || located.clone()), test_env: home.env(),
+                                log: None })
 }
 
 /// A page, as far as the native side can tell: everything sent to it, in

@@ -11,6 +11,7 @@ pub mod diag;
 #[cfg(feature = "e2e")]
 pub mod e2e;
 pub mod locate;
+pub mod logfile;
 pub mod platform;
 pub mod prefs;
 pub mod relay;
@@ -34,15 +35,20 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
         .plugin(tauri_plugin_dialog::init())
+        // Used from the native side only: no capability grants the page any
+        // opener permission, so `open_external` is the one way to a browser.
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(handlers())
         .setup(|app| {
             let handle = app.handle().clone();
+            let data = data_dir(&handle)?;
             let desktop = Desktop::new(
                 Supervisor::launch(Options {
                     locate: Box::new(locate::locate_from_environment),
                     test_env: vec![],
+                    log: Some(std::sync::Arc::new(logfile::Log::in_dir(&data))),
                 }),
-                prefs::path_in(&data_dir(&handle)?),
+                prefs::path_in(&data),
                 chooser(&handle),
             );
             app.manage(desktop);
@@ -57,6 +63,27 @@ pub fn run() {
         .expect("the Comodor desktop application failed to start");
 }
 
+#[cfg(test)]
+mod tests {
+    use super::own_origin;
+
+    fn allowed(url: &str) -> bool {
+        own_origin(&tauri::Url::parse(url).unwrap())
+    }
+
+    #[test]
+    fn only_the_applications_own_pages_are_navigable() {
+        assert!(allowed("tauri://localhost/index.html"));
+        assert!(allowed("http://tauri.localhost/"));
+        assert!(allowed("https://tauri.localhost/assets/a.js"));
+        for refused in ["https://example.com/", "http://tauri.localhost.example.com/",
+                        "file:///C:/Windows/win.ini", "javascript:alert(1)", "data:text/html,x",
+                        "tauri://evil/", "http://localhost/", "about:blank"] {
+            assert!(!allowed(refused), "{refused}");
+        }
+    }
+}
+
 /// The registered commands: only names from `COMMANDS`, plus `e2e_report`
 /// in the test build (contracts/native-bridge.md §One source for the command
 /// list).
@@ -69,6 +96,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         commands::diagnostics,
         commands::choose_workspace,
         commands::retry,
+        commands::open_external,
         e2e::e2e_report
     ];
     #[cfg(not(feature = "e2e"))]
@@ -78,7 +106,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         commands::status,
         commands::diagnostics,
         commands::choose_workspace,
-        commands::retry
+        commands::retry,
+        commands::open_external
     ];
 }
 
@@ -122,6 +151,23 @@ fn create_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
             .position(f64::from(geometry.x), f64::from(geometry.y))
             .maximized(geometry.maximized);
     }
+    // The window shows the application's own pages and nothing else: no
+    // navigation away, no new windows (contracts/native-bridge.md).
+    let builder = builder
+        .on_navigation(|url| {
+            let allowed = own_origin(url);
+            #[cfg(feature = "e2e")]
+            if !allowed {
+                e2e::refused("navigation", url.as_str());
+            }
+            allowed
+        })
+        .on_new_window(|url, _features| {
+            #[cfg(feature = "e2e")]
+            e2e::refused("new_window", url.as_str());
+            let _ = url;
+            tauri::webview::NewWindowResponse::Deny
+        });
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(e2e::init_script());
     let window = builder.build()?;
@@ -132,6 +178,19 @@ fn create_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
         }
     });
     Ok(())
+}
+
+/// The application's own pages: the bundled assets (`tauri://localhost`, or
+/// `http(s)://tauri.localhost` on Windows) and, in a debug build, the
+/// development server.
+pub fn own_origin(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "tauri" => url.host_str() == Some("localhost"),
+        "http" | "https" => url.host_str() == Some("tauri.localhost")
+            || (cfg!(debug_assertions) && url.host_str() == Some("127.0.0.1")
+                && url.port() == Some(5173)),
+        _ => false,
+    }
 }
 
 fn remember_geometry(app: &tauri::AppHandle) {

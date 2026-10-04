@@ -5,6 +5,7 @@
  */
 
 import type { CoreFailure } from "../bridge.ts";
+import { InertText } from "./InertText.tsx";
 
 const TITLES: Readonly<Record<string, string>> = {
   not_found: "Comodor was not found",
@@ -29,11 +30,11 @@ export function FailureView({ failure, diagnostics, onRetry, onChoose }: {
   return (
     <section className="failure-view" data-testid="failure-view" data-class={failure.class}>
       <h1>{failureTitle(failure.class)}</h1>
-      <p className="failure-message">{failure.message}</p>
+      <p className="failure-message"><InertText text={failure.message} /></p>
       {diagnostics !== "" && (
         <>
           <h2>The Core's last output</h2>
-          <pre className="diagnostics">{diagnostics}</pre>
+          <pre className="diagnostics"><InertText text={diagnostics} /></pre>
         </>
       )}
       <div className="actions">

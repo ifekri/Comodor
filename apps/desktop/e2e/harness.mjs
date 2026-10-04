@@ -16,6 +16,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -89,7 +90,8 @@ function writeCoreHome(home, setup) {
 function holdAddress(root, name) {
   return process.platform === "win32"
     ? `\\\\.\\pipe\\comodor-e2e-${name}-${process.pid}`
-    : path.join(root, "hold.sock");
+    // A Unix socket path is limited to about 100 bytes: a short one in /tmp.
+    : `/tmp/comodor-e2e-hold-${process.pid}-${name}.sock`;
 }
 
 /** Release a fixture's hold point, through the same library that opened it. */
@@ -129,6 +131,32 @@ function answer(checkpoint, run) {
   }
 }
 
+/**
+ * Where the canary is. It must be in the Core's home (or the search proves
+ * nothing) and nowhere else: not in any recorded IPC message or command, not
+ * in anything the page held, not in the Core's arguments, the application's
+ * output, its log or its preferences.
+ */
+function searchCanary(canary, places) {
+  const leaks = [];
+  const contains = (text) => typeof text === "string" && text.includes(canary);
+  const file = (label, at) => {
+    if (fs.existsSync(at) && contains(fs.readFileSync(at, "utf-8"))) leaks.push(label);
+    return fs.existsSync(at);
+  };
+  const planted = fs.existsSync(places.home) && contains(fs.readFileSync(places.home, "utf-8"));
+  const searched = file("the bridge record", places.record) && file("the Core's arguments", places.argv);
+  if (fs.existsSync(places.data)) {
+    for (const entry of fs.readdirSync(places.data, { recursive: true })) {
+      const at = path.join(places.data, String(entry));
+      if (fs.statSync(at).isFile()) file(`the application's ${entry}`, at);
+    }
+  }
+  if (contains(places.result)) leaks.push("the page's holdings or the scenario's result");
+  if (contains(places.output)) leaks.push("the application's output");
+  return { planted, searched, leaks };
+}
+
 function copyIfPresent(from, to) {
   if (fs.existsSync(from)) fs.cpSync(from, to, { recursive: true });
 }
@@ -142,7 +170,9 @@ async function runScenario(name) {
   const data = path.join(root, "desktop-data");
   const stored = path.join(root, "stored");
   for (const directory of [home, workspace, data, stored]) fs.mkdirSync(directory);
-  writeCoreHome(home, setup);
+  // SC-009: a credential nothing else could contain, by the run.
+  const canary = setup.canary ? `CANARY-${randomUUID()}` : undefined;
+  writeCoreHome(home, canary ? { ...setup, apiKey: canary } : setup);
   const places = { $workspace: workspace, $stored: stored };
 
   if (setup.lastSelectedFolder !== undefined) {
@@ -174,7 +204,13 @@ async function runScenario(name) {
     COMODOR_E2E_CHOOSE: JSON.stringify(resolve(setup.choose ?? [], places)),
     COMODOR_E2E_CONFIRM: setup.confirm ? "yes" : "no",
   };
-  if (run.hold) env.COMODOR_TEST_HOLD = run.hold;
+  if (run.hold) {
+    env.COMODOR_TEST_HOLD = run.hold;
+    // A socket left by an earlier, killed run would refuse the bind.
+    if (process.platform !== "win32") fs.rmSync(run.hold, { force: true });
+  }
+  const argv = path.join(root, "argv.json");
+  if (canary) env.COMODOR_TEST_ARGV_FILE = argv;
   if (setup.sequence) {
     // The double keeps its counter beside this file.
     env.COMODOR_TEST_SEQUENCE = path.join(root, "sequence.json");
@@ -230,6 +266,19 @@ async function runScenario(name) {
   copyIfPresent(data, path.join(kept, "desktop-data"));
   fs.writeFileSync(path.join(kept, "output.txt"), output.join(""));
   const summary = { scenario: name, elapsedMs: Date.now() - started, ...outcome };
+  if (canary) {
+    const found = searchCanary(canary, {
+      home: path.join(home, "config.json"), record, argv, data,
+      result: JSON.stringify(outcome), output: output.join(""),
+    });
+    summary.canary = found;
+    if (summary.ok && (!found.planted || found.leaks.length > 0 || !found.searched)) {
+      summary.ok = false;
+      summary.error = found.planted
+        ? `the credential reached: ${found.leaks.join(", ") || "(nothing searched)"}`
+        : "the credential was never planted in the Core's home";
+    }
+  }
   // SC-001: from the process start to the page's ready moment.
   if (setup.maxReadyMs !== undefined && summary.ok) {
     const readyAt = Number(summary.details?.readyAt);

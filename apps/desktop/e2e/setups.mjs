@@ -16,6 +16,10 @@
  * - `lastSelectedFolder`: a stored preference, a placeholder or a path.
  * - `confirm`: the second-launch confirmation double's answer.
  * - `params`: handed to the scenario in the page.
+ * - `canary`: true gives the fake provider a unique key, then searches every
+ *   recorded message and command, the page's own holdings (the result), the
+ *   Core's recorded arguments, the application's output, log and
+ *   preferences for it. Any occurrence fails the scenario (SC-009).
  * - `maxReadyMs`: the result's `readyAt` must come this soon after the
  *   process started (SC-001).
  *
@@ -25,6 +29,8 @@
 
 export const SETUPS = {
   empty: { workspaceArgument: true },
+  boundary: { core: ["scripted_core.py", "adversarial"], workspaceArgument: true },
+  "canary-early": { core: ["scripted_core.py", "adversarial"], workspaceArgument: true, canary: true },
   conversation: { core: ["scripted_core.py", "question"], workspaceArgument: true },
   "conversation-permission": { core: ["scripted_core.py", "permission"], workspaceArgument: true },
   "conversation-cancel": {

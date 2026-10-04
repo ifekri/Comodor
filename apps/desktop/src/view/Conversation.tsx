@@ -5,6 +5,8 @@
 
 import { type Entry, type Line, type State, timeline, type ToolRun } from "@comodor/session";
 
+import { InertText } from "./InertText.tsx";
+
 const LINE_STATES: Readonly<Record<string, string>> = {
   pending: "sending…",
   failed_to_send: "not sent",
@@ -20,9 +22,9 @@ function LineView({ line }: { line: Line }) {
     <article className={`line speaker-${line.speaker} line-${line.state}`} data-testid="line"
              data-state={line.state} data-turn={line.turnId}>
       <span className="speaker">{line.speaker === "you" ? "You" : "Comodor"}</span>
-      <div className="text">{line.text}</div>
+      <div className="text"><InertText text={line.text} /></div>
       {note !== "" && <span className="line-note">{note}</span>}
-      {line.error !== undefined && <span className="line-error">{line.error}</span>}
+      {line.error !== undefined && <span className="line-error"><InertText text={line.error} /></span>}
     </article>
   );
 }
@@ -32,14 +34,14 @@ function ToolView({ tool }: { tool: ToolRun }) {
     <article className={`tool tool-${tool.state}`} data-testid="tool" data-call={tool.id}
              data-state={tool.state}>
       <header>
-        <span className="tool-name">{tool.name}</span>
-        {tool.summary !== "" && <span className="tool-summary">{tool.summary}</span>}
+        <span className="tool-name"><InertText text={tool.name} /></span>
+        {tool.summary !== "" && <span className="tool-summary"><InertText text={tool.summary} /></span>}
         <span className="tool-state">{tool.state}</span>
       </header>
       {tool.output !== "" && (
-        <pre className="tool-output">{tool.outputTruncated ? "…" : ""}{tool.output}</pre>
+        <pre className="tool-output">{tool.outputTruncated ? "…" : ""}<InertText text={tool.output} /></pre>
       )}
-      {tool.error !== undefined && <span className="tool-error">{tool.error}</span>}
+      {tool.error !== undefined && <span className="tool-error"><InertText text={tool.error} /></span>}
     </article>
   );
 }
@@ -57,7 +59,7 @@ export function Conversation({ state }: { state: State }) {
                    entry={entry} />
       ))}
       {state.notice !== undefined && (
-        <p className={`notice notice-${state.notice.level}`} data-testid="notice">{state.notice.text}</p>
+        <p className={`notice notice-${state.notice.level}`} data-testid="notice"><InertText text={state.notice.text} /></p>
       )}
     </section>
   );

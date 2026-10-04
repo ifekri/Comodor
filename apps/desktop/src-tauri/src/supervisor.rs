@@ -19,6 +19,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::diag::{self, DiagnosticTail};
+use crate::logfile::{Entry, Log};
 use crate::platform::{build_command, spawn_core, CoreCommand, Stopper};
 use crate::relay;
 use crate::workspace;
@@ -176,6 +177,11 @@ impl Machine {
     /// The cached `client.hello` result, once the Core is ready.
     pub fn handshake(&self) -> Option<&Value> {
         self.relay.handshake()
+    }
+
+    /// Was `url` a link in a line the current page was shown?
+    pub fn displayed(&self, url: &str) -> bool {
+        self.relay.displayed(url)
     }
 
     /// A page connects: its generation.
@@ -368,12 +374,15 @@ pub struct Options {
     /// Empty in the application. Tests give their Cores a temporary home
     /// this way, without changing their own environment.
     pub test_env: Vec<(OsString, OsString)>,
+    /// The application's log; none in tests that do not look at it.
+    pub log: Option<Arc<Log>>,
 }
 
 enum Event {
     Input(Input, Option<Sender<Result<(), String>>>),
     Connect(Box<dyn PageSink>, Sender<u64>),
     SendLine { generation: u64, line: String, reply: Sender<Result<(), String>> },
+    Displayed { url: String, reply: Sender<bool> },
 }
 
 struct Shared {
@@ -481,6 +490,15 @@ impl Supervisor {
         answer.recv().unwrap_or(0)
     }
 
+    /// Was `url` a link in a line the current page was shown?
+    pub fn displayed(&self, url: &str) -> bool {
+        let (reply, answer) = channel();
+        if self.events.send(Event::Displayed { url: url.to_string(), reply }).is_err() {
+            return false;
+        }
+        answer.recv().unwrap_or(false)
+    }
+
     pub fn send_line(&self, generation: u64, line: String) -> Result<(), String> {
         let (reply, answer) = channel();
         self.events.send(Event::SendLine { generation, line, reply })
@@ -512,8 +530,10 @@ impl Driver {
         while let Ok(event) = events.recv() {
             match event {
                 Event::Input(input, reply) => {
-                    if let Input::Exited { core, .. } = &input {
-                        self.running.remove(core);
+                    if let Input::Exited { core, code } = &input {
+                        if self.running.remove(core).is_some() {
+                            self.log(Entry::Exited { code: *code });
+                        }
                         self.set_pid(None);
                     }
                     let outcome = self.machine.handle(input).map(|effects| self.apply(effects));
@@ -526,6 +546,9 @@ impl Driver {
                     sink.send(json!({ "kind": "status", "status": self.machine.status() }));
                     self.page = Some((generation, sink));
                     let _ = reply.send(generation);
+                }
+                Event::Displayed { url, reply } => {
+                    let _ = reply.send(self.machine.displayed(&url));
                 }
                 Event::SendLine { generation, line, reply } => {
                     let outcome = self.machine.send_line(generation, &line)
@@ -546,6 +569,7 @@ impl Driver {
         for effect in effects {
             match effect {
                 Effect::Spawn { core, workspace } => {
+                    self.log(Entry::Workspace(workspace.clone()));
                     let result = self.spawn(core, &workspace);
                     self.pending.push_back(result);
                 }
@@ -651,6 +675,7 @@ impl Driver {
 
         self.running.insert(core, Running { stdin: Some(stdin), stopper });
         self.set_pid(Some(pid));
+        self.log(Entry::Started { pid });
         Input::Spawned { core, pid }
     }
 
@@ -660,9 +685,21 @@ impl Driver {
         crate::e2e::set_core_pid(pid.unwrap_or(0));
     }
 
+    fn log(&self, entry: Entry) {
+        if let Some(log) = &self.options.log {
+            log.record(entry);
+        }
+    }
+
     fn publish(&self) {
         let status = self.machine.status();
         let mut shared = lock(&self.shared.status);
+        if shared.state != status.state {
+            self.log(Entry::State(status.state));
+            if let Some(failure) = &status.failure {
+                self.log(Entry::Failure(failure.class));
+            }
+        }
         if *shared != status {
             *shared = status;
             self.shared.changed.notify_all();

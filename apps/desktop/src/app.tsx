@@ -9,6 +9,7 @@ import type { NativeApi } from "./bridge.ts";
 import { Connection } from "./connection.ts";
 import type { Kept } from "./state.ts";
 import { FailureView } from "./view/FailureView.tsx";
+import { OpenLink } from "./view/InertText.tsx";
 import { SessionView } from "./view/SessionView.tsx";
 import { StatusStrip } from "./view/StatusStrip.tsx";
 import { WorkspaceGate } from "./view/WorkspaceGate.tsx";
@@ -40,25 +41,31 @@ export function App({ api }: { api: NativeApi }) {
 
   const retry = () => void api.invoke("retry").catch(() => {});
   const choose = () => void api.invoke("choose_workspace").catch(() => {});
+  const open = useMemo(() => (url: string) => void api.invoke("open_external", { url }).catch(() => {}),
+                       [api]);
 
   if (status === null) {
     return <main className="window" data-testid="window"><p className="quiet">Starting…</p></main>;
   }
   if (status.state === "ready" && client !== null) {
     return (
-      <main className="window" data-testid="window">
-        <SessionView client={client} kept={kept} status={status} />
-      </main>
+      <OpenLink.Provider value={open}>
+        <main className="window" data-testid="window">
+          <SessionView client={client} kept={kept} status={status} />
+        </main>
+      </OpenLink.Provider>
     );
   }
   return (
-    <main className="window" data-testid="window">
-      <StatusStrip status={status} model={null} />
-      {status.state === "absent" && <WorkspaceGate notice={status.notice} onChoose={choose} />}
-      {status.state === "failed" && status.failure !== null && (
-        <FailureView failure={status.failure} diagnostics={diagnostics}
-                     onRetry={retry} onChoose={choose} />
-      )}
-    </main>
+    <OpenLink.Provider value={open}>
+      <main className="window" data-testid="window">
+        <StatusStrip status={status} model={null} />
+        {status.state === "absent" && <WorkspaceGate notice={status.notice} onChoose={choose} />}
+        {status.state === "failed" && status.failure !== null && (
+          <FailureView failure={status.failure} diagnostics={diagnostics}
+                       onRetry={retry} onChoose={choose} />
+        )}
+      </main>
+    </OpenLink.Provider>
   );
 }
