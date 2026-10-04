@@ -12,6 +12,7 @@ import {
   lifetimeSecondDeclined, lifetimeSecondSame,
 } from "./lifetime.ts";
 import { ready } from "./ready.ts";
+import { unconfigured } from "./unconfigured.ts";
 import { crash, reload } from "./recovery.ts";
 import { workspaceLaunch, workspaceLaunchPath } from "./workspace-launch.ts";
 
@@ -33,6 +34,7 @@ export const SCENARIOS: Readonly<Record<string, Scenario>> = {
   "lifetime-second-same": lifetimeSecondSame,
   ready,
   reload,
+  unconfigured,
   "workspace-launch": workspaceLaunch,
   "workspace-launch-path": workspaceLaunchPath,
 };

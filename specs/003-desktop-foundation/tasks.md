@@ -255,7 +255,7 @@ exact chooser start directory (SC-017).
 - [X] T032 [US1] Implement launch-workspace resolution in `apps/desktop/src-tauri/src/workspace.rs`, held in memory for the whole launch. The chooser adapter is a thin wrapper that passes the start directory to the dialog plugin, used from Rust only; the `e2e` feature swaps in the double. T023 must pass.
 - [X] T033 [US1] Implement the supervisor state machine, command construction and failure classification in `apps/desktop/src-tauri/src/supervisor.rs`, to pass T019 and T020.
 - [X] T034 [US1] Implement the native handshake, its cache, and the stdout bad-line check that raises `protocol_fault` in `apps/desktop/src-tauri/src/relay.rs`, to pass T024 and T025.
-- [ ] T035 [US1] Implement `connect`, `status`, `diagnostics`, `choose_workspace` and `retry` in `apps/desktop/src-tauri/src/commands.rs`, per [native-bridge.md](./contracts/native-bridge.md). Every name comes from the single command constant.
+- [X] T035 [US1] Implement `connect`, `status`, `diagnostics`, `choose_workspace` and `retry` in `apps/desktop/src-tauri/src/commands.rs`, per [native-bridge.md](./contracts/native-bridge.md). Every name comes from the single command constant.
 - [X] T036 [US1] Implement the window shell in `apps/desktop/src/main.tsx`, `apps/desktop/src/app.tsx`, `apps/desktop/src/view/StatusStrip.tsx`, `apps/desktop/src/view/FailureView.tsx` and `apps/desktop/src/view/WorkspaceGate.tsx`, with colours only from `cssVariables()`. T026 must pass.
 - [X] T037 [US1] Push the branch normally (no force) and run the `desktop` job of `.github/workflows/ci.yml` with `workflow_dispatch`. T025, T027 and T028 must pass on all three platforms. Keep the run link, per-platform results and the SC-001 time for the PR description.
 
@@ -525,19 +525,19 @@ configured state with no application restart.
 
 ### Tests for User Story 6 ⚠️
 
-- [ ] T080 [P] [US6] Write `check_again` tests (**U**) in `apps/desktop/src-tauri/src/commands.rs` (test module):
+- [X] T080 [P] [US6] Write `check_again` tests (**U**) in `apps/desktop/src-tauri/src/commands.rs` (test module):
   - refused in `starting`, `handshaking` and `stopping`;
   - otherwise the stop sequence with reason `check_again` (10 s grace), then a Core in the same workspace.
-- [ ] T081 [P] [US6] Write unconfigured tests (**W**) in `apps/desktop/test/unconfigured.test.tsx`:
+- [X] T081 [P] [US6] Write unconfigured tests (**W**) in `apps/desktop/test/unconfigured.test.tsx`:
   - `configured: false` shows the direction to run `comodor setup` in a terminal;
   - send is unavailable;
   - "Check again" calls `check_again`;
   - after a configured `model.get`, send is available.
-- [ ] T082 [US6] Write the scenario `unconfigured` (**S**, all platforms) in `apps/desktop/e2e/scenarios/unconfigured.ts`: the unconfigured state is shown and send is refused; the harness writes the offline provider into the home; "Check again" then shows it configured, with no application restart (SC-015).
+- [X] T082 [US6] Write the scenario `unconfigured` (**S**, all platforms) in `apps/desktop/e2e/scenarios/unconfigured.ts`: the unconfigured state is shown and send is refused; the harness writes the offline provider into the home; "Check again" then shows it configured, with no application restart (SC-015).
 
 ### Implementation for User Story 6
 
-- [ ] T083 [US6] Implement `check_again` in `apps/desktop/src-tauri/src/commands.rs`, using T075's stop sequence, and `apps/desktop/src/view/SetupNotice.tsx`, with the composer gated on the reported `configured`. T080, T081 and T082 must pass.
+- [X] T083 [US6] Implement `check_again` in `apps/desktop/src-tauri/src/commands.rs`, using T075's stop sequence, and `apps/desktop/src/view/SetupNotice.tsx`, with the composer gated on the reported `configured`. T080, T081 and T082 must pass.
 
 **Checkpoint**: all six stories pass on three platforms, and every command exists.
 
@@ -556,12 +556,12 @@ then delivery on one exact SHA.
 - T091–T099 are recorded in the PR description and the owner report, and
   stay unchecked in the tree by design.
 
-- [ ] T084 Write the final command-list test (**U**) in `apps/desktop/src-tauri/src/commands.rs` (test module), run without the `e2e` feature:
+- [X] T084 Write the final command-list test (**U**) in `apps/desktop/src-tauri/src/commands.rs` (test module), run without the `e2e` feature:
   - the constant equals exactly `connect`, `send_line`, `status`, `diagnostics`, `choose_workspace`, `retry`, `check_again`, `quit_now` and `open_external`;
   - every name has a registered handler.
 
   Mutation check: removing or adding a command fails the test (FR-030, SC-011).
-- [ ] T085 Write the release-manifest check in `apps/desktop/e2e/release-manifest.mjs`, and add it as a step of the `desktop` job in `.github/workflows/ci.yml`.
+- [X] T085 Write the release-manifest check in `apps/desktop/e2e/release-manifest.mjs`, and add it as a step of the `desktop` job in `.github/workflows/ci.yml`.
   1. Build the **release configuration** (`tauri build --no-bundle`, no features, no `--config` override) and copy `apps/desktop/src-tauri/gen/schemas/acl-manifests.json` and `apps/desktop/src-tauri/gen/schemas/capabilities.json` aside.
   2. Assert from those copies:
      - the `__app-acl__` manifest holds exactly one allow/deny pair for each of the nine commands of `COMMANDS`, and nothing for `e2e_report`;
@@ -572,7 +572,7 @@ then delivery on one exact SHA.
      Identifiers are read from the generated files and matched by command name, never hard-coded.
   3. Build the `e2e` configuration (`--features e2e --config src-tauri/tauri.e2e.conf.json`) into a separate target directory, and assert its app manifest and capabilities differ from the release copies only by `e2e_report`'s pair and the `e2e-test` capability that grants its allow identifier.
   4. A mutation check: adding `"e2e_report"` to `capabilities/main.json` in a scratch copy makes step 2 fail (FR-030, SC-011).
-- [ ] T086 Write the scenario `canary-full` (**S**, all platforms) in `apps/desktop/e2e/scenarios/canary-full.ts`. Run every flow with a unique `api_key`:
+- [X] T086 Write the scenario `canary-full` (**S**, all platforms) in `apps/desktop/e2e/scenarios/canary-full.ts`. Run every flow with a unique `api_key`:
   - ready, conversation, adversarial;
   - reload during `hold-mid-turn`;
   - a crash and restart through `sequenced`;
@@ -581,9 +581,9 @@ then delivery on one exact SHA.
   - a second launch.
 
   Then assert zero canary occurrences in every channel listed in T054 (FR-028, FR-032, SC-009).
-- [ ] T087 [P] Update `docs/desktop-architecture.md` from "planned, not built" to what D1 delivers: supervision, the relay and its read-only observation, the bridge commands, OD-1–OD-3, the test layers, and what remains for D2–D6.
-- [ ] T088 [P] Update the Desktop row meaning in `docs/surface-parity.md` to name both the desktop application (`apps/desktop`) and the computer-control backend (`src/comodor/desktop/`). Run `pytest tests/test_surface_impact_contract.py`; it pins row names only, so no test change is expected.
-- [ ] T089 [P] Add a "Desktop from source" section to `README.md` and `apps/desktop/README.md`. Cover:
+- [X] T087 [P] Update `docs/desktop-architecture.md` from "planned, not built" to what D1 delivers: supervision, the relay and its read-only observation, the bridge commands, OD-1–OD-3, the test layers, and what remains for D2–D6.
+- [X] T088 [P] Update the Desktop row meaning in `docs/surface-parity.md` to name both the desktop application (`apps/desktop`) and the computer-control backend (`src/comodor/desktop/`). Run `pytest tests/test_surface_impact_contract.py`; it pins row names only, so no test change is expected.
+- [X] T089 [P] Add a "Desktop from source" section to `README.md` and `apps/desktop/README.md`. Cover:
   - prerequisites per platform;
   - `COMODOR_BIN` and `COMODOR_ARGS` (a path with spaces goes in `COMODOR_BIN`, plan K8);
   - that D1 is not packaged.

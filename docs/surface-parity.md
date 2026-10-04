@@ -23,7 +23,7 @@ Do not add, remove, rename, duplicate or reorder rows.
 | Web UI | Browser interface and its server/session adapters |
 | CLI / Headless | Commands and non-interactive execution |
 | API / Protocols | HTTP API, ACP and other protocol contracts |
-| Desktop | Native controls, desktop automation and platform adapters |
+| Desktop | The desktop application (`apps/desktop`) and the computer-control backend (`src/comodor/desktop/`): native controls, desktop automation and platform adapters |
 | Channels / Integrations | Messaging, GitHub and other external integrations |
 | Docker / Packaged Runtime | Container startup, distribution, assets and runtime configuration |
 | Persistence / Shared State | State ownership, storage formats, reload and concurrent access |

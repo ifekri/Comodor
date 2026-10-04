@@ -617,6 +617,31 @@ uv run ruff check .
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
+### Desktop from source
+
+The desktop application (`apps/desktop`, a Tauri 2 window over the same Core)
+runs from source on Windows, Linux and macOS. It is not packaged yet: there is
+no installer, signing or auto-update.
+
+Prerequisites: everything above, plus Node 22.6+, Bun, the Rust toolchain
+pinned in `apps/desktop/src-tauri/rust-toolchain.toml`, and the platform's
+WebView — WebView2 on Windows, WebKitGTK 4.1 on Linux, the Xcode command-line
+tools on macOS.
+
+```bash
+npm ci
+cd apps/desktop
+npm run tauri -- dev
+```
+
+The window finds the Core the way the terminal interface does: `COMODOR_BIN`,
+with `COMODOR_ARGS` split on whitespace as its leading arguments (for example
+`COMODOR_BIN=python COMODOR_ARGS="-m comodor"`), else `comodor` on `PATH`. A
+path that contains spaces goes in `COMODOR_BIN`, never in `COMODOR_ARGS`.
+Provider setup stays in the terminal: run `comodor setup`, then choose
+"Check again" in the window. See [apps/desktop/README.md](apps/desktop/README.md)
+and [docs/desktop-architecture.md](docs/desktop-architecture.md).
+
 ---
 
 ## Engineering principles

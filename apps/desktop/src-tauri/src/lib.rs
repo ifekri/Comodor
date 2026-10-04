@@ -162,6 +162,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         commands::retry,
         commands::open_external,
         commands::quit_now,
+        commands::check_again,
         e2e::e2e_report
     ];
     #[cfg(not(feature = "e2e"))]
@@ -173,7 +174,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         commands::choose_workspace,
         commands::retry,
         commands::open_external,
-        commands::quit_now
+        commands::quit_now,
+        commands::check_again
     ];
 }
 

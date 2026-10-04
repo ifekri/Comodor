@@ -13,7 +13,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-import { expect, pressKey, type Scenario, type ScenarioContext, typeInto, withText } from "../runner.ts";
+import { expect, holdings, pressKey, type Scenario, type ScenarioContext, typeInto, withText } from "../runner.ts";
 
 /** Prompt the adversarial Core, and wait until its whole answer is shown. */
 async function adversarial(context: ScenarioContext): Promise<void> {
@@ -43,26 +43,13 @@ function inert(): void {
   expect(document.querySelector(".status-state")?.textContent === "Ready", "the state label is the window's own");
 }
 
-async function storage(): Promise<Record<string, unknown>> {
-  const entries = (store: Storage) => Object.fromEntries(
-    Array.from({ length: store.length }, (_, index) => store.key(index)!)
-      .map((key) => [key, store.getItem(key)]));
-  const databases = typeof indexedDB.databases === "function" ? await indexedDB.databases() : [];
-  return {
-    localStorage: entries(localStorage),
-    sessionStorage: entries(sessionStorage),
-    indexedDB: databases.map((database) => database.name),
-    document: document.documentElement.outerHTML,
-  };
-}
-
 export const canaryEarly: Scenario = async (context) => {
   await context.element('[data-testid="status-strip"][data-state="ready"] .status-model');
   await adversarial(context);
   // Through the bridge, so the recorder sees them: the tail and the status.
   const diagnostics = await invoke<string>("diagnostics");
   const status = await invoke<Record<string, unknown>>("status");
-  return { held: await storage(), diagnostics, status };
+  return { held: await holdings(), diagnostics, status };
 };
 
 /**

@@ -242,6 +242,29 @@ pub fn check_external(url: &str, displayed: &dyn Fn(&str) -> bool) -> Result<Str
     Ok(url.to_string())
 }
 
+/// Whether "Check again" applies now: not while a Core is on its way up or
+/// down, and not before there is a workspace (R11).
+pub fn check_again_allowed(status: &Status) -> Result<(), String> {
+    match status.state {
+        CoreState::Starting | CoreState::Handshaking | CoreState::Restarting | CoreState::Stopping => {
+            Err("the Core is already starting or stopping".into())
+        }
+        _ if status.workspace.is_none() => Err("there is no workspace yet".into()),
+        _ => Ok(()),
+    }
+}
+
+/// "Check again", after `comodor setup` (R11): the Core is stopped in the
+/// orderly way and started again in the same workspace, so it reads the
+/// configuration afresh. No application restart.
+#[tauri::command]
+pub fn check_again(desktop: State<'_, Desktop>) -> Result<Value, String> {
+    let result = check_again_allowed(&desktop.supervisor.status())
+        .and_then(|()| desktop.supervisor.stop(StopReason::CheckAgain))
+        .map(|()| json!({}));
+    recorded("check_again", json!({}), result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,6 +292,31 @@ mod tests {
         }
         let unique: BTreeSet<&str> = COMMANDS.iter().copied().collect();
         assert_eq!(unique.len(), COMMANDS.len(), "no name twice");
+    }
+
+    // -- T084 -----------------------------------------------------------------
+
+    #[test]
+    fn the_command_constant_is_exactly_the_contract() {
+        let constant: BTreeSet<&str> = COMMANDS.iter().copied().collect();
+        let contract: BTreeSet<&str> = CONTRACT.iter().copied().collect();
+        assert_eq!(constant, contract, "FR-030, SC-011");
+        assert_eq!(COMMANDS.len(), CONTRACT.len());
+    }
+
+    #[test]
+    fn every_command_has_a_registered_handler_in_the_release_build() {
+        let source = include_str!("lib.rs");
+        let release = &source[source.find("#[cfg(not(feature = \"e2e\"))]\n    return tauri::generate_handler![")
+            .expect("the release handler list")..];
+        let release = &release[release.find("generate_handler![").unwrap() + "generate_handler![".len()..];
+        let list = &release[..release.find(']').unwrap()];
+        let registered: BTreeSet<&str> = list.split(',').map(str::trim).filter(|e| !e.is_empty())
+            .map(|entry| entry.strip_prefix("commands::")
+                .unwrap_or_else(|| panic!("{entry} is not a bridge command")))
+            .collect();
+        let constant: BTreeSet<&str> = COMMANDS.iter().copied().collect();
+        assert_eq!(registered, constant);
     }
 
     #[test]
@@ -350,6 +398,47 @@ mod tests {
         for window in config["app"]["windows"].as_array().unwrap() {
             assert_eq!(window["devtools"], false);
         }
+    }
+
+    // -- T080 -----------------------------------------------------------------
+
+    use crate::shutdown::StopReason;
+    use crate::supervisor::{Effect, Input, Machine, State as CoreState};
+
+    fn status_in(state: CoreState, workspace: Option<&str>) -> Status {
+        let mut status = Machine::new().status();
+        status.state = state;
+        status.workspace = workspace.map(str::to_string);
+        status
+    }
+
+    #[test]
+    fn check_again_is_refused_while_a_core_is_on_its_way_up_or_down() {
+        for state in [CoreState::Starting, CoreState::Handshaking, CoreState::Restarting, CoreState::Stopping] {
+            assert!(check_again_allowed(&status_in(state, Some("/w"))).is_err(), "{state:?}");
+        }
+        assert!(check_again_allowed(&status_in(CoreState::Absent, None)).is_err(), "no workspace yet");
+        for state in [CoreState::Ready, CoreState::Failed] {
+            assert_eq!(check_again_allowed(&status_in(state, Some("/w"))), Ok(()), "{state:?}");
+        }
+    }
+
+    #[test]
+    fn check_again_stops_the_core_then_starts_one_in_the_same_workspace() {
+        let mut machine = Machine::new();
+        let effects = machine.handle(Input::Start { workspace: "/w".into() }).unwrap();
+        let core = effects.iter().find_map(|e| match e { Effect::Spawn { core, .. } => Some(*core), _ => None }).unwrap();
+        machine.handle(Input::Spawned { core, pid: 1 }).unwrap();
+        machine.handle(Input::Line { core, line: serde_json::json!({"version": 2, "type": "response",
+            "id": crate::relay::HELLO_ID, "result": {"protocol_version": 2, "core": {"name": "c", "version": "1"},
+            "capabilities": []}}).to_string() }).unwrap();
+        let stop = machine.handle(Input::Stop { reason: StopReason::CheckAgain }).unwrap();
+        assert!(stop.contains(&Effect::Deadline { core, after: crate::shutdown::GRACE }), "{stop:?}");
+        let after = machine.handle(Input::Exited { core, code: Some(0) }).unwrap();
+        let next = after.iter().find_map(|e| match e { Effect::Spawn { workspace, .. } => Some(workspace.clone()), _ => None });
+        assert_eq!(next, Some("/w".into()), "{after:?}");
+        assert!(!after.contains(&Effect::Finished), "the application stays");
+        assert_eq!(machine.status().restart_count, 0, "an orderly restart is not a crash");
     }
 
     // -- T052 -----------------------------------------------------------------

@@ -42,6 +42,7 @@ export function App({ api }: { api: NativeApi }) {
 
   const retry = () => void api.invoke("retry").catch(() => {});
   const quitNow = () => void api.invoke("quit_now").catch(() => {});
+  const checkAgain = () => void api.invoke("check_again").catch(() => {});
   const choose = () => void api.invoke("choose_workspace").catch(() => {});
   const open = useMemo(() => (url: string) => void api.invoke("open_external", { url }).catch(() => {}),
                        [api]);
@@ -54,7 +55,7 @@ export function App({ api }: { api: NativeApi }) {
       <OpenLink.Provider value={open}>
         <main className="window" data-testid="window">
           <StopOutcome outcome={status.stop_outcome} />
-          <SessionView client={client} kept={kept} status={status} />
+          <SessionView client={client} kept={kept} status={status} onCheckAgain={checkAgain} />
         </main>
       </OpenLink.Provider>
     );

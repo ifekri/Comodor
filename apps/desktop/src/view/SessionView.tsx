@@ -13,6 +13,7 @@ import { Conversation } from "./Conversation.tsx";
 import { FormCard } from "./FormCard.tsx";
 import { ModeControl } from "./ModeControl.tsx";
 import { PermissionCard } from "./PermissionCard.tsx";
+import { SetupNotice } from "./SetupNotice.tsx";
 import { StatusStrip } from "./StatusStrip.tsx";
 
 /** Background delegates, in one line: how many, and in which states. */
@@ -31,16 +32,19 @@ function Delegates({ state }: { state: State }) {
   );
 }
 
-export function SessionView({ client, kept, status }: {
+export function SessionView({ client, kept, status, onCheckAgain }: {
   client: CoreClient;
   kept: Kept;
   status: CoreStatus;
+  onCheckAgain: () => void;
 }) {
   const session = useSession(client, kept);
   const { state } = session;
   const waiting = presented(state);
   // What answers, as the Core said at connect and since (`model.changed`).
   const model = state.model ?? null;
+  // As the Core reports it: an unconfigured provider cannot answer (R11).
+  const unconfigured = model !== null && model.configured === false;
   return (
     <>
       <StatusStrip status={status} model={model} />
@@ -49,6 +53,7 @@ export function SessionView({ client, kept, status }: {
         : (
           <div className="session" data-testid="session">
             <ModeControl intent={session.intent} onChoose={session.chooseMode} />
+            {unconfigured && <SetupNotice onCheckAgain={onCheckAgain} />}
             {session.recovery.map((note) => (
               <p key={note} className="recovery" data-testid="recovery">{note}</p>
             ))}
@@ -62,7 +67,7 @@ export function SessionView({ client, kept, status }: {
               <PermissionCard key={waiting.id} interaction={waiting}
                               onReply={(choice) => session.decide("permission.reply", { choice })} />
             )}
-            <Composer busy={state.session.busy} ready={state.connection.kind === "ready"}
+            <Composer busy={state.session.busy} ready={state.connection.kind === "ready" && !unconfigured}
                       onSend={session.send} onCancel={session.cancel} />
           </div>
         )}

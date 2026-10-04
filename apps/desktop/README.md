@@ -18,6 +18,7 @@ imports or changes it.
 | `tauri-build` | 2.7.1 |
 | `tauri-plugin-single-instance` | 2.5.2 |
 | `tauri-plugin-dialog` | 2.8.1 |
+| `tauri-plugin-opener` | 2.7.0 (used from the native side only) |
 | `@tauri-apps/api`, `@tauri-apps/cli` | 2.12.1 |
 | `react`, `react-dom` | 19.2.8 (the same React the terminal interface resolves) |
 
@@ -59,10 +60,16 @@ Windows, 2026-10-03, not inferred from documentation:
 
 ## Running from source
 
-Prerequisites: Python 3.11+ with Comodor installed (`pip install -e ".[dev]"`
-at the repository root), Node 22.6+, Bun, the pinned Rust toolchain, and the
-platform's Tauri prerequisites — WebView2 on Windows, WebKitGTK 4.1 on Linux,
-Xcode command-line tools on macOS.
+Prerequisites on every platform: Python 3.11+ with Comodor installed
+(`pip install -e ".[dev]"` at the repository root), Node 22.6+, Bun, and the
+pinned Rust toolchain (`rustup` installs it from `rust-toolchain.toml`). Then
+the platform's own:
+
+| Platform | Also needed |
+| --- | --- |
+| Windows | the MSVC build tools and the WebView2 runtime (present on Windows 11) |
+| Linux | WebKitGTK 4.1 and its build dependencies: `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev libxdo-dev libssl-dev pkg-config build-essential` |
+| macOS | the Xcode command-line tools |
 
 ```sh
 npm ci                                   # at the repository root
@@ -88,8 +95,12 @@ npm test                                 # window logic (Bun + happy-dom)
 cargo test --manifest-path src-tauri/Cargo.toml          # native unit + integration
 npm run e2e                              # in-application scenarios (test build)
 npm run lifetime                         # process-lifetime cases
+npm run canary                           # every flow with a unique credential
 npm run release-manifest                 # the release build's permission boundary
 ```
 
 Every test is offline: the Core runs with the scripted `fake` provider, the
-scripted Core fixture or a Core double, and no test needs a credential.
+scripted Core fixture or a Core double, and no test needs a credential. Set
+`COMODOR_PYTHON` to the interpreter that has Comodor installed when it is not
+`python` (`python3` on Linux and macOS); on Linux the scenario harness runs
+itself inside `dbus-run-session` and `xvfb-run`.

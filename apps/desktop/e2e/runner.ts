@@ -72,6 +72,20 @@ const context = (params: Data): ScenarioContext => ({
 /** How long a scenario may run in the page; the harness allows longer. */
 const PAGE_DEADLINE_MS = 120_000;
 
+/** Everything the page holds: its storage and its document (SC-009). */
+export async function holdings(): Promise<Data> {
+  const entries = (store: Storage) => Object.fromEntries(
+    Array.from({ length: store.length }, (_, index) => store.key(index)!)
+      .map((key) => [key, store.getItem(key)]));
+  const databases = typeof indexedDB.databases === "function" ? await indexedDB.databases() : [];
+  return {
+    localStorage: entries(localStorage),
+    sessionStorage: entries(sessionStorage),
+    indexedDB: databases.map((database) => database.name ?? ""),
+    document: document.documentElement.outerHTML,
+  };
+}
+
 /** What the page showed, for a failure's report. */
 function page(): string {
   return (document.body?.innerHTML ?? "").slice(0, 4000);
@@ -107,7 +121,9 @@ export async function runScenario(): Promise<void> {
   }
   try {
     const details = await scenario(context(given?.params ?? {}));
-    await verdict({ ok: true, details: details ?? {} });
+    // What the page holds goes with every verdict, so the harness can search
+    // it for the credential canary.
+    await verdict({ ok: true, details: details ?? {}, held: await holdings() });
   } catch (problem) {
     await verdict({ ok: false, page: page(),
                     error: problem instanceof Error ? `${problem.message}\n${problem.stack ?? ""}`

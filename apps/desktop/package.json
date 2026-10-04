@@ -12,6 +12,7 @@
     "tauri": "tauri",
     "e2e": "node e2e/harness.mjs",
     "lifetime": "node e2e/lifetime.mjs",
+    "canary": "node e2e/canary-full.mjs",
     "release-manifest": "node e2e/release-manifest.mjs"
   },
   "dependencies": {

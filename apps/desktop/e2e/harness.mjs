@@ -133,6 +133,10 @@ function answer(checkpoint, run) {
       run.cores.push(pid);
       return { ok: true };
     }
+    case "configure-provider":
+      // What `comodor setup` leaves behind: the offline provider, configured.
+      writeCoreHome(run.home, { ...run.setup, configured: true, apiKey: run.apiKey });
+      return { ok: true };
     case "close-window":
     case "quit":
       // Done by the test build once the page has this reply.
@@ -167,7 +171,10 @@ function searchCanary(canary, places) {
     return fs.existsSync(at);
   };
   const planted = fs.existsSync(places.home) && contains(fs.readFileSync(places.home, "utf-8"));
-  const searched = file("the bridge record", places.record) && file("the Core's arguments", places.argv);
+  // The record holds every IPC message, every command and every Core's
+  // arguments; the fixture also writes its own arguments when it can.
+  const searched = file("the bridge record", places.record);
+  file("the Core's own record of its arguments", places.argv);
   if (fs.existsSync(places.data)) {
     for (const entry of fs.readdirSync(places.data, { recursive: true })) {
       const at = path.join(places.data, String(entry));
@@ -217,7 +224,7 @@ async function runScenario(name) {
   const stored = path.join(root, "stored");
   for (const directory of [home, workspace, data, stored]) fs.mkdirSync(directory);
   // SC-009: a credential nothing else could contain, by the run.
-  const canary = setup.canary ? `CANARY-${randomUUID()}` : undefined;
+  const canary = setup.canary || CANARY_ALL ? `CANARY-${randomUUID()}` : undefined;
   writeCoreHome(home, canary ? { ...setup, apiKey: canary } : setup);
   const places = { $workspace: workspace, $stored: stored };
 
@@ -234,7 +241,8 @@ async function runScenario(name) {
              error: `COMODOR_ARGS is split on whitespace; move the checkout: ${fixturePath}` };
   }
   const coreArgs = setup.realCore ? "-m comodor" : `${fixturePath} ${argument}`;
-  const run = { hold: setup.hold ? holdAddress(root, name) : undefined, cores: [], places };
+  const run = { hold: setup.hold ? holdAddress(root, name) : undefined, cores: [], places, home, setup,
+                apiKey: canary ?? setup.apiKey };
   const record = path.join(root, "record.jsonl");
   const env = {
     ...process.env,
@@ -323,7 +331,9 @@ async function runScenario(name) {
   fs.writeFileSync(path.join(kept, "output.txt"), output.join(""));
   const summary = { scenario: name, elapsedMs: Date.now() - started, ...outcome };
   // The double's child must go with it.
-  if (setup.childPid && fs.existsSync(childPid)) run.cores.push(Number(fs.readFileSync(childPid, "utf-8")));
+  const childCounts = setup.childPid === true
+    || (Array.isArray(setup.childPid) && setup.childPid.includes(process.platform));
+  if (childCounts && fs.existsSync(childPid)) run.cores.push(Number(fs.readFileSync(childPid, "utf-8")));
   // SC-007: no Core outlives the application, whatever ended it.
   if (run.cores.length > 0) {
     const left = [];
@@ -381,6 +391,8 @@ async function runScenario(name) {
 
 const argv = process.argv.slice(2);
 const skipBuild = argv.includes("--skip-build");
+// Every scenario of this run gets a unique credential and the full search.
+const CANARY_ALL = argv.includes("--canary");
 const named = argv.filter((arg) => !arg.startsWith("--"));
 // The lifetime cases end the application themselves; `npm run lifetime`
 // runs them (lifetime.mjs), and a plain run leaves them out.

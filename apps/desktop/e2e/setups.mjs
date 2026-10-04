@@ -23,7 +23,8 @@
  * - `lifetime`: a case that ends the application itself (`npm run lifetime`);
  *   it names its Cores, and passes when the application ended as the case
  *   ends it and no named Core is left.
- * - `childPid`: the double writes its child's pid, which must be gone too.
+ * - `childPid`: the double writes its child's pid, which must be gone too —
+ *   everywhere (`true`), or only on the listed platforms.
  * - `forced`: whether the log must say the stop was forced (OD-2).
  * - `platforms`: where the case applies; elsewhere it is reported N/A.
  * - `maxReadyMs`: the result's `readyAt` must come this soon after the
@@ -44,9 +45,11 @@ export const SETUPS = {
   },
   "lifetime-kill": { lifetime: true, workspaceArgument: true },
   // A Core that ignores EOF: only the job object (Windows) or the
-  // parent-death signal (Linux) ends it. macOS has neither (FR-018).
+  // parent-death signal (Linux) ends it; macOS has neither (FR-018). The
+  // job ends the Core's own children too; the parent-death signal reaches
+  // the Core only, so on Linux its child is not part of the guarantee.
   "lifetime-kill-stubborn": {
-    lifetime: true, core: ["doubles.py", "ignore-stop"], childPid: true, workspaceArgument: true,
+    lifetime: true, core: ["doubles.py", "ignore-stop"], childPid: ["win32"], workspaceArgument: true,
     platforms: ["win32", "linux"],
   },
   "lifetime-second-same": { lifetime: true, workspaceArgument: true },
@@ -69,6 +72,7 @@ export const SETUPS = {
     hold: true,
     workspaceArgument: true,
   },
+  unconfigured: { realCore: true, configured: false, workspaceArgument: true },
   ready: {
     realCore: true,
     workspaceArgument: true,

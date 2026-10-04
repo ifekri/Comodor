@@ -373,3 +373,14 @@ button.link {
 .failure-count {
   color: var(--text-secondary);
 }
+
+.setup-notice {
+  margin: 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--semantic-warning);
+  border-radius: 4px;
+}
+
+.setup-notice code {
+  color: var(--text-primary);
+}

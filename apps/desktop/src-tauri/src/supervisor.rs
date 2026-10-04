@@ -826,6 +826,15 @@ impl Driver {
             Ok(command) => command,
             Err(failure) => return Input::SpawnFailed { core, failure },
         };
+        // The test build records what every Core was started with, for the
+        // credential canary (FR-003).
+        #[cfg(feature = "e2e")]
+        crate::e2e::record("spawn", &json!({
+            "program": command.program.to_string_lossy(),
+            "args": command.full_args().iter().map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            "workspace": workspace.display().to_string(),
+        }));
         let mut spawned = match spawn_core(&command, workspace, &self.options.test_env) {
             Ok(spawned) => spawned,
             Err(problem) => return Input::SpawnFailed { core, failure: Failure::new(

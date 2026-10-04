@@ -240,6 +240,17 @@ jobs:
       - name: Lifetime
         run: npm run -w apps/desktop lifetime -- --skip-build
 
+      # Every flow again, each with a unique credential that must appear
+      # nowhere the window can reach (SC-009). Uses the build above.
+      - name: Credential canary, every flow
+        run: npm run -w apps/desktop canary -- --skip-build
+
+      # Last: it builds the release configuration over the test build. The
+      # release grants exactly the nine commands; the test build adds only
+      # its own (FR-030, SC-011).
+      - name: Release command list
+        run: npm run -w apps/desktop release-manifest
+
       - name: Keep what the scenarios left
         if: always()
         uses: actions/upload-artifact@v4
