@@ -22,6 +22,8 @@ mod imp;
 mod linux;
 #[cfg(unix)]
 mod watchdog;
+#[cfg(unix)]
+pub use watchdog::WATCHDOG_FLAG;
 
 /// Use `program` to run each Core's watchdog (Linux and macOS); by default,
 /// this executable. Tests that start Cores from a test binary name the

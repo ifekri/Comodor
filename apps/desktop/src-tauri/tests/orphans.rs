@@ -106,6 +106,30 @@ fn unix_a_killed_application_leaves_no_core_and_no_child() {
     assert!(wait_gone(pids[1]), "and so is its child");
 }
 
+/// CI finding (PR #62, Linux): the parent-death signal can end the Core a
+/// moment before the watchdog sees the application go, so the watchdog may
+/// see the Core's exit first. Whichever it sees, the Core's children must not
+/// survive it — here the Core is gone before the watchdog even starts, and
+/// the application (this test) is still alive.
+#[cfg(unix)]
+#[test]
+fn unix_the_watchdog_ends_the_group_when_the_core_goes_first() {
+    let (home, scratch, env) = ignore_stop("orphans-core-first");
+    let mut core = spawn_core(&fixture_command("doubles.py", "ignore-stop"), &home.workspace, &env).unwrap();
+    greet(&mut core);
+    let group = core.pid;
+    let child = read_pid(&scratch.root.join("child.pid"), None);
+    // The Core alone, not its group: the child stays behind in the group.
+    assert_eq!(unsafe { libc::kill(group as libc::pid_t, libc::SIGKILL) }, 0);
+    let _ = core.child.wait();
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_comodor-desktop"))
+        .args([comodor_desktop::platform::WATCHDOG_FLAG, &std::process::id().to_string(), &group.to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success(), "the watchdog ran: {status:?}");
+    assert!(wait_gone(child), "the Core's child is gone with its group");
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn macos_closing_stdin_ends_the_real_core() {

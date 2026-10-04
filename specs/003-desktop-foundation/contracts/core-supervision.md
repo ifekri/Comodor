@@ -101,8 +101,10 @@ The orderly sequence, for every `ShutdownRequest` reason:
 
 Abrupt application death (FR-018): Windows, the job closes; Linux and
 macOS, a watchdog started with each Core (the application's own executable
-in a process group of its own) waits on the application's exit — `kqueue` on
-macOS, `pidfd` on Linux — and then signals the Core's whole group; Linux
+in a process group of its own) waits on the application's or the Core's
+exit — `kqueue` on macOS, `pidfd` on Linux — and then, whichever went
+first, signals the Core's whole group (the parent-death signal can end the
+Core a moment before the application's exit is seen); Linux
 also arms the parent-death signal; all platforms, stdin reaches EOF and the
 Core's `serve()` loop ends into `close()`. (The watchdog was added for a
 review finding on PR #62: the parent-death signal reaches the Core alone,

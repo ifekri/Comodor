@@ -7,8 +7,13 @@
 //! application starts a small process: this same executable, run with
 //! `WATCHDOG_FLAG`, in a process group of its own. It waits, without polling,
 //! for the application or the Core to exit — `kqueue` on macOS, `pidfd` on
-//! Linux. If the application goes first, it signals the Core's group; either
-//! way it then exits. The application ends it, too, when the Core is gone.
+//! Linux — then signals the Core's whole group and exits. Whichever it sees
+//! first: on Linux the parent-death signal ends the Core in the same instant
+//! the application dies, so "the Core went first" cannot be read as "the
+//! application is fine"; and when the Core does exit on its own, the
+//! application ends its leftovers at that moment anyway, so signalling them
+//! here is the same act. The application ends the watchdog when the Core is
+//! gone.
 
 use std::ffi::OsString;
 use std::io;
@@ -64,8 +69,7 @@ fn end_group(group: libc::pid_t) {
     unsafe { libc::kill(-group, libc::SIGKILL) };
 }
 
-/// Wait until the application or the Core exits; if the application did,
-/// end the Core's group.
+/// Wait until the application or the Core exits, then end the Core's group.
 #[cfg(target_os = "macos")]
 fn watch(application: libc::pid_t, group: libc::pid_t) -> i32 {
     unsafe {
@@ -89,7 +93,8 @@ fn watch(application: libc::pid_t, group: libc::pid_t) -> i32 {
         }
         let core = [watch_for(group)];
         if libc::kevent(queue, core.as_ptr(), 1, std::ptr::null_mut(), 0, std::ptr::null()) < 0 {
-            return 0; // the Core is gone already: nothing to guard
+            end_group(group); // the Core is gone already: only leftovers remain
+            return 0;
         }
         let mut seen: libc::kevent = std::mem::zeroed();
         loop {
@@ -97,16 +102,13 @@ fn watch(application: libc::pid_t, group: libc::pid_t) -> i32 {
             if got < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
                 continue;
             }
-            if got == 1 && seen.ident == application as libc::uintptr_t {
-                end_group(group);
-            }
+            end_group(group);
             return 0;
         }
     }
 }
 
-/// Wait until the application or the Core exits; if the application did,
-/// end the Core's group.
+/// Wait until the application or the Core exits, then end the Core's group.
 #[cfg(target_os = "linux")]
 fn watch(application: libc::pid_t, group: libc::pid_t) -> i32 {
     unsafe {
@@ -122,7 +124,8 @@ fn watch(application: libc::pid_t, group: libc::pid_t) -> i32 {
         }
         let core = open(group);
         if core < 0 {
-            return 0; // the Core is gone already: nothing to guard
+            end_group(group); // the Core is gone already: only leftovers remain
+            return 0;
         }
         let mut fds = [
             libc::pollfd { fd: app, events: libc::POLLIN, revents: 0 },
@@ -133,9 +136,7 @@ fn watch(application: libc::pid_t, group: libc::pid_t) -> i32 {
             if got < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
                 continue;
             }
-            if fds[0].revents != 0 {
-                end_group(group);
-            }
+            end_group(group);
             return 0;
         }
     }

@@ -117,8 +117,8 @@ the process group elsewhere). A forced stop is logged as "stopped before it
 finished" and is never reported as saved. Abrupt death of the application is
 covered too: the job closes (Windows); on Linux and macOS a small watchdog
 started with each Core — the application's own executable, in a group of its
-own — sees the application exit (`kqueue`, `pidfd`) and ends the Core's whole
-group; Linux adds the parent-death signal; and stdin reaches EOF everywhere.
+own — sees the application or the Core exit (`kqueue`, `pidfd`) and ends
+the Core's whole group, whichever went first; Linux adds the parent-death signal; and stdin reaches EOF everywhere.
 
 **OD-3 — the workspace.** A path on the command line is used directly.
 Otherwise every fresh launch opens the system folder chooser at the folder
