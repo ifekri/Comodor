@@ -63,6 +63,7 @@ export function App({ api }: { api: NativeApi }) {
         {status.state === "absent" && <WorkspaceGate notice={status.notice} onChoose={choose} />}
         {status.state === "failed" && status.failure !== null && (
           <FailureView failure={status.failure} diagnostics={diagnostics}
+                       restarts={{ count: status.restart_count, limit: status.restart_limit }}
                        onRetry={retry} onChoose={choose} />
         )}
       </main>

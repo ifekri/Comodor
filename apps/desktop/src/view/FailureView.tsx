@@ -21,8 +21,10 @@ export function failureTitle(failureClass: string): string {
   return TITLES[failureClass] ?? "The Core is not running";
 }
 
-export function FailureView({ failure, diagnostics, onRetry, onChoose }: {
+export function FailureView({ failure, restarts, diagnostics, onRetry, onChoose }: {
   failure: CoreFailure;
+  /** The crash count and its limit (OD-1), when the Core had been ready. */
+  restarts?: { count: number; limit: number };
   diagnostics: string;
   onRetry: () => void;
   onChoose: () => void;
@@ -31,6 +33,13 @@ export function FailureView({ failure, diagnostics, onRetry, onChoose }: {
     <section className="failure-view" data-testid="failure-view" data-class={failure.class}>
       <h1>{failureTitle(failure.class)}</h1>
       <p className="failure-message"><InertText text={failure.message} /></p>
+      {(failure.class === "crashed" || failure.class === "protocol_fault")
+        && restarts !== undefined && restarts.count >= restarts.limit && (
+        <p className="failure-count">
+          Stopped {restarts.count} of {restarts.limit} times in a row: it is not started again
+          until you choose to.
+        </p>
+      )}
       {diagnostics !== "" && (
         <>
           <h2>The Core's last output</h2>

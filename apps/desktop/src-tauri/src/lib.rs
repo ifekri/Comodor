@@ -15,6 +15,7 @@ pub mod logfile;
 pub mod platform;
 pub mod prefs;
 pub mod relay;
+pub mod restart;
 pub mod supervisor;
 pub mod workspace;
 

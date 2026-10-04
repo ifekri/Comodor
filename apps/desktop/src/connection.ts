@@ -89,10 +89,19 @@ export class Connection {
         capabilities: ["questions", "permissions"],
       });
       client.onClose(() => {
-        if (this.state.client === client) this.update({ client: null });
+        if (this.state.client !== client) return;
+        this.update({ client: null });
+        // The status may already say the next Core is ready; it will not say
+        // so again, so the next client starts here.
+        if (this.state.status?.state === "ready") void Promise.resolve().then(() => this.startClient());
       });
       await client.start();
       if (this.disposed) return;
+      // The test build's scenarios compare what the window shows with what
+      // the Core says; fixed at build time, so a release build has none of it.
+      if (import.meta.env.MODE === "e2e") {
+        (window as unknown as Record<string, unknown>)["__comodorClient"] = client;
+      }
       this.update({ client });
     } catch {
       // The Core went while the client was starting. The status says so, and

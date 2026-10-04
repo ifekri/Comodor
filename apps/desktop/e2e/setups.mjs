@@ -36,6 +36,13 @@ export const SETUPS = {
   "conversation-cancel": {
     core: ["scripted_core.py", "hold-mid-turn"], hold: true, workspaceArgument: true,
   },
+  reload: { core: ["scripted_core.py", "hold-mid-turn"], hold: true, workspaceArgument: true },
+  crash: {
+    core: ["doubles.py", "sequenced"],
+    sequence: ["complete-turn", "scripted:hold-mid-turn", "crash-on-send"],
+    hold: true,
+    workspaceArgument: true,
+  },
   ready: {
     realCore: true,
     workspaceArgument: true,

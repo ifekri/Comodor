@@ -31,7 +31,7 @@ export function status(overrides: Partial<CoreStatus> = {}): CoreStatus {
 
 export class FakeNative {
   readonly calls: Call[] = [];
-  readonly core: FakeCore;
+  core: FakeCore;
   current: CoreStatus;
   diagnostics = "";
   /** What `choose_workspace` answers. */
@@ -48,6 +48,18 @@ export class FakeNative {
   push(next: CoreStatus): void {
     this.current = next;
     this.deliver?.({ kind: "status", status: next });
+  }
+
+  /**
+   * The Core is restarted: the old one ends (the page's connection closes),
+   * the status says so, and `next` is the Core the next connection reaches.
+   */
+  restart(next: FakeCore, count = 1): void {
+    this.push({ ...this.current, state: "restarting", restart_count: count });
+    const old = this.core;
+    this.core = next;
+    old.end();
+    this.push({ ...this.current, state: "ready", restart_count: count });
   }
 
   commands(name: string): Call[] {

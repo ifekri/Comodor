@@ -321,3 +321,37 @@ pub fn request(id: &str, method: &str, params: Value) -> String {
     serde_json::json!({ "version": 2, "type": "request", "id": id, "method": method,
                         "params": params }).to_string()
 }
+
+impl Page {
+    /// How many messages have been seen: a point to wait from.
+    pub fn mark(&self) -> usize {
+        self.seen.borrow().len()
+    }
+
+    /// The params of the first `event` after `mark` satisfying `wanted`.
+    pub fn event_since(&self, mark: usize, name: &str, wanted: impl Fn(&Value) -> bool) -> Value {
+        let matches = |m: &Value| m["kind"] == "line" && serde_json::from_str::<Value>(
+            m["line"].as_str().unwrap_or(""))
+            .map(|l| l["type"] == "event" && l["event"] == name && wanted(&l["params"]))
+            .unwrap_or(false);
+        loop {
+            if let Some(found) = self.seen.borrow().iter().skip(mark).find(|m| matches(m)) {
+                let line: Value = serde_json::from_str(found["line"].as_str().unwrap()).unwrap();
+                return line["params"].clone();
+            }
+            self.next();
+        }
+    }
+}
+
+/// End a process at once, as a crash would.
+pub fn kill(pid: u32) {
+    #[cfg(windows)]
+    let status = std::process::Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+        .status();
+    #[cfg(unix)]
+    let status = std::process::Command::new("kill").args(["-9", &pid.to_string()]).status();
+    assert!(status.map(|s| s.success()).unwrap_or(false), "could not kill {pid}");
+}

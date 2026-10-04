@@ -319,7 +319,7 @@ a permission answered exactly, cancel, and a mode change shown only after
 - [X] T047 [P] [US2] Implement `apps/desktop/src/view/Conversation.tsx` and `apps/desktop/src/view/Composer.tsx`, with commands in `apps/desktop/src/commands.ts`. T040 must pass.
 - [X] T048 [P] [US2] Implement `apps/desktop/src/view/FormCard.tsx`, with `@comodor/questions`, and `apps/desktop/src/view/PermissionCard.tsx`. T041 must pass.
 - [X] T049 [P] [US2] Implement `apps/desktop/src/view/ModeControl.tsx` from `@comodor/modes`. T042 must pass.
-- [ ] T050 [US2] Run the `desktop` job of `.github/workflows/ci.yml` by `workflow_dispatch`. T039 and T043 must pass on all three platforms. Keep the results for the PR description.
+- [X] T050 [US2] Run the `desktop` job of `.github/workflows/ci.yml` by `workflow_dispatch`. T039 and T043 must pass on all three platforms. Keep the results for the PR description.
 
 **Checkpoint**: US1 and US2 work — a usable single-session window.
 
@@ -390,7 +390,7 @@ SC-003–SC-006, SC-017 (within a launch).
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T059 [P] [US3] Write restart-policy and completion tests (**U**) in `apps/desktop/src-tauri/src/restart.rs`, per [data-model.md](./data-model.md) §3, with synthetic relayed events.
+- [X] T059 [P] [US3] Write restart-policy and completion tests (**U**) in `apps/desktop/src-tauri/src/restart.rs`, per [data-model.md](./data-model.md) §3, with synthetic relayed events.
   - **Crash count**: crashes 1 and 2 restart; crash 3 does not and waits for "Try again".
   - **Completed**: a `session.send` result with `turn_id`, then `message.completed` all `completed`, then `busy: false`, with no `warning` or `error` notification and no `session.cancel` — resets to 0.
   - **Uncertain — no reset**: each of these leaves the count unchanged:
@@ -405,8 +405,8 @@ SC-003–SC-006, SC-017 (within a launch).
   - A failure before `ready` is never restarted.
 
   Mutation checks: treating the clarification stop as completed fails a test, and so does resetting on "Try again" (FR-005, SC-006).
-- [ ] T060 [P] [US3] Write reconnect tests (**U**) in `apps/desktop/src-tauri/src/relay.rs` (test module): a Core restart sends `closed` and empties `in_flight`; the next `connect` gets a new generation; the cached handshake is the new Core's.
-- [ ] T061 [US3] Write recovery integration tests (**I**, all platforms) in `apps/desktop/src-tauri/tests/recovery.rs`:
+- [X] T060 [P] [US3] Write reconnect tests (**U**) in `apps/desktop/src-tauri/src/relay.rs` (test module): a Core restart sends `closed` and empties `in_flight`; the next `connect` gets a new generation; the cached handshake is the new Core's.
+- [X] T061 [US3] Write recovery integration tests (**I**, all platforms) in `apps/desktop/src-tauri/tests/recovery.rs`:
   - kill a ready Core between turns: it restarts in the same workspace, and `session.open(<stored id>)` returns the persisted transcript within 10 s (SC-003, time recorded);
   - kill during `hold-mid-turn`: the turn is not persisted, and nothing is re-sent (SC-004);
   - with the `sequenced` double, each launch is ended by its own crash (`crash-on-send`, when the test sends) or, for `complete-turn` and `scripted:<scenario>` launches, by the test killing the Core after that launch's turn has ended. Expected counts per launch:
@@ -414,17 +414,17 @@ SC-003–SC-006, SC-017 (within a launch).
     - `[crash-on-send, complete-turn, crash-on-send, crash-on-send]`: launch 1 → 1; launch 2's turn completes → 0, then the kill → 1; launch 3 → 2; launch 4 → 3, and it stops;
     - `[crash-on-send, scripted:<s>, crash-on-send]` for each `<s>` in `cancel-between-messages`, `cancel-mid-message`, `fail-between-messages`, `fail-mid-message` and `clarification-stop`: launch 1 → 1; launch 2's uncertain turn does not reset, and the kill → 2; launch 3 → 3, and it stops (SC-006);
   - the relay log shows no `session.send` the test did not issue.
-- [ ] T062 [P] [US3] Write recovery tests (**W**) in `apps/desktop/test/recovery.test.tsx`:
+- [X] T062 [P] [US3] Write recovery tests (**W**) in `apps/desktop/test/recovery.test.tsx`:
   - after `closed` and `ready`, the page reconnects with a new `CoreClient` and calls `session.open(stored_id)`;
   - a refusal (nothing stored) leads to `session.create` and a notice;
   - `unsent_turn` is shown as interrupted and not saved, and nothing is re-sent;
   - delegates are summarised in one line, including `lost`;
   - the stop at the limit shows the count and "Try again".
-- [ ] T063 [US3] Write the scenario `reload` (**S**, all platforms) in `apps/desktop/e2e/scenarios/reload.ts`:
+- [X] T063 [US3] Write the scenario `reload` (**S**, all platforms) in `apps/desktop/e2e/scenarios/reload.ts`:
   - during `hold-mid-turn`, reload the page, then release the hold;
   - the rebuilt conversation equals a bridge `session.snapshot`, with no duplicate and no missing message (SC-005);
   - no chooser appears and the workspace is unchanged (SC-017).
-- [ ] T064 [US3] Write the scenario `crash` (**S**, all platforms) in `apps/desktop/e2e/scenarios/crash.ts`, with the `sequenced` double and the harness's pid kill:
+- [X] T064 [US3] Write the scenario `crash` (**S**, all platforms) in `apps/desktop/e2e/scenarios/crash.ts`, with the `sequenced` double and the harness's pid kill:
   - a kill between turns: the transcript is back within 10 s;
   - a kill during `hold-mid-turn`: the interrupted notice appears and nothing is re-sent;
   - three consecutive crashes require "Try again";
@@ -432,9 +432,9 @@ SC-003–SC-006, SC-017 (within a launch).
 
 ### Implementation for User Story 3
 
-- [ ] T065 [US3] Implement `RestartPolicy` and `TurnObservation` in `apps/desktop/src-tauri/src/restart.rs`. Add the read-only observation of the fields listed in native-bridge guarantee 2 in `apps/desktop/src-tauri/src/relay.rs`, changing nothing. Integrate in `apps/desktop/src-tauri/src/supervisor.rs`. T059 must pass.
-- [ ] T066 [US3] Implement restart and reconnect in `apps/desktop/src-tauri/src/supervisor.rs` and `apps/desktop/src-tauri/src/relay.rs`: `closed` to the page, a new handshake, the same workspace, a new generation, and `restart_count` in `status`. T060 and T061 must pass.
-- [ ] T067 [US3] Implement page recovery and reload rejoin in `apps/desktop/src/state.ts` and `apps/desktop/src/view/Conversation.tsx`. T062 must pass.
+- [X] T065 [US3] Implement `RestartPolicy` and `TurnObservation` in `apps/desktop/src-tauri/src/restart.rs`. Add the read-only observation of the fields listed in native-bridge guarantee 2 in `apps/desktop/src-tauri/src/relay.rs`, changing nothing. Integrate in `apps/desktop/src-tauri/src/supervisor.rs`. T059 must pass.
+- [X] T066 [US3] Implement restart and reconnect in `apps/desktop/src-tauri/src/supervisor.rs` and `apps/desktop/src-tauri/src/relay.rs`: `closed` to the page, a new handshake, the same workspace, a new generation, and `restart_count` in `status`. T060 and T061 must pass.
+- [X] T067 [US3] Implement page recovery and reload rejoin in `apps/desktop/src/state.ts` and `apps/desktop/src/view/Conversation.tsx`. T062 must pass.
 - [ ] T068 [US3] Run the `desktop` job of `.github/workflows/ci.yml` by `workflow_dispatch`. T061, T063 and T064 must pass on all three platforms. Keep the results and the SC-003 times for the PR description.
 
 **Checkpoint**: recovery is correct and honest, and US1, US2 and US5 still pass.

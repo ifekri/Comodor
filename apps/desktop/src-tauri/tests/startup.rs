@@ -113,8 +113,11 @@ fn a_line_that_is_not_protocol_is_a_fault() {
     let home = CoreHome::new("startup-fault");
     let supervisor = launch(fixture_command("doubles.py", "bad-line"), &home);
     supervisor.start(home.workspace.clone()).unwrap();
+    // Each fault of a ready Core counts as a crash: it is restarted twice,
+    // and the third stops it, still named a protocol fault (OD-1).
     let status = supervisor.wait_for(|status| status.state == State::Failed, DEADLINE).expect("failed");
     assert_eq!(failure_of(&status).0, FailureClass::ProtocolFault);
+    assert_eq!(status.restart_count, 3);
 }
 
 #[test]

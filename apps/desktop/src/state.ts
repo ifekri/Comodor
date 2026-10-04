@@ -41,6 +41,8 @@ export interface SessionView {
   decide(method: "question.answer" | "permission.reply", params: Record<string, unknown>): void;
   /** Aim at a mode; the Core decides. */
   chooseMode(mode: Mode): void;
+  /** What the window says about a restart: why the conversation looks as it does. */
+  readonly recovery: readonly string[];
 }
 
 /** What survives a Core restart within this window (R12). */
@@ -61,6 +63,7 @@ export function useSession(client: CoreClient, kept: Kept): SessionView {
   const latest = useRef(state);
   latest.current = state;
   const inFlight = useRef<string | undefined>(undefined);
+  const [recovery, setRecovery] = useState<string[]>([]);
 
   const resync = useCallback(async (id: string, fresh: boolean) => {
     dispatch({ type: "resynchronising" });
@@ -87,8 +90,10 @@ export function useSession(client: CoreClient, kept: Kept): SessionView {
       if (name === "mode.changed") {
         setIntent((was) => intentConfirmed(was, params["mode"] as Mode));
       }
-      if (name === "message.completed" && params["turn_id"] === kept.unsentTurn
-          && params["status"] === "completed") {
+      // The turn is over, however it ended: it is no longer one a restart
+      // could have interrupted.
+      if (name === "session.updated"
+          && (params["session"] as Record<string, unknown> | undefined)?.["busy"] === false) {
         kept.unsentTurn = undefined;
       }
     });
@@ -97,14 +102,39 @@ export function useSession(client: CoreClient, kept: Kept): SessionView {
     });
     void (async () => {
       try {
-        let session: Session;
+        const notes: string[] = [];
+        let session: Session | undefined;
         if (kept.storedId) {
-          session = (await client.call("session.open", { session_id: kept.storedId }))["session"] as Session;
+          // After a restart: the stored conversation is reopened. Opening
+          // gives a live session with an id of its own; the stored record
+          // keeps its id, which is what a later restart opens again.
+          session = await client.call("session.open", { session_id: kept.storedId })
+            .then((answer) => answer["session"] as Session)
+            .catch(() => undefined);
+          if (!session) {
+            notes.push("The previous conversation could not be reopened, so a new one was started.");
+            kept.storedId = undefined;
+          }
+          if (kept.unsentTurn !== undefined) {
+            notes.push("The answer to your last message was interrupted when the Core stopped. "
+                       + "It was not saved, and it was not sent again.");
+            kept.unsentTurn = undefined;
+          }
         } else {
+          // A reload of this window: its Core is the same one, and so is its
+          // live session.
+          const live = await client.call("session.list")
+            .then((answer) => (answer["sessions"] as Session[] | undefined) ?? [])
+            .catch(() => [] as Session[]);
+          session = live[0];
+          if (session) kept.storedId = session.id;
+        }
+        if (!session) {
           session = (await client.call("session.create"))["session"] as Session;
+          kept.storedId = session.id;
         }
         if (!alive) return;
-        kept.storedId = session.id;
+        setRecovery(notes);
         dispatch({ type: "connected", session });
         await resync(session.id, true);
         if (!alive) return;
@@ -184,5 +214,5 @@ export function useSession(client: CoreClient, kept: Kept): SessionView {
     setIntent((was) => wantMode(was, mode));
   }, []);
 
-  return { state, intent, send, cancel, decide, chooseMode };
+  return { state, intent, send, cancel, decide, chooseMode, recovery };
 }

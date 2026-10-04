@@ -37,6 +37,9 @@ export function StatusStrip({ status, model }: {
       {status.workspace !== null && (
         <span className="status-workspace" title={status.workspace}><InertText text={status.workspace} /></span>
       )}
+      {status.state === "restarting" && status.notice !== null && (
+        <span className="status-notice"><InertText text={status.notice} /></span>
+      )}
       {model !== null && (
         <>
           <span className="status-provider"><InertText text={model.provider || "no provider"} /></span>

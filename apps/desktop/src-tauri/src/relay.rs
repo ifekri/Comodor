@@ -605,6 +605,38 @@ mod tests {
         assert_eq!(observed, vec![Observation::Cancel]);
     }
 
+    // -- T060 -----------------------------------------------------------------
+
+    #[test]
+    fn a_core_restart_closes_the_page_and_forgets_what_was_waiting() {
+        let mut relay = ready_relay();
+        let generation = relay.connect();
+        to_core(&mut relay, generation, r#"{"version":2,"type":"request","id":"1","method":"model.get","params":{}}"#);
+        assert_eq!(relay.core_gone(), Some(generation), "the page of this generation is told");
+        assert_eq!(relay.core_gone(), None, "and only once");
+        assert_eq!(relay.handshake(), None, "the old Core's handshake is gone with it");
+        let next = relay.connect();
+        assert!(next > generation);
+        assert!(relay.from_core(&format!(
+            r#"{{"version":2,"type":"response","id":"g{generation}:1","result":{{}}}}"#)).to_page.is_none(),
+            "the old Core's late answer reaches nobody");
+    }
+
+    #[test]
+    fn the_cached_handshake_is_the_new_cores() {
+        let mut relay = ready_relay();
+        relay.connect();
+        relay.core_gone();
+        let mut newer = serde_json::from_str::<Value>(&answer(2)).unwrap()["result"].clone();
+        newer["core"]["version"] = "2".into();
+        relay.cache_handshake(newer.clone());
+        let generation = relay.connect();
+        let FromPage::Answer(line) = relay.from_page(generation,
+            r#"{"version":2,"type":"request","id":"h","method":"client.hello","params":{}}"#, true).unwrap()
+            else { panic!("answered here") };
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["result"], newer);
+    }
+
     /// The same cases as `test/inert.test.tsx`: the page and the native side
     /// agree on what a link is.
     #[test]

@@ -62,6 +62,10 @@ class Hold:
         self._listener: Listener | None = None
         if address:
             family = "AF_PIPE" if sys.platform == "win32" else "AF_UNIX"
+            if family == "AF_UNIX" and os.path.exists(address):
+                # Left by an earlier launch that was killed, as the restart
+                # tests do; a stale socket file would refuse this bind.
+                os.unlink(address)
             self._listener = Listener(address=address, family=family, authkey=None)
 
     def wait(self) -> None:
@@ -193,6 +197,10 @@ def main() -> int:
     record_launch()
     gateway_module.FakeProvider = ScriptedProvider
     config = load(cwd=os.getcwd())
+    # The scripts are the whole turn, and several need the call after a tool
+    # (the answer after a form, the failure between messages). With the loop
+    # off the agent stops after the first tools and those calls never happen.
+    config.agent.loop = True
     if SCENARIO == "permission":
         config.safety.auto_approve_writes = False
         config.safety.auto_approve_safe = True
@@ -204,11 +212,14 @@ def main() -> int:
         tools = ToolRegistry(config=built_config)
         tools.add(HoldStep())
         tools.add(EchoText())
+        # The conversation is on the assembly as the real one has it, so the
+        # Core persists each turn to the temporary home like the real Core.
+        conversation = Conversation()
         agent = AgentLoop(built_config, Gateway(built_config, scripts=scripts),
-                          tools, bus, permissions, Conversation())
+                          tools, bus, permissions, conversation)
         return Assembly(config=built_config, bus=bus, gateway=None, memory=None,
                         permissions=permissions, skills=None, mcp=None,
-                        tools=agent.tools, agent=agent)
+                        tools=agent.tools, agent=agent, conversation=conversation)
 
     channel_out, restore = own_stdout()
     channel = Channel(reader=sys.stdin, writer=channel_out, log=sys.stderr)

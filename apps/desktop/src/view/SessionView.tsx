@@ -4,7 +4,7 @@
  */
 
 import type { CoreClient } from "@comodor/client";
-import { presented } from "@comodor/session";
+import { presented, type State } from "@comodor/session";
 
 import type { CoreStatus } from "../bridge.ts";
 import { type Kept, useSession } from "../state.ts";
@@ -14,6 +14,22 @@ import { FormCard } from "./FormCard.tsx";
 import { ModeControl } from "./ModeControl.tsx";
 import { PermissionCard } from "./PermissionCard.tsx";
 import { StatusStrip } from "./StatusStrip.tsx";
+
+/** Background delegates, in one line: how many, and in which states. */
+function Delegates({ state }: { state: State }) {
+  if (state.delegates.length === 0) return null;
+  const counts = new Map<string, number>();
+  for (const delegate of state.delegates) {
+    counts.set(delegate.state, (counts.get(delegate.state) ?? 0) + 1);
+  }
+  const total = state.delegates.length;
+  const parts = [...counts].map(([name, count]) => `${count} ${name}`).join(", ");
+  return (
+    <p className="delegates" data-testid="delegates">
+      {total} background {total === 1 ? "task" : "tasks"}: {parts}
+    </p>
+  );
+}
 
 export function SessionView({ client, kept, status }: {
   client: CoreClient;
@@ -33,6 +49,10 @@ export function SessionView({ client, kept, status }: {
         : (
           <div className="session" data-testid="session">
             <ModeControl intent={session.intent} onChoose={session.chooseMode} />
+            {session.recovery.map((note) => (
+              <p key={note} className="recovery" data-testid="recovery">{note}</p>
+            ))}
+            <Delegates state={state} />
             <Conversation state={state} />
             {waiting?.kind === "question" && (
               <FormCard key={waiting.id} interaction={waiting}

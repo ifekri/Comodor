@@ -22,6 +22,7 @@ use crate::diag::{self, DiagnosticTail};
 use crate::logfile::{Entry, Log};
 use crate::platform::{build_command, spawn_core, CoreCommand, Stopper};
 use crate::relay;
+use crate::restart::{RestartPolicy, Turns};
 use crate::workspace;
 
 pub type CoreId = u64;
@@ -120,7 +121,7 @@ pub struct CoreIdentity {
 }
 
 /// The restart limit (OD-1): automatic restarts stop at this crash.
-pub const RESTART_LIMIT: u32 = 3;
+pub const RESTART_LIMIT: u32 = crate::restart::LIMIT;
 
 pub struct Machine {
     state: State,
@@ -131,7 +132,8 @@ pub struct Machine {
     failure: Option<Failure>,
     notice: Option<String>,
     identity: Option<CoreIdentity>,
-    restart_count: u32,
+    restarts: RestartPolicy,
+    turns: Turns,
     relay: relay::Relay,
 }
 
@@ -151,7 +153,8 @@ impl Machine {
             failure: None,
             notice: None,
             identity: None,
-            restart_count: 0,
+            restarts: RestartPolicy::new(),
+            turns: Turns::new(),
             relay: relay::Relay::new(),
         }
     }
@@ -165,7 +168,7 @@ impl Machine {
             state: self.state,
             workspace: self.workspace.as_ref().map(|path| path.display().to_string()),
             failure: self.failure.clone(),
-            restart_count: self.restart_count,
+            restart_count: self.restarts.count(),
             restart_limit: RESTART_LIMIT,
             closing: None,
             stop_outcome: None,
@@ -196,7 +199,9 @@ impl Machine {
             relay::FromPage::Answer(answer) => Ok(vec![Effect::ToPage { generation, line: answer }]),
             relay::FromPage::ToCore { line, observed } => {
                 let core = self.core.filter(|_| ready).ok_or("the Core is not ready")?;
-                let _ = observed;
+                for observation in &observed {
+                    self.turns.observe(observation);
+                }
                 Ok(vec![Effect::Write { core, line }])
             }
         }
@@ -211,8 +216,20 @@ impl Machine {
             return vec![];
         }
         let relayed = self.relay.from_core(line);
-        relayed.to_page.map(|(generation, line)| vec![Effect::ToPage { generation, line }])
-            .unwrap_or_default()
+        let mut effects: Vec<Effect> = relayed.to_page
+            .map(|(generation, line)| vec![Effect::ToPage { generation, line }])
+            .unwrap_or_default();
+        // Only a completed turn resets the crash count (data-model.md §3).
+        let before = self.restarts.count();
+        for observation in &relayed.observed {
+            if self.turns.observe(observation) {
+                self.restarts.completed();
+            }
+        }
+        if self.restarts.count() != before {
+            effects.push(Effect::StatusChanged);
+        }
+        effects
     }
 
     /// One input, its effects; a person's action that does not apply now is
@@ -236,7 +253,7 @@ impl Machine {
                 Ok(vec![Effect::StatusChanged])
             }
             Input::Spawned { core, .. } => {
-                if !self.is_current(core) || self.state != State::Starting {
+                if !self.is_current(core) || !matches!(self.state, State::Starting | State::Restarting) {
                     return Ok(vec![]);
                 }
                 self.state = State::Handshaking;
@@ -266,11 +283,11 @@ impl Machine {
                 }
                 self.core = None;
                 Ok(match self.state {
-                    State::Starting | State::Handshaking => self.fail(Failure::new(
+                    State::Starting | State::Restarting | State::Handshaking => self.fail(Failure::new(
                         FailureClass::ExitedBeforeReady,
                         format!("The Core exited before it was ready ({}). Its last output is \
                                  below.", describe_exit(code)))),
-                    State::Ready => self.fail(Failure::new(
+                    State::Ready => self.crashed(Failure::new(
                         FailureClass::Crashed,
                         format!("The Core stopped unexpectedly ({}).", describe_exit(code)))),
                     _ => vec![],
@@ -280,6 +297,8 @@ impl Machine {
                 if self.state != State::Failed || self.workspace.is_none() {
                     return Err("\"Try again\" applies only after a failure".into());
                 }
+                // A person's "Try again" leaves the count as it is (OD-1).
+                self.notice = None;
                 Ok(self.start())
             }
         }
@@ -291,10 +310,15 @@ impl Machine {
 
     /// A new Core in the current workspace.
     fn start(&mut self) -> Vec<Effect> {
+        self.start_as(State::Starting)
+    }
+
+    fn start_as(&mut self, state: State) -> Vec<Effect> {
         let core = self.next_core;
         self.next_core += 1;
         self.core = Some(core);
-        self.state = State::Starting;
+        self.state = state;
+        self.turns.forget();
         self.failure = None;
         self.identity = None;
         let workspace = self.workspace.clone().expect("a start has a workspace");
@@ -310,6 +334,7 @@ impl Machine {
                 });
                 self.relay.cache_handshake(result);
                 self.state = State::Ready;
+                self.notice = None;
                 vec![Effect::StatusChanged]
             }
             relay::Handshake::Mismatch(message) | relay::Handshake::Refused(message) => {
@@ -330,19 +355,47 @@ impl Machine {
 
     fn fail(&mut self, failure: Failure) -> Vec<Effect> {
         self.state = State::Failed;
-        let mut effects = vec![];
-        if let Some(generation) = self.relay.core_gone() {
-            effects.push(Effect::PageClosed { generation, reason: failure.message.clone() });
-        }
+        // The status first: a page told its connection closed must already
+        // know the Core is not ready, or it would reconnect to nothing.
+        let closed = self.relay.core_gone();
+        let reason = failure.message.clone();
         self.failure = Some(failure);
-        effects.push(Effect::StatusChanged);
+        let mut effects = vec![Effect::StatusChanged];
+        if let Some(generation) = closed {
+            effects.push(Effect::PageClosed { generation, reason });
+        }
         effects
     }
 
     fn fail_and_stop(&mut self, core: CoreId, failure: Failure) -> Vec<Effect> {
+        let was_ready = self.state == State::Ready;
         self.core = None;
         let mut effects = vec![Effect::CloseStdin { core }, Effect::ForceStop { core }];
-        effects.extend(self.fail(failure));
+        // A fault of a ready Core counts as a crash (data-model.md §1).
+        effects.extend(if was_ready { self.crashed(failure) } else { self.fail(failure) });
+        effects
+    }
+
+    /// A Core that had reached `ready` is gone. Restarted in the same
+    /// workspace while the count allows (OD-1); otherwise it waits for "Try
+    /// again". Nothing it was doing is replayed.
+    fn crashed(&mut self, failure: Failure) -> Vec<Effect> {
+        self.turns.forget();
+        if !self.restarts.crashed() {
+            let count = self.restarts.count();
+            // The class says what the last one was: a crash, or a fault.
+            return self.fail(Failure::new(failure.class, format!(
+                "{} It stopped {count} times in a row, so it was not started again.",
+                failure.message)));
+        }
+        let closed = self.relay.core_gone();
+        self.notice = Some(format!("{} Starting it again ({} of {}).",
+                                   failure.message, self.restarts.count(), RESTART_LIMIT));
+        // The status (restarting) reaches the page before `closed` does.
+        let mut effects = self.start_as(State::Restarting);
+        if let Some(generation) = closed {
+            effects.push(Effect::PageClosed { generation, reason: failure.message });
+        }
         effects
     }
 }
@@ -860,10 +913,13 @@ mod tests {
 
     #[test]
     fn a_bad_line_while_ready_is_a_protocol_fault_and_the_core_is_stopped() {
-        let (machine, core) = ready();
-        let (_, failure, effects) = failed_with(machine, Input::Line { core, line: "{not json".into() });
-        assert_eq!(failure.class, FailureClass::ProtocolFault);
+        let (mut machine, core) = ready();
+        let effects = machine.handle(Input::Line { core, line: "{not json".into() }).unwrap();
         assert!(effects.contains(&Effect::ForceStop { core }));
+        // A fault of a ready Core is a crash for the restart count (OD-1).
+        assert_eq!(machine.state(), State::Restarting);
+        let notice = machine.status().notice.expect("why it restarted");
+        assert!(notice.contains("not protocol"), "{notice}");
     }
 
     #[test]
@@ -983,7 +1039,6 @@ mod tests {
         assert!(effects.iter().any(|effect| matches!(effect,
             Effect::PageClosed { generation: g, .. } if *g == generation)), "{effects:?}");
         assert!(machine.send_line(generation, MODEL_GET).is_err());
-        machine.handle(Input::Retry).unwrap();
         assert!(machine.connect() > generation, "generations only grow across Cores");
     }
 
@@ -993,6 +1048,138 @@ mod tests {
         machine.connect();
         let native = format!(r#"{{"version":2,"type":"response","id":"{}","result":{{}}}}"#, relay::HELLO_ID);
         assert_eq!(machine.handle(Input::Line { core, line: native }).unwrap(), vec![]);
+    }
+
+    // -- restarts (OD-1) ------------------------------------------------------
+
+    /// The ready Core `core` crashes; a new Core, if one starts, is answered.
+    fn crash(machine: &mut Machine, core: CoreId) -> (Vec<Effect>, Option<CoreId>) {
+        let effects = machine.handle(Input::Exited { core, code: Some(70) }).unwrap();
+        let next = effects.iter().find_map(|effect| match effect {
+            Effect::Spawn { core, workspace } => {
+                assert_eq!(workspace, Path::new(WS), "restarted in the same workspace");
+                Some(*core)
+            }
+            _ => None,
+        });
+        if let Some(next) = next {
+            assert_eq!(machine.state(), State::Restarting);
+            machine.handle(Input::Spawned { core: next, pid: 7 }).unwrap();
+            assert_eq!(machine.state(), State::Handshaking);
+            machine.handle(Input::Line { core: next, line: hello_answer(2) }).unwrap();
+            assert_eq!(machine.state(), State::Ready);
+        }
+        (effects, next)
+    }
+
+    fn turn(machine: &mut Machine, core: CoreId, events: &[&str]) {
+        let generation = machine.connect();
+        machine.send_line(generation,
+            r#"{"version":2,"type":"request","id":"s","method":"session.send","params":{"session_id":"x","text":"hi"}}"#).unwrap();
+        let accepted = format!(
+            r#"{{"version":2,"type":"response","id":"g{generation}:s","result":{{"accepted":true,"turn_id":"t1"}}}}"#);
+        machine.handle(Input::Line { core, line: accepted }).unwrap();
+        for event in events {
+            machine.handle(Input::Line { core, line: (*event).to_string() }).unwrap();
+        }
+    }
+
+    const COMPLETED: &str = r#"{"version":2,"type":"event","event":"message.completed","seq":1,"params":{"turn_id":"t1","status":"completed"}}"#;
+    const WARNING: &str = r#"{"version":2,"type":"event","event":"notification.created","seq":2,"params":{"level":"warning","text":"Stopped: a decision is needed"}}"#;
+    const IDLE: &str = r#"{"version":2,"type":"event","event":"session.updated","seq":3,"params":{"session":{"busy":false}}}"#;
+
+    #[test]
+    fn crashes_one_and_two_restart_and_the_third_waits_for_try_again() {
+        let (mut machine, core) = ready();
+        let generation = machine.connect();
+        let (effects, second) = crash(&mut machine, core);
+        assert!(effects.iter().any(|e| matches!(e, Effect::PageClosed { generation: g, .. } if *g == generation)),
+                "the page is told its Core went: {effects:?}");
+        assert_eq!(machine.status().restart_count, 1);
+        let (_, third) = crash(&mut machine, second.expect("restart after crash 1"));
+        assert_eq!(machine.status().restart_count, 2);
+        let (effects, none) = crash(&mut machine, third.expect("restart after crash 2"));
+        assert!(none.is_none(), "no restart after crash 3: {effects:?}");
+        let status = machine.status();
+        assert_eq!(status.state, State::Failed);
+        assert_eq!(status.restart_count, 3);
+        assert_eq!(status.failure.unwrap().class, FailureClass::Crashed);
+    }
+
+    /// The page hears that its Core is restarting (or failed) before its
+    /// connection closes, so it never reconnects to a Core that is not ready.
+    #[test]
+    fn the_status_reaches_the_page_before_its_connection_closes() {
+        for limit_reached in [false, true] {
+            let (mut machine, mut core) = ready();
+            if limit_reached {
+                for _ in 0..2 {
+                    core = crash(&mut machine, core).1.unwrap();
+                }
+            }
+            machine.connect();
+            let effects = machine.handle(Input::Exited { core, code: Some(70) }).unwrap();
+            let status = effects.iter().position(|e| *e == Effect::StatusChanged).expect("a status");
+            let closed = effects.iter().position(|e| matches!(e, Effect::PageClosed { .. })).expect("closed");
+            assert!(status < closed, "{effects:?}");
+        }
+    }
+
+    #[test]
+    fn try_again_after_the_limit_keeps_the_count() {
+        let (mut machine, mut core) = ready();
+        for _ in 0..2 {
+            core = crash(&mut machine, core).1.unwrap();
+        }
+        crash(&mut machine, core);
+        machine.handle(Input::Retry).unwrap();
+        assert_eq!(machine.status().restart_count, 3, "Try again does not reset (OD-1)");
+    }
+
+    #[test]
+    fn a_completed_turn_resets_the_count() {
+        let (mut machine, core) = ready();
+        let core = crash(&mut machine, core).1.unwrap();
+        assert_eq!(machine.status().restart_count, 1);
+        turn(&mut machine, core, &[COMPLETED, IDLE]);
+        assert_eq!(machine.status().restart_count, 0);
+    }
+
+    #[test]
+    fn an_uncertain_turn_does_not_reset_the_count() {
+        let (mut machine, core) = ready();
+        let core = crash(&mut machine, core).1.unwrap();
+        turn(&mut machine, core, &[COMPLETED, WARNING, IDLE]);
+        assert_eq!(machine.status().restart_count, 1);
+    }
+
+    #[test]
+    fn a_relayed_cancel_does_not_reset_the_count() {
+        let (mut machine, core) = ready();
+        let core = crash(&mut machine, core).1.unwrap();
+        let generation = machine.connect();
+        machine.send_line(generation,
+            r#"{"version":2,"type":"request","id":"s","method":"session.send","params":{"session_id":"x","text":"hi"}}"#).unwrap();
+        machine.handle(Input::Line { core, line: format!(
+            r#"{{"version":2,"type":"response","id":"g{generation}:s","result":{{"accepted":true,"turn_id":"t1"}}}}"#) }).unwrap();
+        machine.send_line(generation,
+            r#"{"version":2,"type":"request","id":"c","method":"session.cancel","params":{"session_id":"x"}}"#).unwrap();
+        machine.handle(Input::Line { core, line: COMPLETED.into() }).unwrap();
+        machine.handle(Input::Line { core, line: IDLE.into() }).unwrap();
+        assert_eq!(machine.status().restart_count, 1);
+    }
+
+    #[test]
+    fn a_crash_while_handshaking_after_a_restart_is_not_restarted() {
+        let (mut machine, core) = ready();
+        let effects = machine.handle(Input::Exited { core, code: Some(70) }).unwrap();
+        let next = effects.iter().find_map(|e| match e { Effect::Spawn { core, .. } => Some(*core), _ => None })
+            .unwrap();
+        machine.handle(Input::Spawned { core: next, pid: 8 }).unwrap();
+        let effects = machine.handle(Input::Exited { core: next, code: Some(1) }).unwrap();
+        assert!(!effects.iter().any(|e| matches!(e, Effect::Spawn { .. })));
+        assert_eq!(machine.status().failure.unwrap().class, FailureClass::ExitedBeforeReady);
+        assert_eq!(machine.status().restart_count, 1, "a failure before ready never counts");
     }
 
     #[test]

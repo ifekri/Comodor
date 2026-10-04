@@ -8,6 +8,7 @@ import { boundary, canaryEarly } from "./boundary.ts";
 import { conversation, conversationCancel, conversationPermission } from "./conversation.ts";
 import { empty } from "./empty.ts";
 import { ready } from "./ready.ts";
+import { crash, reload } from "./recovery.ts";
 import { workspaceLaunch, workspaceLaunchPath } from "./workspace-launch.ts";
 
 export const SCENARIOS: Readonly<Record<string, Scenario>> = {
@@ -16,8 +17,10 @@ export const SCENARIOS: Readonly<Record<string, Scenario>> = {
   conversation,
   "conversation-cancel": conversationCancel,
   "conversation-permission": conversationPermission,
+  crash,
   empty,
   ready,
+  reload,
   "workspace-launch": workspaceLaunch,
   "workspace-launch-path": workspaceLaunchPath,
 };
