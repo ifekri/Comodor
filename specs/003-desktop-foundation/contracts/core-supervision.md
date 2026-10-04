@@ -67,7 +67,14 @@ of §5 applies) or choose another workspace; no separate stop action exists.
 ## 4. Supervision (FR-004–FR-007)
 
 - A Core exit in `ready` means `crashed`. A bad stdout line in `ready` means
-  `protocol_fault`, followed by the forced-stop sequence.
+  `protocol_fault`, followed by the forced-stop sequence. A bad line is one
+  the page's client would reject: not a v2 envelope, missing a field the
+  schema's `x-envelope` requires, or with a field of the wrong type (`id`,
+  `event` a non-empty string; `params`, `result` an object; `seq` a number;
+  an error's `code` a string).
+- A Core stopped for a fault is never running alongside another: whatever
+  follows (the restart, "Try again", another workspace) starts its Core only
+  after the faulted one has exited.
 - Completed turns are observed read-only from relayed events, under the
   conservative rule of [data-model.md](../data-model.md) §3. Only a completed
   turn resets the crash count.

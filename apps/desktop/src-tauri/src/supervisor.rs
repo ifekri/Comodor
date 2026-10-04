@@ -141,6 +141,11 @@ pub struct Machine {
     workspace: Option<PathBuf>,
     /// The Core whose observations count; anything from another is stale.
     core: Option<CoreId>,
+    /// A Core stopped for a fault that has not exited yet: no other Core
+    /// starts until it has.
+    faulted: Option<CoreId>,
+    /// A start waiting for `faulted` to exit.
+    deferred: bool,
     next_core: CoreId,
     failure: Option<Failure>,
     notice: Option<String>,
@@ -172,6 +177,8 @@ impl Machine {
             state: State::Absent,
             workspace: None,
             core: None,
+            faulted: None,
+            deferred: false,
             next_core: 1,
             failure: None,
             notice: None,
@@ -307,6 +314,10 @@ impl Machine {
                 })
             }
             Input::Exited { core, code } => {
+                if self.faulted == Some(core) {
+                    self.faulted = None;
+                    return Ok(if std::mem::take(&mut self.deferred) { self.spawn() } else { vec![] });
+                }
                 if !self.is_current(core) {
                     return Ok(vec![]);
                 }
@@ -355,6 +366,7 @@ impl Machine {
     /// The stop sequence: `shutdown` (to a Core that can take it), stdin
     /// closed, then the wait for the exit, bounded by the grace (OD-2).
     fn stop(&mut self, reason: StopReason) -> Vec<Effect> {
+        self.deferred = false;
         let Some(core) = self.core else {
             // Nothing runs: stopped already.
             self.stop_outcome = Some(StopOutcome::Orderly);
@@ -432,13 +444,23 @@ impl Machine {
     }
 
     fn start_as(&mut self, state: State) -> Vec<Effect> {
-        let core = self.next_core;
-        self.next_core += 1;
-        self.core = Some(core);
         self.state = state;
         self.turns.forget();
         self.failure = None;
         self.identity = None;
+        if self.faulted.is_some() {
+            // Never two Cores at once: this one starts when that one exits.
+            self.core = None;
+            self.deferred = true;
+            return vec![Effect::StatusChanged];
+        }
+        self.spawn()
+    }
+
+    fn spawn(&mut self) -> Vec<Effect> {
+        let core = self.next_core;
+        self.next_core += 1;
+        self.core = Some(core);
         let workspace = self.workspace.clone().expect("a start has a workspace");
         vec![Effect::Spawn { core, workspace }, Effect::StatusChanged]
     }
@@ -488,6 +510,7 @@ impl Machine {
     fn fail_and_stop(&mut self, core: CoreId, failure: Failure) -> Vec<Effect> {
         let was_ready = self.state == State::Ready;
         self.core = None;
+        self.faulted = Some(core);
         let mut effects = vec![Effect::CloseStdin { core }, Effect::ForceStop { core }];
         // A fault of a ready Core counts as a crash (data-model.md §1).
         effects.extend(if was_ready { self.crashed(failure) } else { self.fail(failure) });
@@ -718,7 +741,10 @@ impl Driver {
                         if self.running.remove(core).is_some() {
                             self.log(Entry::Exited { code: *code });
                         }
-                        self.set_pid(None);
+                        // Only the last running Core's exit unpublishes it.
+                        if self.running.is_empty() {
+                            self.set_pid(None);
+                        }
                     }
                     let outcome = self.machine.handle(input).map(|effects| self.apply(effects));
                     if let Some(reply) = reply {
@@ -1090,6 +1116,50 @@ mod tests {
             assert!(!effects.iter().any(|e| matches!(e, Effect::ToPage { generation: g, .. } if *g == generation)),
                     "never relayed: {line}");
         }
+    }
+
+    fn spawned(effects: &[Effect]) -> Option<CoreId> {
+        effects.iter().find_map(|e| match e { Effect::Spawn { core, .. } => Some(*core), _ => None })
+    }
+
+    /// Review finding (PR #62): a faulted Core is signalled, and its
+    /// replacement starts only once it has exited — never two at once.
+    #[test]
+    fn a_faulted_core_is_replaced_only_after_it_has_exited() {
+        let (mut machine, core) = ready();
+        let effects = machine.handle(Input::Line { core, line: "garbage".into() }).unwrap();
+        assert!(effects.contains(&Effect::ForceStop { core }), "{effects:?}");
+        assert_eq!(spawned(&effects), None, "not while the faulted Core runs: {effects:?}");
+        assert_eq!(machine.state(), State::Restarting);
+        // Its last lines are not protocol to anyone.
+        assert_eq!(machine.handle(Input::Line { core, line: "more".into() }).unwrap(), vec![]);
+        let effects = machine.handle(Input::Exited { core, code: None }).unwrap();
+        let next = spawned(&effects).expect("the restart, now");
+        assert_ne!(next, core);
+        assert_eq!(machine.state(), State::Restarting);
+        assert_eq!(machine.status().restart_count, 1);
+    }
+
+    #[test]
+    fn nothing_starts_while_a_core_that_failed_its_handshake_still_runs() {
+        let (mut machine, core) = handshaking();
+        machine.handle(Input::Line { core, line: "Traceback (most recent call last):".into() }).unwrap();
+        assert_eq!(machine.state(), State::Failed);
+        let effects = machine.handle(Input::Retry).unwrap();
+        assert_eq!(spawned(&effects), None, "{effects:?}");
+        assert_eq!(machine.state(), State::Starting);
+        let next = spawned(&machine.handle(Input::Exited { core, code: None }).unwrap()).expect("then it starts");
+        assert_ne!(next, core);
+    }
+
+    #[test]
+    fn a_window_closed_while_a_faulted_core_ends_starts_nothing_after() {
+        let (mut machine, core) = ready();
+        machine.handle(Input::Line { core, line: "garbage".into() }).unwrap();
+        let effects = machine.handle(Input::Stop { reason: StopReason::WindowClosed }).unwrap();
+        assert!(effects.contains(&Effect::Finished), "{effects:?}");
+        assert_eq!(machine.handle(Input::Exited { core, code: None }).unwrap(), vec![]);
+        assert_eq!(machine.state(), State::Stopped);
     }
 
     #[test]

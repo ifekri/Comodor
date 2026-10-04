@@ -301,7 +301,7 @@ desktop's own tests and is not part of the Python package (the sdist includes
 
 | # | Risk | Mitigation or status |
 | --- | --- | --- |
-| K1 | On macOS, and for grandchildren on Linux, processes the Core started (a tool's shell command) depend on the Core's own cleanup when the application is killed abruptly | The Core leads a process group and a forced stop signals the group; abrupt-kill cleanup of grandchildren is **not guaranteed** on macOS. Recorded; SC-007 counts Core processes, as the spec defines. |
+| K1 | On Linux and macOS, processes the Core started (a tool's shell command) outlive an application killed abruptly unless something besides the Core ends them | The Core leads a process group; a forced stop signals the group, and a watchdog started with each Core (R8; added for a review finding on PR #62) signals the group when the application or the Core exits, tested by killing the application with a Core and child that ignore EOF. A process that leaves the Core's group (its own session or group) is not reached; recorded. SC-007 counts Core processes, as the spec defines. |
 | K2 | The Linux parent-death signal follows the spawning *thread* | The Core is spawned only from the supervisor's long-lived thread; a test kills the application and checks the Core exits. |
 | K3 | WebKitGTK and a virtual display on Linux CI; the macOS runner's window server | The in-application runner needs no WebDriver; the CI job installs the Linux packages; a platform where a layer cannot run is recorded **NOT VERIFIED**, never passed, and D1 is then incomplete; the Linux leg also runs in a D-Bus session (K11). |
 | K4 | The development server listens on loopback in dev mode | It serves static assets only; tests and releases use embedded assets (R2). |

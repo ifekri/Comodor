@@ -94,7 +94,19 @@ fn envelope(line: &str) -> Option<Value> {
         return None;
     }
     let (_, fields) = ENVELOPE_FIELDS.iter().find(|(shape, _)| *shape == kind)?;
-    fields.iter().all(|field| value.get(*field).is_some()).then_some(value)
+    if !fields.iter().all(|field| value.get(*field).is_some()) {
+        return None;
+    }
+    // The field types the page's client requires (`@comodor/protocol`'s
+    // `decode`): a line it would drop is a fault here, not something relayed.
+    let text = |key: &str| value[key].as_str().is_some_and(|text| !text.is_empty());
+    let object = |key: &str| value[key].is_object();
+    let typed = match kind {
+        "response" => text("id") && object("result"),
+        "error" => value["error"]["code"].is_string(),
+        _ => text("event") && value["seq"].is_number() && object("params"),
+    };
+    typed.then_some(value)
 }
 
 /// What the relay saw, for the restart counter (data-model.md §3). These are
@@ -666,13 +678,29 @@ mod tests {
             r#"{"version":2,"type":"response","id":"1"}"#,
             r#"{"version":2,"type":"error","id":"1"}"#,
             r#"{"version":2,"type":"response","result":{}}"#,
+            // Review finding (PR #62): present but of the wrong type, as the
+            // shared client's `decode` would reject them.
+            r#"{"version":2,"type":"event","event":"x","seq":"bad","params":{}}"#,
+            r#"{"version":2,"type":"event","event":"x","seq":1,"params":[]}"#,
+            r#"{"version":2,"type":"event","event":"","seq":1,"params":{}}"#,
+            r#"{"version":2,"type":"event","event":7,"seq":1,"params":{}}"#,
+            r#"{"version":2,"type":"response","id":1,"result":{}}"#,
+            r#"{"version":2,"type":"response","id":"","result":{}}"#,
+            r#"{"version":2,"type":"response","id":"1","result":[]}"#,
+            r#"{"version":2,"type":"response","id":"1","result":null}"#,
+            r#"{"version":2,"type":"error","id":"1","error":{"message":"y"}}"#,
+            r#"{"version":2,"type":"error","id":"1","error":{"code":5}}"#,
+            r#"{"version":2,"type":"error","id":"1","error":"x"}"#,
         ] {
             assert!(!is_envelope(bad), "{bad}");
         }
         for good in [
             r#"{"version":2,"type":"event","event":"x","seq":1,"params":{}}"#,
+            r#"{"version":2,"type":"event","event":"x","seq":1.5,"params":{}}"#,
             r#"{"version":2,"type":"response","id":"1","result":{}}"#,
             r#"{"version":2,"type":"error","id":"1","error":{"code":"x","message":"y"}}"#,
+            // An error may answer a request whose id could not be read.
+            r#"{"version":2,"type":"error","id":null,"error":{"code":"parse_error"}}"#,
         ] {
             assert!(is_envelope(good), "{good}");
         }

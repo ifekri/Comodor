@@ -294,14 +294,19 @@ itself.
 | Platform | Normal stop | Application killed abruptly |
 | --- | --- | --- |
 | Windows | stop request, then end the job | the Core runs in a **job object** set to kill on close; the job dies with the application's handle, taking the Core and its descendants |
-| Linux | stop request, then signal the Core's process group | the Core is started with a **parent-death signal**, from a dedicated long-lived supervisor thread (the signal follows the spawning thread); stdin also reaches EOF and the Core exits (`serve_stdio`) |
-| macOS | stop request, then signal the Core's process group | stdin reaches EOF and the Core exits through its own `close()` |
+| Linux | stop request, then signal the Core's process group | the Core is started with a **parent-death signal**, from a dedicated long-lived supervisor thread (the signal follows the spawning thread); a **watchdog** (below) ends the Core's whole process group; stdin also reaches EOF and the Core exits (`serve_stdio`) |
+| macOS | stop request, then signal the Core's process group | a **watchdog** (below) ends the Core's whole process group; stdin reaches EOF and the Core exits through its own `close()` |
 
-**Rationale**: The Core already exits on EOF. The two OS mechanisms add a
-guarantee that does not depend on the Core noticing. **Risk**: on macOS, and
-on Linux for grandchildren, processes the Core itself started (a tool's shell
-command) depend on the Core's own cleanup when the application is killed
-abruptly; see plan §Risks.
+The watchdog (added for a review finding on PR #62) is the application's own
+executable, started with each Core in a process group of its own. It waits for
+the application or the Core to exit (`pidfd` on Linux, `kqueue` on macOS),
+then signals the Core's group.
+
+**Rationale**: The Core already exits on EOF. The OS mechanisms and the
+watchdog add a guarantee that does not depend on the Core noticing. **Risk**:
+on Linux and macOS, a process the Core started that leaves the Core's process
+group (its own session or group) is outside what the group signal reaches;
+see plan §Risks.
 
 ---
 
