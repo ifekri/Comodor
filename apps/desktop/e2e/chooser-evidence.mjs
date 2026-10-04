@@ -80,8 +80,9 @@ $bmp.Save('${shot.replaceAll("'", "''")}', [System.Drawing.Imaging.ImageFormat]:
     return { found: run.status === 0, read: run.stdout.trim(), error: run.stderr.trim() };
   }
   if (process.platform === "linux") {
-    const found = spawnSync("timeout", [String(DIALOG_DEADLINE_S), "xdotool", "search", "--sync", "--name", TITLE],
-                            { encoding: "utf-8" });
+    // Only once it is mapped: a window found before then has no image yet.
+    const found = spawnSync("timeout", [String(DIALOG_DEADLINE_S), "xdotool", "search", "--sync", "--onlyvisible",
+                                        "--name", TITLE], { encoding: "utf-8" });
     if (found.status !== 0) return { found: false, read: "", error: found.stderr.trim() };
     const id = found.stdout.trim().split(/\s+/)[0];
     const shotRun = spawnSync("import", ["-window", id, shot], { encoding: "utf-8" });
