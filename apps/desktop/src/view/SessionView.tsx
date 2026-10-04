@@ -32,11 +32,12 @@ function Delegates({ state }: { state: State }) {
   );
 }
 
-export function SessionView({ client, kept, status, onCheckAgain }: {
+export function SessionView({ client, kept, status, onCheckAgain, onChangeWorkspace }: {
   client: CoreClient;
   kept: Kept;
   status: CoreStatus;
   onCheckAgain: () => void;
+  onChangeWorkspace?: (() => void) | undefined;
 }) {
   const session = useSession(client, kept);
   const { state } = session;
@@ -47,7 +48,7 @@ export function SessionView({ client, kept, status, onCheckAgain }: {
   const unconfigured = model !== null && model.configured === false;
   return (
     <>
-      <StatusStrip status={status} model={model} />
+      <StatusStrip status={status} model={model} onChangeWorkspace={onChangeWorkspace} />
       {!state.session
         ? <p className="quiet">Opening the session…</p>
         : (

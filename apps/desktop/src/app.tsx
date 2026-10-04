@@ -55,7 +55,8 @@ export function App({ api }: { api: NativeApi }) {
       <OpenLink.Provider value={open}>
         <main className="window" data-testid="window">
           <StopOutcome outcome={status.stop_outcome} />
-          <SessionView client={client} kept={kept} status={status} onCheckAgain={checkAgain} />
+          <SessionView client={client} kept={kept} status={status} onCheckAgain={checkAgain}
+                       onChangeWorkspace={choose} />
         </main>
       </OpenLink.Provider>
     );
@@ -63,7 +64,7 @@ export function App({ api }: { api: NativeApi }) {
   return (
     <OpenLink.Provider value={open}>
       <main className="window" data-testid="window">
-        <StatusStrip status={status} model={null} />
+        <StatusStrip status={status} model={null} onChangeWorkspace={choose} />
         <StopOutcome outcome={status.stop_outcome} />
         {status.state === "stopping" && (
           <ClosingView secondsRemaining={status.closing?.seconds_remaining ?? 0} onQuitNow={quitNow} />

@@ -57,6 +57,11 @@ body,
   unicode-bidi: plaintext;
 }
 
+.status-change {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
 .status-unconfigured {
   color: var(--semantic-warning);
 }

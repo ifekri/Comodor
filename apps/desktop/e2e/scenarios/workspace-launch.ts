@@ -36,6 +36,37 @@ export const workspaceLaunch: Scenario = async (context) => {
   return { starts: after };
 };
 
+/**
+ * Review finding (PR #62): the workspace changed later, from the ready
+ * window (FR-021). "Change workspace…" opens the chooser at the last chosen
+ * folder; the choice stops the Core and starts one there.
+ */
+export const workspaceChange: Scenario = async (context) => {
+  const workspace = String(context.params["workspace"]);
+  const stored = String(context.params["stored"]);
+  const shown = () => document.querySelector(".status-workspace")?.textContent ?? "";
+  const ready = () => document.querySelector('[data-testid="status-strip"][data-state="ready"]');
+
+  await context.waitFor(() => ready() && shown() === workspace);
+  const { pid: first } = await context.query("core_pid");
+  expect(typeof first === "number" && first > 0, `a Core runs: ${String(first)}`);
+  await context.checkpoint("remember-core", { pid: first });
+
+  const change = await context.waitFor(() => [...document.querySelectorAll("button")]
+    .find((button) => button.textContent === "Change workspace…"));
+  change.click();
+
+  await context.waitFor(() => ready() && shown() === stored);
+  const { pid: second } = await context.query("core_pid");
+  expect(typeof second === "number" && second > 0 && second !== first, `a new Core: ${String(second)}`);
+  await context.checkpoint("remember-core", { pid: second });
+  const starts = (await context.query("chooser"))["starts"] as (string | null)[];
+  expect(starts.length === 1 && starts[0] === stored,
+         `the chooser starts at the last chosen folder: ${JSON.stringify(starts)}`);
+  expect(document.querySelector('[data-testid="stop-outcome"]') === null, "the stop was orderly");
+  return { switchedTo: shown() };
+};
+
 /** A valid command-line path: the Core starts there, with no chooser. */
 export const workspaceLaunchPath: Scenario = async (context) => {
   const workspace = String(context.params["workspace"]);

@@ -77,6 +77,13 @@ export const SETUPS = {
     params: { workspace: "$workspace" },
     maxReadyMs: 10_000,
   },
+  // FR-021: changed later from the ready window, to the folder last chosen.
+  "workspace-change": {
+    lastSelectedFolder: "$stored",
+    workspaceArgument: true,
+    choose: ["$stored"],
+    params: { workspace: "$workspace", stored: "$stored" },
+  },
   "workspace-launch": {
     lastSelectedFolder: "$stored",
     choose: [null, "$workspace"],

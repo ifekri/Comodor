@@ -335,7 +335,14 @@ impl Machine {
                 })
             }
             Input::Stop { reason } => {
-                if self.stopping.is_some() {
+                if let Some((pending, _)) = &mut self.stopping {
+                    // Closing or quitting while a workspace change or "Check
+                    // again" is stopping the Core: the application ends when
+                    // it has stopped, instead of starting another.
+                    if reason.ends_application() && !pending.ends_application() {
+                        *pending = reason;
+                        return Ok(vec![]);
+                    }
                     return Err("the Core is already stopping".into());
                 }
                 Ok(self.stop(reason))
@@ -1160,6 +1167,36 @@ mod tests {
         assert!(effects.contains(&Effect::Finished), "{effects:?}");
         assert_eq!(machine.handle(Input::Exited { core, code: None }).unwrap(), vec![]);
         assert_eq!(machine.state(), State::Stopped);
+    }
+
+    /// Review finding (PR #62): closing or quitting while a workspace change
+    /// or "Check again" is stopping the Core ends the application then,
+    /// rather than being lost to the restart.
+    #[test]
+    fn a_quit_during_a_restarting_stop_ends_the_application_instead() {
+        for pending in [StopReason::WorkspaceChange("/elsewhere".into()), StopReason::CheckAgain] {
+            for ending in [StopReason::WindowClosed, StopReason::Quit, StopReason::OsSessionEnd] {
+                let (mut machine, core) = ready();
+                machine.handle(Input::Stop { reason: pending.clone() }).unwrap();
+                assert!(machine.handle(Input::Stop { reason: ending.clone() }).is_ok(), "{pending:?} then {ending:?}");
+                let effects = machine.handle(Input::Exited { core, code: Some(0) }).unwrap();
+                assert!(effects.contains(&Effect::Finished), "{pending:?} then {ending:?}: {effects:?}");
+                assert_eq!(spawned(&effects), None);
+                assert_eq!(machine.state(), State::Stopped);
+                assert_eq!(machine.status().workspace.as_deref(), Some(WS), "no switch on the way out");
+            }
+        }
+    }
+
+    #[test]
+    fn a_second_stop_that_would_not_end_the_application_is_refused() {
+        let (mut machine, _) = ready();
+        machine.handle(Input::Stop { reason: StopReason::Quit }).unwrap();
+        assert!(machine.handle(Input::Stop { reason: StopReason::CheckAgain }).is_err());
+        assert!(machine.handle(Input::Stop { reason: StopReason::WorkspaceChange("/x".into()) }).is_err());
+        let (mut machine, _) = ready();
+        machine.handle(Input::Stop { reason: StopReason::CheckAgain }).unwrap();
+        assert!(machine.handle(Input::Stop { reason: StopReason::WorkspaceChange("/x".into()) }).is_err());
     }
 
     #[test]

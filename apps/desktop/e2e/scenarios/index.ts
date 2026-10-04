@@ -14,7 +14,7 @@ import {
 import { ready } from "./ready.ts";
 import { unconfigured } from "./unconfigured.ts";
 import { crash, reload } from "./recovery.ts";
-import { workspaceLaunch, workspaceLaunchPath } from "./workspace-launch.ts";
+import { workspaceChange, workspaceLaunch, workspaceLaunchPath } from "./workspace-launch.ts";
 
 export const SCENARIOS: Readonly<Record<string, Scenario>> = {
   boundary,
@@ -35,6 +35,7 @@ export const SCENARIOS: Readonly<Record<string, Scenario>> = {
   ready,
   reload,
   unconfigured,
+  "workspace-change": workspaceChange,
   "workspace-launch": workspaceLaunch,
   "workspace-launch-path": workspaceLaunchPath,
 };

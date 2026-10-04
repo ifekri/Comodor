@@ -106,6 +106,11 @@ The orderly sequence, for every `ShutdownRequest` reason:
 5. `stopped`. For `quit` and `window_closed` the application then exits; for
    `workspace_change` and `check_again` a new Core starts.
 
+One stop runs at a time. A close or quit that arrives while a
+`workspace_change` or `check_again` stop is in progress replaces its reason,
+so the application exits when the Core has stopped and no new Core starts;
+any other second stop is refused.
+
 Abrupt application death (FR-018): Windows, the job closes; Linux and
 macOS, a watchdog started with each Core (the application's own executable
 in a process group of its own) waits on the application's or the Core's

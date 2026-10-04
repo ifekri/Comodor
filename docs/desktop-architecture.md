@@ -124,9 +124,12 @@ the Core's whole group, whichever went first; Linux adds the parent-death signal
 Otherwise every fresh launch opens the system folder chooser at the folder
 last chosen; no Core starts before a choice, and a dismissal offers "Choose
 workspace…". The workspace is kept for the whole launch, through reloads and
-every kind of restart. A second launch focuses the window; another folder is
-switched to only after a native confirmation, through the stop sequence, and
-never as a second Core.
+every kind of restart. "Change workspace…" in the status strip changes it
+later: the chooser opens at the last chosen folder, and the choice goes
+through the stop sequence. A second launch focuses the window; another folder
+is switched to only after a native confirmation, through the stop sequence,
+and never as a second Core. Closing or quitting while a switch is stopping
+the Core ends the application instead.
 
 ---
 

@@ -109,3 +109,32 @@ describe("the workspace gate", () => {
     expect(native.commands("send_line")).toEqual([]);
   });
 });
+
+/** Review finding (PR #62): the workspace can be changed later (FR-021). */
+describe("changing the workspace later", () => {
+  test('the ready view offers "Change workspace…", which calls choose_workspace', async () => {
+    const native = new FakeNative(status({ workspace: "/work/one" }));
+    native.chosen = "/work/two";
+    const view = await show(native);
+    await until(() => view.container.querySelector('[data-testid="status-strip"][data-state="ready"]'),
+                "the ready strip");
+    const button = await until(() => byText(view.container, "button", "Change workspace…"), "the button");
+    await click(button);
+    expect(native.commands("choose_workspace").length).toBe(1);
+  });
+
+  test("so does a Core that is still starting", async () => {
+    const native = new FakeNative(status({ state: "handshaking", core: null }));
+    const view = await show(native);
+    await until(() => view.container.querySelector('[data-state="handshaking"]'), "starting");
+    await click(await until(() => byText(view.container, "button", "Change workspace…"), "the button"));
+    expect(native.commands("choose_workspace").length).toBe(1);
+  });
+
+  test("not while closing: a stop is already under way", async () => {
+    const native = new FakeNative(status({ state: "stopping", core: null, closing: { seconds_remaining: 9 } }));
+    const view = await show(native);
+    await until(() => view.text().includes("Quit now"), "closing");
+    expect(byText(view.container, "button", "Change workspace…")).toBeNull();
+  });
+});
