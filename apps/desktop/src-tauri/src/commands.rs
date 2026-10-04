@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::State;
 
+use crate::instance::Confirm;
 use crate::prefs::{self, Preferences};
+use crate::shutdown::StopReason;
 use crate::supervisor::{PageSink, State as CoreState, Status, Supervisor};
 use crate::workspace::{self, Chooser, Resolution};
 
@@ -119,6 +121,12 @@ pub fn retry(desktop: State<'_, Desktop>) -> Result<Value, String> {
     recorded("retry", json!({}), desktop.supervisor.retry().map(|()| json!({})))
 }
 
+/// The person's "Quit now": the stop in progress is forced at once (OD-2).
+#[tauri::command]
+pub fn quit_now(desktop: State<'_, Desktop>) -> Result<Value, String> {
+    recorded("quit_now", json!({}), desktop.supervisor.quit_now().map(|()| json!({})))
+}
+
 /// Opens a link the page was shown, outside the window, in the system's
 /// browser. The page has no opener permission of its own.
 #[tauri::command]
@@ -160,7 +168,9 @@ fn choose(desktop: &Desktop) -> Result<Option<String>, String> {
         CoreState::Absent | CoreState::Failed | CoreState::Stopped => {
             desktop.supervisor.start(path.clone())?;
         }
-        _ => return Err("changing the workspace of a running Core is not available yet".into()),
+        // A running Core is stopped first (10 s grace), then one starts in
+        // the new folder (FR-021).
+        _ => desktop.supervisor.stop(StopReason::WorkspaceChange(path.clone()))?,
     }
     Ok(Some(path.display().to_string()))
 }
@@ -177,6 +187,32 @@ impl Chooser for SystemChooser {
             dialog = dialog.set_directory(start);
         }
         dialog.blocking_pick_folder()?.into_path().ok()
+    }
+}
+
+/// The application's second-launch confirmation: a native dialog.
+pub struct SystemConfirm(pub tauri::AppHandle);
+
+impl Confirm for SystemConfirm {
+    fn switch_workspace(&mut self, from: &Path, to: &Path) -> bool {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+        self.0.dialog()
+            .message(format!("Comodor is working in {}.\n\nStop it there and switch to {}?",
+                             from.display(), to.display()))
+            .title("Switch workspace?")
+            .buttons(MessageDialogButtons::OkCancelCustom("Switch".into(), "Keep working here".into()))
+            .blocking_show()
+    }
+}
+
+/// The test build's confirmation double (`e2e::confirm`).
+#[cfg(feature = "e2e")]
+pub struct ConfirmDouble;
+
+#[cfg(feature = "e2e")]
+impl Confirm for ConfirmDouble {
+    fn switch_workspace(&mut self, from: &Path, to: &Path) -> bool {
+        crate::e2e::confirm(&format!("switch from {} to {}", from.display(), to.display()))
     }
 }
 

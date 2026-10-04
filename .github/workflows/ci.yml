@@ -235,6 +235,11 @@ jobs:
       - name: In-application scenarios
         run: npm run -w apps/desktop e2e
 
+      # Close, quit mid-turn, Quit now, kill, second launches: after each,
+      # no Core is left (SC-007, SC-008, SC-016). Uses the build above.
+      - name: Lifetime
+        run: npm run -w apps/desktop lifetime -- --skip-build
+
       - name: Keep what the scenarios left
         if: always()
         uses: actions/upload-artifact@v4

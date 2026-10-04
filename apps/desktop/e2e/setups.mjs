@@ -20,6 +20,12 @@
  *   recorded message and command, the page's own holdings (the result), the
  *   Core's recorded arguments, the application's output, log and
  *   preferences for it. Any occurrence fails the scenario (SC-009).
+ * - `lifetime`: a case that ends the application itself (`npm run lifetime`);
+ *   it names its Cores, and passes when the application ended as the case
+ *   ends it and no named Core is left.
+ * - `childPid`: the double writes its child's pid, which must be gone too.
+ * - `forced`: whether the log must say the stop was forced (OD-2).
+ * - `platforms`: where the case applies; elsewhere it is reported N/A.
  * - `maxReadyMs`: the result's `readyAt` must come this soon after the
  *   process started (SC-001).
  *
@@ -28,6 +34,26 @@
  */
 
 export const SETUPS = {
+  "lifetime-close": { lifetime: true, workspaceArgument: true, forced: false },
+  "lifetime-quit-held": {
+    lifetime: true, core: ["scripted_core.py", "hold-mid-turn"], hold: true, workspaceArgument: true,
+    forced: false,
+  },
+  "lifetime-quit-now": {
+    lifetime: true, core: ["doubles.py", "ignore-stop"], childPid: true, workspaceArgument: true, forced: true,
+  },
+  "lifetime-kill": { lifetime: true, workspaceArgument: true },
+  // A Core that ignores EOF: only the job object (Windows) or the
+  // parent-death signal (Linux) ends it. macOS has neither (FR-018).
+  "lifetime-kill-stubborn": {
+    lifetime: true, core: ["doubles.py", "ignore-stop"], childPid: true, workspaceArgument: true,
+    platforms: ["win32", "linux"],
+  },
+  "lifetime-second-same": { lifetime: true, workspaceArgument: true },
+  "lifetime-second-declined": { lifetime: true, workspaceArgument: true, confirm: false },
+  "lifetime-second-confirmed": {
+    lifetime: true, workspaceArgument: true, confirm: true, params: { stored: "$stored" },
+  },
   empty: { workspaceArgument: true },
   boundary: { core: ["scripted_core.py", "adversarial"], workspaceArgument: true },
   "canary-early": { core: ["scripted_core.py", "adversarial"], workspaceArgument: true, canary: true },

@@ -23,6 +23,7 @@ use crate::logfile::{Entry, Log};
 use crate::platform::{build_command, spawn_core, CoreCommand, Stopper};
 use crate::relay;
 use crate::restart::{RestartPolicy, Turns};
+use crate::shutdown::{self, StopOutcome, StopReason};
 use crate::workspace;
 
 pub type CoreId = u64;
@@ -83,6 +84,12 @@ pub enum Input {
     Exited { core: CoreId, code: Option<i32> },
     /// The person's "Try again".
     Retry,
+    /// Stop the Core, for this reason (contracts/core-supervision.md §5).
+    Stop { reason: StopReason },
+    /// The grace for stopping `core` ran out.
+    DeadlinePassed { core: CoreId },
+    /// The person's "Quit now", while stopping.
+    QuitNow,
 }
 
 /// What the driver is asked to do.
@@ -98,6 +105,12 @@ pub enum Effect {
     ToPage { generation: u64, line: String },
     /// The page of `generation` lost its Core: it must reconnect.
     PageClosed { generation: u64, reason: String },
+    /// Tell the machine `DeadlinePassed` for `core` after this long.
+    Deadline { core: CoreId, after: Duration },
+    /// A fixed line for the application's log.
+    Note(&'static str),
+    /// The Core has stopped and the application should end.
+    Finished,
 }
 
 /// The `status` command's answer and the channel's `status` message.
@@ -109,7 +122,7 @@ pub struct Status {
     pub restart_count: u32,
     pub restart_limit: u32,
     pub closing: Option<Value>,
-    pub stop_outcome: Option<String>,
+    pub stop_outcome: Option<StopOutcome>,
     pub core: Option<CoreIdentity>,
     pub notice: Option<String>,
 }
@@ -135,6 +148,11 @@ pub struct Machine {
     restarts: RestartPolicy,
     turns: Turns,
     relay: relay::Relay,
+    clock: Arc<dyn Fn() -> Instant + Send + Sync>,
+    /// The stop in progress: why, and since when.
+    stopping: Option<(StopReason, Instant)>,
+    forced: bool,
+    stop_outcome: Option<StopOutcome>,
 }
 
 impl Default for Machine {
@@ -145,6 +163,11 @@ impl Default for Machine {
 
 impl Machine {
     pub fn new() -> Self {
+        Self::with_clock(Arc::new(Instant::now))
+    }
+
+    /// A machine whose idea of now is `clock` (the tests' is moved by hand).
+    pub fn with_clock(clock: Arc<dyn Fn() -> Instant + Send + Sync>) -> Self {
         Self {
             state: State::Absent,
             workspace: None,
@@ -156,6 +179,10 @@ impl Machine {
             restarts: RestartPolicy::new(),
             turns: Turns::new(),
             relay: relay::Relay::new(),
+            clock,
+            stopping: None,
+            forced: false,
+            stop_outcome: None,
         }
     }
 
@@ -170,8 +197,10 @@ impl Machine {
             failure: self.failure.clone(),
             restart_count: self.restarts.count(),
             restart_limit: RESTART_LIMIT,
-            closing: None,
-            stop_outcome: None,
+            closing: self.stopping.as_ref().map(|(_, since)| json!({
+                "seconds_remaining": shutdown::seconds_remaining((self.clock)() - *since),
+            })),
+            stop_outcome: self.stop_outcome,
             core: self.identity.clone(),
             notice: self.notice.clone(),
         }
@@ -283,6 +312,7 @@ impl Machine {
                 }
                 self.core = None;
                 Ok(match self.state {
+                    State::Stopping => self.stopped(),
                     State::Starting | State::Restarting | State::Handshaking => self.fail(Failure::new(
                         FailureClass::ExitedBeforeReady,
                         format!("The Core exited before it was ready ({}). Its last output is \
@@ -293,6 +323,24 @@ impl Machine {
                     _ => vec![],
                 })
             }
+            Input::Stop { reason } => {
+                if self.stopping.is_some() {
+                    return Err("the Core is already stopping".into());
+                }
+                Ok(self.stop(reason))
+            }
+            Input::DeadlinePassed { core } => {
+                if self.stopping.is_none() || !self.is_current(core) {
+                    return Ok(vec![]);
+                }
+                Ok(self.force(core))
+            }
+            Input::QuitNow => {
+                if self.stopping.is_none() {
+                    return Err("\"Quit now\" applies only while closing".into());
+                }
+                Ok(self.core.map(|core| self.force(core)).unwrap_or_default())
+            }
             Input::Retry => {
                 if self.state != State::Failed || self.workspace.is_none() {
                     return Err("\"Try again\" applies only after a failure".into());
@@ -302,6 +350,76 @@ impl Machine {
                 Ok(self.start())
             }
         }
+    }
+
+    /// The stop sequence: `shutdown` (to a Core that can take it), stdin
+    /// closed, then the wait for the exit, bounded by the grace (OD-2).
+    fn stop(&mut self, reason: StopReason) -> Vec<Effect> {
+        let Some(core) = self.core else {
+            // Nothing runs: stopped already.
+            self.stop_outcome = Some(StopOutcome::Orderly);
+            self.stopping = Some((reason, (self.clock)()));
+            return self.after_stop();
+        };
+        let ready = self.state == State::Ready;
+        self.stopping = Some((reason, (self.clock)()));
+        self.forced = false;
+        self.stop_outcome = None;
+        self.state = State::Stopping;
+        let mut effects = vec![Effect::StatusChanged];
+        if ready {
+            effects.push(Effect::Write { core, line: shutdown::shutdown_request() });
+        }
+        effects.push(Effect::CloseStdin { core });
+        effects.push(Effect::Deadline { core, after: shutdown::GRACE });
+        effects
+    }
+
+    /// The grace ran out, or the person chose "Quit now": end the Core and
+    /// everything it started.
+    fn force(&mut self, core: CoreId) -> Vec<Effect> {
+        if self.forced {
+            return vec![];
+        }
+        self.forced = true;
+        vec![Effect::ForceStop { core }, Effect::Note(shutdown::FORCED_LOG)]
+    }
+
+    /// The Core being stopped has exited.
+    fn stopped(&mut self) -> Vec<Effect> {
+        self.stop_outcome = Some(if self.forced { StopOutcome::Forced } else { StopOutcome::Orderly });
+        self.turns.forget();
+        self.after_stop()
+    }
+
+    /// What follows a stop, by its reason.
+    fn after_stop(&mut self) -> Vec<Effect> {
+        let (reason, _) = self.stopping.take().expect("a stop in progress");
+        let closed = self.relay.core_gone();
+        let forced = self.stop_outcome == Some(StopOutcome::Forced);
+        let mut effects = match reason {
+            StopReason::WindowClosed | StopReason::Quit | StopReason::OsSessionEnd => {
+                self.state = State::Stopped;
+                vec![Effect::StatusChanged, Effect::Finished]
+            }
+            StopReason::WorkspaceChange(path) => {
+                self.workspace = Some(path);
+                self.failure = None;
+                let effects = self.start();
+                self.notice = forced.then(|| shutdown::FORCED_NOTICE.to_string());
+                effects
+            }
+            StopReason::CheckAgain => {
+                self.failure = None;
+                let effects = self.start();
+                self.notice = forced.then(|| shutdown::FORCED_NOTICE.to_string());
+                effects
+            }
+        };
+        if let Some(generation) = closed {
+            effects.push(Effect::PageClosed { generation, reason: "the Core was stopped".into() });
+        }
+        effects
     }
 
     fn is_current(&self, core: CoreId) -> bool {
@@ -429,6 +547,9 @@ pub struct Options {
     pub test_env: Vec<(OsString, OsString)>,
     /// The application's log; none in tests that do not look at it.
     pub log: Option<Arc<Log>>,
+    /// Called once the Core has stopped for a reason that ends the
+    /// application (the application exits here).
+    pub on_finished: Option<Box<dyn Fn() + Send>>,
 }
 
 enum Event {
@@ -501,6 +622,16 @@ impl Supervisor {
 
     pub fn retry(&self) -> Result<(), String> {
         self.input(Input::Retry)
+    }
+
+    /// Begin the stop sequence for `reason`.
+    pub fn stop(&self, reason: StopReason) -> Result<(), String> {
+        self.input(Input::Stop { reason })
+    }
+
+    /// The person's "Quit now".
+    pub fn quit_now(&self) -> Result<(), String> {
+        self.input(Input::QuitNow)
     }
 
     pub fn status(&self) -> Status {
@@ -657,6 +788,21 @@ impl Driver {
                         if *current == generation {
                             sink.send(json!({ "kind": "line", "line": line }));
                         }
+                    }
+                }
+                Effect::Deadline { core, after } => {
+                    // The grace bound (OD-2): the one timer in the supervisor.
+                    let events = self.events.clone();
+                    std::thread::Builder::new().name("stop-deadline".into()).spawn(move || {
+                        std::thread::sleep(after);
+                        let _ = events.send(Event::Input(Input::DeadlinePassed { core }, None));
+                    }).expect("start the stop deadline");
+                }
+                Effect::Note(text) => self.log(Entry::Note(text)),
+                Effect::Finished => {
+                    self.publish();
+                    if let Some(finished) = &self.options.on_finished {
+                        finished();
                     }
                 }
                 Effect::PageClosed { generation, reason } => {

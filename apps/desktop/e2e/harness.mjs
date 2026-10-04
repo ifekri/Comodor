@@ -126,6 +126,28 @@ function answer(checkpoint, run) {
       process.kill(pid, "SIGKILL");
       return { ok: true };
     }
+    // The lifetime cases (T074).
+    case "remember-core": {
+      const pid = Number(checkpoint.data?.pid);
+      if (!pid) return { ok: false, error: "no Core pid" };
+      run.cores.push(pid);
+      return { ok: true };
+    }
+    case "close-window":
+    case "quit":
+      // Done by the test build once the page has this reply.
+      return { ok: true, act: checkpoint.name };
+    case "kill-app":
+      run.killed = true;
+      run.app.kill("SIGKILL");
+      return { ok: true };
+    case "second-launch": {
+      const target = resolve(checkpoint.data?.path ?? "", run.places);
+      const second = spawnSync(executable(), target ? [target] : [], {
+        env: run.env, stdio: "ignore", timeout: FAILURE_DEADLINE_MS,
+      });
+      return { ok: true, code: second.status, signal: second.signal };
+    }
     default:
       return { ok: false, error: `unknown checkpoint ${checkpoint.name}` };
   }
@@ -157,6 +179,27 @@ function searchCanary(canary, places) {
   return { planted, searched, leaks };
 }
 
+/** How often a process that is not ours is checked for: between checks only. */
+const CHECK_EVERY_MS = 50;
+
+/**
+ * Wait for process `pid` to be gone, by the failure deadline. Node has no
+ * way to wait on a process it did not start, so this checks, then waits for
+ * the next check, until it is gone.
+ */
+async function gone(pid) {
+  const ends = Date.now() + FAILURE_DEADLINE_MS;
+  while (Date.now() < ends) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, CHECK_EVERY_MS));
+  }
+  return false;
+}
+
 function copyIfPresent(from, to) {
   if (fs.existsSync(from)) fs.cpSync(from, to, { recursive: true });
 }
@@ -164,6 +207,9 @@ function copyIfPresent(from, to) {
 async function runScenario(name) {
   const setup = SETUPS[name];
   if (!setup) return { scenario: name, ok: false, error: "no setup for this scenario" };
+  if (setup.platforms && !setup.platforms.includes(process.platform)) {
+    return { scenario: name, ok: true, notApplicable: `not applicable on ${process.platform}` };
+  }
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "comodor-e2e-"));
   const home = path.join(root, "home");
   const workspace = path.join(root, "workspace");
@@ -188,7 +234,7 @@ async function runScenario(name) {
              error: `COMODOR_ARGS is split on whitespace; move the checkout: ${fixturePath}` };
   }
   const coreArgs = setup.realCore ? "-m comodor" : `${fixturePath} ${argument}`;
-  const run = { hold: setup.hold ? holdAddress(root, name) : undefined };
+  const run = { hold: setup.hold ? holdAddress(root, name) : undefined, cores: [], places };
   const record = path.join(root, "record.jsonl");
   const env = {
     ...process.env,
@@ -211,6 +257,8 @@ async function runScenario(name) {
   }
   const argv = path.join(root, "argv.json");
   if (canary) env.COMODOR_TEST_ARGV_FILE = argv;
+  const childPid = path.join(root, "child.pid");
+  if (setup.childPid) env.COMODOR_TEST_CHILD_PID_FILE = childPid;
   if (setup.sequence) {
     // The double keeps its counter beside this file.
     env.COMODOR_TEST_SEQUENCE = path.join(root, "sequence.json");
@@ -220,6 +268,8 @@ async function runScenario(name) {
   const args = setup.workspaceArgument ? [workspace] : [];
   const started = Date.now();
   const app = spawn(executable(), args, { env, stdio: ["pipe", "pipe", "pipe"] });
+  run.app = app;
+  run.env = env;
   const output = [];
   app.stderr.on("data", (chunk) => output.push(chunk.toString()));
 
@@ -251,7 +301,13 @@ async function runScenario(name) {
     });
     app.on("exit", (code, signal) => {
       clearTimeout(deadline);
-      if (!result) {
+      if (setup.lifetime && !result) {
+        // The application ended the way the case ends it: by closing, by
+        // quitting, or killed by the harness.
+        const ended = run.killed ? signal !== null || code !== 0 : code === 0;
+        resolve(ended ? { ok: true, exitCode: code, signal }
+                      : { ok: false, error: `the application ended badly (${code ?? signal})` });
+      } else if (!result) {
         resolve({ ok: false, error: `the application exited (${code ?? signal}) without a result` });
       } else {
         resolve({ ...result, exitCode: code, ok: result.ok === true && code === 0 });
@@ -266,6 +322,30 @@ async function runScenario(name) {
   copyIfPresent(data, path.join(kept, "desktop-data"));
   fs.writeFileSync(path.join(kept, "output.txt"), output.join(""));
   const summary = { scenario: name, elapsedMs: Date.now() - started, ...outcome };
+  // The double's child must go with it.
+  if (setup.childPid && fs.existsSync(childPid)) run.cores.push(Number(fs.readFileSync(childPid, "utf-8")));
+  // SC-007: no Core outlives the application, whatever ended it.
+  if (run.cores.length > 0) {
+    const left = [];
+    for (const pid of run.cores) if (!(await gone(pid))) left.push(pid);
+    summary.coresLeft = left;
+    if (left.length > 0 && summary.ok) {
+      summary.ok = false;
+      summary.error = `a Core outlived the application: ${left.join(", ")}`;
+    }
+  } else if (setup.lifetime && summary.ok) {
+    summary.ok = false;
+    summary.error = "the case never named its Core";
+  }
+  // OD-2: the log says whether the stop was forced.
+  if (setup.forced !== undefined && summary.ok) {
+    const log = path.join(data, "comodor-desktop.log");
+    const forced = fs.existsSync(log) && fs.readFileSync(log, "utf-8").includes("stopped before it finished");
+    if (forced !== setup.forced) {
+      summary.ok = false;
+      summary.error = `the stop was ${forced ? "" : "not "}forced, which this case does not expect`;
+    }
+  }
   if (canary) {
     const found = searchCanary(canary, {
       home: path.join(home, "config.json"), record, argv, data,
@@ -302,7 +382,10 @@ async function runScenario(name) {
 const argv = process.argv.slice(2);
 const skipBuild = argv.includes("--skip-build");
 const named = argv.filter((arg) => !arg.startsWith("--"));
-const scenarios = named.length ? named : Object.keys(SETUPS);
+// The lifetime cases end the application themselves; `npm run lifetime`
+// runs them (lifetime.mjs), and a plain run leaves them out.
+const scenarios = named.length ? named
+  : Object.keys(SETUPS).filter((name) => !SETUPS[name].lifetime);
 
 if (!skipBuild) build();
 if (!fs.existsSync(executable())) {
@@ -314,7 +397,7 @@ fs.mkdirSync(ARTIFACTS, { recursive: true });
 let failed = 0;
 for (const name of scenarios) {
   const summary = await runScenario(name);
-  const verdict = summary.ok ? "PASS" : "FAIL";
+  const verdict = summary.notApplicable ? "N/A " : summary.ok ? "PASS" : "FAIL";
   const ready = summary.readyMs === undefined ? "" : `, ready in ${summary.readyMs} ms`;
   console.log(`${verdict} ${name} (${summary.elapsedMs ?? 0} ms${ready})${summary.ok ? "" : `: ${summary.error ?? "see result.json"}`}`);
   if (!summary.ok) failed += 1;

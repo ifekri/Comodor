@@ -18,6 +18,8 @@ mod imp;
 #[cfg(windows)]
 #[path = "windows.rs"]
 mod imp;
+#[cfg(target_os = "linux")]
+mod linux;
 
 /// The executable and the leading arguments; `core --stdio` is appended.
 #[derive(Clone, Debug, PartialEq, Eq)]

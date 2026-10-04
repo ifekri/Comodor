@@ -219,13 +219,14 @@ pub fn launch_with_env(command: CoreCommand, home: &CoreHome,
                        extra: Vec<(OsString, OsString)>) -> Supervisor {
     let mut env = home.env();
     env.extend(extra);
-    Supervisor::launch(Options { locate: Box::new(move || Ok(command.clone())), test_env: env, log: None })
+    Supervisor::launch(Options { locate: Box::new(move || Ok(command.clone())), test_env: env, log: None,
+                                on_finished: None })
 }
 
 /// A supervisor whose locating has already happened, successfully or not.
 pub fn launch_located(located: Result<CoreCommand, Failure>, home: &CoreHome) -> Supervisor {
     Supervisor::launch(Options { locate: Box::new(move || located.clone()), test_env: home.env(),
-                                log: None })
+                                log: None, on_finished: None })
 }
 
 /// A page, as far as the native side can tell: everything sent to it, in
@@ -354,4 +355,51 @@ pub fn kill(pid: u32) {
     #[cfg(unix)]
     let status = std::process::Command::new("kill").args(["-9", &pid.to_string()]).status();
     assert!(status.map(|s| s.success()).unwrap_or(false), "could not kill {pid}");
+}
+
+/// Wait for process `pid` — not necessarily ours — to end, by the failure
+/// deadline. True when it has ended.
+#[cfg(windows)]
+pub fn wait_gone(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+    unsafe {
+        let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if handle.is_null() {
+            return true; // no such process: gone already
+        }
+        let waited = WaitForSingleObject(handle, DEADLINE.as_millis() as u32);
+        CloseHandle(handle);
+        waited == WAIT_OBJECT_0
+    }
+}
+
+/// Wait for process `pid` — not necessarily ours — to end, by the failure
+/// deadline. True when it has ended. There is no portable way to wait on a
+/// process that is not a child, so this checks, then yields, until it has.
+#[cfg(unix)]
+pub fn wait_gone(pid: u32) -> bool {
+    /// Between checks only: the condition is the process being gone.
+    const CHECK_EVERY: Duration = Duration::from_millis(20);
+    let ends = std::time::Instant::now() + DEADLINE;
+    while std::time::Instant::now() < ends {
+        if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+            return true;
+        }
+        std::thread::sleep(CHECK_EVERY);
+    }
+    false
+}
+
+/// The pid a fixture wrote to `file`, once it has written it.
+pub fn read_pid(file: &Path, page: Option<&Page>) -> u32 {
+    let _ = page;
+    let ends = std::time::Instant::now() + DEADLINE;
+    loop {
+        if let Some(pid) = fs::read_to_string(file).ok().and_then(|text| text.trim().parse().ok()) {
+            return pid;
+        }
+        assert!(std::time::Instant::now() < ends, "no pid in {}", file.display());
+        std::thread::yield_now();
+    }
 }

@@ -8,6 +8,7 @@
 pub mod command_names;
 pub mod commands;
 pub mod diag;
+pub mod instance;
 #[cfg(feature = "e2e")]
 pub mod e2e;
 pub mod locate;
@@ -16,6 +17,7 @@ pub mod platform;
 pub mod prefs;
 pub mod relay;
 pub mod restart;
+pub mod shutdown;
 pub mod supervisor;
 pub mod workspace;
 
@@ -25,7 +27,8 @@ use std::path::PathBuf;
 use tauri::{Manager, WebviewWindowBuilder};
 
 use commands::Desktop;
-use supervisor::{Options, Supervisor};
+use shutdown::StopReason;
+use supervisor::{Options, State, Supervisor};
 
 /// The one window's label, as `tauri.conf.json` and the `main` capability
 /// name it.
@@ -33,8 +36,9 @@ pub const MAIN_WINDOW: &str = "main";
 
 /// Start the application.
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
+    let app = tauri::Builder::default()
+        // A second launch reaches this one instead of starting another Core.
+        .plugin(tauri_plugin_single_instance::init(second_launch))
         .plugin(tauri_plugin_dialog::init())
         // Used from the native side only: no capability grants the page any
         // opener permission, so `open_external` is the one way to a browser.
@@ -43,11 +47,15 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let data = data_dir(&handle)?;
+            let finishing = handle.clone();
             let desktop = Desktop::new(
                 Supervisor::launch(Options {
                     locate: Box::new(locate::locate_from_environment),
                     test_env: vec![],
                     log: Some(std::sync::Arc::new(logfile::Log::in_dir(&data))),
+                    // The Core has stopped for a reason that ends the
+                    // application: now it may.
+                    on_finished: Some(Box::new(move || finishing.exit(0))),
                 }),
                 prefs::path_in(&data),
                 chooser(&handle),
@@ -60,8 +68,63 @@ pub fn run() {
             })?;
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("the Comodor desktop application failed to start");
+    app.run(|app, event| {
+        // A request to end the application that did not come from the stop
+        // sequence (a menu's Quit, the system) becomes one: the Core is
+        // stopped first, and the application ends when it has.
+        if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
+            if stop_first(app, StopReason::Quit) {
+                api.prevent_exit();
+            }
+        }
+    });
+}
+
+/// Begin the stop sequence unless the Core has already stopped. True when
+/// the caller must wait for it.
+fn stop_first(app: &tauri::AppHandle, reason: StopReason) -> bool {
+    let Some(desktop) = app.try_state::<Desktop>() else { return false };
+    if desktop.supervisor.status().state == State::Stopped {
+        return false;
+    }
+    // Already stopping is fine: the sequence in progress ends the application.
+    let _ = desktop.supervisor.stop(reason);
+    true
+}
+
+/// The single-instance plugin's callback: a second launch's arguments.
+fn second_launch(app: &tauri::AppHandle, argv: Vec<String>, cwd: String) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    let args: Vec<OsString> = argv.into_iter().skip(1).map(OsString::from).collect();
+    let current = app.state::<Desktop>().supervisor.status().workspace.map(PathBuf::from);
+    let decision = instance::decide(current.as_deref(), &args, std::path::Path::new(&cwd));
+    if decision == instance::Decision::Focus {
+        return;
+    }
+    // The confirmation blocks; never on the main thread.
+    let asking = app.clone();
+    let _ = std::thread::Builder::new().name("second-launch".into()).spawn(move || {
+        let mut confirm = confirmer(&asking);
+        if let instance::Action::Switch(path) = instance::resolve(decision, current.as_deref(), confirm.as_mut()) {
+            let _ = asking.state::<Desktop>().supervisor.stop(StopReason::WorkspaceChange(path));
+        }
+    });
+}
+
+fn confirmer(app: &tauri::AppHandle) -> Box<dyn instance::Confirm> {
+    #[cfg(feature = "e2e")]
+    {
+        let _ = app;
+        Box::new(commands::ConfirmDouble)
+    }
+    #[cfg(not(feature = "e2e"))]
+    Box::new(commands::SystemConfirm(app.clone()))
 }
 
 #[cfg(test)]
@@ -98,6 +161,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         commands::choose_workspace,
         commands::retry,
         commands::open_external,
+        commands::quit_now,
         e2e::e2e_report
     ];
     #[cfg(not(feature = "e2e"))]
@@ -108,7 +172,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         commands::diagnostics,
         commands::choose_workspace,
         commands::retry,
-        commands::open_external
+        commands::open_external,
+        commands::quit_now
     ];
 }
 
@@ -174,8 +239,13 @@ fn create_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     let window = builder.build()?;
     let saving = app.clone();
     window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { .. } = event {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
             remember_geometry(&saving);
+            // The close waits for the Core (OD-2): "Closing…" shows, and the
+            // application ends when the stop sequence does.
+            if stop_first(&saving, StopReason::WindowClosed) {
+                api.prevent_close();
+            }
         }
     });
     Ok(())

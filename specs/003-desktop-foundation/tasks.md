@@ -435,7 +435,7 @@ SC-003–SC-006, SC-017 (within a launch).
 - [X] T065 [US3] Implement `RestartPolicy` and `TurnObservation` in `apps/desktop/src-tauri/src/restart.rs`. Add the read-only observation of the fields listed in native-bridge guarantee 2 in `apps/desktop/src-tauri/src/relay.rs`, changing nothing. Integrate in `apps/desktop/src-tauri/src/supervisor.rs`. T059 must pass.
 - [X] T066 [US3] Implement restart and reconnect in `apps/desktop/src-tauri/src/supervisor.rs` and `apps/desktop/src-tauri/src/relay.rs`: `closed` to the page, a new handshake, the same workspace, a new generation, and `restart_count` in `status`. T060 and T061 must pass.
 - [X] T067 [US3] Implement page recovery and reload rejoin in `apps/desktop/src/state.ts` and `apps/desktop/src/view/Conversation.tsx`. T062 must pass.
-- [ ] T068 [US3] Run the `desktop` job of `.github/workflows/ci.yml` by `workflow_dispatch`. T061, T063 and T064 must pass on all three platforms. Keep the results and the SC-003 times for the PR description.
+- [X] T068 [US3] Run the `desktop` job of `.github/workflows/ci.yml` by `workflow_dispatch`. T061, T063 and T064 must pass on all three platforms. Keep the results and the SC-003 times for the PR description.
 
 **Checkpoint**: recovery is correct and honest, and US1, US2 and US5 still pass.
 
@@ -456,7 +456,7 @@ the same and a different path — on each platform (SC-007, SC-008, SC-016).
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T069 [P] [US4] Write shutdown-sequence tests (**U**) in `apps/desktop/src-tauri/src/shutdown.rs`, with an injected clock:
+- [X] T069 [P] [US4] Write shutdown-sequence tests (**U**) in `apps/desktop/src-tauri/src/shutdown.rs`, with an injected clock:
   - the order is `shutdown`, then stdin closed, then wait for exit;
   - the forced stop happens at exactly 10 s and not before, or immediately on `quit_now`;
   - `outcome` is `orderly` or `forced`;
@@ -464,25 +464,25 @@ the same and a different path — on each platform (SC-007, SC-008, SC-016).
   - no forced path produces text containing "saved".
 
   Mutation checks: a 5 s deadline fails a test, and so does a "saved" string on a forced path (FR-017, SC-016).
-- [ ] T070 [P] [US4] Write platform orphan tests (**I**) in `apps/desktop/src-tauri/tests/orphans.rs`, each behind its platform check:
+- [X] T070 [P] [US4] Write platform orphan tests (**I**) in `apps/desktop/src-tauri/tests/orphans.rs`, each behind its platform check:
   - **Windows**: dropping the job handle ends the Core and the `ignore-stop` child.
   - **Linux**: the parent-death signal ends the Core when the supervisor's process ends.
   - **Linux and macOS**: a forced stop signals the process group, ending the double and its child.
   - **macOS**: closing stdin ends the real Core by EOF.
-- [ ] T071 [US4] Write shutdown integration tests (**I**, all platforms) in `apps/desktop/src-tauri/tests/shutdown.rs`:
+- [X] T071 [US4] Write shutdown integration tests (**I**, all platforms) in `apps/desktop/src-tauri/tests/shutdown.rs`:
   - the scripted Core stopped during `hold-mid-turn` exits within the bound, `orderly`, with no termination;
   - `ignore-stop` is terminated at the deadline with its child, and `forced` is logged;
   - `quit_now` terminates immediately.
-- [ ] T072 [P] [US4] Write closing tests (**W**) in `apps/desktop/test/closing.test.tsx`:
+- [X] T072 [P] [US4] Write closing tests (**W**) in `apps/desktop/test/closing.test.tsx`:
   - `stopping` shows "Closing…" with the seconds remaining, and "Quit now" calls `quit_now`;
   - `stop_outcome: forced` shows "Comodor was stopped before it finished; work it had not saved may be lost", with no "saved" text.
-- [ ] T073 [P] [US4] Write second-launch decision tests (**U**) in `apps/desktop/src-tauri/src/instance.rs`:
+- [X] T073 [P] [US4] Write second-launch decision tests (**U**) in `apps/desktop/src-tauri/src/instance.rs`:
   - no path, or the current path: focus only;
   - a different valid path: ask through the confirmation adapter;
   - confirmed: the stop sequence with reason `workspace_change`, then a Core in the new path;
   - declined or unanswered: keep the current workspace and Core;
   - never a second Core (FR-019, SC-008).
-- [ ] T074 [US4] Write the lifetime harness and cases (**L**, all platforms) in `apps/desktop/e2e/lifetime.mjs`. It learns the Core's pid from the test build and waits for process exit with a failure deadline, not a delay. Cases:
+- [X] T074 [US4] Write the lifetime harness and cases (**L**, all platforms) in `apps/desktop/e2e/lifetime.mjs`. It learns the Core's pid from the test build and waits for process exit with a failure deadline, not a delay. Cases:
   - a normal close, a quit during `hold-mid-turn`, "Quit now", and an abrupt kill of the application — after each, zero Core processes remain (SC-007, SC-016);
   - a second launch: one window and one Core;
   - a second launch with a different path, declined through the confirmation double: workspace kept;
@@ -492,15 +492,15 @@ the same and a different path — on each platform (SC-007, SC-008, SC-016).
 
 ### Implementation for User Story 4
 
-- [ ] T075 [US4] Implement the stop sequence in `apps/desktop/src-tauri/src/shutdown.rs`, integrated in `apps/desktop/src-tauri/src/supervisor.rs`:
+- [X] T075 [US4] Implement the stop sequence in `apps/desktop/src-tauri/src/shutdown.rs`, integrated in `apps/desktop/src-tauri/src/supervisor.rs`:
   - reasons `window_closed`, `quit`, `workspace_change`, `check_again` and `os_session_end`;
   - a grace of 10 s from the injected clock;
   - `outcome` recorded, the log line written, and `closing` and `stop_outcome` in `status`.
 
   T069 and T071 must pass.
-- [ ] T076 [US4] Implement the orphan guarantees in `apps/desktop/src-tauri/src/platform/windows.rs` (a job object that kills on close), `apps/desktop/src-tauri/src/platform/linux.rs` (a parent-death signal in `pre_exec`) and `apps/desktop/src-tauri/src/platform/unix.rs` (a process-group leader, and a group signal on forced stop). T070 must pass.
-- [ ] T077 [US4] Hold the close request until the stop sequence ends, show "Closing…", and implement `quit_now` in `apps/desktop/src-tauri/src/main.rs` and `apps/desktop/src-tauri/src/commands.rs`. Implement `apps/desktop/src/view/ClosingView.tsx`. T072 must pass.
-- [ ] T078 [US4] Implement single-instance handling and the second-launch confirmation in `apps/desktop/src-tauri/src/instance.rs` and `apps/desktop/src-tauri/src/main.rs`:
+- [X] T076 [US4] Implement the orphan guarantees in `apps/desktop/src-tauri/src/platform/windows.rs` (a job object that kills on close), `apps/desktop/src-tauri/src/platform/linux.rs` (a parent-death signal in `pre_exec`) and `apps/desktop/src-tauri/src/platform/unix.rs` (a process-group leader, and a group signal on forced stop). T070 must pass.
+- [X] T077 [US4] Hold the close request until the stop sequence ends, show "Closing…", and implement `quit_now` in `apps/desktop/src-tauri/src/main.rs` and `apps/desktop/src-tauri/src/commands.rs`. Implement `apps/desktop/src/view/ClosingView.tsx`. T072 must pass.
+- [X] T078 [US4] Implement single-instance handling and the second-launch confirmation in `apps/desktop/src-tauri/src/instance.rs` and `apps/desktop/src-tauri/src/main.rs`:
   - `tauri-plugin-single-instance` and a native confirmation dialog through `tauri-plugin-dialog`, both used from Rust only;
   - the `e2e` double replaces the dialog.
 

@@ -33,6 +33,8 @@ static WRITE: Mutex<()> = Mutex::new(());
 static CHECKPOINT: Mutex<()> = Mutex::new(());
 static CORE_PID: AtomicU32 = AtomicU32::new(0);
 static CHOICES_TAKEN: AtomicUsize = AtomicUsize::new(0);
+/// Every second-launch confirmation the double was asked, in order.
+static CONFIRMATIONS: Mutex<Vec<Value>> = Mutex::new(Vec::new());
 /// Every start directory the chooser double was given, in order.
 static CHOOSER_STARTS: Mutex<Vec<Option<String>>> = Mutex::new(Vec::new());
 
@@ -99,8 +101,31 @@ pub fn choose_folder(start: Option<&Path>) -> Option<PathBuf> {
 pub fn confirm(question: &str) -> bool {
     let answer = std::env::var("COMODOR_E2E_CONFIRM").map(|text| text == "yes")
         .unwrap_or(false);
-    record("confirm", &json!({ "question": question, "answer": answer }));
+    let entry = json!({ "question": question, "answer": answer });
+    record("confirm", &entry);
+    CONFIRMATIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(entry);
     answer
+}
+
+/// What the harness asked the application to do, the way a person or the
+/// system would: close the window, or quit. Done after the page has its
+/// reply, on a thread of its own.
+fn act_for_harness(app: &tauri::AppHandle, act: &str) {
+    use tauri::Manager;
+    let app = app.clone();
+    let act = act.to_string();
+    let _ = std::thread::Builder::new().name("e2e-act".into()).spawn(move || match act.as_str() {
+        "close-window" => {
+            if let Some(window) = app.get_webview_window(crate::MAIN_WINDOW) {
+                let _ = window.close();
+            }
+        }
+        "quit" => {
+            let _ = app.state::<crate::commands::Desktop>().supervisor
+                .stop(crate::shutdown::StopReason::Quit);
+        }
+        _ => {}
+    });
 }
 
 /// The scenario runner's one command. A checkpoint blocks until the harness
@@ -117,11 +142,18 @@ pub fn e2e_report(app: tauri::AppHandle, result: Value) -> Result<Value, String>
             if reply.trim().is_empty() {
                 return Err("the harness closed its channel".into());
             }
-            serde_json::from_str(reply.trim()).map_err(|problem| problem.to_string())
+            let reply: Value = serde_json::from_str(reply.trim()).map_err(|problem| problem.to_string())?;
+            if let Some(act) = reply.get("act").and_then(Value::as_str) {
+                act_for_harness(&app, act);
+            }
+            Ok(reply)
         }
         Some("query") => match result.get("what").and_then(Value::as_str) {
             Some("listeners") => Ok(json!({ "listeners": network_listeners() })),
             Some("core_pid") => Ok(json!({ "pid": CORE_PID.load(Ordering::SeqCst) })),
+            Some("confirmations") => Ok(json!({
+                "confirmations": *CONFIRMATIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+            })),
             Some("refused") => Ok(json!({
                 "refused": *REFUSED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
             })),

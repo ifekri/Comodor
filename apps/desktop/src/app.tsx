@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import type { NativeApi } from "./bridge.ts";
 import { Connection } from "./connection.ts";
 import type { Kept } from "./state.ts";
+import { ClosingView, StopOutcome } from "./view/ClosingView.tsx";
 import { FailureView } from "./view/FailureView.tsx";
 import { OpenLink } from "./view/InertText.tsx";
 import { SessionView } from "./view/SessionView.tsx";
@@ -40,6 +41,7 @@ export function App({ api }: { api: NativeApi }) {
   }, [api, failed, status?.failure?.message]);
 
   const retry = () => void api.invoke("retry").catch(() => {});
+  const quitNow = () => void api.invoke("quit_now").catch(() => {});
   const choose = () => void api.invoke("choose_workspace").catch(() => {});
   const open = useMemo(() => (url: string) => void api.invoke("open_external", { url }).catch(() => {}),
                        [api]);
@@ -51,6 +53,7 @@ export function App({ api }: { api: NativeApi }) {
     return (
       <OpenLink.Provider value={open}>
         <main className="window" data-testid="window">
+          <StopOutcome outcome={status.stop_outcome} />
           <SessionView client={client} kept={kept} status={status} />
         </main>
       </OpenLink.Provider>
@@ -60,6 +63,10 @@ export function App({ api }: { api: NativeApi }) {
     <OpenLink.Provider value={open}>
       <main className="window" data-testid="window">
         <StatusStrip status={status} model={null} />
+        <StopOutcome outcome={status.stop_outcome} />
+        {status.state === "stopping" && (
+          <ClosingView secondsRemaining={status.closing?.seconds_remaining ?? 0} onQuitNow={quitNow} />
+        )}
         {status.state === "absent" && <WorkspaceGate notice={status.notice} onChoose={choose} />}
         {status.state === "failed" && status.failure !== null && (
           <FailureView failure={status.failure} diagnostics={diagnostics}
