@@ -251,6 +251,24 @@ jobs:
       - name: Release command list
         run: npm run -w apps/desktop release-manifest
 
+      # The real system folder chooser (SC-017): the release build, launched
+      # twice with a stored folder; the dialog window alone is captured.
+      # Recorded for review here, on a runner with nothing else on screen.
+      - name: Folder chooser tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y xdotool imagemagick
+
+      - name: Real folder chooser evidence
+        run: npm run -w apps/desktop chooser-evidence -- --skip-build
+
+      - name: Keep the folder chooser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-chooser-${{ matrix.os }}
+          path: apps/desktop/e2e/out/chooser-evidence
+          if-no-files-found: ignore
+
       - name: Keep what the scenarios left
         if: always()
         uses: actions/upload-artifact@v4
