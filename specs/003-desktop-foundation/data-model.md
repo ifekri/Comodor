@@ -159,7 +159,7 @@ A JSON file in the application's own per-user configuration directory.
 | --- | --- | --- |
 | `version` | integer | schema version, starting at 1 |
 | `window` | `{width, height, x, y, maximized}` | window geometry |
-| `last_selected_folder` | string or absent | the folder the person last chose; it only decides where the chooser opens (OD-3) and never starts a Core by itself |
+| `last_selected_folder` | string, platform path, or absent | the folder the person last chose; it only decides where the chooser opens (OD-3) and never starts a Core by itself. Text when the path is valid Unicode, otherwise the platform's own reversible form, so it comes back exactly; a form this platform cannot read counts as absent |
 
 Validation:
 

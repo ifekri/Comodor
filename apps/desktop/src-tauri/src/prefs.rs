@@ -26,8 +26,44 @@ pub struct Preferences {
     pub version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window: Option<WindowGeometry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_selected_folder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none",
+            serialize_with = "folder::save", deserialize_with = "folder::load")]
+    pub last_selected_folder: Option<PathBuf>,
+}
+
+/// The folder, stored losslessly: as text when its path is valid Unicode,
+/// otherwise in the platform's own form (serde's `OsString` encoding), so a
+/// path that is not UTF-8 comes back exactly. A stored form this platform
+/// cannot read is an absent folder, not a malformed file.
+mod folder {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    use serde::de::IgnoredAny;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn save<S: Serializer>(folder: &Option<PathBuf>, out: S) -> Result<S::Ok, S::Error> {
+        match folder.as_deref().map(|path| (path.to_str(), path.as_os_str())) {
+            Some((Some(text), _)) => out.serialize_str(text),
+            Some((None, native)) => native.serialize(out),
+            None => out.serialize_none(),
+        }
+    }
+
+    pub fn load<'de, D: Deserializer<'de>>(stored: D) -> Result<Option<PathBuf>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Stored {
+            Text(String),
+            Native(OsString),
+            Other(IgnoredAny),
+        }
+        Ok(match Stored::deserialize(stored)? {
+            Stored::Text(text) => Some(PathBuf::from(text)),
+            Stored::Native(native) => Some(PathBuf::from(native)),
+            Stored::Other(_) => None,
+        })
+    }
 }
 
 impl Default for Preferences {
@@ -91,7 +127,7 @@ mod tests {
         Preferences {
             version: 1,
             window: Some(WindowGeometry { width: 1100, height: 760, x: 10, y: -20, maximized: false }),
-            last_selected_folder: Some("/work/project".into()),
+            last_selected_folder: Some(PathBuf::from("/work/project")),
         }
     }
 
@@ -108,6 +144,43 @@ mod tests {
         assert_eq!(empty, json!({"version": 1}), "an absent folder is absent, not null");
     }
 
+    /// Review finding (PR #62): the folder comes back exactly, even when its
+    /// path is not valid Unicode; a Unicode path is still stored as text.
+    #[test]
+    fn the_last_folder_round_trips_losslessly() {
+        let dir = Dir::new("lossless");
+        #[cfg(unix)]
+        let odd: PathBuf = {
+            use std::os::unix::ffi::OsStrExt;
+            std::ffi::OsStr::from_bytes(b"/work/caf\xe9").into()
+        };
+        #[cfg(windows)]
+        let odd: PathBuf = {
+            use std::os::windows::ffi::OsStringExt;
+            std::ffi::OsString::from_wide(&[0x43, 0x3a, 0x5c, 0xd800]).into()
+        };
+        assert!(odd.to_str().is_none(), "the path is not valid Unicode");
+        let stored = Preferences { last_selected_folder: Some(odd.clone()), ..full() };
+        save(&dir.file(), &stored).unwrap();
+        assert_eq!(load(&dir.file()).last_selected_folder, Some(odd));
+
+        save(&dir.file(), &full()).unwrap();
+        let value: Value = serde_json::from_str(&std::fs::read_to_string(dir.file()).unwrap()).unwrap();
+        assert_eq!(value["last_selected_folder"], "/work/project", "a Unicode path stays text");
+    }
+
+    #[test]
+    fn a_folder_this_platform_cannot_read_is_absent_and_the_rest_is_kept() {
+        let dir = Dir::new("other-platform");
+        let foreign = if cfg!(windows) { r#"{"Unix":[47,119]}"# } else { r#"{"Windows":[67,58]}"# };
+        std::fs::write(dir.file(), format!(
+            r#"{{"version":1,"window":{{"width":1,"height":2,"x":3,"y":4,"maximized":true}},"last_selected_folder":{foreign}}}"#))
+            .unwrap();
+        let loaded = load(&dir.file());
+        assert_eq!(loaded.last_selected_folder, None);
+        assert!(loaded.window.is_some(), "the window geometry survives");
+    }
+
     #[test]
     fn a_missing_file_is_the_default() {
         let dir = Dir::new("missing");
@@ -119,7 +192,7 @@ mod tests {
         let dir = Dir::new("unknown");
         std::fs::write(dir.file(), r#"{"version":1,"last_selected_folder":"/a","token":"CANARY-PREF"}"#).unwrap();
         let loaded = load(&dir.file());
-        assert_eq!(loaded.last_selected_folder.as_deref(), Some("/a"));
+        assert_eq!(loaded.last_selected_folder.as_deref(), Some(Path::new("/a")));
         save(&dir.file(), &loaded).unwrap();
         let written = std::fs::read_to_string(dir.file()).unwrap();
         assert!(!written.contains("CANARY-PREF"), "{written}");

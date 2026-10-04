@@ -56,10 +56,9 @@ pub fn check(path: &Path) -> Result<(), Failure> {
 /// Ask the chooser, starting at the last selected folder while it exists, and
 /// store a choice.
 pub fn choose(preferences: &mut Preferences, chooser: &mut dyn Chooser) -> Option<PathBuf> {
-    let start = preferences.last_selected_folder.as_deref().map(Path::new)
-        .filter(|folder| folder.is_dir());
+    let start = preferences.last_selected_folder.as_deref().filter(|folder| folder.is_dir());
     let chosen = chooser.choose(start)?;
-    preferences.last_selected_folder = Some(chosen.display().to_string());
+    preferences.last_selected_folder = Some(chosen.clone());
     Some(chosen)
 }
 
@@ -124,7 +123,7 @@ mod tests {
     }
 
     fn prefs_at(folder: Option<&Path>) -> Preferences {
-        Preferences { last_selected_folder: folder.map(|p| p.display().to_string()),
+        Preferences { last_selected_folder: folder.map(Path::to_path_buf),
                       ..Preferences::default() }
     }
 
@@ -196,7 +195,7 @@ mod tests {
         let mut prefs = prefs_at(None);
         assert_eq!(resolve_launch(None, &mut prefs, &mut chooser),
                    Resolution::Chosen { source: Source::Chooser, path: chosen.0.clone(), report: None });
-        assert_eq!(prefs.last_selected_folder, Some(chosen.0.display().to_string()));
+        assert_eq!(prefs.last_selected_folder, Some(chosen.0.clone()));
     }
 
     #[test]
@@ -229,7 +228,7 @@ mod tests {
         let mut chooser = Recorder::answering(vec![Some(second.0.clone())]);
         assert_eq!(choose(&mut prefs, &mut chooser), Some(second.0.clone()));
         assert_eq!(chooser.starts, vec![Some(first.0.clone())]);
-        assert_eq!(prefs.last_selected_folder, Some(second.0.display().to_string()));
+        assert_eq!(prefs.last_selected_folder, Some(second.0.clone()));
     }
 
     #[test]
