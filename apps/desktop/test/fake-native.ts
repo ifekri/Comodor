@@ -18,6 +18,7 @@ export function status(overrides: Partial<CoreStatus> = {}): CoreStatus {
   return {
     state: "ready",
     workspace: "/work/project",
+    workspace_id: "launch:1",
     failure: null,
     restart_count: 0,
     restart_limit: 3,

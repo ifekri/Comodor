@@ -53,7 +53,7 @@ export interface Kept {
   /** The live session of the Core the page last held; a reload finds it. */
   liveId: string | undefined;
   unsentTurn: string | undefined;
-  /** The workspace the stored conversation belongs to. */
+  /** The workspace (its native id) the stored conversation belongs to. */
   workspace: string | undefined;
 }
 

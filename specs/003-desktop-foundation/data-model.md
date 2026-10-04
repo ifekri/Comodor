@@ -201,7 +201,7 @@ clears the first three:
 | `core_status` | the last `CoreProcess.state` and `failure` the native side reported |
 | `stored_id` | the conversation to reopen after a restart (R12) |
 | `live_id` | the live session of the Core the page last held, which a reload finds in `session.list` |
-| `workspace` | the workspace `stored_id` belongs to |
+| `workspace` | the workspace `stored_id` belongs to, by the native side's lossless `workspace_id` |
 | `unsent_turn` | the `turn_id` the Core accepted and never completed, shown as interrupted after a crash |
 | `composer_text` | the unsent prompt |
 | `interaction_cursor` | which option of the pending form is focused; question selection state comes from `@comodor/questions` |

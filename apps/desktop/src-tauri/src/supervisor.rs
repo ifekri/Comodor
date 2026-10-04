@@ -117,7 +117,11 @@ pub enum Effect {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Status {
     pub state: State,
+    /// For display: a path that is not UTF-8 loses bytes here.
     pub workspace: Option<String>,
+    /// Which workspace, losslessly: it changes exactly when the folder
+    /// does, and is never reused within a launch.
+    pub workspace_id: Option<String>,
     pub failure: Option<Failure>,
     pub restart_count: u32,
     pub restart_limit: u32,
@@ -139,6 +143,10 @@ pub const RESTART_LIMIT: u32 = crate::restart::LIMIT;
 pub struct Machine {
     state: State,
     workspace: Option<PathBuf>,
+    /// Bumped whenever the workspace becomes a different folder.
+    workspace_epoch: u64,
+    /// This launch, so a `workspace_id` never repeats one from another.
+    launch: u32,
     /// The Core whose observations count; anything from another is stale.
     core: Option<CoreId>,
     /// A Core stopped for a fault that has not exited yet: no other Core
@@ -176,6 +184,8 @@ impl Machine {
         Self {
             state: State::Absent,
             workspace: None,
+            workspace_epoch: 0,
+            launch: std::process::id(),
             core: None,
             faulted: None,
             deferred: false,
@@ -201,6 +211,7 @@ impl Machine {
         Status {
             state: self.state,
             workspace: self.workspace.as_ref().map(|path| path.display().to_string()),
+            workspace_id: self.workspace.as_ref().map(|_| format!("{}:{}", self.launch, self.workspace_epoch)),
             failure: self.failure.clone(),
             restart_count: self.restarts.count(),
             restart_limit: RESTART_LIMIT,
@@ -276,7 +287,7 @@ impl Machine {
                 if !matches!(self.state, State::Absent | State::Failed | State::Stopped) {
                     return Err("a Core is already running in this window".into());
                 }
-                self.workspace = Some(workspace);
+                self.set_workspace(workspace);
                 self.notice = None;
                 Ok(self.start())
             }
@@ -422,7 +433,7 @@ impl Machine {
                 vec![Effect::StatusChanged, Effect::Finished]
             }
             StopReason::WorkspaceChange(path) => {
-                self.workspace = Some(path);
+                self.set_workspace(path);
                 self.failure = None;
                 let effects = self.start();
                 self.notice = forced.then(|| shutdown::FORCED_NOTICE.to_string());
@@ -439,6 +450,14 @@ impl Machine {
             effects.push(Effect::PageClosed { generation, reason: "the Core was stopped".into() });
         }
         effects
+    }
+
+    /// The workspace is now `path`; a different folder is a new identity.
+    fn set_workspace(&mut self, path: PathBuf) {
+        if self.workspace.as_ref() != Some(&path) {
+            self.workspace_epoch += 1;
+        }
+        self.workspace = Some(path);
     }
 
     fn is_current(&self, core: CoreId) -> bool {
@@ -1197,6 +1216,60 @@ mod tests {
         let (mut machine, _) = ready();
         machine.handle(Input::Stop { reason: StopReason::CheckAgain }).unwrap();
         assert!(machine.handle(Input::Stop { reason: StopReason::WorkspaceChange("/x".into()) }).is_err());
+    }
+
+    /// Review finding (PR #62): the page tells workspaces apart by an id
+    /// that changes exactly when the folder does — never by the display
+    /// string, which loses bytes that are not UTF-8.
+    #[test]
+    fn the_workspace_id_changes_exactly_when_the_folder_does() {
+        let (mut machine, core) = ready();
+        let first = machine.status().workspace_id.expect("an id with a workspace");
+        // A restart, "Check again" and the same folder again keep it.
+        let (_, next) = crash(&mut machine, core);
+        assert_eq!(machine.status().workspace_id.as_ref(), Some(&first));
+        machine.handle(Input::Stop { reason: StopReason::CheckAgain }).unwrap();
+        machine.handle(Input::Exited { core: next.unwrap(), code: Some(0) }).unwrap();
+        assert_eq!(machine.status().workspace_id.as_ref(), Some(&first));
+        let current = spawned_core(&machine);
+        machine.handle(Input::Stop { reason: StopReason::WorkspaceChange(WS.into()) }).unwrap();
+        machine.handle(Input::Exited { core: current, code: Some(0) }).unwrap();
+        assert_eq!(machine.status().workspace_id.as_ref(), Some(&first));
+
+        // Another folder is another id, even when it displays the same.
+        let current = spawned_core(&machine);
+        machine.handle(Input::Stop { reason: StopReason::WorkspaceChange(lookalike(1)) }).unwrap();
+        machine.handle(Input::Exited { core: current, code: Some(0) }).unwrap();
+        let second = machine.status().workspace_id.unwrap();
+        assert_ne!(second, first);
+        let shown = machine.status().workspace;
+        let current = spawned_core(&machine);
+        machine.handle(Input::Stop { reason: StopReason::WorkspaceChange(lookalike(2)) }).unwrap();
+        machine.handle(Input::Exited { core: current, code: Some(0) }).unwrap();
+        assert_ne!(machine.status().workspace_id.unwrap(), second);
+        if cfg!(unix) {
+            assert_eq!(machine.status().workspace, shown, "the two folders display the same");
+        }
+        assert_eq!(Machine::new().status().workspace_id, None);
+    }
+
+    /// Two folders whose names differ only in a byte that is not UTF-8 (on
+    /// Unix); elsewhere, simply two folders.
+    fn lookalike(n: u8) -> PathBuf {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            PathBuf::from(std::ffi::OsStr::from_bytes(&[b'/', b'w', 0x7f + n]))
+        }
+        #[cfg(not(unix))]
+        {
+            PathBuf::from(format!("/w{n}"))
+        }
+    }
+
+    /// The Core the machine started last.
+    fn spawned_core(machine: &Machine) -> CoreId {
+        machine.core.expect("a Core is running")
     }
 
     #[test]

@@ -30,7 +30,10 @@ export interface CoreFailure {
 /** The Core's lifecycle, as the `status` command and channel report it. */
 export interface CoreStatus {
   readonly state: string;
+  /** For display only: a path that is not UTF-8 loses bytes in it. */
   readonly workspace: string | null;
+  /** Which workspace, losslessly; it changes exactly when the folder does. */
+  readonly workspace_id: string | null;
   readonly failure: CoreFailure | null;
   readonly restart_count: number;
   readonly restart_limit: number;

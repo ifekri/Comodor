@@ -145,11 +145,24 @@ describe("what the window keeps", () => {
 
     const next = coreWith("s2", "/work/other");
     native.replace(next, { ...native.current, state: "stopping" },
-                   { ...native.current, state: "ready", workspace: "/work/other" });
+                   { ...native.current, state: "ready", workspace: "/work/other", workspace_id: "launch:2" });
     await until(() => next.requests("session.create").length === 1, "a new conversation");
     expect(next.requests("session.open")).toEqual([]);
     await until(() => container.querySelector('[data-testid="composer"]'), "the composer");
     expect(container.querySelector('[data-testid="recovery"]')).toBeNull();
+  });
+});
+
+describe("telling workspaces apart", () => {
+  /** Review finding (PR #62): two folders can display the same (a byte that
+   * is not UTF-8); the native side's id tells them apart. */
+  test("a folder that only looks the same is still a new conversation", async () => {
+    const { native } = await open();
+    const next = coreWith("s2");
+    native.replace(next, { ...native.current, state: "stopping" },
+                   { ...native.current, state: "ready", workspace_id: "launch:2" });
+    await until(() => next.requests("session.create").length === 1, "a new conversation");
+    expect(next.requests("session.open")).toEqual([]);
   });
 });
 
