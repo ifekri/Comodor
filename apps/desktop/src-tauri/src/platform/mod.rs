@@ -121,7 +121,10 @@ pub fn build_command(command: &CoreCommand, workspace: &Path,
 /// Start the Core in `workspace`.
 pub fn spawn_core(command: &CoreCommand, workspace: &Path,
                   test_env: &[(OsString, OsString)]) -> io::Result<SpawnedCore> {
-    let mut child = build_command(command, workspace, test_env).spawn()?;
+    let mut built = build_command(command, workspace, test_env);
+    // Windows: held until it is in its job (`Tree::adopt` lets it run).
+    imp::start_suspended(&mut built);
+    let mut child = built.spawn()?;
     let tree = match imp::Tree::adopt(&child) {
         Ok(tree) => tree,
         Err(problem) => {

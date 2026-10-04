@@ -12,6 +12,9 @@ pub fn configure(command: &mut Command) {
     super::linux::arm_parent_death(command);
 }
 
+/// Nothing to hold back here: the group exists from the first instruction.
+pub fn start_suspended(_command: &mut Command) {}
+
 /// The Core's process group, and the watchdog that ends it if the
 /// application dies (`watchdog.rs`).
 pub struct Tree {

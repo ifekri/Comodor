@@ -45,10 +45,58 @@ export interface SessionView {
   readonly recovery: readonly string[];
 }
 
-/** What survives a Core restart within this window (R12). */
+/** What survives a Core restart, and a reload of this window, within one
+ * launch (R12). */
 export interface Kept {
+  /** The stored conversation a new Core reopens. */
   storedId: string | undefined;
+  /** The live session of the Core the page last held; a reload finds it. */
+  liveId: string | undefined;
   unsentTurn: string | undefined;
+  /** The workspace the stored conversation belongs to. */
+  workspace: string | undefined;
+}
+
+const KEPT_KEY = "comodor.kept";
+type KeptFields = { -readonly [K in keyof Kept]: Kept[K] };
+
+/**
+ * The window's `Kept`, mirrored into `storage` — the window's session
+ * storage, which a reload of its content keeps and a new launch does not.
+ * Without storage it lives in memory only.
+ */
+export function keptIn(storage: Storage | undefined): Kept {
+  const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+  let saved: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(storage?.getItem(KEPT_KEY) ?? "{}");
+    if (parsed !== null && typeof parsed === "object") saved = parsed as Record<string, unknown>;
+  } catch {
+    saved = {};
+  }
+  const fields: KeptFields = {
+    storedId: text(saved["storedId"]), liveId: text(saved["liveId"]),
+    unsentTurn: text(saved["unsentTurn"]), workspace: text(saved["workspace"]),
+  };
+  const save = () => {
+    try {
+      storage?.setItem(KEPT_KEY, JSON.stringify(fields));
+    } catch {
+      // Kept in memory only, then: a reload starts from the live session.
+    }
+  };
+  const kept = {} as Kept;
+  for (const key of Object.keys(fields) as (keyof Kept)[]) {
+    Object.defineProperty(kept, key, {
+      enumerable: true,
+      get: () => fields[key],
+      set: (value: string | undefined) => {
+        fields[key] = value;
+        save();
+      },
+    });
+  }
+  return kept;
 }
 
 function sessionOf(params: Record<string, unknown>): string | undefined {
@@ -57,7 +105,7 @@ function sessionOf(params: Record<string, unknown>): string | undefined {
   return typeof session?.["id"] === "string" ? session["id"] : undefined;
 }
 
-export function useSession(client: CoreClient, kept: Kept): SessionView {
+export function useSession(client: CoreClient, kept: Kept, workspace: string | null): SessionView {
   const [state, dispatch] = useReducer(reduce, initial);
   const [intent, setIntent] = useState<ModeIntent>(beginIntent("act"));
   const latest = useRef(state);
@@ -97,20 +145,40 @@ export function useSession(client: CoreClient, kept: Kept): SessionView {
         kept.unsentTurn = undefined;
       }
     });
+    let closed = false;
     const unlost = client.onClose((reason) => {
+      closed = true;
       if (alive) dispatch({ type: "lost", reason });
     });
     void (async () => {
       try {
         const notes: string[] = [];
-        let session: Session | undefined;
-        if (kept.storedId) {
+        // Another workspace is another conversation: nothing from the last
+        // one is reopened in it, or called interrupted there.
+        if (kept.workspace !== (workspace ?? undefined)) {
+          kept.storedId = undefined;
+          kept.liveId = undefined;
+          kept.unsentTurn = undefined;
+          kept.workspace = workspace ?? undefined;
+        }
+        // A reload of this window finds its live session in the same Core;
+        // a new Core has none until one is opened.
+        const live = await client.call("session.list")
+          .then((answer) => (answer["sessions"] as Session[] | undefined) ?? [])
+          .catch(() => [] as Session[]);
+        let session: Session | undefined = live.find((one) => one.id === kept.liveId);
+        if (session) {
+          // A reload: the same Core, the same conversation.
+        } else if (kept.storedId) {
           // After a restart: the stored conversation is reopened. Opening
           // gives a live session with an id of its own; the stored record
           // keeps its id, which is what a later restart opens again.
           session = await client.call("session.open", { session_id: kept.storedId })
             .then((answer) => answer["session"] as Session)
             .catch(() => undefined);
+          // A connection that went meanwhile says nothing about what is
+          // stored: the next client tries again.
+          if (!alive || closed) return;
           if (!session) {
             notes.push("The previous conversation could not be reopened, so a new one was started.");
             kept.storedId = undefined;
@@ -121,11 +189,7 @@ export function useSession(client: CoreClient, kept: Kept): SessionView {
             kept.unsentTurn = undefined;
           }
         } else {
-          // A reload of this window: its Core is the same one, and so is its
-          // live session.
-          const live = await client.call("session.list")
-            .then((answer) => (answer["sessions"] as Session[] | undefined) ?? [])
-            .catch(() => [] as Session[]);
+          // A reload that kept nothing: the Core's live session, if any.
           session = live[0];
           if (session) kept.storedId = session.id;
         }
@@ -133,6 +197,7 @@ export function useSession(client: CoreClient, kept: Kept): SessionView {
           session = (await client.call("session.create"))["session"] as Session;
           kept.storedId = session.id;
         }
+        kept.liveId = session.id;
         if (!alive) return;
         setRecovery(notes);
         dispatch({ type: "connected", session });
@@ -149,7 +214,7 @@ export function useSession(client: CoreClient, kept: Kept): SessionView {
       stop();
       unlost();
     };
-  }, [client, kept, resync]);
+  }, [client, kept, workspace, resync]);
 
   // A hole in the sequence means an event never arrived, and no later event
   // repairs that: the Core is asked for the whole session again.

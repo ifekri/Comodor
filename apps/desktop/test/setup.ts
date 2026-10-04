@@ -6,9 +6,16 @@
  * window, and the offline rule (FR-034) says nothing in a test may.
  */
 
+import { beforeEach } from "bun:test";
+
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 GlobalRegistrator.register({ url: "http://localhost/" });
+
+// Each test is a fresh launch: nothing a window kept carries over.
+beforeEach(() => {
+  sessionStorage.clear();
+});
 
 const refuse = (): never => {
   throw new Error("window tests run offline: no network access");

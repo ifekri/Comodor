@@ -38,6 +38,8 @@ export class FakeNative {
   chosen: string | null = null;
   private deliver: ((message: Inbound) => void) | undefined;
   private generation = 0;
+  /** The generation whose lines reach the Core; none once its Core went. */
+  private live: number | undefined;
 
   constructor(initial: CoreStatus = status(), core: FakeCore = new FakeCore()) {
     this.current = initial;
@@ -55,11 +57,23 @@ export class FakeNative {
    * the status says so, and `next` is the Core the next connection reaches.
    */
   restart(next: FakeCore, count = 1): void {
-    this.push({ ...this.current, state: "restarting", restart_count: count });
+    this.replace(next, { ...this.current, state: "restarting", restart_count: count },
+                 { ...this.current, state: "ready", restart_count: count });
+  }
+
+  /**
+   * One Core replaced by `next`, in the order the native side keeps: the
+   * status (`during`), then the page's connection closed, then — once the
+   * next Core is ready — `after`. A line from the old generation is refused.
+   */
+  replace(next: FakeCore, during: CoreStatus, after: CoreStatus): void {
+    this.push(during);
     const old = this.core;
     this.core = next;
+    this.live = undefined;
+    this.deliver?.({ kind: "closed", reason: "the Core stopped" });
     old.end();
-    this.push({ ...this.current, state: "ready", restart_count: count });
+    this.push(after);
   }
 
   commands(name: string): Call[] {
@@ -72,6 +86,7 @@ export class FakeNative {
       switch (command) {
         case "connect": {
           this.generation += 1;
+          this.live = this.generation;
           const deliver = args?.["on"] as (message: Inbound) => void;
           this.deliver = deliver;
           deliver({ kind: "status", status: this.current });
@@ -82,6 +97,7 @@ export class FakeNative {
           return { generation: this.generation } as T;
         }
         case "send_line":
+          if (args?.["generation"] !== this.live) throw new Error("the generation is not current");
           this.core.write(String(args?.["line"]));
           return {} as T;
         case "status":

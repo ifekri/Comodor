@@ -37,6 +37,8 @@ export class FakeCore implements Transport {
   readonly handlers = new Map<string, (params: Params, id: string) => Answer>();
 
   private seq = 0;
+  /** The sessions live in this Core: created or opened in it. */
+  private live = new Set<string>();
   private queued: string[] = [];
   private wake: (() => void) | undefined;
   private done = false;
@@ -121,11 +123,12 @@ export class FakeCore implements Transport {
                          "tool_events", "tasks", "delegates", "usage"],
         } };
       case "session.create":
+      case "session.open":
+        this.live.add(this.session.id);
         return { result: { session: this.session } };
       case "session.list":
-        return { result: { sessions: [this.session] } };
-      case "session.open":
-        return { result: { session: this.session } };
+        // Only what is live in this Core, as the real one answers.
+        return { result: { sessions: this.live.has(this.session.id) ? [this.session] : [] } };
       case "session.snapshot": {
         const at = Number(this.snapshot["revision"] ?? 0);
         if (at > this.seq) this.seq = at;

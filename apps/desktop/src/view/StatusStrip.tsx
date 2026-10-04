@@ -41,13 +41,13 @@ export function StatusStrip({ status, model, onChangeWorkspace }: {
     <header className="status-strip" data-testid="status-strip" data-state={status.state}>
       <span className={`status-state state-${status.state}`}>{stateLabel(status.state)}</span>
       {status.workspace !== null && (
-        <span className="status-workspace" title={status.workspace}><InertText text={status.workspace} /></span>
+        <span className="status-workspace" title={status.workspace}><InertText text={status.workspace} linked={false} /></span>
       )}
       {onChangeWorkspace !== undefined && CHANGEABLE.has(status.state) && (
         <button type="button" className="status-change" onClick={onChangeWorkspace}>Change workspace…</button>
       )}
       {status.state === "restarting" && status.notice !== null && (
-        <span className="status-notice"><InertText text={status.notice} /></span>
+        <span className="status-notice"><InertText text={status.notice} linked={false} /></span>
       )}
       {model !== null && (
         <>

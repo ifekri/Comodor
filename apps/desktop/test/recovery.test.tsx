@@ -106,6 +106,53 @@ describe("after a restart", () => {
   });
 });
 
+/** A Core whose live session has its own id, as `session.open` gives. */
+function coreWith(id: string, workspace = "/work/project"): FakeCore {
+  const core = new FakeCore();
+  core.session = { ...core.session, id, workspace };
+  core.snapshot = { ...core.snapshot, session: core.session };
+  return core;
+}
+
+/** Review findings (PR #62): which conversation a new Core reopens. */
+describe("what the window keeps", () => {
+  test("a reload keeps the stored conversation for the next restart", async () => {
+    const { native } = await open();
+    const second = coreWith("live-2");
+    native.restart(second);
+    await until(() => second.requests("session.snapshot").length > 0, "the reopened session");
+    expect(second.requests("session.open")[0]!.params).toEqual({ session_id: "s1" });
+
+    // The window's content reloads: a new page, the same Core.
+    await rendered!.unmount();
+    rendered = await render(<App api={native.api} />);
+    await until(() => second.requests("session.snapshot").length > 1, "the session after the reload");
+    expect(second.requests("session.open").length).toBe(1);
+    expect(second.requests("session.create")).toEqual([]);
+
+    const third = coreWith("live-3");
+    native.restart(third, 2);
+    await until(() => third.requests("session.open").length === 1, "the reopen");
+    expect(third.requests("session.open")[0]!.params).toEqual({ session_id: "s1" });
+  });
+
+  test("a new workspace starts a new conversation, with nothing called interrupted", async () => {
+    const { native, container } = await open();
+    const field = container.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;
+    await typeInto(field, "start something");
+    await press(field, "Enter");
+    await until(() => native.core.requests("session.send").length === 1, "the send");
+
+    const next = coreWith("s2", "/work/other");
+    native.replace(next, { ...native.current, state: "stopping" },
+                   { ...native.current, state: "ready", workspace: "/work/other" });
+    await until(() => next.requests("session.create").length === 1, "a new conversation");
+    expect(next.requests("session.open")).toEqual([]);
+    await until(() => container.querySelector('[data-testid="composer"]'), "the composer");
+    expect(container.querySelector('[data-testid="recovery"]')).toBeNull();
+  });
+});
+
 describe("at the restart limit", () => {
   test("the window shows the count and offers Try again", async () => {
     const native = new FakeNative(status({

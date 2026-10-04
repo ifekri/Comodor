@@ -84,6 +84,22 @@ describe("the failure views", () => {
     expect(titles.size).toBe(CLASSES.length);
   });
 
+  /** Review finding (PR #62): text from the native side was never shown
+   * through the relay, so it carries no link to open. */
+  test("a link in the failure or its diagnostics is shown as text, not offered", async () => {
+    const native = new FakeNative(status({
+      state: "failed", core: null,
+      failure: { class: "crashed", message: "see https://example.com/why" },
+    }));
+    native.diagnostics = "Traceback: details at https://example.com/trace";
+    const view = await show(native);
+    const failure = await until(() => view.container.querySelector<HTMLElement>('[data-testid="failure-view"]'),
+                                "the failure view");
+    await until(() => failure.textContent?.includes("https://example.com/trace"), "the tail");
+    expect(failure.textContent).toContain("https://example.com/why");
+    expect(failure.querySelector("button.link")).toBeNull();
+  });
+
   test('"Try again" calls retry', async () => {
     const native = new FakeNative(status({
       state: "failed", core: null,

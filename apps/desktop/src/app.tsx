@@ -3,17 +3,26 @@
  * report. Nothing here decides anything the Core owns (FR-024).
  */
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import type { NativeApi } from "./bridge.ts";
 import { Connection } from "./connection.ts";
-import type { Kept } from "./state.ts";
+import { keptIn } from "./state.ts";
 import { ClosingView, StopOutcome } from "./view/ClosingView.tsx";
 import { FailureView } from "./view/FailureView.tsx";
 import { OpenLink } from "./view/InertText.tsx";
 import { SessionView } from "./view/SessionView.tsx";
 import { StatusStrip } from "./view/StatusStrip.tsx";
 import { WorkspaceGate } from "./view/WorkspaceGate.tsx";
+
+/** The window's session storage, where it is available. */
+function windowStorage(): Storage | undefined {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return undefined;
+  }
+}
 
 export function App({ api }: { api: NativeApi }) {
   const connection = useMemo(() => new Connection(api), [api]);
@@ -22,8 +31,8 @@ export function App({ api }: { api: NativeApi }) {
     return () => connection.dispose();
   }, [connection]);
   const { status, client } = useSyncExternalStore(connection.subscribe, () => connection.snapshot);
-  // Kept for the window's whole life, across Core restarts (R12).
-  const kept = useRef<Kept>({ storedId: undefined, unsentTurn: undefined }).current;
+  // Kept for the window's whole life, across Core restarts and reloads (R12).
+  const [kept] = useState(() => keptIn(windowStorage()));
 
   const [diagnostics, setDiagnostics] = useState("");
   const failed = status?.state === "failed";

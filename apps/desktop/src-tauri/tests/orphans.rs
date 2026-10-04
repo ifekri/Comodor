@@ -40,6 +40,28 @@ fn windows_closing_the_job_ends_the_core_and_its_child() {
     assert!(wait_gone(child), "and so is its child");
 }
 
+/// Review finding (PR #62): the Core is in its job before it runs at all, so
+/// nothing it starts, however early, is outside the job. It reports, as its
+/// first act, whether it is in a job.
+#[cfg(windows)]
+#[test]
+fn windows_the_core_is_in_its_job_before_it_runs() {
+    let home = CoreHome::new("orphans-job-first");
+    let report = "import ctypes, sys; k = ctypes.windll.kernel32; inside = ctypes.c_int(0); \
+                  k.IsProcessInJob(ctypes.c_void_p(-1), None, ctypes.byref(inside)); \
+                  sys.stdout.write(str(inside.value)); sys.stdout.flush()";
+    let command = comodor_desktop::platform::CoreCommand {
+        program: support::python(),
+        args: vec!["-c".into(), report.into()],
+    };
+    let mut core = spawn_core(&command, &home.workspace, &home.env()).unwrap();
+    let (_stdin, mut stdout, _stderr) = core.take_streams();
+    let mut said = String::new();
+    std::io::Read::read_to_string(&mut stdout, &mut said).unwrap();
+    assert!(core.child.wait().unwrap().success());
+    assert_eq!(said, "1", "the Core ran inside its job");
+}
+
 #[cfg(unix)]
 #[test]
 fn unix_a_forced_stop_signals_the_whole_process_group() {

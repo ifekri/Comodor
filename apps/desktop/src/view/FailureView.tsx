@@ -32,7 +32,7 @@ export function FailureView({ failure, restarts, diagnostics, onRetry, onChoose 
   return (
     <section className="failure-view" data-testid="failure-view" data-class={failure.class}>
       <h1>{failureTitle(failure.class)}</h1>
-      <p className="failure-message"><InertText text={failure.message} /></p>
+      <p className="failure-message"><InertText text={failure.message} linked={false} /></p>
       {(failure.class === "crashed" || failure.class === "protocol_fault")
         && restarts !== undefined && restarts.count >= restarts.limit && (
         <p className="failure-count">
@@ -43,7 +43,7 @@ export function FailureView({ failure, restarts, diagnostics, onRetry, onChoose 
       {diagnostics !== "" && (
         <>
           <h2>The Core's last output</h2>
-          <pre className="diagnostics"><InertText text={diagnostics} /></pre>
+          <pre className="diagnostics"><InertText text={diagnostics} linked={false} /></pre>
         </>
       )}
       <div className="actions">

@@ -145,7 +145,9 @@ only from `cssVariables()`.
 Outside text is inert: messages, tool output, file names, model names and
 errors render as text, control characters as visible symbols (`␛`), and only
 `http`/`https` links are clickable — opened through `open_external`, which
-accepts only a link the current page was shown. The window refuses
+accepts only a link the current page was shown. Text the native side reports
+(a failure, its diagnostics, the workspace, a notice) never passed through
+the relay, so its links are shown as text only. The window refuses
 navigation away from its own pages and new windows. An unconfigured provider
 shows the direction to run `comodor setup` in a terminal, with Send
 unavailable, and "Check again" restarts the Core to read it.

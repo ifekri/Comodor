@@ -293,7 +293,7 @@ itself.
 
 | Platform | Normal stop | Application killed abruptly |
 | --- | --- | --- |
-| Windows | stop request, then end the job | the Core runs in a **job object** set to kill on close; the job dies with the application's handle, taking the Core and its descendants |
+| Windows | stop request, then end the job | the Core runs in a **job object** set to kill on close; the job dies with the application's handle, taking the Core and its descendants. The Core starts suspended and runs only once it is in the job, so nothing it starts escapes it (review finding on PR #62) |
 | Linux | stop request, then signal the Core's process group | the Core is started with a **parent-death signal**, from a dedicated long-lived supervisor thread (the signal follows the spawning thread); a **watchdog** (below) ends the Core's whole process group; stdin also reaches EOF and the Core exits (`serve_stdio`) |
 | macOS | stop request, then signal the Core's process group | a **watchdog** (below) ends the Core's whole process group; stdin reaches EOF and the Core exits through its own `close()` |
 
@@ -382,7 +382,9 @@ boundary), the page creates a new session and says the earlier one had nothing
 saved. A turn the page had sent and not seen complete is shown as interrupted
 and not saved; nothing is re-sent (FR-016). Background delegates are reported
 in the states the restarted Core's snapshot gives (`lost`), as one summary
-line; D1 has no delegate panel (D5).
+line; D1 has no delegate panel (D5). The stored id belongs to the workspace it
+was made in: after a change of workspace nothing is reopened, and a new
+conversation starts (review finding on PR #62).
 
 **Rationale**: Sessions persist at turn boundaries and `session.open`
 restores transcript, plan and title (`docs/app-architecture.md`). The
@@ -398,6 +400,13 @@ unchanged `CoreClient` over the bridge (local hello); subscribe to events; call
 `session.list` (D1 holds one session per Core) and `session.snapshot`; feed
 both into the `@comodor/session` reducer, which already drops a stale snapshot
 and applies only events above its revision (FR-011, FR-012).
+
+What the page keeps for recovery (R12: the stored id, the live session it
+last held, the interrupted turn, and their workspace) is mirrored into the
+window's session storage, which a reload keeps and a new launch does not. A
+reload therefore finds its live session in `session.list` and still knows
+the stored id a later restart must open; a reopened session's live id is
+never mistaken for it (review finding on PR #62).
 
 **Rationale**: Exactly the protocol's documented rejoin path
 (`docs/protocol.md` §Sequence numbers). The relay's generations make stale
