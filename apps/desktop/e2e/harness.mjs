@@ -280,6 +280,8 @@ async function runScenario(name) {
   run.env = env;
   const output = [];
   app.stderr.on("data", (chunk) => output.push(chunk.toString()));
+  // A reply racing the application's end fails to write; its exit decides.
+  app.stdin.on("error", () => {});
 
   const outcome = await new Promise((resolve) => {
     let result;
@@ -298,7 +300,8 @@ async function runScenario(name) {
         } catch (problem) {
           reply = { ok: false, error: String(problem) };
         }
-        app.stdin.write(`${JSON.stringify(reply)}\n`);
+        // A killed application takes no reply.
+        if (!run.killed) app.stdin.write(`${JSON.stringify(reply)}\n`);
       } else if (report.phase === "result") {
         result = report;
       }
