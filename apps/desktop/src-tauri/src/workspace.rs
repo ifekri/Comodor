@@ -62,15 +62,20 @@ pub fn choose(preferences: &mut Preferences, chooser: &mut dyn Chooser) -> Optio
     Some(chosen)
 }
 
-/// Decide the launch's workspace.
+/// Decide the launch's workspace. An invalid command-line path is told
+/// before the chooser opens, so the window shows it whatever the chooser
+/// then answers.
 pub fn resolve_launch(command_line: Option<&OsStr>, preferences: &mut Preferences,
-                      chooser: &mut dyn Chooser) -> Resolution {
+                      chooser: &mut dyn Chooser, tell: &mut dyn FnMut(&str)) -> Resolution {
     let mut report = None;
     if let Some(given) = command_line {
         let path = std::path::absolute(given).unwrap_or_else(|_| PathBuf::from(given));
         match check(&path) {
             Ok(()) => return Resolution::Chosen { source: Source::CommandLine, path, report: None },
-            Err(failure) => report = Some(failure.message),
+            Err(failure) => {
+                tell(&failure.message);
+                report = Some(failure.message);
+            }
         }
     }
     match choose(preferences, chooser) {
@@ -132,7 +137,7 @@ mod tests {
         let dir = Dir::new("cli");
         let mut chooser = Recorder::answering(vec![]);
         let mut prefs = prefs_at(None);
-        let resolution = resolve_launch(Some(dir.0.as_os_str()), &mut prefs, &mut chooser);
+        let resolution = resolve_launch(Some(dir.0.as_os_str()), &mut prefs, &mut chooser, &mut |_| {});
         assert_eq!(resolution, Resolution::Chosen { source: Source::CommandLine,
                                                     path: dir.0.clone(), report: None });
         assert!(chooser.starts.is_empty(), "no chooser");
@@ -142,7 +147,7 @@ mod tests {
     #[test]
     fn a_relative_command_line_path_is_made_absolute() {
         let mut prefs = prefs_at(None);
-        match resolve_launch(Some(OsStr::new("src")), &mut prefs, &mut Recorder::answering(vec![])) {
+        match resolve_launch(Some(OsStr::new("src")), &mut prefs, &mut Recorder::answering(vec![]), &mut |_| {}) {
             Resolution::Chosen { path, .. } => {
                 assert!(path.is_absolute(), "{path:?}");
                 assert_eq!(path, std::env::current_dir().unwrap().join("src"));
@@ -158,7 +163,7 @@ mod tests {
         let missing = stored.0.join("does-not-exist");
         let mut chooser = Recorder::answering(vec![Some(chosen.0.clone())]);
         let mut prefs = prefs_at(Some(&stored.0));
-        match resolve_launch(Some(missing.as_os_str()), &mut prefs, &mut chooser) {
+        match resolve_launch(Some(missing.as_os_str()), &mut prefs, &mut chooser, &mut |_| {}) {
             Resolution::Chosen { source, path, report } => {
                 assert_eq!(source, Source::Chooser);
                 assert_eq!(path, chosen.0);
@@ -170,12 +175,39 @@ mod tests {
         assert_eq!(chooser.starts, vec![Some(stored.0.clone())]);
     }
 
+    /// Review finding (PR #62): the bad path is reported before the chooser
+    /// opens, so the window shows it whatever the chooser then answers.
+    #[test]
+    fn an_invalid_command_line_path_is_told_before_the_chooser_opens() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        struct Logged(Rc<RefCell<Vec<String>>>, Option<PathBuf>);
+        impl Chooser for Logged {
+            fn choose(&mut self, _start: Option<&Path>) -> Option<PathBuf> {
+                self.0.borrow_mut().push("chooser".into());
+                self.1.take()
+            }
+        }
+        let chosen = Dir::new("chosen-told");
+        let missing = chosen.0.join("does-not-exist");
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut chooser = Logged(events.clone(), Some(chosen.0.clone()));
+        let told = events.clone();
+        let resolution = resolve_launch(Some(missing.as_os_str()), &mut prefs_at(None), &mut chooser,
+                                        &mut |report| told.borrow_mut().push(format!("told: {report}")));
+        assert!(matches!(resolution, Resolution::Chosen { .. }), "{resolution:?}");
+        let events = events.borrow();
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert!(events[0].starts_with("told: ") && events[0].contains(&missing.display().to_string()), "{events:?}");
+        assert_eq!(events[1], "chooser");
+    }
+
     #[test]
     fn no_path_gives_the_chooser_exactly_the_last_selected_folder() {
         let stored = Dir::new("stored-b");
         let mut chooser = Recorder::answering(vec![Some(stored.0.clone())]);
         let mut prefs = prefs_at(Some(&stored.0));
-        resolve_launch(None, &mut prefs, &mut chooser);
+        resolve_launch(None, &mut prefs, &mut chooser, &mut |_| {});
         assert_eq!(chooser.starts, vec![Some(stored.0.clone())]);
     }
 
@@ -184,7 +216,7 @@ mod tests {
         let gone = std::env::temp_dir().join(format!("comodor-ws-gone-{}", std::process::id()));
         let mut chooser = Recorder::answering(vec![]);
         let mut prefs = prefs_at(Some(&gone));
-        resolve_launch(None, &mut prefs, &mut chooser);
+        resolve_launch(None, &mut prefs, &mut chooser, &mut |_| {});
         assert_eq!(chooser.starts, vec![None]);
     }
 
@@ -193,7 +225,7 @@ mod tests {
         let chosen = Dir::new("chosen-c");
         let mut chooser = Recorder::answering(vec![Some(chosen.0.clone())]);
         let mut prefs = prefs_at(None);
-        assert_eq!(resolve_launch(None, &mut prefs, &mut chooser),
+        assert_eq!(resolve_launch(None, &mut prefs, &mut chooser, &mut |_| {}),
                    Resolution::Chosen { source: Source::Chooser, path: chosen.0.clone(), report: None });
         assert_eq!(prefs.last_selected_folder, Some(chosen.0.clone()));
     }
@@ -202,7 +234,7 @@ mod tests {
     fn a_dismissal_starts_nothing_and_says_no_workspace_chosen() {
         let mut chooser = Recorder::answering(vec![None]);
         let mut prefs = prefs_at(None);
-        assert_eq!(resolve_launch(None, &mut prefs, &mut chooser),
+        assert_eq!(resolve_launch(None, &mut prefs, &mut chooser, &mut |_| {}),
                    Resolution::Dismissed { notice: NO_WORKSPACE.into() });
         assert_eq!(prefs.last_selected_folder, None);
     }
@@ -211,7 +243,7 @@ mod tests {
     fn a_dismissal_after_a_bad_path_still_reports_the_path() {
         let missing = std::env::temp_dir().join(format!("comodor-ws-none-{}", std::process::id()));
         let mut prefs = prefs_at(None);
-        match resolve_launch(Some(missing.as_os_str()), &mut prefs, &mut Recorder::answering(vec![None])) {
+        match resolve_launch(Some(missing.as_os_str()), &mut prefs, &mut Recorder::answering(vec![None]), &mut |_| {}) {
             Resolution::Dismissed { notice } => {
                 assert!(notice.contains(NO_WORKSPACE));
                 assert!(notice.contains(&missing.display().to_string()), "{notice}");

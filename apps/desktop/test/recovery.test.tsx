@@ -116,6 +116,26 @@ function coreWith(id: string, workspace = "/work/project"): FakeCore {
 
 /** Review findings (PR #62): which conversation a new Core reopens. */
 describe("what the window keeps", () => {
+  /** Review finding (PR #62): a turn that finished while the window was
+   * reloading is not called interrupted by a later crash. */
+  test("a turn the snapshot shows finished is not called interrupted after a reload", async () => {
+    const { native, container } = await open();
+    const field = container.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;
+    await typeInto(field, "a quick one");
+    await press(field, "Enter");
+    await until(() => native.core.requests("session.send").length === 1, "the send");
+    // The window reloads; the turn ends meanwhile, and the new page only
+    // sees it in the snapshot (the session is idle).
+    await rendered!.unmount();
+    rendered = await render(<App api={native.api} />);
+    await until(() => native.core.requests("session.snapshot").length > 1, "the snapshot after the reload");
+    await until(() => rendered!.container.querySelector('[data-testid="composer"]'), "the composer");
+    const next = coreWith("live-2");
+    native.restart(next);
+    await until(() => next.requests("session.snapshot").length > 0, "the reopened session");
+    expect(byText(rendered!.container, '[data-testid="recovery"]', "interrupted")).toBeNull();
+  });
+
   test("a reload keeps the stored conversation for the next restart", async () => {
     const { native } = await open();
     const second = coreWith("live-2");

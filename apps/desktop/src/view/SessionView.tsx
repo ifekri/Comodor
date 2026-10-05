@@ -69,7 +69,7 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
               <PermissionCard key={waiting.id} interaction={waiting}
                               onReply={(choice) => session.decide("permission.reply", { choice })} />
             )}
-            <Composer busy={state.session.busy} ready={state.connection.kind === "ready" && !unconfigured}
+            <Composer busy={state.session.busy} ready={state.connection.kind === "ready" && model?.configured === true}
                       onSend={session.send} onCancel={session.cancel} />
           </div>
         )}

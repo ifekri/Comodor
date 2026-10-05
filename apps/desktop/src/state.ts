@@ -122,12 +122,15 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
       const answer = await client.call("session.snapshot", { session_id: id });
       const snapshot = answer["snapshot"] as Snapshot;
       dispatch({ type: "snapshot", snapshot });
+      // An idle session has no turn a restart could interrupt — one that
+      // ended while this page was not listening included.
+      if (snapshot.session?.busy === false) kept.unsentTurn = undefined;
       const mode = (snapshot.session?.mode ?? "act") as Mode;
       setIntent((was) => (fresh ? beginIntent(mode) : intentConfirmed(was, mode)));
     } catch (problem) {
       dispatch({ type: "lost", reason: (problem as Error).message });
     }
-  }, [client]);
+  }, [client, kept]);
 
   useEffect(() => {
     let alive = true;

@@ -25,19 +25,14 @@ pub struct Tree {
 impl Tree {
     pub fn adopt(child: &Child) -> io::Result<Self> {
         let group = child.id() as libc::pid_t;
-        let watchdog = super::watchdog::start(group);
-        // On Linux the parent-death signal still ends the Core itself, so the
-        // watchdog is best effort there. On macOS nothing else would end a
-        // Core that ignores EOF: no Core runs without one, and the caller
-        // ends the Core it just started.
-        #[cfg(target_os = "macos")]
-        let watchdog = watchdog
+        // No Core runs unguarded: on macOS nothing else ends a Core that
+        // ignores EOF, and on Linux the parent-death signal reaches the Core
+        // alone, not what it started. The caller ends the Core it just
+        // started. (Linux's `pidfd_open` is in every kernel Tauri's WebKitGTK
+        // runs on, so this fails only when resources are exhausted.)
+        let watchdog = super::watchdog::start(group)
             .map_err(|problem| io::Error::other(format!("the Core's watchdog could not start: {problem}")))?;
-        #[cfg(not(target_os = "macos"))]
-        let watchdog = watchdog.ok();
-        #[cfg(target_os = "macos")]
-        let watchdog = Some(watchdog);
-        Ok(Tree { group, watchdog: std::sync::Mutex::new(watchdog) })
+        Ok(Tree { group, watchdog: std::sync::Mutex::new(Some(watchdog)) })
     }
 
     /// Signal the whole group to end, now.

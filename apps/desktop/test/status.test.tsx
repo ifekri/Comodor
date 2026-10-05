@@ -57,6 +57,21 @@ describe("the ready strip", () => {
     expect(native.core.requests("workspace.get").length).toBe(1);
   });
 
+  /** Review finding (PR #62): Send waits until the Core says it is
+   * configured, not merely until it has not said otherwise. */
+  test("Send stays unavailable until the Core reports the provider configured", async () => {
+    const native = new FakeNative();
+    native.core.handlers.set("model.get", () => ({ hold: true }));
+    const view = await show(native);
+    const send = await until(() => byText(view.container, '[data-testid="composer"] button', "Send"), "Send");
+    await until(() => native.core.requests("model.get").length === 1, "the model asked");
+    expect((send as HTMLButtonElement).disabled).toBe(true);
+    native.core.respond(native.core.requests("model.get")[0]!.id,
+                        { provider: "fake", model: "fake-1", configured: true });
+    await until(() => !(byText(view.container, '[data-testid="composer"] button', "Send") as HTMLButtonElement).disabled,
+                "Send available");
+  });
+
   test("an unconfigured provider is shown as not configured", async () => {
     const native = new FakeNative();
     native.core.model = { provider: "", model: "", configured: false };

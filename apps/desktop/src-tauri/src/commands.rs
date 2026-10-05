@@ -54,7 +54,8 @@ impl Desktop {
             let mut preferences = lock(&self.preferences);
             let before = preferences.clone();
             let resolution = workspace::resolve_launch(command_line.as_deref(), &mut preferences,
-                                                       lock(&self.chooser).as_mut());
+                                                       lock(&self.chooser).as_mut(),
+                                                       &mut |report| self.supervisor.no_workspace(report.into()));
             if *preferences != before {
                 let _ = prefs::save(&self.prefs_path, &preferences);
             }
