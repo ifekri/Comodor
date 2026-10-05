@@ -89,6 +89,10 @@ impl CoreHome {
     }
 
     pub fn with(label: &str, options: HomeOptions) -> Self {
+        // Every Core a test starts has the application's real watchdog: this
+        // test binary is not one. A test that wants another sets it first.
+        #[cfg(unix)]
+        comodor_desktop::platform::set_watchdog_program(env!("CARGO_BIN_EXE_comodor-desktop").into());
         let scratch = Scratch::new(label);
         let home = scratch.root.join("home");
         let workspace = scratch.root.join("workspace");
