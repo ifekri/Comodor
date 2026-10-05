@@ -103,7 +103,9 @@ fn envelope(line: &str) -> Option<Value> {
     let object = |key: &str| value[key].is_object();
     let typed = match kind {
         "response" => text("id") && object("result"),
-        "error" => value["error"]["code"].is_string(),
+        // An error answers its request's id, or null when the Core could
+        // not read one; anything else would answer nothing.
+        "error" => (value["id"].is_null() || text("id")) && value["error"]["code"].is_string(),
         _ => text("event") && value["seq"].is_number() && object("params"),
     };
     typed.then_some(value)
@@ -691,6 +693,11 @@ mod tests {
             r#"{"version":2,"type":"error","id":"1","error":{"message":"y"}}"#,
             r#"{"version":2,"type":"error","id":"1","error":{"code":5}}"#,
             r#"{"version":2,"type":"error","id":"1","error":"x"}"#,
+            // An error answers a request by its id, or by null when it could
+            // not read one; anything else answers nothing.
+            r#"{"version":2,"type":"error","id":7,"error":{"code":"x"}}"#,
+            r#"{"version":2,"type":"error","id":"","error":{"code":"x"}}"#,
+            r#"{"version":2,"type":"error","id":{},"error":{"code":"x"}}"#,
         ] {
             assert!(!is_envelope(bad), "{bad}");
         }

@@ -71,7 +71,7 @@ of §5 applies) or choose another workspace; no separate stop action exists.
   the page's client would reject: not a v2 envelope, missing a field the
   schema's `x-envelope` requires, or with a field of the wrong type (`id`,
   `event` a non-empty string; `params`, `result` an object; `seq` a number;
-  an error's `code` a string).
+  an error's `code` a string and its `id` a non-empty string or null).
 - A Core stopped for a fault is never running alongside another: whatever
   follows (the restart, "Try again", another workspace) starts its Core only
   after the faulted one has exited.
