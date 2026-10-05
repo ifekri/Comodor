@@ -13,7 +13,9 @@
 //! application is fine"; and when the Core does exit on its own, the
 //! application ends its leftovers at that moment anyway, so signalling them
 //! here is the same act. The application ends the watchdog when the Core is
-//! gone.
+//! gone. Once it is watching, the watchdog writes one byte to its stdout:
+//! a watchdog that exits before that guards nothing, and counts as not
+//! started.
 
 use std::ffi::OsString;
 use std::io;
@@ -39,19 +41,39 @@ fn program() -> io::Result<PathBuf> {
     }
 }
 
-/// Start the watchdog for the Core leading process group `group`.
+/// Start the watchdog for the Core leading process group `group`, and wait
+/// until it is watching.
 pub fn start(group: libc::pid_t) -> io::Result<Child> {
+    use std::io::Read;
     use std::os::unix::process::CommandExt;
     let application = std::process::id().to_string();
-    Command::new(program()?)
+    let mut child = Command::new(program()?)
         .args([WATCHDOG_FLAG, &application, &group.to_string()])
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
         // Its own group: a signal to the application's group, or to the
         // Core's, does not take the watchdog with it.
         .process_group(0)
-        .spawn()
+        .spawn()?;
+    // One byte once it watches; end of file if it stopped before that. It
+    // never waits on anything, so this read returns promptly either way.
+    let mut ready = [0u8; 1];
+    let watching = child.stdout.take().map(|mut out| out.read(&mut ready)).transpose()?;
+    if watching != Some(1) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(io::Error::other("the watchdog stopped before it was watching"));
+    }
+    Ok(child)
+}
+
+/// Tell the application the watch is in place: one byte on stdout.
+fn watching() {
+    unsafe {
+        let _ = libc::write(1, b"w".as_ptr().cast(), 1);
+        libc::close(1);
+    }
 }
 
 /// When this process was started as a watchdog, watch, and return the exit
@@ -96,6 +118,7 @@ fn watch(application: libc::pid_t, group: libc::pid_t) -> i32 {
             end_group(group); // the Core is gone already: only leftovers remain
             return 0;
         }
+        watching();
         let mut seen: libc::kevent = std::mem::zeroed();
         loop {
             let got = libc::kevent(queue, std::ptr::null(), 0, &mut seen, 1, std::ptr::null());
@@ -131,6 +154,7 @@ fn watch(application: libc::pid_t, group: libc::pid_t) -> i32 {
             libc::pollfd { fd: app, events: libc::POLLIN, revents: 0 },
             libc::pollfd { fd: core, events: libc::POLLIN, revents: 0 },
         ];
+        watching();
         loop {
             let got = libc::poll(fds.as_mut_ptr(), 2, -1);
             if got < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {

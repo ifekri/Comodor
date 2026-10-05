@@ -10,7 +10,9 @@
  * - `hold`: true gives the fixture a hold point (`COMODOR_TEST_HOLD`).
  * - `sequence`: the `sequenced` double's per-launch behaviours, written to
  *   the file `COMODOR_TEST_SEQUENCE` names.
- * - `workspaceArgument`: true passes the workspace on the command line.
+ * - `workspaceArgument`: true passes the workspace on the command line;
+ *   `"inner"` makes the workspace a project (a `.git` marker) and passes a
+ *   folder inside it.
  * - `choose`: the chooser double's answers in order (a path, a placeholder,
  *   or `null` for a dismissal).
  * - `lastSelectedFolder`: a stored preference, a placeholder or a path.
@@ -93,5 +95,11 @@ export const SETUPS = {
     lastSelectedFolder: "$stored",
     workspaceArgument: true,
     params: { workspace: "$workspace" },
+  },
+  // FR-020: started in a folder inside a project, the Core works in the
+  // project's root, and the window shows the Core's report.
+  "workspace-project-root": {
+    workspaceArgument: "inner",
+    params: { root: "$workspace", inner: "$inner" },
   },
 };

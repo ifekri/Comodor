@@ -43,6 +43,8 @@ export interface SessionView {
   chooseMode(mode: Mode): void;
   /** What the window says about a restart: why the conversation looks as it does. */
   readonly recovery: readonly string[];
+  /** The workspace as the Core reports it (`workspace.get`), once known. */
+  readonly workspace: string | null;
 }
 
 /** What survives a Core restart, and a reload of this window, within one
@@ -112,6 +114,7 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
   latest.current = state;
   const inFlight = useRef<string | undefined>(undefined);
   const [recovery, setRecovery] = useState<string[]>([]);
+  const [coreWorkspace, setCoreWorkspace] = useState<string | null>(null);
 
   const resync = useCallback(async (id: string, fresh: boolean) => {
     dispatch({ type: "resynchronising" });
@@ -205,6 +208,10 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
         if (!alive) return;
         const info = await client.call("model.get");
         if (alive) dispatch({ type: "modelInfo", model: info as never });
+        // Where the Core works, as it says (FR-020): its project root, which
+        // may differ from the folder it was started in.
+        const where = await client.call("workspace.get");
+        if (alive && typeof where["path"] === "string") setCoreWorkspace(where["path"]);
       } catch (problem) {
         if (alive) dispatch({ type: "lost", reason: (problem as Error).message });
       }
@@ -279,5 +286,5 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
     setIntent((was) => wantMode(was, mode));
   }, []);
 
-  return { state, intent, send, cancel, decide, chooseMode, recovery };
+  return { state, intent, send, cancel, decide, chooseMode, recovery, workspace: coreWorkspace };
 }

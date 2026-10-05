@@ -32,16 +32,21 @@ export function stateLabel(state: string): string {
  * already on its way out. */
 const CHANGEABLE = new Set(["starting", "handshaking", "restarting", "ready"]);
 
-export function StatusStrip({ status, model, onChangeWorkspace }: {
+export function StatusStrip({ status, model, workspace, onChangeWorkspace }: {
   status: CoreStatus;
   model: ModelInfo | null;
+  /** Where the Core works, as it reports it; until then, the folder the
+   * native side started it in. */
+  workspace?: string | null | undefined;
   onChangeWorkspace?: (() => void) | undefined;
 }) {
   return (
     <header className="status-strip" data-testid="status-strip" data-state={status.state}>
       <span className={`status-state state-${status.state}`}>{stateLabel(status.state)}</span>
-      {status.workspace !== null && (
-        <span className="status-workspace" title={status.workspace}><InertText text={status.workspace} linked={false} /></span>
+      {(workspace ?? status.workspace) !== null && (
+        <span className="status-workspace" title={workspace ?? status.workspace ?? ""}>
+          <InertText text={workspace ?? status.workspace} linked={false} />
+        </span>
       )}
       {onChangeWorkspace !== undefined && CHANGEABLE.has(status.state) && (
         <button type="button" className="status-change" onClick={onChangeWorkspace}>Change workspace…</button>

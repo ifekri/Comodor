@@ -48,7 +48,8 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
   const unconfigured = model !== null && model.configured === false;
   return (
     <>
-      <StatusStrip status={status} model={model} onChangeWorkspace={onChangeWorkspace} />
+      <StatusStrip status={status} model={model} workspace={session.workspace}
+                   onChangeWorkspace={onChangeWorkspace} />
       {!state.session
         ? <p className="quiet">Opening the session…</p>
         : (

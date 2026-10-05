@@ -48,9 +48,8 @@ export function FailureView({ failure, restarts, diagnostics, onRetry, onChoose 
       )}
       <div className="actions">
         <button type="button" onClick={onRetry}>Try again</button>
-        {failure.class === "workspace_unavailable" && (
-          <button type="button" onClick={onChoose}>Choose workspace…</button>
-        )}
+        {/* Whatever failed, another workspace can be chosen (FR-021). */}
+        <button type="button" onClick={onChoose}>Choose workspace…</button>
       </div>
     </section>
   );

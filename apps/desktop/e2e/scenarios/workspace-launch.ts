@@ -67,6 +67,21 @@ export const workspaceChange: Scenario = async (context) => {
   return { switchedTo: shown() };
 };
 
+/**
+ * Review finding (PR #62): started in a folder inside a project, the Core
+ * works in the project's root, and the window shows where the Core works —
+ * not the folder it was started in (FR-020).
+ */
+export const workspaceProjectRoot: Scenario = async (context) => {
+  const root = String(context.params["root"]);
+  const inner = String(context.params["inner"]);
+  const shown = () => document.querySelector(".status-workspace")?.textContent ?? "";
+  await context.waitFor(() => document.querySelector('[data-testid="status-strip"][data-state="ready"]')
+    && shown() === root);
+  expect(root !== inner && inner.startsWith(root), `started inside the project: ${inner} in ${root}`);
+  return { shown: shown() };
+};
+
 /** A valid command-line path: the Core starts there, with no chooser. */
 export const workspaceLaunchPath: Scenario = async (context) => {
   const workspace = String(context.params["workspace"]);

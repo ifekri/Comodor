@@ -104,7 +104,7 @@ function releaseHold(address) {
   if (result.status !== 0) throw new Error(`releasing the hold failed: ${result.stderr}`);
 }
 
-/** `$workspace` and `$stored` in a setup value, at any depth. */
+/** `$workspace`, `$stored` and `$inner` in a setup value, at any depth. */
 function resolve(value, places) {
   if (typeof value === "string" && value in places) return places[value];
   if (Array.isArray(value)) return value.map((item) => resolve(item, places));
@@ -217,7 +217,9 @@ async function runScenario(name) {
   if (setup.platforms && !setup.platforms.includes(process.platform)) {
     return { scenario: name, ok: true, notApplicable: `not applicable on ${process.platform}` };
   }
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "comodor-e2e-"));
+  // Its real path: the Core reports its workspace resolved (`/private/var`
+  // on macOS, long names on Windows), and the window shows that report.
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "comodor-e2e-")));
   const home = path.join(root, "home");
   const workspace = path.join(root, "workspace");
   const data = path.join(root, "desktop-data");
@@ -226,7 +228,13 @@ async function runScenario(name) {
   // SC-009: a credential nothing else could contain, by the run.
   const canary = setup.canary || CANARY_ALL ? `CANARY-${randomUUID()}` : undefined;
   writeCoreHome(home, canary ? { ...setup, apiKey: canary } : setup);
-  const places = { $workspace: workspace, $stored: stored };
+  // A folder inside a project: the Core works in the project's root.
+  const inner = path.join(workspace, "inner");
+  if (setup.workspaceArgument === "inner") {
+    fs.mkdirSync(path.join(workspace, ".git"));
+    fs.mkdirSync(inner);
+  }
+  const places = { $workspace: workspace, $stored: stored, $inner: inner };
 
   if (setup.lastSelectedFolder !== undefined) {
     fs.writeFileSync(path.join(data, "preferences.json"), JSON.stringify({
@@ -273,7 +281,7 @@ async function runScenario(name) {
     fs.writeFileSync(env.COMODOR_TEST_SEQUENCE, JSON.stringify(setup.sequence));
   }
 
-  const args = setup.workspaceArgument ? [workspace] : [];
+  const args = setup.workspaceArgument === "inner" ? [inner] : setup.workspaceArgument ? [workspace] : [];
   const started = Date.now();
   const app = spawn(executable(), args, { env, stdio: ["pipe", "pipe", "pipe"] });
   run.app = app;

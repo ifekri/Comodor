@@ -29,6 +29,7 @@ const CLASSES = [
 describe("the ready strip", () => {
   test("shows the workspace, provider, model and configured state as reported", async () => {
     const native = new FakeNative(status({ workspace: "/work/دفتر project" }));
+    native.core.session = { ...native.core.session, workspace: "/work/دفتر project" };
     native.core.model = { provider: "fake", model: "fake-1", configured: true };
     const view = await show(native);
     const strip = await until(() =>
@@ -41,6 +42,19 @@ describe("the ready strip", () => {
     expect(text).toContain("fake-1");
     expect(text).toContain("Configured");
     expect(native.core.requests("model.get").length).toBe(1);
+  });
+
+  /** Review finding (PR #62): the workspace shown is the one the Core
+   * reports (FR-020) — its project root, not the folder it was started in. */
+  test("shows the workspace the Core reports, not the folder it was started in", async () => {
+    const native = new FakeNative(status({ workspace: "/repo/src" }));
+    native.core.session = { ...native.core.session, workspace: "/repo" };
+    const view = await show(native);
+    const strip = await until(() =>
+      view.container.querySelector<HTMLElement>('[data-testid="status-strip"][data-state="ready"]'),
+      "the ready strip");
+    await until(() => strip.querySelector(".status-workspace")?.textContent === "/repo", "the Core's workspace");
+    expect(native.core.requests("workspace.get").length).toBe(1);
   });
 
   test("an unconfigured provider is shown as not configured", async () => {
@@ -98,6 +112,21 @@ describe("the failure views", () => {
     await until(() => failure.textContent?.includes("https://example.com/trace"), "the tail");
     expect(failure.textContent).toContain("https://example.com/why");
     expect(failure.querySelector("button.link")).toBeNull();
+  });
+
+  /** Review finding (PR #62): whatever failed, the workspace can be changed. */
+  test('every failure offers "Choose workspace…"', async () => {
+    for (const failureClass of CLASSES) {
+      const native = new FakeNative(status({
+        state: "failed", core: null, failure: { class: failureClass, message: failureClass },
+      }));
+      const view = await show(native);
+      const button = await until(() => byText(view.container, "button", "Choose workspace…"), failureClass);
+      await click(button);
+      expect(native.commands("choose_workspace").length).toBe(1);
+      await rendered?.unmount();
+      rendered = undefined;
+    }
   });
 
   test('"Try again" calls retry', async () => {

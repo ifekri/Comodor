@@ -126,7 +126,7 @@ last chosen; no Core starts before a choice, and a dismissal offers "Choose
 workspace…". The workspace is kept for the whole launch, through reloads and
 every kind of restart. "Change workspace…" in the status strip changes it
 later: the chooser opens at the last chosen folder, and the choice goes
-through the stop sequence. A second launch focuses the window; another folder
+through the stop sequence; every failure view offers "Choose workspace…" too. A second launch focuses the window; another folder
 is switched to only after a native confirmation, through the stop sequence,
 and never as a second Core. Closing or quitting while a switch is stopping
 the Core ends the application instead.
@@ -136,7 +136,8 @@ the Core ends the application instead.
 ## The window
 
 One screen, driven by the unchanged `@comodor/session` reducer: a status
-strip (workspace, provider, model, configured), the conversation with tool
+strip (the workspace as the Core reports it — its project root, which may be
+above the folder chosen — then provider, model, configured), the conversation with tool
 activity, forms through `@comodor/questions`, permissions, the mode control
 from `@comodor/modes` (its label changes only on `mode.changed`), and a
 composer whose Send and Cancel are `@comodor/commands` commands. Colours come
