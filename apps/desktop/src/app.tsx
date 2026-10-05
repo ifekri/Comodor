@@ -36,6 +36,10 @@ export function App({ api }: { api: NativeApi }) {
 
   const [diagnostics, setDiagnostics] = useState("");
   const failed = status?.state === "failed";
+  // Fetched on every report of the failure, not once: a faulted Core's last
+  // output is read only after it exits, and the native side reports again
+  // then.
+  const failure = failed ? status : null;
   useEffect(() => {
     if (!failed) return;
     let alive = true;
@@ -47,7 +51,7 @@ export function App({ api }: { api: NativeApi }) {
     return () => {
       alive = false;
     };
-  }, [api, failed, status?.failure?.message]);
+  }, [api, failed, failure]);
 
   const retry = () => void api.invoke("retry").catch(() => {});
   const quitNow = () => void api.invoke("quit_now").catch(() => {});

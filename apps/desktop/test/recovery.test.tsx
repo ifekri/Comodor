@@ -115,6 +115,28 @@ function coreWith(id: string, workspace = "/work/project"): FakeCore {
 }
 
 /** Review findings (PR #62): which conversation a new Core reopens. */
+/** Review finding (PR #62): a live event that arrives while the first
+ * snapshot is on its way must not make that snapshot look stale. */
+describe("the first snapshot", () => {
+  test("events that arrive before it are applied after it, and nothing is lost", async () => {
+    const native = new FakeNative();
+    native.core.snapshot = {
+      session: native.core.session, revision: 4, tools: [],
+      messages: [{ message_id: "m1", turn_id: "t1", role: "assistant",
+                   text: "from the snapshot", status: "completed" }],
+    };
+    native.core.handlers.set("session.snapshot", () => ({ hold: true }));
+    rendered = await render(<App api={native.api} />);
+    await until(() => native.core.requests("session.snapshot").length === 1, "the snapshot asked");
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t2", message_id: "m2", role: "assistant" }, 5);
+    native.core.emit("message.delta", { session_id: "s1", turn_id: "t2", message_id: "m2", text: "after it" }, 6);
+    native.core.respond(native.core.requests("session.snapshot")[0]!.id, { snapshot: native.core.snapshot });
+    const container = rendered.container;
+    await until(() => byText(container, '[data-testid="line"]', "after it"), "the live text");
+    await until(() => byText(container, '[data-testid="line"]', "from the snapshot"), "the snapshot's text");
+  });
+});
+
 describe("what the window keeps", () => {
   /** Review finding (PR #62): a turn that finished while the window was
    * reloading is not called interrupted by a later crash. */

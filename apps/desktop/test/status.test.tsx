@@ -144,6 +144,20 @@ describe("the failure views", () => {
     }
   });
 
+  /** Review finding (PR #62): the tail is fetched again when the native
+   * side reports again, once the faulted Core's last output is in. */
+  test("the diagnostics are fetched again when the failure is reported again", async () => {
+    const failed = status({ state: "failed", core: null,
+                            failure: { class: "protocol_fault", message: "not protocol" } });
+    const native = new FakeNative(failed);
+    native.diagnostics = "first line";
+    const view = await show(native);
+    await until(() => view.text().includes("first line"), "the first tail");
+    native.diagnostics = "first line\nlast line";
+    native.push({ ...failed });
+    await until(() => view.text().includes("last line"), "the complete tail");
+  });
+
   test('"Try again" calls retry', async () => {
     const native = new FakeNative(status({
       state: "failed", core: null,

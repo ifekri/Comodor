@@ -405,7 +405,10 @@ the Core accepted and no completion), not an invented state.
 unchanged `CoreClient` over the bridge (local hello); subscribe to events; call
 `session.list` (D1 holds one session per Core) and `session.snapshot`; feed
 both into the `@comodor/session` reducer, which already drops a stale snapshot
-and applies only events above its revision (FR-011, FR-012).
+and applies only events above its revision (FR-011, FR-012). Events that
+arrive before a connection's first snapshot is applied are held and replayed
+after it: applied first, they would make that snapshot look stale (review
+finding on PR #62).
 
 What the page keeps for recovery (R12: the stored id, the live session it
 last held, the interrupted turn, and their workspace) is mirrored into the
