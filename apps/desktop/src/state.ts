@@ -192,10 +192,10 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
           kept.workspace = workspace ?? undefined;
         }
         // A reload of this window finds its live session in the same Core;
-        // a new Core has none until one is opened.
+        // a new Core has none until one is opened. A list that failed says
+        // neither, so nothing is opened on its word: the connection is lost.
         const live = await client.call("session.list")
-          .then((answer) => (answer["sessions"] as Session[] | undefined) ?? [])
-          .catch(() => [] as Session[]);
+          .then((answer) => (answer["sessions"] as Session[] | undefined) ?? []);
         let session: Session | undefined = live.find((one) => one.id === kept.liveId);
         if (session) {
           // A reload: the same Core, the same conversation.

@@ -40,6 +40,19 @@ describe("after a restart", () => {
     expect(first.requests("session.open")).toEqual([]);
   });
 
+  /** Review finding (PR #62): a `ready` that arrives while the last client
+   * is still failing to start is not lost. */
+  test("a Core ready while the last client was still starting gets a client", async () => {
+    const native = new FakeNative();
+    native.core.handlers.set("client.hello", () => ({ hold: true }));
+    rendered = await render(<App api={native.api} />);
+    await until(() => native.core.requests("client.hello").length === 1, "the first hello");
+    const next = new FakeCore();
+    native.restart(next);
+    await until(() => next.requests("client.hello").length === 1, "the next Core's hello");
+    await until(() => rendered!.container.querySelector('[data-testid="composer"]'), "the composer");
+  });
+
   test("when nothing was stored, a new conversation starts and the window says so", async () => {
     const { native, container } = await open();
     const next = new FakeCore();
@@ -233,6 +246,20 @@ describe("what the window keeps", () => {
     await until(() => next.requests("session.open").length === 1, "the reopen");
     await until(() => byText(rendered!.container, '[data-testid="recovery"]', "interrupted"), "the notice");
     expect(next.requests("session.send")).toEqual([]);
+  });
+
+  /** Review finding (PR #62): a failed `session.list` says nothing about
+   * which sessions the Core has: nothing is opened or created on its word. */
+  test("a reload whose session list fails opens nothing in its place", async () => {
+    const { native } = await open();
+    await rendered!.unmount();
+    native.core.handlers.set("session.list", () => ({ error: { code: "internal", message: "list failed" } }));
+    rendered = await render(<App api={native.api} />);
+    const lost = await until(() => rendered!.container.querySelector('[data-testid="session-lost"]'), "the window says so");
+    expect(lost.textContent).toContain("list failed");
+    expect(rendered!.container.querySelector('[data-testid="composer"]')).toBeNull();
+    expect(native.core.requests("session.open")).toEqual([]);
+    expect(native.core.requests("session.create").length).toBe(1);
   });
 
   test("a reload keeps the stored conversation for the next restart", async () => {

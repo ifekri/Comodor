@@ -24,6 +24,9 @@ export class Connection {
   private bridge: BridgeConnection | null = null;
   private attaching: Promise<BridgeConnection> | null = null;
   private starting = false;
+  /** How many `ready` statuses have arrived: one that came while a client
+   * was starting was turned away, and is answered when that start ends. */
+  private readies = 0;
   private disposed = false;
 
   constructor(private readonly api: NativeApi) {}
@@ -60,7 +63,10 @@ export class Connection {
     this.update({ status });
     // A status can arrive while `connect` itself is still being answered;
     // the client starts once that connection is recorded, never beside it.
-    if (status.state === "ready") void Promise.resolve().then(() => this.startClient());
+    if (status.state === "ready") {
+      this.readies += 1;
+      void Promise.resolve().then(() => this.startClient());
+    }
   }
 
   /** The open bridge connection, or a new one. */
@@ -82,6 +88,7 @@ export class Connection {
   private async startClient(): Promise<void> {
     if (this.starting || this.state.client?.open) return;
     this.starting = true;
+    const readies = this.readies;
     try {
       const bridge = await this.attached();
       const client = new CoreClient(bridge, {
@@ -108,6 +115,11 @@ export class Connection {
       // the next `ready` starts a new client.
     } finally {
       this.starting = false;
+      // A `ready` that came meanwhile will not come again: answered here.
+      if (this.readies !== readies && !this.disposed && this.state.status?.state === "ready"
+          && !this.state.client?.open) {
+        void Promise.resolve().then(() => this.startClient());
+      }
     }
   }
 }

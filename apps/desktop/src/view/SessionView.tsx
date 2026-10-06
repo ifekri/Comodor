@@ -51,7 +51,11 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
       <StatusStrip status={status} model={model} workspace={session.workspace}
                    onChangeWorkspace={onChangeWorkspace} />
       {!state.session
-        ? <p className="quiet">Opening the session…</p>
+        ? state.connection.kind === "lost"
+          ? <p className="quiet" data-testid="session-lost">
+              The session could not be opened: {state.connection.reason}
+            </p>
+          : <p className="quiet">Opening the session…</p>
         : (
           <div className="session" data-testid="session">
             <ModeControl intent={session.intent} onChoose={session.chooseMode} />

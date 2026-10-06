@@ -45,14 +45,20 @@ only a one-line delegate summary; panels are D5. An unknown event is ignored.
 **Page reload**:
 
 1. The page: `connect` (a new generation), then `start()`.
-2. The page: subscribe, then `session.list`.
+2. The page: subscribe, then `session.list`. A `session.list` that fails
+   says nothing about which sessions the Core has, so nothing is opened or
+   created on its word: the window says the session could not be opened.
 3. The page: `session.snapshot`, then apply events above its revision.
+   A snapshot showing the session busy marks its turn as one a crash would
+   interrupt.
 
 **Core crash**:
 
 1. The native side restarts the Core and handshakes again, then sends status
    `ready` to the page.
-2. The page: `start()` again, then `session.open(stored_id)`.
+2. The page: `start()` again, then `session.open(stored_id)`. A `ready`
+   that arrives while the previous `start()` is still failing is answered
+   once that start ends.
 3. If the Core refuses (nothing stored), `session.create` plus a notice.
 4. An unfinished turn is shown as interrupted. Nothing is re-sent.
 
