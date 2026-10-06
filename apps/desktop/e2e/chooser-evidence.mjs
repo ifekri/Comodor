@@ -7,15 +7,21 @@
  * launched twice in a row with no workspace argument, each time with a
  * different folder stored as the last one chosen. When the dialog's window
  * exists, that window alone is captured — never the whole screen, which on a
- * person's machine shows whatever else they have open — and on Windows the
- * dialog's address bar is also read through UI Automation. Then the
- * application is ended. Nothing is chosen and no Core starts.
+ * person's machine shows whatever else they have open. Where the platform
+ * lets a tool read the dialog itself, the folder it opened at is observed
+ * and compared with the stored one: on Windows the address bar, through UI
+ * Automation; on macOS the panel's column browser (the selected folder in
+ * each column, from the disk's root) and its location pop-up, through the
+ * Accessibility API. The stored folder written beforehand is the request,
+ * never the observation. Then the application is ended. Nothing is chosen
+ * and no Core starts.
  *
  *   node e2e/chooser-evidence.mjs [--skip-build]
  *
  * Output: `e2e/out/chooser-evidence/` — one screenshot per launch and
- * `evidence.json`. The person reviewing the PR judges the images; this tool
- * only records them.
+ * `evidence.json`. A dialog that opened anywhere else fails the run; a
+ * platform where the folder could not be observed is said so, and its
+ * screenshots remain the only evidence.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -51,6 +57,113 @@ function buildRelease() {
   const cli = createRequire(import.meta.url).resolve("@tauri-apps/cli/tauri.js");
   const result = spawnSync(process.execPath, [cli, "build", "--no-bundle"], { cwd: DESKTOP, stdio: "inherit" });
   if (result.status !== 0) throw new Error("the release build failed");
+}
+
+/**
+ * macOS: read the open panel of process `pid` through the Accessibility API,
+ * without touching it — the selected folder in each column of its browser,
+ * from the disk's root, and the value of its pop-ups. Read until two reads
+ * agree, so a panel still filling its columns is not taken half-way.
+ */
+function observePanel(pid) {
+  const swift = `
+import AppKit
+import ApplicationServices
+import Foundation
+
+func value(_ e: AXUIElement, _ name: String) -> AnyObject? {
+  var v: AnyObject?
+  return AXUIElementCopyAttributeValue(e, name as CFString, &v) == .success ? v : nil
+}
+func kids(_ e: AXUIElement) -> [AXUIElement] { value(e, kAXChildrenAttribute as String) as? [AXUIElement] ?? [] }
+func role(_ e: AXUIElement) -> String { value(e, kAXRoleAttribute as String) as? String ?? "" }
+func first(_ e: AXUIElement, _ wanted: String, _ depth: Int = 0) -> AXUIElement? {
+  if role(e) == wanted { return e }
+  if depth > 40 { return nil }
+  for k in kids(e) { if let found = first(k, wanted, depth + 1) { return found } }
+  return nil
+}
+func all(_ e: AXUIElement, _ wanted: String, _ depth: Int = 0, into out: inout [AXUIElement]) {
+  if role(e) == wanted { out.append(e) }
+  if depth > 40 { return }
+  for k in kids(e) { all(k, wanted, depth + 1, into: &out) }
+}
+// A row's name: its text, not an icon's description.
+func label(_ e: AXUIElement) -> String? {
+  if ["AXStaticText", "AXTextField"].contains(role(e)),
+     let s = value(e, kAXValueAttribute as String) as? String, !s.isEmpty { return s }
+  for k in kids(e) { if let s = label(k) { return s } }
+  return nil
+}
+func selected(_ e: AXUIElement, _ depth: Int = 0) -> AXUIElement? {
+  if (value(e, kAXSelectedAttribute as String) as? Bool) == true { return e }
+  if depth > 20 { return nil }
+  for k in kids(e) { if let s = selected(k, depth + 1) { return s } }
+  return nil
+}
+struct Seen: Equatable { var columns: [String]; var popups: [String]; var owner: String }
+func read(_ pid: pid_t, _ owner: String) -> Seen? {
+  let app = AXUIElementCreateApplication(pid)
+  for window in value(app, kAXWindowsAttribute as String) as? [AXUIElement] ?? [] {
+    guard let browser = first(window, "AXBrowser") else { continue }
+    let columns = value(browser, "AXColumns") as? [AXUIElement] ?? kids(browser)
+    let names = columns.compactMap { column in selected(column).flatMap(label) }
+    var popups: [AXUIElement] = []
+    all(window, "AXPopUpButton", into: &popups)
+    let values = popups.compactMap { value($0, kAXValueAttribute as String) as? String }
+    return Seen(columns: names, popups: values, owner: owner)
+  }
+  return nil
+}
+func emit(_ object: [String: Any], _ code: Int32) -> Never {
+  let data = try! JSONSerialization.data(withJSONObject: object)
+  print(String(data: data, encoding: .utf8)!)
+  exit(code)
+}
+
+guard AXIsProcessTrusted() else { emit(["error": "this process is not trusted for Accessibility"], 3) }
+let application = pid_t(CommandLine.arguments[1])!
+let deadline = Date().addingTimeInterval(${DIALOG_DEADLINE_S})
+var last: Seen? = nil
+while Date() < deadline {
+  var targets: [(pid_t, String)] = [(application, "application")]
+  for running in NSWorkspace.shared.runningApplications
+      where (running.localizedName ?? "").contains("Open and Save Panel") {
+    targets.append((running.processIdentifier, running.localizedName ?? "panel service"))
+  }
+  let seen = targets.lazy.compactMap { read($0.0, $0.1) }.first
+  if let seen = seen, !seen.columns.isEmpty, seen == last {
+    let root = (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]))?.volumeName
+    var names = seen.columns
+    if let root = root, names.first == root { names.removeFirst() }
+    emit(["path": "/" + names.joined(separator: "/"), "columns": seen.columns, "popups": seen.popups,
+          "owner": seen.owner, "volume": root ?? ""], 0)
+  }
+  last = seen
+  usleep(250_000)
+}
+emit(["error": "no stable selection in the panel's browser", "columns": last?.columns ?? [],
+      "popups": last?.popups ?? []], 4)
+`;
+  const script = path.join(os.tmpdir(), "comodor-chooser-observe.swift");
+  fs.writeFileSync(script, swift);
+  const run = spawnSync("swift", [script, String(pid)], { encoding: "utf-8" });
+  try {
+    return JSON.parse(run.stdout.trim().split("\n").pop() ?? "");
+  } catch {
+    return { error: `the observer gave no answer (${run.status}): ${run.stderr.trim().slice(-400)}` };
+  }
+}
+
+/** Is `observed` the folder `stored` names, however it is spelled? */
+function sameFolder(observed, stored) {
+  try {
+    const a = fs.realpathSync.native(observed);
+    const b = fs.realpathSync.native(stored);
+    return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+  } catch {
+    return false;
+  }
 }
 
 /** Wait for the dialog, capture its window alone into `shot`; what was read. */
@@ -137,10 +250,24 @@ try {
     const app = spawn(executable(), [], { stdio: "ignore" });
     const shot = path.join(OUT, `launch-${n}-${process.platform}.png`);
     const seen = capture(shot);
+    // The folder the dialog itself shows, where the platform lets it be read.
+    let observed = null;
+    let observation;
+    if (seen.found && process.platform === "win32" && seen.read.startsWith("Address: ")) {
+      observed = seen.read.slice("Address: ".length);
+      observation = { how: "the dialog's address bar (UI Automation)" };
+    } else if (seen.found && process.platform === "darwin") {
+      observation = { how: "the panel's column browser (Accessibility)", ...observePanel(app.pid) };
+      observed = observation.path ?? null;
+    } else {
+      observation = { how: "not read on this platform: the screenshot's path bar is the evidence" };
+    }
     app.kill("SIGKILL");
     await new Promise((resolve) => app.once("exit", resolve));
-    launches.push({ launch: n, platform: process.platform, startFolder: stored,
-                    dialog: seen.found, read: seen.read, screenshot: fs.existsSync(shot) ? path.basename(shot) : null,
+    launches.push({ launch: n, platform: process.platform, requested: stored, dialog: seen.found,
+                    read: seen.read, observed, observation,
+                    matches: observed === null ? null : sameFolder(observed, stored),
+                    screenshot: fs.existsSync(shot) ? path.basename(shot) : null,
                     error: seen.error || undefined });
   }
 } finally {
@@ -149,6 +276,11 @@ try {
 }
 fs.writeFileSync(path.join(OUT, "evidence.json"), JSON.stringify(launches, null, 2));
 console.log(JSON.stringify(launches, null, 2));
-const ok = launches.every((launch) => launch.dialog && launch.screenshot);
-console.log(ok ? "RECORDED chooser evidence" : "NOT RECORDED chooser evidence");
+// A dialog that opened elsewhere is a failure; one whose folder could not be
+// read is said so, and not passed off as observed.
+const ok = launches.every((launch) => launch.dialog && launch.screenshot && launch.matches !== false);
+const observedAll = launches.every((launch) => launch.matches === true);
+console.log(!ok ? "NOT RECORDED chooser evidence"
+  : observedAll ? "RECORDED chooser evidence: the start folder observed on every launch"
+  : "RECORDED chooser evidence: screenshots only, the start folder NOT OBSERVED");
 process.exit(ok ? 0 : 1);
