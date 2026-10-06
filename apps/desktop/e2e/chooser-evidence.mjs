@@ -60,10 +60,14 @@ function buildRelease() {
 }
 
 /**
- * macOS: read the open panel of process `pid` through the Accessibility API,
- * without touching it — the selected folder in each column of its browser,
- * from the disk's root, and the value of its pop-ups. Read until two reads
- * agree, so a panel still filling its columns is not taken half-way.
+ * macOS: read the open panel of process `pid` through the Accessibility API.
+ * The folder is taken from what the panel itself reports, in order: the file
+ * URL of the selected row in its browser (a URL is the whole path); else
+ * the menu of its location pop-up, which lists the folder and each parent up
+ * to the disk (opened and cancelled — after the screenshot — to read it);
+ * else the selected folder of each browser column. Every read is kept, raw.
+ * Reads repeat until two agree, so a panel still filling in is not taken
+ * half-way.
  */
 function observePanel(pid) {
   const swift = `
@@ -75,6 +79,10 @@ func value(_ e: AXUIElement, _ name: String) -> AnyObject? {
   var v: AnyObject?
   return AXUIElementCopyAttributeValue(e, name as CFString, &v) == .success ? v : nil
 }
+func attributes(_ e: AXUIElement) -> [String] {
+  var names: CFArray?
+  return AXUIElementCopyAttributeNames(e, &names) == .success ? (names as? [String] ?? []) : []
+}
 func kids(_ e: AXUIElement) -> [AXUIElement] { value(e, kAXChildrenAttribute as String) as? [AXUIElement] ?? [] }
 func role(_ e: AXUIElement) -> String { value(e, kAXRoleAttribute as String) as? String ?? "" }
 func first(_ e: AXUIElement, _ wanted: String, _ depth: Int = 0) -> AXUIElement? {
@@ -83,10 +91,10 @@ func first(_ e: AXUIElement, _ wanted: String, _ depth: Int = 0) -> AXUIElement?
   for k in kids(e) { if let found = first(k, wanted, depth + 1) { return found } }
   return nil
 }
-func all(_ e: AXUIElement, _ wanted: String, _ depth: Int = 0, into out: inout [AXUIElement]) {
-  if role(e) == wanted { out.append(e) }
+func all(_ e: AXUIElement, _ depth: Int = 0, into out: inout [AXUIElement], where keep: (AXUIElement) -> Bool) {
+  if keep(e) { out.append(e) }
   if depth > 40 { return }
-  for k in kids(e) { all(k, wanted, depth + 1, into: &out) }
+  for k in kids(e) { all(k, depth + 1, into: &out, where: keep) }
 }
 // A row's name: its text, not an icon's description.
 func label(_ e: AXUIElement) -> String? {
@@ -95,25 +103,56 @@ func label(_ e: AXUIElement) -> String? {
   for k in kids(e) { if let s = label(k) { return s } }
   return nil
 }
-func selected(_ e: AXUIElement, _ depth: Int = 0) -> AXUIElement? {
-  if (value(e, kAXSelectedAttribute as String) as? Bool) == true { return e }
-  if depth > 20 { return nil }
-  for k in kids(e) { if let s = selected(k, depth + 1) { return s } }
-  return nil
-}
-struct Seen: Equatable { var columns: [String]; var popups: [String]; var owner: String }
-func read(_ pid: pid_t, _ owner: String) -> Seen? {
-  let app = AXUIElementCreateApplication(pid)
-  for window in value(app, kAXWindowsAttribute as String) as? [AXUIElement] ?? [] {
-    guard let browser = first(window, "AXBrowser") else { continue }
-    let columns = value(browser, "AXColumns") as? [AXUIElement] ?? kids(browser)
-    let names = columns.compactMap { column in selected(column).flatMap(label) }
-    var popups: [AXUIElement] = []
-    all(window, "AXPopUpButton", into: &popups)
-    let values = popups.compactMap { value($0, kAXValueAttribute as String) as? String }
-    return Seen(columns: names, popups: values, owner: owner)
+// A path the element reports itself: a file URL or a path.
+func path(_ e: AXUIElement) -> String? {
+  for name in ["AXURL", "AXDocument", "AXFilename"] {
+    guard let v = value(e, name) else { continue }
+    if let url = v as? URL, url.isFileURL { return url.path }
+    if let s = v as? String {
+      if s.hasPrefix("file://"), let url = URL(string: s) { return url.path }
+      if s.hasPrefix("/") { return s }
+    }
   }
   return nil
+}
+func isSelected(_ e: AXUIElement) -> Bool { (value(e, kAXSelectedAttribute as String) as? Bool) == true }
+
+struct Seen: Equatable {
+  var urls: [String]; var selected: [String]; var popups: [String]; var leafAttributes: [String]
+}
+func panel(_ pid: pid_t) -> (AXUIElement, AXUIElement)? {
+  let app = AXUIElementCreateApplication(pid)
+  for window in value(app, kAXWindowsAttribute as String) as? [AXUIElement] ?? [] {
+    if let browser = first(window, "AXBrowser") { return (window, browser) }
+  }
+  return nil
+}
+func read(_ window: AXUIElement, _ browser: AXUIElement) -> Seen {
+  var chosen: [AXUIElement] = []
+  all(browser, into: &chosen, where: isSelected)
+  let urls = chosen.compactMap { row -> String? in
+    path(row) ?? kids(row).lazy.compactMap(path).first
+  }
+  var popups: [AXUIElement] = []
+  all(window, into: &popups, where: { role($0) == "AXPopUpButton" })
+  return Seen(urls: urls, selected: chosen.compactMap(label),
+              popups: popups.compactMap { value($0, kAXValueAttribute as String) as? String },
+              leafAttributes: chosen.last.map(attributes) ?? [])
+}
+// The location pop-up's menu: the folder, then each parent, down to the disk.
+func menuChain(_ window: AXUIElement, _ leaf: String) -> [String] {
+  var popups: [AXUIElement] = []
+  all(window, into: &popups, where: { role($0) == "AXPopUpButton" })
+  guard let popup = popups.first(where: { (value($0, kAXValueAttribute as String) as? String) == leaf }),
+        AXUIElementPerformAction(popup, kAXPressAction as CFString) == .success else { return [] }
+  var items: [AXUIElement] = []
+  for _ in 0..<40 where items.isEmpty {
+    usleep(100_000)
+    all(popup, into: &items, where: { role($0) == "AXMenuItem" })
+  }
+  let titles = items.map { value($0, kAXTitleAttribute as String) as? String ?? "" }
+  if let menu = first(popup, "AXMenu") { AXUIElementPerformAction(menu, kAXCancelAction as CFString) }
+  return titles
 }
 func emit(_ object: [String: Any], _ code: Int32) -> Never {
   let data = try! JSONSerialization.data(withJSONObject: object)
@@ -123,26 +162,38 @@ func emit(_ object: [String: Any], _ code: Int32) -> Never {
 
 guard AXIsProcessTrusted() else { emit(["error": "this process is not trusted for Accessibility"], 3) }
 let application = pid_t(CommandLine.arguments[1])!
+let volume = (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]))?.volumeName ?? ""
 let deadline = Date().addingTimeInterval(${DIALOG_DEADLINE_S})
 var last: Seen? = nil
 while Date() < deadline {
-  var targets: [(pid_t, String)] = [(application, "application")]
-  for running in NSWorkspace.shared.runningApplications
-      where (running.localizedName ?? "").contains("Open and Save Panel") {
-    targets.append((running.processIdentifier, running.localizedName ?? "panel service"))
+  if let found = panel(application) {
+    let (window, browser) = found
+    let seen = read(window, browser)
+    if !seen.popups.isEmpty, seen == last {
+      var report: [String: Any] = ["urls": seen.urls, "selected": seen.selected, "popups": seen.popups,
+                                   "leafAttributes": seen.leafAttributes, "volume": volume]
+      let leaf = seen.selected.last ?? seen.popups[0]
+      if let url = seen.urls.first(where: { ($0 as NSString).lastPathComponent == leaf }) {
+        report["path"] = url
+        report["method"] = "the selected row's file URL"
+      } else {
+        let chain = menuChain(window, leaf)
+        report["menu"] = chain
+        let parents = Array(chain.prefix(while: { !$0.isEmpty }))
+        if let disk = parents.firstIndex(of: volume), disk > 0 {
+          report["path"] = "/" + parents[..<disk].reversed().joined(separator: "/")
+          report["method"] = "the location pop-up's menu, from the folder down to the disk"
+        } else {
+          report["error"] = "neither a file URL nor a menu down to the disk was read"
+        }
+      }
+      emit(report, 0)
+    }
+    last = seen
   }
-  let seen = targets.lazy.compactMap { read($0.0, $0.1) }.first
-  if let seen = seen, !seen.columns.isEmpty, seen == last {
-    let root = (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]))?.volumeName
-    var names = seen.columns
-    if let root = root, names.first == root { names.removeFirst() }
-    emit(["path": "/" + names.joined(separator: "/"), "columns": seen.columns, "popups": seen.popups,
-          "owner": seen.owner, "volume": root ?? ""], 0)
-  }
-  last = seen
   usleep(250_000)
 }
-emit(["error": "no stable selection in the panel's browser", "columns": last?.columns ?? [],
+emit(["error": "the panel's browser was not read twice alike", "selected": last?.selected ?? [],
       "popups": last?.popups ?? []], 4)
 `;
   const script = path.join(os.tmpdir(), "comodor-chooser-observe.swift");
