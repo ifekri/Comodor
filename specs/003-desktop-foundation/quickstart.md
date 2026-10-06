@@ -111,7 +111,8 @@ launched twice with a stored folder, and the folder the dialog opened at is
 read from the dialog itself and compared with it (Windows: the address bar,
 through UI Automation; macOS: the panel's column browser, through
 Accessibility; Linux: the path bar's buttons from the root to the checked
-folder, through AT-SPI, read only). A mismatch fails the job. The path
+folder, through AT-SPI, read only). A folder that does not match, or that
+could not be read from the dialog, fails the job. The path
 bar's screenshot alone shows only the last folders' names, so on Linux it
 is supporting evidence, never the observation. The screenshots of each dialog are kept beside
 `evidence.json` as supporting evidence; the folder stored beforehand is the

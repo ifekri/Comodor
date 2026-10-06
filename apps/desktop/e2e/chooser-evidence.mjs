@@ -20,9 +20,9 @@
  *   node e2e/chooser-evidence.mjs [--skip-build]
  *
  * Output: `e2e/out/chooser-evidence/` — one screenshot per launch and
- * `evidence.json`. A dialog that opened anywhere else fails the run; a
- * platform where the folder could not be observed is said so, and its
- * screenshots remain the only evidence.
+ * `evidence.json`. A dialog that opened anywhere else, or whose folder could
+ * not be read from the dialog itself, fails the run; the screenshots are
+ * supporting evidence only.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -432,11 +432,10 @@ try {
 }
 fs.writeFileSync(path.join(OUT, "evidence.json"), JSON.stringify(launches, null, 2));
 console.log(JSON.stringify(launches, null, 2));
-// A dialog that opened elsewhere is a failure; one whose folder could not be
-// read is said so, and not passed off as observed.
-const ok = launches.every((launch) => launch.dialog && launch.screenshot && launch.matches !== false);
-const observedAll = launches.every((launch) => launch.matches === true);
-console.log(!ok ? "NOT RECORDED chooser evidence"
-  : observedAll ? "RECORDED chooser evidence: the start folder observed on every launch"
-  : "RECORDED chooser evidence: screenshots only, the start folder NOT OBSERVED");
+// Every launch's folder is read from the dialog itself and must equal the
+// stored one: a dialog that opened elsewhere, or whose folder could not be
+// read, fails the run. A screenshot alone never passes.
+const ok = launches.every((launch) => launch.dialog && launch.screenshot && launch.matches === true);
+console.log(ok ? "RECORDED chooser evidence: the start folder observed on every launch"
+  : "NOT RECORDED chooser evidence: a start folder was not observed, or did not match");
 process.exit(ok ? 0 : 1);
