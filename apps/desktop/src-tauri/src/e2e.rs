@@ -120,6 +120,9 @@ fn act_for_harness(app: &tauri::AppHandle, act: &str) {
                 let _ = window.close();
             }
         }
+        // The machine woke: told the way the wake watch tells it, since a
+        // test runner cannot put the machine to sleep.
+        "wake" => app.state::<crate::commands::Desktop>().supervisor.woke(),
         "quit" => {
             let _ = app.state::<crate::commands::Desktop>().supervisor
                 .stop(crate::shutdown::StopReason::Quit);

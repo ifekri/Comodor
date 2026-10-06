@@ -23,6 +23,10 @@ pub struct Desktop {
     chooser: Mutex<Box<dyn Chooser + Send>>,
     /// Only one chooser at a time (a workspace change in progress).
     choosing: Mutex<()>,
+    /// Whether the machine has slept since the last look.
+    pub wake: std::sync::Arc<crate::wake::Watch>,
+    /// Only one link confirmation at a time.
+    linking: Mutex<()>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -33,7 +37,25 @@ impl Desktop {
     pub fn new(supervisor: Supervisor, prefs_path: PathBuf, chooser: Box<dyn Chooser + Send>) -> Self {
         let preferences = prefs::load(&prefs_path);
         Self { supervisor, prefs_path, preferences: Mutex::new(preferences),
-               chooser: Mutex::new(chooser), choosing: Mutex::new(()) }
+               chooser: Mutex::new(chooser), choosing: Mutex::new(()),
+               wake: std::sync::Arc::new(crate::wake::Watch::system()), linking: Mutex::new(()) }
+    }
+
+    /// The same, watching `wake` for the machine's sleep (tests move it by
+    /// hand).
+    pub fn with_wake(mut self, wake: crate::wake::Watch) -> Self {
+        self.wake = std::sync::Arc::new(wake);
+        self
+    }
+
+    /// One line from the page. A wake not yet noticed is noticed first,
+    /// before anything reaches a Core that may not have survived the sleep:
+    /// the line is then refused until the Core has answered the check.
+    pub fn send_line(&self, generation: u64, line: String) -> Result<(), String> {
+        if self.wake.woke() {
+            self.supervisor.woke();
+        }
+        self.supervisor.send_line(generation, line)
     }
 
     pub fn preferences(&self) -> Preferences {
@@ -103,7 +125,7 @@ pub fn connect(desktop: State<'_, Desktop>, on: Channel<Value>) -> Value {
 #[tauri::command]
 pub fn send_line(desktop: State<'_, Desktop>, generation: u64, line: String) -> Result<Value, String> {
     let args = json!({ "generation": generation, "line": line });
-    let result = desktop.supervisor.send_line(generation, line).map(|()| json!({}));
+    let result = desktop.send_line(generation, line).map(|()| json!({}));
     recorded("send_line", args, result)
 }
 
@@ -129,18 +151,43 @@ pub fn quit_now(desktop: State<'_, Desktop>) -> Result<Value, String> {
 }
 
 /// Opens a link the page was shown, outside the window, in the system's
-/// browser. The page has no opener permission of its own.
-#[tauri::command]
+/// browser — once the person has said yes to exactly that URL in a native
+/// dialog. The page has no opener permission of its own, and its call is
+/// never taken as proof of a click. The dialog blocks, so this runs off the
+/// main thread.
+#[tauri::command(async)]
 pub fn open_external(app: tauri::AppHandle, desktop: State<'_, Desktop>, url: String)
                      -> Result<Value, String> {
     let args = json!({ "url": url });
-    let result = check_external(&url, &|candidate| desktop.supervisor.displayed(candidate))
-        .and_then(|url| {
-            use tauri_plugin_opener::OpenerExt;
-            app.opener().open_url(url, None::<&str>).map_err(|problem| problem.to_string())
-        })
-        .map(|()| json!({}));
+    let result = match desktop.linking.try_lock() {
+        Err(_) => Err("another link is waiting for the person's answer".to_string()),
+        Ok(_one_at_a_time) => open_link(&url, &|candidate| desktop.supervisor.displayed(candidate),
+                                        link_confirmer(&app).as_mut(), &mut |url| opener(&app, url)),
+    }.map(|()| json!({}));
     recorded("open_external", args, result)
+}
+
+#[cfg(not(feature = "e2e"))]
+fn link_confirmer(app: &tauri::AppHandle) -> Box<dyn ConfirmLink> {
+    Box::new(SystemConfirm(app.clone()))
+}
+
+#[cfg(feature = "e2e")]
+fn link_confirmer(_app: &tauri::AppHandle) -> Box<dyn ConfirmLink> {
+    Box::new(ConfirmDouble)
+}
+
+#[cfg(not(feature = "e2e"))]
+fn opener(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url(url, None::<&str>).map_err(|problem| problem.to_string())
+}
+
+/// The test build never starts a browser: it records what would open.
+#[cfg(feature = "e2e")]
+fn opener(_app: &tauri::AppHandle, url: &str) -> Result<(), String> {
+    crate::e2e::record("opened", &json!({ "url": url }));
+    Ok(())
 }
 
 /// Opens the chooser at the last selected folder; the chosen absolute path,
@@ -206,9 +253,27 @@ impl Confirm for SystemConfirm {
     }
 }
 
+impl ConfirmLink for SystemConfirm {
+    fn open(&mut self, url: &str) -> bool {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+        self.0.dialog()
+            .message(format!("Open this link in your browser?\n\n{url}"))
+            .title("Open link?")
+            .buttons(MessageDialogButtons::OkCancelCustom("Open".into(), "Cancel".into()))
+            .blocking_show()
+    }
+}
+
 /// The test build's confirmation double (`e2e::confirm`).
 #[cfg(feature = "e2e")]
 pub struct ConfirmDouble;
+
+#[cfg(feature = "e2e")]
+impl ConfirmLink for ConfirmDouble {
+    fn open(&mut self, url: &str) -> bool {
+        crate::e2e::confirm(&format!("open {url}"))
+    }
+}
 
 #[cfg(feature = "e2e")]
 impl Confirm for ConfirmDouble {
@@ -241,6 +306,24 @@ pub fn check_external(url: &str, displayed: &dyn Fn(&str) -> bool) -> Result<Str
         return refused();
     }
     Ok(url.to_string())
+}
+
+/// The person's answer, in a native dialog the page cannot reach, to
+/// opening one exact URL outside the window.
+pub trait ConfirmLink {
+    fn open(&mut self, url: &str) -> bool;
+}
+
+/// `open_external`, apart from the platform: `url` must pass
+/// `check_external`, and then the person must say yes to exactly it in
+/// `confirm`, every time; only then is it handed to `open`.
+pub fn open_link(url: &str, displayed: &dyn Fn(&str) -> bool, confirm: &mut dyn ConfirmLink,
+                 open: &mut dyn FnMut(&str) -> Result<(), String>) -> Result<(), String> {
+    let url = check_external(url, displayed)?;
+    if !confirm.open(&url) {
+        return Err(format!("{url} was not opened: the person did not confirm it"));
+    }
+    open(&url)
 }
 
 /// Whether "Check again" applies now: not while a Core is on its way up or
@@ -473,6 +556,89 @@ mod tests {
                         "ftp://shown.example/x", "HTTPS://shown.example/x ", "", "https://"] {
             assert!(check_external(refused, &displayed).is_err(), "{refused:?}");
         }
+    }
+
+    /// What a person answered, and what was opened.
+    struct Person {
+        answer: bool,
+        asked: Vec<String>,
+    }
+
+    impl ConfirmLink for Person {
+        fn open(&mut self, url: &str) -> bool {
+            self.asked.push(url.to_string());
+            self.answer
+        }
+    }
+
+    fn try_open(relay: &Relay, person: &mut Person, url: &str) -> (Result<(), String>, Vec<String>) {
+        let mut opened = vec![];
+        let result = open_link(url, &|candidate| relay.displayed(candidate), person,
+                               &mut |url| { opened.push(url.to_string()); Ok(()) });
+        (result, opened)
+    }
+
+    /// Review finding (PR #62): a link the page asks to open is opened only
+    /// once the person has said yes to exactly that URL, natively.
+    #[test]
+    fn a_link_opens_only_after_the_person_says_yes_to_it() {
+        let relay = shown(&["See https://example.com/docs."]);
+        let mut person = Person { answer: true, asked: vec![] };
+        let (result, opened) = try_open(&relay, &mut person, "https://example.com/docs");
+        assert_eq!(result, Ok(()));
+        assert_eq!(person.asked, ["https://example.com/docs"]);
+        assert_eq!(opened, ["https://example.com/docs"]);
+    }
+
+    #[test]
+    fn a_link_the_person_declines_is_not_opened() {
+        let relay = shown(&["See https://example.com/docs."]);
+        let mut person = Person { answer: false, asked: vec![] };
+        let (result, opened) = try_open(&relay, &mut person, "https://example.com/docs");
+        assert!(result.is_err());
+        assert_eq!(person.asked, ["https://example.com/docs"]);
+        assert!(opened.is_empty());
+    }
+
+    /// The page's call proves nothing about a click: each call is put to the
+    /// person again, and a yes is never remembered for the next one.
+    #[test]
+    fn every_call_from_the_page_is_put_to_the_person() {
+        let relay = shown(&["https://example.com/a"]);
+        let mut person = Person { answer: true, asked: vec![] };
+        try_open(&relay, &mut person, "https://example.com/a").0.unwrap();
+        person.answer = false;
+        let (result, opened) = try_open(&relay, &mut person, "https://example.com/a");
+        assert!(result.is_err());
+        assert!(opened.is_empty());
+        assert_eq!(person.asked.len(), 2);
+    }
+
+    /// A URL that was only in a field the window never shows as a link
+    /// (here, inside an event's metadata) authorizes nothing by being
+    /// relayed: without the person's yes nothing opens.
+    #[test]
+    fn a_url_in_a_field_never_shown_as_a_link_opens_nothing_on_its_own() {
+        let mut relay = Relay::new();
+        relay.connect();
+        relay.from_core(&serde_json::json!({"version": 2, "type": "event", "event": "session.updated",
+            "seq": 1, "params": {"session": {"id": "s1", "meta": {"x": "https://hidden.example/run"}}}})
+            .to_string());
+        let mut person = Person { answer: false, asked: vec![] };
+        let (result, opened) = try_open(&relay, &mut person, "https://hidden.example/run");
+        assert!(result.is_err());
+        assert!(opened.is_empty(), "never opened without the person's yes");
+    }
+
+    /// An older page's links are refused before anyone is asked.
+    #[test]
+    fn a_link_from_an_older_generation_is_refused_without_asking() {
+        let mut relay = shown(&["https://old.example/page"]);
+        relay.connect();
+        let mut person = Person { answer: true, asked: vec![] };
+        let (result, opened) = try_open(&relay, &mut person, "https://old.example/page");
+        assert!(result.is_err());
+        assert!(person.asked.is_empty() && opened.is_empty());
     }
 
     #[test]

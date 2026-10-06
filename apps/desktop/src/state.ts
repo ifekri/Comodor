@@ -107,7 +107,8 @@ function sessionOf(params: Record<string, unknown>): string | undefined {
   return typeof session?.["id"] === "string" ? session["id"] : undefined;
 }
 
-export function useSession(client: CoreClient, kept: Kept, workspace: string | null): SessionView {
+export function useSession(client: CoreClient, kept: Kept, workspace: string | null,
+                           coreState = "ready"): SessionView {
   const [state, dispatch] = useReducer(reduce, initial);
   const [intent, setIntent] = useState<ModeIntent>(beginIntent("act"));
   const latest = useRef(state);
@@ -265,6 +266,22 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
     const id = state.session?.id;
     if (state.gap && id) void resync(id, false);
   }, [state.gap, state.revision, state.session?.id, resync]);
+
+  // After the machine slept, the native side checked that the Core still
+  // answers; what the session became meanwhile is the Core's to say, so it
+  // is read again in full before anything is sent.
+  const checked = useRef(false);
+  useEffect(() => {
+    if (coreState === "checking") {
+      checked.current = true;
+      return;
+    }
+    const id = latest.current.session?.id;
+    if (coreState === "ready" && checked.current && id) {
+      checked.current = false;
+      void resync(id, false);
+    }
+  }, [coreState, resync]);
 
   // One mode request in flight; the current aim is what goes out next.
   useEffect(() => {

@@ -304,7 +304,11 @@ point.
 - **Event gap after reload or sleep.** A sequence gap is repaired from a
   snapshot, never by continuing with a hole; a duplicate event is ignored.
 - **Machine sleep and wake.** On wake the application confirms the Core is
-  alive and the session is current before accepting input.
+  alive and the session is current before accepting input: nothing the
+  window sends reaches the Core until the Core has answered a check, and the
+  window then reads its session again from the Core. A Core that exited
+  while the machine slept, or does not answer the check within 10 seconds,
+  is restarted as after a crash.
 - **Workspace or path with non-ASCII characters.** Persian, mixed right-to-left
   and left-to-right text, emoji, combining characters and long paths are shown
   as the Core reports them and passed through unchanged.
@@ -495,7 +499,8 @@ point.
   operations this specification requires — relaying protocol messages to and
   from its own Core, choosing a workspace, reporting Core status and
   diagnostics, and opening an external link in the system browser after the
-  person asks — and MUST refuse everything else.
+  person confirms that exact link in a native dialog the window's content
+  cannot reach — and MUST refuse everything else.
 - **FR-031**: When the Core reports the provider as not configured, the
   application MUST show that state, MUST direct the person to run
   `comodor setup` in a terminal, MUST NOT accept a prompt until the Core reports

@@ -15,14 +15,14 @@ single-instance handling and link opening run on the native side.
 | Command | Arguments | Returns | Refuses when |
 | --- | --- | --- | --- |
 | `connect` | an IPC channel for inbound messages | `{generation}` — this page's generation; the channel then receives status and protocol lines | — (a new page gets a new generation; the previous generation stops receiving) |
-| `send_line` | `{generation, line}` — one protocol v2 request envelope as text | `{}` | the generation is not current; the line is not a JSON object with `type: "request"`; the method is `shutdown` or not a protocol v2 method; the Core is not `ready` |
+| `send_line` | `{generation, line}` — one protocol v2 request envelope as text | `{}` | the generation is not current; the line is not a JSON object with `type: "request"`; the method is `shutdown` or not a protocol v2 method; the Core is not `ready` (after a wake not yet noticed, the wake is noticed first, and the Core is then `checking`) |
 | `status` | — | the current `CoreProcess` summary: `state`, `workspace` (or none chosen yet; for display, so a path that is not UTF-8 loses bytes), `workspace_id` (which workspace, losslessly: it changes exactly when the folder does and is never reused within a launch; the page tells workspaces apart by it), `failure` (class and message), `restart_count` of the three allowed (OD-1), `closing` with the seconds remaining (OD-2), `stop_outcome` (`orderly` or `forced`), handshake Core name/version | — |
 | `diagnostics` | — | the `DiagnosticTail` as text | — |
 | `choose_workspace` | — | opens the chooser at the last selected folder; returns the chosen absolute path, or `null` if the person dismissed it. On a new choice, a running Core is stopped (10 s grace) and one is started in the new workspace (FR-021); the same command is how the person chooses after a dismissed launch chooser | a workspace change is already in progress |
 | `retry` | — | `{}`; the person's "Try again": starts a Core from `failed` in the same workspace. It does not reset the restart count (OD-1) | the Core is not `failed` |
 | `check_again` | — | `{}`; orderly restart of the Core, used after `comodor setup` (R11) | the Core is `starting`, `handshaking` or `stopping` |
 | `quit_now` | — | `{}`; the person's "Quit now": forced stop during `stopping`, before the 10-second deadline (OD-2) | not `stopping` |
-| `open_external` | `{url}` | `{}` | the scheme is not `http` or `https`; the call does not come from a person's activation (the page calls it only from a click handler, and the native side checks that the URL is one the page displayed as a link in the current generation) |
+| `open_external` | `{url}` | `{}`, once the person has said yes to exactly this URL in a native dialog ("Open link?", naming the URL; one at a time) | the scheme is not `http` or `https`; the URL was not in a line relayed to the page of the current generation (refused before anyone is asked); another link is waiting for an answer; the person did not say yes. The page's call is never taken as proof of a click, and a URL's presence in a relayed line, in any field, authorizes nothing: each call is put to the person, and a yes is never remembered |
 
 What is deliberately absent: reading files, running processes, reading
 configuration, the environment or credentials, clipboard access, window

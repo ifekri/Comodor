@@ -19,6 +19,7 @@ pub mod relay;
 pub mod restart;
 pub mod shutdown;
 pub mod supervisor;
+pub mod wake;
 pub mod workspace;
 
 use std::ffi::OsString;
@@ -60,6 +61,10 @@ pub fn run() {
                 prefs::path_in(&data),
                 chooser(&handle),
             );
+            // After the machine sleeps, the Core is checked before the page
+            // may send to it again (spec: Machine sleep and wake).
+            let waking = handle.clone();
+            wake::watch(desktop.wake.clone(), move || waking.state::<Desktop>().supervisor.woke());
             app.manage(desktop);
             create_main_window(&handle)?;
             let launching = handle.clone();

@@ -105,9 +105,15 @@ result. Runs during development use `workflow_dispatch` on the pushed branch.
 Evidence for the **exact final SHA** goes in the PR description and the owner
 report, never in a repository commit made after the final validation round.
 
-The real folder chooser (SC-017) is checked by hand on each platform. A
-screenshot or screen recording shows the dialog opening at the folder the
-application passed, and is attached to the PR description.
+The real folder chooser (SC-017) is recorded by `npm run -w apps/desktop
+chooser-evidence` in the `desktop` job on each platform: the release build is
+launched twice with a stored folder, and the folder the dialog opened at is
+read from the dialog itself and compared with it (Windows: the address bar,
+through UI Automation; macOS: the panel's column browser, through
+Accessibility; Linux: the GTK location entry, through the clipboard). A
+mismatch fails the job. The screenshots of each dialog are kept beside
+`evidence.json` as supporting evidence; the folder stored beforehand is the
+request, never the observation.
 
 A layer or platform without recorded evidence is reported as **NOT
 VERIFIED**, and D1 is then **incomplete**. NOT VERIFIED is never a pass and is

@@ -48,6 +48,38 @@ async function noChooser(context: ScenarioContext): Promise<void> {
   expect(Array.isArray(starts) && starts.length === 0, `no chooser appeared: ${JSON.stringify(starts)}`);
 }
 
+/** The window equals what the Core's snapshot says, line for line. */
+async function equalsTheCore(): Promise<number> {
+  const client = (window as unknown as Record<string, unknown>)["__comodorClient"] as CoreClient;
+  const sessions = (await client.call("session.list"))["sessions"] as { id: string }[];
+  const snapshot = (await client.call("session.snapshot", { session_id: sessions[0]!.id }))["snapshot"] as
+    { messages: { role: string; text: string }[] };
+  const shown = lines();
+  const told = snapshot.messages.map((message) => ({
+    speaker: message.role === "user" ? "You" : "Comodor", text: message.text,
+  }));
+  expect(JSON.stringify(shown) === JSON.stringify(told),
+         `the window equals the Core's snapshot:\n${JSON.stringify(shown)}\n${JSON.stringify(told)}`);
+  return shown.length;
+}
+
+/**
+ * Spec: Machine sleep and wake. The machine "wakes" while an answer is held
+ * mid-message and then finishes: the native side checks the Core before the
+ * page may send again, and the page reads its session again afterwards (the
+ * harness checks both, in order, from the run's record). The window ends up
+ * equal to the Core's snapshot, and can send again.
+ */
+export const wake: Scenario = async (context) => {
+  await prompt(context, "Tell me something long.");
+  await context.waitFor(() => withText('[data-testid="line"][data-state="streaming"]', "The first words"));
+  await context.checkpoint("release-and-wake");
+  await context.waitFor(() => withText('[data-testid="line"][data-state="completed"]', "the rest of it follows"));
+  await context.waitFor(() => document.querySelector('[data-testid="status-strip"][data-state="ready"]'));
+  await sendable(context);
+  return { lines: await equalsTheCore() };
+};
+
 /** T063: reload while the answer is held mid-message. */
 export const reload: Scenario = async (context) => {
   if (place() === null) {

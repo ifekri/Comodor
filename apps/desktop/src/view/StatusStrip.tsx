@@ -18,6 +18,7 @@ const STATE_LABELS: Readonly<Record<string, string>> = {
   handshaking: "Starting…",
   restarting: "Restarting…",
   ready: "Ready",
+  checking: "Checking the Core…",
   failed: "Stopped",
   stopping: "Closing…",
   stopped: "Stopped",
@@ -30,7 +31,7 @@ export function stateLabel(state: string): string {
 /** Where a running or starting Core can be moved to another workspace
  * (FR-021); a failed or absent one has its own chooser, a stopping one is
  * already on its way out. */
-const CHANGEABLE = new Set(["starting", "handshaking", "restarting", "ready"]);
+const CHANGEABLE = new Set(["starting", "handshaking", "restarting", "ready", "checking"]);
 
 export function StatusStrip({ status, model, workspace, onChangeWorkspace }: {
   status: CoreStatus;

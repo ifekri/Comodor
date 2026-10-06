@@ -63,7 +63,9 @@ export function App({ api }: { api: NativeApi }) {
   if (status === null) {
     return <main className="window" data-testid="window"><p className="quiet">Starting…</p></main>;
   }
-  if (status.state === "ready" && client !== null) {
+  // While the Core is checked after the machine slept, the conversation
+  // stays on screen; nothing can be sent until the Core has answered.
+  if ((status.state === "ready" || status.state === "checking") && client !== null) {
     return (
       <OpenLink.Provider value={open}>
         <main className="window" data-testid="window">

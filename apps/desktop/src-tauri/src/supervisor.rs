@@ -35,6 +35,9 @@ pub enum State {
     Starting,
     Handshaking,
     Ready,
+    /// After the machine slept: the Core must answer before the page may
+    /// send to it again.
+    Checking,
     Restarting,
     Failed,
     Stopping,
@@ -90,6 +93,10 @@ pub enum Input {
     DeadlinePassed { core: CoreId },
     /// The person's "Quit now", while stopping.
     QuitNow,
+    /// The machine has woken from sleep.
+    Woke,
+    /// The Core did not answer the check `check` in time.
+    CheckOverdue { core: CoreId, check: u64 },
 }
 
 /// What the driver is asked to do.
@@ -107,6 +114,8 @@ pub enum Effect {
     PageClosed { generation: u64, reason: String },
     /// Tell the machine `DeadlinePassed` for `core` after this long.
     Deadline { core: CoreId, after: Duration },
+    /// Tell the machine `CheckOverdue` for `core` and `check` after this long.
+    CheckDeadline { core: CoreId, check: u64, after: Duration },
     /// A fixed line for the application's log.
     Note(&'static str),
     /// The Core has stopped and the application should end.
@@ -137,6 +146,10 @@ pub struct CoreIdentity {
     pub version: String,
 }
 
+/// How long a Core has to answer after the machine woke before it is taken
+/// for hung and restarted.
+pub const CHECK_GRACE: Duration = Duration::from_secs(10);
+
 /// The restart limit (OD-1): automatic restarts stop at this crash.
 pub const RESTART_LIMIT: u32 = crate::restart::LIMIT;
 
@@ -166,6 +179,9 @@ pub struct Machine {
     stopping: Option<(StopReason, Instant)>,
     forced: bool,
     stop_outcome: Option<StopOutcome>,
+    /// The checks sent after a wake, counted: an answer or a deadline counts
+    /// only for the latest.
+    checks: u64,
 }
 
 impl Default for Machine {
@@ -200,6 +216,7 @@ impl Machine {
             stopping: None,
             forced: false,
             stop_outcome: None,
+            checks: 0,
         }
     }
 
@@ -324,8 +341,14 @@ impl Machine {
                 }
                 Ok(match self.state {
                     State::Handshaking => self.handshake_line(core, &line),
-                    State::Ready if !relay::is_envelope(&line) => self.fault(core, &line),
-                    State::Ready => self.core_line(&line),
+                    State::Ready | State::Checking if !relay::is_envelope(&line) => self.fault(core, &line),
+                    // Any answer to the check, an error included, shows the
+                    // Core is answering: the page may send again.
+                    State::Checking if answers(&line, &check_id(self.checks)) => {
+                        self.state = State::Ready;
+                        vec![Effect::StatusChanged]
+                    }
+                    State::Ready | State::Checking => self.core_line(&line),
                     _ => vec![],
                 })
             }
@@ -351,7 +374,7 @@ impl Machine {
                         FailureClass::ExitedBeforeReady,
                         format!("The Core exited before it was ready ({}). Its last output is \
                                  below.", describe_exit(code)))),
-                    State::Ready => self.crashed(Failure::new(
+                    State::Ready | State::Checking => self.crashed(Failure::new(
                         FailureClass::Crashed,
                         format!("The Core stopped unexpectedly ({}).", describe_exit(code)))),
                     _ => vec![],
@@ -383,6 +406,27 @@ impl Machine {
                 }
                 Ok(self.core.or(self.faulted).map(|core| self.force(core)).unwrap_or_default())
             }
+            Input::Woke => {
+                // Only a ready Core is checked: any other state is already
+                // on its way somewhere, and one check at a time.
+                let Some(core) = self.core.filter(|_| self.state == State::Ready) else {
+                    return Ok(vec![]);
+                };
+                self.checks += 1;
+                self.state = State::Checking;
+                let check = self.checks;
+                let line = json!({"version": relay::PROTOCOL_VERSION, "type": "request",
+                                  "id": check_id(check), "method": "session.list", "params": {}});
+                Ok(vec![Effect::StatusChanged, Effect::Write { core, line: line.to_string() },
+                        Effect::CheckDeadline { core, check, after: CHECK_GRACE }])
+            }
+            Input::CheckOverdue { core, check } => {
+                if self.state != State::Checking || !self.is_current(core) || check != self.checks {
+                    return Ok(vec![]);
+                }
+                Ok(self.fail_and_stop(core, Failure::new(FailureClass::Crashed,
+                    "The Core did not answer after the computer woke from sleep.")))
+            }
             Input::Retry => {
                 if self.state != State::Failed || self.workspace.is_none() {
                     return Err("\"Try again\" applies only after a failure".into());
@@ -406,7 +450,7 @@ impl Machine {
             self.stopping = Some((reason, (self.clock)()));
             return self.after_stop();
         };
-        let ready = self.state == State::Ready;
+        let ready = matches!(self.state, State::Ready | State::Checking);
         self.stopping = Some((reason, (self.clock)()));
         self.forced = false;
         self.stop_outcome = None;
@@ -550,7 +594,7 @@ impl Machine {
     }
 
     fn fail_and_stop(&mut self, core: CoreId, failure: Failure) -> Vec<Effect> {
-        let was_ready = self.state == State::Ready;
+        let was_ready = matches!(self.state, State::Ready | State::Checking);
         self.core = None;
         self.faulted = Some(core);
         let mut effects = vec![Effect::CloseStdin { core }, Effect::ForceStop { core }];
@@ -581,6 +625,18 @@ impl Machine {
         }
         effects
     }
+}
+
+/// The id of the native side's check number `check` after a wake.
+fn check_id(check: u64) -> String {
+    format!("native:check:{check}")
+}
+
+/// Is `line` an answer (a response or an error) to the request `id`?
+fn answers(line: &str, id: &str) -> bool {
+    serde_json::from_str::<Value>(line).ok().is_some_and(|envelope| {
+        matches!(envelope["type"].as_str(), Some("response" | "error")) && envelope["id"].as_str() == Some(id)
+    })
 }
 
 /// One line of the Core's stdout as text. A line that is not UTF-8 is not
@@ -710,6 +766,12 @@ impl Supervisor {
     /// The person's "Quit now".
     pub fn quit_now(&self) -> Result<(), String> {
         self.input(Input::QuitNow)
+    }
+
+    /// The machine has woken from sleep: the Core is checked before the page
+    /// may send to it again.
+    pub fn woke(&self) {
+        let _ = self.input(Input::Woke);
     }
 
     pub fn status(&self) -> Status {
@@ -883,6 +945,13 @@ impl Driver {
                         std::thread::sleep(after);
                         let _ = events.send(Event::Input(Input::DeadlinePassed { core }, None));
                     }).expect("start the stop deadline");
+                }
+                Effect::CheckDeadline { core, check, after } => {
+                    let events = self.events.clone();
+                    std::thread::Builder::new().name("check-deadline".into()).spawn(move || {
+                        std::thread::sleep(after);
+                        let _ = events.send(Event::Input(Input::CheckOverdue { core, check }, None));
+                    }).expect("start the check deadline");
                 }
                 Effect::Note(text) => self.log(Entry::Note(text)),
                 Effect::Finished => {
@@ -1254,6 +1323,131 @@ mod tests {
         assert!(effects.contains(&Effect::Finished), "{effects:?}");
         assert_eq!(spawned(&effects), None, "nothing starts after: {effects:?}");
         assert_eq!(machine.state(), State::Stopped);
+    }
+
+    // -- after the machine slept (spec: Machine sleep and wake) ---------------
+
+    /// The check a wake sends the Core: its id, from the effects.
+    fn check_sent(effects: &[Effect], core: CoreId) -> String {
+        effects.iter().find_map(|effect| match effect {
+            Effect::Write { core: to, line } if *to == core => {
+                let request: Value = serde_json::from_str(line).ok()?;
+                let id = request["id"].as_str()?;
+                id.starts_with("native:check:").then(|| {
+                    assert_eq!(request["method"], "session.list", "{line}");
+                    id.to_string()
+                })
+            }
+            _ => None,
+        }).unwrap_or_else(|| panic!("no check was sent: {effects:?}"))
+    }
+
+    fn page_request(id: &str) -> String {
+        json!({"version": 2, "type": "request", "id": id, "method": "model.get", "params": {}}).to_string()
+    }
+
+    /// Review finding (PR #62): after a wake the page sends nothing to the
+    /// Core until the Core has answered.
+    #[test]
+    fn after_a_wake_the_page_waits_until_the_core_answers() {
+        let (mut machine, core) = ready();
+        let generation = machine.connect();
+        let effects = machine.handle(Input::Woke).unwrap();
+        assert_eq!(machine.state(), State::Checking);
+        let check = check_sent(&effects, core);
+        assert!(effects.contains(&Effect::CheckDeadline { core, check: 1, after: CHECK_GRACE }), "{effects:?}");
+        assert!(effects.contains(&Effect::StatusChanged));
+        assert!(machine.send_line(generation, &page_request("1")).is_err(), "nothing reaches the Core yet");
+
+        // An event the Core wrote meanwhile still reaches the page.
+        let event = json!({"version": 2, "type": "event", "event": "session.updated", "seq": 3,
+                           "params": {"session": {"id": "s1"}}}).to_string();
+        let relayed = machine.handle(Input::Line { core, line: event }).unwrap();
+        assert!(relayed.iter().any(|e| matches!(e, Effect::ToPage { .. })), "{relayed:?}");
+
+        let answer = json!({"version": 2, "type": "response", "id": check, "result": {"sessions": []}});
+        let effects = machine.handle(Input::Line { core, line: answer.to_string() }).unwrap();
+        assert_eq!(effects, vec![Effect::StatusChanged], "the answer is the native side's own");
+        assert_eq!(machine.state(), State::Ready);
+        assert!(machine.send_line(generation, &page_request("2")).is_ok());
+        // A late deadline for the answered check changes nothing.
+        assert_eq!(machine.handle(Input::CheckOverdue { core, check: 1 }).unwrap(), vec![]);
+        assert_eq!(machine.state(), State::Ready);
+    }
+
+    #[test]
+    fn an_error_answer_still_shows_the_core_is_answering() {
+        let (mut machine, core) = ready();
+        let check = check_sent(&machine.handle(Input::Woke).unwrap(), core);
+        let error = json!({"version": 2, "type": "error", "id": check,
+                           "error": {"code": "internal", "message": "busy"}});
+        machine.handle(Input::Line { core, line: error.to_string() }).unwrap();
+        assert_eq!(machine.state(), State::Ready);
+    }
+
+    /// Not answering in time: taken for hung, ended, and restarted like a
+    /// crash (OD-1 counts it).
+    #[test]
+    fn a_core_that_does_not_answer_after_a_wake_is_restarted() {
+        let (mut machine, core) = ready();
+        machine.handle(Input::Woke).unwrap();
+        // Another Core's deadline, or another check's, is not this one.
+        assert_eq!(machine.handle(Input::CheckOverdue { core: core + 1, check: 1 }).unwrap(), vec![]);
+        assert_eq!(machine.handle(Input::CheckOverdue { core, check: 2 }).unwrap(), vec![]);
+        assert_eq!(machine.state(), State::Checking);
+        let effects = machine.handle(Input::CheckOverdue { core, check: 1 }).unwrap();
+        assert!(effects.contains(&Effect::ForceStop { core }), "{effects:?}");
+        assert_eq!(machine.state(), State::Restarting);
+        let status = machine.status();
+        assert_eq!(status.restart_count, 1);
+        assert!(status.notice.as_deref().is_some_and(|n| n.contains("did not answer")), "{status:?}");
+        // The next Core starts once the hung one has exited, never beside it.
+        assert!(!effects.iter().any(|e| matches!(e, Effect::Spawn { .. })), "{effects:?}");
+        let after = machine.handle(Input::Exited { core, code: None }).unwrap();
+        assert!(after.iter().any(|e| matches!(e, Effect::Spawn { .. })), "{after:?}");
+    }
+
+    #[test]
+    fn a_core_that_exited_while_the_machine_slept_is_restarted() {
+        let (mut machine, core) = ready();
+        machine.handle(Input::Woke).unwrap();
+        let effects = machine.handle(Input::Exited { core, code: Some(1) }).unwrap();
+        assert!(effects.iter().any(|e| matches!(e, Effect::Spawn { .. })), "{effects:?}");
+        assert_eq!(machine.state(), State::Restarting);
+        assert_eq!(machine.status().restart_count, 1);
+    }
+
+    #[test]
+    fn a_bad_line_during_the_check_is_a_fault() {
+        let (mut machine, core) = ready();
+        machine.handle(Input::Woke).unwrap();
+        let effects = machine.handle(Input::Line { core, line: "garbage".into() }).unwrap();
+        assert!(effects.contains(&Effect::ForceStop { core }), "{effects:?}");
+        assert_eq!(machine.status().failure, None, "restarted, not failed");
+        assert_eq!(machine.state(), State::Restarting);
+    }
+
+    #[test]
+    fn closing_during_the_check_is_an_orderly_stop() {
+        let (mut machine, core) = ready();
+        machine.handle(Input::Woke).unwrap();
+        let effects = machine.handle(Input::Stop { reason: StopReason::WindowClosed }).unwrap();
+        assert!(effects.iter().any(|e| matches!(e, Effect::Write { line, .. } if line.contains("shutdown"))),
+                "{effects:?}");
+        assert_eq!(machine.state(), State::Stopping);
+        // The check's deadline no longer applies; the stop's does.
+        assert_eq!(machine.handle(Input::CheckOverdue { core, check: 1 }).unwrap(), vec![]);
+        assert_eq!(machine.state(), State::Stopping);
+    }
+
+    #[test]
+    fn a_wake_while_no_core_is_ready_changes_nothing() {
+        let (mut machine, _) = started();
+        assert_eq!(machine.handle(Input::Woke).unwrap(), vec![]);
+        assert_eq!(machine.state(), State::Starting);
+        let (mut machine, _) = ready();
+        machine.handle(Input::Woke).unwrap();
+        assert_eq!(machine.handle(Input::Woke).unwrap(), vec![], "one check at a time");
     }
 
     /// Review finding (PR #62): while a stop waits for a faulted Core, the

@@ -38,7 +38,13 @@ absent ──start──▶ starting ──spawned──▶ handshaking ──he
    │                 └──────────────▶ starting                │
    │                                                          └──▶ starting
    │
-ready / failed ──quit, close or workspace change──▶ stopping ──exit──▶ stopped
+ready ──machine woke──▶ checking ──the Core answered──▶ ready
+                          │
+                exit, bad line, or no answer within 10 s
+                          ▼
+                as from ready: restarting, or failed (crashed, protocol_fault)
+
+ready / checking / failed ──quit, close or workspace change──▶ stopping ──exit──▶ stopped
                                                         │
                                                grace expired or
                                                "Quit now" (person)
@@ -56,8 +62,11 @@ Rules:
   versions.
 - A non-protocol line on the Core's stdout moves `handshaking` or `ready` to
   failure with `protocol_fault` (FR-007).
-- Automatic restart applies only from `ready` (R4). Every failure before
-  `ready` waits for "Try again".
+- Automatic restart applies only from `ready` or `checking` (R4). Every
+  failure before `ready` waits for "Try again".
+- `checking` follows a wake from sleep: the native side sends the Core a
+  `session.list` of its own and refuses every line from the window until any
+  answer to it arrives. No answer within 10 seconds counts as a crash.
 - `stopping` begins with the orderly sequence in
   [core-supervision.md](./contracts/core-supervision.md) §5. `stopped` is
   reached only on the observed process exit.

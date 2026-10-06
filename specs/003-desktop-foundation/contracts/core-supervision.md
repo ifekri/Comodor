@@ -76,6 +76,19 @@ of §5 applies) or choose another workspace; no separate stop action exists.
 - A Core stopped for a fault is never running alongside another: whatever
   follows (the restart, "Try again", another workspace) starts its Core only
   after the faulted one has exited.
+- After the machine sleeps (spec: Machine sleep and wake): a sleep is read
+  from two platform clocks, one that runs while the machine sleeps and one
+  that does not (Linux `CLOCK_BOOTTIME` and `CLOCK_MONOTONIC`; macOS
+  `CLOCK_MONOTONIC_RAW` and `CLOCK_UPTIME_RAW`; Windows `QueryInterruptTime`
+  and `QueryUnbiasedInterruptTime`). It is looked for every second and
+  before every line the window sends. A sleep of a second or more moves a
+  `ready` Core to `checking`: the native side sends it `session.list` with
+  an id of its own, and refuses the window's lines until any answer to it
+  arrives (`ready` again; the window then reads its session afresh). An
+  exit or a bad line meanwhile is handled as from `ready`; no answer within
+  10 seconds counts as a crash (`crashed`, "did not answer after the
+  computer woke from sleep"), and the Core is ended and restarted under
+  OD-1.
 - Completed turns are observed read-only from relayed events, under the
   conservative rule of [data-model.md](../data-model.md) §3. Only a completed
   turn resets the crash count.

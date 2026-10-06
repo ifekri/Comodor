@@ -256,7 +256,7 @@ jobs:
       # Recorded for review here, on a runner with nothing else on screen.
       - name: Folder chooser tools (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y xdotool imagemagick
+        run: sudo apt-get install -y xdotool imagemagick xclip
 
       - name: Real folder chooser evidence
         run: npm run -w apps/desktop chooser-evidence -- --skip-build

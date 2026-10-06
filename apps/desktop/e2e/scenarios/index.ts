@@ -13,7 +13,7 @@ import {
 } from "./lifetime.ts";
 import { ready } from "./ready.ts";
 import { unconfigured } from "./unconfigured.ts";
-import { crash, reload } from "./recovery.ts";
+import { crash, reload, wake } from "./recovery.ts";
 import { workspaceChange, workspaceLaunch, workspaceLaunchPath, workspaceProjectRoot } from "./workspace-launch.ts";
 
 export const SCENARIOS: Readonly<Record<string, Scenario>> = {
@@ -35,6 +35,7 @@ export const SCENARIOS: Readonly<Record<string, Scenario>> = {
   ready,
   reload,
   unconfigured,
+  wake,
   "workspace-change": workspaceChange,
   "workspace-launch": workspaceLaunch,
   "workspace-launch-path": workspaceLaunchPath,

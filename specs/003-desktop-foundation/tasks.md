@@ -588,6 +588,14 @@ then delivery on one exact SHA.
   - `COMODOR_BIN` and `COMODOR_ARGS` (a path with spaces goes in `COMODOR_BIN`, plan K8);
   - that D1 is not packaged.
 - [X] T090 Mark `[X]` in `specs/003-desktop-foundation/tasks.md` each of T001–T089 whose evidence exists from the development runs, leaving any without evidence open. Commit with a neutral message and no attribution. From here, a commit is made only to fix a valid Codex finding (T098), a failing local gate (T092–T096) or a failing CI check (T097). Each fix commit changes code, tests or docs only — never evidence — and sends the work back to T092 on the new exact head SHA.
+- [X] T100 [US3] After the machine sleeps (spec: Machine sleep and wake; review thread on `d996b86`):
+  - `apps/desktop/src-tauri/src/wake.rs` reads sleep from two platform clocks (one runs while the machine sleeps, one does not) and reports each sleep of 1 s or more once; looked for every second and before every line the page sends (`Desktop::send_line`);
+  - `apps/desktop/src-tauri/src/supervisor.rs` moves a `ready` Core to `checking` on a wake, sends it a native `session.list`, refuses the page's lines until any answer, and treats an exit, a bad line, or no answer within `CHECK_GRACE` (10 s) as from `ready` (crash, OD-1);
+  - the window keeps the conversation during `checking`, offers no Send, and reads the session again once `ready` (`apps/desktop/src/state.ts`, `app.tsx`, `view/SessionView.tsx`, `view/StatusStrip.tsx`).
+
+  Tests written first, each failing on the previous behaviour: the machine tests in `supervisor.rs`, `wake.rs`'s own tests (including this platform's clocks, run on all three), `apps/desktop/src-tauri/tests/wake.rs` (the real Core answers; a Core that never answers is restarted; a line sent before the wake was noticed is held back), `apps/desktop/test/wake.test.tsx`, and the scenario `wake` (S, all platforms; the harness checks `checking`, then `ready`, then a fresh `session.snapshot`, in the run's record). Mutation-checked.
+- [X] T101 [US5] `open_external` opens a link only after the person says yes to exactly that URL in a native dialog (review thread on `d996b86`): `ConfirmLink` and `open_link` in `apps/desktop/src-tauri/src/commands.rs`; one confirmation at a time; the test build records instead of opening a browser. Tests written first in `commands.rs`: refusal, confirmation, every call asked again, a URL only in a field never shown as a link, an older generation's link refused without asking. Mutation-checked.
+- [X] T102 Record the Linux SC-017 observation from the dialog itself: `apps/desktop/e2e/chooser-evidence.mjs` reads the GTK location entry (Ctrl+L) through the clipboard (`xclip`, installed in `.github/workflows/ci.yml`) and captures it; the path bar alone shows only the last folders' names.
 - [ ] T091 Push `003-desktop-foundation` normally (never forced) and open one PR against `main`, as the owner's stated D1 workflow authorizes. First confirm the identity: `gh auth status` and `gh api user --jq .login` must show `ifekri`. The PR body, from `.github/PULL_REQUEST_TEMPLATE.md`, has:
   - a neutral description with no tool or model attribution;
   - the Surface Impact table with the ten canonical rows and statuses from [plan.md](./plan.md) §Surface Impact, each with evidence;
@@ -612,7 +620,7 @@ then delivery on one exact SHA.
   - the canary results.
 
   A layer or platform without a passing result is NOT VERIFIED, and D1 is then incomplete (FR-033).
-- [ ] T095 Record real-folder-chooser evidence on Windows, Linux and macOS for the same build ([quickstart.md](./quickstart.md) §7). A screenshot or recording shows the OS dialog opening at the folder the application passed, on two consecutive fresh launches. Attach it to the PR description. Missing evidence on any platform leaves SC-017, and D1, incomplete.
+- [ ] T095 Record real-folder-chooser evidence on Windows, Linux and macOS for the same build ([quickstart.md](./quickstart.md) §7): on two consecutive fresh launches, the folder the OS dialog opened at, read from the dialog itself, equals the folder the application passed; the screenshots are kept as supporting evidence. A platform where it could not be read is reported as such, not as observed. Attach it to the PR description. Missing evidence on any platform leaves SC-017, and D1, incomplete.
 - [ ] T096 Record the offline evidence in the PR description (FR-034, SC-013):
   - the `desktop` job reads no secret;
   - every fixture config under `apps/desktop/src-tauri/tests/` uses `base_url: "offline"`;

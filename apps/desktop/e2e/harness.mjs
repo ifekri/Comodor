@@ -114,12 +114,36 @@ function resolve(value, places) {
   return value;
 }
 
+/** What is missing from the recorded run after a wake, or null. */
+function wakeProblem(record) {
+  const entries = fs.existsSync(record)
+    ? fs.readFileSync(record, "utf-8").split("\n").filter(Boolean).map((line) => JSON.parse(line))
+    : [];
+  const state = (entry) => entry.kind === "inbound" && entry.value?.kind === "status" && entry.value.status?.state;
+  const checking = entries.findIndex((entry) => state(entry) === "checking");
+  if (checking < 0) return "the Core was never checked after the wake";
+  const ready = entries.findIndex((entry, at) => at > checking && state(entry) === "ready");
+  if (ready < 0) return "the Core was never ready again after the check";
+  const sentBefore = entries.slice(checking, ready).some((entry) => entry.kind === "command"
+    && entry.value?.name === "send_line" && !("Err" in (entry.value.result ?? {})));
+  if (sentBefore) return "a line reached the Core while it was being checked";
+  const reread = entries.some((entry, at) => at > ready && entry.kind === "command"
+    && entry.value?.name === "send_line"
+    && JSON.parse(entry.value.args?.line ?? "{}").method === "session.snapshot");
+  return reread ? null : "the session was not read again after the check";
+}
+
 /** Answer one checkpoint from the page. */
 function answer(checkpoint, run) {
   switch (checkpoint.name) {
     case "release-hold":
       releaseHold(run.hold);
       return { ok: true };
+    // The machine woke while the turn went on: the Core finishes it, and the
+    // application is told it woke (a runner cannot really sleep).
+    case "release-and-wake":
+      releaseHold(run.hold);
+      return { ok: true, act: "wake" };
     case "kill-core": {
       const pid = Number(checkpoint.data?.pid);
       if (!pid) return { ok: false, error: "no Core pid" };
@@ -378,6 +402,16 @@ async function runScenario(name) {
       summary.error = found.planted
         ? `the credential reached: ${found.leaks.join(", ") || "(nothing searched)"}`
         : "the credential was never planted in the Core's home";
+    }
+  }
+  // After a wake (spec: Machine sleep and wake): the native side checked the
+  // Core (status `checking`, then `ready`), and only then did the page read
+  // its session again — from what the run recorded, in order.
+  if (setup.wake && summary.ok) {
+    const problem = wakeProblem(record);
+    if (problem) {
+      summary.ok = false;
+      summary.error = problem;
     }
   }
   // SC-001: from the process start to the page's ready moment.

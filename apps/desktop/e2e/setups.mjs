@@ -66,6 +66,8 @@ export const SETUPS = {
     core: ["scripted_core.py", "hold-mid-turn"], hold: true, workspaceArgument: true,
   },
   reload: { core: ["scripted_core.py", "hold-mid-turn"], hold: true, workspaceArgument: true },
+  // Spec: Machine sleep and wake — the turn goes on while the Core is checked.
+  wake: { core: ["scripted_core.py", "hold-mid-turn"], hold: true, workspaceArgument: true, wake: true },
   crash: {
     core: ["doubles.py", "sequenced"],
     sequence: ["complete-turn", "scripted:hold-mid-turn", "crash-on-send"],
