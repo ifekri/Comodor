@@ -132,8 +132,12 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
       const snapshot = answer["snapshot"] as Snapshot;
       dispatch({ type: "snapshot", snapshot });
       // An idle session has no turn a restart could interrupt — one that
-      // ended while this page was not listening included.
+      // ended while this page was not listening included. A busy one has,
+      // even if the page that sent it reloaded before seeing its answer.
       if (snapshot.session?.busy === false) kept.unsentTurn = undefined;
+      else if (snapshot.session?.busy === true && kept.unsentTurn === undefined) {
+        kept.unsentTurn = snapshot.messages?.at(-1)?.turn_id ?? "";
+      }
       const mode = (snapshot.session?.mode ?? "act") as Mode;
       setIntent((was) => (fresh ? beginIntent(mode) : intentConfirmed(was, mode)));
     } catch (problem) {

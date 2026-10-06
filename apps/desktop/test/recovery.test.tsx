@@ -207,6 +207,34 @@ describe("what the window keeps", () => {
     expect(byText(rendered!.container, '[data-testid="recovery"]', "interrupted")).toBeNull();
   });
 
+  /** Review finding (PR #62): a turn the Core accepted while the window was
+   * reloading, whose answer the old page never saw, is still called
+   * interrupted by a later crash. */
+  test("a turn still running after a reload is called interrupted by a later crash", async () => {
+    const { native, container } = await open();
+    native.core.handlers.set("session.send", () => ({ hold: true }));
+    const field = container.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;
+    await typeInto(field, "a long one");
+    await press(field, "Enter");
+    await until(() => native.core.requests("session.send").length === 1, "the send");
+    // The window reloads before the answer arrives; the new page sees the
+    // turn only as a busy session in its snapshot.
+    await rendered!.unmount();
+    native.core.session = { ...native.core.session, busy: true };
+    native.core.snapshot = {
+      session: native.core.session, revision: 2, tools: [],
+      messages: [{ message_id: "m1", turn_id: "t1", role: "assistant", text: "half", status: "streaming" }],
+    };
+    rendered = await render(<App api={native.api} />);
+    await until(() => native.core.requests("session.snapshot").length > 1, "the snapshot after the reload");
+    await until(() => rendered!.container.querySelector('[data-testid="composer"]'), "the composer");
+    const next = coreWith("live-2");
+    native.restart(next);
+    await until(() => next.requests("session.open").length === 1, "the reopen");
+    await until(() => byText(rendered!.container, '[data-testid="recovery"]', "interrupted"), "the notice");
+    expect(next.requests("session.send")).toEqual([]);
+  });
+
   test("a reload keeps the stored conversation for the next restart", async () => {
     const { native } = await open();
     const second = coreWith("live-2");

@@ -202,7 +202,7 @@ clears the first three:
 | `stored_id` | the conversation to reopen after a restart (R12) |
 | `live_id` | the live session of the Core the page last held, which a reload finds in `session.list` |
 | `workspace` | the workspace `stored_id` belongs to, by the native side's lossless `workspace_id` |
-| `unsent_turn` | the `turn_id` the Core accepted and never completed, shown as interrupted after a crash |
+| `unsent_turn` | the `turn_id` the Core accepted and never completed, shown as interrupted after a crash; a snapshot showing the session busy sets it too (a page reloaded before seeing the answer), one showing it idle clears it |
 | `composer_text` | the unsent prompt |
 | `interaction_cursor` | which option of the pending form is focused; question selection state comes from `@comodor/questions` |
 
