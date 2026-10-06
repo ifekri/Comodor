@@ -73,7 +73,17 @@ async function equalsTheCore(): Promise<number> {
 export const wake: Scenario = async (context) => {
   await prompt(context, "Tell me something long.");
   await context.waitFor(() => withText('[data-testid="line"][data-state="streaming"]', "The first words"));
+  // The wake is told after the harness's reply, so the page's own read of
+  // its session after the check is what marks the check as over.
+  const client = (window as unknown as Record<string, unknown>)["__comodorClient"] as CoreClient;
+  const call = client.call.bind(client);
+  let reread = 0;
+  client.call = (method: Parameters<CoreClient["call"]>[0], params?: Record<string, unknown>) => {
+    if (method === "session.snapshot") reread += 1;
+    return call(method, params);
+  };
   await context.checkpoint("release-and-wake");
+  await context.waitFor(() => reread > 0);
   await context.waitFor(() => withText('[data-testid="line"][data-state="completed"]', "the rest of it follows"));
   await context.waitFor(() => document.querySelector('[data-testid="status-strip"][data-state="ready"]'));
   await sendable(context);

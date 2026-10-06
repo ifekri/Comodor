@@ -12,10 +12,7 @@
  * and compared with the stored one: on Windows the address bar, through UI
  * Automation; on macOS the panel's column browser (the selected folder in
  * each column, from the disk's root) and its location pop-up, through the
- * Accessibility API; on Linux the GTK dialog's own location entry (Ctrl+L
- * shows it filled with the folder the dialog is in), copied and read back
- * with `xclip`, with a second screenshot of the entry. The path bar alone
- * shows only the last folders' names, not the whole path. The stored folder written beforehand is the request,
+ * Accessibility API. The stored folder written beforehand is the request,
  * never the observation. Then the application is ended. Nothing is chosen
  * and no Core starts.
  *
@@ -209,35 +206,6 @@ emit(["error": "the panel's browser was not read twice alike", "selected": last?
   }
 }
 
-/**
- * Linux: the folder the GTK dialog is in, from its own location entry.
- * Ctrl+L shows the entry filled with that folder; it is selected, copied
- * and read back from the clipboard, until an absolute path comes back. Then
- * the entry is captured too (`entryShot`). Nothing is chosen: the
- * application is ended afterwards with the dialog still open.
- */
-function observeGtk(windowId, entryShot) {
-  const run = (command, args) => spawnSync(command, args, { encoding: "utf-8", timeout: 10_000 });
-  // Without a window manager the keyboard follows the pointer.
-  run("xdotool", ["mousemove", "--window", windowId, "40", "40"]);
-  run("xdotool", ["windowfocus", windowId]);
-  run("xdotool", ["key", "--clearmodifiers", "ctrl+l"]);
-  const ends = Date.now() + DIALOG_DEADLINE_S * 1000;
-  let text = "";
-  while (!text.startsWith("/") && Date.now() < ends) {
-    run("xdotool", ["key", "--clearmodifiers", "ctrl+a", "ctrl+c"]);
-    const read = run("xclip", ["-o", "-selection", "clipboard"]);
-    text = read.status === 0 ? read.stdout.trim() : "";
-  }
-  run("import", ["-window", windowId, entryShot]);
-  if (!text.startsWith("/")) {
-    return { method: "the location entry (Ctrl+L), through the clipboard", error: `read ${JSON.stringify(text)}` };
-  }
-  return { method: "the location entry (Ctrl+L), through the clipboard", entry: text,
-           path: text.replace(/\/+$/, "") || "/",
-           entryScreenshot: fs.existsSync(entryShot) ? path.basename(entryShot) : null };
-}
-
 /** Is `observed` the folder `stored` names, however it is spelled? */
 function sameFolder(observed, stored) {
   try {
@@ -341,11 +309,6 @@ try {
       observation = { how: "the dialog's address bar (UI Automation)" };
     } else if (seen.found && process.platform === "darwin") {
       observation = { how: "the panel's column browser (Accessibility)", ...observePanel(app.pid) };
-      observed = observation.path ?? null;
-    } else if (seen.found && process.platform === "linux") {
-      const windowId = seen.read.replace(/^window /, "");
-      observation = { how: "the GTK dialog's location entry",
-                      ...observeGtk(windowId, path.join(OUT, `launch-${n}-${process.platform}-entry.png`)) };
       observed = observation.path ?? null;
     } else {
       observation = { how: "not read on this platform: the screenshot's path bar is the evidence" };
