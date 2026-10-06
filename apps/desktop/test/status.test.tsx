@@ -124,7 +124,7 @@ describe("the failure views", () => {
     const view = await show(native);
     const failure = await until(() => view.container.querySelector<HTMLElement>('[data-testid="failure-view"]'),
                                 "the failure view");
-    await until(() => failure.textContent?.includes("https://example.com/trace"), "the tail");
+    await until(() => failure.textContent?.includes("Traceback: details at https://example.com/trace"), "the tail");
     expect(failure.textContent).toContain("https://example.com/why");
     expect(failure.querySelector("button.link")).toBeNull();
   });
