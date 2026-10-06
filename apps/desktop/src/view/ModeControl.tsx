@@ -8,8 +8,10 @@
 import { CYCLE, type Mode, MODES } from "@comodor/modes";
 import type { ModeIntent } from "@comodor/session";
 
-export function ModeControl({ intent, onChoose }: {
+export function ModeControl({ intent, held, onChoose }: {
   intent: ModeIntent;
+  /** While the session is being checked or read again: nothing is sent. */
+  held: boolean;
   onChoose: (mode: Mode) => void;
 }) {
   const current = MODES[intent.confirmed];
@@ -19,7 +21,7 @@ export function ModeControl({ intent, onChoose }: {
         {current.label}
       </span>
       {CYCLE.map((mode) => (
-        <button key={mode} type="button" title={MODES[mode].summary}
+        <button key={mode} type="button" title={MODES[mode].summary} disabled={held}
                 aria-pressed={mode === intent.confirmed}
                 className={mode === intent.desired && mode !== intent.confirmed
                   ? "mode-option asked" : "mode-option"}

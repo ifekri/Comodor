@@ -47,8 +47,9 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
   // As the Core reports it: an unconfigured provider cannot answer (R11).
   const unconfigured = model !== null && model.configured === false;
   // From a check after the machine slept until the session has been read
-  // again, nothing the person does reaches the Core.
-  const held = status.state !== "ready" || session.refreshing;
+  // again — and for as long as the session cannot be read — nothing the
+  // person does reaches the Core.
+  const held = status.state !== "ready" || session.refreshing || state.connection.kind !== "ready";
   return (
     <>
       <StatusStrip status={status} model={model} workspace={session.workspace}
@@ -61,7 +62,12 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
           : <p className="quiet">Opening the session…</p>
         : (
           <div className="session" data-testid="session">
-            <ModeControl intent={session.intent} onChoose={session.chooseMode} />
+            <ModeControl intent={session.intent} held={held} onChoose={session.chooseMode} />
+            {state.connection.kind === "lost" && (
+              <p className="recovery" data-testid="session-unread">
+                The session could not be read again: {state.connection.reason}
+              </p>
+            )}
             {unconfigured && <SetupNotice onCheckAgain={onCheckAgain} />}
             {session.recovery.map((note) => (
               <p key={note} className="recovery" data-testid="recovery">{note}</p>
@@ -77,7 +83,7 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
                               onReply={(choice) => session.decide("permission.reply", { choice })} />
             )}
             <Composer busy={state.session.busy}
-                      ready={!held && state.connection.kind === "ready" && model?.configured === true}
+                      ready={!held && model?.configured === true}
                       cancellable={!held}
                       onSend={session.send} onCancel={session.cancel} />
           </div>

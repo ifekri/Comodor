@@ -202,6 +202,54 @@ describe("after the machine wakes", () => {
     expect(native.core.requests("session.cancel")).toEqual([]);
   });
 
+  /** Review finding (PR #62): the mode cannot be changed from the check until
+   * the session has been read again. */
+  test("the mode cannot be changed until the session is read again", async () => {
+    const { native, container } = await open();
+    const modes = () => [...container.querySelectorAll<HTMLButtonElement>('[data-testid="mode"] button')];
+    await until(() => modes().length > 0 && modes().every((button) => !button.disabled), "modes available");
+    const before = native.core.requests("session.set_mode").length;
+    native.push(status({ state: "checking", check_epoch: 1 }));
+    await until(() => modes().every((button) => button.disabled), "modes held during the check");
+    let offeredEarly = false;
+    const watcher = new MutationObserver(() => {
+      if (modes().some((button) => !button.disabled)) offeredEarly = true;
+    });
+    watcher.observe(container.querySelector('[data-testid="mode"]')!, { attributes: true, subtree: true });
+    native.core.handlers.set("session.snapshot", () => ({ hold: true }));
+    const asked = native.core.requests("session.snapshot").length;
+    native.push(status({ state: "ready", check_epoch: 1 }));
+    await until(() => native.core.requests("session.snapshot").length === asked + 1, "the session read again");
+    for (const button of modes()) button.click();
+    expect(offeredEarly).toBe(false);
+    watcher.disconnect();
+    expect(native.core.requests("session.set_mode").length).toBe(before);
+  });
+
+  /** Review finding (PR #62): a read after the check that fails leaves the
+   * window holding everything, and says so, rather than offering actions on
+   * what it showed before the sleep. */
+  test("a failed read after the check keeps every action held, and says so", async () => {
+    const { native, container } = await open();
+    native.core.emit("session.updated", { session: { ...native.core.session, busy: true } });
+    native.core.emit("permission.requested", {
+      id: "p1", session_id: "s1", title: "Write out.txt", options: ["allow", "deny"], tool: "write_file",
+    });
+    const card = await until(() => container.querySelector<HTMLElement>('[data-testid="permission"]'), "the card");
+    native.push(status({ state: "checking", check_epoch: 1 }));
+    await until(() => [...card.querySelectorAll("button")].every((button) => button.disabled), "held");
+    native.core.handlers.set("session.snapshot", () => ({
+      error: { code: "internal", message: "the store could not be read" } }));
+    native.push(status({ state: "ready", check_epoch: 1 }));
+    const notice = await until(() => container.querySelector('[data-testid="session-unread"]'), "the window says so");
+    expect(notice.textContent).toContain("the store could not be read");
+    expect([...card.querySelectorAll("button")].every((button) => button.disabled)).toBe(true);
+    expect((byText(container, '[data-testid="composer"] button', "Cancel") as HTMLButtonElement).disabled).toBe(true);
+    expect(send(container)!.disabled).toBe(true);
+    expect([...container.querySelectorAll<HTMLButtonElement>('[data-testid="mode"] button')]
+      .every((button) => button.disabled)).toBe(true);
+  });
+
   /** Review finding (PR #62): a waiting permission or question cannot be
    * answered from the check until the session has been read again — it may
    * have been settled while the machine slept. */

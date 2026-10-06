@@ -88,8 +88,10 @@ of §5 applies) or choose another workspace; no separate stop action exists.
   and it stays raised: the window reads its session afresh for every epoch
   newer than the last it read, even when `checking` and `ready` reached it
   before it rendered again, and
-  offers neither Send, Cancel, nor an answer to a waiting question or
-  permission from the check until that read has settled; a session the window had not finished opening when the check
+  offers neither Send, Cancel, a mode change, nor an answer to a waiting
+  question or permission from the check until that read has succeeded; if
+  it fails, they stay unavailable and the window says the session could
+  not be read again; a session the window had not finished opening when the check
   began is opened again from the start). An
   exit or a bad line meanwhile is handled as from `ready`; no answer within
   10 seconds counts as a crash (`crashed`, "did not answer after the
