@@ -146,6 +146,25 @@ fn a_flood_on_stderr_never_blocks_the_handshake() {
     assert!(tail.contains("diagnostic line"), "the tail holds the latest lines");
 }
 
+/// Review finding (PR #62): each failure shows only its own attempt's
+/// diagnostics: a later attempt that fails before a Core runs shows none of
+/// the earlier Core's output.
+#[test]
+fn a_failure_before_a_core_runs_shows_no_earlier_diagnostics() {
+    let home = CoreHome::new("startup-fresh-tail");
+    let supervisor = launch(fixture_command("doubles.py", "exit-immediately"), &home);
+    supervisor.start(home.workspace.clone()).unwrap();
+    supervisor.wait_for(settled, DEADLINE).expect("settled");
+    assert!(supervisor.diagnostics().contains("doubles: this Core refuses to start"));
+    std::fs::remove_dir_all(&home.workspace).unwrap();
+    supervisor.retry().unwrap();
+    let status = supervisor.wait_for(|s| s.state == State::Failed
+        && s.failure.as_ref().is_some_and(|f| f.class == FailureClass::WorkspaceUnavailable), DEADLINE)
+        .expect("the workspace is unavailable");
+    assert_eq!(status.state, State::Failed);
+    assert_eq!(supervisor.diagnostics(), "", "nothing from the earlier Core");
+}
+
 #[test]
 fn try_again_after_a_failure_starts_a_new_core_in_the_same_workspace() {
     let home = CoreHome::new("startup-retry");

@@ -200,6 +200,20 @@ mod tests {
         assert_eq!(value, json!({"version": 1, "last_selected_folder": "/a"}));
     }
 
+    /// Review question (PR #62): a later save replaces the file on every
+    /// platform (`std::fs::rename` replaces an existing file on Windows too).
+    #[test]
+    fn a_second_save_replaces_the_first() {
+        let dir = Dir::new("second-save");
+        save(&dir.file(), &full()).unwrap();
+        let changed = Preferences { last_selected_folder: Some(PathBuf::from("/elsewhere")), ..full() };
+        save(&dir.file(), &changed).unwrap();
+        assert_eq!(load(&dir.file()), changed);
+        let leftovers: Vec<_> = std::fs::read_dir(&dir.0).unwrap()
+            .map(|entry| entry.unwrap().file_name()).collect();
+        assert_eq!(leftovers, vec![std::ffi::OsString::from(FILE_NAME)], "no temporary file is left");
+    }
+
     #[test]
     fn a_malformed_file_is_absent_and_replaced_on_save() {
         let dir = Dir::new("malformed");

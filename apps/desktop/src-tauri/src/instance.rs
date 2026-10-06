@@ -45,7 +45,9 @@ pub fn decide(current: Option<&Path>, args: &[OsString], cwd: &Path) -> Decision
     if same { Decision::Focus } else { Decision::Ask(std::path::absolute(&path).unwrap_or(path)) }
 }
 
-fn same_folder(a: &Path, b: &Path) -> bool {
+/// Are `a` and `b` the same folder, however spelled (canonically equal when
+/// both resolve; otherwise equal as written)?
+pub(crate) fn same_folder(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
         _ => a == b,

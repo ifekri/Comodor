@@ -455,9 +455,10 @@ impl Machine {
         effects
     }
 
-    /// The workspace is now `path`; a different folder is a new identity.
+    /// The workspace is now `path`; a different folder is a new identity,
+    /// another spelling of the same folder is not.
     fn set_workspace(&mut self, path: PathBuf) {
-        if self.workspace.as_ref() != Some(&path) {
+        if !self.workspace.as_deref().is_some_and(|current| crate::instance::same_folder(current, &path)) {
             self.workspace_epoch += 1;
         }
         self.workspace = Some(path);
@@ -874,6 +875,8 @@ impl Driver {
     /// Start a Core: the workspace is checked and the Core located first, so
     /// each of those failures has its own class.
     fn spawn(&mut self, core: CoreId, workspace: &Path) -> Input {
+        // Each attempt's failure shows only its own diagnostics.
+        lock(&self.shared.tail).clear();
         if let Err(failure) = workspace::check(workspace) {
             return Input::SpawnFailed { core, failure };
         }
@@ -897,7 +900,6 @@ impl Driver {
                 format!("Comodor could not be started from {}: {problem}",
                         Path::new(&command.program).display())) },
         };
-        lock(&self.shared.tail).clear();
         let (stdin, stdout, stderr) = spawned.take_streams();
         let stopper = spawned.stopper();
         let pid = spawned.pid;
@@ -1268,6 +1270,24 @@ mod tests {
             assert_eq!(machine.status().workspace, shown, "the two folders display the same");
         }
         assert_eq!(Machine::new().status().workspace_id, None);
+    }
+
+    /// Review finding (PR #62): another spelling of the same folder is the
+    /// same workspace, and keeps its id.
+    #[test]
+    fn another_spelling_of_the_same_folder_keeps_the_workspace_id() {
+        let root = std::env::temp_dir().join(format!("comodor-alias-{}", std::process::id()));
+        let folder = root.join("work");
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut machine = Machine::new();
+        machine.handle(Input::Start { workspace: folder.clone() }).unwrap();
+        let first = machine.status().workspace_id;
+        let core = spawned_core(&machine);
+        machine.handle(Input::Stop { reason: StopReason::WorkspaceChange(folder.join("..").join("work")) }).unwrap();
+        machine.handle(Input::Exited { core, code: Some(0) }).unwrap();
+        let second = machine.status().workspace_id;
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(second, first);
     }
 
     /// Two folders whose names differ only in a byte that is not UTF-8 (on
