@@ -332,6 +332,10 @@ impl Machine {
             Input::Exited { core, code } => {
                 if self.faulted == Some(core) {
                     self.faulted = None;
+                    if self.stopping.is_some() {
+                        self.deferred = false;
+                        return Ok(self.stopped());
+                    }
                     // Its last output is read now: the status is told again,
                     // and the window fetches the complete diagnostics.
                     return Ok(if std::mem::take(&mut self.deferred) { self.spawn() }
@@ -393,7 +397,9 @@ impl Machine {
     /// closed, then the wait for the exit, bounded by the grace (OD-2).
     fn stop(&mut self, reason: StopReason) -> Vec<Effect> {
         self.deferred = false;
-        let Some(core) = self.core else {
+        // A Core stopped for a fault is still a Core until it has exited: the
+        // stop waits for it as for any other (it was signalled already).
+        let Some(core) = self.core.or(self.faulted) else {
             // Nothing runs: stopped already.
             self.stop_outcome = Some(StopOutcome::Orderly);
             self.stopping = Some((reason, (self.clock)()));
@@ -1235,12 +1241,16 @@ mod tests {
     }
 
     #[test]
+    /// Review finding (PR #62): the application ends only once the faulted
+    /// Core has exited — and nothing starts after it.
     fn a_window_closed_while_a_faulted_core_ends_starts_nothing_after() {
         let (mut machine, core) = ready();
         machine.handle(Input::Line { core, line: "garbage".into() }).unwrap();
         let effects = machine.handle(Input::Stop { reason: StopReason::WindowClosed }).unwrap();
-        assert!(effects.contains(&Effect::Finished), "{effects:?}");
+        assert!(!effects.contains(&Effect::Finished), "not while the faulted Core runs: {effects:?}");
+        assert_eq!(machine.state(), State::Stopping);
         let effects = machine.handle(Input::Exited { core, code: None }).unwrap();
+        assert!(effects.contains(&Effect::Finished), "{effects:?}");
         assert_eq!(spawned(&effects), None, "nothing starts after: {effects:?}");
         assert_eq!(machine.state(), State::Stopped);
     }
