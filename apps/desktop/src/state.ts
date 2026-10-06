@@ -116,7 +116,16 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
   const [recovery, setRecovery] = useState<string[]>([]);
   const [coreWorkspace, setCoreWorkspace] = useState<string | null>(null);
 
+  // While a snapshot is on its way, events wait: one applied before it would
+  // make the snapshot look older than the window, and it would be dropped —
+  // on the first load and on every repair of a gap alike. Replayed after it,
+  // the reducer drops those the snapshot already covers.
+  const holding = useRef(true);
+  const held = useRef<{ name: EventName; params: Record<string, unknown>; seq: number }[]>([]);
+  const handleRef = useRef<(name: EventName, params: Record<string, unknown>, seq: number) => void>(() => {});
+
   const resync = useCallback(async (id: string, fresh: boolean) => {
+    holding.current = true;
     dispatch({ type: "resynchronising" });
     try {
       const answer = await client.call("session.snapshot", { session_id: id });
@@ -129,17 +138,17 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
       setIntent((was) => (fresh ? beginIntent(mode) : intentConfirmed(was, mode)));
     } catch (problem) {
       dispatch({ type: "lost", reason: (problem as Error).message });
+    } finally {
+      holding.current = false;
+      for (const { name, params, seq } of held.current.splice(0)) handleRef.current(name, params, seq);
     }
   }, [client, kept]);
 
   useEffect(() => {
     let alive = true;
-    // Until this connection's first snapshot is applied, events wait: one
-    // applied before it would make the snapshot look older than the window
-    // and be dropped with it. Replayed after it, the reducer drops those the
-    // snapshot already covers.
-    let based = false;
-    const early: { name: EventName; params: Record<string, unknown>; seq: number }[] = [];
+    // A new connection waits for its first snapshot.
+    holding.current = true;
+    held.current = [];
     const handle = (name: EventName, params: Record<string, unknown>, seq: number) => {
       // One window, one session: another session's events are not this one's.
       const owner = sessionOf(params);
@@ -156,10 +165,11 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
         kept.unsentTurn = undefined;
       }
     };
+    handleRef.current = handle;
     const stop = client.on((name: EventName, params, seq) => {
       if (!alive) return;
-      if (based) handle(name, params, seq);
-      else early.push({ name, params, seq });
+      if (holding.current) held.current.push({ name, params, seq });
+      else handle(name, params, seq);
     });
     let closed = false;
     const unlost = client.onClose((reason) => {
@@ -218,8 +228,6 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
         setRecovery(notes);
         dispatch({ type: "connected", session });
         await resync(session.id, true);
-        based = true;
-        for (const { name, params, seq } of early.splice(0)) handle(name, params, seq);
         if (!alive) return;
         const info = await client.call("model.get");
         if (alive) dispatch({ type: "modelInfo", model: info as never });

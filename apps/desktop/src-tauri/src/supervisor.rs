@@ -576,6 +576,16 @@ impl Machine {
     }
 }
 
+/// One line of the Core's stdout as text. A line that is not UTF-8 is not
+/// protocol: it is marked so it can never parse as an envelope, rather than
+/// having its bytes replaced and passing as one.
+pub(crate) fn decoded(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(_) => format!("(a line that is not UTF-8) {}", String::from_utf8_lossy(bytes)),
+    }
+}
+
 fn describe_exit(code: Option<i32>) -> String {
     match code {
         Some(code) => format!("exit code {code}"),
@@ -929,8 +939,8 @@ impl Driver {
                     Ok(0) | Err(_) => break,
                     Ok(_) => {}
                 }
-                let line = String::from_utf8_lossy(&buffer)
-                    .trim_end_matches(['\n', '\r']).to_string();
+                let end = buffer.iter().rposition(|&byte| byte != b'\n' && byte != b'\r').map_or(0, |at| at + 1);
+                let line = decoded(&buffer[..end]);
                 if lines.send(Event::Input(Input::Line { core, line }, None)).is_err() {
                     break;
                 }
@@ -1165,6 +1175,20 @@ mod tests {
 
     fn spawned(effects: &[Effect]) -> Option<CoreId> {
         effects.iter().find_map(|e| match e { Effect::Spawn { core, .. } => Some(*core), _ => None })
+    }
+
+    /// Review finding (PR #62): a line that is not UTF-8 is not protocol,
+    /// even when its bytes would otherwise make a valid envelope — it is
+    /// never relayed with its bytes replaced.
+    #[test]
+    fn a_line_that_is_not_utf8_is_a_protocol_fault() {
+        let bytes = b"{\"version\":2,\"type\":\"event\",\"event\":\"x\",\"seq\":1,\"params\":{\"text\":\"\xff\"}}";
+        let line = decoded(bytes);
+        assert!(!relay::is_envelope(&line), "{line}");
+        let (mut machine, core) = ready();
+        let effects = machine.handle(Input::Line { core, line }).unwrap();
+        assert!(effects.contains(&Effect::ForceStop { core }), "{effects:?}");
+        assert_eq!(decoded(b"{\"ok\":true}"), "{\"ok\":true}", "a UTF-8 line is kept as it is");
     }
 
     /// Review finding (PR #62): a faulted Core is signalled, and its

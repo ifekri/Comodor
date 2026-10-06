@@ -148,6 +148,8 @@ pub struct FromCore {
 struct InFlight {
     page_id: String,
     method: String,
+    /// The page that asked: only it is answered.
+    generation: u64,
 }
 
 /// The relay between the current page and the Core.
@@ -197,7 +199,8 @@ impl Relay {
     pub fn connect(&mut self) -> u64 {
         self.generation += 1;
         self.live = true;
-        self.in_flight.clear();
+        // What an older page sent stays in flight: its answer is no longer
+        // delivered, but what it says (a turn started) still counts.
         self.links.clear();
         self.generation
     }
@@ -255,7 +258,7 @@ impl Relay {
             return Err(format!("request id {page_id} is already waiting for an answer"));
         }
         let observed = if method == "session.cancel" { vec![Observation::Cancel] } else { vec![] };
-        self.in_flight.insert(native.clone(), InFlight { page_id, method });
+        self.in_flight.insert(native.clone(), InFlight { page_id, method, generation });
         let rewritten = format!("{}{}{}", &line[..span.start], Value::String(native), &line[span.end..]);
         Ok(FromPage::ToCore { line: rewritten, observed })
     }
@@ -287,7 +290,8 @@ impl Relay {
                 }
                 let span = id_span(line).expect("a parsed answer with a string id has an id");
                 let restored = format!("{}{}{}", &line[..span.start], waiting.page_id, &line[span.end..]);
-                let to_page = self.current().map(|generation| (generation, restored));
+                let to_page = self.current().filter(|current| *current == waiting.generation)
+                    .map(|generation| (generation, restored));
                 if to_page.is_some() {
                     self.remember_links(&envelope);
                 }
@@ -711,6 +715,24 @@ mod tests {
         ] {
             assert!(is_envelope(good), "{good}");
         }
+    }
+
+    /// Review finding (PR #62): a reload between a `session.send` and its
+    /// answer leaves the answer undelivered — the page is another — but
+    /// still observed, so the turn can reset the restart count.
+    #[test]
+    fn an_answer_for_a_reloaded_page_is_observed_but_not_delivered() {
+        let mut relay = Relay::new();
+        relay.cache_handshake(json!({"protocol_version": 2}));
+        let first = relay.connect();
+        let sent = r#"{"version":2,"type":"request","id":"s","method":"session.send","params":{}}"#;
+        assert!(matches!(relay.from_page(first, sent, true), Ok(FromPage::ToCore { .. })));
+        let second = relay.connect();
+        assert!(second > first);
+        let answer = format!(r#"{{"version":2,"type":"response","id":"g{first}:s","result":{{"accepted":true,"turn_id":"t9"}}}}"#);
+        let relayed = relay.from_core(&answer);
+        assert_eq!(relayed.observed, vec![Observation::TurnStarted("t9".into())]);
+        assert_eq!(relayed.to_page, None, "the reloaded page never sent it");
     }
 
     #[test]

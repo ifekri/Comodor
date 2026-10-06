@@ -72,7 +72,7 @@ bridge:
    No other field is read.
 3. `client.hello` is answered locally from the cached handshake, with the
    page's request id.
-4. An answer for a non-current generation is dropped. So is an unknown id.
+4. An answer for a non-current generation is not delivered (what it reports, such as a started turn, still counts for the restart policy). An unknown id is dropped.
 5. No message the Core did not send reaches the page as a protocol line.
 
 ## Capability configuration (release build)

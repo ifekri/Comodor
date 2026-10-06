@@ -137,6 +137,29 @@ describe("the first snapshot", () => {
   });
 });
 
+describe("a gap in the sequence", () => {
+  /** Review finding (PR #62): the repair's snapshot is applied even when a
+   * live event arrives while it is on its way. */
+  test("is repaired by a snapshot, with live events held until it is applied", async () => {
+    const { native, container } = await open();
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t1", message_id: "m1", role: "assistant" }, 1);
+    native.core.handlers.set("session.snapshot", () => ({ hold: true }));
+    // seq 5 after 1: events 2-4 never arrived, so the window asks again.
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t2", message_id: "m5", role: "assistant" }, 5);
+    await until(() => native.core.requests("session.snapshot").length === 2, "the repair asked");
+    native.core.emit("message.delta", { session_id: "s1", turn_id: "t2", message_id: "m5", text: "after the repair" }, 6);
+    native.core.respond(native.core.requests("session.snapshot")[1]!.id, { snapshot: {
+      session: native.core.session, revision: 5, tools: [],
+      messages: [
+        { message_id: "m4", turn_id: "t1", role: "assistant", text: "repaired", status: "completed" },
+        { message_id: "m5", turn_id: "t2", role: "assistant", text: "", status: "streaming" },
+      ],
+    } });
+    await until(() => byText(container, '[data-testid="line"]', "repaired"), "the snapshot's message");
+    await until(() => byText(container, '[data-testid="line"]', "after the repair"), "the live text");
+  });
+});
+
 describe("what the window keeps", () => {
   /** Review finding (PR #62): a turn that finished while the window was
    * reloading is not called interrupted by a later crash. */

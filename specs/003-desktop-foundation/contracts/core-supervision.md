@@ -68,7 +68,7 @@ of §5 applies) or choose another workspace; no separate stop action exists.
 
 - A Core exit in `ready` means `crashed`. A bad stdout line in `ready` means
   `protocol_fault`, followed by the forced-stop sequence. A bad line is one
-  the page's client would reject: not a v2 envelope, missing a field the
+  the page's client would reject: not UTF-8, not a v2 envelope, missing a field the
   schema's `x-envelope` requires, or with a field of the wrong type (`id`,
   `event` a non-empty string; `params`, `result` an object; `seq` a number;
   an error's `code` a string and its `id` a non-empty string or null).
