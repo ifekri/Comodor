@@ -98,6 +98,76 @@ describe("after the machine wakes", () => {
     expect(native.core.requests("session.cancel")).toEqual([]);
   });
 
+  /** Review finding (PR #62): a turn that ended while the machine slept is
+   * not offered for cancelling before the fresh read says so. */
+  test("Cancel stays unavailable until the session is read again", async () => {
+    const { native, container } = await open();
+    native.core.emit("session.updated", { session: { ...native.core.session, busy: true } });
+    await until(() => byText(container, '[data-testid="composer"] button', "Cancel"), "Cancel offered while busy");
+    native.push(status({ state: "checking" }));
+    const cancel = await until(() => {
+      const button = byText(container, '[data-testid="composer"] button', "Cancel") as HTMLButtonElement | null;
+      return button?.disabled ? button : null;
+    }, "Cancel unavailable during the check");
+    let enabledEarly = false;
+    const watcher = new MutationObserver(() => {
+      if (!cancel.disabled) enabledEarly = true;
+    });
+    watcher.observe(cancel, { attributes: true, attributeFilter: ["disabled"] });
+    // The turn ended while the machine slept: the Core's session is idle.
+    native.core.snapshot = { ...native.core.snapshot, session: { ...native.core.session, busy: false }, revision: 50 };
+    native.core.handlers.set("session.snapshot", () => ({ hold: true }));
+    const asked = native.core.requests("session.snapshot").length;
+    native.push(status({ state: "ready" }));
+    await until(() => native.core.requests("session.snapshot").length === asked + 1, "the session read again");
+    expect(enabledEarly).toBe(false);
+    native.core.respond(native.core.requests("session.snapshot")[asked]!.id, { snapshot: native.core.snapshot });
+    await until(() => byText(container, '[data-testid="composer"] button', "Cancel") === null, "no turn to cancel");
+    watcher.disconnect();
+    expect(native.core.requests("session.cancel")).toEqual([]);
+  });
+
+  /** Review finding (PR #62): a wake while the window is still opening its
+   * session does not leave Send unavailable for good. */
+  test("a wake while the session is still being opened still ends with Send available", async () => {
+    const native = new FakeNative();
+    native.core.handlers.set("session.list", () => ({ hold: true }));
+    rendered = await render(<App api={native.api} />);
+    await until(() => native.core.requests("session.list").length === 1, "the window opening its session");
+    native.push(status({ state: "checking" }));
+    await until(() => rendered!.container.querySelector('[data-testid="status-strip"][data-state="checking"]'),
+                "the check shown");
+    native.core.handlers.delete("session.list");
+    native.push(status({ state: "ready" }));
+    // The first opening's answer comes late.
+    native.core.respond(native.core.requests("session.list")[0]!.id, { sessions: [] });
+    const container = rendered.container;
+    await until(() => send(container) !== null && !send(container)!.disabled, "Send available");
+    expect(native.core.requests("session.create").length).toBe(1);
+  });
+
+  /** The same, when the opening tried to send during the check and was
+   * refused: it is opened again once the Core has answered. */
+  test("an opening refused during the check is tried again once the Core answers", async () => {
+    const native = new FakeNative();
+    native.core.handlers.set("session.list", () => ({ hold: true }));
+    rendered = await render(<App api={native.api} />);
+    await until(() => native.core.requests("session.list").length === 1, "the window opening its session");
+    native.push(status({ state: "checking" }));
+    await until(() => rendered!.container.querySelector('[data-testid="status-strip"][data-state="checking"]'),
+                "the check shown");
+    native.core.handlers.delete("session.list");
+    // Its next step, session.create, is refused while the Core is checked.
+    native.core.respond(native.core.requests("session.list")[0]!.id, { sessions: [] });
+    await until(() => native.commands("send_line").some((call) =>
+      JSON.parse(String(call.args?.["line"])).method === "session.create"), "the refused create");
+    expect(native.core.requests("session.create")).toEqual([]);
+    native.push(status({ state: "ready" }));
+    const container = rendered.container;
+    await until(() => send(container) !== null && !send(container)!.disabled, "Send available");
+    expect(native.core.requests("session.create").length).toBe(1);
+  });
+
   test("a Core that ended while the machine slept is reopened as after any crash", async () => {
     const { native, container } = await open();
     native.push(status({ state: "checking" }));

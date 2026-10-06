@@ -118,6 +118,8 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
   latest.current = state;
   const inFlight = useRef<string | undefined>(undefined);
   const [recovery, setRecovery] = useState<string[]>([]);
+  // Bumped to open the session again: a wake ended before it was open.
+  const [opening, setOpening] = useState(0);
   const [coreWorkspace, setCoreWorkspace] = useState<string | null>(null);
 
   // While a snapshot is on its way, events wait: one applied before it would
@@ -200,6 +202,8 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
         // neither, so nothing is opened on its word: the connection is lost.
         const live = await client.call("session.list")
           .then((answer) => (answer["sessions"] as Session[] | undefined) ?? []);
+        // Superseded meanwhile: whatever opens the session now is another run.
+        if (!alive || closed) return;
         let session: Session | undefined = live.find((one) => one.id === kept.liveId);
         if (session) {
           // A reload: the same Core, the same conversation.
@@ -257,7 +261,7 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
       stop();
       unlost();
     };
-  }, [client, kept, workspace, resync]);
+  }, [client, kept, workspace, resync, opening]);
 
   // A hole in the sequence means an event never arrived, and no later event
   // repairs that: the Core is asked for the whole session again. Looked at
@@ -283,10 +287,16 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
       setRefreshing(true);
       return;
     }
+    if (coreState !== "ready" || !checked.current) return;
+    checked.current = false;
     const id = latest.current.session?.id;
-    if (coreState === "ready" && checked.current && id) {
-      checked.current = false;
+    if (id) {
       void resync(id, false).finally(() => setRefreshing(false));
+    } else {
+      // Not open yet: anything it sent during the check was refused, so it
+      // is opened again from the start, and takes its own fresh read.
+      setRefreshing(false);
+      setOpening((count) => count + 1);
     }
   }, [coreState, resync]);
 

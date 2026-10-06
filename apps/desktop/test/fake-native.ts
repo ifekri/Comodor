@@ -99,6 +99,8 @@ export class FakeNative {
         }
         case "send_line":
           if (args?.["generation"] !== this.live) throw new Error("the generation is not current");
+          // As the native side does while it checks the Core after a wake.
+          if (this.current.state === "checking") throw new Error("the Core is not ready");
           this.core.write(String(args?.["line"]));
           return {} as T;
         case "status":

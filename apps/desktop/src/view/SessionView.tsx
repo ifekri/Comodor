@@ -76,7 +76,7 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
             <Composer busy={state.session.busy}
                       ready={status.state === "ready" && !session.refreshing && state.connection.kind === "ready"
                         && model?.configured === true}
-                      cancellable={status.state === "ready"}
+                      cancellable={status.state === "ready" && !session.refreshing}
                       onSend={session.send} onCancel={session.cancel} />
           </div>
         )}

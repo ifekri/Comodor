@@ -86,7 +86,8 @@ of §5 applies) or choose another workspace; no separate stop action exists.
   an id of its own, and refuses the window's lines until any answer to it
   arrives (`ready` again; the window then reads its session afresh, and
   offers neither Send nor Cancel from the check until that read has
-  settled). An
+  settled; a session the window had not finished opening when the check
+  began is opened again from the start). An
   exit or a bad line meanwhile is handled as from `ready`; no answer within
   10 seconds counts as a crash (`crashed`, "did not answer after the
   computer woke from sleep"), and the Core is ended and restarted under
