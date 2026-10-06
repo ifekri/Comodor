@@ -207,6 +207,11 @@ impl Machine {
         self.state
     }
 
+    /// The workspace exactly, as a path (`status` has it for display only).
+    pub fn workspace(&self) -> Option<&Path> {
+        self.workspace.as_deref()
+    }
+
     pub fn status(&self) -> Status {
         Status {
             state: self.state,
@@ -617,6 +622,8 @@ struct Shared {
     changed: Condvar,
     tail: Arc<Mutex<DiagnosticTail>>,
     pid: Mutex<Option<u32>>,
+    /// The workspace exactly: what a second launch is compared with.
+    workspace: Mutex<Option<PathBuf>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -641,6 +648,7 @@ impl Supervisor {
             changed: Condvar::new(),
             tail: Arc::new(Mutex::new(DiagnosticTail::new())),
             pid: Mutex::new(None),
+            workspace: Mutex::new(None),
         });
         let driver = Driver {
             machine: Machine::new(),
@@ -689,6 +697,11 @@ impl Supervisor {
 
     pub fn status(&self) -> Status {
         lock(&self.shared.status).clone()
+    }
+
+    /// The workspace exactly, as a path; `status().workspace` is lossy.
+    pub fn workspace(&self) -> Option<PathBuf> {
+        lock(&self.shared.workspace).clone()
     }
 
     /// Wait until the status satisfies `until`, or `deadline` passes. It
@@ -957,6 +970,7 @@ impl Driver {
     }
 
     fn publish(&self) {
+        *lock(&self.shared.workspace) = self.machine.workspace().map(Path::to_path_buf);
         let status = self.machine.status();
         let mut shared = lock(&self.shared.status);
         if shared.state != status.state {

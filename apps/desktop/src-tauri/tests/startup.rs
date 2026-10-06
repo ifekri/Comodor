@@ -182,3 +182,20 @@ fn try_again_after_a_failure_starts_a_new_core_in_the_same_workspace() {
     assert!(states[second_start..].contains(&"starting".to_string()), "{states:?}");
     assert_eq!(supervisor.status().workspace, first.workspace);
 }
+
+/// Review finding (PR #62): the native side keeps the workspace exactly, so
+/// a second launch is compared with the real folder — never with its display
+/// string, which loses bytes that are not UTF-8.
+#[cfg(unix)]
+#[test]
+fn the_supervisor_reports_the_workspace_exactly() {
+    use std::os::unix::ffi::OsStrExt;
+    let home = CoreHome::new("startup-exact-workspace");
+    let odd = home.scratch.root.join(std::ffi::OsStr::from_bytes(b"caf\xe9"));
+    std::fs::create_dir_all(&odd).unwrap();
+    let supervisor = launch(fixture_command("doubles.py", "exit-immediately"), &home);
+    supervisor.start(odd.clone()).unwrap();
+    supervisor.wait_for(settled, DEADLINE).expect("settled");
+    assert_eq!(supervisor.workspace(), Some(odd.clone()));
+    assert_ne!(supervisor.status().workspace.map(PathBuf::from), Some(odd), "the display string is lossy");
+}

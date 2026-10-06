@@ -102,7 +102,8 @@ fn second_launch(app: &tauri::AppHandle, argv: Vec<String>, cwd: String) {
         let _ = window.set_focus();
     }
     let args: Vec<OsString> = argv.into_iter().skip(1).map(OsString::from).collect();
-    let current = app.state::<Desktop>().supervisor.status().workspace.map(PathBuf::from);
+    // The exact folder: its display string would lose bytes that are not UTF-8.
+    let current = app.state::<Desktop>().supervisor.workspace();
     let decision = instance::decide(current.as_deref(), &args, std::path::Path::new(&cwd));
     if decision == instance::Decision::Focus {
         return;

@@ -301,9 +301,10 @@ The watchdog (added for a review finding on PR #62) is the application's own
 executable, started with each Core in a process group of its own. It waits for
 the application or the Core to exit (`pidfd` on Linux, `kqueue` on macOS),
 then signals the Core's group. It reports once it is watching (one byte on
-its stdout), and a watchdog that exits before that counts as not started. A
-Core whose watchdog cannot start is ended at once and reported as a failed
-start, on both platforms: on macOS nothing else ends a Core that ignores EOF,
+its stdout), and a watchdog that exits before that counts as not started. The
+Core is held between fork and exec until then, so nothing it starts precedes
+its guard. A Core whose watchdog cannot start never runs, and the start is
+reported as failed, on both platforms: on macOS nothing else ends a Core that ignores EOF,
 and on Linux the parent-death signal reaches the Core alone, not what it
 started. (`pidfd_open` is in every kernel Tauri's WebKitGTK runs on, so this
 fails only when resources are exhausted.)

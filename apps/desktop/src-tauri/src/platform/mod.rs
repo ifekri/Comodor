@@ -121,18 +121,8 @@ pub fn build_command(command: &CoreCommand, workspace: &Path,
 /// Start the Core in `workspace`.
 pub fn spawn_core(command: &CoreCommand, workspace: &Path,
                   test_env: &[(OsString, OsString)]) -> io::Result<SpawnedCore> {
-    let mut built = build_command(command, workspace, test_env);
-    // Windows: held until it is in its job (`Tree::adopt` lets it run).
-    imp::start_suspended(&mut built);
-    let mut child = built.spawn()?;
-    let tree = match imp::Tree::adopt(&child) {
-        Ok(tree) => tree,
-        Err(problem) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(problem);
-        }
-    };
+    // Held until it is guarded: in its job (Windows), watched (Linux, macOS).
+    let (child, tree) = imp::spawn(build_command(command, workspace, test_env))?;
     let pid = child.id();
     Ok(SpawnedCore { child, pid, tree: Stopper(Arc::new(tree)) })
 }

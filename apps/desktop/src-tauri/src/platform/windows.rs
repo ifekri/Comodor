@@ -34,10 +34,19 @@ pub fn configure(command: &mut Command) {
     command.creation_flags(CREATE_NO_WINDOW);
 }
 
-/// The Core is started suspended; `Tree::adopt` resumes it once it is in its
-/// job.
-pub fn start_suspended(command: &mut Command) {
+/// Start the Core suspended, put it in its job, then let it run; return it
+/// with its job.
+pub fn spawn(mut command: Command) -> io::Result<(Child, Tree)> {
     command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+    let mut child = command.spawn()?;
+    match Tree::adopt(&child) {
+        Ok(tree) => Ok((child, tree)),
+        Err(problem) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(problem)
+        }
+    }
 }
 
 /// Resume every thread of the suspended process `pid` (a new process has
