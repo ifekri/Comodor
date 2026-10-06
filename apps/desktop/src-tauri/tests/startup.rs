@@ -185,8 +185,9 @@ fn try_again_after_a_failure_starts_a_new_core_in_the_same_workspace() {
 
 /// Review finding (PR #62): the native side keeps the workspace exactly, so
 /// a second launch is compared with the real folder — never with its display
-/// string, which loses bytes that are not UTF-8.
-#[cfg(unix)]
+/// string, which loses bytes that are not UTF-8. Linux only: macOS refuses a
+/// file name that is not UTF-8, so the case cannot arise there.
+#[cfg(target_os = "linux")]
 #[test]
 fn the_supervisor_reports_the_workspace_exactly() {
     use std::os::unix::ffi::OsStrExt;
