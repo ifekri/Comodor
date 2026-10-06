@@ -38,7 +38,7 @@ describe("after the machine wakes", () => {
     await until(() => byText(container, '[data-testid="line"]', "before the sleep"), "the conversation");
     await until(() => send(container) !== null && !send(container)!.disabled, "Send available");
 
-    native.push(status({ state: "checking" }));
+    native.push(status({ state: "checking", check_epoch: 1 }));
     await until(() => container.querySelector('[data-testid="status-strip"][data-state="checking"]'),
                 "the strip says so");
     await until(() => send(container)?.disabled === true, "Send unavailable during the check");
@@ -53,7 +53,7 @@ describe("after the machine wakes", () => {
       ],
     };
     const asked = native.core.requests("session.snapshot").length;
-    native.push(status({ state: "ready" }));
+    native.push(status({ state: "ready", check_epoch: 1 }));
     await until(() => native.core.requests("session.snapshot").length === asked + 1, "the session read again");
     await until(() => byText(container, '[data-testid="line"]', "while it slept"), "what changed meanwhile");
     await until(() => send(container) !== null && !send(container)!.disabled, "Send available again");
@@ -64,7 +64,7 @@ describe("after the machine wakes", () => {
   test("Send is never available between the check and the session read again", async () => {
     const { native, container } = await open();
     await until(() => send(container) !== null && !send(container)!.disabled, "Send available");
-    native.push(status({ state: "checking" }));
+    native.push(status({ state: "checking", check_epoch: 1 }));
     await until(() => send(container)?.disabled === true, "Send unavailable during the check");
     const button = send(container)!;
     let enabledEarly = false;
@@ -74,7 +74,7 @@ describe("after the machine wakes", () => {
     watcher.observe(button, { attributes: true, attributeFilter: ["disabled"] });
     native.core.handlers.set("session.snapshot", () => ({ hold: true }));
     const asked = native.core.requests("session.snapshot").length;
-    native.push(status({ state: "ready" }));
+    native.push(status({ state: "ready", check_epoch: 1 }));
     await until(() => native.core.requests("session.snapshot").length === asked + 1, "the session read again");
     expect(enabledEarly).toBe(false);
     native.core.respond(native.core.requests("session.snapshot")[asked]!.id, { snapshot: native.core.snapshot });
@@ -90,7 +90,7 @@ describe("after the machine wakes", () => {
     const cancel = await until(() => byText(container, '[data-testid="composer"] button', "Cancel") as
       HTMLButtonElement | null, "Cancel offered while busy");
     expect(cancel.disabled).toBe(false);
-    native.push(status({ state: "checking" }));
+    native.push(status({ state: "checking", check_epoch: 1 }));
     await until(() => (byText(container, '[data-testid="composer"] button', "Cancel") as HTMLButtonElement).disabled,
                 "Cancel unavailable during the check");
     const field = container.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;
@@ -104,7 +104,7 @@ describe("after the machine wakes", () => {
     const { native, container } = await open();
     native.core.emit("session.updated", { session: { ...native.core.session, busy: true } });
     await until(() => byText(container, '[data-testid="composer"] button', "Cancel"), "Cancel offered while busy");
-    native.push(status({ state: "checking" }));
+    native.push(status({ state: "checking", check_epoch: 1 }));
     const cancel = await until(() => {
       const button = byText(container, '[data-testid="composer"] button', "Cancel") as HTMLButtonElement | null;
       return button?.disabled ? button : null;
@@ -118,7 +118,7 @@ describe("after the machine wakes", () => {
     native.core.snapshot = { ...native.core.snapshot, session: { ...native.core.session, busy: false }, revision: 50 };
     native.core.handlers.set("session.snapshot", () => ({ hold: true }));
     const asked = native.core.requests("session.snapshot").length;
-    native.push(status({ state: "ready" }));
+    native.push(status({ state: "ready", check_epoch: 1 }));
     await until(() => native.core.requests("session.snapshot").length === asked + 1, "the session read again");
     expect(enabledEarly).toBe(false);
     native.core.respond(native.core.requests("session.snapshot")[asked]!.id, { snapshot: native.core.snapshot });
@@ -134,11 +134,11 @@ describe("after the machine wakes", () => {
     native.core.handlers.set("session.list", () => ({ hold: true }));
     rendered = await render(<App api={native.api} />);
     await until(() => native.core.requests("session.list").length === 1, "the window opening its session");
-    native.push(status({ state: "checking" }));
+    native.push(status({ state: "checking", check_epoch: 1 }));
     await until(() => rendered!.container.querySelector('[data-testid="status-strip"][data-state="checking"]'),
                 "the check shown");
     native.core.handlers.delete("session.list");
-    native.push(status({ state: "ready" }));
+    native.push(status({ state: "ready", check_epoch: 1 }));
     // The first opening's answer comes late.
     native.core.respond(native.core.requests("session.list")[0]!.id, { sessions: [] });
     const container = rendered.container;
@@ -153,7 +153,7 @@ describe("after the machine wakes", () => {
     native.core.handlers.set("session.list", () => ({ hold: true }));
     rendered = await render(<App api={native.api} />);
     await until(() => native.core.requests("session.list").length === 1, "the window opening its session");
-    native.push(status({ state: "checking" }));
+    native.push(status({ state: "checking", check_epoch: 1 }));
     await until(() => rendered!.container.querySelector('[data-testid="status-strip"][data-state="checking"]'),
                 "the check shown");
     native.core.handlers.delete("session.list");
@@ -162,15 +162,49 @@ describe("after the machine wakes", () => {
     await until(() => native.commands("send_line").some((call) =>
       JSON.parse(String(call.args?.["line"])).method === "session.create"), "the refused create");
     expect(native.core.requests("session.create")).toEqual([]);
-    native.push(status({ state: "ready" }));
+    native.push(status({ state: "ready", check_epoch: 1 }));
     const container = rendered.container;
     await until(() => send(container) !== null && !send(container)!.disabled, "Send available");
     expect(native.core.requests("session.create").length).toBe(1);
   });
 
+  /** Review finding (PR #62, P1): a check that begins and ends before the
+   * window renders again is still followed by a fresh read, with Send and
+   * Cancel unavailable until it has settled. */
+  test("a check over before the next render is still followed by a fresh read", async () => {
+    const { native, container } = await open();
+    native.core.emit("session.updated", { session: { ...native.core.session, busy: true } });
+    await until(() => byText(container, '[data-testid="composer"] button', "Cancel"), "Cancel offered while busy");
+    const sendButton = send(container)!;
+    const cancelButton = byText(container, '[data-testid="composer"] button', "Cancel") as HTMLButtonElement;
+    let offeredEarly = false;
+    const watcher = new MutationObserver(() => {
+      if (!sendButton.disabled || !cancelButton.disabled) offeredEarly = true;
+    });
+    native.core.snapshot = {
+      session: { ...native.core.session, busy: false }, revision: 60, tools: [],
+      messages: [{ message_id: "m9", turn_id: "t9", role: "assistant", text: "while it slept", status: "completed" }],
+    };
+    native.core.handlers.set("session.snapshot", () => ({ hold: true }));
+    const asked = native.core.requests("session.snapshot").length;
+    // Both arrive in the same turn: the window never renders `checking`.
+    native.push(status({ state: "checking", check_epoch: 1 }));
+    native.push(status({ state: "ready", check_epoch: 1 }));
+    watcher.observe(container, { attributes: true, attributeFilter: ["disabled"], subtree: true });
+    await until(() => native.core.requests("session.snapshot").length === asked + 1, "the session read again");
+    expect(sendButton.disabled).toBe(true);
+    expect(cancelButton.disabled).toBe(true);
+    expect(offeredEarly).toBe(false);
+    native.core.respond(native.core.requests("session.snapshot")[asked]!.id, { snapshot: native.core.snapshot });
+    await until(() => byText(container, '[data-testid="line"]', "while it slept"), "what changed meanwhile");
+    await until(() => send(container) !== null && !send(container)!.disabled, "Send available once read");
+    watcher.disconnect();
+    expect(native.core.requests("session.cancel")).toEqual([]);
+  });
+
   test("a Core that ended while the machine slept is reopened as after any crash", async () => {
     const { native, container } = await open();
-    native.push(status({ state: "checking" }));
+    native.push(status({ state: "checking", check_epoch: 1 }));
     await until(() => send(container)?.disabled === true, "Send unavailable during the check");
     const next = new FakeCore();
     native.restart(next);

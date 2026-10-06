@@ -22,6 +22,7 @@ export function status(overrides: Partial<CoreStatus> = {}): CoreStatus {
     failure: null,
     restart_count: 0,
     restart_limit: 3,
+    check_epoch: 0,
     closing: null,
     stop_outcome: null,
     core: { name: "comodor-core", version: "test" },

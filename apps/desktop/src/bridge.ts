@@ -37,6 +37,9 @@ export interface CoreStatus {
   readonly failure: CoreFailure | null;
   readonly restart_count: number;
   readonly restart_limit: number;
+  /** How many checks of the Core have begun after the machine woke; a new
+   * one means the session must be read again, however fast it ended. */
+  readonly check_epoch: number;
   readonly closing: { readonly seconds_remaining: number } | null;
   readonly stop_outcome: "orderly" | "forced" | null;
   readonly core: { readonly name: string; readonly version: string } | null;

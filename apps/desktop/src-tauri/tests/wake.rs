@@ -67,6 +67,7 @@ fn the_real_core_answers_the_check_and_the_page_may_send_again() {
     supervisor.woke();
     let states = page.states_until(2, "ready");
     assert_eq!(&states[states.len() - 2..], ["checking", "ready"], "{states:?}");
+    assert_eq!(supervisor.status().check_epoch, 1, "the check stays named once it is over");
 
     // The session is the Core's to tell, and it still has it.
     supervisor.send_line(generation, request("s", "session.snapshot", json!({ "session_id": session })))

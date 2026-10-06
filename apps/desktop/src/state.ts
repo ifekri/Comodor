@@ -111,7 +111,7 @@ function sessionOf(params: Record<string, unknown>): string | undefined {
 }
 
 export function useSession(client: CoreClient, kept: Kept, workspace: string | null,
-                           coreState = "ready"): SessionView {
+                           coreState = "ready", checkEpoch = 0): SessionView {
   const [state, dispatch] = useReducer(reduce, initial);
   const [intent, setIntent] = useState<ModeIntent>(beginIntent("act"));
   const latest = useRef(state);
@@ -276,29 +276,28 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
 
   // After the machine slept, the native side checked that the Core still
   // answers; what the session became meanwhile is the Core's to say, so it
-  // is read again in full before anything is sent.
-  // Set when the check begins and cleared only once that read has settled,
-  // so no render in between offers Send.
-  const checked = useRef(false);
-  const [refreshing, setRefreshing] = useState(false);
+  // is read again in full before anything is sent. Each check has an epoch
+  // the native side keeps in its status: a newer epoch than the last one
+  // read means a read is due, even if the check began and ended between two
+  // renders. The view starts at the epoch it opened with, since opening
+  // reads the session anyway.
+  const [settled, setSettled] = useState(checkEpoch);
+  const refreshing = checkEpoch > settled;
+  const reading = useRef<number | null>(null);
   useEffect(() => {
-    if (coreState === "checking") {
-      checked.current = true;
-      setRefreshing(true);
-      return;
-    }
-    if (coreState !== "ready" || !checked.current) return;
-    checked.current = false;
+    if (coreState !== "ready" || checkEpoch <= settled || reading.current === checkEpoch) return;
+    reading.current = checkEpoch;
+    const done = () => setSettled((was) => Math.max(was, checkEpoch));
     const id = latest.current.session?.id;
     if (id) {
-      void resync(id, false).finally(() => setRefreshing(false));
+      void resync(id, false).finally(done);
     } else {
       // Not open yet: anything it sent during the check was refused, so it
       // is opened again from the start, and takes its own fresh read.
-      setRefreshing(false);
+      done();
       setOpening((count) => count + 1);
     }
-  }, [coreState, resync]);
+  }, [coreState, checkEpoch, settled, resync]);
 
   // One mode request in flight; the current aim is what goes out next.
   useEffect(() => {

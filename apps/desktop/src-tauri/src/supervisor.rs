@@ -134,6 +134,10 @@ pub struct Status {
     pub failure: Option<Failure>,
     pub restart_count: u32,
     pub restart_limit: u32,
+    /// How many checks of the Core have begun after the machine woke. It
+    /// stays once a check is over, so a page that missed `checking` still
+    /// knows its session must be read again.
+    pub check_epoch: u64,
     pub closing: Option<Value>,
     pub stop_outcome: Option<StopOutcome>,
     pub core: Option<CoreIdentity>,
@@ -237,6 +241,7 @@ impl Machine {
             failure: self.failure.clone(),
             restart_count: self.restarts.count(),
             restart_limit: RESTART_LIMIT,
+            check_epoch: self.checks,
             closing: self.stopping.as_ref().map(|(_, since)| json!({
                 "seconds_remaining": shutdown::seconds_remaining((self.clock)() - *since),
             })),
@@ -1373,6 +1378,23 @@ mod tests {
         // A late deadline for the answered check changes nothing.
         assert_eq!(machine.handle(Input::CheckOverdue { core, check: 1 }).unwrap(), vec![]);
         assert_eq!(machine.state(), State::Ready);
+    }
+
+    /// Review finding (PR #62, P1): the status names each check by an epoch
+    /// that stays after the Core has answered, so a page that never saw
+    /// `checking` still knows a check happened.
+    #[test]
+    fn each_check_has_an_epoch_in_the_status_that_outlives_it() {
+        let (mut machine, core) = ready();
+        assert_eq!(machine.status().check_epoch, 0);
+        let check = check_sent(&machine.handle(Input::Woke).unwrap(), core);
+        assert_eq!(machine.status().check_epoch, 1);
+        let answer = json!({"version": 2, "type": "response", "id": check, "result": {"sessions": []}});
+        machine.handle(Input::Line { core, line: answer.to_string() }).unwrap();
+        assert_eq!(machine.state(), State::Ready);
+        assert_eq!(machine.status().check_epoch, 1, "still there once ready");
+        machine.handle(Input::Woke).unwrap();
+        assert_eq!(machine.status().check_epoch, 2);
     }
 
     #[test]

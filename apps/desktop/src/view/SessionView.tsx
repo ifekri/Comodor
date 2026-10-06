@@ -39,7 +39,7 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
   onCheckAgain: () => void;
   onChangeWorkspace?: (() => void) | undefined;
 }) {
-  const session = useSession(client, kept, status.workspace_id, status.state);
+  const session = useSession(client, kept, status.workspace_id, status.state, status.check_epoch);
   const { state } = session;
   const waiting = presented(state);
   // What answers, as the Core said at connect and since (`model.changed`).

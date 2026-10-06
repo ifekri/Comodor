@@ -12,7 +12,8 @@
  * and compared with the stored one: on Windows the address bar, through UI
  * Automation; on macOS the panel's column browser (the selected folder in
  * each column, from the disk's root) and its location pop-up, through the
- * Accessibility API. The stored folder written beforehand is the request,
+ * Accessibility API; on Linux the path bar's buttons from the root to the
+ * checked folder, through AT-SPI. The stored folder written beforehand is the request,
  * never the observation. Then the application is ended. Nothing is chosen
  * and no Core starts.
  *
@@ -206,6 +207,105 @@ emit(["error": "the panel's browser was not read twice alike", "selected": last?
   }
 }
 
+/**
+ * Linux: the folder the GTK dialog is in, from its own accessibility tree
+ * (AT-SPI), read only. The dialog's path bar has one toggle button per
+ * folder from the root down, and the folder shown is the one checked; the
+ * path is the names from the root's button to the checked one. Every button
+ * read is kept, raw. Reads repeat until two agree, so a dialog still filling
+ * in is not taken half-way. Nothing in the dialog is pressed or changed.
+ */
+const GTK_OBSERVER = `
+import json, sys, threading, time
+import gi
+gi.require_version("Atspi", "2.0")
+from gi.repository import Atspi
+
+PID = int(sys.argv[1])
+TITLE = sys.argv[2]
+ENDS = time.monotonic() + float(sys.argv[3])
+# What the root's button may be called: it shows an icon, not a name.
+ROOT_NAMES = {"", "/", "File System", "File System Root", "Computer"}
+
+
+def children(node):
+    for index in range(node.get_child_count()):
+        child = node.get_child_at_index(index)
+        if child is not None:
+            yield child
+
+
+def walk(node, depth=0):
+    yield node
+    if depth < 60:
+        for child in children(node):
+            yield from walk(child, depth + 1)
+
+
+def dialog():
+    for app in children(Atspi.get_desktop(0)):
+        try:
+            if app.get_process_id() != PID:
+                continue
+        except Exception:
+            continue
+        for window in children(app):
+            if window.get_name() == TITLE:
+                return window
+    return None
+
+
+def buttons_of(window):
+    found = []
+    for node in walk(window):
+        if node.get_role() != Atspi.Role.TOGGLE_BUTTON:
+            continue
+        states = node.get_state_set()
+        try:
+            x = node.get_extents(Atspi.CoordType.SCREEN).x
+        except Exception:
+            x = None
+        found.append({"name": node.get_name() or "", "x": x,
+                      "checked": states.contains(Atspi.StateType.CHECKED)})
+    if found and all(button["x"] is not None for button in found):
+        found.sort(key=lambda button: button["x"])
+    return found
+
+
+last = None
+while time.monotonic() < ENDS:
+    window = dialog()
+    if window is not None:
+        read = buttons_of(window)
+        if read and read == last:
+            break
+        last = read
+    # The interval between reads while the dialog appears, within the deadline.
+    threading.Event().wait(0.25)
+
+buttons = last or []
+result = {"buttons": buttons}
+checked = [at for at, button in enumerate(buttons) if button["checked"]]
+if len(checked) == 1 and buttons and buttons[0]["name"] in ROOT_NAMES:
+    parts = [button["name"] for button in buttons[1:checked[0] + 1]]
+    if parts and all(part and "/" not in part for part in parts):
+        result["path"] = "/" + "/".join(parts)
+print(json.dumps(result))
+`;
+
+function observeGtk(pid) {
+  const script = path.join(os.tmpdir(), "comodor-chooser-observe.py");
+  fs.writeFileSync(script, GTK_OBSERVER);
+  const run = spawnSync("/usr/bin/python3", [script, String(pid), TITLE, String(DIALOG_DEADLINE_S)],
+                        { encoding: "utf-8" });
+  try {
+    return { method: "the path bar's buttons, from the root to the checked folder (AT-SPI)",
+             ...JSON.parse(run.stdout.trim().split("\n").pop() ?? "") };
+  } catch {
+    return { error: `the observer gave no answer (${run.status}): ${run.stderr.trim().slice(-400)}` };
+  }
+}
+
 /** Is `observed` the folder `stored` names, however it is spelled? */
 function sameFolder(observed, stored) {
   try {
@@ -282,9 +382,11 @@ exit(2)
 
 if (!process.argv.includes("--skip-build")) buildRelease();
 if (process.platform === "linux" && !process.env.DISPLAY) {
-  // Once, under a display (CI has none of its own).
-  const wrapped = spawnSync("xvfb-run", ["-a", "-s", "-screen 0 1280x800x24", process.execPath,
-                                         fileURLToPath(import.meta.url), "--skip-build"], { stdio: "inherit" });
+  // Once, under a display (CI has none of its own) and in a D-Bus session,
+  // which the accessibility bus the observer reads through needs.
+  const wrapped = spawnSync("dbus-run-session", ["--", "xvfb-run", "-a", "-s", "-screen 0 1280x800x24",
+                                                 process.execPath, fileURLToPath(import.meta.url), "--skip-build"],
+                            { stdio: "inherit" });
   process.exit(wrapped.status ?? 1);
 }
 
@@ -309,6 +411,9 @@ try {
       observation = { how: "the dialog's address bar (UI Automation)" };
     } else if (seen.found && process.platform === "darwin") {
       observation = { how: "the panel's column browser (Accessibility)", ...observePanel(app.pid) };
+      observed = observation.path ?? null;
+    } else if (seen.found && process.platform === "linux") {
+      observation = { how: "the dialog's path bar (AT-SPI)", ...observeGtk(app.pid) };
       observed = observation.path ?? null;
     } else {
       observation = { how: "not read on this platform: the screenshot's path bar is the evidence" };

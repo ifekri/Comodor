@@ -84,7 +84,10 @@ of §5 applies) or choose another workspace; no separate stop action exists.
   before every line the window sends. A sleep of a second or more moves a
   `ready` Core to `checking`: the native side sends it `session.list` with
   an id of its own, and refuses the window's lines until any answer to it
-  arrives (`ready` again; the window then reads its session afresh, and
+  arrives (`ready` again). Each check raises `check_epoch` in the status,
+  and it stays raised: the window reads its session afresh for every epoch
+  newer than the last it read, even when `checking` and `ready` reached it
+  before it rendered again, and
   offers neither Send nor Cancel from the check until that read has
   settled; a session the window had not finished opening when the check
   began is opened again from the start). An
