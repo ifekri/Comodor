@@ -371,7 +371,8 @@ impl Machine {
                 Ok(self.stop(reason))
             }
             Input::DeadlinePassed { core } => {
-                if self.stopping.is_none() || !self.is_current(core) {
+                // The stop may be waiting for a Core that has faulted.
+                if self.stopping.is_none() || self.core.or(self.faulted) != Some(core) {
                     return Ok(vec![]);
                 }
                 Ok(self.force(core))
@@ -380,7 +381,7 @@ impl Machine {
                 if self.stopping.is_none() {
                     return Err("\"Quit now\" applies only while closing".into());
                 }
-                Ok(self.core.map(|core| self.force(core)).unwrap_or_default())
+                Ok(self.core.or(self.faulted).map(|core| self.force(core)).unwrap_or_default())
             }
             Input::Retry => {
                 if self.state != State::Failed || self.workspace.is_none() {
@@ -1253,6 +1254,26 @@ mod tests {
         assert!(effects.contains(&Effect::Finished), "{effects:?}");
         assert_eq!(spawned(&effects), None, "nothing starts after: {effects:?}");
         assert_eq!(machine.state(), State::Stopped);
+    }
+
+    /// Review finding (PR #62): while a stop waits for a faulted Core, the
+    /// deadline and "Quit now" force that Core, as they would any other.
+    #[test]
+    fn the_deadline_and_quit_now_force_a_faulted_core_being_waited_for() {
+        for by_deadline in [true, false] {
+            let (mut machine, core) = ready();
+            machine.handle(Input::Line { core, line: "garbage".into() }).unwrap();
+            machine.handle(Input::Stop { reason: StopReason::WindowClosed }).unwrap();
+            let effects = if by_deadline {
+                machine.handle(Input::DeadlinePassed { core }).unwrap()
+            } else {
+                machine.handle(Input::QuitNow).unwrap()
+            };
+            assert!(effects.contains(&Effect::ForceStop { core }), "by deadline {by_deadline}: {effects:?}");
+            let effects = machine.handle(Input::Exited { core, code: None }).unwrap();
+            assert!(effects.contains(&Effect::Finished), "{effects:?}");
+            assert_eq!(machine.status().stop_outcome, Some(StopOutcome::Forced));
+        }
     }
 
     /// Review finding (PR #62): closing or quitting while a workspace change
