@@ -46,6 +46,9 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
   const model = state.model ?? null;
   // As the Core reports it: an unconfigured provider cannot answer (R11).
   const unconfigured = model !== null && model.configured === false;
+  // From a check after the machine slept until the session has been read
+  // again, nothing the person does reaches the Core.
+  const held = status.state !== "ready" || session.refreshing;
   return (
     <>
       <StatusStrip status={status} model={model} workspace={session.workspace}
@@ -66,17 +69,16 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
             <Delegates state={state} />
             <Conversation state={state} />
             {waiting?.kind === "question" && (
-              <FormCard key={waiting.id} interaction={waiting}
+              <FormCard key={waiting.id} interaction={waiting} held={held}
                         onAnswer={(params) => session.decide("question.answer", params)} />
             )}
             {waiting?.kind === "permission" && (
-              <PermissionCard key={waiting.id} interaction={waiting}
+              <PermissionCard key={waiting.id} interaction={waiting} held={held}
                               onReply={(choice) => session.decide("permission.reply", { choice })} />
             )}
             <Composer busy={state.session.busy}
-                      ready={status.state === "ready" && !session.refreshing && state.connection.kind === "ready"
-                        && model?.configured === true}
-                      cancellable={status.state === "ready" && !session.refreshing}
+                      ready={!held && state.connection.kind === "ready" && model?.configured === true}
+                      cancellable={!held}
                       onSend={session.send} onCancel={session.cancel} />
           </div>
         )}

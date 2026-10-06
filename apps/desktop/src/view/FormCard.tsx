@@ -28,8 +28,10 @@ function at(state: FormState, index: number): FormState {
   return { ...state, at: index, writing: false };
 }
 
-export function FormCard({ interaction, onAnswer }: {
+export function FormCard({ interaction, held, onAnswer }: {
   interaction: Interaction;
+  /** While the session is being checked or read again: nothing is sent. */
+  held: boolean;
   onAnswer: (params: Record<string, unknown>) => void;
 }) {
   const request = interaction.request as unknown as QuestionRequest;
@@ -37,7 +39,7 @@ export function FormCard({ interaction, onAnswer }: {
   // different request starts clean and a redelivery keeps the selection.
   const [form, setForm] = useState<FormState>(() => begin(request));
 
-  const submitting = interaction.state === "submitting";
+  const submitting = interaction.state === "submitting" || held;
   return (
     <section className="card form-card" data-testid="form" data-id={request.id}>
       <h2><InertText text={request.title} /></h2>

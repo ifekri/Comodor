@@ -13,13 +13,15 @@ const CHOICE_LABELS: Readonly<Record<string, string>> = {
   deny: "Deny",
 };
 
-export function PermissionCard({ interaction, onReply }: {
+export function PermissionCard({ interaction, held, onReply }: {
   interaction: Interaction;
+  /** While the session is being checked or read again: nothing is sent. */
+  held: boolean;
   onReply: (choice: string) => void;
 }) {
   const request = interaction.request;
   const options = Array.isArray(request["options"]) ? request["options"] as string[] : [];
-  const submitting = interaction.state === "submitting";
+  const submitting = interaction.state === "submitting" || held;
   return (
     <section className="card permission-card" data-testid="permission"
              data-id={String(request["id"] ?? "")}>

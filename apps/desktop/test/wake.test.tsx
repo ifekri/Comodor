@@ -202,6 +202,48 @@ describe("after the machine wakes", () => {
     expect(native.core.requests("session.cancel")).toEqual([]);
   });
 
+  /** Review finding (PR #62): a waiting permission or question cannot be
+   * answered from the check until the session has been read again — it may
+   * have been settled while the machine slept. */
+  for (const kind of ["permission", "question"] as const) {
+    test(`a waiting ${kind} cannot be answered until the session is read again`, async () => {
+      const { native, container } = await open();
+      if (kind === "permission") {
+        native.core.emit("permission.requested", {
+          id: "p1", session_id: "s1", title: "Write out.txt", options: ["allow", "deny"], tool: "write_file",
+        });
+      } else {
+        native.core.emit("question.requested", {
+          id: "q1", session_id: "s1", title: "A decision",
+          questions: [{ header: "Database", prompt: "Which one?", multiple: false,
+                        options: [{ id: "o1", label: "SQLite" }, { id: "o2", label: "PostgreSQL" }] }],
+        });
+      }
+      const card = await until(() => container.querySelector<HTMLElement>(
+        kind === "permission" ? '[data-testid="permission"]' : '[data-testid="form"]'), "the card");
+      const buttons = () => [...card.querySelectorAll<HTMLButtonElement>("button")]
+        .filter((button) => kind === "permission" || button.textContent !== "Answer");
+      expect(buttons().every((button) => !button.disabled)).toBe(true);
+
+      native.push(status({ state: "checking", check_epoch: 1 }));
+      await until(() => buttons().every((button) => button.disabled), "the card held during the check");
+      let offeredEarly = false;
+      const watcher = new MutationObserver(() => {
+        if (buttons().some((button) => !button.disabled)) offeredEarly = true;
+      });
+      watcher.observe(card, { attributes: true, attributeFilter: ["disabled"], subtree: true });
+      native.core.handlers.set("session.snapshot", () => ({ hold: true }));
+      const asked = native.core.requests("session.snapshot").length;
+      native.push(status({ state: "ready", check_epoch: 1 }));
+      await until(() => native.core.requests("session.snapshot").length === asked + 1, "the session read again");
+      for (const button of buttons()) button.click();
+      expect(offeredEarly).toBe(false);
+      watcher.disconnect();
+      expect(native.core.requests("permission.reply")).toEqual([]);
+      expect(native.core.requests("question.answer")).toEqual([]);
+    });
+  }
+
   test("a Core that ended while the machine slept is reopened as after any crash", async () => {
     const { native, container } = await open();
     native.push(status({ state: "checking", check_epoch: 1 }));
