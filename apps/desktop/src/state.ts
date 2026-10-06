@@ -247,11 +247,15 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
   }, [client, kept, workspace, resync]);
 
   // A hole in the sequence means an event never arrived, and no later event
-  // repairs that: the Core is asked for the whole session again.
+  // repairs that: the Core is asked for the whole session again. Looked at
+  // again whenever the revision moves while a gap stands, so a hole found
+  // among the events replayed after a repair is repaired too (the gap flag
+  // itself never changed); a snapshot dropped as stale moves nothing, so
+  // this never spins.
   useEffect(() => {
     const id = state.session?.id;
     if (state.gap && id) void resync(id, false);
-  }, [state.gap, state.session?.id, resync]);
+  }, [state.gap, state.revision, state.session?.id, resync]);
 
   // One mode request in flight; the current aim is what goes out next.
   useEffect(() => {

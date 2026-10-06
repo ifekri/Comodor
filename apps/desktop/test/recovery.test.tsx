@@ -158,6 +158,32 @@ describe("a gap in the sequence", () => {
     await until(() => byText(container, '[data-testid="line"]', "repaired"), "the snapshot's message");
     await until(() => byText(container, '[data-testid="line"]', "after the repair"), "the live text");
   });
+
+  /** Review finding (PR #62): a hole found among the events held during a
+   * repair is repaired too, not left because the gap flag never changed. */
+  test("found again among the held events is repaired again", async () => {
+    const { native, container } = await open();
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t1", message_id: "m1", role: "assistant" }, 1);
+    native.core.handlers.set("session.snapshot", () => ({ hold: true }));
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t2", message_id: "m5", role: "assistant" }, 5);
+    await until(() => native.core.requests("session.snapshot").length === 2, "the first repair asked");
+    // Held during the repair, and one above the snapshot's revision + 1:
+    // event 6 never arrived either.
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t3", message_id: "m7", role: "assistant" }, 7);
+    native.core.respond(native.core.requests("session.snapshot")[1]!.id, { snapshot: {
+      session: native.core.session, revision: 5, tools: [],
+      messages: [{ message_id: "m4", turn_id: "t1", role: "assistant", text: "first repair", status: "completed" }],
+    } });
+    await until(() => native.core.requests("session.snapshot").length === 3, "the second repair asked");
+    native.core.respond(native.core.requests("session.snapshot")[2]!.id, { snapshot: {
+      session: native.core.session, revision: 7, tools: [],
+      messages: [
+        { message_id: "m4", turn_id: "t1", role: "assistant", text: "first repair", status: "completed" },
+        { message_id: "m6", turn_id: "t2", role: "assistant", text: "second repair", status: "completed" },
+      ],
+    } });
+    await until(() => byText(container, '[data-testid="line"]', "second repair"), "the second repair applied");
+  });
 });
 
 describe("what the window keeps", () => {
