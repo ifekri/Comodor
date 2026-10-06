@@ -45,6 +45,9 @@ export interface SessionView {
   readonly recovery: readonly string[];
   /** The workspace as the Core reports it (`workspace.get`), once known. */
   readonly workspace: string | null;
+  /** From a check after the machine slept until the session has been read
+   * again: nothing may be sent meanwhile. */
+  readonly refreshing: boolean;
 }
 
 /** What survives a Core restart, and a reload of this window, within one
@@ -270,16 +273,20 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
   // After the machine slept, the native side checked that the Core still
   // answers; what the session became meanwhile is the Core's to say, so it
   // is read again in full before anything is sent.
+  // Set when the check begins and cleared only once that read has settled,
+  // so no render in between offers Send.
   const checked = useRef(false);
+  const [refreshing, setRefreshing] = useState(false);
   useEffect(() => {
     if (coreState === "checking") {
       checked.current = true;
+      setRefreshing(true);
       return;
     }
     const id = latest.current.session?.id;
     if (coreState === "ready" && checked.current && id) {
       checked.current = false;
-      void resync(id, false);
+      void resync(id, false).finally(() => setRefreshing(false));
     }
   }, [coreState, resync]);
 
@@ -339,5 +346,5 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
     setIntent((was) => wantMode(was, mode));
   }, []);
 
-  return { state, intent, send, cancel, decide, chooseMode, recovery, workspace: coreWorkspace };
+  return { state, intent, send, cancel, decide, chooseMode, recovery, workspace: coreWorkspace, refreshing };
 }

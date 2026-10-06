@@ -84,7 +84,9 @@ of §5 applies) or choose another workspace; no separate stop action exists.
   before every line the window sends. A sleep of a second or more moves a
   `ready` Core to `checking`: the native side sends it `session.list` with
   an id of its own, and refuses the window's lines until any answer to it
-  arrives (`ready` again; the window then reads its session afresh). An
+  arrives (`ready` again; the window then reads its session afresh, and
+  offers neither Send nor Cancel from the check until that read has
+  settled). An
   exit or a bad line meanwhile is handled as from `ready`; no answer within
   10 seconds counts as a crash (`crashed`, "did not answer after the
   computer woke from sleep"), and the Core is ended and restarted under

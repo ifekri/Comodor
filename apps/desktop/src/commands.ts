@@ -17,6 +17,8 @@ export interface ConversationContext {
   readonly busy: boolean;
   /** Whether the session can take a prompt now: not while it is being read. */
   readonly ready: boolean;
+  /** Whether a cancel can reach the Core now: not while it is being checked. */
+  readonly cancellable: boolean;
 }
 
 export const commands = new CommandRegistry<ConversationContext>()
@@ -35,7 +37,7 @@ export const commands = new CommandRegistry<ConversationContext>()
       title: "Cancel",
       group: "Conversation",
       keywords: ["stop", "interrupt"],
-      enabled: (context) => context.busy,
+      enabled: (context) => context.busy && context.cancellable,
       run: (context) => context.cancel(),
     },
   )

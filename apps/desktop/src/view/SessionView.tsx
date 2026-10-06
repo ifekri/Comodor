@@ -74,7 +74,9 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
                               onReply={(choice) => session.decide("permission.reply", { choice })} />
             )}
             <Composer busy={state.session.busy}
-                      ready={status.state === "ready" && state.connection.kind === "ready" && model?.configured === true}
+                      ready={status.state === "ready" && !session.refreshing && state.connection.kind === "ready"
+                        && model?.configured === true}
+                      cancellable={status.state === "ready"}
                       onSend={session.send} onCancel={session.cancel} />
           </div>
         )}

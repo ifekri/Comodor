@@ -7,9 +7,11 @@ import { type KeyboardEvent, useState } from "react";
 
 import { COMMAND_IDS, commands, type ConversationContext, keyName } from "../commands.ts";
 
-export function Composer({ busy, ready, onSend, onCancel }: {
+export function Composer({ busy, ready, cancellable, onSend, onCancel }: {
   busy: boolean;
   ready: boolean;
+  /** Whether a cancel can reach the Core now: not while it is being checked. */
+  cancellable: boolean;
   onSend: (text: string) => void;
   onCancel: () => void;
 }) {
@@ -17,6 +19,7 @@ export function Composer({ busy, ready, onSend, onCancel }: {
   const context: ConversationContext = {
     busy,
     ready,
+    cancellable,
     send: () => {
       if (draft.trim() === "") return;
       onSend(draft);
@@ -43,7 +46,7 @@ export function Composer({ busy, ready, onSend, onCancel }: {
           {commands.get(COMMAND_IDS.send)?.title}
         </button>
         {busy && (
-          <button type="button" onClick={() => run(COMMAND_IDS.cancel)}>
+          <button type="button" disabled={!cancellable} onClick={() => run(COMMAND_IDS.cancel)}>
             {commands.get(COMMAND_IDS.cancel)?.title}
           </button>
         )}
