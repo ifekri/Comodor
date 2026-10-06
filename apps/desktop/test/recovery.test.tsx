@@ -63,6 +63,22 @@ describe("after a restart", () => {
     await until(() => byText(container, '[data-testid="recovery"]', "could not be reopened"), "the notice");
   });
 
+  /** Review finding (PR #62): only the Core's refusal says nothing is
+   * stored; any other failure keeps the stored conversation for next time. */
+  test("a reopen that fails for another reason keeps the stored conversation", async () => {
+    const { native } = await open();
+    const next = new FakeCore();
+    next.handlers.set("session.open", () => ({ error: { code: "internal", message: "the disk hiccuped" } }));
+    native.restart(next);
+    const lost = await until(() => rendered!.container.querySelector('[data-testid="session-lost"]'), "the window says so");
+    expect(lost.textContent).toContain("the disk hiccuped");
+    expect(next.requests("session.create")).toEqual([]);
+    const third = coreWith("live-3");
+    native.restart(third, 2);
+    await until(() => third.requests("session.open").length === 1, "the reopen");
+    expect(third.requests("session.open")[0]!.params).toEqual({ session_id: "s1" });
+  });
+
   test("an accepted turn the Core never finished is shown as interrupted, and never sent again", async () => {
     const { native, container } = await open();
     const field = container.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;

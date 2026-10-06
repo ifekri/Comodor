@@ -53,7 +53,8 @@ clarification-required outcome of its own. The native side caches the answer.
 
 | Observation | Result |
 | --- | --- |
-| a response with `protocol_version` 2 | `ready` |
+| a response with `protocol_version` 2 and a whole `HelloResult` (`core` with string `name` and `version`, `capabilities` a list of strings) | `ready` |
+| a response with `protocol_version` 2 that is not a whole `HelloResult` | `failed: protocol_fault` |
 | a response with another version | `failed: protocol_mismatch`, naming both versions |
 | an `unsupported_version` error | `failed: protocol_mismatch`, naming the Core's `supported` list |
 | the process exits first | `failed: exited_before_ready`, with the diagnostic tail |

@@ -54,7 +54,8 @@ pub fn read_handshake(line: &str) -> Handshake {
         Some("response") => {
             let result = envelope.get("result").cloned().unwrap_or(Value::Null);
             match result.get("protocol_version").and_then(Value::as_i64) {
-                Some(PROTOCOL_VERSION) => Handshake::Ready(result),
+                Some(PROTOCOL_VERSION) if is_hello_result(&result) => Handshake::Ready(result),
+                Some(PROTOCOL_VERSION) => Handshake::Fault,
                 other => Handshake::Mismatch(format!(
                     "This window speaks protocol version {PROTOCOL_VERSION}; the Core answered \
                      with version {}.",
@@ -77,6 +78,14 @@ pub fn read_handshake(line: &str) -> Handshake {
         }
         _ => Handshake::NotYet,
     }
+}
+
+/// The schema's `HelloResult`: `core` with a string `name` and `version`,
+/// and `capabilities` a list of strings.
+fn is_hello_result(result: &Value) -> bool {
+    let core = &result["core"];
+    core["name"].is_string() && core["version"].is_string()
+        && result["capabilities"].as_array().is_some_and(|all| all.iter().all(Value::is_string))
 }
 
 /// Is this line a protocol v2 envelope the Core may send: a JSON object at
@@ -468,6 +477,27 @@ mod tests {
     fn another_version_is_a_mismatch_naming_both() {
         let Handshake::Mismatch(message) = read_handshake(&answer(3)) else { panic!("mismatch") };
         assert!(message.contains("version 2") && message.contains("version 3"), "{message}");
+    }
+
+    /// Review finding (PR #62): an answer at version 2 that is not the
+    /// schema's `HelloResult` is a fault, not a Core to cache and trust.
+    #[test]
+    fn an_answer_without_a_whole_hello_result_is_a_fault() {
+        let with = |result: Value| json!({"version": 2, "type": "response", "id": HELLO_ID,
+                                          "result": result}).to_string();
+        for result in [
+            json!({"protocol_version": 2, "capabilities": []}),
+            json!({"protocol_version": 2, "core": {"name": "c", "version": "1"}}),
+            json!({"protocol_version": 2, "core": "c", "capabilities": []}),
+            json!({"protocol_version": 2, "core": {"name": "c"}, "capabilities": []}),
+            json!({"protocol_version": 2, "core": {"name": 1, "version": "1"}, "capabilities": []}),
+            json!({"protocol_version": 2, "core": {"name": "c", "version": "1"}, "capabilities": "all"}),
+            json!({"protocol_version": 2, "core": {"name": "c", "version": "1"}, "capabilities": [1]}),
+        ] {
+            assert_eq!(read_handshake(&with(result.clone())), Handshake::Fault, "{result}");
+        }
+        // Another version is still named as such, whatever else is missing.
+        assert!(matches!(read_handshake(&with(json!({"protocol_version": 3}))), Handshake::Mismatch(_)));
     }
 
     #[test]

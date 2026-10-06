@@ -59,7 +59,10 @@ only a one-line delegate summary; panels are D5. An unknown event is ignored.
 2. The page: `start()` again, then `session.open(stored_id)`. A `ready`
    that arrives while the previous `start()` is still failing is answered
    once that start ends.
-3. If the Core refuses (nothing stored), `session.create` plus a notice.
+3. If the Core refuses (`not_allowed`: nothing stored), `session.create` plus
+   a notice. Any other failure says nothing about what is stored: the window
+   says the session could not be opened, and keeps the stored id for the next
+   Core.
 4. An unfinished turn is shown as interrupted. Nothing is re-sent.
 
 **Unconfigured provider**:

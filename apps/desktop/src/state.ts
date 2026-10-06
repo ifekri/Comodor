@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
-import type { CoreClient } from "@comodor/client";
+import { type CoreClient, ProtocolError } from "@comodor/client";
 import type { Mode } from "@comodor/modes";
 import type { EventName, Session } from "@comodor/protocol";
 import {
@@ -203,9 +203,14 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
           // After a restart: the stored conversation is reopened. Opening
           // gives a live session with an id of its own; the stored record
           // keeps its id, which is what a later restart opens again.
+          // Only the Core's refusal says nothing is stored; any other failure
+          // says nothing about it, and the stored id is kept for next time.
           session = await client.call("session.open", { session_id: kept.storedId })
             .then((answer) => answer["session"] as Session)
-            .catch(() => undefined);
+            .catch((problem: unknown) => {
+              if (problem instanceof ProtocolError && problem.code === "not_allowed") return undefined;
+              throw problem;
+            });
           // A connection that went meanwhile says nothing about what is
           // stored: the next client tries again.
           if (!alive || closed) return;
