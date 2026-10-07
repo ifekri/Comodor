@@ -322,6 +322,15 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
   // person does reaches the Core, a queued mode change included.
   const gated = coreState !== "ready" || refreshing || state.connection.kind !== "ready";
 
+  // A mode request the native side refused never reached the Core (for one,
+  // the line that was the first to notice a wake): the choice stays and goes
+  // out once nothing holds it. At most a few in a row, so a native side that
+  // keeps refusing is not asked again and again; a check resets the count.
+  const nativeRefusals = useRef(0);
+  useEffect(() => {
+    if (gated) nativeRefusals.current = 0;
+  }, [gated]);
+
   // One mode request in flight; the current aim is what goes out next, once
   // nothing holds it: matched by then against the mode the Core reported.
   useEffect(() => {
@@ -331,6 +340,11 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
     setIntent((was) => intentSending(was, next));
     void client.call("session.set_mode", { session_id: id, mode: next })
       .catch((problem: unknown) => {
+        if (problem instanceof ProtocolError && problem.data["refused_by"] === "native"
+            && ++nativeRefusals.current <= 3) {
+          setIntent((was) => ({ ...was, inFlight: undefined }));
+          return;
+        }
         // The Core's own refusal is shown and ends the wish. A connection
         // that closed or timed out (the client's own `internal_error`) says
         // nothing about it.

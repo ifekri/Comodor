@@ -142,6 +142,8 @@ function refusal(line: string, reason: string): string {
     version: 2,
     type: "error",
     id,
-    error: { code: "not_allowed", message: reason },
+    // Marked as the native side's: the Core never saw the line, so this is
+    // not the Core refusing it.
+    error: { code: "not_allowed", message: reason, data: { refused_by: "native" } },
   });
 }

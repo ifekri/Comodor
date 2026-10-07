@@ -114,6 +114,53 @@ describe("a mode change queued when the machine sleeps", () => {
     expect(modeAttempts(native)).toEqual(["plan", "ask"]);
   });
 
+  /** Review finding (PR #62): the click that is the first to notice a wake
+   * is refused by the native side, not by the Core; it is kept and sent once
+   * the session has been read again, not lost. */
+  test("a choice refused because it was the first to notice the wake is sent after the read", async () => {
+    const { native, container } = await open();
+    // As `Desktop::send_line` does: the line notices the wake, the Core is
+    // then being checked, and the line is refused.
+    const invoke = native.api.invoke;
+    let noticed = false;
+    (native.api as { invoke: typeof invoke }).invoke = async (command, args) => {
+      const line = command === "send_line" ? JSON.parse(String(args?.["line"])) as { method: string } : null;
+      if (line?.method === "session.set_mode" && !noticed) {
+        noticed = true;
+        native.push(status({ state: "checking", check_epoch: 1 }));
+      }
+      return invoke(command, args);
+    };
+    const button = (label: string) => byText(container, '[data-testid="mode"] button', label) as HTMLButtonElement;
+    await until(() => button("PLAN") && !button("PLAN").disabled, "the modes");
+    await click(button("PLAN"));
+    await until(() => modeAttempts(native).length === 1, "the click that noticed the wake");
+    await until(() => container.querySelector('[data-testid="status-strip"][data-state="checking"]'), "the check");
+    expect(native.core.requests("session.set_mode")).toEqual([]);
+    native.push(status({ state: "ready", check_epoch: 1 }));
+    await until(() => native.core.requests("session.set_mode").length === 1, "the choice, after the read");
+    expect(native.core.requests("session.set_mode")[0]!.params["mode"]).toBe("plan");
+  });
+
+  test("a native side that keeps refusing a choice is not asked again and again", async () => {
+    const { native, container } = await open();
+    const invoke = native.api.invoke;
+    let refused = 0;
+    (native.api as { invoke: typeof invoke }).invoke = async (command, args) => {
+      const line = command === "send_line" ? JSON.parse(String(args?.["line"])) as { method: string } : null;
+      if (line?.method === "session.set_mode") {
+        refused += 1;
+        throw "the generation is not current";
+      }
+      return invoke(command, args);
+    };
+    const button = (label: string) => byText(container, '[data-testid="mode"] button', label) as HTMLButtonElement;
+    await until(() => button("PLAN") && !button("PLAN").disabled, "the modes");
+    await click(button("PLAN"));
+    await until(() => container.querySelector('[data-testid="mode"] .mode-refused'), "the refusal shown");
+    expect(refused).toBe(4);
+  });
+
   test("is not replayed into a reopened conversation when the Core is restarted, and the window says so",
        async () => {
     const { native, container } = await open();
