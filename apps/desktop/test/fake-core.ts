@@ -21,7 +21,7 @@ export interface SentRequest {
 /** What a handler returns: a result, or an error to answer with. */
 export type Answer =
   | { readonly result: Params }
-  | { readonly error: { readonly code: string; readonly message: string } }
+  | { readonly error: { readonly code: string; readonly message: string; readonly data?: Params } }
   /** Answered later by the test, through `answer()`. */
   | { readonly hold: true };
 
@@ -76,7 +76,7 @@ export class FakeCore implements Transport {
       ? handler(request.params, request.id)
       : this.defaultAnswer(request);
     if ("hold" in answer) return;
-    if ("error" in answer) this.error(request.id, answer.error.code, answer.error.message);
+    if ("error" in answer) this.error(request.id, answer.error.code, answer.error.message, answer.error.data);
     else this.respond(request.id, answer.result);
   }
 
@@ -96,8 +96,9 @@ export class FakeCore implements Transport {
     this.push({ version: PROTOCOL_VERSION, type: "response", id, result });
   }
 
-  error(id: string, code: string, message: string): void {
-    this.push({ version: PROTOCOL_VERSION, type: "error", id, error: { code, message } });
+  error(id: string, code: string, message: string, data?: Params): void {
+    this.push({ version: PROTOCOL_VERSION, type: "error", id,
+                error: data === undefined ? { code, message } : { code, message, data } });
   }
 
   /** The connection ends, as it does when the Core's process exits. */

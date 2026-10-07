@@ -50,8 +50,9 @@ bridge:
 - `lines()` — the `line` messages, in order;
 - `write(line)` — `send_line` with the page's generation; a line the native
   side refuses becomes that request's error answer on this page only
-  (`not_allowed`, with `data.refused_by: "native"`, since the Core never saw
-  it — the window keeps a mode change refused this way, for instance by the
+  (`not_allowed`, its `data.native_refusal` a value made once per page that
+  no Core is ever sent, so a Core's own error cannot pass for one — the
+  Core never saw the line; the window keeps a mode change refused this way, for instance by the
   line that was the first to notice a wake, and sends it once nothing holds
   it, at most a few times in a row);
 - `close()` — detaches the page only. It never stops the Core: Core lifetime

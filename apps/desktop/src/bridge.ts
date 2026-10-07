@@ -131,6 +131,18 @@ export async function connect(
 }
 
 /** An error answer for a refused request, keyed on that request's own id. */
+/**
+ * Marks the error answers this page makes itself for a line the native side
+ * refused. A Core's own errors are relayed with whatever data it put in them,
+ * so the mark is a value made here, once per page, that no Core is ever sent.
+ */
+export const NATIVE_REFUSAL = crypto.randomUUID();
+
+/** Is `data` (an error's) one this page made for a natively refused line? */
+export function refusedNatively(data: Record<string, unknown>): boolean {
+  return data["native_refusal"] === NATIVE_REFUSAL;
+}
+
 function refusal(line: string, reason: string): string {
   let id: unknown = null;
   try {
@@ -144,6 +156,6 @@ function refusal(line: string, reason: string): string {
     id,
     // Marked as the native side's: the Core never saw the line, so this is
     // not the Core refusing it.
-    error: { code: "not_allowed", message: reason, data: { refused_by: "native" } },
+    error: { code: "not_allowed", message: reason, data: { native_refusal: NATIVE_REFUSAL } },
   });
 }

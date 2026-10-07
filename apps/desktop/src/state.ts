@@ -30,6 +30,8 @@ import {
   wantMode,
 } from "@comodor/session";
 
+import { refusedNatively } from "./bridge.ts";
+
 export interface SessionView {
   readonly state: State;
   readonly intent: ModeIntent;
@@ -340,8 +342,7 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
     setIntent((was) => intentSending(was, next));
     void client.call("session.set_mode", { session_id: id, mode: next })
       .catch((problem: unknown) => {
-        if (problem instanceof ProtocolError && problem.data["refused_by"] === "native"
-            && ++nativeRefusals.current <= 3) {
+        if (problem instanceof ProtocolError && refusedNatively(problem.data) && ++nativeRefusals.current <= 3) {
           setIntent((was) => ({ ...was, inFlight: undefined }));
           return;
         }

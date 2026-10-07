@@ -161,6 +161,19 @@ describe("a mode change queued when the machine sleeps", () => {
     expect(refused).toBe(4);
   });
 
+  /** Review finding (PR #62): what a Core puts in its own error cannot make
+   * its refusal pass for the native side's. */
+  test("a Core's refusal claiming to be the native side's is still the Core's", async () => {
+    const { native, container } = await open();
+    native.core.handlers.set("session.set_mode", () => ({
+      error: { code: "not_allowed", message: "no", data: { refused_by: "native", native_refusal: "guess" } } }));
+    const button = (label: string) => byText(container, '[data-testid="mode"] button', label) as HTMLButtonElement;
+    await until(() => button("PLAN") && !button("PLAN").disabled, "the modes");
+    await click(button("PLAN"));
+    await until(() => container.querySelector('[data-testid="mode"] .mode-refused'), "the refusal shown");
+    expect(native.core.requests("session.set_mode").length).toBe(1);
+  });
+
   test("is not replayed into a reopened conversation when the Core is restarted, and the window says so",
        async () => {
     const { native, container } = await open();
