@@ -1,0 +1,2 @@
+This file is deliberately not executable. Pointing COMODOR_BIN at it is how
+the desktop tests produce the spawn_failed startup failure.

@@ -1,0 +1,345 @@
+/**
+ * T062: the window after its Core restarts (FR-011, FR-016, R12). The page
+ * reconnects with a new client and reopens the stored conversation; what the
+ * Core never completed is shown as interrupted and is never sent again.
+ */
+
+import { afterEach, describe, expect, test } from "bun:test";
+
+import { App } from "../src/app.tsx";
+import { FakeCore } from "./fake-core.ts";
+import { FakeNative, openWindow, status } from "./fake-native.ts";
+import { byText, click, press, render, type Rendered, typeInto, until } from "./render.ts";
+
+let rendered: Rendered | undefined;
+
+afterEach(async () => {
+  await rendered?.unmount();
+  rendered = undefined;
+});
+
+async function open(native = new FakeNative()) {
+  return openWindow(async (n) => {
+    rendered = await render(<App api={n.api} />);
+    return rendered;
+  }, until, native);
+}
+
+describe("after a restart", () => {
+  test("the page reconnects with a new client and reopens the stored conversation", async () => {
+    const { native, container } = await open();
+    const first = native.core;
+    const next = new FakeCore();
+    native.restart(next);
+    await until(() => next.requests("session.open").length === 1, "the reopen");
+    expect(next.requests("session.open")[0]!.params).toEqual({ session_id: "s1" });
+    expect(next.requests("client.hello").length).toBe(1);
+    expect(next.requests("session.create")).toEqual([]);
+    expect(native.commands("connect").length).toBe(2);
+    await until(() => container.querySelector('[data-testid="composer"]'), "the composer again");
+    expect(first.requests("session.open")).toEqual([]);
+  });
+
+  /** Review finding (PR #62): a `ready` that arrives while the last client
+   * is still failing to start is not lost. */
+  test("a Core ready while the last client was still starting gets a client", async () => {
+    const native = new FakeNative();
+    native.core.handlers.set("client.hello", () => ({ hold: true }));
+    rendered = await render(<App api={native.api} />);
+    await until(() => native.core.requests("client.hello").length === 1, "the first hello");
+    const next = new FakeCore();
+    native.restart(next);
+    await until(() => next.requests("client.hello").length === 1, "the next Core's hello");
+    await until(() => rendered!.container.querySelector('[data-testid="composer"]'), "the composer");
+  });
+
+  test("when nothing was stored, a new conversation starts and the window says so", async () => {
+    const { native, container } = await open();
+    const next = new FakeCore();
+    next.handlers.set("session.open", () => ({
+      error: { code: "not_allowed", message: "no stored session named 's1'" } }));
+    native.restart(next);
+    await until(() => next.requests("session.create").length === 1, "a new conversation");
+    await until(() => byText(container, '[data-testid="recovery"]', "could not be reopened"), "the notice");
+  });
+
+  /** Review finding (PR #62): only the Core's refusal says nothing is
+   * stored; any other failure keeps the stored conversation for next time. */
+  test("a reopen that fails for another reason keeps the stored conversation", async () => {
+    const { native } = await open();
+    const next = new FakeCore();
+    next.handlers.set("session.open", () => ({ error: { code: "internal", message: "the disk hiccuped" } }));
+    native.restart(next);
+    const lost = await until(() => rendered!.container.querySelector('[data-testid="session-lost"]'), "the window says so");
+    expect(lost.textContent).toContain("the disk hiccuped");
+    expect(next.requests("session.create")).toEqual([]);
+    const third = coreWith("live-3");
+    native.restart(third, 2);
+    await until(() => third.requests("session.open").length === 1, "the reopen");
+    expect(third.requests("session.open")[0]!.params).toEqual({ session_id: "s1" });
+  });
+
+  test("an accepted turn the Core never finished is shown as interrupted, and never sent again", async () => {
+    const { native, container } = await open();
+    const field = container.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;
+    await typeInto(field, "start something");
+    await press(field, "Enter");
+    await until(() => native.core.requests("session.send").length === 1, "the send");
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t1", message_id: "m1", role: "assistant" });
+    native.core.emit("message.delta", { session_id: "s1", turn_id: "t1", message_id: "m1", text: "half an ans" });
+    await until(() => byText(container, '[data-testid="line"]', "half an ans"), "the stream");
+
+    const next = new FakeCore();
+    native.restart(next);
+    await until(() => next.requests("session.open").length === 1, "the reopen");
+    const notice = await until(() => byText(container, '[data-testid="recovery"]', "interrupted"), "the notice");
+    expect(notice.textContent).toContain("not saved");
+    expect(next.requests("session.send")).toEqual([]);
+  });
+
+  test("a turn that finished before the restart is not called interrupted", async () => {
+    const { native, container } = await open();
+    const field = container.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;
+    await typeInto(field, "a short one");
+    await press(field, "Enter");
+    await until(() => native.core.requests("session.send").length === 1, "the send");
+    native.core.emit("session.updated", { session: { ...native.core.session, busy: true } });
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t1", message_id: "m1", role: "assistant" });
+    native.core.emit("message.completed", { session_id: "s1", turn_id: "t1", message_id: "m1",
+                                            text: "done", status: "completed" });
+    native.core.emit("session.updated", { session: { ...native.core.session, busy: false } });
+    await until(() => byText(container, '[data-testid="line"]', "done"), "the answer");
+    const next = new FakeCore();
+    native.restart(next);
+    await until(() => next.requests("session.open").length === 1, "the reopen");
+    await until(() => container.querySelector('[data-testid="composer"]'), "the composer");
+    expect(byText(container, '[data-testid="recovery"]', "interrupted")).toBeNull();
+  });
+
+  test("background delegates are summarised in one line, lost ones included", async () => {
+    const native = new FakeNative();
+    native.core.snapshot = {
+      ...native.core.snapshot,
+      delegates: [
+        { id: "d1", label: "index the tests", state: "running", steps: 1, tool_calls: 0,
+          tokens: 0, elapsed: 3, started_at: 0 },
+        { id: "d2", label: "read the docs", state: "lost", steps: 2, tool_calls: 1,
+          tokens: 0, elapsed: 9, started_at: 0 },
+      ],
+    };
+    const { container } = await open(native);
+    const line = await until(() => container.querySelector<HTMLElement>('[data-testid="delegates"]'), "the summary");
+    expect(line.textContent).toContain("2 background tasks");
+    expect(line.textContent).toContain("1 running");
+    expect(line.textContent).toContain("1 lost");
+  });
+});
+
+/** A Core whose live session has its own id, as `session.open` gives. */
+function coreWith(id: string, workspace = "/work/project"): FakeCore {
+  const core = new FakeCore();
+  core.session = { ...core.session, id, workspace };
+  core.snapshot = { ...core.snapshot, session: core.session };
+  return core;
+}
+
+/** Review findings (PR #62): which conversation a new Core reopens. */
+/** Review finding (PR #62): a live event that arrives while the first
+ * snapshot is on its way must not make that snapshot look stale. */
+describe("the first snapshot", () => {
+  test("events that arrive before it are applied after it, and nothing is lost", async () => {
+    const native = new FakeNative();
+    native.core.snapshot = {
+      session: native.core.session, revision: 4, tools: [],
+      messages: [{ message_id: "m1", turn_id: "t1", role: "assistant",
+                   text: "from the snapshot", status: "completed" }],
+    };
+    native.core.handlers.set("session.snapshot", () => ({ hold: true }));
+    rendered = await render(<App api={native.api} />);
+    await until(() => native.core.requests("session.snapshot").length === 1, "the snapshot asked");
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t2", message_id: "m2", role: "assistant" }, 5);
+    native.core.emit("message.delta", { session_id: "s1", turn_id: "t2", message_id: "m2", text: "after it" }, 6);
+    native.core.respond(native.core.requests("session.snapshot")[0]!.id, { snapshot: native.core.snapshot });
+    const container = rendered.container;
+    await until(() => byText(container, '[data-testid="line"]', "after it"), "the live text");
+    await until(() => byText(container, '[data-testid="line"]', "from the snapshot"), "the snapshot's text");
+  });
+});
+
+describe("a gap in the sequence", () => {
+  /** Review finding (PR #62): the repair's snapshot is applied even when a
+   * live event arrives while it is on its way. */
+  test("is repaired by a snapshot, with live events held until it is applied", async () => {
+    const { native, container } = await open();
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t1", message_id: "m1", role: "assistant" }, 1);
+    native.core.handlers.set("session.snapshot", () => ({ hold: true }));
+    // seq 5 after 1: events 2-4 never arrived, so the window asks again.
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t2", message_id: "m5", role: "assistant" }, 5);
+    await until(() => native.core.requests("session.snapshot").length === 2, "the repair asked");
+    native.core.emit("message.delta", { session_id: "s1", turn_id: "t2", message_id: "m5", text: "after the repair" }, 6);
+    native.core.respond(native.core.requests("session.snapshot")[1]!.id, { snapshot: {
+      session: native.core.session, revision: 5, tools: [],
+      messages: [
+        { message_id: "m4", turn_id: "t1", role: "assistant", text: "repaired", status: "completed" },
+        { message_id: "m5", turn_id: "t2", role: "assistant", text: "", status: "streaming" },
+      ],
+    } });
+    await until(() => byText(container, '[data-testid="line"]', "repaired"), "the snapshot's message");
+    await until(() => byText(container, '[data-testid="line"]', "after the repair"), "the live text");
+  });
+
+  /** Review finding (PR #62): a hole found among the events held during a
+   * repair is repaired too, not left because the gap flag never changed. */
+  test("found again among the held events is repaired again", async () => {
+    const { native, container } = await open();
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t1", message_id: "m1", role: "assistant" }, 1);
+    native.core.handlers.set("session.snapshot", () => ({ hold: true }));
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t2", message_id: "m5", role: "assistant" }, 5);
+    await until(() => native.core.requests("session.snapshot").length === 2, "the first repair asked");
+    // Held during the repair, and one above the snapshot's revision + 1:
+    // event 6 never arrived either.
+    native.core.emit("message.started", { session_id: "s1", turn_id: "t3", message_id: "m7", role: "assistant" }, 7);
+    native.core.respond(native.core.requests("session.snapshot")[1]!.id, { snapshot: {
+      session: native.core.session, revision: 5, tools: [],
+      messages: [{ message_id: "m4", turn_id: "t1", role: "assistant", text: "first repair", status: "completed" }],
+    } });
+    await until(() => native.core.requests("session.snapshot").length === 3, "the second repair asked");
+    native.core.respond(native.core.requests("session.snapshot")[2]!.id, { snapshot: {
+      session: native.core.session, revision: 7, tools: [],
+      messages: [
+        { message_id: "m4", turn_id: "t1", role: "assistant", text: "first repair", status: "completed" },
+        { message_id: "m6", turn_id: "t2", role: "assistant", text: "second repair", status: "completed" },
+      ],
+    } });
+    await until(() => byText(container, '[data-testid="line"]', "second repair"), "the second repair applied");
+  });
+});
+
+describe("what the window keeps", () => {
+  /** Review finding (PR #62): a turn that finished while the window was
+   * reloading is not called interrupted by a later crash. */
+  test("a turn the snapshot shows finished is not called interrupted after a reload", async () => {
+    const { native, container } = await open();
+    const field = container.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;
+    await typeInto(field, "a quick one");
+    await press(field, "Enter");
+    await until(() => native.core.requests("session.send").length === 1, "the send");
+    // The window reloads; the turn ends meanwhile, and the new page only
+    // sees it in the snapshot (the session is idle).
+    await rendered!.unmount();
+    rendered = await render(<App api={native.api} />);
+    await until(() => native.core.requests("session.snapshot").length > 1, "the snapshot after the reload");
+    await until(() => rendered!.container.querySelector('[data-testid="composer"]'), "the composer");
+    const next = coreWith("live-2");
+    native.restart(next);
+    await until(() => next.requests("session.snapshot").length > 0, "the reopened session");
+    expect(byText(rendered!.container, '[data-testid="recovery"]', "interrupted")).toBeNull();
+  });
+
+  /** Review finding (PR #62): a turn the Core accepted while the window was
+   * reloading, whose answer the old page never saw, is still called
+   * interrupted by a later crash. */
+  test("a turn still running after a reload is called interrupted by a later crash", async () => {
+    const { native, container } = await open();
+    native.core.handlers.set("session.send", () => ({ hold: true }));
+    const field = container.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;
+    await typeInto(field, "a long one");
+    await press(field, "Enter");
+    await until(() => native.core.requests("session.send").length === 1, "the send");
+    // The window reloads before the answer arrives; the new page sees the
+    // turn only as a busy session in its snapshot.
+    await rendered!.unmount();
+    native.core.session = { ...native.core.session, busy: true };
+    native.core.snapshot = {
+      session: native.core.session, revision: 2, tools: [],
+      messages: [{ message_id: "m1", turn_id: "t1", role: "assistant", text: "half", status: "streaming" }],
+    };
+    rendered = await render(<App api={native.api} />);
+    await until(() => native.core.requests("session.snapshot").length > 1, "the snapshot after the reload");
+    await until(() => rendered!.container.querySelector('[data-testid="composer"]'), "the composer");
+    const next = coreWith("live-2");
+    native.restart(next);
+    await until(() => next.requests("session.open").length === 1, "the reopen");
+    await until(() => byText(rendered!.container, '[data-testid="recovery"]', "interrupted"), "the notice");
+    expect(next.requests("session.send")).toEqual([]);
+  });
+
+  /** Review finding (PR #62): a failed `session.list` says nothing about
+   * which sessions the Core has: nothing is opened or created on its word. */
+  test("a reload whose session list fails opens nothing in its place", async () => {
+    const { native } = await open();
+    await rendered!.unmount();
+    native.core.handlers.set("session.list", () => ({ error: { code: "internal", message: "list failed" } }));
+    rendered = await render(<App api={native.api} />);
+    const lost = await until(() => rendered!.container.querySelector('[data-testid="session-lost"]'), "the window says so");
+    expect(lost.textContent).toContain("list failed");
+    expect(rendered!.container.querySelector('[data-testid="composer"]')).toBeNull();
+    expect(native.core.requests("session.open")).toEqual([]);
+    expect(native.core.requests("session.create").length).toBe(1);
+  });
+
+  test("a reload keeps the stored conversation for the next restart", async () => {
+    const { native } = await open();
+    const second = coreWith("live-2");
+    native.restart(second);
+    await until(() => second.requests("session.snapshot").length > 0, "the reopened session");
+    expect(second.requests("session.open")[0]!.params).toEqual({ session_id: "s1" });
+
+    // The window's content reloads: a new page, the same Core.
+    await rendered!.unmount();
+    rendered = await render(<App api={native.api} />);
+    await until(() => second.requests("session.snapshot").length > 1, "the session after the reload");
+    expect(second.requests("session.open").length).toBe(1);
+    expect(second.requests("session.create")).toEqual([]);
+
+    const third = coreWith("live-3");
+    native.restart(third, 2);
+    await until(() => third.requests("session.open").length === 1, "the reopen");
+    expect(third.requests("session.open")[0]!.params).toEqual({ session_id: "s1" });
+  });
+
+  test("a new workspace starts a new conversation, with nothing called interrupted", async () => {
+    const { native, container } = await open();
+    const field = container.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;
+    await typeInto(field, "start something");
+    await press(field, "Enter");
+    await until(() => native.core.requests("session.send").length === 1, "the send");
+
+    const next = coreWith("s2", "/work/other");
+    native.replace(next, { ...native.current, state: "stopping" },
+                   { ...native.current, state: "ready", workspace: "/work/other", workspace_id: "launch:2" });
+    await until(() => next.requests("session.create").length === 1, "a new conversation");
+    expect(next.requests("session.open")).toEqual([]);
+    await until(() => container.querySelector('[data-testid="composer"]'), "the composer");
+    expect(container.querySelector('[data-testid="recovery"]')).toBeNull();
+  });
+});
+
+describe("telling workspaces apart", () => {
+  /** Review finding (PR #62): two folders can display the same (a byte that
+   * is not UTF-8); the native side's id tells them apart. */
+  test("a folder that only looks the same is still a new conversation", async () => {
+    const { native } = await open();
+    const next = coreWith("s2");
+    native.replace(next, { ...native.current, state: "stopping" },
+                   { ...native.current, state: "ready", workspace_id: "launch:2" });
+    await until(() => next.requests("session.create").length === 1, "a new conversation");
+    expect(next.requests("session.open")).toEqual([]);
+  });
+});
+
+describe("at the restart limit", () => {
+  test("the window shows the count and offers Try again", async () => {
+    const native = new FakeNative(status({
+      state: "failed", core: null, restart_count: 3,
+      failure: { class: "crashed",
+                 message: "The Core stopped unexpectedly (exit code 70). It stopped 3 times in a row, so it was not started again." },
+    }));
+    rendered = await render(<App api={native.api} />);
+    const view = await until(() => rendered!.container.querySelector<HTMLElement>('[data-testid="failure-view"]'),
+                             "the failure view");
+    expect(view.textContent).toContain("3 of 3");
+    await click(byText(view, "button", "Try again")!);
+    expect(native.commands("retry").length).toBe(1);
+  });
+});

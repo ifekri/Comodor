@@ -1,0 +1,441 @@
+#!/usr/bin/env node
+/**
+ * Evidence that the real system folder chooser opens where the application
+ * says (T095, SC-017, quickstart §7).
+ *
+ * The release build — the real dialog, not the test build's double — is
+ * launched twice in a row with no workspace argument, each time with a
+ * different folder stored as the last one chosen. When the dialog's window
+ * exists, that window alone is captured — never the whole screen, which on a
+ * person's machine shows whatever else they have open. Where the platform
+ * lets a tool read the dialog itself, the folder it opened at is observed
+ * and compared with the stored one: on Windows the address bar, through UI
+ * Automation; on macOS the panel's column browser (the selected folder in
+ * each column, from the disk's root) and its location pop-up, through the
+ * Accessibility API; on Linux the path bar's buttons from the root to the
+ * checked folder, through AT-SPI. The stored folder written beforehand is the request,
+ * never the observation. Then the application is ended. Nothing is chosen
+ * and no Core starts.
+ *
+ *   node e2e/chooser-evidence.mjs [--skip-build]
+ *
+ * Output: `e2e/out/chooser-evidence/` — one screenshot per launch and
+ * `evidence.json`. A dialog that opened anywhere else, or whose folder could
+ * not be read from the dialog itself, fails the run; the screenshots are
+ * supporting evidence only.
+ */
+
+import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const DESKTOP = path.dirname(HERE);
+const OUT = path.join(HERE, "out", "chooser-evidence");
+const IDENTIFIER = "ai.comodor.desktop";
+const TITLE = "Choose a workspace for Comodor";
+/** How long the dialog may take to appear before the launch fails. */
+const DIALOG_DEADLINE_S = 60;
+
+function configDir() {
+  if (process.platform === "win32") return path.join(process.env.APPDATA, IDENTIFIER);
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", IDENTIFIER);
+  }
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), IDENTIFIER);
+}
+
+function executable() {
+  const target = process.env.CARGO_TARGET_DIR
+    ? path.resolve(process.env.CARGO_TARGET_DIR) : path.join(DESKTOP, "src-tauri", "target");
+  return path.join(target, "release", process.platform === "win32" ? "comodor-desktop.exe" : "comodor-desktop");
+}
+
+function buildRelease() {
+  const cli = createRequire(import.meta.url).resolve("@tauri-apps/cli/tauri.js");
+  const result = spawnSync(process.execPath, [cli, "build", "--no-bundle"], { cwd: DESKTOP, stdio: "inherit" });
+  if (result.status !== 0) throw new Error("the release build failed");
+}
+
+/**
+ * macOS: read the open panel of process `pid` through the Accessibility API.
+ * The folder is taken from what the panel itself reports, in order: the file
+ * URL of the selected row in its browser (a URL is the whole path); else
+ * the menu of its location pop-up, which lists the folder and each parent up
+ * to the disk (opened and cancelled — after the screenshot — to read it);
+ * else the selected folder of each browser column. Every read is kept, raw.
+ * Reads repeat until two agree, so a panel still filling in is not taken
+ * half-way.
+ */
+function observePanel(pid) {
+  const swift = `
+import AppKit
+import ApplicationServices
+import Foundation
+
+func value(_ e: AXUIElement, _ name: String) -> AnyObject? {
+  var v: AnyObject?
+  return AXUIElementCopyAttributeValue(e, name as CFString, &v) == .success ? v : nil
+}
+func attributes(_ e: AXUIElement) -> [String] {
+  var names: CFArray?
+  return AXUIElementCopyAttributeNames(e, &names) == .success ? (names as? [String] ?? []) : []
+}
+func kids(_ e: AXUIElement) -> [AXUIElement] { value(e, kAXChildrenAttribute as String) as? [AXUIElement] ?? [] }
+func role(_ e: AXUIElement) -> String { value(e, kAXRoleAttribute as String) as? String ?? "" }
+func first(_ e: AXUIElement, _ wanted: String, _ depth: Int = 0) -> AXUIElement? {
+  if role(e) == wanted { return e }
+  if depth > 40 { return nil }
+  for k in kids(e) { if let found = first(k, wanted, depth + 1) { return found } }
+  return nil
+}
+func all(_ e: AXUIElement, _ depth: Int = 0, into out: inout [AXUIElement], where keep: (AXUIElement) -> Bool) {
+  if keep(e) { out.append(e) }
+  if depth > 40 { return }
+  for k in kids(e) { all(k, depth + 1, into: &out, where: keep) }
+}
+// A row's name: its text, not an icon's description.
+func label(_ e: AXUIElement) -> String? {
+  if ["AXStaticText", "AXTextField"].contains(role(e)),
+     let s = value(e, kAXValueAttribute as String) as? String, !s.isEmpty { return s }
+  for k in kids(e) { if let s = label(k) { return s } }
+  return nil
+}
+// A path the element reports itself: a file URL or a path.
+func path(_ e: AXUIElement) -> String? {
+  for name in ["AXURL", "AXDocument", "AXFilename"] {
+    guard let v = value(e, name) else { continue }
+    if let url = v as? URL, url.isFileURL { return url.path }
+    if let s = v as? String {
+      if s.hasPrefix("file://"), let url = URL(string: s) { return url.path }
+      if s.hasPrefix("/") { return s }
+    }
+  }
+  return nil
+}
+func isSelected(_ e: AXUIElement) -> Bool { (value(e, kAXSelectedAttribute as String) as? Bool) == true }
+
+struct Seen: Equatable {
+  var urls: [String]; var selected: [String]; var popups: [String]; var leafAttributes: [String]
+}
+func panel(_ pid: pid_t) -> (AXUIElement, AXUIElement)? {
+  let app = AXUIElementCreateApplication(pid)
+  for window in value(app, kAXWindowsAttribute as String) as? [AXUIElement] ?? [] {
+    if let browser = first(window, "AXBrowser") { return (window, browser) }
+  }
+  return nil
+}
+func read(_ window: AXUIElement, _ browser: AXUIElement) -> Seen {
+  var chosen: [AXUIElement] = []
+  all(browser, into: &chosen, where: isSelected)
+  let urls = chosen.compactMap { row -> String? in
+    path(row) ?? kids(row).lazy.compactMap(path).first
+  }
+  var popups: [AXUIElement] = []
+  all(window, into: &popups, where: { role($0) == "AXPopUpButton" })
+  return Seen(urls: urls, selected: chosen.compactMap(label),
+              popups: popups.compactMap { value($0, kAXValueAttribute as String) as? String },
+              leafAttributes: chosen.last.map(attributes) ?? [])
+}
+// The location pop-up's menu: the folder, then each parent, down to the disk.
+func menuChain(_ window: AXUIElement, _ leaf: String) -> [String] {
+  var popups: [AXUIElement] = []
+  all(window, into: &popups, where: { role($0) == "AXPopUpButton" })
+  guard let popup = popups.first(where: { (value($0, kAXValueAttribute as String) as? String) == leaf }),
+        AXUIElementPerformAction(popup, kAXPressAction as CFString) == .success else { return [] }
+  var items: [AXUIElement] = []
+  for _ in 0..<40 where items.isEmpty {
+    usleep(100_000)
+    all(popup, into: &items, where: { role($0) == "AXMenuItem" })
+  }
+  let titles = items.map { value($0, kAXTitleAttribute as String) as? String ?? "" }
+  if let menu = first(popup, "AXMenu") { AXUIElementPerformAction(menu, kAXCancelAction as CFString) }
+  return titles
+}
+func emit(_ object: [String: Any], _ code: Int32) -> Never {
+  let data = try! JSONSerialization.data(withJSONObject: object)
+  print(String(data: data, encoding: .utf8)!)
+  exit(code)
+}
+
+guard AXIsProcessTrusted() else { emit(["error": "this process is not trusted for Accessibility"], 3) }
+let application = pid_t(CommandLine.arguments[1])!
+let volume = (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]))?.volumeName ?? ""
+let deadline = Date().addingTimeInterval(${DIALOG_DEADLINE_S})
+var last: Seen? = nil
+while Date() < deadline {
+  if let found = panel(application) {
+    let (window, browser) = found
+    let seen = read(window, browser)
+    if !seen.popups.isEmpty, seen == last {
+      var report: [String: Any] = ["urls": seen.urls, "selected": seen.selected, "popups": seen.popups,
+                                   "leafAttributes": seen.leafAttributes, "volume": volume]
+      let leaf = seen.selected.last ?? seen.popups[0]
+      if let url = seen.urls.first(where: { ($0 as NSString).lastPathComponent == leaf }) {
+        report["path"] = url
+        report["method"] = "the selected row's file URL"
+      } else {
+        let chain = menuChain(window, leaf)
+        report["menu"] = chain
+        let parents = Array(chain.prefix(while: { !$0.isEmpty }))
+        if let disk = parents.firstIndex(of: volume), disk > 0 {
+          report["path"] = "/" + parents[..<disk].reversed().joined(separator: "/")
+          report["method"] = "the location pop-up's menu, from the folder down to the disk"
+        } else {
+          report["error"] = "neither a file URL nor a menu down to the disk was read"
+        }
+      }
+      emit(report, 0)
+    }
+    last = seen
+  }
+  usleep(250_000)
+}
+emit(["error": "the panel's browser was not read twice alike", "selected": last?.selected ?? [],
+      "popups": last?.popups ?? []], 4)
+`;
+  const script = path.join(os.tmpdir(), "comodor-chooser-observe.swift");
+  fs.writeFileSync(script, swift);
+  const run = spawnSync("swift", [script, String(pid)], { encoding: "utf-8" });
+  try {
+    return JSON.parse(run.stdout.trim().split("\n").pop() ?? "");
+  } catch {
+    return { error: `the observer gave no answer (${run.status}): ${run.stderr.trim().slice(-400)}` };
+  }
+}
+
+/**
+ * Linux: the folder the GTK dialog is in, from its own accessibility tree
+ * (AT-SPI), read only. The dialog's path bar has one toggle button per
+ * folder from the root down, and the folder shown is the one checked; the
+ * path is the names from the root's button to the checked one. Every button
+ * read is kept, raw. Reads repeat until two agree, so a dialog still filling
+ * in is not taken half-way. Nothing in the dialog is pressed or changed.
+ */
+const GTK_OBSERVER = `
+import json, sys, threading, time
+import gi
+gi.require_version("Atspi", "2.0")
+from gi.repository import Atspi
+
+PID = int(sys.argv[1])
+TITLE = sys.argv[2]
+ENDS = time.monotonic() + float(sys.argv[3])
+# What the root's button may be called: it shows an icon, not a name.
+ROOT_NAMES = {"", "/", "File System", "File System Root", "Computer"}
+
+
+def children(node):
+    for index in range(node.get_child_count()):
+        child = node.get_child_at_index(index)
+        if child is not None:
+            yield child
+
+
+def walk(node, depth=0):
+    yield node
+    if depth < 60:
+        for child in children(node):
+            yield from walk(child, depth + 1)
+
+
+def dialog():
+    for app in children(Atspi.get_desktop(0)):
+        try:
+            if app.get_process_id() != PID:
+                continue
+        except Exception:
+            continue
+        for window in children(app):
+            if window.get_name() == TITLE:
+                return window
+    return None
+
+
+def buttons_of(window):
+    found = []
+    for node in walk(window):
+        if node.get_role() != Atspi.Role.TOGGLE_BUTTON:
+            continue
+        states = node.get_state_set()
+        try:
+            x = node.get_extents(Atspi.CoordType.SCREEN).x
+        except Exception:
+            x = None
+        found.append({"name": node.get_name() or "", "x": x,
+                      "checked": states.contains(Atspi.StateType.CHECKED)})
+    if found and all(button["x"] is not None for button in found):
+        found.sort(key=lambda button: button["x"])
+    return found
+
+
+last = None
+while time.monotonic() < ENDS:
+    window = dialog()
+    if window is not None:
+        read = buttons_of(window)
+        if read and read == last:
+            break
+        last = read
+    # The interval between reads while the dialog appears, within the deadline.
+    threading.Event().wait(0.25)
+
+buttons = last or []
+result = {"buttons": buttons}
+checked = [at for at, button in enumerate(buttons) if button["checked"]]
+if len(checked) == 1 and buttons and buttons[0]["name"] in ROOT_NAMES:
+    parts = [button["name"] for button in buttons[1:checked[0] + 1]]
+    if parts and all(part and "/" not in part for part in parts):
+        result["path"] = "/" + "/".join(parts)
+print(json.dumps(result))
+`;
+
+function observeGtk(pid) {
+  const script = path.join(os.tmpdir(), "comodor-chooser-observe.py");
+  fs.writeFileSync(script, GTK_OBSERVER);
+  const run = spawnSync("/usr/bin/python3", [script, String(pid), TITLE, String(DIALOG_DEADLINE_S)],
+                        { encoding: "utf-8" });
+  try {
+    return { method: "the path bar's buttons, from the root to the checked folder (AT-SPI)",
+             ...JSON.parse(run.stdout.trim().split("\n").pop() ?? "") };
+  } catch {
+    return { error: `the observer gave no answer (${run.status}): ${run.stderr.trim().slice(-400)}` };
+  }
+}
+
+/** Is `observed` the folder `stored` names, however it is spelled? */
+function sameFolder(observed, stored) {
+  try {
+    const a = fs.realpathSync.native(observed);
+    const b = fs.realpathSync.native(stored);
+    return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+  } catch {
+    return false;
+  }
+}
+
+/** Wait for the dialog, capture its window alone into `shot`; what was read. */
+function capture(shot) {
+  if (process.platform === "win32") {
+    const script = `
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, System.Drawing
+Add-Type -Namespace Native -Name Dpi -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
+[void][Native.Dpi]::SetProcessDPIAware()
+$name = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, '${TITLE}')
+$ends = (Get-Date).AddSeconds(${DIALOG_DEADLINE_S})
+$dialog = $null
+while (-not $dialog -and (Get-Date) -lt $ends) {
+  $dialog = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $name)
+}
+if (-not $dialog) { Write-Output 'NO-DIALOG'; exit 2 }
+$all = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+foreach ($e in $all) { if ($e.Current.Name -like 'Address:*') { Write-Output $e.Current.Name; break } }
+# The dialog's own rectangle only.
+$r = $dialog.Current.BoundingRectangle
+$bmp = New-Object System.Drawing.Bitmap ([int]$r.Width), ([int]$r.Height)
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen([int]$r.X, [int]$r.Y, 0, 0, $bmp.Size)
+$bmp.Save('${shot.replaceAll("'", "''")}', [System.Drawing.Imaging.ImageFormat]::Png)
+`;
+    const run = spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf-8" });
+    return { found: run.status === 0, read: run.stdout.trim(), error: run.stderr.trim() };
+  }
+  if (process.platform === "linux") {
+    // Only once it is mapped: a window found before then has no image yet.
+    const found = spawnSync("timeout", [String(DIALOG_DEADLINE_S), "xdotool", "search", "--sync", "--onlyvisible",
+                                        "--name", TITLE], { encoding: "utf-8" });
+    if (found.status !== 0) return { found: false, read: "", error: found.stderr.trim() };
+    const id = found.stdout.trim().split(/\s+/)[0];
+    const shotRun = spawnSync("import", ["-window", id, shot], { encoding: "utf-8" });
+    return { found: true, read: `window ${id}`, error: shotRun.stderr.trim() };
+  }
+  // macOS: the panel is a second window of the application's process (or of
+  // the system's open-and-save panel service), read from the window list.
+  const swift = `
+import CoreGraphics
+import Foundation
+let deadline = Date().addingTimeInterval(${DIALOG_DEADLINE_S})
+while Date() < deadline {
+  let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+  let owners = list.compactMap { $0[kCGWindowOwnerName as String] as? String }
+  let ours = list.filter { ($0[kCGWindowOwnerName as String] as? String) == "comodor-desktop" }
+  let panel = list.first { (($0[kCGWindowOwnerName as String] as? String) ?? "").contains("Open and Save Panel") }
+    ?? (ours.count >= 2 ? ours.min { (($0[kCGWindowNumber as String] as? Int) ?? 0) > (($1[kCGWindowNumber as String] as? Int) ?? 0) } : nil)
+  if let panel = panel, let id = panel[kCGWindowNumber as String] as? Int {
+    print(id)
+    exit(0)
+  }
+}
+exit(2)
+`;
+  const script = path.join(os.tmpdir(), "comodor-chooser-wait.swift");
+  fs.writeFileSync(script, swift);
+  const found = spawnSync("swift", [script], { encoding: "utf-8" });
+  if (found.status !== 0) return { found: false, read: "", error: found.stderr.trim() };
+  const id = found.stdout.trim();
+  const shotRun = spawnSync("screencapture", ["-x", "-o", "-l", id, shot], { encoding: "utf-8" });
+  return { found: true, read: `window ${id}`, error: shotRun.stderr.trim() };
+}
+
+if (!process.argv.includes("--skip-build")) buildRelease();
+if (process.platform === "linux" && !process.env.DISPLAY) {
+  // Once, under a display (CI has none of its own) and in a D-Bus session,
+  // which the accessibility bus the observer reads through needs.
+  const wrapped = spawnSync("dbus-run-session", ["--", "xvfb-run", "-a", "-s", "-screen 0 1280x800x24",
+                                                 process.execPath, fileURLToPath(import.meta.url), "--skip-build"],
+                            { stdio: "inherit" });
+  process.exit(wrapped.status ?? 1);
+}
+
+fs.rmSync(OUT, { recursive: true, force: true });
+fs.mkdirSync(OUT, { recursive: true });
+const prefs = path.join(configDir(), "preferences.json");
+const saved = fs.existsSync(prefs) ? fs.readFileSync(prefs) : null;
+const launches = [];
+try {
+  for (const n of [1, 2]) {
+    const stored = fs.mkdtempSync(path.join(os.tmpdir(), `comodor-chooser-start-${n}-`));
+    fs.mkdirSync(path.dirname(prefs), { recursive: true });
+    fs.writeFileSync(prefs, JSON.stringify({ version: 1, last_selected_folder: stored }));
+    const app = spawn(executable(), [], { stdio: "ignore" });
+    const shot = path.join(OUT, `launch-${n}-${process.platform}.png`);
+    const seen = capture(shot);
+    // The folder the dialog itself shows, where the platform lets it be read.
+    let observed = null;
+    let observation;
+    if (seen.found && process.platform === "win32" && seen.read.startsWith("Address: ")) {
+      observed = seen.read.slice("Address: ".length);
+      observation = { how: "the dialog's address bar (UI Automation)" };
+    } else if (seen.found && process.platform === "darwin") {
+      observation = { how: "the panel's column browser (Accessibility)", ...observePanel(app.pid) };
+      observed = observation.path ?? null;
+    } else if (seen.found && process.platform === "linux") {
+      observation = { how: "the dialog's path bar (AT-SPI)", ...observeGtk(app.pid) };
+      observed = observation.path ?? null;
+    } else {
+      observation = { how: "not read on this platform: the screenshot's path bar is the evidence" };
+    }
+    app.kill("SIGKILL");
+    await new Promise((resolve) => app.once("exit", resolve));
+    launches.push({ launch: n, platform: process.platform, requested: stored, dialog: seen.found,
+                    read: seen.read, observed, observation,
+                    matches: observed === null ? null : sameFolder(observed, stored),
+                    screenshot: fs.existsSync(shot) ? path.basename(shot) : null,
+                    error: seen.error || undefined });
+  }
+} finally {
+  if (saved) fs.writeFileSync(prefs, saved);
+  else fs.rmSync(prefs, { force: true });
+}
+fs.writeFileSync(path.join(OUT, "evidence.json"), JSON.stringify(launches, null, 2));
+console.log(JSON.stringify(launches, null, 2));
+// Every launch's folder is read from the dialog itself and must equal the
+// stored one: a dialog that opened elsewhere, or whose folder could not be
+// read, fails the run. A screenshot alone never passes.
+const ok = launches.every((launch) => launch.dialog && launch.screenshot && launch.matches === true);
+console.log(ok ? "RECORDED chooser evidence: the start folder observed on every launch"
+  : "NOT RECORDED chooser evidence: a start folder was not observed, or did not match");
+process.exit(ok ? 0 : 1);

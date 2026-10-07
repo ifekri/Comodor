@@ -1,0 +1,48 @@
+[package]
+name = "comodor-desktop"
+version = "0.1.0"
+description = "Comodor desktop (D1): a window that owns one Comodor Core and speaks protocol v2 to it."
+edition = "2021"
+rust-version = "1.85"
+publish = false
+license = "MIT"
+
+[lib]
+name = "comodor_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "comodor-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.1", features = [] }
+serde_json = "=1.0.151"
+
+[dependencies]
+tauri = { version = "=2.12.1", features = [] }
+tauri-plugin-single-instance = "=2.5.2"
+tauri-plugin-dialog = "=2.8.1"
+tauri-plugin-opener = "=2.7.0"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.190"
+
+[features]
+# The test build: the scenario runner's report command, recorders and test
+# doubles. Never enabled for a release build (contracts/native-bridge.md).
+e2e = []

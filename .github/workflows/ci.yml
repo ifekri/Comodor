@@ -163,6 +163,120 @@ jobs:
       - name: What it costs
         run: bun apps/tui/test/bun/measure.tsx
 
+  desktop:
+    name: Desktop on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The desktop window owns a Core process and talks to a real WebView,
+        # and both differ per platform: process trees, the WebView engine, the
+        # single-instance channel. All three are the evidence (FR-033).
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      # Named rather than assumed, as in the renderer job.
+      COMODOR_PYTHON: ${{ matrix.os == 'windows-latest' && 'python' || 'python3' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - run: npm ci
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      # WebKitGTK is the Linux WebView; the window needs a display and the
+      # single-instance plugin a D-Bus session, which the harness starts.
+      - name: Linux WebView and display
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libsoup-3.0-dev libxdo-dev libssl-dev pkg-config build-essential \
+            xvfb xauth dbus dbus-x11
+
+      # The toolchain pinned in apps/desktop/src-tauri/rust-toolchain.toml.
+      - name: Rust
+        shell: bash
+        run: |
+          channel=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' apps/desktop/src-tauri/rust-toolchain.toml)
+          test -n "$channel"
+          rustup toolchain install "$channel" --profile minimal
+
+      # The native crate embeds the built page, so the page is built first.
+      - name: Build the page
+        run: npm run -w apps/desktop build
+
+      - name: Native unit and integration tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
+
+      # The test build's own support: the network-listener report must see a
+      # listener when there is one, or its empty answer proves nothing.
+      - name: Test-build support
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --features e2e --lib e2e::tests
+
+      - name: Window tests
+        run: npm run -w apps/desktop test
+
+      # The test build in a real WebView, against the scripted Core.
+      - name: In-application scenarios
+        run: npm run -w apps/desktop e2e
+
+      # Close, quit mid-turn, Quit now, kill, second launches: after each,
+      # no Core is left (SC-007, SC-008, SC-016). Uses the build above.
+      - name: Lifetime
+        run: npm run -w apps/desktop lifetime -- --skip-build
+
+      # Every flow again, each with a unique credential that must appear
+      # nowhere the window can reach (SC-009). Uses the build above.
+      - name: Credential canary, every flow
+        run: npm run -w apps/desktop canary -- --skip-build
+
+      # Last: it builds the release configuration over the test build. The
+      # release grants exactly the nine commands; the test build adds only
+      # its own (FR-030, SC-011).
+      - name: Release command list
+        run: npm run -w apps/desktop release-manifest
+
+      # The real system folder chooser (SC-017): the release build, launched
+      # twice with a stored folder; the dialog window alone is captured.
+      # Recorded for review here, on a runner with nothing else on screen.
+      - name: Folder chooser tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y xdotool imagemagick at-spi2-core gir1.2-atspi-2.0 python3-gi
+
+      - name: Real folder chooser evidence
+        run: npm run -w apps/desktop chooser-evidence -- --skip-build
+
+      - name: Keep the folder chooser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-chooser-${{ matrix.os }}
+          path: apps/desktop/e2e/out/chooser-evidence
+          if-no-files-found: ignore
+
+      - name: Keep what the scenarios left
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-${{ matrix.os }}
+          path: apps/desktop/e2e/out
+          if-no-files-found: ignore
+
   packaged:
     name: Installed package on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

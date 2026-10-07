@@ -1,0 +1,403 @@
+/**
+ * The session, as this window holds it (data-model.md §7).
+ *
+ * Everything about the conversation is the Core's, projected by the
+ * unchanged `@comodor/session` reducer: the client is subscribed, then a
+ * session is created (or the stored one reopened after a restart), then its
+ * snapshot is taken. A gap in the event sequence is answered with a fresh
+ * snapshot. The window adds only presentation and connection facts: which
+ * conversation to reopen (`storedId`), and which accepted turn never
+ * completed (`unsentTurn`).
+ */
+
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+
+import { type CoreClient, ProtocolError } from "@comodor/client";
+import { type Mode, MODES } from "@comodor/modes";
+import type { EventName, Session } from "@comodor/protocol";
+import {
+  beginIntent,
+  canSubmit,
+  initial,
+  intentConfirmed,
+  intentDue,
+  intentSending,
+  type ModeIntent,
+  reduce,
+  refuseIntent,
+  type Snapshot,
+  type State,
+  wantMode,
+} from "@comodor/session";
+
+import { refusedNatively } from "./bridge.ts";
+
+export interface SessionView {
+  readonly state: State;
+  readonly intent: ModeIntent;
+  /** The person's prompt. */
+  send(text: string): void;
+  /** Stop whatever the session is doing. */
+  cancel(): void;
+  /** One decision on the request waiting first. */
+  decide(method: "question.answer" | "permission.reply", params: Record<string, unknown>): void;
+  /** Aim at a mode; the Core decides. */
+  chooseMode(mode: Mode): void;
+  /** What the window says about a restart: why the conversation looks as it does. */
+  readonly recovery: readonly string[];
+  /** The workspace as the Core reports it (`workspace.get`), once known. */
+  readonly workspace: string | null;
+  /** From a check after the machine slept until the session has been read
+   * again: nothing may be sent meanwhile. */
+  readonly refreshing: boolean;
+  /** Whether nothing the person does may reach the Core now: during a check,
+   * until the session has been read again, or while it cannot be read. */
+  readonly gated: boolean;
+}
+
+/** What survives a Core restart, and a reload of this window, within one
+ * launch (R12). */
+export interface Kept {
+  /** The stored conversation a new Core reopens. */
+  storedId: string | undefined;
+  /** The live session of the Core the page last held; a reload finds it. */
+  liveId: string | undefined;
+  unsentTurn: string | undefined;
+  /** The workspace (its native id) the stored conversation belongs to. */
+  workspace: string | undefined;
+  /** The mode the person last chose that the Core has not confirmed: kept
+   * across a restart, so a reopened conversation says it was not applied
+   * rather than dropping it unsaid or sending it into that conversation. */
+  wantedMode: string | undefined;
+}
+
+const KEPT_KEY = "comodor.kept";
+type KeptFields = { -readonly [K in keyof Kept]: Kept[K] };
+
+/**
+ * The window's `Kept`, mirrored into `storage` — the window's session
+ * storage, which a reload of its content keeps and a new launch does not.
+ * Without storage it lives in memory only.
+ */
+export function keptIn(storage: Storage | undefined): Kept {
+  const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+  let saved: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(storage?.getItem(KEPT_KEY) ?? "{}");
+    if (parsed !== null && typeof parsed === "object") saved = parsed as Record<string, unknown>;
+  } catch {
+    saved = {};
+  }
+  const fields: KeptFields = {
+    storedId: text(saved["storedId"]), liveId: text(saved["liveId"]),
+    unsentTurn: text(saved["unsentTurn"]), workspace: text(saved["workspace"]),
+    wantedMode: text(saved["wantedMode"]),
+  };
+  const save = () => {
+    try {
+      storage?.setItem(KEPT_KEY, JSON.stringify(fields));
+    } catch {
+      // Kept in memory only, then: a reload starts from the live session.
+    }
+  };
+  const kept = {} as Kept;
+  for (const key of Object.keys(fields) as (keyof Kept)[]) {
+    Object.defineProperty(kept, key, {
+      enumerable: true,
+      get: () => fields[key],
+      set: (value: string | undefined) => {
+        fields[key] = value;
+        save();
+      },
+    });
+  }
+  return kept;
+}
+
+function sessionOf(params: Record<string, unknown>): string | undefined {
+  if (typeof params["session_id"] === "string") return params["session_id"];
+  const session = params["session"] as Record<string, unknown> | undefined;
+  return typeof session?.["id"] === "string" ? session["id"] : undefined;
+}
+
+export function useSession(client: CoreClient, kept: Kept, workspace: string | null,
+                           coreState = "ready", checkEpoch = 0): SessionView {
+  const [state, dispatch] = useReducer(reduce, initial);
+  const [intent, setIntent] = useState<ModeIntent>(beginIntent("act"));
+  const latest = useRef(state);
+  latest.current = state;
+  const inFlight = useRef<string | undefined>(undefined);
+  const [recovery, setRecovery] = useState<string[]>([]);
+  // Bumped to open the session again: a wake ended before it was open.
+  const [opening, setOpening] = useState(0);
+  const [coreWorkspace, setCoreWorkspace] = useState<string | null>(null);
+
+  // While a snapshot is on its way, events wait: one applied before it would
+  // make the snapshot look older than the window, and it would be dropped —
+  // on the first load and on every repair of a gap alike. Replayed after it,
+  // the reducer drops those the snapshot already covers.
+  const holding = useRef(true);
+  const held = useRef<{ name: EventName; params: Record<string, unknown>; seq: number }[]>([]);
+  const handleRef = useRef<(name: EventName, params: Record<string, unknown>, seq: number) => void>(() => {});
+
+  const resync = useCallback(async (id: string, fresh: boolean) => {
+    holding.current = true;
+    dispatch({ type: "resynchronising" });
+    try {
+      const answer = await client.call("session.snapshot", { session_id: id });
+      const snapshot = answer["snapshot"] as Snapshot;
+      dispatch({ type: "snapshot", snapshot });
+      // An idle session has no turn a restart could interrupt — one that
+      // ended while this page was not listening included. A busy one has,
+      // even if the page that sent it reloaded before seeing its answer.
+      if (snapshot.session?.busy === false) kept.unsentTurn = undefined;
+      else if (snapshot.session?.busy === true && kept.unsentTurn === undefined) {
+        kept.unsentTurn = snapshot.messages?.at(-1)?.turn_id ?? "";
+      }
+      const mode = (snapshot.session?.mode ?? "act") as Mode;
+      setIntent((was) => (fresh ? beginIntent(mode) : intentConfirmed(was, mode)));
+      const wanted = kept.wantedMode as Mode | undefined;
+      if (fresh && wanted !== undefined) {
+        kept.wantedMode = undefined;
+        if (wanted !== mode) {
+          setRecovery((notes) => [...notes, `The mode you chose, ${MODES[wanted]?.label ?? wanted}, was not `
+            + "applied: the conversation was reopened. Choose it again if you still want it."]);
+        }
+      }
+    } catch (problem) {
+      dispatch({ type: "lost", reason: (problem as Error).message });
+    } finally {
+      holding.current = false;
+      for (const { name, params, seq } of held.current.splice(0)) handleRef.current(name, params, seq);
+    }
+  }, [client, kept]);
+
+  useEffect(() => {
+    let alive = true;
+    // A new connection waits for its first snapshot.
+    holding.current = true;
+    held.current = [];
+    const handle = (name: EventName, params: Record<string, unknown>, seq: number) => {
+      // One window, one session: another session's events are not this one's.
+      const owner = sessionOf(params);
+      const current = latest.current.session?.id;
+      if (owner && current && owner !== current) return;
+      dispatch({ type: "event", name, params, seq });
+      if (name === "mode.changed") {
+        setIntent((was) => intentConfirmed(was, params["mode"] as Mode));
+        if (params["mode"] === kept.wantedMode) kept.wantedMode = undefined;
+      }
+      // The turn is over, however it ended: it is no longer one a restart
+      // could have interrupted.
+      if (name === "session.updated"
+          && (params["session"] as Record<string, unknown> | undefined)?.["busy"] === false) {
+        kept.unsentTurn = undefined;
+      }
+    };
+    handleRef.current = handle;
+    const stop = client.on((name: EventName, params, seq) => {
+      if (!alive) return;
+      if (holding.current) held.current.push({ name, params, seq });
+      else handle(name, params, seq);
+    });
+    let closed = false;
+    const unlost = client.onClose((reason) => {
+      closed = true;
+      if (alive) dispatch({ type: "lost", reason });
+    });
+    void (async () => {
+      try {
+        const notes: string[] = [];
+        // Another workspace is another conversation: nothing from the last
+        // one is reopened in it, or called interrupted there.
+        if (kept.workspace !== (workspace ?? undefined)) {
+          kept.storedId = undefined;
+          kept.liveId = undefined;
+          kept.unsentTurn = undefined;
+          kept.wantedMode = undefined;
+          kept.workspace = workspace ?? undefined;
+        }
+        // A reload of this window finds its live session in the same Core;
+        // a new Core has none until one is opened. A list that failed says
+        // neither, so nothing is opened on its word: the connection is lost.
+        const live = await client.call("session.list")
+          .then((answer) => (answer["sessions"] as Session[] | undefined) ?? []);
+        // Superseded meanwhile: whatever opens the session now is another run.
+        if (!alive || closed) return;
+        let session: Session | undefined = live.find((one) => one.id === kept.liveId);
+        if (session) {
+          // A reload: the same Core, the same conversation.
+        } else if (kept.storedId) {
+          // After a restart: the stored conversation is reopened. Opening
+          // gives a live session with an id of its own; the stored record
+          // keeps its id, which is what a later restart opens again.
+          // Only the Core's refusal says nothing is stored; any other failure
+          // says nothing about it, and the stored id is kept for next time.
+          session = await client.call("session.open", { session_id: kept.storedId })
+            .then((answer) => answer["session"] as Session)
+            .catch((problem: unknown) => {
+              if (problem instanceof ProtocolError && problem.code === "not_allowed") return undefined;
+              throw problem;
+            });
+          // A connection that went meanwhile says nothing about what is
+          // stored: the next client tries again.
+          if (!alive || closed) return;
+          if (!session) {
+            notes.push("The previous conversation could not be reopened, so a new one was started.");
+            kept.storedId = undefined;
+          }
+          if (kept.unsentTurn !== undefined) {
+            notes.push("The answer to your last message was interrupted when the Core stopped. "
+                       + "It was not saved, and it was not sent again.");
+            kept.unsentTurn = undefined;
+          }
+        } else {
+          // A reload that kept nothing: the Core's live session, if any.
+          session = live[0];
+          if (session) kept.storedId = session.id;
+        }
+        if (!session) {
+          session = (await client.call("session.create"))["session"] as Session;
+          kept.storedId = session.id;
+        }
+        kept.liveId = session.id;
+        if (!alive) return;
+        setRecovery(notes);
+        dispatch({ type: "connected", session });
+        await resync(session.id, true);
+        if (!alive) return;
+        const info = await client.call("model.get");
+        if (alive) dispatch({ type: "modelInfo", model: info as never });
+        // Where the Core works, as it says (FR-020): its project root, which
+        // may differ from the folder it was started in.
+        const where = await client.call("workspace.get");
+        if (alive && typeof where["path"] === "string") setCoreWorkspace(where["path"]);
+      } catch (problem) {
+        if (alive) dispatch({ type: "lost", reason: (problem as Error).message });
+      }
+    })();
+    return () => {
+      alive = false;
+      stop();
+      unlost();
+    };
+  }, [client, kept, workspace, resync, opening]);
+
+  // A hole in the sequence means an event never arrived, and no later event
+  // repairs that: the Core is asked for the whole session again. Looked at
+  // again whenever the revision moves while a gap stands, so a hole found
+  // among the events replayed after a repair is repaired too (the gap flag
+  // itself never changed); a snapshot dropped as stale moves nothing, so
+  // this never spins.
+  useEffect(() => {
+    const id = state.session?.id;
+    if (state.gap && id) void resync(id, false);
+  }, [state.gap, state.revision, state.session?.id, resync]);
+
+  // After the machine slept, the native side checked that the Core still
+  // answers; what the session became meanwhile is the Core's to say, so it
+  // is read again in full before anything is sent. Each check has an epoch
+  // the native side keeps in its status: a newer epoch than the last one
+  // read means a read is due, even if the check began and ended between two
+  // renders. The view starts at the epoch it opened with, since opening
+  // reads the session anyway.
+  const [settled, setSettled] = useState(checkEpoch);
+  const refreshing = checkEpoch > settled;
+  const reading = useRef<number | null>(null);
+  useEffect(() => {
+    if (coreState !== "ready" || checkEpoch <= settled || reading.current === checkEpoch) return;
+    reading.current = checkEpoch;
+    const done = () => setSettled((was) => Math.max(was, checkEpoch));
+    const id = latest.current.session?.id;
+    if (id) {
+      void resync(id, false).finally(done);
+    } else {
+      // Not open yet: anything it sent during the check was refused, so it
+      // is opened again from the start, and takes its own fresh read.
+      done();
+      setOpening((count) => count + 1);
+    }
+  }, [coreState, checkEpoch, settled, resync]);
+
+  // From a check after the machine slept until the session has been read
+  // again — and for as long as the session cannot be read — nothing the
+  // person does reaches the Core, a queued mode change included.
+  const gated = coreState !== "ready" || refreshing || state.connection.kind !== "ready";
+
+  // A mode request the native side refused never reached the Core (for one,
+  // the line that was the first to notice a wake): the choice stays and goes
+  // out once nothing holds it. At most a few in a row, so a native side that
+  // keeps refusing is not asked again and again; a check resets the count.
+  const nativeRefusals = useRef(0);
+  useEffect(() => {
+    if (gated) nativeRefusals.current = 0;
+  }, [gated]);
+
+  // One mode request in flight; the current aim is what goes out next, once
+  // nothing holds it: matched by then against the mode the Core reported.
+  useEffect(() => {
+    const id = state.session?.id;
+    const next = intentDue(intent);
+    if (!id || next === undefined || gated) return;
+    setIntent((was) => intentSending(was, next));
+    void client.call("session.set_mode", { session_id: id, mode: next })
+      .catch((problem: unknown) => {
+        if (problem instanceof ProtocolError && refusedNatively(problem.data) && ++nativeRefusals.current <= 3) {
+          setIntent((was) => ({ ...was, inFlight: undefined }));
+          return;
+        }
+        // The Core's own refusal is shown and ends the wish. A connection
+        // that closed or timed out (the client's own `internal_error`) says
+        // nothing about it.
+        if (problem instanceof ProtocolError && problem.code !== "internal_error") kept.wantedMode = undefined;
+        setIntent((was) => refuseIntent(was, (problem as Error).message));
+        dispatch({ type: "event", name: "notification.created", seq: 0,
+                   params: { level: "warning", text: (problem as Error).message } });
+      });
+  }, [client, intent, state.session?.id, gated]);
+
+  const send = useCallback((text: string) => {
+    const id = latest.current.session?.id;
+    const trimmed = text.trim();
+    if (!id || !trimmed) return;
+    const localId = `you-${latest.current.arrivals + 1}`;
+    dispatch({ type: "sending", localId, text: trimmed });
+    client.call("session.send", { session_id: id, text: trimmed })
+      .then((answer) => {
+        const turnId = String(answer["turn_id"] ?? "");
+        kept.unsentTurn = turnId;
+        dispatch({ type: "accepted", localId, turnId });
+      })
+      .catch((problem: unknown) => {
+        dispatch({ type: "rejected", localId, reason: (problem as Error).message });
+      });
+  }, [client, kept]);
+
+  const cancel = useCallback(() => {
+    const id = latest.current.session?.id;
+    if (id) void client.call("session.cancel", { session_id: id }).catch(() => {});
+  }, [client]);
+
+  const decide = useCallback((method: "question.answer" | "permission.reply",
+                              params: Record<string, unknown>) => {
+    const waiting = latest.current.interactions[0];
+    if (!waiting || !canSubmit(latest.current, waiting.id)) return;
+    // Two clicks inside one tick both read the projection before it is
+    // re-rendered; the latch refuses the second.
+    if (inFlight.current === waiting.id) return;
+    inFlight.current = waiting.id;
+    const id = waiting.id;
+    dispatch({ type: "submitting", id });
+    client.call(method, { ...params, id }).catch((problem: unknown) => {
+      inFlight.current = undefined;
+      dispatch({ type: "submitFailed", id, reason: (problem as Error).message });
+    });
+  }, [client]);
+
+  const chooseMode = useCallback((mode: Mode) => {
+    kept.wantedMode = mode;
+    setIntent((was) => wantMode(was, mode));
+  }, [kept]);
+
+  return { state, intent, send, cancel, decide, chooseMode, recovery, workspace: coreWorkspace, refreshing, gated };
+}

@@ -24,6 +24,9 @@
     },
     {
       "path": "apps/tui"
+    },
+    {
+      "path": "apps/desktop"
     }
   ]
 }

@@ -1,0 +1,391 @@
+/*
+ * Every colour is a design token (src/theme.ts sets them from
+ * cssVariables()). No colour literal belongs in this file.
+ */
+
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  font-size: 14px;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--surface-base);
+  color: var(--text-primary);
+}
+
+.window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 12px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+
+.status-state {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.state-ready {
+  color: var(--semantic-success);
+}
+
+.state-failed,
+.state-stopped {
+  color: var(--semantic-danger);
+}
+
+.status-workspace {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50%;
+  unicode-bidi: plaintext;
+}
+
+.status-change {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.status-unconfigured {
+  color: var(--semantic-warning);
+}
+
+.failure-view,
+.workspace-gate {
+  padding: 24px;
+  overflow: auto;
+}
+
+.failure-view h1 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: var(--semantic-danger);
+}
+
+.failure-view h2 {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.failure-message,
+.notice {
+  unicode-bidi: plaintext;
+  white-space: pre-wrap;
+}
+
+.diagnostics {
+  max-height: 40vh;
+  overflow: auto;
+  padding: 8px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  unicode-bidi: plaintext;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+button {
+  font: inherit;
+  padding: 6px 14px;
+  background: var(--surface-selected);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--border-active);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--border-focused);
+  outline-offset: 1px;
+}
+
+.quiet {
+  padding: 24px;
+  color: var(--text-muted);
+}
+
+.session {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.mode-control {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.mode-current {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.mode-act { color: var(--mode-act); }
+.mode-plan { color: var(--mode-plan); }
+.mode-ask { color: var(--mode-ask); }
+.mode-chat { color: var(--mode-chat); }
+
+.mode-option.asked {
+  border-color: var(--border-focused);
+}
+
+.mode-refused {
+  color: var(--semantic-warning);
+}
+
+.conversation {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.line .speaker {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.line .text,
+.tool-output,
+.detail {
+  white-space: pre-wrap;
+  word-break: break-word;
+  unicode-bidi: plaintext;
+}
+
+.speaker-you .text {
+  color: var(--text-secondary);
+}
+
+.line-note,
+.tool-state {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.line-error,
+.tool-error,
+.card-error {
+  display: block;
+  color: var(--semantic-danger);
+  white-space: pre-wrap;
+}
+
+.tool {
+  padding: 6px 8px;
+  background: var(--surface-raised);
+  border-left: 2px solid var(--border-active);
+}
+
+.tool header {
+  display: flex;
+  gap: 8px;
+}
+
+.tool-name {
+  font-weight: 600;
+}
+
+.tool-summary {
+  color: var(--text-secondary);
+  unicode-bidi: plaintext;
+}
+
+.tool-failed {
+  border-left-color: var(--semantic-danger);
+}
+
+.tool-output {
+  max-height: 30vh;
+  overflow: auto;
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+}
+
+.notice-warning { color: var(--semantic-warning); }
+.notice-error { color: var(--semantic-danger); }
+.notice-info { color: var(--semantic-info); }
+
+.card {
+  margin: 0 12px 12px;
+  padding: 12px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-focused);
+  border-radius: 4px;
+}
+
+.card h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  unicode-bidi: plaintext;
+}
+
+.question {
+  border: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.question legend {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  unicode-bidi: plaintext;
+}
+
+.option.chosen {
+  border-color: var(--border-focused);
+  background: var(--surface-selected);
+}
+
+.option-description {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.free {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.free input,
+.composer textarea {
+  font: inherit;
+  flex: 1;
+  padding: 6px;
+  background: var(--surface-base);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+}
+
+.permission-card dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0 0 8px;
+}
+
+.permission-card dt {
+  color: var(--text-muted);
+}
+
+.permission-card dd {
+  margin: 0;
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-default);
+  background: var(--surface-raised);
+}
+
+.composer textarea {
+  resize: vertical;
+  unicode-bidi: plaintext;
+}
+
+.composer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* A link from outside text: a button, so nothing in the page navigates. */
+button.link {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--semantic-info);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+
+.closing {
+  padding: 24px;
+}
+
+.closing h1 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.stop-outcome,
+.recovery,
+.delegates,
+.status-notice {
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--semantic-warning);
+  unicode-bidi: plaintext;
+}
+
+.delegates {
+  color: var(--text-secondary);
+}
+
+.failure-count {
+  color: var(--text-secondary);
+}
+
+.setup-notice {
+  margin: 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--semantic-warning);
+  border-radius: 4px;
+}
+
+.setup-notice code {
+  color: var(--text-primary);
+}
