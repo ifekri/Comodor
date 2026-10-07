@@ -46,10 +46,7 @@ export function SessionView({ client, kept, status, onCheckAgain, onChangeWorksp
   const model = state.model ?? null;
   // As the Core reports it: an unconfigured provider cannot answer (R11).
   const unconfigured = model !== null && model.configured === false;
-  // From a check after the machine slept until the session has been read
-  // again — and for as long as the session cannot be read — nothing the
-  // person does reaches the Core.
-  const held = status.state !== "ready" || session.refreshing || state.connection.kind !== "ready";
+  const held = session.gated;
   return (
     <>
       <StatusStrip status={status} model={model} workspace={session.workspace}

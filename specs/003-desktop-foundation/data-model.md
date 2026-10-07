@@ -200,10 +200,10 @@ message.
 ## 7. WindowView (page, not persisted)
 
 What the page adds to the `@comodor/session` projection. It holds only
-presentation and connection facts. `stored_id`, `live_id`, `unsent_turn` and
-`workspace` are kept in the window's session storage, so a reload of the
-window keeps them and a new launch does not (R13); a change of workspace
-clears the first three:
+presentation and connection facts. `stored_id`, `live_id`, `unsent_turn`,
+`wanted_mode` and `workspace` are kept in the window's session storage, so a
+reload of the window keeps them and a new launch does not (R13); a change of
+workspace clears all but `workspace`:
 
 | Field | Meaning |
 | --- | --- |
@@ -212,6 +212,7 @@ clears the first three:
 | `live_id` | the live session of the Core the page last held, which a reload finds in `session.list` |
 | `workspace` | the workspace `stored_id` belongs to, by the native side's lossless `workspace_id` |
 | `unsent_turn` | the `turn_id` the Core accepted and never completed, shown as interrupted after a crash; a snapshot showing the session busy sets it too (a page reloaded before seeing the answer), one showing it idle clears it |
+| `wanted_mode` | the mode the person last chose that the Core has not confirmed; cleared by its confirmation or the Core's refusal, kept across a lost connection. When the conversation is opened afresh (a new Core, or a reload) and the Core's mode differs, the window says it was not applied, and never sends it there |
 | `composer_text` | the unsent prompt |
 | `interaction_cursor` | which option of the pending form is focused; question selection state comes from `@comodor/questions` |
 

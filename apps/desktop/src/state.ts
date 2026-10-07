@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { type CoreClient, ProtocolError } from "@comodor/client";
-import type { Mode } from "@comodor/modes";
+import { type Mode, MODES } from "@comodor/modes";
 import type { EventName, Session } from "@comodor/protocol";
 import {
   beginIntent,
@@ -48,6 +48,9 @@ export interface SessionView {
   /** From a check after the machine slept until the session has been read
    * again: nothing may be sent meanwhile. */
   readonly refreshing: boolean;
+  /** Whether nothing the person does may reach the Core now: during a check,
+   * until the session has been read again, or while it cannot be read. */
+  readonly gated: boolean;
 }
 
 /** What survives a Core restart, and a reload of this window, within one
@@ -60,6 +63,10 @@ export interface Kept {
   unsentTurn: string | undefined;
   /** The workspace (its native id) the stored conversation belongs to. */
   workspace: string | undefined;
+  /** The mode the person last chose that the Core has not confirmed: kept
+   * across a restart, so a reopened conversation says it was not applied
+   * rather than dropping it unsaid or sending it into that conversation. */
+  wantedMode: string | undefined;
 }
 
 const KEPT_KEY = "comodor.kept";
@@ -82,6 +89,7 @@ export function keptIn(storage: Storage | undefined): Kept {
   const fields: KeptFields = {
     storedId: text(saved["storedId"]), liveId: text(saved["liveId"]),
     unsentTurn: text(saved["unsentTurn"]), workspace: text(saved["workspace"]),
+    wantedMode: text(saved["wantedMode"]),
   };
   const save = () => {
     try {
@@ -146,6 +154,14 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
       }
       const mode = (snapshot.session?.mode ?? "act") as Mode;
       setIntent((was) => (fresh ? beginIntent(mode) : intentConfirmed(was, mode)));
+      const wanted = kept.wantedMode as Mode | undefined;
+      if (fresh && wanted !== undefined) {
+        kept.wantedMode = undefined;
+        if (wanted !== mode) {
+          setRecovery((notes) => [...notes, `The mode you chose, ${MODES[wanted]?.label ?? wanted}, was not `
+            + "applied: the conversation was reopened. Choose it again if you still want it."]);
+        }
+      }
     } catch (problem) {
       dispatch({ type: "lost", reason: (problem as Error).message });
     } finally {
@@ -167,6 +183,7 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
       dispatch({ type: "event", name, params, seq });
       if (name === "mode.changed") {
         setIntent((was) => intentConfirmed(was, params["mode"] as Mode));
+        if (params["mode"] === kept.wantedMode) kept.wantedMode = undefined;
       }
       // The turn is over, however it ended: it is no longer one a restart
       // could have interrupted.
@@ -195,6 +212,7 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
           kept.storedId = undefined;
           kept.liveId = undefined;
           kept.unsentTurn = undefined;
+          kept.wantedMode = undefined;
           kept.workspace = workspace ?? undefined;
         }
         // A reload of this window finds its live session in the same Core;
@@ -299,19 +317,29 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
     }
   }, [coreState, checkEpoch, settled, resync]);
 
-  // One mode request in flight; the current aim is what goes out next.
+  // From a check after the machine slept until the session has been read
+  // again — and for as long as the session cannot be read — nothing the
+  // person does reaches the Core, a queued mode change included.
+  const gated = coreState !== "ready" || refreshing || state.connection.kind !== "ready";
+
+  // One mode request in flight; the current aim is what goes out next, once
+  // nothing holds it: matched by then against the mode the Core reported.
   useEffect(() => {
     const id = state.session?.id;
     const next = intentDue(intent);
-    if (!id || next === undefined) return;
+    if (!id || next === undefined || gated) return;
     setIntent((was) => intentSending(was, next));
     void client.call("session.set_mode", { session_id: id, mode: next })
       .catch((problem: unknown) => {
+        // The Core's own refusal is shown and ends the wish. A connection
+        // that closed or timed out (the client's own `internal_error`) says
+        // nothing about it.
+        if (problem instanceof ProtocolError && problem.code !== "internal_error") kept.wantedMode = undefined;
         setIntent((was) => refuseIntent(was, (problem as Error).message));
         dispatch({ type: "event", name: "notification.created", seq: 0,
                    params: { level: "warning", text: (problem as Error).message } });
       });
-  }, [client, intent, state.session?.id]);
+  }, [client, intent, state.session?.id, gated]);
 
   const send = useCallback((text: string) => {
     const id = latest.current.session?.id;
@@ -352,8 +380,9 @@ export function useSession(client: CoreClient, kept: Kept, workspace: string | n
   }, [client]);
 
   const chooseMode = useCallback((mode: Mode) => {
+    kept.wantedMode = mode;
     setIntent((was) => wantMode(was, mode));
-  }, []);
+  }, [kept]);
 
-  return { state, intent, send, cancel, decide, chooseMode, recovery, workspace: coreWorkspace, refreshing };
+  return { state, intent, send, cancel, decide, chooseMode, recovery, workspace: coreWorkspace, refreshing, gated };
 }
