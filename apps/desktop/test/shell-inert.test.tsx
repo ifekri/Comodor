@@ -66,3 +66,22 @@ describe("right-to-left text", () => {
     expect(order[0]).toBe("nav");
   });
 });
+
+describe("the diagnostics panel", () => {
+  test("shows hostile and right-to-left output inertly, in its own direction", async () => {
+    const native = new FakeNative();
+    native.diagnostics = `${HOSTILE}\nخطا در ${PERSIAN}`;
+    const { container } = await openWindow(show, until, native);
+    await click(railButton(container, "Diagnostics"));
+    const panel = await until(() => container.querySelector<HTMLElement>('aside[aria-label="Diagnostics"]'), "the panel");
+    const tail = await until(() => panel.querySelector<HTMLElement>('[data-testid="diagnostics-tail"]'), "the tail");
+    expect(panel.querySelector("script, img, iframe, object, embed, a, button.link")).toBeNull();
+    expect(tail.textContent).not.toContain("\x1b");
+    expect(tail.textContent).toContain("<script>alert(1)</script>");
+    expect(tail.textContent).toContain("␛[2J␛[H");
+    expect(tail.textContent).toContain("دفتر پروژه");
+    expect(tail.getAttribute("dir")).toBe("auto");
+    expect(container.querySelector('[data-testid="shell"]')!.getAttribute("dir")).toBeNull();
+    expect(document.title).not.toBe("owned");
+  });
+});
