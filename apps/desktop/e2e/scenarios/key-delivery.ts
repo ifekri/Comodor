@@ -86,8 +86,11 @@ export const keyDelivery: Scenario = async (context) => {
   if (linux && !linux.ok) throw capabilityUnavailable(linux.reason ?? "the window could not be focused");
   const windows = focusing["windows"] as { ok: boolean; reason?: string } | undefined;
   if (windows && !windows.ok) throw capabilityUnavailable(windows.reason ?? "the window could not be focused");
-  const focused = await observed(async () =>
-    (await context.query("window" as never) as { focused?: boolean })["focused"] === true);
+  // The page has the focus, or the native window says it does. On Windows the
+  // WebView's own child window takes the keyboard focus, so the top-level
+  // window never reports it there; the page's document still does.
+  const focused = await observed(async () => document.hasFocus()
+    || (await context.query("window" as never) as { focused?: boolean })["focused"] === true);
   if (!focused) throw capabilityUnavailable("the window never reported focus");
 
   // 2. The probe: a plain letter must reach a field in the real page.
@@ -96,10 +99,19 @@ export const keyDelivery: Scenario = async (context) => {
   probe.setAttribute("aria-label", "Key probe");
   document.body.appendChild(probe);
   probe.focus();
+  // Every key the page sees during the probe, for the failure's message.
+  const seen: string[] = [];
+  const listen = (event: KeyboardEvent) => seen.push(`${event.type}:${event.key}:${event.code}`);
+  window.addEventListener("keydown", listen, true);
   await press(context, { key: "q" });
   const arrived = await observed(() => probe.value === "q");
+  window.removeEventListener("keydown", listen, true);
+  const holding = `${document.activeElement?.tagName ?? "nothing"}, page focused: ${document.hasFocus()}`;
   probe.remove();
-  if (!arrived) throw capabilityUnavailable("injected keys do not reach the WebView");
+  if (!arrived) {
+    throw capabilityUnavailable(`injected keys do not reach the WebView (keys seen: ${seen.join(" ") || "none"
+    }; focus: ${holding})`);
+  }
 
   // 3. The shortcuts, each judged by what the page shows afterwards.
   const results: Data = {};

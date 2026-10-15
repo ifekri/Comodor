@@ -47,7 +47,7 @@ Write-Output ([Motion]::Get())
 
 /** Client-area animation now, optionally after setting it (`on`/`off`). */
 function windowsAnimation(set) {
-  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_SCRIPT], {
+  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_SCRIPT], { windowsHide: true,
     encoding: "utf-8", timeout: 60_000, env: { ...process.env, COMODOR_MOTION_SET: set ?? "" },
   });
   if (result.status !== 0) return { error: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim() || "PowerShell failed" };

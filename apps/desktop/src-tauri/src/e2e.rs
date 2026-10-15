@@ -132,6 +132,10 @@ fn act_for_harness(app: &tauri::AppHandle, act: &str) {
         "focus-window" => {
             if let Some(window) = app.get_webview_window(crate::MAIN_WINDOW) {
                 let _ = window.set_focus();
+                // The window in front is not enough on Windows: the keyboard
+                // focus must be in the WebView's own child window as well.
+                let webview: &tauri::Webview = window.as_ref();
+                let _ = webview.set_focus();
             }
         }
         _ => {}

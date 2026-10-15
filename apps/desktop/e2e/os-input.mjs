@@ -67,7 +67,7 @@ function pressWindows(pid, spec) {
   const modifiers = [...(spec.mod ? [0x11] : []), ...(spec.shift ? [0x10] : [])];
   const vks = [...modifiers, WINDOWS_VK[spec.key], WINDOWS_VK[spec.key], ...modifiers.toReversed()];
   const ups = [...modifiers.map(() => 0), 0, 1, ...modifiers.map(() => 1)];
-  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_SCRIPT], {
+  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_SCRIPT], { windowsHide: true,
     encoding: "utf-8", timeout: 60_000,
     env: { ...process.env, COMODOR_KEY_PID: String(pid), COMODOR_KEY_VKS: vks.join(","), COMODOR_KEY_UPS: ups.join(",") },
   });
@@ -81,10 +81,11 @@ function pressWindows(pid, spec) {
 /**
  * Windows refuses `SetForegroundWindow` to a process that did not receive the
  * last input event, so the application's own `set_focus` stays in the
- * background on a runner nobody types at. This process sends an Alt press and
- * release through `SendInput` (which makes it the one that received the last
- * input), then brings the application's visible top-level window forward and
- * reads the foreground window's process back.
+ * background on a runner nobody types at. Unless the application is already
+ * in front, this process sends an input event through `SendInput` (a pointer
+ * move of zero, which makes it the one that received the last input), then
+ * brings the application's window forward; it reads the foreground window's
+ * process back either way.
  */
 const WINDOWS_FOCUS_SCRIPT = String.raw`
 $ErrorActionPreference = "Stop"
@@ -133,20 +134,23 @@ public static class Focus {
     if (joined) AttachThreadInput(mine, foreground, false);
   }
   public static uint Foreground() { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid; }
-  public static uint Alt() {
-    var inputs = new INPUT[2];
-    inputs[0].type = 1; inputs[0].u.ki.vk = 0x12;
-    inputs[1].type = 1; inputs[1].u.ki.vk = 0x12; inputs[1].u.ki.flags = 2u;
-    return SendInput(2, inputs, Marshal.SizeOf(typeof(INPUT)));
+  // An input event that means nothing to any window: the pointer moved by
+  // zero. (A lone Alt would put the window in front into its menu mode.)
+  public static uint Nudge() {
+    var inputs = new INPUT[1];
+    inputs[0].type = 0; inputs[0].u.mi.flags = 1u;
+    return SendInput(1, inputs, Marshal.SizeOf(typeof(INPUT)));
   }
 }
 "@
 $target = [uint32]$env:COMODOR_KEY_PID
 $window = [Focus]::Find($target)
 if ($window -eq [IntPtr]::Zero) { Write-Output "capability-unavailable: no visible window titled Comodor in process $target"; exit 3 }
-if ([Focus]::Alt() -ne 2) { Write-Output "capability-unavailable: SendInput could not send the Alt press"; exit 3 }
-if ([Focus]::IsIconic($window)) { [void][Focus]::ShowWindow($window, 9) }
-[Focus]::Raise($window)
+if ([Focus]::Foreground() -ne $target) {
+  if ([Focus]::Nudge() -ne 1) { Write-Output "capability-unavailable: SendInput could not send an input event"; exit 3 }
+  if ([Focus]::IsIconic($window)) { [void][Focus]::ShowWindow($window, 9) }
+  [Focus]::Raise($window)
+}
 $foreground = [Focus]::Foreground()
 if ($foreground -ne $target) { Write-Output "capability-unavailable: the foreground window belongs to process $foreground, not the application ($target)"; exit 3 }
 Write-Output "focused"
@@ -154,7 +158,7 @@ Write-Output "focused"
 
 /** Bring the application with `pid` to the foreground (Windows), and confirm it. */
 export function focusWindows(pid) {
-  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_FOCUS_SCRIPT], {
+  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_FOCUS_SCRIPT], { windowsHide: true,
     encoding: "utf-8", timeout: 60_000, env: { ...process.env, COMODOR_KEY_PID: String(pid) },
   });
   if (result.error) return unavailable(`PowerShell could not run: ${result.error.message}`);
@@ -262,7 +266,7 @@ function pressLinux(pid, spec) {
 export function preflight() {
   if (!osLevelEnabled()) return { ok: false, outcome: "not-run", reason: "operating-system-level evidence disabled" };
   if (process.platform === "win32") {
-    const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", "exit 0"], { timeout: 60_000 });
+    const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", "exit 0"], { windowsHide: true, timeout: 60_000 });
     return result.status === 0 ? { ok: true } : unavailable("PowerShell is not available");
   }
   if (process.platform === "darwin") {

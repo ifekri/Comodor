@@ -188,11 +188,18 @@ function answer(checkpoint, run) {
       const linux = process.platform === "linux" && osLevelEnabled() ? focusLinux(run.app.pid) : { ok: true };
       // Windows keeps a window that did not get the last input in the
       // background; the harness, which sends it, brings it forward.
+      const focusStarted = Date.now();
       const windows = process.platform === "win32" && osLevelEnabled() ? focusWindows(run.app.pid) : { ok: true };
+      if (process.platform === "win32" && osLevelEnabled()) {
+        console.log(`focus-window: ${JSON.stringify(windows)} in ${Date.now() - focusStarted} ms`);
+      }
       return { ok: true, act: "focus-window", linux, windows };
     }
-    case "press-keys":
-      return { ok: true, result: pressKey(run.app.pid, checkpoint.data?.key) };
+    case "press-keys": {
+      const result = pressKey(run.app.pid, checkpoint.data?.key);
+      if (osLevelEnabled()) console.log(`press-keys ${JSON.stringify(checkpoint.data?.key)}: ${JSON.stringify(result)}`);
+      return { ok: true, result };
+    }
     // D2 (T094): the reduced-motion preference set for this run, if any.
     case "reduced-motion":
       return { ok: true, motion: motion
