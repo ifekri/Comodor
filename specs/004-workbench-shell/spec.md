@@ -121,9 +121,9 @@ below were read from the repository, not assumed.
   and permission cards and prompt area, applied to D2's existing surfaces
   only; no region the reference shows beyond them (menus, sessions, agents,
   tasks, explorer, editor, terminal) is added. The colours are a second,
-  additive mapping of the shared design tokens (`desktop`), with the roles
-  the window needs added to the shared list; the terminal mapping and the TUI
-  are unchanged. The fonts are pinned dependencies bundled into the page; the
+  additive mapping of the shared design tokens (`desktop`), with the finer
+  roles the window needs in a window-only list beside the shared tokens; the
+  terminal mapping, and so the TUI and its committed bundle, are unchanged. The fonts are pinned dependencies bundled into the page; the
   Content Security Policy is unchanged. Where the reference's text colours
   fall below WCAG 2.1 AA on their grounds, the nearest passing value is used
   (SC-006 wins). The reference itself stays in the owner's checkout and is

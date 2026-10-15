@@ -8,10 +8,10 @@
  * actually draw, and the component is unchanged.
  *
  * So a token names a *role* — `surface.raised`, `border.focused`,
- * `semantic.danger` — and never a colour. `terminal` below is the first
- * mapping; `desktop` is the second, which the Tauri window emits as CSS
- * variables from the same list. That is what makes "the same design in two
- * renderers" a mechanical claim rather than an aspiration.
+ * `semantic.danger` — and never a colour. `terminal()` below is the first
+ * mapping; a future Tauri client adds a second that emits CSS variables from
+ * the same list, which is what makes "the same design in two renderers" a
+ * mechanical claim rather than an aspiration.
  */
 
 export const SURFACE = [
@@ -19,35 +19,18 @@ export const SURFACE = [
   "surface.raised",
   "surface.overlay",
   "surface.selected",
-  // The window's finer grounds: its bars, its panels, a field, the prompt, a
-  // row under the pointer, the primary action, and each mode's own ground.
-  "surface.bar",
-  "surface.panel",
-  "surface.input",
-  "surface.prompt",
-  "surface.hover",
-  "surface.primary",
-  "surface.act",
-  "surface.plan",
-  "surface.ask",
-  "surface.chat",
-  // What a floating layer's shadow is drawn in.
-  "surface.shadow",
 ] as const;
 
 export const BORDER = [
   "border.default",
   "border.focused",
   "border.active",
-  "border.strong",
-  "border.subtle",
 ] as const;
 
 export const TEXT = [
   "text.primary",
   "text.secondary",
   "text.muted",
-  "text.accent",
 ] as const;
 
 export const SEMANTIC = [
@@ -117,23 +100,82 @@ export const terminal: Theme = {
   "mode.plan": "#6ba3c4",
   "mode.ask": "#a99bd4",
   "mode.chat": "#7d726a",
+};
 
-  // The terminal has no finer grounds than the four above, so each of these
-  // is one of them; nothing in the terminal client draws them.
-  "surface.bar": "#16120f",
-  "surface.panel": "#16120f",
-  "surface.input": "#0d0b0a",
-  "surface.prompt": "#0d0b0a",
-  "surface.hover": "#2a211b",
-  "surface.primary": "#2a211b",
-  "surface.act": "#2a211b",
-  "surface.plan": "#2a211b",
-  "surface.ask": "#2a211b",
-  "surface.chat": "#2a211b",
-  "surface.shadow": "#000000",
-  "border.strong": "#3a2f27",
-  "border.subtle": "#3a2f27",
-  "text.accent": "#ff9d5c",
+/**
+ * The same tokens as CSS custom properties.
+ *
+ * Not used by the terminal client. It is here because it is the proof that a
+ * token is renderer-independent: if a token could not be expressed this way,
+ * it was a colour wearing a name.
+ *
+ * Every role is emitted, the window's (`WINDOW`, below) included; a theme
+ * without them, like the terminal's, gives each its stand-in's colour.
+ */
+export function cssVariables(theme: Theme | WindowTheme = terminal): string {
+  const colours: Partial<Record<Role, string>> = theme;
+  return roles()
+    .map((role) => `  --${role.replace(/\./g, "-")}: ${colours[role] ?? theme[STAND_IN[role as WindowRole]]};`)
+    .join("\n");
+}
+
+/**
+ * The desktop window's finer roles (Feature 004): its bars, its panels, a
+ * field, the prompt, a row under the pointer, the primary action, each mode's
+ * own ground, a floating layer's shadow, a strong and a subtle border, and an
+ * accent for text. Roles like the others, kept in their own list so the
+ * terminal mapping above stays exactly as it is: the terminal draws none of
+ * them, and `cssVariables` gives each one a terminal stand-in.
+ */
+export const WINDOW = [
+  "surface.bar",
+  "surface.panel",
+  "surface.input",
+  "surface.prompt",
+  "surface.hover",
+  "surface.primary",
+  "surface.act",
+  "surface.plan",
+  "surface.ask",
+  "surface.chat",
+  "surface.shadow",
+  "border.strong",
+  "border.subtle",
+  "text.accent",
+] as const;
+
+export type WindowRole = (typeof WINDOW)[number];
+
+export type Role = Token | WindowRole;
+
+/**
+ * Every role a CSS mapping emits: the shared tokens, then the window's. A
+ * function rather than a constant, so a client that never asks for it (the
+ * terminal) bundles none of the window's roles.
+ */
+export function roles(): readonly Role[] {
+  return [...TOKENS, ...WINDOW];
+}
+
+/** A mapping for a renderer that draws the window's roles too. */
+export type WindowTheme = Readonly<Record<Role, string>>;
+
+/** For a theme without the window's roles, the shared token each one falls back to. */
+export const STAND_IN: Readonly<Record<WindowRole, Token>> = {
+  "surface.bar": "surface.raised",
+  "surface.panel": "surface.raised",
+  "surface.input": "surface.base",
+  "surface.prompt": "surface.base",
+  "surface.hover": "surface.selected",
+  "surface.primary": "surface.selected",
+  "surface.act": "surface.selected",
+  "surface.plan": "surface.selected",
+  "surface.ask": "surface.selected",
+  "surface.chat": "surface.selected",
+  "surface.shadow": "surface.base",
+  "border.strong": "border.default",
+  "border.subtle": "border.default",
+  "text.accent": "border.focused",
 };
 
 /**
@@ -146,7 +188,7 @@ export const terminal: Theme = {
  * grounds — the nearest value that passes is used instead, and the
  * reference's dimmer greys are not used for text at all.
  */
-export const desktop: Theme = {
+export const desktop: WindowTheme = {
   "surface.base": "#191919",
   "surface.raised": "#2a2a2a",
   "surface.overlay": "#272727",
@@ -185,16 +227,3 @@ export const desktop: Theme = {
   "mode.ask": "#3fa2e0",
   "mode.chat": "#b8b8b8",
 };
-
-/**
- * The same tokens as CSS custom properties.
- *
- * Not used by the terminal client. It is here because it is the proof that a
- * token is renderer-independent: if a token could not be expressed this way,
- * it was a colour wearing a name.
- */
-export function cssVariables(theme: Theme = terminal): string {
-  return TOKENS
-    .map((token) => `  --${token.replace(/\./g, "-")}: ${theme[token]};`)
-    .join("\n");
-}

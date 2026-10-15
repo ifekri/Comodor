@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MODE, TOKENS, type Token, cssVariables, desktop, isToken, terminal } from "../src/index.ts";
+import {
+  MODE, type Role, STAND_IN, TOKENS, WINDOW, cssVariables, desktop, isToken, roles, terminal,
+} from "../src/index.ts";
 
 test("every token has a value in the terminal theme", () => {
   // The type says so; this says so at runtime, which is what catches a theme
@@ -58,9 +60,9 @@ test("the same tokens come out as CSS custom properties", () => {
   }
 });
 
-test("every token has a value in the desktop theme", () => {
-  for (const token of TOKENS) {
-    assert.match(desktop[token], /^#[0-9a-f]{6}$/i, `${token} is not a colour`);
+test("every role has a value in the desktop theme", () => {
+  for (const role of roles()) {
+    assert.match(desktop[role], /^#[0-9a-f]{6}$/i, `${role} is not a colour`);
   }
   assert.notEqual(desktop["mode.act"], desktop["mode.plan"]);
   assert.notEqual(desktop["mode.act"], desktop["mode.ask"]);
@@ -83,12 +85,12 @@ function contrast(one: string, other: string): number {
 test("desktop text reaches WCAG AA on every ground it is drawn on", () => {
   // The grounds text sits on, and the colours text is drawn in. `surface.hover`
   // carries only the two brightest text colours; the stylesheet keeps the rest off it.
-  const grounds: Token[] = ["surface.base", "surface.raised", "surface.overlay", "surface.selected",
+  const grounds: Role[] = ["surface.base", "surface.raised", "surface.overlay", "surface.selected",
     "surface.bar", "surface.panel", "surface.input", "surface.prompt"];
-  const inks: Token[] = ["text.primary", "text.secondary", "text.muted", "text.accent",
+  const inks: Role[] = ["text.primary", "text.secondary", "text.muted", "text.accent",
     "semantic.success", "semantic.warning", "semantic.danger", "semantic.info", ...MODE];
-  const pairs: [Token, Token][] = [
-    ...grounds.flatMap((ground) => inks.map((ink) => [ink, ground] as [Token, Token])),
+  const pairs: [Role, Role][] = [
+    ...grounds.flatMap((ground) => inks.map((ink) => [ink, ground] as [Role, Role])),
     ["text.primary", "surface.hover"], ["text.secondary", "surface.hover"],
     ["text.primary", "surface.primary"],
     ["mode.act", "surface.act"], ["mode.plan", "surface.plan"],
@@ -102,6 +104,26 @@ test("desktop text reaches WCAG AA on every ground it is drawn on", () => {
 
 test("the desktop theme comes out as CSS custom properties too", () => {
   const css = cssVariables(desktop);
-  assert.equal(css.split("\n").length, TOKENS.length);
+  assert.equal(css.split("\n").length, roles().length);
   assert.ok(css.includes("--surface-base: #191919;"));
+  assert.ok(css.includes("--surface-bar: #1f1f1f;"));
+});
+
+test("the window's roles are roles, apart from the shared tokens", () => {
+  for (const role of WINDOW) {
+    assert.match(role, /^(surface|border|text|semantic|mode)\.[a-z]+$/);
+    assert.doesNotMatch(role, /orange|blue|green|red|yellow|purple|grey|gray|white|black/i);
+    assert.ok(!isToken(role), `${role} is also a shared token`);
+  }
+  assert.equal(new Set(roles()).size, roles().length);
+});
+
+test("the terminal mapping carries none of the window's roles; CSS gives it stand-ins", () => {
+  // The terminal client bundles `terminal`; it stays exactly the shared tokens.
+  assert.deepEqual(Object.keys(terminal).sort(), [...TOKENS].sort());
+  const css = cssVariables();
+  assert.equal(css.split("\n").length, roles().length);
+  for (const role of WINDOW) {
+    assert.ok(css.includes(`--${role.replace(/\./g, "-")}: ${terminal[STAND_IN[role]]};`), `${role} has no stand-in`);
+  }
 });
