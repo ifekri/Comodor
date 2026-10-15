@@ -14,20 +14,34 @@ import { expect, type Scenario, type ScenarioContext } from "../runner.ts";
 type Data = Record<string, unknown>;
 interface KeySpec { key: "q" | "k" | "F6" | "Escape" | "Tab"; mod?: boolean; shift?: boolean }
 
-/** How many frames a delivered key may take to show; a bound, never a delay. */
-const FRAMES = 600;
+/** How long a delivered key may take to show; a bound, never a delay. */
+const BOUND_MS = 10_000;
 
+/**
+ * The next frame, or the next turn of the event loop if no frame comes: a
+ * window the system keeps in the background draws no frames, and the wait
+ * must still end within its bound.
+ */
 function frame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+    const turn = new MessageChannel();
+    turn.port1.onmessage = () => {
+      turn.port1.close();
+      resolve();
+    };
+    turn.port2.postMessage(null);
+  });
 }
 
 /** Wait, frame by frame, until `check` holds; false if it never does within the bound. */
 async function observed(check: () => boolean | Promise<boolean>): Promise<boolean> {
-  for (let count = 0; count < FRAMES; count += 1) {
+  const ends = performance.now() + BOUND_MS;
+  while (performance.now() < ends) {
     if (await check()) return true;
     await frame();
   }
-  return false;
+  return await check();
 }
 
 function capabilityUnavailable(reason: string): Error {

@@ -104,14 +104,33 @@ public static class Focus {
   [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr window);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
   [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int size);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint attach, uint to, bool on);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  // The application's main window: visible, of the process, titled "Comodor".
   public static IntPtr Find(uint target) {
     IntPtr found = IntPtr.Zero;
     EnumWindows((window, data) => {
       uint pid; GetWindowThreadProcessId(window, out pid);
-      if (pid == target && IsWindowVisible(window)) { found = window; return false; }
+      if (pid != target || !IsWindowVisible(window)) return true;
+      var title = new System.Text.StringBuilder(256);
+      GetWindowText(window, title, title.Capacity);
+      if (title.ToString() == "Comodor") { found = window; return false; }
       return true;
     }, IntPtr.Zero);
     return found;
+  }
+  // Join the foreground thread's input for the call, as Windows asks of a
+  // process that is not in the foreground, then leave it again.
+  public static void Raise(IntPtr window) {
+    uint ignored;
+    uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), out ignored);
+    uint mine = GetCurrentThreadId();
+    bool joined = foreground != 0 && foreground != mine && AttachThreadInput(mine, foreground, true);
+    BringWindowToTop(window);
+    SetForegroundWindow(window);
+    if (joined) AttachThreadInput(mine, foreground, false);
   }
   public static uint Foreground() { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid; }
   public static uint Alt() {
@@ -124,11 +143,10 @@ public static class Focus {
 "@
 $target = [uint32]$env:COMODOR_KEY_PID
 $window = [Focus]::Find($target)
-if ($window -eq [IntPtr]::Zero) { Write-Output "capability-unavailable: no visible window of process $target"; exit 3 }
+if ($window -eq [IntPtr]::Zero) { Write-Output "capability-unavailable: no visible window titled Comodor in process $target"; exit 3 }
 if ([Focus]::Alt() -ne 2) { Write-Output "capability-unavailable: SendInput could not send the Alt press"; exit 3 }
-[void][Focus]::ShowWindow($window, 9)
-[void][Focus]::BringWindowToTop($window)
-[void][Focus]::SetForegroundWindow($window)
+if ([Focus]::IsIconic($window)) { [void][Focus]::ShowWindow($window, 9) }
+[Focus]::Raise($window)
 $foreground = [Focus]::Foreground()
 if ($foreground -ne $target) { Write-Output "capability-unavailable: the foreground window belongs to process $foreground, not the application ($target)"; exit 3 }
 Write-Output "focused"

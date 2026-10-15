@@ -81,6 +81,18 @@ export const narrow: Scenario = async (context) => {
   const before = await windowNow(context);
   if (before.monitor === null) throw new Error("capability-unavailable: no monitor reported");
   const s = before.scale_factor;
+  // What the window calls its inner size, less the page's: on macOS Tauri
+  // counts the title bar inside the inner size, so the page is that much
+  // shorter; on Windows and Linux the two are the same. The offset must be
+  // zero there, a title bar's height on macOS, and the same at every size.
+  const titleBar = Math.round(before.inner.height / s - window.innerHeight);
+  const mac = navigator.userAgent.includes("Mac OS X");
+  expect(Math.abs(before.inner.width / s - window.innerWidth) <= 1,
+         `product-failure: the page is ${window.innerWidth} wide in an inner width of ${before.inner.width / s}`);
+  expect(mac ? titleBar >= 0 && titleBar <= 40 : Math.abs(titleBar) <= 1,
+         `product-failure: the page is ${titleBar} px shorter than the window's inner height on ${
+           mac ? "macOS" : "this platform"}`);
+  const pageHeight = (height: number) => height - (mac ? titleBar : 0);
   const frameWidth = before.outer.width - before.inner.width;
   const frameHeight = before.outer.height - before.inner.height;
   const area = before.monitor.work_area;
@@ -115,12 +127,13 @@ export const narrow: Scenario = async (context) => {
     const box = () => document.querySelector('[data-testid="shell"]')!.getBoundingClientRect().width;
     const settled = await observed(() => Math.abs(shellWidth() - box()) < 0.01
       && Math.abs(shellWidth() - logical.width) <= 1
-      && Math.abs(window.innerWidth - logical.width) <= 1 && Math.abs(window.innerHeight - logical.height) <= 1);
+      && Math.abs(window.innerWidth - logical.width) <= 1 && Math.abs(window.innerHeight - pageHeight(logical.height)) <= 1);
     if (!settled) {
       // What the window and the page each said, so a mismatch can be told apart.
       const now = await windowNow(context);
       expect(false, `product-failure: ${name}: page ${window.innerWidth}×${window.innerHeight} and shell ${
-        shellWidth()} are not within 1 px of ${logical.width}×${logical.height}; window ${JSON.stringify(now)
+        shellWidth()} are not within 1 px of ${logical.width}×${pageHeight(logical.height)} (title bar ${
+        mac ? titleBar : 0}); window ${JSON.stringify(now)
       }; document ${document.documentElement.clientWidth}×${document.documentElement.clientHeight}, visual viewport ${
         window.visualViewport?.width}×${window.visualViewport?.height}, screen ${screen.width}×${screen.height}`);
     }
@@ -175,5 +188,6 @@ export const narrow: Scenario = async (context) => {
                    shellBox: shellElement.getBoundingClientRect().width, mode, scale: s });
   }
   return { outcome: "verified", workArea: area, frame: { width: frameWidth, height: frameHeight }, scale: s,
+           titleBarInInner: mac ? titleBar : 0,
            monitorScale: before.monitor.scale_factor, sizes: results };
 };
