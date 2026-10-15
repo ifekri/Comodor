@@ -91,18 +91,30 @@ impl Desktop {
         Ok(json!({ "layout": layout }))
     }
 
+    /// Store a chosen folder into the preferences as they are now — with any
+    /// layout written while the chooser was open — and save them.
+    fn store_choice(&self, folder: Option<PathBuf>) {
+        let mut stored = lock(&self.preferences);
+        stored.preferences.last_selected_folder = folder;
+        let _ = prefs::save_stored(&self.prefs_path, &stored);
+    }
+
     /// Decide this launch's workspace (OD-3) and start a Core there, or say
     /// that none was chosen. Runs off the main thread: the chooser blocks.
     pub fn launch(&self, command_line: Option<OsString>) {
         let _held = lock(&self.choosing);
         let resolution = {
-            let mut stored = lock(&self.preferences);
-            let before = stored.preferences.clone();
-            let resolution = workspace::resolve_launch(command_line.as_deref(), &mut stored.preferences,
+            // The chooser works on a copy: the preferences are locked only to
+            // read them and to store the choice, never while a person decides,
+            // so the page's layout operations (on the main thread, which the
+            // dialog needs) never wait for it.
+            let mut preferences = self.preferences();
+            let before = preferences.last_selected_folder.clone();
+            let resolution = workspace::resolve_launch(command_line.as_deref(), &mut preferences,
                                                        lock(&self.chooser).as_mut(),
                                                        &mut |report| self.supervisor.no_workspace(report.into()));
-            if stored.preferences != before {
-                let _ = prefs::save_stored(&self.prefs_path, &stored);
+            if preferences.last_selected_folder != before {
+                self.store_choice(preferences.last_selected_folder);
             }
             resolution
         };
@@ -242,10 +254,11 @@ fn choose(desktop: &Desktop) -> Result<Option<String>, String> {
         return Err("a workspace change is already in progress".into());
     };
     let chosen = {
-        let mut stored = lock(&desktop.preferences);
-        let chosen = workspace::choose(&mut stored.preferences, lock(&desktop.chooser).as_mut());
+        // As at launch: the chooser works on a copy, unlocked.
+        let mut preferences = desktop.preferences();
+        let chosen = workspace::choose(&mut preferences, lock(&desktop.chooser).as_mut());
         if chosen.is_some() {
-            let _ = prefs::save_stored(&desktop.prefs_path, &stored);
+            desktop.store_choice(preferences.last_selected_folder);
         }
         chosen
     };
@@ -879,5 +892,70 @@ mod layout_command_tests {
         }
         assert_eq!(read["stored"], true);
         assert_eq!(read["layout"]["panel_surface"], "diagnostics");
+    }
+
+    /// The chooser stays open for as long as a person takes; it opens and
+    /// then waits for the test to answer it.
+    struct Held {
+        opened: std::sync::mpsc::Sender<()>,
+        answer: std::sync::mpsc::Receiver<Option<PathBuf>>,
+    }
+
+    impl Chooser for Held {
+        fn choose(&mut self, _start: Option<&Path>) -> Option<PathBuf> {
+            let _ = self.opened.send(());
+            self.answer.recv().ok().flatten()
+        }
+    }
+
+    /// The bound on each wait below; reaching it is the failure.
+    const FAILURE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+    #[test]
+    fn the_layout_operations_never_wait_for_an_open_chooser() {
+        // A sync command runs on the main thread, which the native dialog
+        // needs: if the layout operations waited for the chooser, the window
+        // would freeze with the dialog half drawn.
+        let dir = Dir::new("held-chooser");
+        let chosen = dir.0.join("chosen");
+        std::fs::create_dir_all(&chosen).unwrap();
+        let (opened, on_open) = std::sync::mpsc::channel();
+        let (answer, answers) = std::sync::mpsc::channel();
+        let supervisor = Supervisor::launch(Options {
+            locate: Box::new(|| Err(Failure::new(FailureClass::NotFound, "no Core in this test"))),
+            test_env: vec![],
+            log: None,
+            on_finished: None,
+        });
+        let desktop = std::sync::Arc::new(Desktop::new(supervisor, dir.file(),
+                                                      Box::new(Held { opened, answer: answers })));
+
+        let launching = std::thread::spawn({
+            let desktop = desktop.clone();
+            move || desktop.launch(None)
+        });
+        on_open.recv_timeout(FAILURE_DEADLINE).expect("the chooser opened");
+
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn({
+            let desktop = desktop.clone();
+            move || {
+                let read = desktop.read_layout();
+                let written = desktop.write_layout(&valid());
+                let _ = done.send((read, written));
+            }
+        });
+        let outcome = finished.recv_timeout(FAILURE_DEADLINE);
+        // Answer the chooser either way, so nothing is left waiting.
+        answer.send(Some(chosen.clone())).unwrap();
+        launching.join().unwrap();
+
+        let (read, written) = outcome.expect("the layout operations finished while the chooser was open");
+        assert_eq!(read["stored"], false);
+        assert!(written.is_ok(), "{written:?}");
+        // The choice and the layout written meanwhile are both kept.
+        let stored = prefs::load_stored(&dir.file());
+        assert_eq!(stored.preferences.last_selected_folder.as_deref(), Some(chosen.as_path()));
+        assert_eq!(serde_json::to_value(stored.layout).unwrap(), valid());
     }
 }
