@@ -116,8 +116,14 @@ export const narrow: Scenario = async (context) => {
     const settled = await observed(() => Math.abs(shellWidth() - box()) < 0.01
       && Math.abs(shellWidth() - logical.width) <= 1
       && Math.abs(window.innerWidth - logical.width) <= 1 && Math.abs(window.innerHeight - logical.height) <= 1);
-    expect(settled, `product-failure: ${name}: page ${window.innerWidth}×${window.innerHeight} and shell ${
-      shellWidth()} are not within 1 px of ${logical.width}×${logical.height}`);
+    if (!settled) {
+      // What the window and the page each said, so a mismatch can be told apart.
+      const now = await windowNow(context);
+      expect(false, `product-failure: ${name}: page ${window.innerWidth}×${window.innerHeight} and shell ${
+        shellWidth()} are not within 1 px of ${logical.width}×${logical.height}; window ${JSON.stringify(now)
+      }; document ${document.documentElement.clientWidth}×${document.documentElement.clientHeight}, visual viewport ${
+        window.visualViewport?.width}×${window.visualViewport?.height}, screen ${screen.width}×${screen.height}`);
+    }
     const measured = shellWidth();
     const compact = measured < 900;
 

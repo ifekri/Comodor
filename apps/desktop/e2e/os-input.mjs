@@ -78,6 +78,74 @@ function pressWindows(pid, spec) {
   return { ok: true };
 }
 
+/**
+ * Windows refuses `SetForegroundWindow` to a process that did not receive the
+ * last input event, so the application's own `set_focus` stays in the
+ * background on a runner nobody types at. This process sends an Alt press and
+ * release through `SendInput` (which makes it the one that received the last
+ * input), then brings the application's visible top-level window forward and
+ * reads the foreground window's process back.
+ */
+const WINDOWS_FOCUS_SCRIPT = String.raw`
+$ErrorActionPreference = "Stop"
+Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public static class Focus {
+  [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx; public int dy; public uint data; public uint flags; public uint time; public IntPtr extra; }
+  [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort vk; public ushort scan; public uint flags; public uint time; public IntPtr extra; }
+  [StructLayout(LayoutKind.Explicit)] public struct UNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
+  [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public UNION u; }
+  public delegate bool EnumProc(IntPtr window, IntPtr data);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc proc, IntPtr data);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr window);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
+  [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+  public static IntPtr Find(uint target) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((window, data) => {
+      uint pid; GetWindowThreadProcessId(window, out pid);
+      if (pid == target && IsWindowVisible(window)) { found = window; return false; }
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
+  public static uint Foreground() { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid; }
+  public static uint Alt() {
+    var inputs = new INPUT[2];
+    inputs[0].type = 1; inputs[0].u.ki.vk = 0x12;
+    inputs[1].type = 1; inputs[1].u.ki.vk = 0x12; inputs[1].u.ki.flags = 2u;
+    return SendInput(2, inputs, Marshal.SizeOf(typeof(INPUT)));
+  }
+}
+"@
+$target = [uint32]$env:COMODOR_KEY_PID
+$window = [Focus]::Find($target)
+if ($window -eq [IntPtr]::Zero) { Write-Output "capability-unavailable: no visible window of process $target"; exit 3 }
+if ([Focus]::Alt() -ne 2) { Write-Output "capability-unavailable: SendInput could not send the Alt press"; exit 3 }
+[void][Focus]::ShowWindow($window, 9)
+[void][Focus]::BringWindowToTop($window)
+[void][Focus]::SetForegroundWindow($window)
+$foreground = [Focus]::Foreground()
+if ($foreground -ne $target) { Write-Output "capability-unavailable: the foreground window belongs to process $foreground, not the application ($target)"; exit 3 }
+Write-Output "focused"
+`;
+
+/** Bring the application with `pid` to the foreground (Windows), and confirm it. */
+export function focusWindows(pid) {
+  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_FOCUS_SCRIPT], {
+    encoding: "utf-8", timeout: 60_000, env: { ...process.env, COMODOR_KEY_PID: String(pid) },
+  });
+  if (result.error) return unavailable(`PowerShell could not run: ${result.error.message}`);
+  const said = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+  if (result.status === 3) return unavailable(said.replace(/^capability-unavailable:\s*/, ""));
+  if (result.status !== 0) return unavailable(`focusing failed: ${said}`);
+  return { ok: true };
+}
+
 // -- macOS ---------------------------------------------------------------
 
 const MAC_KEYCODE = { q: 12, k: 40, F6: 97, Escape: 53, Tab: 48 };

@@ -70,6 +70,8 @@ export const keyDelivery: Scenario = async (context) => {
   const focusing = await context.checkpoint("focus-window");
   const linux = focusing["linux"] as { ok: boolean; reason?: string } | undefined;
   if (linux && !linux.ok) throw capabilityUnavailable(linux.reason ?? "the window could not be focused");
+  const windows = focusing["windows"] as { ok: boolean; reason?: string } | undefined;
+  if (windows && !windows.ok) throw capabilityUnavailable(windows.reason ?? "the window could not be focused");
   const focused = await observed(async () =>
     (await context.query("window" as never) as { focused?: boolean })["focused"] === true);
   if (!focused) throw capabilityUnavailable("the window never reported focus");

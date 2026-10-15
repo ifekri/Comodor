@@ -24,7 +24,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { focusLinux, osLevelEnabled, preflight, pressKey } from "./os-input.mjs";
+import { focusLinux, focusWindows, osLevelEnabled, preflight, pressKey } from "./os-input.mjs";
 import { setReducedMotion } from "./os-preferences.mjs";
 import { SETUPS } from "./setups.mjs";
 
@@ -186,7 +186,10 @@ function answer(checkpoint, run) {
       // The act brings the window forward. Xvfb has no window manager, so on
       // Linux xdotool also gives the window the input focus.
       const linux = process.platform === "linux" && osLevelEnabled() ? focusLinux(run.app.pid) : { ok: true };
-      return { ok: true, act: "focus-window", linux };
+      // Windows keeps a window that did not get the last input in the
+      // background; the harness, which sends it, brings it forward.
+      const windows = process.platform === "win32" && osLevelEnabled() ? focusWindows(run.app.pid) : { ok: true };
+      return { ok: true, act: "focus-window", linux, windows };
     }
     case "press-keys":
       return { ok: true, result: pressKey(run.app.pid, checkpoint.data?.key) };
