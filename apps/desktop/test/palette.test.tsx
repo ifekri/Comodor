@@ -136,3 +136,23 @@ describe("while open", () => {
     expect(native.core.requests("session.set_mode").length).toBe(0);
   });
 });
+
+describe("Escape with focus outside the palette", () => {
+  // The palette does not trap focus: Tab from its field reaches the shell.
+  // Escape still closes it, and focus returns to where it was before.
+  test("closes the palette and returns focus to its opener", async () => {
+    const native = new FakeNative();
+    const { container } = await openWindow(show, until, native);
+    const opener = container.querySelector<HTMLButtonElement>('footer.status-bar button[aria-label="Commands"]')!;
+    opener.focus();
+    await click(opener);
+    await until(() => palette(container), "the palette");
+    const before = native.calls.length;
+    const outside = container.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button')!;
+    outside.focus();
+    await key("Escape", {}, outside);
+    await until(() => palette(container) === null, "closed");
+    expect(document.activeElement).toBe(opener);
+    expect(native.calls.length).toBe(before);
+  });
+});

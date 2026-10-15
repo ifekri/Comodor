@@ -129,3 +129,19 @@ describe("the edge", () => {
     expect((native.writtenLayouts[1] as { panel_width: number }).panel_width).toBe(370);
   });
 });
+
+describe("going to the message box over a covering panel", () => {
+  // Below 900 px the panel covers the main area: the composer behind it must
+  // be shown before it takes focus, as "Show the conversation" does.
+  test("closes the covering panel and focuses the composer", async () => {
+    const { container } = await openWindow(show, until);
+    await resizeTo(899);
+    await click(railButton(container, "Core"));
+    await until(() => panel(container)?.classList.contains("side-panel-covering"), "covering");
+    await key("k", { ctrlKey: true });
+    await until(() => container.querySelector('[role="dialog"][aria-label="Commands"]'), "the palette");
+    await click(container.querySelector<HTMLElement>('[role="option"][data-command="composer.focus"]')!);
+    await until(() => panel(container) === null, "the covering panel closed");
+    expect(document.activeElement).toBe(container.querySelector('[data-testid="composer"] textarea'));
+  });
+});

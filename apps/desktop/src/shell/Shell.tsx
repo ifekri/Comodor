@@ -204,7 +204,9 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
     },
     nextRegion: () => cycleRegions(root(), 1),
     previousRegion: () => cycleRegions(root(), -1),
-    focusComposer: () => fallbackTarget(mainRef.current ?? document)?.focus(),
+    // The composer is behind a covering panel: show it first, as "Show the
+    // conversation" does, so focus never lands on a control nobody can see.
+    focusComposer: showConversation,
     jumpToNewest: () => {
       const conversation = mainRef.current?.querySelector<HTMLElement>('[data-testid="conversation"]');
       if (conversation) conversation.scrollTop = conversation.scrollHeight;
@@ -267,12 +269,21 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
   // The keyboard (FR-016–FR-019): one listener for the window. Keys typed in
   // a text field reach it only when modified (and F6); the composer keeps
   // Enter and Escape; reserved keys are never taken.
-  const keyState = useRef({ paletteOpen, covering: shell.mode === "covering" });
-  keyState.current = { paletteOpen, covering: shell.mode === "covering" };
+  const keyState = useRef({ paletteOpen, covering: shell.mode === "covering", closePalette });
+  keyState.current = { paletteOpen, covering: shell.mode === "covering", closePalette };
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || keyState.current.paletteOpen) return;
+      if (event.defaultPrevented) return;
       const name = keyName(event, platform);
+      if (keyState.current.paletteOpen) {
+        // The palette does not trap focus: from anywhere, Escape closes it
+        // (its own field handles Escape first, when it has the focus).
+        if (name === "escape") {
+          event.preventDefault();
+          keyState.current.closePalette();
+        }
+        return;
+      }
       if (name === undefined) return;
       if (name === "escape") {
         // Palette (handled by its own field) → covering panel → composer.
