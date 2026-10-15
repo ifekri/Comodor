@@ -153,3 +153,38 @@ export function withText(selector: string, text: string, root: ParentNode = docu
   return [...root.querySelectorAll<HTMLElement>(selector)]
     .find((element) => (element.textContent ?? "").includes(text)) ?? null;
 }
+
+/** One rule an automated accessibility check found broken, and where. */
+export interface Violation {
+  readonly rule: string;
+  readonly impact: string | null;
+  readonly targets: string[];
+}
+
+/**
+ * D2 (research R12): the WCAG 2.1 Level A and AA rules `axe-core` can test,
+ * run on the whole document in this real WebView. Test build only: the
+ * runner, and `axe-core` with it, is never in a release bundle.
+ */
+export async function accessibilityViolations(): Promise<Violation[]> {
+  // A panel or the palette eases in from transparent: judge the colours it
+  // settles on, once every running animation has finished.
+  await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
+  const { default: axe } = await import("axe-core");
+  const result = await axe.run(document, {
+    runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
+    resultTypes: ["violations"],
+  });
+  return result.violations.map((violation) => ({
+    rule: violation.id,
+    impact: violation.impact ?? null,
+    targets: violation.nodes.flatMap((node) => node.target.map(String)),
+  }));
+}
+
+/** Fail the scenario on any WCAG 2.1 A/AA violation, naming each rule and element. */
+export async function expectAccessible(where: string): Promise<void> {
+  const violations = await accessibilityViolations();
+  expect(violations.length === 0,
+         `${where}: ${violations.map((v) => `${v.rule} (${v.impact ?? "?"}) at ${v.targets.join(", ")}`).join("; ")}`);
+}

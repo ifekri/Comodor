@@ -8,10 +8,10 @@
  * actually draw, and the component is unchanged.
  *
  * So a token names a *role* — `surface.raised`, `border.focused`,
- * `semantic.danger` — and never a colour. `terminal()` below is the first
- * mapping; a future Tauri client adds a second that emits CSS variables from
- * the same list, which is what makes "the same design in two renderers" a
- * mechanical claim rather than an aspiration.
+ * `semantic.danger` — and never a colour. `terminal` below is the first
+ * mapping; `desktop` is the second, which the Tauri window emits as CSS
+ * variables from the same list. That is what makes "the same design in two
+ * renderers" a mechanical claim rather than an aspiration.
  */
 
 export const SURFACE = [
@@ -19,18 +19,35 @@ export const SURFACE = [
   "surface.raised",
   "surface.overlay",
   "surface.selected",
+  // The window's finer grounds: its bars, its panels, a field, the prompt, a
+  // row under the pointer, the primary action, and each mode's own ground.
+  "surface.bar",
+  "surface.panel",
+  "surface.input",
+  "surface.prompt",
+  "surface.hover",
+  "surface.primary",
+  "surface.act",
+  "surface.plan",
+  "surface.ask",
+  "surface.chat",
+  // What a floating layer's shadow is drawn in.
+  "surface.shadow",
 ] as const;
 
 export const BORDER = [
   "border.default",
   "border.focused",
   "border.active",
+  "border.strong",
+  "border.subtle",
 ] as const;
 
 export const TEXT = [
   "text.primary",
   "text.secondary",
   "text.muted",
+  "text.accent",
 ] as const;
 
 export const SEMANTIC = [
@@ -100,6 +117,73 @@ export const terminal: Theme = {
   "mode.plan": "#6ba3c4",
   "mode.ask": "#a99bd4",
   "mode.chat": "#7d726a",
+
+  // The terminal has no finer grounds than the four above, so each of these
+  // is one of them; nothing in the terminal client draws them.
+  "surface.bar": "#16120f",
+  "surface.panel": "#16120f",
+  "surface.input": "#0d0b0a",
+  "surface.prompt": "#0d0b0a",
+  "surface.hover": "#2a211b",
+  "surface.primary": "#2a211b",
+  "surface.act": "#2a211b",
+  "surface.plan": "#2a211b",
+  "surface.ask": "#2a211b",
+  "surface.chat": "#2a211b",
+  "surface.shadow": "#000000",
+  "border.strong": "#3a2f27",
+  "border.subtle": "#3a2f27",
+  "text.accent": "#ff9d5c",
+};
+
+/**
+ * The desktop window's mapping (Feature 004): a neutral dark ground with a
+ * cyan focus, after the owner's reference design.
+ *
+ * Every text colour here reaches WCAG 2.1 AA (4.5:1) on every ground it is
+ * drawn on. Where the reference's grey or red fell short — `text.muted`
+ * (#8a8a8a there) and `semantic.danger` (#e0605a there) on the raised
+ * grounds — the nearest value that passes is used instead, and the
+ * reference's dimmer greys are not used for text at all.
+ */
+export const desktop: Theme = {
+  "surface.base": "#191919",
+  "surface.raised": "#2a2a2a",
+  "surface.overlay": "#272727",
+  "surface.selected": "#1b2b2f",
+  "surface.bar": "#1f1f1f",
+  "surface.panel": "#242424",
+  "surface.input": "#1c1c1c",
+  "surface.prompt": "#1d1d1d",
+  "surface.hover": "#333333",
+  "surface.primary": "#2f5a3e",
+  "surface.act": "#163824",
+  "surface.plan": "#173a44",
+  "surface.ask": "#1d2a33",
+  "surface.chat": "#262626",
+  "surface.shadow": "#000000",
+
+  "border.default": "#3a3a3a",
+  "border.focused": "#5fd4e8",
+  "border.active": "#3fa9bc",
+  "border.strong": "#424242",
+  "border.subtle": "#333333",
+
+  "text.primary": "#e6e6e6",
+  "text.secondary": "#b8b8b8",
+  "text.muted": "#929292",
+  "text.accent": "#5fd4e8",
+
+  "semantic.success": "#35c46a",
+  "semantic.warning": "#e0a04a",
+  "semantic.danger": "#e66a64",
+  "semantic.info": "#3fa2e0",
+
+  // Act changes things and reads green; Plan is the cyan of focus; Ask is blue.
+  "mode.act": "#35c46a",
+  "mode.plan": "#5fd4e8",
+  "mode.ask": "#3fa2e0",
+  "mode.chat": "#b8b8b8",
 };
 
 /**

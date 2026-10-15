@@ -24,7 +24,23 @@ export const FLOWS = [
   "unconfigured",              // "Check again" from an unconfigured home
   "lifetime-quit-now",         // "Closing…" with a forced stop
   "lifetime-second-confirmed", // a second launch
+  // D2: the workbench shell, its palette, keys, layout and panels.
+  "shell",
+  "palette",
+  "keyboard",
+  "layout",                    // read_layout, write_layout and a refused write
+  "layout-relaunch-same",
+  "layout-relaunch-other",
+  "core-panel",
+  "narrow",
+  "accessibility",
+  "key-delivery",
+  "reduced-motion",
 ];
+
+// D2 (T075): over every flow, the harness also requires that both layout
+// operations, a refused write among them, were recorded.
+process.env.COMODOR_CANARY_LAYOUT = "1";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const run = spawnSync(process.execPath,

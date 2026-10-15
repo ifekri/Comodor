@@ -1,9 +1,13 @@
 /**
  * The window's commands, from `@comodor/commands`: each action is one
- * command, reached the same way by its button and by its key.
+ * command, reached the same way by its button, its key and (D2) the palette.
+ * D1's Send and Cancel come first; the workbench's follow, in the same one
+ * registry (src/shell/commands.ts).
  */
 
 import { CommandRegistry } from "@comodor/commands";
+
+import { type ShellContext, workbenchBindings, workbenchCommands } from "./shell/commands.ts";
 
 export const COMMAND_IDS = {
   send: "conversation.send",
@@ -21,7 +25,12 @@ export interface ConversationContext {
   readonly cancellable: boolean;
 }
 
-export const commands = new CommandRegistry<ConversationContext>()
+/** D1's context, and (D2) the shell's, when a command runs from the shell. */
+export interface WindowContext extends ConversationContext {
+  readonly shell?: ShellContext | undefined;
+}
+
+export const commands = new CommandRegistry<WindowContext>()
   .add(
     {
       id: COMMAND_IDS.send,
@@ -44,7 +53,9 @@ export const commands = new CommandRegistry<ConversationContext>()
   .bind(
     { key: "enter", command: COMMAND_IDS.send, hint: "Enter send" },
     { key: "escape", command: COMMAND_IDS.cancel, hint: "Esc cancel" },
-  );
+  )
+  .add(...workbenchCommands())
+  .bind(...workbenchBindings());
 
 /** The registry's name for a key event, or none. Shift+Enter is a newline. */
 export function keyName(event: { key: string; shiftKey: boolean; ctrlKey: boolean;

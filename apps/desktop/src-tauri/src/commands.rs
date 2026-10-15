@@ -10,7 +10,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::instance::Confirm;
-use crate::prefs::{self, Preferences};
+use crate::prefs::{self, Preferences, Stored};
 use crate::shutdown::StopReason;
 use crate::supervisor::{PageSink, State as CoreState, Status, Supervisor};
 use crate::workspace::{self, Chooser, Resolution};
@@ -19,7 +19,8 @@ use crate::workspace::{self, Chooser, Resolution};
 pub struct Desktop {
     pub supervisor: Supervisor,
     prefs_path: PathBuf,
-    preferences: Mutex<Preferences>,
+    /// D1's preferences and the D2 layout beside them, as the file holds them.
+    preferences: Mutex<Stored>,
     chooser: Mutex<Box<dyn Chooser + Send>>,
     /// Only one chooser at a time (a workspace change in progress).
     choosing: Mutex<()>,
@@ -35,7 +36,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 impl Desktop {
     pub fn new(supervisor: Supervisor, prefs_path: PathBuf, chooser: Box<dyn Chooser + Send>) -> Self {
-        let preferences = prefs::load(&prefs_path);
+        let preferences = prefs::load_stored(&prefs_path);
         Self { supervisor, prefs_path, preferences: Mutex::new(preferences),
                chooser: Mutex::new(chooser), choosing: Mutex::new(()),
                wake: std::sync::Arc::new(crate::wake::Watch::system()), linking: Mutex::new(()) }
@@ -59,13 +60,35 @@ impl Desktop {
     }
 
     pub fn preferences(&self) -> Preferences {
-        lock(&self.preferences).clone()
+        lock(&self.preferences).preferences.clone()
     }
 
     pub fn save_preferences(&self, change: impl FnOnce(&mut Preferences)) {
-        let mut preferences = lock(&self.preferences);
-        change(&mut preferences);
-        let _ = prefs::save(&self.prefs_path, &preferences);
+        let mut stored = lock(&self.preferences);
+        change(&mut stored.preferences);
+        let _ = prefs::save_stored(&self.prefs_path, &stored);
+    }
+
+    /// The stored layout, or the defaults: `{layout, stored}` and nothing
+    /// else from the file. Reads memory only; never writes
+    /// (contracts/layout-persistence.md, `read_layout`).
+    pub fn read_layout(&self) -> Value {
+        let layout = lock(&self.preferences).layout;
+        json!({ "layout": layout.unwrap_or_default(), "stored": layout.is_some() })
+    }
+
+    /// Validate `layout` completely before anything else; on refusal nothing
+    /// is written and memory is unchanged. An accepted layout is saved with
+    /// the rest of the file, under the same lock as every D1 save, and
+    /// committed to memory only once the save succeeded.
+    pub fn write_layout(&self, layout: &Value) -> Result<Value, String> {
+        let layout = prefs::validate_layout(layout)?;
+        let mut stored = lock(&self.preferences);
+        let next = Stored { preferences: stored.preferences.clone(), layout: Some(layout) };
+        prefs::save_stored(&self.prefs_path, &next)
+            .map_err(|problem| format!("the layout could not be saved: {problem}"))?;
+        *stored = next;
+        Ok(json!({ "layout": layout }))
     }
 
     /// Decide this launch's workspace (OD-3) and start a Core there, or say
@@ -73,13 +96,13 @@ impl Desktop {
     pub fn launch(&self, command_line: Option<OsString>) {
         let _held = lock(&self.choosing);
         let resolution = {
-            let mut preferences = lock(&self.preferences);
-            let before = preferences.clone();
-            let resolution = workspace::resolve_launch(command_line.as_deref(), &mut preferences,
+            let mut stored = lock(&self.preferences);
+            let before = stored.preferences.clone();
+            let resolution = workspace::resolve_launch(command_line.as_deref(), &mut stored.preferences,
                                                        lock(&self.chooser).as_mut(),
                                                        &mut |report| self.supervisor.no_workspace(report.into()));
-            if *preferences != before {
-                let _ = prefs::save(&self.prefs_path, &preferences);
+            if stored.preferences != before {
+                let _ = prefs::save_stored(&self.prefs_path, &stored);
             }
             resolution
         };
@@ -190,6 +213,21 @@ fn opener(_app: &tauri::AppHandle, url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The stored layout or the defaults (D2; contracts/layout-persistence.md).
+#[tauri::command]
+pub fn read_layout(desktop: State<'_, Desktop>) -> Value {
+    recorded("read_layout", json!({}), desktop.read_layout())
+}
+
+/// Store a layout after validating it completely; a refusal changes nothing
+/// (D2; contracts/layout-persistence.md).
+#[tauri::command]
+pub fn write_layout(desktop: State<'_, Desktop>, layout: Value) -> Result<Value, String> {
+    let args = json!({ "layout": layout });
+    let result = desktop.write_layout(&layout);
+    recorded("write_layout", args, result)
+}
+
 /// Opens the chooser at the last selected folder; the chosen absolute path,
 /// or `null` when the person dismissed it. Blocks on the chooser, so it runs
 /// off the main thread.
@@ -204,10 +242,10 @@ fn choose(desktop: &Desktop) -> Result<Option<String>, String> {
         return Err("a workspace change is already in progress".into());
     };
     let chosen = {
-        let mut preferences = lock(&desktop.preferences);
-        let chosen = workspace::choose(&mut preferences, lock(&desktop.chooser).as_mut());
+        let mut stored = lock(&desktop.preferences);
+        let chosen = workspace::choose(&mut stored.preferences, lock(&desktop.chooser).as_mut());
         if chosen.is_some() {
-            let _ = prefs::save(&desktop.prefs_path, &preferences);
+            let _ = prefs::save_stored(&desktop.prefs_path, &stored);
         }
         chosen
     };
@@ -357,11 +395,13 @@ mod tests {
     use serde_json::Value;
     use std::collections::BTreeSet;
 
-    /// The nine of contracts/native-bridge.md, written out here on purpose:
-    /// the constant is checked against the contract, not against itself.
-    const CONTRACT: [&str; 9] = ["connect", "send_line", "status", "diagnostics",
-                                 "choose_workspace", "retry", "check_again", "quit_now",
-                                 "open_external"];
+    /// The eleven of specs/004-workbench-shell/contracts/native-operations.md
+    /// (D1's nine and D2's two layout operations), written out here on
+    /// purpose: the constant is checked against the contract, not against
+    /// itself.
+    const CONTRACT: [&str; 11] = ["connect", "send_line", "status", "diagnostics",
+                                  "choose_workspace", "retry", "check_again", "quit_now",
+                                  "open_external", "read_layout", "write_layout"];
 
     fn json(text: &str) -> Value {
         serde_json::from_str(text).expect("JSON")
@@ -646,5 +686,198 @@ mod tests {
         let mut relay = shown(&["https://old.example/page"]);
         relay.connect();
         assert!(check_external("https://old.example/page", &|url| relay.displayed(url)).is_err());
+    }
+}
+
+/// D2: `read_layout` and `write_layout` (contracts/layout-persistence.md).
+#[cfg(test)]
+mod layout_command_tests {
+    use super::*;
+    use crate::supervisor::{Failure, FailureClass, Options};
+    use serde_json::json;
+
+    struct Dir(PathBuf);
+
+    impl Dir {
+        fn new(label: &str) -> Self {
+            let path = std::env::temp_dir()
+                .join(format!("comodor-layout-cmd-{label}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+        fn file(&self) -> PathBuf {
+            prefs::path_in(&self.0)
+        }
+        fn entries(&self) -> Vec<std::ffi::OsString> {
+            let mut names: Vec<_> = std::fs::read_dir(&self.0).unwrap()
+                .map(|entry| entry.unwrap().file_name()).collect();
+            names.sort();
+            names
+        }
+    }
+
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Answers the chooser with one folder.
+    struct Answer(Option<PathBuf>);
+
+    impl Chooser for Answer {
+        fn choose(&mut self, _start: Option<&Path>) -> Option<PathBuf> {
+            self.0.clone()
+        }
+    }
+
+    /// A desktop over `file` whose Core can never be found: nothing here
+    /// needs one, and a start fails at once instead of running anything.
+    fn desktop_at(file: PathBuf, chooser: Option<PathBuf>) -> Desktop {
+        let supervisor = Supervisor::launch(Options {
+            locate: Box::new(|| Err(Failure::new(FailureClass::NotFound, "no Core in this test"))),
+            test_env: vec![],
+            log: None,
+            on_finished: None,
+        });
+        Desktop::new(supervisor, file, Box::new(Answer(chooser)))
+    }
+
+    fn valid() -> Value {
+        json!({"version": 1, "panel_open": true, "panel_surface": "shortcuts", "panel_width": 480})
+    }
+
+    /// Bytes any save would change: compact, an unknown top-level field D1
+    /// never writes back, a stored layout, and a trailing newline. A save of
+    /// any kind, even of the same values, therefore shows in the bytes.
+    const SEEDED: &str = concat!(
+        r#"{"version":1,"window":{"width":900,"height":700,"x":5,"y":6,"maximized":false},"#,
+        r#""last_selected_folder":"/work/kept","token":"not-written-back","#,
+        r#""layout":{"version":1,"panel_open":false,"panel_surface":"diagnostics","panel_width":300}}"#,
+        "\n");
+
+    fn seeded(label: &str) -> (Dir, Desktop) {
+        let dir = Dir::new(label);
+        std::fs::write(dir.file(), SEEDED).unwrap();
+        let desktop = desktop_at(dir.file(), None);
+        (dir, desktop)
+    }
+
+    fn refused_cases() -> Vec<(&'static str, Value)> {
+        let mut over = valid();
+        over["pad"] = json!("x".repeat(1100));
+        let mut unknown = valid();
+        unknown["token"] = json!("x");
+        let mut missing = valid();
+        missing.as_object_mut().unwrap().remove("panel_surface");
+        let set = |field: &str, value: Value| {
+            let mut layout = valid();
+            layout[field] = value;
+            layout
+        };
+        vec![
+            ("unknown field", unknown),
+            ("wrong type", set("panel_open", json!("yes"))),
+            ("out-of-range width", set("panel_width", json!(961))),
+            ("unknown surface", set("panel_surface", json!("terminal"))),
+            ("another version", set("version", json!(2))),
+            ("over 1 KiB", over),
+            ("not an object", json!(["layout"])),
+            ("missing field", missing),
+        ]
+    }
+
+    // -- SC-017: a refused write leaves the whole file byte-identical ----------
+
+    #[test]
+    fn every_refused_write_leaves_the_file_byte_identical() {
+        let (dir, desktop) = seeded("refused");
+        let before_read = desktop.read_layout();
+        for (case, layout) in refused_cases() {
+            let reason = desktop.write_layout(&layout).expect_err(case);
+            assert!(!reason.is_empty(), "{case}: a reason");
+            assert_eq!(std::fs::read(dir.file()).unwrap(), SEEDED.as_bytes(), "{case}: the file's bytes");
+            assert_eq!(dir.entries(), vec![std::ffi::OsString::from(prefs::FILE_NAME)],
+                       "{case}: no temporary file");
+            assert_eq!(desktop.read_layout(), before_read, "{case}: the stored layout in memory");
+            assert_eq!(desktop.preferences(), prefs::load(&dir.file()), "{case}: D1's values in memory");
+        }
+    }
+
+    #[test]
+    fn an_accepted_write_is_stored_and_returned_exactly() {
+        let (dir, desktop) = seeded("accepted");
+        assert_eq!(desktop.write_layout(&valid()), Ok(json!({"layout": valid()})));
+        let stored = prefs::load_stored(&dir.file());
+        assert_eq!(serde_json::to_value(stored.layout).unwrap(), valid());
+        assert_eq!(stored.preferences, prefs::load(&dir.file()), "D1's values are kept");
+        assert_eq!(stored.preferences.last_selected_folder.as_deref(), Some(Path::new("/work/kept")));
+        assert_eq!(desktop.read_layout(), json!({"layout": valid(), "stored": true}));
+        assert_eq!(dir.entries(), vec![std::ffi::OsString::from(prefs::FILE_NAME)]);
+    }
+
+    #[test]
+    fn a_failed_save_reports_and_keeps_the_layout_in_memory() {
+        let dir = Dir::new("failed-save");
+        // The preferences path is a folder: the rename onto it fails.
+        std::fs::create_dir_all(dir.file()).unwrap();
+        let desktop = desktop_at(dir.file(), None);
+        let before = desktop.read_layout();
+        assert!(desktop.write_layout(&valid()).is_err(), "the failure is reported");
+        assert_eq!(desktop.read_layout(), before, "memory keeps its previous layout");
+    }
+
+    #[test]
+    fn a_d1_save_after_an_accepted_write_keeps_the_layout() {
+        let dir = Dir::new("d1-saves");
+        let chosen = dir.0.join("chosen");
+        std::fs::create_dir_all(&chosen).unwrap();
+        let desktop = desktop_at(dir.file(), Some(chosen.clone()));
+        desktop.write_layout(&valid()).unwrap();
+
+        // The geometry, as `remember_geometry` saves it on close.
+        desktop.save_preferences(|preferences| {
+            preferences.window = Some(prefs::WindowGeometry { width: 1, height: 2, x: 3, y: 4, maximized: true });
+        });
+        assert_eq!(serde_json::to_value(prefs::load_stored(&dir.file()).layout).unwrap(), valid(), "geometry");
+
+        // The launch, choosing a folder.
+        desktop.launch(None);
+        let stored = prefs::load_stored(&dir.file());
+        assert_eq!(stored.preferences.last_selected_folder.as_deref(), Some(chosen.as_path()));
+        assert_eq!(serde_json::to_value(stored.layout).unwrap(), valid(), "launch");
+
+        // "Change workspace…".
+        std::fs::write(dir.file(), "{}").unwrap();
+        let again = desktop_at(dir.file(), Some(chosen.clone()));
+        again.write_layout(&valid()).unwrap();
+        assert!(choose(&again).is_ok());
+        assert_eq!(serde_json::to_value(prefs::load_stored(&dir.file()).layout).unwrap(), valid(), "choose");
+    }
+
+    #[test]
+    fn read_layout_returns_the_defaults_and_never_writes() {
+        let dir = Dir::new("read-only");
+        let desktop = desktop_at(dir.file(), None);
+        let read = desktop.read_layout();
+        assert_eq!(read, json!({"layout": {"version": 1, "panel_open": false, "panel_surface": "core",
+                                           "panel_width": 320}, "stored": false}));
+        assert_eq!(read.as_object().unwrap().len(), 2, "exactly `layout` and `stored`");
+        assert_eq!(read["layout"].as_object().unwrap().len(), 4, "exactly the four fields");
+        assert!(!dir.file().exists(), "an absent file stays absent");
+        assert!(dir.entries().is_empty());
+    }
+
+    #[test]
+    fn read_layout_exposes_nothing_else_from_the_file() {
+        let (_dir, desktop) = seeded("nothing-else");
+        let read = desktop.read_layout();
+        let text = read.to_string();
+        for private in ["/work/kept", "not-written-back", "\"window\"", "maximized"] {
+            assert!(!text.contains(private), "{private} in {text}");
+        }
+        assert_eq!(read["stored"], true);
+        assert_eq!(read["layout"]["panel_surface"], "diagnostics");
     }
 }

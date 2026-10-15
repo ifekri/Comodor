@@ -3,17 +3,20 @@
  * buttons and the keys run the same two.
  */
 
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, type MutableRefObject, useLayoutEffect, useState } from "react";
 
 import { COMMAND_IDS, commands, type ConversationContext, keyName } from "../commands.ts";
+import type { ComposerHandle } from "../shell/session-store.ts";
 
-export function Composer({ busy, ready, cancellable, onSend, onCancel }: {
+export function Composer({ busy, ready, cancellable, onSend, onCancel, handle }: {
   busy: boolean;
   ready: boolean;
   /** Whether a cancel can reach the Core now: not while it is being checked. */
   cancellable: boolean;
   onSend: (text: string) => void;
   onCancel: () => void;
+  /** Where the shell finds this composer's draft and its Send (D2 palette). */
+  handle?: MutableRefObject<ComposerHandle | null> | undefined;
 }) {
   const [draft, setDraft] = useState("");
   const context: ConversationContext = {
@@ -28,6 +31,13 @@ export function Composer({ busy, ready, cancellable, onSend, onCancel }: {
     cancel: onCancel,
   };
   const run = (id: string) => void commands.run(id, context);
+  useLayoutEffect(() => {
+    if (!handle) return;
+    handle.current = { hasText: draft.trim() !== "", send: context.send };
+    return () => {
+      handle.current = null;
+    };
+  });
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const name = keyName(event);

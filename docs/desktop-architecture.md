@@ -1,10 +1,13 @@
 # The desktop application
 
 D1 — the desktop foundation — is built: `apps/desktop`, a Tauri 2 window
-that owns one Comodor Core and holds one conversation with it. It runs from
-source on Windows, Linux and macOS; it is not packaged yet. Everything past
-the foundation (the workbench, Monaco, the terminal, panels, packaging) is
-D2–D6 and does not exist yet.
+that owns one Comodor Core and holds one conversation with it. D2 — the
+workbench shell — is built on it: a navigation rail, a status bar, a command
+palette over the shared command registry, a keyboard model and side panels,
+with the layout kept between launches. It runs from source on Windows, Linux
+and macOS; it is not packaged yet. Everything past the shell (Monaco, the
+terminal, agent and session panels, packaging) is D3–D6 and does not exist
+yet.
 
 This records what the desktop is, what the Core had to be true for, and what
 remains.
@@ -87,10 +90,12 @@ It reads — never changes — only what the restart count needs: the
 `status`, `session.updated` busy, `notification.created` level, and a
 relayed `session.cancel`.
 
-**The bridge commands** are exactly nine, from one constant
+**The bridge commands** are exactly eleven, from one constant
 (`command_names.rs`) that feeds both the handler list and the build's app
-manifest: `connect`, `send_line`, `status`, `diagnostics`,
-`choose_workspace`, `retry`, `check_again`, `quit_now`, `open_external`.
+manifest: D1's nine — `connect`, `send_line`, `status`, `diagnostics`,
+`choose_workspace`, `retry`, `check_again`, `quit_now`, `open_external` — and
+D2's `read_layout` and `write_layout`. D1's nine-command record stays as
+history in `specs/003-desktop-foundation/`.
 The `main` capability grants exactly their allow permissions; no plugin and
 no `core:` permission. The folder chooser, the confirmation dialog, single
 instance and link opening run on the native side only.
@@ -153,6 +158,46 @@ navigation away from its own pages and new windows. An unconfigured provider
 shows the direction to run `comodor setup` in a terminal, with Send
 unavailable, and "Check again" restarts the Core to read it.
 
+### The workbench shell (D2)
+
+Around that screen the shell adds, and adds nothing else (no menu, editor,
+terminal, explorer or agent panel — those are later phases):
+
+- **A navigation rail** with exactly four surfaces — the conversation, the
+  Core panel, diagnostics and the keyboard shortcuts — and the palette
+  control.
+- **A status bar** holding D1's status strip once (the Core's state, the
+  workspace, provider and model as reported), the palette control and the
+  one polite announcement region.
+- **A command palette** over the same `@comodor/commands` registry the
+  buttons use: D1's Send and Cancel first, then the workbench commands. It
+  lists what applies now and runs exactly what a button would.
+- **A keyboard model**: `mod` is Cmd on macOS and Ctrl elsewhere; keys the
+  system or a text field owns are never taken; Escape closes the palette,
+  then a covering panel, then reaches the composer; F6 and Shift+F6 cycle the
+  regions; focus returns to whatever opened a panel or the palette.
+- **Side panels** beside the conversation from 900 logical pixels of the
+  shell's measured width, covering it below that; the edge is dragged or
+  moved with the arrow keys.
+- **The Core panel** shows only what the current Core reported, and "not
+  reported yet" for the rest; **diagnostics** show the native side's tail as
+  inert text, in every state.
+
+**The layout preference** — whether a side panel is open, which, and its
+width — is one object in D1's `preferences.json`, read once after `connect`
+through `read_layout` and written after each completed change through
+`write_layout`. The native side validates every write (version, the four
+known fields, their types, the width range, the surface, a 1 KiB bound)
+before storing it atomically; a refused or failed write leaves the file as
+it was and is said quietly once. A stored layout it cannot read is replaced
+by the default without touching D1's own preferences.
+
+**The look** follows the owner's reference design: the design tokens'
+`desktop` mapping (the terminal mapping is unchanged), IBM Plex Sans,
+JetBrains Mono and Material Symbols bundled with the page, a 31px status bar
+and 34px panel headers. Every text colour reaches WCAG 2.1 AA on its ground,
+and the test build checks every window state with `axe-core`.
+
 ---
 
 ## Process lifecycle
@@ -211,8 +256,9 @@ exits, the workspace — never a message the Core wrote.
 | Window | `test/` | the React views over an in-memory native side and Core |
 | Scenarios | `e2e/` (`npm run e2e`) | the test build in a real WebView, driven from the page |
 | Lifetime | `npm run lifetime` | close, quit mid-turn, Quit now, kill, second launches — no Core left after any |
-| Canary | `npm run canary` | every flow with a unique credential |
-| Release list | `npm run release-manifest` | the release build grants exactly the nine commands |
+| Canary | `npm run canary` | every D1 and D2 flow with a unique credential; both layout operations, a refused write among them, recorded; the stored layout holds its four fields and no conversation text |
+| Release list | `npm run release-manifest` | the release build grants exactly the eleven commands |
+| Accessibility | `e2e/scenarios/accessibility.ts` | zero WCAG 2.1 A/AA violations (`axe-core`, test build only) in every window state, with the palette and each panel open, and in covering mode |
 
 All of it runs offline: no provider is ever called. CI runs every layer on
 Windows, Linux and macOS.
@@ -229,7 +275,9 @@ If any of these is reimplemented for the desktop, the boundary has failed:
   mode permits; the desktop has no opinion.
 - **Questions.** The selection reducer, with a different renderer around it.
 - **Session.** The projection, its gap detection and its resync.
-- **Tokens.** `cssVariables()` emits the same names as CSS custom properties.
+- **Tokens.** `cssVariables(desktop)` emits the same names as CSS custom
+  properties; the window's mapping sits beside the terminal's in
+  `@comodor/design-tokens`.
 
 ---
 
@@ -237,17 +285,22 @@ If any of these is reimplemented for the desktop, the boundary has failed:
 
 ```text
 F1–F8  terminal foundation and parity            ← done
-D1     Tauri foundation                          ← this
-D2     the workbench shell
+D1     Tauri foundation                          ← done
+D2     the workbench shell                       ← this
 D3     Monaco and the workspace
 D4     the integrated terminal
 D5     agent, task and session panels
 D6     production hardening: packaging, signing, updates, keychain
 ```
 
-What D1 deliberately leaves to them: packaging and installers, history
+What D1 and D2 deliberately leave to them: packaging and installers, history
 browsing, several sessions, credential entry in the window, a remote Core,
 the editor and terminal panes.
+
+**Not verified.** Two things D1 recorded remain NOT VERIFIED, and D2 does
+not change that: a real suspend and resume of a machine (the wake path is
+tested through a simulated wake), and the native "Open link?" dialog's
+appearance with a real person's answer.
 
 ---
 

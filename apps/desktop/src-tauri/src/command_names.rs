@@ -1,9 +1,11 @@
-/// Every command the window's content may call, and no other
-/// (contracts/native-bridge.md). One list, used twice: `build.rs` declares it
+/// Every command the window's content may call, and no other: D1's nine
+/// (specs/003-desktop-foundation/contracts/native-bridge.md) and D2's two
+/// layout operations (specs/004-workbench-shell/contracts/native-operations.md).
+/// One list, used twice: `build.rs` declares it
 /// in the app manifest, so the build generates an allow/deny permission pair
 /// per command and a command is usable only where a capability grants it;
 /// `lib.rs` registers handlers only for names in it.
-pub const COMMANDS: [&str; 9] = [
+pub const COMMANDS: [&str; 11] = [
     "connect",
     "send_line",
     "status",
@@ -13,6 +15,8 @@ pub const COMMANDS: [&str; 9] = [
     "check_again",
     "quit_now",
     "open_external",
+    "read_layout",
+    "write_layout",
 ];
 
 /// The test build's one extra command. Declared only when the `e2e` feature

@@ -38,6 +38,16 @@ export class FakeNative {
   diagnostics = "";
   /** What `choose_workspace` answers. */
   chosen: string | null = null;
+  /**
+   * What `read_layout` answers (D2). By default `{}`, exactly what the
+   * default branch below answers, so a window test that sets nothing sees
+   * what it always saw.
+   */
+  layoutAnswer: unknown = {};
+  /** Every layout `write_layout` stored, in order. */
+  readonly writtenLayouts: unknown[] = [];
+  /** A reason the next `write_layout` is refused with, once. */
+  refuseNextWrite: string | undefined;
   private deliver: ((message: Inbound) => void) | undefined;
   private generation = 0;
   /** The generation whose lines reach the Core; none once its Core went. */
@@ -110,6 +120,19 @@ export class FakeNative {
           return this.diagnostics as T;
         case "choose_workspace":
           return this.chosen as T;
+        case "read_layout":
+          return this.layoutAnswer as T;
+        case "write_layout": {
+          if (this.refuseNextWrite !== undefined) {
+            const reason = this.refuseNextWrite;
+            this.refuseNextWrite = undefined;
+            throw new Error(reason);
+          }
+          const layout = args?.["layout"];
+          this.writtenLayouts.push(layout);
+          this.layoutAnswer = { layout, stored: true };
+          return { layout } as T;
+        }
         default:
           return {} as T;
       }
