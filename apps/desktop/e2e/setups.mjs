@@ -39,6 +39,9 @@
  * - `reducedMotion` (D2): set the operating system's reduced-motion
  *   preference for this run and restore it after, with
  *   COMODOR_E2E_OS_LEVEL=1 only (e2e/os-preferences.mjs).
+ * - `motionTransition` (D2 follow-up, macOS): switch reduced motion off,
+ *   then on, each in a fresh launch, and restore the exact original after,
+ *   with COMODOR_E2E_OS_LEVEL=1 only.
  *
  * Placeholders, anywhere above: `$workspace` (the launch's workspace folder)
  * and `$stored` (another existing folder, standing for the last one chosen).
@@ -126,6 +129,9 @@ export const SETUPS = {
   // D2: the operating system's reduced-motion preference, set for the run and
   // restored after (COMODOR_E2E_OS_LEVEL=1 only; the stylesheet check always).
   "reduced-motion": { workspaceArgument: true, reducedMotion: true },
+  // D2 follow-up: on macOS, the preference switched off and then on, each
+  // confirmed by the effective value, and the exact original put back.
+  "reduced-motion-transition": { workspaceArgument: true, platforms: ["darwin"], motionTransition: true },
   // D2: the layout through the real bridge, kept across a reload, a crash and
   // a workspace change; a refused write leaves the file byte-identical.
   layout: { workspaceArgument: true, choose: ["$stored"], params: { stored: "$stored" } },

@@ -20,7 +20,7 @@ import { layout, layoutSeeded } from "./layout.ts";
 import { narrow } from "./narrow.ts";
 import { palette, paletteClosing, paletteFailure, paletteUnconfigured } from "./palette.ts";
 import { ready } from "./ready.ts";
-import { reducedMotion } from "./reduced-motion.ts";
+import { reducedMotion, reducedMotionTransition } from "./reduced-motion.ts";
 import { shell, shellFailure } from "./shell.ts";
 import { unconfigured } from "./unconfigured.ts";
 import { crash, reload, wake } from "./recovery.ts";
@@ -68,6 +68,7 @@ export const SCENARIOS: Readonly<Record<string, Scenario>> = {
   "palette-unconfigured": paletteUnconfigured,
   ready,
   "reduced-motion": reducedMotion,
+  "reduced-motion-transition": reducedMotionTransition,
   reload,
   shell,
   "shell-failure": shellFailure,

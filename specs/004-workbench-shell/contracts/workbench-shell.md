@@ -133,7 +133,7 @@ Rules:
 | Compact threshold | 900 logical px | judged on the shell root's measured width (`ResizeObserver` `contentRect.width`, fractional, unrounded): below 900 uses the covering panel; the root exposes it as `data-width` and the mode as `data-mode` |
 | Side panel width | 320 | 240 to half the window, and never below the main area's 360 |
 | Main area minimum | 360 | beside mode only |
-| Window minimum | 520 × 400 | unchanged from D1 |
+| Window minimum | 520 × 400 | unchanged from D1; the native window. On macOS the page is shorter by the title bar Tauri counts inside the inner size (measured, constant, ≤ 40 px; 520 × 368 at a 32 px offset); zero offset on Windows and Linux (spec Clarifications, 2026-10-16) |
 
 - Beside mode: the panel sits to the right of the main area (the layout does
   not mirror), so moving its edge left widens it; dragging its edge or

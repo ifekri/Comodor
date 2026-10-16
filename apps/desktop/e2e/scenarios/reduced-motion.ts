@@ -76,3 +76,58 @@ export const reducedMotion: Scenario = async (context) => {
   expect(still(palette), "product-failure: the palette moves");
   return { outcome: "verified", platform: navigator.userAgent };
 };
+
+function capabilityUnavailable(reason: string): Error {
+  return new Error(`capability-unavailable: ${reason}`);
+}
+
+/** The computed motion of `element`, as the page sees it. */
+function motionOf(element: Element): { animation: string; duration: string; transition: string } {
+  const style = getComputedStyle(element);
+  return { animation: style.animationName, duration: style.animationDuration, transition: style.transitionDuration };
+}
+
+/**
+ * D2 follow-up: one phase of the macOS off-to-on transition. The harness has
+ * switched the operating system's preference and confirmed its effective
+ * value before this launch. Off: the WebView must report no reduced motion,
+ * and the panel must ease in (so the "on" result below is the preference's
+ * doing). On: the WebView must report it, and the panel and the palette must
+ * have zero-duration motion. A WebView that does not follow the operating
+ * system is `capability-unavailable`; a shell that does not follow the WebView
+ * is `product-failure`.
+ */
+export const reducedMotionTransition: Scenario = async (context) => {
+  await context.element('[data-testid="status-strip"][data-state="ready"]');
+  await context.waitFor(() => document.querySelector('[data-testid="session"]'));
+  const reply = await context.checkpoint("motion-phase");
+  const phase = reply["phase"] as { phase?: "off" | "on"; outcome?: string; reason?: string } | undefined;
+  if (!phase?.phase) return { outcome: phase?.outcome ?? "not-run", reason: phase?.reason ?? "no phase was set" };
+
+  const reported = window.matchMedia(QUERY).matches;
+  const marked = document.querySelector('[data-testid="shell"]')?.getAttribute("data-reduced-motion");
+  document.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button[aria-label="Core"]')!.click();
+  const panel = await context.element('aside[aria-label="Core"]');
+  const panelMotion = motionOf(panel);
+
+  if (phase.phase === "off") {
+    if (reported) {
+      throw capabilityUnavailable("the WebView reports reduced motion although the operating system reports it off");
+    }
+    expect(marked === "false", `product-failure: the shell marked itself for reduced motion with it off (${marked})`);
+    expect(!still(panel), `product-failure: with reduced motion off the panel does not ease in (${
+      JSON.stringify(panelMotion)})`);
+    return { outcome: "verified", phase: "off", matchMedia: reported, marked, panel: panelMotion };
+  }
+
+  if (!reported) {
+    throw capabilityUnavailable("the WebView does not report reduced motion although the operating system reports it on");
+  }
+  expect(marked === "true", `product-failure: the shell did not mark itself for reduced motion (${marked})`);
+  expect(still(panel), `product-failure: with reduced motion on the panel moves (${JSON.stringify(panelMotion)})`);
+  document.querySelector<HTMLButtonElement>('footer.status-bar button[aria-label="Commands"]')!.click();
+  const palette = await context.element('[role="dialog"][aria-label="Commands"]');
+  const paletteMotion = motionOf(palette);
+  expect(still(palette), `product-failure: with reduced motion on the palette moves (${JSON.stringify(paletteMotion)})`);
+  return { outcome: "verified", phase: "on", matchMedia: reported, marked, panel: panelMotion, palette: paletteMotion };
+};

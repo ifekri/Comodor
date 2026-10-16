@@ -150,3 +150,62 @@ export function setReducedMotion(env) {
   if (process.platform === "darwin") return macSet();
   return linuxSet(env);
 }
+
+// -- macOS: the off-to-on transition (D2 follow-up) ----------------------
+//
+// The `reduced-motion` scenario above sets the preference on; on a runner
+// where it was already on, that shows the window honouring it, not a
+// change. These pieces let the harness switch it off, then on, each
+// confirmed by the effective value, and put the original back exactly: the
+// same type and value, or no key at all if there was none.
+
+const MAC_DOMAIN = "com.apple.universalaccess";
+const MAC_KEY = "reduceMotion";
+
+/** `defaults read-type` output → the `defaults write` flag that keeps that type, or null. */
+export function macTypeFlag(readType) {
+  const type = /Type is (\w+)/.exec(readType ?? "")?.[1];
+  return { boolean: "-bool", integer: "-int", float: "-float", string: "-string" }[type] ?? null;
+}
+
+/** The `defaults` arguments that put `original` back exactly. */
+export function macRestoreArguments(original) {
+  if (original.absent) return ["delete", MAC_DOMAIN, MAC_KEY];
+  const value = original.flag === "-bool" ? (original.value === "1" ? "true" : "false") : original.value;
+  return ["write", MAC_DOMAIN, MAC_KEY, original.flag, value];
+}
+
+/** Whether `now` is `original` in every part: presence, type, value and effective value. */
+export function macRestoredExactly(original, now) {
+  if (now.effective !== original.effective) return false;
+  if (original.absent) return now.absent === true;
+  return now.absent === false && now.flag === original.flag && now.value === original.value;
+}
+
+/** The setting as it stands: present or absent, its type and value, and the effective value WebKit uses. */
+export function macReadMotion() {
+  const read = defaults("read", MAC_DOMAIN, MAC_KEY);
+  const effective = macEffective();
+  if (effective.error) return { error: `the effective setting could not be read: ${effective.error}` };
+  if (read.status !== 0) return { absent: true, effective: effective.reduced };
+  const type = defaults("read-type", MAC_DOMAIN, MAC_KEY);
+  return { absent: false, value: read.stdout.trim(), type: `${type.stdout ?? ""}`.trim(),
+           flag: macTypeFlag(type.stdout), effective: effective.reduced };
+}
+
+/** Write reduced motion on or off, then read the setting back. */
+export function macWriteMotion(on) {
+  const written = defaults("write", MAC_DOMAIN, MAC_KEY, "-bool", on ? "true" : "false");
+  if (written.status !== 0) return { error: `the setting could not be written: ${`${written.stderr ?? ""}`.trim()}` };
+  return macReadMotion();
+}
+
+/** Put `original` back exactly, and confirm it by reading everything again. */
+export function macRestoreMotion(original) {
+  const back = defaults(...macRestoreArguments(original));
+  const now = macReadMotion();
+  if (back.status !== 0 || now.error) {
+    return { ok: false, reason: `${back.stderr ?? ""}${now.error ?? ""}`.trim() || "the restore failed", readBack: now };
+  }
+  return { ok: macRestoredExactly(original, now), readBack: now };
+}
