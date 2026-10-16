@@ -1,12 +1,18 @@
 /*
  * Every colour is a design token (src/theme.ts sets them from
- * cssVariables()). No colour literal belongs in this file.
+ * cssVariables(desktop)). No colour literal belongs in this file.
+ *
+ * The look follows the owner's reference design for the desktop window:
+ * IBM Plex Sans for the interface, JetBrains Mono for values and keys,
+ * Material Symbols Outlined (weight 300) for icons, 3px radii on controls,
+ * a 31px status bar and 34px panel headers. Fonts are bundled (src/fonts.ts).
  */
 
 :root {
   color-scheme: dark;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
-  font-size: 14px;
+  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 html,
@@ -15,7 +21,72 @@ body,
   margin: 0;
   height: 100%;
   background: var(--surface-base);
-  color: var(--text-primary);
+  color: var(--text-secondary);
+}
+
+/* An icon: a Material Symbols ligature drawn from `data-icon`, never text. */
+.icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.icon::before {
+  content: attr(data-icon);
+  font-family: "Material Symbols Outlined";
+  font-weight: 300;
+  font-style: normal;
+  font-size: 18px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  direction: ltr;
+  font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
+code,
+kbd,
+pre {
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+/* Scrollbars: 8px, no buttons, the thumb shown only while the area is hovered. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
+  background-color: transparent;
+}
+
+:hover::-webkit-scrollbar-thumb {
+  background-color: var(--border-default);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-muted);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--border-active);
 }
 
 .window {
@@ -30,14 +101,13 @@ body,
   gap: 12px;
   align-items: baseline;
   padding: 8px 12px;
-  background: var(--surface-raised);
-  border-bottom: 1px solid var(--border-default);
-  color: var(--text-secondary);
+  background: var(--surface-bar);
+  color: var(--text-muted);
 }
 
 .status-state {
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .state-ready {
@@ -74,12 +144,16 @@ body,
 
 .failure-view h1 {
   margin: 0 0 8px;
-  font-size: 18px;
+  font-size: 16px;
+  font-weight: 600;
   color: var(--semantic-danger);
 }
 
 .failure-view h2 {
-  font-size: 13px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
   color: var(--text-muted);
 }
 
@@ -92,10 +166,14 @@ body,
 .diagnostics {
   max-height: 40vh;
   overflow: auto;
-  padding: 8px;
-  background: var(--surface-overlay);
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--surface-input);
   border: 1px solid var(--border-default);
+  border-radius: 3px;
   color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 19px;
   white-space: pre-wrap;
   word-break: break-word;
   unicode-bidi: plaintext;
@@ -103,27 +181,55 @@ body,
 
 .actions {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-top: 16px;
 }
 
 button {
   font: inherit;
-  padding: 6px 14px;
-  background: var(--surface-selected);
-  color: var(--text-primary);
+  font-size: 12.5px;
+  min-height: 28px;
+  padding: 0 14px;
+  background: var(--surface-input);
+  color: var(--text-secondary);
   border: 1px solid var(--border-default);
-  border-radius: 4px;
+  border-radius: 3px;
   cursor: pointer;
 }
 
-button:hover {
-  border-color: var(--border-active);
+button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 button:focus-visible {
   outline: 2px solid var(--border-focused);
   outline-offset: 1px;
+}
+
+input[type="text"],
+textarea {
+  font: inherit;
+  background: var(--surface-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+}
+
+input[type="text"]:focus,
+textarea:focus {
+  border-color: var(--border-active);
+}
+
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
 }
 
 .quiet {
@@ -138,23 +244,45 @@ button:focus-visible {
   min-height: 0;
 }
 
+/* The mode: what the Core confirmed, and a segmented control to ask for another. */
 .mode-control {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border-default);
+  min-height: 33px;
+  padding: 4px 12px;
+  background: var(--surface-bar);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11.5px;
 }
 
 .mode-current {
-  font-weight: 600;
-  margin-right: 8px;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
 }
 
 .mode-act { color: var(--mode-act); }
 .mode-plan { color: var(--mode-plan); }
 .mode-ask { color: var(--mode-ask); }
 .mode-chat { color: var(--mode-chat); }
+
+.mode-option {
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+}
+
+.mode-option[aria-pressed="true"][data-mode="act"] { background: var(--surface-act); color: var(--mode-act); }
+.mode-option[aria-pressed="true"][data-mode="plan"] { background: var(--surface-plan); color: var(--mode-plan); }
+.mode-option[aria-pressed="true"][data-mode="ask"] { background: var(--surface-ask); color: var(--mode-ask); }
+.mode-option[aria-pressed="true"][data-mode="chat"] { background: var(--surface-chat); color: var(--mode-chat); }
 
 .mode-option.asked {
   border-color: var(--border-focused);
@@ -164,19 +292,62 @@ button:focus-visible {
   color: var(--semantic-warning);
 }
 
+/* The conversation: your messages to the right, Comodor's under its mark. */
 .conversation {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 16px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* Each entry keeps its own height; the conversation scrolls instead. */
+.conversation > * {
+  flex-shrink: 0;
+}
+
+.line {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  max-width: 860px;
 }
 
 .line .speaker {
-  display: block;
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
   color: var(--text-muted);
+}
+
+.speaker-comodor .speaker {
+  color: var(--text-secondary);
+}
+
+.speaker-comodor .speaker::before {
+  content: "";
+  display: block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--border-focused);
+  transform: rotate(45deg);
+}
+
+.speaker-you {
+  align-self: flex-end;
+  max-width: 85%;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
 }
 
 .line .text,
@@ -187,8 +358,14 @@ button:focus-visible {
   unicode-bidi: plaintext;
 }
 
-.speaker-you .text {
+.line .text {
+  font-size: 13.5px;
+  line-height: 22px;
   color: var(--text-secondary);
+}
+
+.speaker-you .text {
+  color: var(--text-primary);
 }
 
 .line-note,
@@ -206,85 +383,160 @@ button:focus-visible {
 }
 
 .tool {
-  padding: 6px 8px;
-  background: var(--surface-raised);
-  border-left: 2px solid var(--border-active);
+  max-width: 860px;
+  overflow: hidden;
+  background: var(--surface-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
 }
 
 .tool header {
   display: flex;
+  align-items: center;
   gap: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+  background: var(--surface-bar);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .tool-name {
-  font-weight: 600;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text-primary);
 }
 
 .tool-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
   color: var(--text-secondary);
   unicode-bidi: plaintext;
 }
 
+.tool-state {
+  margin-left: auto;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+}
+
+.tool-completed .tool-state {
+  color: var(--semantic-success);
+}
+
 .tool-failed {
-  border-left-color: var(--semantic-danger);
+  border-color: var(--semantic-danger);
+}
+
+.tool-failed .tool-state {
+  color: var(--semantic-danger);
 }
 
 .tool-output {
   max-height: 30vh;
   overflow: auto;
-  margin: 6px 0 0;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  line-height: 20px;
   color: var(--text-secondary);
+}
+
+.tool-error {
+  padding: 6px 10px;
 }
 
 .notice-warning { color: var(--semantic-warning); }
 .notice-error { color: var(--semantic-danger); }
 .notice-info { color: var(--semantic-info); }
 
+/* A question or a permission: a raised header, then the answers. */
 .card {
-  margin: 0 12px 12px;
-  padding: 12px;
-  background: var(--surface-overlay);
-  border: 1px solid var(--border-focused);
-  border-radius: 4px;
+  margin: 0;
+  padding: 0 16px 16px;
+  background: var(--surface-panel);
+  border-top: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .card h2 {
-  margin: 0 0 8px;
-  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  margin: 0 -16px 12px;
+  padding: 0 12px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border-default);
+  font-size: 14.5px;
+  font-weight: 400;
+  color: var(--text-primary);
   unicode-bidi: plaintext;
+}
+
+.card h2::before {
+  content: "help";
+  font-family: "Material Symbols Outlined";
+  font-weight: 300;
+  font-size: 20px;
+  line-height: 1;
+  font-feature-settings: "liga";
+  color: var(--text-muted);
+}
+
+.permission-card h2::before {
+  content: "shield";
 }
 
 .question {
   border: none;
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   padding: 0;
 }
 
 .question legend {
+  padding: 0;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
   color: var(--text-muted);
-  font-size: 12px;
+}
+
+.question .prompt {
+  margin: 6px 0 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  unicode-bidi: plaintext;
 }
 
 .options {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .option {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  justify-content: center;
+  min-height: 33px;
+  padding: 4px 10px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text-secondary);
   unicode-bidi: plaintext;
 }
 
 .option.chosen {
-  border-color: var(--border-focused);
+  border-color: var(--border-active);
   background: var(--surface-selected);
+  color: var(--text-primary);
 }
 
 .option-description {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-muted);
 }
 
@@ -293,24 +545,32 @@ button:focus-visible {
   gap: 8px;
   align-items: center;
   margin-top: 8px;
+  font-size: 12.5px;
 }
 
-.free input,
-.composer textarea {
-  font: inherit;
+.free input {
   flex: 1;
-  padding: 6px;
-  background: var(--surface-base);
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+
+.card .actions {
+  justify-content: flex-end;
+}
+
+.form-card .actions button:first-child {
+  background: var(--surface-primary);
+  border-color: var(--surface-primary);
   color: var(--text-primary);
-  border: 1px solid var(--border-default);
-  border-radius: 4px;
 }
 
 .permission-card dl {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 2px 12px;
+  gap: 4px 14px;
   margin: 0 0 8px;
+  font-size: 12.5px;
 }
 
 .permission-card dt {
@@ -319,34 +579,81 @@ button:focus-visible {
 
 .permission-card dd {
   margin: 0;
+  color: var(--text-primary);
 }
 
+.permission-card .detail {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--surface-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+/* The prompt: the field, then a 33px footer with its actions. */
 .composer {
   display: flex;
-  gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border-default);
-  background: var(--surface-raised);
+  flex-direction: column;
+  background: var(--surface-prompt);
+  border-top: 1.5px solid var(--border-strong);
 }
 
 .composer textarea {
-  resize: vertical;
+  display: block;
+  min-height: 56px;
+  height: clamp(56px, 13vh, 110px);
+  padding: 12px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-size: 14.5px;
+  line-height: 22px;
+  color: var(--text-primary);
+  resize: none;
   unicode-bidi: plaintext;
 }
 
 .composer-actions {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: 33px;
+  padding: 0 12px;
+  background: var(--surface-bar);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.composer-actions button {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+
+.composer-actions button:first-child::before {
+  content: "arrow_circle_up";
+  font-family: "Material Symbols Outlined";
+  font-weight: 300;
+  font-size: 18px;
+  line-height: 1;
+  font-feature-settings: "liga";
 }
 
 /* A link from outside text: a button, so nothing in the page navigates. */
 button.link {
   display: inline;
+  min-height: 0;
   padding: 0;
   border: none;
   background: none;
-  color: var(--semantic-info);
+  color: var(--text-accent);
   text-decoration: underline;
   font: inherit;
   cursor: pointer;
@@ -358,7 +665,9 @@ button.link {
 
 .closing h1 {
   margin: 0 0 8px;
-  font-size: 18px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .stop-outcome,
@@ -380,12 +689,558 @@ button.link {
 }
 
 .setup-notice {
-  margin: 0 12px;
-  padding: 8px 12px;
+  margin: 12px;
+  padding: 10px 14px;
+  background: var(--surface-panel);
   border: 1px solid var(--semantic-warning);
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .setup-notice code {
   color: var(--text-primary);
+}
+
+/*
+ * D2: the workbench shell (contracts/workbench-shell.md). The rail is
+ * 56px wide, as `RAIL_WIDTH` in src/shell/Shell.tsx says.
+ */
+
+.shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.shell > .rail {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.shell > .window {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.shell > .status-bar {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  background: var(--surface-panel);
+  border-right: 1.5px solid var(--border-strong);
+}
+
+.rail-button {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  min-height: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.rail-button[aria-current="true"] {
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}
+
+.rail-button[aria-current="true"]::after {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--border-focused);
+}
+
+.rail-palette {
+  margin-top: auto;
+}
+
+.rail-icon::before {
+  font-size: 22px;
+}
+
+.side-panel {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-panel);
+  border-left: 1.5px solid var(--border-strong);
+}
+
+/*
+ * Narrow windows: the panel covers the main area instead of squeezing it,
+ * in the same grid row, so the rail and the status bar stay visible.
+ */
+.side-panel-covering {
+  grid-column: 2 / -1;
+  justify-self: start;
+  max-width: 100%;
+  z-index: 3;
+  border-left: none;
+  border-right: 1.5px solid var(--border-strong);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--surface-shadow) 45%, transparent);
+}
+
+.panel-backdrop {
+  grid-column: 2 / -1;
+  grid-row: 1;
+  z-index: 2;
+  background: var(--surface-base);
+  opacity: 0.62;
+}
+
+/* The panel's edge beside the main area: dragged, or moved with the arrow keys. */
+.side-panel {
+  position: relative;
+}
+
+.side-panel-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 1;
+  touch-action: none;
+}
+
+.side-panel-edge:hover,
+.side-panel-edge:focus {
+  background: var(--border-active);
+}
+
+.core-values {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0 14px;
+  margin: 0 0 12px;
+  font-size: 12px;
+}
+
+.core-values dt,
+.core-values dd {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.core-values dt {
+  color: var(--text-muted);
+}
+
+.core-values dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-primary);
+  font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+}
+
+/* A long value is cut on screen; its title and focus give it whole. */
+.core-value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.core-missing {
+  color: var(--text-muted);
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-style: italic;
+}
+
+.layout-notice {
+  margin: 0 10px;
+  font-size: 10.5px;
+  color: var(--semantic-warning);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  align-self: center;
+}
+
+.side-panel-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.side-panel-title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 3.2px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.side-panel-close {
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.side-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.side-panel-body .actions button {
+  min-height: 26px;
+  font-size: 12px;
+}
+
+/* The status bar: 31px of 10.5px cells, each divided from the next. */
+.status-bar {
+  display: flex;
+  min-width: 0;
+  min-height: 31px;
+  background: var(--surface-bar);
+  border-top: 1.5px solid var(--border-strong);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.status-bar-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.status-bar .status-strip {
+  flex: 1;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.status-bar .status-strip > * {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0 10px;
+  border-right: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.status-bar .status-strip > * > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  unicode-bidi: plaintext;
+}
+
+.status-bar .status-state {
+  font-weight: 500;
+}
+
+.status-bar .status-state::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-bar .status-workspace,
+.status-bar .status-provider,
+.status-bar .status-model {
+  flex: 0 1 auto;
+}
+
+.status-bar .status-workspace {
+  flex-shrink: 3;
+}
+
+.status-bar .status-workspace::before,
+.status-bar .status-provider::before,
+.status-bar .status-model::before {
+  font-family: "Material Symbols Outlined";
+  font-weight: 300;
+  font-size: 16px;
+  line-height: 1;
+  font-feature-settings: "liga";
+  flex: none;
+}
+
+.status-bar .status-workspace::before { content: "folder"; }
+.status-bar .status-provider::before { content: "hub"; }
+.status-bar .status-model::before { content: "neurology"; }
+
+.status-bar .status-model {
+  color: var(--semantic-success);
+}
+
+.status-bar .status-change {
+  min-height: 0;
+  padding: 0 10px;
+  font-size: 10.5px;
+  border: none;
+  border-right: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.status-palette {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-height: 0;
+  margin: 0 0 0 auto;
+  padding: 0 12px;
+  font-size: 10.5px;
+  white-space: nowrap;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  border-radius: 0;
+  color: var(--text-secondary);
+}
+
+.status-palette .icon::before {
+  font-size: 16px;
+}
+
+.palette-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: var(--surface-base);
+  opacity: 0.62;
+}
+
+/* Centred with margins, so its entry animation's transform stays its own. */
+.palette {
+  position: absolute;
+  top: 12%;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: min(560px, calc(100% - 32px));
+  max-height: 70%;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  background: var(--surface-bar);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--surface-shadow) 45%, transparent);
+}
+
+.palette::before {
+  content: "COMMANDS";
+  order: 1;
+  padding: 6px 12px 4px;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--text-muted);
+}
+
+.palette-input {
+  order: 0;
+  height: 32px;
+  margin: 6px 8px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12.5px;
+  background: var(--surface-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+}
+
+.palette-results {
+  order: 2;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+
+.palette-option {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.palette-option.active {
+  background: var(--surface-hover);
+}
+
+.palette-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-group {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.palette-option.active .palette-group {
+  color: var(--text-secondary);
+}
+
+/* Said to a screen reader; the strip shows the same state on screen. */
+.announcer {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * Focus is visible at all times, drawn with the focus token (FR-018): on
+ * every focus, not only the ones a browser counts as keyboard focus, since
+ * the shell moves focus itself (panels, the palette, F6).
+ */
+.shell a:focus,
+.shell button:focus,
+.shell input:focus,
+.shell textarea:focus,
+.shell select:focus,
+.shell [tabindex]:focus,
+.shell [role="option"]:focus {
+  outline: 2px solid var(--border-focused);
+  outline-offset: 1px;
+}
+
+/* The prompt's field sits flush in its area: its ring is drawn inside. */
+.shell .composer textarea:focus {
+  outline-offset: -2px;
+}
+
+/* Panels and the palette ease in; none of it under reduced motion (FR-020). */
+@keyframes shell-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.side-panel,
+.palette {
+  animation: shell-enter 140ms ease-out;
+}
+
+.shell[data-reduced-motion="true"] *,
+.shell[data-reduced-motion="true"] *::before,
+.shell[data-reduced-motion="true"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+.shortcuts {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.shortcuts th,
+.shortcuts td {
+  padding: 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+
+.shortcuts td {
+  color: var(--text-primary);
+}
+
+.shortcuts th {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 10.5px;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+}
+
+kbd {
+  font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  background: var(--surface-input);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell *,
+  .shell *::before,
+  .shell *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

@@ -24,6 +24,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { focusLinux, focusWindows, osLevelEnabled, preflight, pressKey } from "./os-input.mjs";
+import { setReducedMotion } from "./os-preferences.mjs";
 import { SETUPS } from "./setups.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +44,7 @@ const ARTIFACTS = path.resolve(process.env.COMODOR_E2E_ARTIFACTS ?? path.join(HE
 // session: run this whole harness inside both, once.
 if (process.platform === "linux" && !process.env.COMODOR_E2E_WRAPPED) {
   const wrapped = spawnSync("dbus-run-session", [
-    "--", "xvfb-run", "-a", process.execPath, fileURLToPath(import.meta.url),
+    "--", "xvfb-run", "-a", "-s", "-screen 0 1920x1080x24", process.execPath, fileURLToPath(import.meta.url),
     ...process.argv.slice(2),
   ], { stdio: "inherit", env: { ...process.env, COMODOR_E2E_WRAPPED: "1" } });
   process.exit(wrapped.status ?? 1);
@@ -176,6 +178,48 @@ function answer(checkpoint, run) {
       });
       return { ok: true, code: second.status, signal: second.signal };
     }
+    // D2 (T093): keys the operating system delivers, only with
+    // COMODOR_E2E_OS_LEVEL=1; otherwise the scenario reports `not-run`.
+    case "os-level":
+      return { ok: true, preflight: preflight() };
+    case "focus-window": {
+      // The act brings the window forward. Xvfb has no window manager, so on
+      // Linux xdotool also gives the window the input focus.
+      const linux = process.platform === "linux" && osLevelEnabled() ? focusLinux(run.app.pid) : { ok: true };
+      // Windows keeps a window that did not get the last input in the
+      // background; the harness, which sends it, brings it forward.
+      const focusStarted = Date.now();
+      const windows = process.platform === "win32" && osLevelEnabled() ? focusWindows(run.app.pid) : { ok: true };
+      if (process.platform === "win32" && osLevelEnabled()) {
+        console.log(`focus-window: ${JSON.stringify(windows)} in ${Date.now() - focusStarted} ms`);
+      }
+      return { ok: true, act: "focus-window", linux, windows };
+    }
+    case "press-keys": {
+      const result = pressKey(run.app.pid, checkpoint.data?.key);
+      if (osLevelEnabled()) console.log(`press-keys ${JSON.stringify(checkpoint.data?.key)}: ${JSON.stringify(result)}`);
+      return { ok: true, result };
+    }
+    // D2 (T094): the reduced-motion preference set for this run, if any.
+    case "reduced-motion":
+      return { ok: true, motion: motion
+        ? { applied: motion.applied, outcome: motion.outcome, reason: motion.reason, original: motion.original,
+            effective: motion.effective }
+        : { applied: false, outcome: "not-run", reason: "no preference was set for this scenario" } };
+    // D2 (T074): the machine woke, told the way the wake watch tells it.
+    case "wake":
+      return { ok: true, act: "wake" };
+    // D2 (T057): the preferences file's bytes while the application runs,
+    // and whether a temporary file is left beside it.
+    case "read-preferences": {
+      const file = path.join(run.env.COMODOR_DESKTOP_DATA_DIR, "preferences.json");
+      return { ok: true, bytes: fs.existsSync(file) ? fs.readFileSync(file).toString("base64") : null,
+               temporary: fs.existsSync(`${file}.tmp`) };
+    }
+    // D2 (T070): the window's inner size, in physical pixels, set by the
+    // test build after this reply; the page reads it back with `window`.
+    case "resize":
+      return { ok: true, act: "resize", width: checkpoint.data?.width, height: checkpoint.data?.height };
     default:
       return { ok: false, error: `unknown checkpoint ${checkpoint.name}` };
   }
@@ -210,6 +254,59 @@ function searchCanary(canary, places) {
   return { planted, searched, leaks };
 }
 
+/**
+ * D2 (T075): the layout operations in one canary run. Which of them the run
+ * recorded — `read_layout`, `write_layout`, and a refused `write_layout`
+ * (both handlers record every result, refusals included) — and what is wrong
+ * with the stored layout: anything but its four fields, or any conversation
+ * text of the run (what was sent, what came back) in the preferences file.
+ */
+const LAYOUT_FIELDS = ["panel_open", "panel_surface", "panel_width", "version"];
+
+function layoutCanary(record, preferences) {
+  const entries = fs.existsSync(record)
+    ? fs.readFileSync(record, "utf-8").split("\n").filter(Boolean).map((line) => JSON.parse(line))
+    : [];
+  const commands = entries.filter((entry) => entry.kind === "command").map((entry) => entry.value ?? {});
+  const seen = {
+    read: commands.some((command) => command.name === "read_layout"),
+    write: commands.some((command) => command.name === "write_layout" && "Ok" in (command.result ?? {})),
+    refused: commands.some((command) => command.name === "write_layout" && "Err" in (command.result ?? {})),
+  };
+  const texts = [];
+  const parsed = (line) => {
+    try {
+      return JSON.parse(line);
+    } catch {
+      return null;
+    }
+  };
+  for (const entry of entries) {
+    const line = entry.kind === "command" && entry.value?.name === "send_line" ? entry.value.args?.line
+      : entry.kind === "inbound" && entry.value?.kind === "line" ? entry.value.line : undefined;
+    const message = typeof line === "string" ? parsed(line) : null;
+    if (message?.method === "session.send" && typeof message.params?.text === "string") texts.push(message.params.text);
+    if (message?.event?.startsWith?.("message.") && typeof message.params?.text === "string") texts.push(message.params.text);
+    if (typeof message?.params?.delta === "string") texts.push(message.params.delta);
+  }
+  const problems = [];
+  if (fs.existsSync(preferences)) {
+    const text = fs.readFileSync(preferences, "utf-8");
+    const stored = parsed(text);
+    const layout = stored?.layout;
+    if (layout !== undefined) {
+      const fields = layout && typeof layout === "object" ? Object.keys(layout).sort() : [];
+      if (fields.join(",") !== LAYOUT_FIELDS.join(",")) problems.push(`the stored layout has the fields ${fields.join(", ")}`);
+    }
+    const leaked = texts.map((said) => said.trim()).filter((said) => said.length >= 4 && text.includes(said));
+    if (leaked.length > 0) problems.push(`conversation text reached the preferences file: ${leaked.length} piece(s)`);
+  }
+  return { seen, problems };
+}
+
+/** What the layout operations did across every canary run of this invocation. */
+const layoutSeen = { read: false, write: false, refused: false };
+
 /** How often a process that is not ours is checked for: between checks only. */
 const CHECK_EVERY_MS = 50;
 
@@ -235,7 +332,94 @@ function copyIfPresent(from, to) {
   if (fs.existsSync(from)) fs.cpSync(from, to, { recursive: true });
 }
 
+/** The reduced-motion preference of the scenario now running (D2, T094). */
+let motion;
+
+/** D2 (T057): the folders of the run that just ended, and the relaunch about to reuse them. */
+let lastRun;
+let relaunching = null;
+let relaunchRoot = null;
+
+/**
+ * D2 (T057): a setup with `relaunch: { workspace: "same" | "other" }` runs
+ * twice — the first launch ends itself, then the application is launched
+ * again with the same data folder (`COMODOR_DESKTOP_DATA_DIR`), in the same
+ * workspace or a new one, and the scenario runs again with
+ * `params.phase === "relaunched"`. The run passes only if both pass.
+ */
+async function runWithRelaunch(name) {
+  const first = await runScenarioWithPreferences(name);
+  if (!first.ok) return first;
+  const { data, workspace } = lastRun;
+  relaunching = { data, workspace: SETUPS[name].relaunch.workspace === "same" ? workspace : undefined };
+  try {
+    const second = await runScenarioWithPreferences(name);
+    second.firstLaunch = { ok: first.ok, elapsedMs: first.elapsedMs };
+    const result = path.join(ARTIFACTS, name, "result.json");
+    if (fs.existsSync(result)) fs.writeFileSync(result, JSON.stringify(second, null, 2));
+    return second;
+  } finally {
+    relaunching = null;
+    try {
+      if (relaunchRoot) fs.rmSync(relaunchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch (problem) {
+      console.error(`left ${relaunchRoot} behind: ${problem.message}`);
+    }
+    relaunchRoot = null;
+  }
+}
+
+/**
+ * D2 (T094): run a scenario with the operating system's reduced-motion
+ * preference set, and restore it in a `finally` — after a pass, a failure or
+ * the deadline — confirmed by reading it back. A restore that cannot be
+ * confirmed fails the run.
+ */
+async function runScenarioWithPreferences(name) {
+  if (!SETUPS[name]?.reducedMotion) return runScenario(name);
+  const appEnv = {};
+  motion = setReducedMotion(appEnv);
+  const previous = process.env.XDG_CONFIG_HOME;
+  if (appEnv.XDG_CONFIG_HOME) process.env.XDG_CONFIG_HOME = appEnv.XDG_CONFIG_HOME;
+  let summary;
+  let restored = null;
+  try {
+    summary = await runScenario(name);
+  } finally {
+    if (appEnv.XDG_CONFIG_HOME) {
+      if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previous;
+    }
+    restored = motion.restore ? motion.restore() : motion.restored ?? null;
+  }
+  summary.reducedMotion = { applied: motion.applied, outcome: motion.outcome ?? null, reason: motion.reason ?? null,
+                            original: motion.original ?? null, restored };
+  if (restored && !restored.ok) {
+    summary.ok = false;
+    summary.error = `the reduced-motion setting was not restored: ${JSON.stringify(restored)}`;
+  }
+  motion = undefined;
+  // The scenario's own record gains what was set and how it was restored.
+  const result = path.join(ARTIFACTS, name, "result.json");
+  if (fs.existsSync(result)) fs.writeFileSync(result, JSON.stringify(summary, null, 2));
+  return summary;
+}
+
+/** D2: whether a run is already inside its setup's wrapper (see runScenario). */
+let wrapped = false;
+
 async function runScenario(name) {
+  // D2 (T057, T094): a call from the loop goes through the setup's wrapper
+  // first — the relaunch, the reduced-motion preference — and the wrapper's
+  // own calls come back here to run the application.
+  if (!wrapped) {
+    wrapped = true;
+    try {
+      return SETUPS[name]?.relaunch ? await runWithRelaunch(name) : await runScenarioWithPreferences(name);
+    } finally {
+      wrapped = false;
+    }
+  }
   const setup = SETUPS[name];
   if (!setup) return { scenario: name, ok: false, error: "no setup for this scenario" };
   if (setup.platforms && !setup.platforms.includes(process.platform)) {
@@ -265,6 +449,11 @@ async function runScenario(name) {
       version: 1, last_selected_folder: resolve(setup.lastSelectedFolder, places),
     }));
   }
+  // D2 (T057): a preferences file seeded with exact text.
+  if (setup.preferencesText !== undefined) {
+    fs.writeFileSync(path.join(data, "preferences.json"), resolve(setup.preferencesText, places));
+  }
+  lastRun = { data, workspace };
 
   const [fixture, argument] = setup.core ?? ["scripted_core.py", "echo"];
   const fixturePath = path.join(FIXTURES, fixture);
@@ -290,6 +479,11 @@ async function runScenario(name) {
     COMODOR_E2E_CHOOSE: JSON.stringify(resolve(setup.choose ?? [], places)),
     COMODOR_E2E_CONFIRM: setup.confirm ? "yes" : "no",
   };
+  // D2 (T057): a relaunch reuses the first launch's data folder.
+  if (relaunching) {
+    env.COMODOR_DESKTOP_DATA_DIR = relaunching.data;
+    env.COMODOR_E2E_PARAMS = JSON.stringify({ ...JSON.parse(env.COMODOR_E2E_PARAMS), phase: "relaunched" });
+  }
   if (run.hold) {
     env.COMODOR_TEST_HOLD = run.hold;
     // A socket left by an earlier, killed run would refuse the bind.
@@ -306,6 +500,7 @@ async function runScenario(name) {
   }
 
   const args = setup.workspaceArgument === "inner" ? [inner] : setup.workspaceArgument ? [workspace] : [];
+  if (relaunching?.workspace) args.splice(0, args.length, relaunching.workspace);
   const started = Date.now();
   const app = spawn(executable(), args, { env, stdio: ["pipe", "pipe", "pipe"] });
   run.app = app;
@@ -404,6 +599,15 @@ async function runScenario(name) {
         : "the credential was never planted in the Core's home";
     }
   }
+  if (canary) {
+    const layout = layoutCanary(record, path.join(data, "preferences.json"));
+    for (const key of Object.keys(layoutSeen)) layoutSeen[key] ||= layout.seen[key];
+    summary.layoutCanary = layout;
+    if (summary.ok && layout.problems.length > 0) {
+      summary.ok = false;
+      summary.error = layout.problems.join("; ");
+    }
+  }
   // After a wake (spec: Machine sleep and wake): the native side checked the
   // Core (status `checking`, then `ready`), and only then did the page read
   // its session again — from what the run recorded, in order.
@@ -424,6 +628,11 @@ async function runScenario(name) {
     }
   }
   fs.writeFileSync(path.join(kept, "result.json"), JSON.stringify(summary, null, 2));
+  // D2 (T057): a relaunch reuses this run's folders; they go after it.
+  if (setup.relaunch && !relaunching) {
+    relaunchRoot = root;
+    return summary;
+  }
   // Best effort: on Windows the Core may still be ending (its job closes
   // with the application) and holds its working folder until it has.
   try {
@@ -458,6 +667,19 @@ for (const name of scenarios) {
   const ready = summary.readyMs === undefined ? "" : `, ready in ${summary.readyMs} ms`;
   console.log(`${verdict} ${name} (${summary.elapsedMs ?? 0} ms${ready})${summary.ok ? "" : `: ${summary.error ?? "see result.json"}`}`);
   if (!summary.ok) failed += 1;
+}
+// D2 (T075): a canary run over every flow (canary-full.mjs sets
+// COMODOR_CANARY_LAYOUT) must have exercised both layout operations, a refused
+// write among them, or it proves nothing about them.
+if (CANARY_ALL && process.env.COMODOR_CANARY_LAYOUT === "1") {
+  const missing = Object.entries(layoutSeen).filter(([, seen]) => !seen).map(([what]) => what);
+  if (missing.length > 0) {
+    console.log(`FAIL canary coverage: no ${missing.map((what) => ({ read: "read_layout", write: "write_layout",
+      refused: "refused write_layout" })[what]).join(", ")} was recorded`);
+    failed += 1;
+  } else {
+    console.log("PASS canary coverage: read_layout, write_layout and a refused write_layout recorded");
+  }
 }
 fs.writeFileSync(path.join(ARTIFACTS, "summary.json"),
                  JSON.stringify({ scenarios, failed }, null, 2));

@@ -194,6 +194,15 @@ while Date() < deadline {
   }
   usleep(250_000)
 }
+// D2: when no panel was ever found, say what the application's windows were.
+if last == nil {
+  let app = AXUIElementCreateApplication(application)
+  let windows = (value(app, kAXWindowsAttribute as String) as? [AXUIElement] ?? []).map { w -> String in
+    let title = value(w, kAXTitleAttribute as String) as? String ?? ""
+    return role(w) + " '" + title + "' [" + kids(w).map(role).joined(separator: ",") + "]"
+  }
+  emit(["error": "the panel's browser was never found", "windows": windows], 4)
+}
 emit(["error": "the panel's browser was not read twice alike", "selected": last?.selected ?? [],
       "popups": last?.popups ?? []], 4)
 `;

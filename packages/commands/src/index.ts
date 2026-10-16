@@ -130,6 +130,47 @@ export class CommandRegistry<Context = CommandContext> {
   }
 }
 
+/**
+ * A palette's selection: the query, its results, and which one is
+ * highlighted. Shared so every client applies the same rule.
+ */
+export interface PaletteSelection<Context> {
+  readonly query: string;
+  readonly results: readonly Command<Context>[];
+  /** The highlighted result; always valid, or -1 when there is none. */
+  readonly index: number;
+}
+
+/**
+ * The selection for `query`: the registry's ranked search over the commands
+ * enabled in `context`, highlighted from the top. Called on every change of
+ * the query, so an index never survives a rebuilt list and points at
+ * something nobody selected.
+ */
+export function selectionFor<Context>(
+  registry: CommandRegistry<Context>, context: Context, query: string,
+): PaletteSelection<Context> {
+  const results = registry.search(query, context);
+  return { query, results, index: results.length ? 0 : -1 };
+}
+
+/** Move the highlight by `by`, wrapping within the results. */
+export function moveSelection<Context>(
+  state: PaletteSelection<Context>, by: number,
+): PaletteSelection<Context> {
+  const count = state.results.length;
+  if (count === 0) return state;
+  const index = (((state.index < 0 ? 0 : state.index) + by) % count + count) % count;
+  return { ...state, index };
+}
+
+/** The highlighted command, if there is one. */
+export function selectedCommand<Context>(
+  state: PaletteSelection<Context>,
+): Command<Context> | undefined {
+  return state.index < 0 ? undefined : state.results[state.index];
+}
+
 function rank<Context>(command: Command<Context>, needle: string): number {
   const haystacks: Array<[string, number]> = [
     [command.title.toLowerCase(), 3],

@@ -127,8 +127,82 @@ fn act_for_harness(app: &tauri::AppHandle, act: &str) {
             let _ = app.state::<crate::commands::Desktop>().supervisor
                 .stop(crate::shutdown::StopReason::Quit);
         }
+        // D2: bring the window to the foreground, for keys the operating
+        // system delivers (the `key-delivery` scenario).
+        "focus-window" => {
+            if let Some(window) = app.get_webview_window(crate::MAIN_WINDOW) {
+                let _ = window.set_focus();
+                // The window in front is not enough on Windows: the keyboard
+                // focus must be in the WebView's own child window as well.
+                let webview: &tauri::Webview = window.as_ref();
+                let _ = webview.set_focus();
+            }
+        }
         _ => {}
     });
+}
+
+/// D2: the size a `resize` reply asks for, in physical pixels.
+pub fn resize_request(reply: &Value) -> Option<(u32, u32)> {
+    let size = |key: &str| reply.get(key).and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok());
+    match (size("width"), size("height")) {
+        (Some(width), Some(height)) if width > 0 && height > 0 => Some((width, height)),
+        _ => None,
+    }
+}
+
+/// D2: set the window's inner size, in physical pixels, as the harness
+/// asked. Like every act it returns nothing: the scenario reads the size
+/// actually applied through the `window` query.
+fn resize_for_harness(app: &tauri::AppHandle, reply: &Value) {
+    use tauri::Manager;
+    let Some((width, height)) = resize_request(reply) else { return };
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("e2e-resize".into()).spawn(move || {
+        if let Some(window) = app.get_webview_window(crate::MAIN_WINDOW) {
+            let _ = window.set_size(tauri::PhysicalSize::new(width, height));
+        }
+    });
+}
+
+/// D2: the window as the `window` query reports it — physical sizes and the
+/// scale factor, the same sizes in logical pixels rounded to whole numbers,
+/// the monitor's work area likewise (or `null` with no monitor), and focus.
+pub fn window_report(inner: (u32, u32), outer: (u32, u32), scale: f64,
+                     monitor: Option<((i32, i32, u32, u32), f64, &str)>, focused: bool) -> Value {
+    let logical = |(width, height): (u32, u32), scale: f64| {
+        json!({ "width": (f64::from(width) / scale).round(), "height": (f64::from(height) / scale).round() })
+    };
+    let physical = |(width, height): (u32, u32)| json!({ "width": width, "height": height });
+    json!({
+        "inner": physical(inner),
+        "outer": physical(outer),
+        "scale_factor": scale,
+        "inner_logical": logical(inner, scale),
+        "outer_logical": logical(outer, scale),
+        "monitor": monitor.map(|((x, y, width, height), monitor_scale, source)| json!({
+            "work_area": { "x": x, "y": y, "width": width, "height": height },
+            "work_area_logical": logical((width, height), monitor_scale),
+            "scale_factor": monitor_scale,
+            "work_area_source": source,
+        })),
+        "focused": focused,
+    })
+}
+
+fn window_query(app: &tauri::AppHandle) -> Result<Value, String> {
+    use tauri::Manager;
+    let window = app.get_webview_window(crate::MAIN_WINDOW).ok_or("no main window")?;
+    let inner = window.inner_size().map_err(|problem| problem.to_string())?;
+    let outer = window.outer_size().map_err(|problem| problem.to_string())?;
+    let scale = window.scale_factor().map_err(|problem| problem.to_string())?;
+    let focused = window.is_focused().unwrap_or(false);
+    let monitor = window.current_monitor().map_err(|problem| problem.to_string())?.map(|monitor| {
+        let area = monitor.work_area();
+        ((area.position.x, area.position.y, area.size.width, area.size.height), monitor.scale_factor(), "work_area")
+    });
+    Ok(window_report((inner.width, inner.height), (outer.width, outer.height), scale,
+                     monitor.as_ref().map(|(area, scale, source)| (*area, *scale, *source)), focused))
 }
 
 /// The scenario runner's one command. A checkpoint blocks until the harness
@@ -146,6 +220,9 @@ pub fn e2e_report(app: tauri::AppHandle, result: Value) -> Result<Value, String>
                 return Err("the harness closed its channel".into());
             }
             let reply: Value = serde_json::from_str(reply.trim()).map_err(|problem| problem.to_string())?;
+            if reply.get("act").and_then(Value::as_str) == Some("resize") {
+                resize_for_harness(&app, &reply);
+            }
             if let Some(act) = reply.get("act").and_then(Value::as_str) {
                 act_for_harness(&app, act);
             }
@@ -160,6 +237,7 @@ pub fn e2e_report(app: tauri::AppHandle, result: Value) -> Result<Value, String>
             Some("refused") => Ok(json!({
                 "refused": *REFUSED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
             })),
+            Some("window") => window_query(&app),
             Some("chooser") => Ok(json!({
                 "starts": *CHOOSER_STARTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
             })),
@@ -338,5 +416,32 @@ mod tests {
         assert!(names(tcp_port), "TCP {tcp_port} in {during:?}");
         assert!(names(udp_port), "UDP {udp_port} in {during:?}");
         drop((tcp, udp));
+    }
+
+    /// D2: the `resize` reply's size, in physical pixels, or nothing.
+    #[test]
+    fn a_resize_reply_names_a_physical_size() {
+        assert_eq!(resize_request(&json!({"act": "resize", "width": 1124, "height": 750})), Some((1124, 750)));
+        for bad in [json!({"act": "resize"}), json!({"width": 0, "height": 10}), json!({"width": -5, "height": 10}),
+                    json!({"width": 10.5, "height": 10}), json!({"width": "10", "height": 10})] {
+            assert_eq!(resize_request(&bad), None, "{bad}");
+        }
+    }
+
+    /// D2: the `window` query reports physical sizes, the scale factors and
+    /// the logical sizes rounded to whole pixels — at a fractional scale too.
+    #[test]
+    fn the_window_report_rounds_logical_sizes_at_a_fractional_scale() {
+        let report = window_report((1124, 750), (1140, 790), 1.25, Some(((0, 0, 2400, 1560), 1.25, "work_area")), true);
+        assert_eq!(report["inner"], json!({"width": 1124, "height": 750}));
+        assert_eq!(report["inner_logical"], json!({"width": 899.0, "height": 600.0}));
+        assert_eq!(report["outer_logical"], json!({"width": 912.0, "height": 632.0}));
+        assert_eq!(report["scale_factor"], 1.25);
+        assert_eq!(report["monitor"]["work_area_logical"], json!({"width": 1920.0, "height": 1248.0}));
+        assert_eq!(report["monitor"]["work_area_source"], "work_area");
+        assert_eq!(report["focused"], true);
+        let bare = window_report((520, 400), (520, 400), 1.0, None, false);
+        assert_eq!(bare["monitor"], Value::Null);
+        assert_eq!(bare["inner_logical"], json!({"width": 520.0, "height": 400.0}));
     }
 }

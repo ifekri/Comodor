@@ -31,6 +31,14 @@
  * - `platforms`: where the case applies; elsewhere it is reported N/A.
  * - `maxReadyMs`: the result's `readyAt` must come this soon after the
  *   process started (SC-001).
+ * - `preferencesText` (D2): the preferences file's exact text before launch.
+ * - `relaunch` (D2): `{ workspace: "same" | "other" }` — after the first
+ *   launch ends itself, launch again with the same data folder, in the same
+ *   workspace or a new one; the scenario runs again with
+ *   `params.phase === "relaunched"`.
+ * - `reducedMotion` (D2): set the operating system's reduced-motion
+ *   preference for this run and restore it after, with
+ *   COMODOR_E2E_OS_LEVEL=1 only (e2e/os-preferences.mjs).
  *
  * Placeholders, anywhere above: `$workspace` (the launch's workspace folder)
  * and `$stored` (another existing folder, standing for the last one chosen).
@@ -103,5 +111,78 @@ export const SETUPS = {
   "workspace-project-root": {
     workspaceArgument: "inner",
     params: { root: "$workspace", inner: "$inner" },
+  },
+  // D2: the workbench shell around the conversation, and around a failure.
+  shell: { workspaceArgument: true },
+  "shell-failure": { core: ["doubles.py", "version-mismatch"], workspaceArgument: true },
+  // D2: the command palette in each state it can be reached in.
+  palette: { workspaceArgument: true },
+  "palette-failure": { core: ["doubles.py", "version-mismatch"], workspaceArgument: true },
+  "palette-unconfigured": { realCore: true, configured: false, workspaceArgument: true },
+  // D2: the keyboard, with keys dispatched in the page.
+  keyboard: { workspaceArgument: true },
+  // D2: keys delivered by the operating system (COMODOR_E2E_OS_LEVEL=1 only).
+  "key-delivery": { workspaceArgument: true },
+  // D2: the operating system's reduced-motion preference, set for the run and
+  // restored after (COMODOR_E2E_OS_LEVEL=1 only; the stylesheet check always).
+  "reduced-motion": { workspaceArgument: true, reducedMotion: true },
+  // D2: the layout through the real bridge, kept across a reload, a crash and
+  // a workspace change; a refused write leaves the file byte-identical.
+  layout: { workspaceArgument: true, choose: ["$stored"], params: { stored: "$stored" } },
+  // D2: zero WCAG 2.1 A/AA violations in every window state (axe-core).
+  accessibility: { workspaceArgument: true },
+  "accessibility-starting": {
+    core: ["doubles.py", "silent"], workspaceArgument: true, params: { state: "starting|handshaking" },
+  },
+  "accessibility-restarting": {
+    core: ["doubles.py", "sequenced"], sequence: ["scripted:echo", "silent"], workspaceArgument: true,
+    params: { state: "restarting|handshaking|starting", then: "crash" },
+  },
+  "accessibility-checking": {
+    core: ["doubles.py", "ignore-stop"], workspaceArgument: true, params: { state: "checking", then: "wake" },
+  },
+  "accessibility-failed": {
+    core: ["doubles.py", "version-mismatch"], workspaceArgument: true, params: { state: "failed" },
+  },
+  "accessibility-unconfigured": {
+    realCore: true, configured: false, workspaceArgument: true, params: { state: "ready" },
+  },
+  "accessibility-absent": { choose: [null], params: { state: "absent" } },
+  "accessibility-closing": {
+    lifetime: true, core: ["doubles.py", "ignore-stop"], childPid: true, workspaceArgument: true, forced: true,
+  },
+  // D2: narrow windows, sized in physical pixels from the scale factor.
+  narrow: { workspaceArgument: true },
+  // D2: the Core panel across a crash and a workspace change, and the
+  // diagnostics panel over a real Core's stderr.
+  "core-panel": { workspaceArgument: true, choose: ["$stored"], params: { stored: "$stored" } },
+  "diagnostics-panel": { core: ["doubles.py", "stderr-flood"], workspaceArgument: true },
+  // D2: the layout across a relaunch with the same data folder, in the same
+  // workspace and in another one (the first launch quits; see `relaunch`).
+  "layout-relaunch-same": { lifetime: true, workspaceArgument: true, relaunch: { workspace: "same" } },
+  "layout-relaunch-other": { lifetime: true, workspaceArgument: true, relaunch: { workspace: "other" } },
+  // D2: seeded layouts — invalid ones mean the defaults, with D1's values intact.
+  "layout-seeded-unreadable": {
+    workspaceArgument: true,
+    preferencesText: '{"version":1,"window":{"width":1100,"height":760,"x":40,"y":40,"maximized":false},"last_selected_folder":"/work/seeded","layout":"junk"}',
+    params: { expect: "defaults", folder: "/work/seeded", window: {"width":1100,"height":760,"x":40,"y":40,"maximized":false} },
+  },
+  "layout-seeded-version": {
+    workspaceArgument: true,
+    preferencesText: '{"version":1,"window":{"width":1100,"height":760,"x":40,"y":40,"maximized":false},"last_selected_folder":"/work/seeded","layout":{"version":2,"panel_open":true,"panel_surface":"core","panel_width":320}}',
+    params: { expect: "defaults", folder: "/work/seeded", window: {"width":1100,"height":760,"x":40,"y":40,"maximized":false} },
+  },
+  "layout-seeded-range": {
+    workspaceArgument: true,
+    preferencesText: '{"version":1,"window":{"width":1100,"height":760,"x":40,"y":40,"maximized":false},"last_selected_folder":"/work/seeded","layout":{"version":1,"panel_open":true,"panel_surface":"core","panel_width":4000}}',
+    params: { expect: "defaults", folder: "/work/seeded", window: {"width":1100,"height":760,"x":40,"y":40,"maximized":false} },
+  },
+  "layout-seeded-valid": {
+    workspaceArgument: true,
+    preferencesText: '{"version":1,"window":{"width":1100,"height":760,"x":40,"y":40,"maximized":false},"last_selected_folder":"/work/seeded","layout":{"version":1,"panel_open":true,"panel_surface":"shortcuts","panel_width":300}}',
+    params: { expect: "restored", folder: "/work/seeded", window: {"width":1100,"height":760,"x":40,"y":40,"maximized":false} },
+  },
+  "palette-closing": {
+    lifetime: true, core: ["doubles.py", "ignore-stop"], childPid: true, workspaceArgument: true, forced: true,
   },
 };

@@ -21,7 +21,7 @@ export function ModeControl({ intent, held, onChoose }: {
         {current.label}
       </span>
       {CYCLE.map((mode) => (
-        <button key={mode} type="button" title={MODES[mode].summary} disabled={held}
+        <button key={mode} type="button" data-mode={mode} title={MODES[mode].summary} disabled={held}
                 aria-pressed={mode === intent.confirmed}
                 className={mode === intent.desired && mode !== intent.confirmed
                   ? "mode-option asked" : "mode-option"}

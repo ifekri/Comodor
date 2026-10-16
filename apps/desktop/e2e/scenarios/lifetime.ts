@@ -118,3 +118,43 @@ export const lifetimeSecondConfirmed: Scenario = async (context) => {
   expect(document.querySelector('[data-testid="stop-outcome"]') === null, "the stop was orderly");
   return { switchedTo: workspace() };
 };
+
+/**
+ * D2 T059: the layout across an application relaunch with the same data
+ * folder (SC-008, FR-024). The harness runs this twice (`relaunch` in
+ * setups.mjs): first arrange a layout and quit; then, relaunched in the same
+ * workspace or another one, find it restored, and the file holding the
+ * layout beside D1's values.
+ */
+async function relaunchCase(context: ScenarioContext): Promise<Record<string, unknown>> {
+  const panel = () => document.querySelector<HTMLElement>("aside");
+  if (context.params["phase"] !== "relaunched") {
+    await named(context);
+    document.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button[aria-label="Diagnostics"]')!.click();
+    await context.waitFor(() => panel()?.getAttribute("aria-label") === "Diagnostics");
+    // The write follows the click: read the file frame by frame, within a bound.
+    let stored = false;
+    for (let frame = 0; frame < 600 && !stored; frame += 1) {
+      const bytes = (await context.checkpoint("read-preferences"))["bytes"] as string | null;
+      stored = bytes !== null && atob(bytes).includes('"panel_surface": "diagnostics"');
+      if (!stored) await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    }
+    expect(stored, "the layout was written before quitting");
+    // Closed the way a person closes it: D1 saves the window's geometry on
+    // close, through the same file, and the layout must survive that save.
+    await context.checkpoint("close-window");
+    return ending();
+  }
+  await context.element('[data-testid="status-strip"][data-state="ready"]');
+  await context.waitFor(() => panel()?.getAttribute("aria-label") === "Diagnostics");
+  const reply = await context.checkpoint("read-preferences");
+  const file = JSON.parse(atob(reply["bytes"] as string)) as Record<string, unknown>;
+  expect(JSON.stringify(file["layout"]) !== undefined
+    && (file["layout"] as Record<string, unknown>)["panel_surface"] === "diagnostics", "the layout is in the file");
+  expect(file["version"] === 1 && typeof file["window"] === "object", "D1's values are in the file beside it");
+  await named(context);
+  return { restored: panel()!.getAttribute("aria-label"), workspace: workspace(), file };
+}
+
+export const layoutRelaunchSame: Scenario = relaunchCase;
+export const layoutRelaunchOther: Scenario = relaunchCase;

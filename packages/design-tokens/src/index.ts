@@ -108,9 +108,122 @@ export const terminal: Theme = {
  * Not used by the terminal client. It is here because it is the proof that a
  * token is renderer-independent: if a token could not be expressed this way,
  * it was a colour wearing a name.
+ *
+ * Every role is emitted, the window's (`WINDOW`, below) included; a theme
+ * without them, like the terminal's, gives each its stand-in's colour.
  */
-export function cssVariables(theme: Theme = terminal): string {
-  return TOKENS
-    .map((token) => `  --${token.replace(/\./g, "-")}: ${theme[token]};`)
+export function cssVariables(theme: Theme | WindowTheme = terminal): string {
+  const colours: Partial<Record<Role, string>> = theme;
+  return roles()
+    .map((role) => `  --${role.replace(/\./g, "-")}: ${colours[role] ?? theme[STAND_IN[role as WindowRole]]};`)
     .join("\n");
 }
+
+/**
+ * The desktop window's finer roles (Feature 004): its bars, its panels, a
+ * field, the prompt, a row under the pointer, the primary action, each mode's
+ * own ground, a floating layer's shadow, a strong and a subtle border, and an
+ * accent for text. Roles like the others, kept in their own list so the
+ * terminal mapping above stays exactly as it is: the terminal draws none of
+ * them, and `cssVariables` gives each one a terminal stand-in.
+ */
+export const WINDOW = [
+  "surface.bar",
+  "surface.panel",
+  "surface.input",
+  "surface.prompt",
+  "surface.hover",
+  "surface.primary",
+  "surface.act",
+  "surface.plan",
+  "surface.ask",
+  "surface.chat",
+  "surface.shadow",
+  "border.strong",
+  "border.subtle",
+  "text.accent",
+] as const;
+
+export type WindowRole = (typeof WINDOW)[number];
+
+export type Role = Token | WindowRole;
+
+/**
+ * Every role a CSS mapping emits: the shared tokens, then the window's. A
+ * function rather than a constant, so a client that never asks for it (the
+ * terminal) bundles none of the window's roles.
+ */
+export function roles(): readonly Role[] {
+  return [...TOKENS, ...WINDOW];
+}
+
+/** A mapping for a renderer that draws the window's roles too. */
+export type WindowTheme = Readonly<Record<Role, string>>;
+
+/** For a theme without the window's roles, the shared token each one falls back to. */
+export const STAND_IN: Readonly<Record<WindowRole, Token>> = {
+  "surface.bar": "surface.raised",
+  "surface.panel": "surface.raised",
+  "surface.input": "surface.base",
+  "surface.prompt": "surface.base",
+  "surface.hover": "surface.selected",
+  "surface.primary": "surface.selected",
+  "surface.act": "surface.selected",
+  "surface.plan": "surface.selected",
+  "surface.ask": "surface.selected",
+  "surface.chat": "surface.selected",
+  "surface.shadow": "surface.base",
+  "border.strong": "border.default",
+  "border.subtle": "border.default",
+  "text.accent": "border.focused",
+};
+
+/**
+ * The desktop window's mapping (Feature 004): a neutral dark ground with a
+ * cyan focus, after the owner's reference design.
+ *
+ * Every text colour here reaches WCAG 2.1 AA (4.5:1) on every ground it is
+ * drawn on. Where the reference's grey or red fell short — `text.muted`
+ * (#8a8a8a there) and `semantic.danger` (#e0605a there) on the raised
+ * grounds — the nearest value that passes is used instead, and the
+ * reference's dimmer greys are not used for text at all.
+ */
+export const desktop: WindowTheme = {
+  "surface.base": "#191919",
+  "surface.raised": "#2a2a2a",
+  "surface.overlay": "#272727",
+  "surface.selected": "#1b2b2f",
+  "surface.bar": "#1f1f1f",
+  "surface.panel": "#242424",
+  "surface.input": "#1c1c1c",
+  "surface.prompt": "#1d1d1d",
+  "surface.hover": "#333333",
+  "surface.primary": "#2f5a3e",
+  "surface.act": "#163824",
+  "surface.plan": "#173a44",
+  "surface.ask": "#1d2a33",
+  "surface.chat": "#262626",
+  "surface.shadow": "#000000",
+
+  "border.default": "#3a3a3a",
+  "border.focused": "#5fd4e8",
+  "border.active": "#3fa9bc",
+  "border.strong": "#424242",
+  "border.subtle": "#333333",
+
+  "text.primary": "#e6e6e6",
+  "text.secondary": "#b8b8b8",
+  "text.muted": "#929292",
+  "text.accent": "#5fd4e8",
+
+  "semantic.success": "#35c46a",
+  "semantic.warning": "#e0a04a",
+  "semantic.danger": "#e66a64",
+  "semantic.info": "#3fa2e0",
+
+  // Act changes things and reads green; Plan is the cyan of focus; Ask is blue.
+  "mode.act": "#35c46a",
+  "mode.plan": "#5fd4e8",
+  "mode.ask": "#3fa2e0",
+  "mode.chat": "#b8b8b8",
+};

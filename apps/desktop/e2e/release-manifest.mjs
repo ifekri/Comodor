@@ -8,8 +8,9 @@
  * 2. Assert, matching identifiers to command names from the generated files:
  *    exactly one allow/deny pair per command of `COMMANDS` and nothing for
  *    `e2e_report`; only the `main` capability, for window `main`; `main`
- *    grants exactly the nine allow identifiers (the `core:` minimum recorded
- *    at T003 is empty) and no plugin permission.
+ *    grants exactly the eleven allow identifiers of
+ *    specs/004-workbench-shell/contracts/native-operations.md (the `core:`
+ *    minimum recorded at T003 is empty) and no plugin permission.
  * 3. Build the test configuration into its own target directory, and assert
  *    it differs only by `e2e_report`'s pair and the `e2e-test` capability.
  * 4. Prove step 2 can fail: on a scratch copy whose `main` also grants
@@ -31,7 +32,7 @@ const NATIVE = path.join(DESKTOP, "src-tauri");
 const GENERATED = path.join(NATIVE, "gen", "schemas");
 const TEST_COMMAND = "e2e_report";
 
-/** The nine names, read from the one constant the build reads too. */
+/** The eleven names, read from the one constant the build reads too. */
 function commandsConstant() {
   const source = fs.readFileSync(path.join(NATIVE, "src", "command_names.rs"), "utf-8");
   const list = source.slice(source.indexOf("pub const COMMANDS"));
@@ -142,7 +143,7 @@ function checkTestBuild(release, test, commands) {
 }
 
 const commands = commandsConstant();
-if (commands.length !== 9) throw new Error(`COMMANDS has ${commands.length} names`);
+if (commands.length !== 11) throw new Error(`COMMANDS has ${commands.length} names`);
 
 const release = build("release", [], undefined);
 const releaseProblems = checkRelease(release, commands);

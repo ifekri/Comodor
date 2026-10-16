@@ -21,6 +21,8 @@ Behaviours:
   completes the handshake and serves like a real Core.
 - `crash-on-send` — a real scripted Core that exits abruptly on the first
   model call of the first `session.send`.
+- `silent` (D2) — reads `client.hello` and never answers: the window stays
+  "Starting…" for as long as it is looked at.
 - `sequenced` — one behaviour per launch, from the JSON list in
   `COMODOR_TEST_SEQUENCE` (`crash-on-send`, `complete-turn`, or
   `scripted:<scenario>`), advancing a counter kept beside that file. The
@@ -123,6 +125,11 @@ def main() -> None:
             Path(pid_file).write_text(str(child.pid), encoding="utf-8")
         # Every further line, `shutdown` included, is read and ignored; EOF is
         # ignored too. Only a forced stop ends this process and its child.
+        while sys.stdin.readline():
+            pass
+        threading.Event().wait()
+    elif behaviour == "silent":
+        read_hello()
         while sys.stdin.readline():
             pass
         threading.Event().wait()

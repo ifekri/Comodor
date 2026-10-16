@@ -1,5 +1,7 @@
 import { createRoot } from "react-dom/client";
 
+import "./fonts.ts";
+
 import { App } from "./app.tsx";
 import { tauriApi } from "./native.ts";
 import { applyTheme } from "./theme.ts";

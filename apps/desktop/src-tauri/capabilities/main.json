@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The window's only capability: the nine app commands of contracts/native-bridge.md, and nothing else. No plugin permission and no core permission (the IPC channel needs none, verified on tauri 2.12.1).",
+  "description": "The window's only capability: the eleven app commands of specs/004-workbench-shell/contracts/native-operations.md, and nothing else. No plugin permission and no core permission (the IPC channel needs none, verified on tauri 2.12.1).",
   "windows": ["main"],
   "permissions": [
     "allow-connect",
@@ -12,6 +12,8 @@
     "allow-retry",
     "allow-check-again",
     "allow-quit-now",
-    "allow-open-external"
+    "allow-open-external",
+    "allow-read-layout",
+    "allow-write-layout"
   ]
 }
