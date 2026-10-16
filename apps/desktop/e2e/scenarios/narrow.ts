@@ -212,8 +212,8 @@ export const narrow: Scenario = async (context) => {
     for (const button of document.querySelectorAll<HTMLButtonElement>('nav[aria-label="Mode"] button')) {
       usable(button, `${name}: the mode ${button.textContent}`);
     }
-    const change = document.querySelector<HTMLButtonElement>("footer.status-bar .status-change");
-    if (change) usable(change, `${name}: Change workspace…`);
+    // Ready, so "Change workspace…" is offered: its absence fails, like any essential's.
+    usable(document.querySelector<HTMLButtonElement>("footer.status-bar .status-change"), `${name}: Change workspace…`);
     // A draft makes Send available; it is not sent, and the draft is cleared.
     textarea.focus();
     typeInto(textarea, "a draft at this size");

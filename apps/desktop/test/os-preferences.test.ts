@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { macRestoreArguments, macRestoredExactly, macTypeFlag } from "../e2e/os-preferences.mjs";
+import { macReadOutcome, macRestoreArguments, macRestoredExactly, macTypeFlag } from "../e2e/os-preferences.mjs";
 
 describe("the type of the original setting", () => {
   test("is read from `defaults read-type`", () => {
@@ -57,5 +57,30 @@ describe("a restoration counts", () => {
     expect(macRestoredExactly(missing, { absent: true, effective: false })).toBe(true);
     expect(macRestoredExactly(missing, { absent: false, flag: "-bool", value: "0", effective: false })).toBe(false);
     expect(macRestoredExactly(missing, { absent: true, effective: true })).toBe(false);
+  });
+});
+
+describe("reading the original setting", () => {
+  // `defaults` says a missing key in its own words; anything else that fails
+  // is not an absence, and must never be restored by deleting the key.
+  const missing = { status: 1, stdout: "", stderr: "\nThe domain/default pair of (com.apple.universalaccess, reduceMotion) does not exist\n" };
+
+  test("counts the key as absent only when `defaults` says it does not exist", () => {
+    expect(macReadOutcome(missing)).toEqual({ absent: true });
+  });
+
+  test("is an error for any other failure: a timeout, a launch failure, a refusal", () => {
+    expect(macReadOutcome({ status: null, stdout: "", stderr: "", error: new Error("spawnSync defaults ETIMEDOUT") }))
+      .toEqual({ error: expect.stringContaining("ETIMEDOUT") });
+    expect(macReadOutcome({ status: 1, stdout: "", stderr: "Could not read domain: Operation not permitted" }))
+      .toEqual({ error: expect.stringContaining("Operation not permitted") });
+    expect(macReadOutcome({ status: 1, stdout: "", stderr: "" })).toEqual({ error: expect.any(String) });
+  });
+
+  test("keeps a value exactly, removing only the newline `defaults` adds", () => {
+    expect(macReadOutcome({ status: 0, stdout: "1\n", stderr: "" })).toEqual({ absent: false, value: "1" });
+    expect(macReadOutcome({ status: 0, stdout: "  spaced value \n", stderr: "" }))
+      .toEqual({ absent: false, value: "  spaced value " });
+    expect(macReadOutcome({ status: 0, stdout: "two\nlines\n", stderr: "" })).toEqual({ absent: false, value: "two\nlines" });
   });
 });

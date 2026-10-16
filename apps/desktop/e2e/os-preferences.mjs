@@ -182,14 +182,30 @@ export function macRestoredExactly(original, now) {
   return now.absent === false && now.flag === original.flag && now.value === original.value;
 }
 
+/**
+ * What one `defaults read` of the key says: present with its value exactly
+ * (only the newline `defaults` appends removed), absent only when `defaults`
+ * says the pair does not exist, and an error for any other failure — a
+ * timeout, a launch failure, a refusal — so an unreadable setting is never
+ * taken for an absent one (and later deleted).
+ */
+export function macReadOutcome(read) {
+  if (read.error) return { error: `defaults read failed: ${read.error.message ?? read.error}` };
+  if (read.status === 0) return { absent: false, value: `${read.stdout ?? ""}`.replace(/\n$/, "") };
+  const said = `${read.stderr ?? ""}`.trim();
+  if (/does not exist/.test(said)) return { absent: true };
+  return { error: `defaults read failed (${read.status ?? "no status"}): ${said || "no reason given"}` };
+}
+
 /** The setting as it stands: present or absent, its type and value, and the effective value WebKit uses. */
 export function macReadMotion() {
-  const read = defaults("read", MAC_DOMAIN, MAC_KEY);
+  const read = macReadOutcome(defaults("read", MAC_DOMAIN, MAC_KEY));
+  if (read.error) return { error: read.error };
   const effective = macEffective();
   if (effective.error) return { error: `the effective setting could not be read: ${effective.error}` };
-  if (read.status !== 0) return { absent: true, effective: effective.reduced };
+  if (read.absent) return { absent: true, effective: effective.reduced };
   const type = defaults("read-type", MAC_DOMAIN, MAC_KEY);
-  return { absent: false, value: read.stdout.trim(), type: `${type.stdout ?? ""}`.trim(),
+  return { absent: false, value: read.value, type: `${type.stdout ?? ""}`.trim(),
            flag: macTypeFlag(type.stdout), effective: effective.reduced };
 }
 
