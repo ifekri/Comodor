@@ -244,6 +244,10 @@ describe("choosing a surface", () => {
     await showSurface(container, "Keyboard shortcuts");
     await until(() => panelOf(container, "Keyboard shortcuts"), "the shortcuts");
     expect(container.querySelectorAll('[role="dialog"].modal-panel').length).toBe(1);
+    // A body with nothing focusable in it still scrolls by the keyboard (axe: scrollable-region-focusable).
+    const body = panelOf(container, "Keyboard shortcuts")!.querySelector<HTMLElement>(".modal-body")!;
+    expect([body.tabIndex, body.getAttribute("role"), body.getAttribute("aria-label")])
+      .toEqual([0, "region", "Keyboard shortcuts contents"]);
     await showSurface(container, "Keyboard shortcuts");
     await until(() => container.querySelector('[role="dialog"].modal-panel') === null, "the panel closed");
   });

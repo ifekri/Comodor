@@ -50,7 +50,8 @@ export function ModalPanel({ surface, panelRef, onClose, children }: {
             <span className="icon" data-icon="close" aria-hidden="true" />
           </button>
         </div>
-        <div className="modal-body">{children}</div>
+        {/* It scrolls in a short window: the keyboard reaches it even when nothing in it takes focus. */}
+        <div className="modal-body" role="region" aria-label={`${name} contents`} tabIndex={0}>{children}</div>
         <div className="modal-foot">
           <span className="modal-hint">Esc to close</span>
           <button type="button" className="modal-done" onClick={onClose}>Close</button>
