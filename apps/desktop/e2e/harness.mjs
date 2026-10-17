@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { focusLinux, focusWindows, osLevelEnabled, preflight, pressKey } from "./os-input.mjs";
-import { setReducedMotion } from "./os-preferences.mjs";
+import { macReadMotion, macRestoreMotion, macWriteMotion, setReducedMotion } from "./os-preferences.mjs";
 import { SETUPS } from "./setups.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -206,6 +206,10 @@ function answer(checkpoint, run) {
         ? { applied: motion.applied, outcome: motion.outcome, reason: motion.reason, original: motion.original,
             effective: motion.effective }
         : { applied: false, outcome: "not-run", reason: "no preference was set for this scenario" } };
+    // D2 follow-up: which phase of the macOS off-to-on transition this
+    // launch is, and the operating system's effective value for it.
+    case "motion-phase":
+      return { ok: true, phase: motionPhase ?? { outcome: "not-run", reason: "no transition is running" } };
     // D2 (T074): the machine woke, told the way the wake watch tells it.
     case "wake":
       return { ok: true, act: "wake" };
@@ -405,6 +409,72 @@ async function runScenarioWithPreferences(name) {
   return summary;
 }
 
+/** D2 follow-up: the phase of the macOS reduced-motion transition now launched. */
+let motionPhase;
+
+/**
+ * D2 follow-up: on macOS, reduced motion switched off and then on, each in a
+ * fresh launch once the operating system reports it, and the original put
+ * back exactly in a `finally` and confirmed. Each phase is the scenario's
+ * own run; the case passes only if both pass and the restoration is exact.
+ * Elsewhere the case is not applicable; without COMODOR_E2E_OS_LEVEL=1 the
+ * page reports `not-run`.
+ */
+async function runMotionTransition(name) {
+  if (process.platform !== "darwin" || !osLevelEnabled()) {
+    motionPhase = { outcome: "not-run", reason: "operating-system-level evidence disabled" };
+    try {
+      return await runScenario(name);
+    } finally {
+      motionPhase = undefined;
+    }
+  }
+  const original = macReadMotion();
+  const unavailable = (reason, phases) => ({ scenario: name, ok: false, error: `capability-unavailable: ${reason}`,
+                                             transition: { original, phases } });
+  if (original.error) return unavailable(original.error, {});
+  if (!original.absent && original.flag === null) {
+    return unavailable(`the original setting's type cannot be restored exactly (${original.type})`, {});
+  }
+  const phases = {};
+  let summary;
+  let restored = null;
+  try {
+    for (const [phase, on] of [["off", false], ["on", true]]) {
+      const now = macWriteMotion(on);
+      if (now.error) {
+        summary = unavailable(`switching reduced motion ${phase}: ${now.error}`, phases);
+        break;
+      }
+      if (now.effective !== on) {
+        summary = unavailable(`the operating system still reports reduced motion ${on ? "off" : "on"
+          } after it was switched ${phase} (NSWorkspace)`, phases);
+        break;
+      }
+      motionPhase = { phase, applied: true, effective: { reducedMotion: now.effective } };
+      const run = await runScenario(name);
+      phases[phase] = { setting: now, ok: run.ok, details: run.details ?? null, error: run.error ?? null };
+      summary = run;
+      if (!run.ok) break;
+    }
+  } finally {
+    motionPhase = undefined;
+    restored = macRestoreMotion(original);
+  }
+  summary = { ...summary, scenario: name, transition: { original, phases, restored } };
+  if (summary.ok) {
+    summary.details = { outcome: "verified", off: phases.off?.details ?? null, on: phases.on?.details ?? null };
+  }
+  if (!restored.ok) {
+    summary.ok = false;
+    summary.error = `the reduced-motion setting was not restored exactly: ${JSON.stringify(restored)}`;
+  }
+  const result = path.join(ARTIFACTS, name, "result.json");
+  fs.mkdirSync(path.dirname(result), { recursive: true });
+  fs.writeFileSync(result, JSON.stringify(summary, null, 2));
+  return summary;
+}
+
 /** D2: whether a run is already inside its setup's wrapper (see runScenario). */
 let wrapped = false;
 
@@ -415,6 +485,7 @@ async function runScenario(name) {
   if (!wrapped) {
     wrapped = true;
     try {
+      if (SETUPS[name]?.motionTransition) return await runMotionTransition(name);
       return SETUPS[name]?.relaunch ? await runWithRelaunch(name) : await runScenarioWithPreferences(name);
     } finally {
       wrapped = false;

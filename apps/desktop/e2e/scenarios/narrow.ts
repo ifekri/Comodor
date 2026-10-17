@@ -9,7 +9,7 @@
  * `capability-unavailable`.
  */
 
-import { expect, type Scenario, type ScenarioContext } from "../runner.ts";
+import { expect, type Scenario, type ScenarioContext, typeInto } from "../runner.ts";
 
 interface Size { readonly width: number; readonly height: number }
 interface WindowReport {
@@ -60,6 +60,20 @@ function inView(element: Element | null, what: string): void {
   expect(rect.width > 0 && rect.height > 0 && rect.left >= -1 && rect.top >= -1
          && rect.right <= window.innerWidth + 1 && rect.bottom <= window.innerHeight + 1,
          `${what} lies inside the viewport: ${JSON.stringify(rect)} in ${window.innerWidth}×${window.innerHeight}`);
+}
+
+/**
+ * In view, and usable there: the element itself, or something inside it, is
+ * what a pointer at its centre reaches — nothing covers it — and it is not
+ * disabled unless `mayBeDisabled`.
+ */
+function usable(element: Element | null, what: string, mayBeDisabled = false): void {
+  inView(element, what);
+  const rect = element!.getBoundingClientRect();
+  const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  expect(hit !== null && (hit === element || element!.contains(hit)),
+         `${what} is covered at its centre by ${hit?.outerHTML.slice(0, 80) ?? "nothing"}`);
+  if (!mayBeDisabled) expect(!(element as HTMLButtonElement).disabled, `${what} is disabled`);
 }
 
 function noHorizontalScroll(where: string): void {
@@ -182,6 +196,40 @@ export const narrow: Scenario = async (context) => {
       .find((button) => button.textContent === "Send") ?? null, `${name}: Send`);
     inView(document.querySelector(".status-state"), `${name}: the Core state`);
     inView(document.querySelector('footer.status-bar button[aria-label="Commands"]'), `${name}: the palette control`);
+
+    // ...and usable where they are (FR-027): nothing covers them, and they work.
+    const textarea = document.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;
+    const send = () => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="composer"] button')]
+      .find((button) => button.textContent === "Send") ?? null;
+    usable(textarea, `${name}: the composer`);
+    usable(send(), `${name}: Send`, true);
+    usable(document.querySelector(".status-state"), `${name}: the Core state`);
+    const paletteControl = document.querySelector<HTMLButtonElement>('footer.status-bar button[aria-label="Commands"]');
+    usable(paletteControl, `${name}: the palette control`);
+    for (const button of document.querySelectorAll<HTMLButtonElement>('nav[aria-label="Workbench"] button')) {
+      usable(button, `${name}: the rail's ${button.getAttribute("aria-label")}`);
+    }
+    for (const button of document.querySelectorAll<HTMLButtonElement>('nav[aria-label="Mode"] button')) {
+      usable(button, `${name}: the mode ${button.textContent}`);
+    }
+    // Ready, so "Change workspace…" is offered: its absence fails, like any essential's.
+    usable(document.querySelector<HTMLButtonElement>("footer.status-bar .status-change"), `${name}: Change workspace…`);
+    // A draft makes Send available; it is not sent, and the draft is cleared.
+    textarea.focus();
+    typeInto(textarea, "a draft at this size");
+    await context.waitFor(() => send()?.disabled === false);
+    usable(send(), `${name}: Send with a draft`);
+    typeInto(textarea, "");
+    // The palette control opens the palette inside the window; Escape closes it.
+    paletteControl!.focus();
+    paletteControl!.click();
+    const dialog = await context.element('[role="dialog"][aria-label="Commands"]');
+    inView(dialog, `${name}: the palette`);
+    usable(dialog.querySelector('[role="combobox"]'), `${name}: the palette's field`);
+    press("Escape", dialog.querySelector('[role="combobox"]')!);
+    await context.waitFor(() => document.querySelector('[role="dialog"][aria-label="Commands"]') === null);
+    expect(document.activeElement === paletteControl, `${name}: Escape gave focus back to the palette control`);
+    noHorizontalScroll(`${name}, after use`);
     const shellElement = document.querySelector('[data-testid="shell"]')!;
     results.push({ name, requested: size, logical, measured, page: { width: window.innerWidth, height: window.innerHeight },
                    document: document.documentElement.clientWidth, body: document.body.getBoundingClientRect().width,

@@ -130,6 +130,30 @@ below were read from the repository, not assumed.
   never published. *Binds*: FR-018, FR-020, SC-006; the TUI and
   Tests / Documentation surface rows.
 
+### Session 2026-10-16
+
+- Q: What does the 520 × 400 minimum mean on macOS, where Tauri counts the
+  title bar inside the window's inner size? → A: Owner decision after D2's
+  CI: 520 × 400 describes the native window. On macOS the WebView page may
+  be shorter by the title bar — 520 × 368 when the measured offset is 32 px —
+  provided that offset is measured, is the same at every size, and is at
+  most 40 px; on Windows and Linux the offset must be zero. At every tested
+  size the composer, Send, the Core state, the palette control and the other
+  essential actions (the rail, the mode control, "Change workspace…") are
+  visible, reachable by the pointer, and work, with no horizontal scrolling.
+  *Binds*: FR-027, SC-007.
+- Q: Does an already enabled macOS reduced-motion preference prove that the
+  window follows a change of it? → A: Owner decision: no. It shows the
+  window honouring the preference while it is on. A separate macOS check
+  switches the preference off, then on, confirms the operating system's
+  effective value and `matchMedia` each time, requires the shell's
+  transitions to be zero-duration when it is on (and present when it is off),
+  and restores the exact original setting — including an originally absent
+  key — confirmed by reading it back. A runner that cannot perform or expose
+  either transition leaves this NOT VERIFIED with its reason; the already-on
+  result never counts as off-to-on evidence. Windows and Linux keep their
+  criteria. *Binds*: FR-020.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Work in a coherent workbench around the conversation (Priority: P1)
@@ -394,7 +418,10 @@ command remains reachable.
 - **Several displays and scaling.** A stored layout opened on a display with a
   different scale or size stays within the allowed ranges.
 - **Reduced motion.** When the operating system asks for reduced motion, panels
-  open and close without animation.
+  open and close without animation. On macOS a change of the preference is
+  shown from off to on, each state confirmed by the operating system and the
+  WebView, with the original setting restored exactly (Clarifications,
+  2026-10-16).
 - **Untrusted text.** Command titles are the application's own; any Core- or
   native-reported text shown in panels, the status bar or palette results is
   inert, as in D1.
@@ -520,8 +547,14 @@ command remains reachable.
   outside, and MUST return beside the main area at its remembered width when
   the window widens again.
 - **FR-027**: At every window size from the minimum (520 × 400) upward, the
-  composer, Send, the Core state and the palette control MUST be visible, and
-  nothing in the window may scroll horizontally.
+  composer, Send, the Core state, the palette control and the other essential
+  actions (the rail, the mode control, "Change workspace…") MUST be visible,
+  reachable and usable, and nothing in the window may scroll horizontally.
+  The minimum describes the native window: on macOS the page is shorter by
+  the title bar that Tauri counts inside the window's inner size (a measured
+  offset, the same at every size, at most 40 px — 32 px on the CI runner, so
+  520 × 368 at the minimum); on Windows and Linux the offset is zero
+  (Clarifications, 2026-10-16).
 
 **Core state and boundaries**
 
@@ -651,9 +684,13 @@ command remains reachable.
   zero violations of the WCAG 2.1 Level A and AA rules it can test, on all three
   platforms.
 - **SC-007**: At the minimum size, just below and just above the compact
-  threshold, and a wide size, the composer, Send, the Core state and the
-  palette control are visible and the window has no horizontal scrolling, in
-  100% of the layout checks on all three platforms.
+  threshold, and a wide size, the composer, Send, the Core state, the palette
+  control and the other essential actions are visible, reachable by the
+  pointer and usable (a draft makes Send available; the palette opens inside
+  the window and Escape closes it), and the window has no horizontal
+  scrolling, in 100% of the layout checks on all three platforms — judged on
+  macOS against the page that remains after the measured title-bar offset
+  (FR-027).
 - **SC-008**: The layout a person arranged is restored exactly after a window
   reload, a Core restart, a workspace change and an application relaunch, in
   100% of the tests on all three platforms.

@@ -150,3 +150,78 @@ export function setReducedMotion(env) {
   if (process.platform === "darwin") return macSet();
   return linuxSet(env);
 }
+
+// -- macOS: the off-to-on transition (D2 follow-up) ----------------------
+//
+// The `reduced-motion` scenario above sets the preference on; on a runner
+// where it was already on, that shows the window honouring it, not a
+// change. These pieces let the harness switch it off, then on, each
+// confirmed by the effective value, and put the original back exactly: the
+// same type and value, or no key at all if there was none.
+
+const MAC_DOMAIN = "com.apple.universalaccess";
+const MAC_KEY = "reduceMotion";
+
+/** `defaults read-type` output → the `defaults write` flag that keeps that type, or null. */
+export function macTypeFlag(readType) {
+  const type = /Type is (\w+)/.exec(readType ?? "")?.[1];
+  return { boolean: "-bool", integer: "-int", float: "-float", string: "-string" }[type] ?? null;
+}
+
+/** The `defaults` arguments that put `original` back exactly. */
+export function macRestoreArguments(original) {
+  if (original.absent) return ["delete", MAC_DOMAIN, MAC_KEY];
+  const value = original.flag === "-bool" ? (original.value === "1" ? "true" : "false") : original.value;
+  return ["write", MAC_DOMAIN, MAC_KEY, original.flag, value];
+}
+
+/** Whether `now` is `original` in every part: presence, type, value and effective value. */
+export function macRestoredExactly(original, now) {
+  if (now.effective !== original.effective) return false;
+  if (original.absent) return now.absent === true;
+  return now.absent === false && now.flag === original.flag && now.value === original.value;
+}
+
+/**
+ * What one `defaults read` of the key says: present with its value exactly
+ * (only the newline `defaults` appends removed), absent only when `defaults`
+ * says the pair does not exist, and an error for any other failure — a
+ * timeout, a launch failure, a refusal — so an unreadable setting is never
+ * taken for an absent one (and later deleted).
+ */
+export function macReadOutcome(read) {
+  if (read.error) return { error: `defaults read failed: ${read.error.message ?? read.error}` };
+  if (read.status === 0) return { absent: false, value: `${read.stdout ?? ""}`.replace(/\n$/, "") };
+  const said = `${read.stderr ?? ""}`.trim();
+  if (/does not exist/.test(said)) return { absent: true };
+  return { error: `defaults read failed (${read.status ?? "no status"}): ${said || "no reason given"}` };
+}
+
+/** The setting as it stands: present or absent, its type and value, and the effective value WebKit uses. */
+export function macReadMotion() {
+  const read = macReadOutcome(defaults("read", MAC_DOMAIN, MAC_KEY));
+  if (read.error) return { error: read.error };
+  const effective = macEffective();
+  if (effective.error) return { error: `the effective setting could not be read: ${effective.error}` };
+  if (read.absent) return { absent: true, effective: effective.reduced };
+  const type = defaults("read-type", MAC_DOMAIN, MAC_KEY);
+  return { absent: false, value: read.value, type: `${type.stdout ?? ""}`.trim(),
+           flag: macTypeFlag(type.stdout), effective: effective.reduced };
+}
+
+/** Write reduced motion on or off, then read the setting back. */
+export function macWriteMotion(on) {
+  const written = defaults("write", MAC_DOMAIN, MAC_KEY, "-bool", on ? "true" : "false");
+  if (written.status !== 0) return { error: `the setting could not be written: ${`${written.stderr ?? ""}`.trim()}` };
+  return macReadMotion();
+}
+
+/** Put `original` back exactly, and confirm it by reading everything again. */
+export function macRestoreMotion(original) {
+  const back = defaults(...macRestoreArguments(original));
+  const now = macReadMotion();
+  if (back.status !== 0 || now.error) {
+    return { ok: false, reason: `${back.stderr ?? ""}${now.error ?? ""}`.trim() || "the restore failed", readBack: now };
+  }
+  return { ok: macRestoredExactly(original, now), readBack: now };
+}
