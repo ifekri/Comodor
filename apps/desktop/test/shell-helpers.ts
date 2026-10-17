@@ -46,14 +46,48 @@ export function highlighted(container: HTMLElement): string | null {
     ?.getAttribute("data-command") ?? null;
 }
 
-export function railButton(container: HTMLElement, name: string): HTMLButtonElement {
-  return [...container.querySelectorAll<HTMLButtonElement>('nav[aria-label="Workbench"] button')]
-    .find((button) => button.getAttribute("aria-label") === name)!;
+/** A top-bar menu's trigger ("File", "Option", … or "Menu" when folded). */
+export function menuTrigger(container: HTMLElement, label: string): HTMLButtonElement {
+  return container.querySelector<HTMLButtonElement>(`header.top-bar button[data-menu="${label}"]`)!;
 }
 
-/** Open the palette with the status bar's control, and wait for it. */
+/** Open a menu and choose one of its items, as a person does with the mouse. */
+export async function chooseMenuItem(container: HTMLElement, menu: string, item: string): Promise<HTMLButtonElement> {
+  await click(menuTrigger(container, menu));
+  const found = await until(() => [...container.querySelectorAll<HTMLButtonElement>(`[data-menu-of="${menu}"] [role="menuitem"]`)]
+    .find((button) => button.querySelector(".menu-label")?.textContent === item), `the ${item} item`);
+  await click(found);
+  return found;
+}
+
+/** The menu item that shows each surface (Option menu), by the surface's name. */
+const SURFACE_ITEMS: Readonly<Record<string, string>> = {
+  Core: "Core", Diagnostics: "Diagnostics", "Keyboard shortcuts": "Keyboard Shortcuts",
+};
+
+/** Show a surface from the Option menu (the reference's place for the window's panels). */
+export async function showSurface(container: HTMLElement, name: string): Promise<void> {
+  await chooseMenuItem(container, "Option", SURFACE_ITEMS[name] ?? name);
+}
+
+/** The modal panel of a surface, if it is open. */
+export function panelOf(container: HTMLElement, name: string): HTMLElement | null {
+  return container.querySelector<HTMLElement>(`[role="dialog"][aria-label="${name}"]`);
+}
+
+/** The status bar's Diagnostics cell: one click, as the rail button was. */
+export function diagnosticsCell(container: HTMLElement): HTMLButtonElement {
+  return container.querySelector<HTMLButtonElement>("footer.status-bar .status-diagnostics")!;
+}
+
+/** The top bar's search: the palette's visible control. */
+export function paletteControl(container: HTMLElement): HTMLButtonElement {
+  return container.querySelector<HTMLButtonElement>('header.top-bar button[aria-label="Commands"]')!;
+}
+
+/** Open the palette with the top bar's search, and wait for it. */
 export async function openPalette(container: HTMLElement): Promise<HTMLElement> {
-  await click(container.querySelector('footer.status-bar button[aria-label="Commands"]')!);
+  await click(paletteControl(container));
   return await until(() => palette(container), "the palette");
 }
 
@@ -65,5 +99,5 @@ export async function resizeTo(width: number): Promise<void> {
   });
 }
 
-/** The default width of the window tests: wide enough for the panel beside the main area. */
+/** The default width of the window tests: wide enough for the sidebar beside the canvas. */
 export const WIDE = 1024;

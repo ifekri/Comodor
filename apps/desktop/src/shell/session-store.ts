@@ -7,7 +7,7 @@
 
 import type { CoreClient } from "@comodor/client";
 import type { Mode } from "@comodor/modes";
-import type { ModeIntent } from "@comodor/session";
+import type { Delegate, ModeIntent, Task } from "@comodor/session";
 
 import type { ModelInfo } from "../view/StatusStrip.tsx";
 
@@ -35,6 +35,16 @@ export interface SharedSession {
   readonly intent: ModeIntent;
   /** Whether a session is shown (opened and read). */
   readonly shown: boolean;
+  /** The open session's id, as the Core reported it; null until a session is shown. */
+  readonly sessionId: string | null;
+  /** The first message the person sent in this session, as the conversation holds it. */
+  readonly firstMessage: string | null;
+  /** How many conversation lines and tool runs the session holds: none is an empty conversation. */
+  readonly entries: number;
+  /** The Core's task list for this session, whole and read-only. */
+  readonly tasks: readonly Task[];
+  /** The Core's background delegates for this session, read-only. */
+  readonly delegates: readonly Delegate[];
   readonly composer: () => ComposerHandle | null;
   cancel(): void;
   chooseMode(mode: Mode): void;

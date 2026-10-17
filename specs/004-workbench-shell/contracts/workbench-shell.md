@@ -6,17 +6,30 @@ FR-001–FR-029, FR-032). The shapes behind it are in
 
 ## Regions
 
+*Corrected 2026-10-17 (spec Clarifications, "Conflicts with the earlier D2
+scope"): the owner's `_ide_ui` reference binds the whole window. The earlier
+rail and side panel are replaced as below; the D1 constraints that follow
+are unchanged.*
+
 | Region | Accessible role and name | Present |
 | --- | --- | --- |
-| Navigation rail | `navigation` "Workbench" | always, from the first status |
-| Main area | `main` — D1's existing `<main data-testid="window">`; the shell adds no second `main` | always |
-| Side panel | `complementary`, named after its surface ("Core", "Diagnostics", "Keyboard shortcuts") | when open |
-| Status bar | `contentinfo`, with a `status` live region for the Core state | always |
+| Top bar | `banner`: the wordmark; `menubar` "Menu" with File, Model, Memory, Skills, Context, Agent, Option, MCP (one "Menu" control below 760 px); the search (the palette's place); the actions | always, from the first status |
+| Sidebar | `navigation` "Workbench": a toolbar; WORKSPACE and EXPLORER tabs; SESSION, AGENTS and TASKS sections | beside from 900 px; below, hidden and covering when opened |
+| Canvas | `main` — D1's existing `<main data-testid="window">`; the shell adds no second `main` | always |
+| Prompt area | inside the canvas: D1's composer over the reference's footer (model, attachments, Agentic, mode control, Send, Command, Shortcuts) | when a session is shown |
+| Status bar | `contentinfo`, D1's strip in the reference's cells, with a `status` live region for the Core state | always |
+| Modal panel | `dialog`, named after its surface ("Core", "Diagnostics", "Keyboard shortcuts"), over a backdrop | when open |
 
-The rail offers exactly: Conversation, Core, Diagnostics, Keyboard shortcuts,
-and the palette control. Nothing for an editor, workspace browsing, a terminal,
-agents, tasks, delegates, session panels, history, installers, updates or
-credential entry — no entry, no disabled entry, no empty panel (FR-005).
+**Real or unavailable, never pretended.** Every item of a menu, the sidebar
+toolbar, the top bar's actions, the home tiles and the status bar either runs
+a real D2 command (and is then exactly that command, FR-011) or is
+unavailable: `aria-disabled="true"`, a title saying so, the reference's
+dimmed look, and — when chosen — a short notice "… arrives in a later
+version" that runs nothing. The SESSION section lists the session the Core
+opened; AGENTS lists the delegates and TASKS the task list from the Core's
+session snapshot, read-only; with nothing reported each shows a truthful
+empty state; EXPLORER shows the workspace's name and that browsing files
+arrives later. Nothing from the reference's demo seed is ever shown.
 
 D1's views keep their content and behaviour and appear in the main area:
 conversation, failure (every class), no workspace, unconfigured provider,
@@ -115,12 +128,16 @@ Rules:
 - Tab order: rail, main area (conversation, cards, composer), side panel,
   status bar; stable for a given state.
 - F6 and Shift+F6 move focus to the first focusable element of the next or
-  previous region; the side panel is skipped when closed.
-- Opening the palette or a side panel moves focus into it; closing it returns
-  focus to the element that opened it, or to the composer if that element is
-  gone, or to the main area.
-- The palette is a modal dialog with a combobox and a listbox; the side panel
-  is not modal; nothing traps focus.
+  previous region (top bar, sidebar, main, panel, status bar); a region not
+  drawn — the closed panel, the hidden sidebar — is skipped.
+- Opening the palette, the panel or the covering sidebar moves focus into it;
+  closing it returns focus to the element that opened it (or the control drawn
+  anew in its place), or to the composer if that element is gone, or to the
+  main area.
+- The palette is a modal dialog with a combobox and a listbox. The panel is
+  drawn over the canvas with a backdrop, as the reference's modal is, but is
+  not modal to the keyboard or assistive technology (no `aria-modal`):
+  nothing traps focus (FR-018).
 - Announcements: the Core state (status bar live region), a panel opening
   (its name), and the palette's result count — each once.
 - With the operating system's reduced-motion preference, panels and the
@@ -130,20 +147,22 @@ Rules:
 
 | Value | Default | Rule |
 | --- | --- | --- |
-| Compact threshold | 900 logical px | judged on the shell root's measured width (`ResizeObserver` `contentRect.width`, fractional, unrounded): below 900 uses the covering panel; the root exposes it as `data-width` and the mode as `data-mode` |
-| Side panel width | 320 | 240 to half the window, and never below the main area's 360 |
-| Main area minimum | 360 | beside mode only |
+| Compact threshold | 900 logical px | judged on the shell root's measured width (`ResizeObserver` `contentRect.width`, fractional, unrounded): below 900 the sidebar is hidden and covers the canvas when opened; the root exposes it as `data-width` and the mode as `data-mode` (`beside`/`covering`) |
+| Top bar | 64 px | the reference's; below 760 px the menus fold into one "Menu" control and the search into its icon |
+| Sidebar width | `clamp(236px, 20vw, 250px)` | the reference's; not resizable (2026-10-17) |
+| Status bar | 31 px | the reference's |
+| Modal panel | 600 px wide at most, 24 px inset | the reference's |
 | Window minimum | 520 × 400 | unchanged from D1; the native window. On macOS the page is shorter by the title bar Tauri counts inside the inner size (measured, constant, ≤ 40 px; 520 × 368 at a 32 px offset); zero offset on Windows and Linux (spec Clarifications, 2026-10-16) |
 
-- Beside mode: the panel sits to the right of the main area (the layout does
-  not mirror), so moving its edge left widens it; dragging its edge or
-  `panel.wider`/`panel.narrower` (32 px steps, from the focused edge or the
-  palette) resizes it within the rule; the change is written when the drag
-  ends or after each step.
-- Covering mode (compact): the panel covers the main area, with Escape and a
-  click outside closing it; the rail and status bar stay visible.
+- Beside mode (900 px and up): the sidebar sits left of the canvas, as in
+  the reference; its chevron hides and shows it.
+- Covering mode (compact): the sidebar is hidden; opened, it covers the
+  canvas, with Escape and a click outside closing it and focus returned to
+  its opener; the top bar and status bar stay visible.
+- Side-panel resizing (`panel.wider`/`panel.narrower`, the edge) is withdrawn
+  (2026-10-17); the stored `panel_width` is validated as before and not drawn.
 - At every size from the minimum, the composer, Send, the Core state and the
-  palette control are visible and nothing scrolls horizontally.
+  palette control are visible and usable, and nothing scrolls horizontally.
 
 ## Core values
 

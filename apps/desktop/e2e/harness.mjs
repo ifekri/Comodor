@@ -26,6 +26,8 @@ import { fileURLToPath } from "node:url";
 
 import { focusLinux, focusWindows, osLevelEnabled, preflight, pressKey } from "./os-input.mjs";
 import { macReadMotion, macRestoreMotion, macWriteMotion, setReducedMotion } from "./os-preferences.mjs";
+import { recordEntries } from "./record.mjs";
+import { captureWindow } from "./window-capture.mjs";
 import { SETUPS } from "./setups.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -118,9 +120,7 @@ function resolve(value, places) {
 
 /** What is missing from the recorded run after a wake, or null. */
 function wakeProblem(record) {
-  const entries = fs.existsSync(record)
-    ? fs.readFileSync(record, "utf-8").split("\n").filter(Boolean).map((line) => JSON.parse(line))
-    : [];
+  const entries = recordEntries(record);
   const state = (entry) => entry.kind === "inbound" && entry.value?.kind === "status" && entry.value.status?.state;
   const checking = entries.findIndex((entry) => state(entry) === "checking");
   if (checking < 0) return "the Core was never checked after the wake";
@@ -224,6 +224,14 @@ function answer(checkpoint, run) {
     // test build after this reply; the page reads it back with `window`.
     case "resize":
       return { ok: true, act: "resize", width: checkpoint.data?.width, height: checkpoint.data?.height };
+    case "screenshot": {
+      // SC-018: the real window as drawn, captured by the operating system.
+      const label = String(checkpoint.data?.name ?? "window").replace(/[^A-Za-z0-9._-]/g, "_");
+      const file = path.join(run.shots, `${label}-${process.platform}.png`);
+      const shot = captureWindow(run.app.pid, file);
+      console.log(`screenshot ${label}: ${JSON.stringify(shot)}`);
+      return { ok: true, shot: shot.ok ? { ...shot, file: path.basename(file) } : shot };
+    }
     default:
       return { ok: false, error: `unknown checkpoint ${checkpoint.name}` };
   }
@@ -268,9 +276,7 @@ function searchCanary(canary, places) {
 const LAYOUT_FIELDS = ["panel_open", "panel_surface", "panel_width", "version"];
 
 function layoutCanary(record, preferences) {
-  const entries = fs.existsSync(record)
-    ? fs.readFileSync(record, "utf-8").split("\n").filter(Boolean).map((line) => JSON.parse(line))
-    : [];
+  const entries = recordEntries(record);
   const commands = entries.filter((entry) => entry.kind === "command").map((entry) => entry.value ?? {});
   const seen = {
     read: commands.some((command) => command.name === "read_layout"),
@@ -534,7 +540,7 @@ async function runScenario(name) {
   }
   const coreArgs = setup.realCore ? "-m comodor" : `${fixturePath} ${argument}`;
   const run = { hold: setup.hold ? holdAddress(root, name) : undefined, cores: [], places, home, setup,
-                apiKey: canary ?? setup.apiKey };
+                apiKey: canary ?? setup.apiKey, shots: path.join(root, "shots") };
   const record = path.join(root, "record.jsonl");
   const env = {
     ...process.env,
@@ -629,6 +635,7 @@ async function runScenario(name) {
   fs.mkdirSync(kept, { recursive: true });
   copyIfPresent(record, path.join(kept, "record.jsonl"));
   copyIfPresent(data, path.join(kept, "desktop-data"));
+  copyIfPresent(run.shots, path.join(kept, "shots"));
   fs.writeFileSync(path.join(kept, "output.txt"), output.join(""));
   const summary = { scenario: name, elapsedMs: Date.now() - started, ...outcome };
   // The double's child must go with it.
@@ -736,7 +743,10 @@ for (const name of scenarios) {
   const summary = await runScenario(name);
   const verdict = summary.notApplicable ? "N/A " : summary.ok ? "PASS" : "FAIL";
   const ready = summary.readyMs === undefined ? "" : `, ready in ${summary.readyMs} ms`;
-  console.log(`${verdict} ${name} (${summary.elapsedMs ?? 0} ms${ready})${summary.ok ? "" : `: ${summary.error ?? "see result.json"}`}`);
+  // A passing case whose evidence is not complete says so on its line.
+  const outcome = summary.details?.outcome;
+  const noted = summary.ok && typeof outcome === "string" && outcome !== "verified" ? ` [${outcome}]` : "";
+  console.log(`${verdict}${noted} ${name} (${summary.elapsedMs ?? 0} ms${ready})${summary.ok ? "" : `: ${summary.error ?? "see result.json"}`}`);
   if (!summary.ok) failed += 1;
 }
 // D2 (T075): a canary run over every flow (canary-full.mjs sets

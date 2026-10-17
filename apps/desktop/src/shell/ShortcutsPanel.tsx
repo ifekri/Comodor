@@ -14,26 +14,21 @@ export function ShortcutsPanel({ registry, platform }: {
   platform: Platform;
 }) {
   return (
-    <table className="shortcuts" data-testid="shortcuts">
-      <thead>
-        <tr><th scope="col">Keys</th><th scope="col">Command</th></tr>
-      </thead>
-      <tbody>
-        {registry.allBindings().map((binding) => (
-          <tr key={`${binding.key} ${binding.command}`} data-binding={`${binding.key} ${binding.command}`}>
-            <td><kbd>{displayKey(binding.key, platform)}</kbd></td>
-            <td>{registry.get(binding.command)?.title}</td>
-          </tr>
-        ))}
-        <tr data-edge="arrows">
-          <td><kbd>Left</kbd> / <kbd>Right</kbd></td>
-          <td>Widen the side panel / Narrow the side panel, on the focused panel edge</td>
-        </tr>
-        <tr data-edge="ends">
-          <td><kbd>Home</kbd> / <kbd>End</kbd></td>
-          <td>The narrowest / widest side panel, on the focused panel edge</td>
-        </tr>
-      </tbody>
-    </table>
+    <>
+      <h3 className="panel-section">SHORTCUTS</h3>
+      <table className="shortcuts" data-testid="shortcuts">
+        <thead>
+          <tr><th scope="col">Command</th><th scope="col">Keys</th></tr>
+        </thead>
+        <tbody>
+          {registry.allBindings().map((binding) => (
+            <tr key={`${binding.key} ${binding.command}`} data-binding={`${binding.key} ${binding.command}`}>
+              <td>{registry.get(binding.command)?.title}</td>
+              <td><kbd>{displayKey(binding.key, platform)}</kbd></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   );
 }

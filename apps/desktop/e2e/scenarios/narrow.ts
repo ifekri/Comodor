@@ -1,6 +1,8 @@
 /**
- * D2 T071: narrow windows in the real WebView (US6; FR-025–FR-027, FR-034,
- * SC-007). Sizes are computed in physical pixels from the window's scale
+ * D2 T071, corrected 2026-10-17: narrow windows in the real WebView (US6;
+ * FR-026, FR-027, FR-034, SC-007) — the sidebar beside the canvas from 900 px
+ * and covering it below, the panel inside the window at every size, and the
+ * essentials usable. Sizes are computed in physical pixels from the window's scale
  * factor `s`, so fractional scaling is always representable: the minimum
  * ceil(520·s) × ceil(400·s); ceil(900·s) − 1 and ceil(900·s) either side of
  * the threshold (899 and 900 at an integer scale); and a wide size fitted to
@@ -10,6 +12,7 @@
  */
 
 import { expect, type Scenario, type ScenarioContext, typeInto } from "../runner.ts";
+import { panel, paletteControl, region, showSurface, SIDEBAR } from "./workbench.ts";
 
 interface Size { readonly width: number; readonly height: number }
 interface WindowReport {
@@ -38,16 +41,6 @@ async function observed(check: () => boolean | Promise<boolean>, frames = 900): 
 
 function shellWidth(): number {
   return Number(document.querySelector('[data-testid="shell"]')?.getAttribute("data-width"));
-}
-
-function region(): string | null {
-  const active = document.activeElement;
-  if (!active) return null;
-  if (active.closest('nav[aria-label="Workbench"]')) return "rail";
-  if (active.closest("main")) return "main";
-  if (active.closest("aside")) return "panel";
-  if (active.closest("footer.status-bar")) return "status";
-  return null;
 }
 
 function press(key: string, target: Element = document.activeElement ?? document.body): void {
@@ -79,14 +72,13 @@ function usable(element: Element | null, what: string, mayBeDisabled = false): v
 function noHorizontalScroll(where: string): void {
   const root = document.documentElement;
   expect(root.scrollWidth <= root.clientWidth, `${where}: the page scrolls horizontally (${root.scrollWidth} > ${root.clientWidth})`);
-  for (const selector of ['nav[aria-label="Workbench"]', "main", "footer.status-bar", "aside"]) {
+  for (const selector of ["header.top-bar", SIDEBAR, "main", "footer.status-bar", '[role="dialog"].modal-panel']) {
     const element = document.querySelector<HTMLElement>(selector);
     if (element) expect(element.scrollWidth <= element.clientWidth + 1, `${where}: ${selector} scrolls horizontally`);
   }
 }
 
-const coreButton = () => document.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button[aria-label="Core"]')!;
-const panel = () => document.querySelector<HTMLElement>("aside");
+const toggle = () => document.querySelector<HTMLButtonElement>("button.sidebar-toggle");
 
 export const narrow: Scenario = async (context) => {
   await context.element('[data-testid="status-strip"][data-state="ready"]');
@@ -154,40 +146,40 @@ export const narrow: Scenario = async (context) => {
     const measured = shellWidth();
     const compact = measured < 900;
 
-    // The panel's mode, judged by the measured width alone.
-    const opener = coreButton();
-    opener.focus();
-    opener.click();
-    await context.waitFor(() => panel());
-    const mode = panel()!.classList.contains("side-panel-covering") ? "covering" : "beside";
+    // The sidebar's mode, judged by the measured width alone (FR-026).
+    const mode = document.querySelector('[data-testid="shell"]')?.getAttribute("data-mode");
     expect(mode === (compact ? "covering" : "beside"), `product-failure: ${name}: ${mode} at ${measured}`);
-    expect(document.querySelector('[data-testid="shell"]')?.getAttribute("data-mode") === mode,
-           `product-failure: ${name}: data-mode`);
-    expect(region() === "panel", `${name}: focus moved into the panel`);
+    usable(toggle(), `${name}: the sidebar toggle`);
+    if (compact) {
+      expect(document.querySelector(SIDEBAR) === null, `${name}: the sidebar is hidden below 900`);
+      toggle()!.focus();
+      toggle()!.click();
+      const covering = await context.waitFor(() => document.querySelector<HTMLElement>("nav.sidebar-covering"));
+      inView(covering, `${name}: the covering sidebar`);
+      expect(await observed(() => region() === "sidebar", 120), `${name}: focus moved into the covering sidebar`);
+      press("Escape");
+      await context.waitFor(() => document.querySelector(SIDEBAR) === null);
+      expect(document.activeElement === toggle(), `${name}: Escape gave focus back to the sidebar toggle`);
+    } else {
+      inView(document.querySelector("nav.sidebar-beside"), `${name}: the sidebar beside the canvas`);
+    }
 
-    // F6 around the regions at this size.
+    // The panel: drawn inside the window at every size; focus in, F6 around, Escape out.
+    await showSurface(context, "Core");
+    const opener = document.querySelector('header.top-bar button[data-menu="Option"]')
+      ?? document.querySelector('header.top-bar button[data-menu="Menu"]');
+    expect(await observed(() => region() === "panel", 120), `${name}: focus moved into the panel`);
+    inView(panel(), `${name}: the panel`);
+    const around = compact ? "status,top,main,panel" : "status,top,sidebar,main,panel";
     const seen: (string | null)[] = [];
-    for (let count = 0; count < 4; count += 1) {
+    for (let count = 0; count < around.split(",").length; count += 1) {
       press("F6");
       seen.push(region());
     }
-    expect(seen.join(",") === "status,rail,main,panel", `${name}: F6 cycle ${seen.join(",")}`);
-
-    if (mode === "beside") {
-      const edge = panel()!.querySelector<HTMLElement>('[role="separator"]')!;
-      edge.focus();
-      const was = Number(edge.getAttribute("aria-valuenow"));
-      press("ArrowLeft", edge);
-      await observed(() => Number(edge.getAttribute("aria-valuenow")) !== was, 120);
-      const now = Number(edge.getAttribute("aria-valuenow"));
-      expect(now >= 240 && now <= Number(edge.getAttribute("aria-valuemax")), `${name}: keyboard resize in range`);
-      coreButton().click();
-    } else {
-      press("Escape", panel()!);
-      await context.waitFor(() => panel() === null);
-      expect(document.activeElement === opener, `${name}: Escape gave focus back to the rail`);
-    }
+    expect(seen.join(",") === around, `${name}: F6 cycle ${seen.join(",")}`);
+    press("Escape");
     await context.waitFor(() => panel() === null);
+    expect(document.activeElement === opener, `${name}: Escape gave focus back to the menu that opened the panel`);
 
     // At every size, with the panel closed: the essentials in view, nothing scrolling sideways.
     noHorizontalScroll(name);
@@ -195,7 +187,7 @@ export const narrow: Scenario = async (context) => {
     inView([...document.querySelectorAll<HTMLButtonElement>('[data-testid="composer"] button')]
       .find((button) => button.textContent === "Send") ?? null, `${name}: Send`);
     inView(document.querySelector(".status-state"), `${name}: the Core state`);
-    inView(document.querySelector('footer.status-bar button[aria-label="Commands"]'), `${name}: the palette control`);
+    inView(paletteControl(), `${name}: the palette control`);
 
     // ...and usable where they are (FR-027): nothing covers them, and they work.
     const textarea = document.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')!;
@@ -204,11 +196,11 @@ export const narrow: Scenario = async (context) => {
     usable(textarea, `${name}: the composer`);
     usable(send(), `${name}: Send`, true);
     usable(document.querySelector(".status-state"), `${name}: the Core state`);
-    const paletteControl = document.querySelector<HTMLButtonElement>('footer.status-bar button[aria-label="Commands"]');
-    usable(paletteControl, `${name}: the palette control`);
-    for (const button of document.querySelectorAll<HTMLButtonElement>('nav[aria-label="Workbench"] button')) {
-      usable(button, `${name}: the rail's ${button.getAttribute("aria-label")}`);
-    }
+    usable(paletteControl(), `${name}: the palette control`);
+    // The menus, or "Menu" when they fold below 760 px.
+    const menus = [...document.querySelectorAll<HTMLButtonElement>("header.top-bar button[data-menu]")];
+    expect(menus.length === (measured < 760 ? 1 : 8), `${name}: ${menus.length} menu triggers at ${measured}`);
+    for (const button of menus) usable(button, `${name}: the menu ${button.textContent}`);
     for (const button of document.querySelectorAll<HTMLButtonElement>('nav[aria-label="Mode"] button')) {
       usable(button, `${name}: the mode ${button.textContent}`);
     }
@@ -221,14 +213,14 @@ export const narrow: Scenario = async (context) => {
     usable(send(), `${name}: Send with a draft`);
     typeInto(textarea, "");
     // The palette control opens the palette inside the window; Escape closes it.
-    paletteControl!.focus();
-    paletteControl!.click();
+    paletteControl()!.focus();
+    paletteControl()!.click();
     const dialog = await context.element('[role="dialog"][aria-label="Commands"]');
     inView(dialog, `${name}: the palette`);
     usable(dialog.querySelector('[role="combobox"]'), `${name}: the palette's field`);
     press("Escape", dialog.querySelector('[role="combobox"]')!);
     await context.waitFor(() => document.querySelector('[role="dialog"][aria-label="Commands"]') === null);
-    expect(document.activeElement === paletteControl, `${name}: Escape gave focus back to the palette control`);
+    expect(document.activeElement === paletteControl(), `${name}: Escape gave focus back to the palette control`);
     noHorizontalScroll(`${name}, after use`);
     const shellElement = document.querySelector('[data-testid="shell"]')!;
     results.push({ name, requested: size, logical, measured, page: { width: window.innerWidth, height: window.innerHeight },

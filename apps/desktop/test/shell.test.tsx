@@ -1,14 +1,18 @@
 /**
- * T026: the workbench shell around D1's window (US1; FR-001, FR-003, FR-004,
- * FR-006, FR-007), against the in-memory native side and Core.
+ * T026, corrected 2026-10-17: the workbench shell in the reference's
+ * composition around D1's window (US1; FR-001, FR-003–FR-007, SC-012),
+ * against the in-memory native side and Core. Every later-phase element is
+ * unavailable and runs nothing; every listed value is the Core's.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
 
 import type { CoreStatus } from "../src/bridge.ts";
 import { App } from "../src/app.tsx";
+import { MENUS } from "../src/shell/TopBar.tsx";
 import { FakeNative, openWindow, status } from "./fake-native.ts";
 import { click, render, type Rendered, until } from "./render.ts";
+import { chooseMenuItem, menuTrigger, panelOf, paletteControl, showSurface } from "./shell-helpers.ts";
 
 let rendered: Rendered | undefined;
 
@@ -33,22 +37,16 @@ const STATES: Record<string, Partial<CoreStatus>> = {
   absent: { state: "absent", workspace: null, workspace_id: null, core: null, notice: null },
 };
 
-function rail(container: HTMLElement): HTMLElement | null {
-  return container.querySelector<HTMLElement>('nav[aria-label="Workbench"]');
-}
+const sidebar = (container: HTMLElement) => container.querySelector<HTMLElement>('nav[aria-label="Workbench"]');
 
-function railButton(container: HTMLElement, name: string): HTMLButtonElement {
-  return [...rail(container)!.querySelectorAll<HTMLButtonElement>("button")]
-    .find((button) => button.getAttribute("aria-label") === name || button.textContent?.trim() === name)!;
-}
-
-describe("the four regions", () => {
+describe("the reference's regions", () => {
   for (const [name, overrides] of Object.entries(STATES)) {
     test(`are present in the ${name} state`, async () => {
       const view = await show(new FakeNative(status(overrides)));
       await until(() => view.container.querySelector('[data-testid="status-strip"]'), "the status strip");
       const container = view.container;
-      expect(rail(container)).not.toBeNull();
+      expect(container.querySelector("header.top-bar")).not.toBeNull();
+      expect(sidebar(container)).not.toBeNull();
       const mains = container.querySelectorAll("main");
       expect(mains.length).toBe(1);
       expect(mains[0]!.getAttribute("data-testid")).toBe("window");
@@ -57,7 +55,7 @@ describe("the four regions", () => {
       expect(bar!.querySelector('[role="status"]')).not.toBeNull();
       expect(container.querySelectorAll('[data-testid="status-strip"]').length).toBe(1);
       expect(bar!.querySelector('[data-testid="status-strip"]')).not.toBeNull();
-      expect(bar!.querySelector('button[aria-label="Commands"]')).not.toBeNull();
+      expect(paletteControl(container)).not.toBeNull();
     });
   }
 
@@ -90,52 +88,154 @@ describe("the four regions", () => {
     expect(strip.querySelector(".status-state")?.textContent).toBe("Ready");
     expect(strip.textContent).toContain("Configured");
   });
+
+  test("the prompt's footer holds the mode control, Send and the palette, and the model the Core reports", async () => {
+    const native = new FakeNative();
+    native.core.model = { provider: "fake", model: "fake-1", configured: true };
+    const { container } = await openWindow(show, until, native);
+    const footer = container.querySelector<HTMLElement>('[data-testid="composer"] .composer-actions')!;
+    expect(footer.querySelector('[data-testid="mode"]')).not.toBeNull();
+    expect(footer.querySelector('button[aria-label="Commands"]')).not.toBeNull();
+    await until(() => footer.querySelector('[data-testid="model-chip"]')?.textContent === "fake / fake-1", "the model");
+  });
 });
 
-describe("the rail", () => {
-  test("lists exactly the four surfaces and the palette control, each named with an icon", async () => {
+describe("the menus", () => {
+  test("are the reference's, in its order", async () => {
     const { container } = await openWindow(show, until);
-    const buttons = [...rail(container)!.querySelectorAll<HTMLButtonElement>("button")];
-    expect(buttons.map((button) => button.getAttribute("aria-label")))
-      .toEqual(["Conversation", "Core", "Diagnostics", "Keyboard shortcuts", "Commands"]);
-    for (const button of buttons) {
-      const icon = button.querySelector('[aria-hidden="true"]');
-      expect(icon).not.toBeNull();
-      expect(button.getAttribute("title")).toBeTruthy();
+    const labels = [...container.querySelectorAll<HTMLButtonElement>("header.top-bar [data-menu]")]
+      .map((button) => button.textContent);
+    expect(labels).toEqual(["File", "Model", "Memory", "Skills", "Context", "Agent", "Option", "MCP"]);
+  });
+
+  test("every item is a real command or unavailable, and an unavailable one runs nothing", async () => {
+    const native = new FakeNative();
+    const { container } = await openWindow(show, until, native);
+    for (const menu of MENUS) {
+      await click(menuTrigger(container, menu.label));
+      const items = await until(() => {
+        const found = [...container.querySelectorAll<HTMLButtonElement>(`[data-menu-of="${menu.label}"] [role="menuitem"]`)];
+        return found.length > 0 ? found : null;
+      }, `the ${menu.label} menu`);
+      expect(items.length).toBe(menu.items.length);
+      for (const [at, item] of items.entries()) {
+        const expected = menu.items[at]!;
+        if (expected.command === undefined) {
+          expect(item.getAttribute("aria-disabled")).toBe("true");
+          expect(item.getAttribute("data-command")).toBeNull();
+          expect(item.getAttribute("title")).toContain("arrives in a later version");
+        } else {
+          expect(item.getAttribute("data-command")).toBe(expected.command);
+        }
+      }
+      await click(menuTrigger(container, menu.label));
+    }
+    // Every later item, chosen: nothing reaches the native side or the Core.
+    const calls = native.calls.length;
+    const requests = native.core.sent.length;
+    for (const menu of MENUS) {
+      for (const item of menu.items.filter((entry) => entry.command === undefined)) {
+        await chooseMenuItem(container, menu.label, item.label);
+        await until(() => container.querySelector('[data-testid="later-notice"]')?.textContent
+          === `${item.label} arrives in a later version.`, `the notice for ${item.label}`);
+      }
+    }
+    expect(native.calls.slice(calls)).toEqual([]);
+    expect(native.core.sent.length).toBe(requests);
+  });
+
+  test("a real item runs its command: Open Folder changes the workspace", async () => {
+    const native = new FakeNative();
+    const { container } = await openWindow(show, until, native);
+    await chooseMenuItem(container, "File", "Open Folder");
+    await until(() => native.commands("choose_workspace").length === 1, "the chooser");
+  });
+});
+
+describe("every later-phase control", () => {
+  test("is marked unavailable, says so, and runs nothing", async () => {
+    const native = new FakeNative();
+    const { container } = await openWindow(show, until, native);
+    const later = [...container.querySelectorAll<HTMLButtonElement>("button.later")];
+    expect(later.length).toBeGreaterThan(10);
+    const calls = native.calls.length;
+    const requests = native.core.sent.length;
+    for (const button of later) {
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      const label = button.getAttribute("data-later")!;
+      expect(button.getAttribute("title")).toBe(`${label} arrives in a later version.`);
+      await click(button);
+      await until(() => container.querySelector('[data-testid="later-notice"]')?.textContent
+        === `${label} arrives in a later version.`, `the notice for ${label}`);
+    }
+    expect(native.calls.slice(calls)).toEqual([]);
+    expect(native.core.sent.length).toBe(requests);
+  });
+});
+
+describe("the sidebar", () => {
+  test("lists only what the Core reported: the session, its delegates and its tasks", async () => {
+    const native = new FakeNative();
+    native.core.snapshot = {
+      ...native.core.snapshot,
+      tasks: [{ text: "Read the settings page", state: "done" }, { text: "Split the form", state: "active" }],
+      delegates: [{ id: "d1", label: "search the docs", state: "running", steps: 3, tool_calls: 2, tokens: 10,
+                    elapsed: 4, started_at: 1 }],
+    };
+    const { container } = await openWindow(show, until, native);
+    const nav = sidebar(container)!;
+    await until(() => nav.querySelectorAll(".task-row").length === 2, "the Core's tasks");
+    expect([...nav.querySelectorAll(".task-text")].map((node) => node.textContent))
+      .toEqual(["Read the settings page", "Split the form"]);
+    expect(nav.querySelector('[data-task-state="done"]')).not.toBeNull();
+    expect(nav.querySelectorAll(".agent-card").length).toBe(1);
+    expect(nav.querySelector(".agent-task")?.textContent).toBe("Task : search the docs");
+    expect(nav.querySelector('section[aria-label="Agents"] .side-count')?.textContent).toBe("1/1");
+    expect(nav.querySelector('section[aria-label="Tasks"] .side-count')?.textContent).toBe("1/2");
+    expect(nav.querySelectorAll(".side-row").length).toBe(1);
+  });
+
+  test("with nothing reported, says so, and invents nothing", async () => {
+    const { container } = await openWindow(show, until);
+    const nav = sidebar(container)!;
+    expect(nav.querySelectorAll(".agent-card, .task-row").length).toBe(0);
+    expect(nav.textContent).toContain("No agents in this session.");
+    expect(nav.textContent).toContain("No tasks in this session.");
+    for (const demo of ["John", "Devid", "Sara", "Mina", "Settings page – Sample app", "Fable", "%36", "ifekri/main"]) {
+      expect(container.textContent).not.toContain(demo);
     }
   });
 
-  test("marks which surface is active", async () => {
-    const { container } = await openWindow(show, until);
-    expect(railButton(container, "Conversation").getAttribute("aria-current")).toBe("true");
-    await click(railButton(container, "Core"));
-    await until(() => container.querySelector('aside[aria-label="Core"]'), "the Core panel");
-    expect(railButton(container, "Core").getAttribute("aria-current")).toBe("true");
-    expect(railButton(container, "Diagnostics").getAttribute("aria-current")).toBe("false");
+  test("the explorer tab says browsing arrives later and shows the workspace as reported", async () => {
+    const native = new FakeNative(status({ workspace: "/work/project" }));
+    const { container } = await openWindow(show, until, native);
+    await click([...sidebar(container)!.querySelectorAll<HTMLButtonElement>('[role="tab"]')].at(-1)!);
+    const explorer = await until(() => sidebar(container)!.querySelector('[role="tabpanel"][aria-label="Explorer"]'),
+      "the explorer");
+    expect(explorer.textContent).toContain("arrives in a later version");
+    expect(explorer.querySelectorAll("button").length).toBe(0);
   });
 });
 
 describe("choosing a surface", () => {
-  test("shows it in the side panel; choosing the one shown closes the panel", async () => {
+  test("shows it in the modal panel; choosing the one shown closes it", async () => {
     const { container } = await openWindow(show, until);
-    expect(container.querySelector("aside")).toBeNull();
-    await click(railButton(container, "Diagnostics"));
-    await until(() => container.querySelector('aside[aria-label="Diagnostics"]'), "diagnostics");
-    await click(railButton(container, "Keyboard shortcuts"));
-    await until(() => container.querySelector('aside[aria-label="Keyboard shortcuts"]'), "the shortcuts");
-    expect(container.querySelectorAll("aside").length).toBe(1);
-    await click(railButton(container, "Keyboard shortcuts"));
-    await until(() => container.querySelector("aside") === null, "the panel closed");
+    expect(container.querySelector('[role="dialog"].modal-panel')).toBeNull();
+    await showSurface(container, "Diagnostics");
+    await until(() => panelOf(container, "Diagnostics"), "diagnostics");
+    await showSurface(container, "Keyboard shortcuts");
+    await until(() => panelOf(container, "Keyboard shortcuts"), "the shortcuts");
+    expect(container.querySelectorAll('[role="dialog"].modal-panel').length).toBe(1);
+    await showSurface(container, "Keyboard shortcuts");
+    await until(() => container.querySelector('[role="dialog"].modal-panel') === null, "the panel closed");
   });
 
-  test("the conversation is the main area: choosing it moves focus there, beside an open panel", async () => {
+  test("the conversation is the canvas: choosing it closes the panel and moves focus there", async () => {
     const { container } = await openWindow(show, until);
-    await click(railButton(container, "Core"));
-    await until(() => container.querySelector('aside[aria-label="Core"]'), "the Core panel");
-    await click(railButton(container, "Conversation"));
-    expect(container.querySelector('main [data-testid="conversation"]')).not.toBeNull();
+    await showSurface(container, "Core");
+    await until(() => panelOf(container, "Core"), "the Core panel");
+    await click(container.querySelector<HTMLButtonElement>(".side-row-open")!);
+    await until(() => panelOf(container, "Core") === null, "the panel closed");
     expect(document.activeElement?.closest("main")?.getAttribute("data-testid")).toBe("window");
-    expect(container.querySelector('aside[aria-label="Core"]')).not.toBeNull();
-    expect(railButton(container, "Core").getAttribute("aria-current")).toBe("true");
   });
 });

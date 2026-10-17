@@ -42,6 +42,7 @@ export function CorePanel({ report, registry, context, onRun }: {
   });
   return (
     <div className="core-panel" data-testid="core-panel">
+      <h3 className="panel-section">VALUES</h3>
       <dl className="core-values">
         <dt>State</dt><dd dir="auto">{stateLabel(report.state)}</dd>
         <dt>Workspace</dt><dd dir="auto"><Value text={report.workspace} /></dd>
@@ -58,6 +59,7 @@ export function CorePanel({ report, registry, context, onRun }: {
           </>
         )}
       </dl>
+      {actions.length > 0 && <h3 className="panel-section">ACTIONS</h3>}
       {actions.length > 0 && (
         <div className="actions">
           {actions.map((command) => (

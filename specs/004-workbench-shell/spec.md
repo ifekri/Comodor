@@ -154,6 +154,57 @@ below were read from the repository, not assumed.
   result never counts as off-to-on evidence. Windows and Linux keep their
   criteria. *Binds*: FR-020.
 
+### Session 2026-10-17
+
+- Q: What is the binding visual reference for the IDE window, and how far
+  does it reach? → A: Owner correction, superseding the "look only, within
+  D2's four surfaces" decision of 2026-10-15: the HTML, CSS and scripts of
+  the owner's `_ide_ui` reference (kept unpublished in the owner's checkout)
+  bind the whole visible window — composition, proportions, spacing,
+  typography, colours, borders, the top area, the left navigation, the
+  central canvas, the conversation and question states, the prompt area, the
+  menus and the bottom status area. The reference is never committed or
+  bundled. *Binds*: FR-001–FR-007, FR-011, FR-025–FR-027, SC-002, SC-007,
+  SC-012, SC-018.
+- Q: How do later-phase (D3–D5) elements of the reference appear before
+  their phase? → A: They may establish the reference's visual structure, but
+  only as truthful unavailable or empty states: a control of a later phase is
+  marked unavailable (`aria-disabled`), says so when chosen ("… arrives in a
+  later version"), and never runs anything; a list of a later phase (agents,
+  tasks, sessions, files) shows only what the Core reported, or an honest
+  empty state. No session, agent, task, file, activity or result is
+  invented, and no visible control may appear to work when it does not. The
+  palette and the shortcuts still list only real commands. *Binds*: FR-005,
+  FR-012, SC-012.
+- Q: What stays fixed? → A: D1's behaviour and tests (SC-001's rule), the
+  Core's authority, the eleven native operations and their capabilities, the
+  layout preference's stored format, and the 520 × 400 minimum window.
+
+### Conflicts with the earlier D2 scope (resolved 2026-10-17)
+
+| Earlier D2 requirement | The reference | Resolution |
+| --- | --- | --- |
+| FR-001 four regions: rail, main area, side panel, status bar | A 64 px top bar, a left sidebar (236–250 px) with a toolbar, WORKSPACE/EXPLORER tabs and SESSION/AGENTS/TASKS sections, a central canvas over a prompt area, and a 31 px status bar | The reference's regions replace the rail and the side panel (FR-001 as amended) |
+| FR-004/FR-006/FR-007 a rail listing the four D2 surfaces | No rail; actions live in menus, the sidebar toolbar, the prompt footer and the status bar; settings-like content opens in a centred modal panel | The Core panel, diagnostics and keyboard shortcuts open as the reference's modal panel, from the menus, the status bar, the prompt footer, the palette and their shortcuts; the conversation is the canvas |
+| FR-005/SC-012 no entry, tab or disabled placeholder for later phases | Menus, sidebar sections, tabs, tiles and actions for sessions, agents, tasks, files, loops, skills, memory, MCP, a terminal | Allowed as truthful unavailable or empty states only (Session 2026-10-17); palette and shortcuts unchanged |
+| FR-003 the status bar holds the palette control | The status bar holds activity, folder, branch, context, terminal and debug cells; the command control is in the prompt footer ("Command [/]") | The status bar keeps D1's strip in the reference's cells; the palette control moves to the prompt footer ("Command [Ctrl+K]") |
+| FR-011 a centred palette dialog | A search field in the top bar with a results list below it, and a slash-command list above the prompt | The palette is the top bar's search: its field takes the search box's place and its results drop below in the reference's result rows |
+| FR-025/FR-026 a resizable side panel, beside from 900 px and covering below | No side panel; a fixed-width collapsible sidebar | Side-panel resizing is withdrawn (with its edge and its wider/narrower commands); the 900 px threshold now governs the sidebar: beside from 900, hidden below and covering the canvas when opened, closed by Escape or a click outside |
+| FR-021/FR-022 the stored layout is the side panel's state and width | — | The stored format is unchanged (version, `panel_open`, `panel_surface`, `panel_width`); `panel_open`/`panel_surface` now name the open modal panel, restored after a reload, a Core restart and a relaunch; `panel_width` is kept and validated as before but no longer drawn |
+| The composer with Send and Cancel beside the field; the mode control above the conversation | A prompt field over a 33 px footer: model chip, attachments, Agentic, an Ask/Plan/Build segmented control, "Send Message [ENTER]", "Command [/]", "Sub-Agents [Ctrl+S]" | The footer in the reference's order with truthful content: the model the Core reports; attachments and Agentic unavailable; the Core's modes (shown Act/Plan/Ask, the Core's own labels in title case, not "Build"); Send (still labelled "Send"); "Command [Ctrl+K]"; "Shortcuts [Ctrl+/]" |
+| The 520 × 400 minimum window | `min-width: 760px` | The minimum stays; below 760 px the menus fold into one "Menu" control and the search into its icon, so nothing scrolls sideways (FR-027) |
+| Demo content in the reference (named agents, tasks, sessions, files, terminal output, models) | Seeded for design review only | Never shown; every value is the Core's or the native side's, or a stated empty state |
+
+**Reading the rest of this specification.** Where a user story, an
+acceptance scenario, an entity or a scope line below still names the
+navigation rail, the side panel, its edge or its width, it is read through
+this table: the rail's entries are the menus, the status-bar cells and the
+prompt-footer controls; the side panel is the modal panel (opened, closed,
+restored and focused exactly as the side panel was, but not resized); the
+region cycle runs top bar → sidebar → canvas → status bar (and the panel
+while open); and the covering behaviour below the threshold is the sidebar's.
+Every other requirement keeps its meaning.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Work in a coherent workbench around the conversation (Priority: P1)
@@ -432,9 +483,11 @@ command remains reachable.
 
 **The shell**
 
-- **FR-001**: The window MUST present four regions whenever a Core exists or is
-  starting: a navigation rail, a main area holding the conversation, a side
-  panel that may be open or closed, and a status bar. The failure,
+- **FR-001**: The window MUST present the reference's regions (Clarifications,
+  2026-10-17) whenever a Core exists or is starting: a top bar, a left
+  sidebar, a central canvas holding the conversation over the prompt area,
+  and a status bar; the Core panel, diagnostics and keyboard shortcuts open as
+  a modal panel over them. The failure,
   no-workspace, "Closing…" and unconfigured-provider views of D1 MUST appear in
   the main area of that shell.
 - **FR-002**: Every D1 capability MUST remain available and behave as D1
@@ -443,14 +496,20 @@ command remains reachable.
   Quit now, recovery after reload and restart, and the wake check.
 - **FR-003**: The status bar MUST show the Core's state, the workspace as the
   Core reports it, the provider, the model and the configured state, from the
-  same reports D1's status strip uses, and MUST offer the palette control.
-- **FR-004**: The navigation rail MUST list exactly the D2 surfaces of FR-006,
-  each with a name and an icon, and MUST show which is active.
-- **FR-005**: The window MUST NOT offer any entry, panel, tab, command,
-  shortcut or disabled placeholder for an editor, workspace browsing, a
-  terminal, agents, tasks, delegates, session panels, history browsing,
-  installers, updates or credential entry. Those surfaces arrive with their
-  phase (D3–D6) and not before.
+  same reports D1's status strip uses, in the reference's cells; the palette
+  control is in the prompt footer (Clarifications, 2026-10-17).
+- **FR-004**: The top bar MUST show the reference's menus (File, Model,
+  Memory, Skills, Context, Agent, Option, MCP), its search (the palette's
+  place, FR-011) and its actions; the sidebar its toolbar, its WORKSPACE and
+  EXPLORER tabs and its SESSION, AGENTS and TASKS sections. Every item either
+  runs a real D2 command or is a truthful unavailable or empty state.
+- **FR-005**: Elements of a later phase (an editor, workspace browsing, a
+  terminal, agents, tasks, sessions, loops, skills, memory, MCP, providers,
+  installers, updates, credential entry) MAY appear only as the reference's
+  structure in a truthful unavailable or empty state: unavailable controls are
+  marked so, say so when chosen and run nothing; lists show only what the Core
+  reported or an honest empty state. No palette command or shortcut is
+  offered for them (Clarifications, 2026-10-17).
 
 **Surfaces and navigation**
 
@@ -458,9 +517,9 @@ command remains reachable.
   Core panel (User Story 5), the diagnostics panel (User Story 5), and the
   keyboard shortcuts reference (User Story 3). Each has a real D2 function; the
   rail offers nothing else.
-- **FR-007**: Choosing a surface in the rail, by its shortcut, or from the
-  palette MUST show it: the conversation in the main area, the others in the
-  side panel. Choosing the surface that is already shown in the side panel
+- **FR-007**: Choosing a surface from a menu, the status bar, the prompt
+  footer, its shortcut or the palette MUST show it: the conversation in the
+  canvas, the others in the modal panel. Choosing the surface already shown
   MUST close the panel.
 - **FR-008**: The Core panel MUST show only values the native side or the Core
   reported for the current Core: state, workspace (as the Core reports it),
@@ -477,7 +536,9 @@ command remains reachable.
 **Command palette**
 
 - **FR-011**: The window MUST provide a command palette, opened by a shortcut
-  and by a visible control, built on the shared command registry: every
+  and by visible controls (the top bar's search and the prompt footer's
+  "Command"), shown as the reference's search with its results below,
+  built on the shared command registry: every
   palette entry, button and shortcut for the same action is one command.
 - **FR-012**: The palette MUST list exactly the commands enabled in the current
   state, with their group and shortcut; it MUST NOT list a command that would
@@ -492,7 +553,8 @@ command remains reachable.
 - **FR-015**: The commands in D2 MUST include at least: open the palette;
   focus the composer; send; cancel; each mode, and the next and previous mode;
   change workspace; check again; try again; Quit now (while closing); show
-  each D2 surface; open, close and resize the side panel; reset the layout;
+  each D2 surface; open and close the panel; show and hide the sidebar; reset
+  the layout;
   jump to the newest message; and show the keyboard shortcuts. Each is listed
   only when it applies (FR-012).
 
@@ -513,8 +575,8 @@ command remains reachable.
   focus.
 - **FR-019**: Opening a panel or overlay MUST move focus into it; closing it
   MUST return focus to the element that opened it, or to the composer if that
-  element no longer exists. Escape MUST close the topmost overlay or a covering
-  side panel.
+  element no longer exists. Escape MUST close the topmost overlay (an open
+  menu, the palette, the modal panel) or the covering sidebar.
 - **FR-020**: Regions and controls MUST have accessible names; state changes
   the person needs to know (Core state, a panel opening, the palette's result
   count) MUST be announced once to assistive technology; motion MUST follow
@@ -539,16 +601,17 @@ command remains reachable.
 
 **Narrow windows**
 
-- **FR-025**: The side panel MUST have a minimum and a maximum width, and the
-  main area a minimum width; resizing MUST stay within them, by dragging and by
-  a keyboard shortcut that changes the width in steps.
-- **FR-026**: Below the compact threshold, the side panel MUST cover the main
-  area instead of shrinking it, MUST be dismissible with Escape or a click
-  outside, and MUST return beside the main area at its remembered width when
-  the window widens again.
+- **FR-025**: *Withdrawn 2026-10-17* — the reference has no resizable side
+  panel. The stored `panel_width` keeps its validation (FR-036) and is not
+  drawn.
+- **FR-026**: From the compact threshold (900 logical px) up, the sidebar MUST
+  sit beside the canvas; below it, the sidebar MUST be hidden and, when
+  opened, cover the canvas instead of shrinking it, dismissible with Escape or
+  a click outside, with focus returned to its opener.
 - **FR-027**: At every window size from the minimum (520 × 400) upward, the
   composer, Send, the Core state, the palette control and the other essential
-  actions (the rail, the mode control, "Change workspace…") MUST be visible,
+  actions (the menus or the "Menu" control, the sidebar toggle, the mode
+  control, "Change workspace…") MUST be visible,
   reachable and usable, and nothing in the window may scroll horizontally.
   The minimum describes the native window: on macOS the page is shorter by
   the title bar that Tauri counts inside the window's inner size (a measured
@@ -702,9 +765,10 @@ command remains reachable.
 - **SC-011**: A canary credential appears zero times in the shell's surfaces,
   palette, announcements and stored layout preferences, and conversation text
   appears zero times in stored layout preferences, across every D2 flow.
-- **SC-012**: Zero navigation entries, palette commands or shortcuts refer to
-  an editor, workspace browsing, a terminal, agents, tasks, delegates, session
-  panels, history, installers, updates or credential entry.
+- **SC-012**: Zero palette commands or shortcuts refer to a later phase, and
+  every later-phase element shown (FR-005) is unavailable or empty in 100% of
+  the checks: it is marked unavailable, runs nothing when chosen, and shows no
+  value the Core did not report.
 - **SC-013**: Every acceptance test runs without network access to a model
   provider, without a credential and without paid tokens.
 - **SC-014**: The terminal interface's renderer suite, the frontend tests, the
@@ -716,6 +780,15 @@ command remains reachable.
 - **SC-016**: The release build grants exactly D1's nine native operations plus
   the two layout operations, and no other, in 100% of the release
   command-manifest runs.
+- **SC-018**: Screenshots of the real desktop WebView — not DOM checks — on
+  Windows, Linux and macOS, at the reference viewport (1440 × 900), the
+  minimum window and either side of the 900 px threshold, in the normal,
+  menu, question, palette and panel states, are compared section by section
+  with the reference rendered at the same sizes and states; every material
+  difference is either corrected or listed with its reason (a truthful state
+  where the reference shows demo content, the Core's own labels, a platform's
+  title bar or font rendering). The appearance is not accepted while a
+  material difference remains unlisted.
 - **SC-017**: 100% of invalid layout writes in the tests (unknown fields, wrong
   types, out-of-range width, an unknown surface, another format version,
   oversized input) are refused, and the stored preferences file, including

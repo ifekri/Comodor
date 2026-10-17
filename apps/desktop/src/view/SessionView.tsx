@@ -17,6 +17,10 @@ import { Conversation } from "./Conversation.tsx";
 import { FormCard } from "./FormCard.tsx";
 import { ModeControl } from "./ModeControl.tsx";
 import { PermissionCard } from "./PermissionCard.tsx";
+import { HomeCard } from "../shell/HomeCard.tsx";
+import { WORKBENCH_COMMAND_IDS } from "../shell/commands.ts";
+import { currentPlatform, displayKey } from "../shell/keys.ts";
+import { PromptLead, PromptTrail, SendHint } from "../shell/PromptFooter.tsx";
 import { ShellRun } from "../shell/run-context.ts";
 import type { ComposerHandle, SessionStore, SharedSession } from "../shell/session-store.ts";
 import { SetupNotice } from "./SetupNotice.tsx";
@@ -63,11 +67,15 @@ export function SessionView({ client, kept, status, onCheckAgain, store }: {
   // a new workspace's are reported by the Core that opens it (FR-028).
   const workspaceId = useRef(status.workspace_id).current;
   const restartCount = useRef(status.restart_count).current;
+  const sessionId = state.session?.id ?? null;
+  const firstMessage = state.lines.find((line) => line.speaker === "you")?.text ?? null;
+  const entries = state.lines.length + state.tools.length;
   const shared = useMemo<SharedSession>(() => ({
     client, workspaceId, restartCount, model, workspace: session.workspace, gated: held, busy, intent: session.intent, shown,
+    sessionId, firstMessage, entries, tasks: state.tasks, delegates: state.delegates,
     composer: () => composer.current, cancel: session.cancel, chooseMode: session.chooseMode,
-  }), [client, workspaceId, restartCount, model, session.workspace, held, busy, session.intent, shown, session.cancel,
-      session.chooseMode]);
+  }), [client, workspaceId, restartCount, model, session.workspace, held, busy, session.intent, shown, sessionId,
+      firstMessage, entries, state.tasks, state.delegates, session.cancel, session.chooseMode]);
   useLayoutEffect(() => {
     store?.set(shared);
   }, [store, shared]);
@@ -83,7 +91,6 @@ export function SessionView({ client, kept, status, onCheckAgain, store }: {
           : <p className="quiet">Opening the session…</p>
         : (
           <div className="session" data-testid="session">
-            <ModeControl intent={session.intent} held={held} onChoose={chooseMode} />
             {state.connection.kind === "lost" && (
               <p className="recovery" data-testid="session-unread">
                 The session could not be read again: {state.connection.reason}
@@ -94,6 +101,9 @@ export function SessionView({ client, kept, status, onCheckAgain, store }: {
               <p key={note} className="recovery" data-testid="recovery">{note}</p>
             ))}
             <Delegates state={state} />
+            {run && entries === 0 && !waiting && (
+              <HomeCard canChangeWorkspace onChangeWorkspace={() => run(WORKBENCH_COMMAND_IDS.workspaceChange)} />
+            )}
             <Conversation state={state} />
             {waiting?.kind === "question" && (
               <FormCard key={waiting.id} interaction={waiting} held={held}
@@ -106,7 +116,14 @@ export function SessionView({ client, kept, status, onCheckAgain, store }: {
             <Composer busy={state.session.busy}
                       ready={!held && model?.configured === true}
                       cancellable={!held}
-                      onSend={session.send} onCancel={session.cancel} handle={composer} />
+                      onSend={session.send} onCancel={session.cancel} handle={composer}
+                      placeholder={run ? `Prompt Here ···  (${displayKey("mod+k", currentPlatform())} for commands)` : undefined}
+                      leading={run && <PromptLead model={model}
+                                                  modeControl={<ModeControl intent={session.intent} held={held}
+                                                                            onChoose={chooseMode} />} />}
+                      sendHint={run && <SendHint />}
+                      trailing={run && <PromptTrail />} />
+            {!run && <ModeControl intent={session.intent} held={held} onChoose={chooseMode} />}
           </div>
         )}
     </>

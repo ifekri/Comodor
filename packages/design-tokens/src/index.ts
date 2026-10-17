@@ -139,8 +139,12 @@ export const WINDOW = [
   "surface.ask",
   "surface.chat",
   "surface.shadow",
+  "surface.active",
+  "surface.foot",
+  "surface.backdrop",
   "border.strong",
   "border.subtle",
+  "border.tile",
   "text.accent",
 ] as const;
 
@@ -173,8 +177,12 @@ export const STAND_IN: Readonly<Record<WindowRole, Token>> = {
   "surface.ask": "surface.selected",
   "surface.chat": "surface.selected",
   "surface.shadow": "surface.base",
+  "surface.active": "surface.selected",
+  "surface.foot": "surface.raised",
+  "surface.backdrop": "surface.base",
   "border.strong": "border.default",
   "border.subtle": "border.default",
+  "border.tile": "border.default",
   "text.accent": "border.focused",
 };
 
@@ -204,12 +212,16 @@ export const desktop: WindowTheme = {
   "surface.ask": "#1d2a33",
   "surface.chat": "#262626",
   "surface.shadow": "#000000",
+  "surface.active": "#2c2c2c",
+  "surface.foot": "#212121",
+  "surface.backdrop": "#0c0c0c",
 
   "border.default": "#3a3a3a",
   "border.focused": "#5fd4e8",
   "border.active": "#3fa9bc",
   "border.strong": "#424242",
   "border.subtle": "#333333",
+  "border.tile": "#4a4a4a",
 
   "text.primary": "#e6e6e6",
   "text.secondary": "#b8b8b8",

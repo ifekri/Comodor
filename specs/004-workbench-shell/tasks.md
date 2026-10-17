@@ -444,12 +444,13 @@ T056–T059 → T060–T061 · T062–T064 → T065–T067 · T069–T071 → T0
 | SC-009 | T006, T017, T058 |
 | SC-010 | T062, T064, T068 |
 | SC-011 | T075, T076, T082 |
-| SC-012 | T027 |
+| SC-012 | T027, T106, T107 |
 | SC-013 | T078 |
 | SC-014 | T079, T083 |
 | SC-015 | T077, T088 |
 | SC-016 | T008, T009, T014, T018, T081 |
 | SC-017 | T007, T010, T015, T057, T058 |
+| SC-018 | T109, T110, T111 |
 
 ---
 
@@ -463,3 +464,23 @@ T056–T059 → T060–T061 · T062–T064 → T065–T067 · T069–T071 → T0
 - [ ] T099 Exact-head CI on the new pull request: every required check green on all three platforms; `reduced-motion-transition` `verified` on macOS with the original, both phases and the exact restoration recorded (or, if the runner cannot perform or expose a transition, NOT VERIFIED with its reason — never a pass), N/A on Windows and Linux; `narrow` `verified` on all three with the usability checks; record the evidence in the pull request
 - [ ] T100 Request a fresh Codex review of the new pull request's exact final head when the account limit permits; fix every valid actionable finding with a failing-first test, push, repeat T099 and T100; it does not cover PR #64's unreviewed head (T090's recorded gap)
 - [ ] T101 Report to the owner: branch, pull request, final SHA, changed files, the macOS off-to-on and restoration evidence, CI per platform, the review state, every NOT VERIFIED item. Leave the pull request open: no approval, no auto-merge, no merge
+
+---
+
+## Phase 12: Correction — the reference window (owner decision of 2026-10-17; new pull request, left open)
+
+**Goal**: the whole visible window composed as the `_ide_ui` reference is — top bar with menus and search, left sidebar, canvas with the home card, prompt area with its footer, modal panel, status bar, question cards — with every value the Core's, every working action real, and every later-phase element unavailable and saying so. `_ide_ui` is read, never committed or bundled.
+
+- [X] T102 Record the conflicts with the earlier D2 scope before implementing: `spec.md` (Clarifications 2026-10-17, the conflicts table, FR-001/003/004/005/007/011/015/019/026/027, FR-025 withdrawn, SC-012, SC-018), `plan.md` (Correction 2026-10-17), `contracts/workbench-shell.md` (Regions, Sizes, focus rules: the panel is drawn over the canvas but not modal; nothing traps focus)
+- [X] T103 [P] Add the window-only roles the reference needs to `packages/design-tokens/src/index.ts` (`surface.active`, `surface.foot`, `surface.backdrop`, `border.tile`, each with its terminal stand-in) and their contrast pairs to `packages/design-tokens/test/tokens.test.ts`; the TUI bundle in `src/comodor/tui/dist` is unchanged
+- [X] T104 Compose the window in `apps/desktop/src/shell/`: `TopBar.tsx` (the reference's eight menus item for item, folded into "Menu" below 760 px; the search in the palette's place; Cancel real, the other actions later), `Sidebar.tsx` (toolbar, WORKSPACE/EXPLORER, the session, the Core's delegates and tasks, read-only), `HomeCard.tsx`, `PromptFooter.tsx`, `ModalPanel.tsx` (replaces `SidePanel.tsx`), `StatusBar.tsx`, `Later.tsx`; `Shell.tsx` (sidebar beside from 900 px, covering below; Escape order palette → panel → covering sidebar); `Rail.tsx` and `SidePanel.tsx` removed; `commands.ts` (`sidebar.toggle`, `mod+o`, `mod+b`; panel width commands withdrawn); D1's `Composer.tsx` and `SessionView.tsx` gain only optional presentation slots (Send and Cancel keep their text)
+- [X] T105 Style the window in `apps/desktop/src/styles.css` from the reference's measurements (top bar 64 px, sidebar `clamp(236px, 20vw, 250px)`, status bar 31 px, modal 600 px, prompt footer 33 px, question cards with numbered answers), reduced motion respected; later controls dimmed and `cursor: not-allowed`
+- [X] T106 Update the D2 window tests for the new regions without changing a D1 test: `shell`, `focus` (regions top bar → sidebar → main → panel → status; the panel not modal; the covering sidebar; Escape order), `sidebar` (replaces `side-panel`: 900/899, toggle, `mod+b`, the panel unresized at every width), `preference` (the stored width carried, not drawn), `shortcuts-panel`, `boundaries` (a control naming a later phase is unavailable and says so, unless it only shows the Core's report), `shell-inert` (the layout does not mirror), `announce`, `palette*`, `core-panel`, `coverage`, `diagnostics-panel`. Fix found by the new sidebar test: the palette's opener is taken off the focus stack when the palette closes, so a command run from the palette records the right opener and keeps the focus it placed
+- [X] T107 Mutation checks of the truthfulness guards (each fails `shell.test`/`boundaries.test`; restored): a later control without `aria-disabled`; a later menu item that runs a real command; the sidebar inventing an agent when the Core reported none
+- [X] T108 Update the real-WebView scenarios in `apps/desktop/e2e/scenarios/` that used the rail, the side panel or its edge (shell, palette, keyboard, layout, core-panel, narrow, accessibility, reduced-motion, key-delivery, the lifetime relaunch) to the menus, the search, the modal panel and the sidebar; the narrow essentials become the menus or "Menu", the sidebar toggle, the palette control, the mode control, Send, the Core state and "Change workspace…"
+- [X] T109 Add a `screenshot` checkpoint to `apps/desktop/e2e/harness.mjs` that captures the real WebView window on each platform (Windows: the window's client area; macOS: `screencapture -l` of the window; Linux: the X window under Xvfb), and a `visual` scenario that sets 1440 × 900, the minimum, 899 and 900 and shows the normal, menu, question, palette and panel states; CI uploads the images per platform
+- [ ] T110 Compare the real screenshots with the reference rendered at the same sizes and states, section by section (top bar, sidebar, canvas, conversation and question, prompt area, menus, modal panel, status bar); correct every material difference; record the comparison table and the remaining deliberate, truthful differences (SC-018)
+- [ ] T111 Offline gates (ruff, pytest, frontend lint/typecheck/tests, window tests, capability map, protocol codegen check, `git diff --check`), then exact-head CI on all three platforms with the screenshots attached
+- [ ] T112 Request a Codex review of the new pull request's exact final head; fix every valid actionable finding with a failing-first test; repeat T111 and T112 after each new commit
+- [ ] T113 Report to the owner: final SHA, the screenshots, the comparison table, the remaining visual differences, CI, the review, every NOT VERIFIED item. Leave the pull request open: no approval, no auto-merge, no merge. PR #64's missing final-head review stays a separate recorded gap; T099–T101 are not ticked by this work
+- [X] T114 Make the harness read the bridge record as a log still being written (`apps/desktop/e2e/record.mjs`, test `apps/desktop/test/record.test.ts`): an unfinished last line (a second launch still writing) is not an entry; every finished line must parse. Found as a macOS canary failure on main at `9f7aa37` (`lifetime-second-confirmed`: "Unterminated string in JSON"); mutation (keeping the unfinished line) fails the test; restored

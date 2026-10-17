@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { App } from "../src/app.tsx";
 import { FakeNative, openWindow, status } from "./fake-native.ts";
 import { click, render, type Rendered, until } from "./render.ts";
-import { railButton } from "./shell-helpers.ts";
+import { showSurface } from "./shell-helpers.ts";
 
 let rendered: Rendered | undefined;
 
@@ -33,8 +33,8 @@ describe("hostile text from the Core", () => {
     native.core.session = { ...native.core.session, workspace: PERSIAN };
     native.core.model = { provider: HOSTILE, model: HOSTILE, configured: true };
     const { container } = await openWindow(show, until, native);
-    await click(railButton(container, "Core"));
-    const panel = await until(() => container.querySelector<HTMLElement>('aside[aria-label="Core"]'), "the panel");
+    await showSurface(container, "Core");
+    const panel = await until(() => container.querySelector<HTMLElement>('[role="dialog"][aria-label="Core"]'), "the panel");
     await until(() => (panel.textContent ?? "").includes("مدل-۱"), "the model in the panel");
     const bar = container.querySelector<HTMLElement>("footer.status-bar")!;
     await until(() => (bar.textContent ?? "").includes("مدل-۱"), "the model in the status bar");
@@ -55,15 +55,18 @@ describe("right-to-left text", () => {
     const native = new FakeNative(status({ workspace: PERSIAN }));
     native.core.session = { ...native.core.session, workspace: PERSIAN };
     const { container } = await openWindow(show, until, native);
-    await click(railButton(container, "Core"));
-    const panel = await until(() => container.querySelector<HTMLElement>('aside[aria-label="Core"]'), "the panel");
+    await showSurface(container, "Core");
+    const panel = await until(() => container.querySelector<HTMLElement>('[role="dialog"][aria-label="Core"]'), "the panel");
     await until(() => (panel.textContent ?? "").includes("دفتر پروژه"), "the Persian path");
     for (const value of panel.querySelectorAll("dd")) expect(value.getAttribute("dir")).toBe("auto");
     const shell = container.querySelector('[data-testid="shell"]')!;
     expect(shell.getAttribute("dir")).toBeNull();
     expect(document.documentElement.getAttribute("dir")).not.toBe("rtl");
-    const order = [...shell.children].map((child) => child.tagName.toLowerCase()).filter((tag) => tag !== "div");
-    expect(order[0]).toBe("nav");
+    // The reference's left-to-right order holds: top bar, the sidebar on the left, the canvas, the status bar.
+    const order = [...shell.children]
+      .map((child) => (child.classList.contains("canvas") ? "canvas" : child.tagName.toLowerCase()))
+      .filter((tag) => tag !== "div");
+    expect(order).toEqual(["header", "nav", "canvas", "footer"]);
   });
 });
 
@@ -72,8 +75,8 @@ describe("the diagnostics panel", () => {
     const native = new FakeNative();
     native.diagnostics = `${HOSTILE}\nخطا در ${PERSIAN}`;
     const { container } = await openWindow(show, until, native);
-    await click(railButton(container, "Diagnostics"));
-    const panel = await until(() => container.querySelector<HTMLElement>('aside[aria-label="Diagnostics"]'), "the panel");
+    await showSurface(container, "Diagnostics");
+    const panel = await until(() => container.querySelector<HTMLElement>('[role="dialog"][aria-label="Diagnostics"]'), "the panel");
     const tail = await until(() => panel.querySelector<HTMLElement>('[data-testid="diagnostics-tail"]'), "the tail");
     expect(panel.querySelector("script, img, iframe, object, embed, a, button.link")).toBeNull();
     expect(tail.textContent).not.toContain("\x1b");

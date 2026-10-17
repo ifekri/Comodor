@@ -127,10 +127,10 @@ export const lifetimeSecondConfirmed: Scenario = async (context) => {
  * layout beside D1's values.
  */
 async function relaunchCase(context: ScenarioContext): Promise<Record<string, unknown>> {
-  const panel = () => document.querySelector<HTMLElement>("aside");
+  const panel = () => document.querySelector<HTMLElement>('[role="dialog"].modal-panel');
   if (context.params["phase"] !== "relaunched") {
     await named(context);
-    document.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button[aria-label="Diagnostics"]')!.click();
+    document.querySelector<HTMLButtonElement>("footer.status-bar .status-diagnostics")!.click();
     await context.waitFor(() => panel()?.getAttribute("aria-label") === "Diagnostics");
     // The write follows the click: read the file frame by frame, within a bound.
     let stored = false;

@@ -32,20 +32,43 @@ export class FocusReturn {
     this.openers.pop();
   }
 
+  /** Take the most recent opener off, to give focus back to it later. */
+  take(): Element | null {
+    return this.openers.pop() ?? null;
+  }
+
   restore(root: ParentNode = document): void {
-    const opener = this.openers.pop();
-    const usable = opener instanceof HTMLElement && opener.isConnected
-      && !(opener as HTMLButtonElement).disabled ? opener : null;
-    (usable ?? fallbackTarget(root))?.focus();
+    focusBack(this.openers.pop() ?? null, root);
   }
 }
 
-/** The shell's regions in order: rail, main area, side panel (when shown), status bar. */
+/** An element that can take focus now: in the document and not disabled. */
+export function isUsable(element: Element | null | undefined): element is HTMLElement {
+  return element instanceof HTMLElement && element.isConnected && !(element as HTMLButtonElement).disabled;
+}
+
+/**
+ * Give focus back to an opener: the element itself, else the one drawn anew
+ * in its place (the top bar's search, replaced by the palette while it is
+ * open) found by its focus key, else the composer, else the main area.
+ */
+export function focusBack(opener: Element | null, root: ParentNode = document): void {
+  const key = opener instanceof HTMLElement ? opener.dataset["focusKey"] : undefined;
+  const again = key === undefined ? null : root.querySelector<HTMLElement>(`[data-focus-key="${key}"]`);
+  (isUsable(opener) ? opener : isUsable(again) ? again : fallbackTarget(root))?.focus();
+}
+
+/**
+ * The shell's regions in order (spec Clarifications, 2026-10-17): the top
+ * bar, the sidebar (when shown), the canvas, the panel (when open), the
+ * status bar.
+ */
 export function regions(root: ParentNode): HTMLElement[] {
   return [
+    root.querySelector<HTMLElement>("header.top-bar"),
     root.querySelector<HTMLElement>('nav[aria-label="Workbench"]'),
     root.querySelector<HTMLElement>("main"),
-    root.querySelector<HTMLElement>("aside"),
+    root.querySelector<HTMLElement>('[role="dialog"].modal-panel'),
     root.querySelector<HTMLElement>("footer.status-bar"),
   ].filter((region): region is HTMLElement => region !== null);
 }

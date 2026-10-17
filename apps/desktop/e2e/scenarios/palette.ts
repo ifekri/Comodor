@@ -5,6 +5,7 @@
  */
 
 import { expect, type Scenario, type ScenarioContext, typeInto } from "../runner.ts";
+import { panel, paletteControl } from "./workbench.ts";
 
 const MAC = /Mac/i.test(navigator.userAgent);
 
@@ -30,7 +31,7 @@ function ids(): string[] {
 }
 
 async function openWithControl(context: ScenarioContext): Promise<HTMLInputElement> {
-  document.querySelector<HTMLButtonElement>('footer.status-bar button[aria-label="Commands"]')!.click();
+  paletteControl()!.click();
   await context.waitFor(() => dialog());
   return dialog()!.querySelector<HTMLInputElement>('[role="combobox"]')!;
 }
@@ -46,14 +47,14 @@ export const palette: Scenario = async (context) => {
   typeInto(input, "dia");
   await context.waitFor(() => ids()[0] === "view.diagnostics");
   key(input, "Enter");
-  await context.waitFor(() => dialog() === null && document.querySelector('aside[aria-label="Diagnostics"]'));
+  await context.waitFor(() => dialog() === null && panel("Diagnostics"));
 
   const second = await openWithControl(context);
   typeInto(second, "core panel");
   const core = await context.waitFor(() =>
     document.querySelector<HTMLElement>('[role="option"][data-command="view.core"]'));
   core.click();
-  await context.waitFor(() => dialog() === null && document.querySelector('aside[aria-label="Core"]'));
+  await context.waitFor(() => dialog() === null && panel("Core"));
   return { opened: ["view.diagnostics", "view.core"] };
 };
 

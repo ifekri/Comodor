@@ -11,7 +11,7 @@ import { App } from "../src/app.tsx";
 import { FakeCore } from "./fake-core.ts";
 import { FakeNative, openWindow, status } from "./fake-native.ts";
 import { click, render, type Rendered, until } from "./render.ts";
-import { key, openPalette, paletteInput, railButton } from "./shell-helpers.ts";
+import { key, openPalette, paletteInput, showSurface } from "./shell-helpers.ts";
 import { typeInto } from "./render.ts";
 
 let rendered: Rendered | undefined;
@@ -29,7 +29,7 @@ async function show(native: FakeNative): Promise<Rendered> {
 const STORED = { version: 1, panel_open: true, panel_surface: "diagnostics", panel_width: 400 };
 
 function panel(container: HTMLElement): HTMLElement | null {
-  return container.querySelector<HTMLElement>("aside");
+  return container.querySelector<HTMLElement>('[role="dialog"].modal-panel');
 }
 
 async function runFromPalette(container: HTMLElement, query: string, id: string): Promise<void> {
@@ -45,7 +45,6 @@ describe("reading", () => {
     native.layoutAnswer = { layout: STORED, stored: true };
     const { container } = await openWindow(show, until, native);
     await until(() => panel(container)?.getAttribute("aria-label") === "Diagnostics", "the stored panel");
-    expect(panel(container)!.style.width).toBe("400px");
     expect(native.commands("read_layout").length).toBe(1);
     expect(native.calls[0]!.command).toBe("connect");
   });
@@ -82,34 +81,34 @@ describe("reading", () => {
 });
 
 describe("writing", () => {
-  test("after each completed change: open, surface, resize step, close, reset", async () => {
+  test("after each completed change: open, surface, close, reset; the stored width is carried, not drawn", async () => {
     const native = new FakeNative();
+    native.layoutAnswer = { layout: { ...STORED, panel_open: false }, stored: true };
     const { container } = await openWindow(show, until, native);
-    await click(railButton(container, "Core"));
+    await until(() => native.commands("read_layout").length === 1, "the read");
+    await showSurface(container, "Core");
     await until(() => native.writtenLayouts.length === 1, "open written");
-    expect(native.writtenLayouts[0]).toEqual({ version: 1, panel_open: true, panel_surface: "core", panel_width: 320 });
-    await click(railButton(container, "Diagnostics"));
+    expect(native.writtenLayouts[0]).toEqual({ version: 1, panel_open: true, panel_surface: "core", panel_width: 400 });
+    await showSurface(container, "Diagnostics");
     await until(() => native.writtenLayouts.length === 2, "surface written");
-    await runFromPalette(container, "widen", "panel.wider");
-    await until(() => native.writtenLayouts.length === 3, "resize step written");
-    expect((native.writtenLayouts[2] as { panel_width: number }).panel_width).toBe(352);
-    await click(railButton(container, "Diagnostics"));
-    await until(() => native.writtenLayouts.length === 4, "close written");
+    await showSurface(container, "Diagnostics");
+    await until(() => native.writtenLayouts.length === 3, "close written");
+    expect(native.writtenLayouts[2]).toEqual({ version: 1, panel_open: false, panel_surface: "diagnostics", panel_width: 400 });
     await runFromPalette(container, "reset", "layout.reset");
-    await until(() => native.writtenLayouts.length === 5, "reset written");
-    expect(native.writtenLayouts[4]).toEqual({ version: 1, panel_open: false, panel_surface: "core", panel_width: 320 });
-    expect(native.writtenLayouts.length).toBe(5);
+    await until(() => native.writtenLayouts.length === 4, "reset written");
+    expect(native.writtenLayouts[3]).toEqual({ version: 1, panel_open: false, panel_surface: "core", panel_width: 320 });
+    expect(native.writtenLayouts.length).toBe(4);
   });
 
   test("a refused write keeps the window's layout, says so once, and the next change writes again", async () => {
     const native = new FakeNative();
     const { container } = await openWindow(show, until, native);
     native.refuseNextWrite = "the layout is larger than 1024 bytes";
-    await click(railButton(container, "Core"));
+    await showSurface(container, "Core");
     const notice = await until(() => container.querySelector<HTMLElement>('[data-testid="layout-notice"]'), "the notice");
     expect(notice.textContent).toContain("the layout is larger than 1024 bytes");
     expect(panel(container)?.getAttribute("aria-label")).toBe("Core");
-    await click(railButton(container, "Diagnostics"));
+    await showSurface(container, "Diagnostics");
     await until(() => native.writtenLayouts.length === 1, "the next write");
     await until(() => container.querySelector('[data-testid="layout-notice"]') === null, "the notice cleared");
   });
@@ -117,7 +116,7 @@ describe("writing", () => {
   test("nothing about the layout reaches the Core", async () => {
     const native = new FakeNative();
     const { container } = await openWindow(show, until, native);
-    await click(railButton(container, "Core"));
+    await showSurface(container, "Core");
     await until(() => native.writtenLayouts.length === 1, "written");
     for (const request of native.core.sent) {
       expect(JSON.stringify(request)).not.toMatch(/panel_(open|surface|width)/);
@@ -136,7 +135,6 @@ describe("across the Core's life", () => {
     native.push(status({ workspace: "/work/other", workspace_id: "launch:2" }));
     await until(() => container.querySelector('[data-testid="status-strip"]'), "the new workspace");
     expect(panel(container)?.getAttribute("aria-label")).toBe("Diagnostics");
-    expect(panel(container)!.style.width).toBe("400px");
     expect(native.commands("read_layout").length).toBe(1);
   });
 

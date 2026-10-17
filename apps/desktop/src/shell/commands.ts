@@ -33,8 +33,7 @@ export const WORKBENCH_COMMAND_IDS = {
   viewShortcuts: "view.shortcuts",
   diagnosticsRefresh: "diagnostics.refresh",
   panelClose: "panel.close",
-  panelWider: "panel.wider",
-  panelNarrower: "panel.narrower",
+  sidebarToggle: "sidebar.toggle",
   layoutReset: "layout.reset",
   regionNext: "region.next",
   regionPrevious: "region.previous",
@@ -49,9 +48,8 @@ export interface ShellState {
   readonly paletteOpen: boolean;
   readonly panelOpen: boolean;
   readonly panelSurface: PanelSurface;
-  readonly panelMode: "closed" | "beside" | "covering";
-  readonly canWiden: boolean;
-  readonly canNarrow: boolean;
+  /** Whether the sidebar is shown, beside the canvas or covering it. */
+  readonly sidebarShown: boolean;
 }
 
 /** What the commands do: the shell's own actions and D1's native ones. */
@@ -60,8 +58,7 @@ export interface ShellActions {
   showConversation(): void;
   showSurface(surface: PanelSurface): void;
   closePanel(): void;
-  widenPanel(): void;
-  narrowPanel(): void;
+  toggleSidebar(): void;
   resetLayout(): void;
   nextRegion(): void;
   previousRegion(): void;
@@ -159,14 +156,10 @@ export function workbenchCommands(): Command<WindowContext>[] {
     command(ID.diagnosticsRefresh, "Refresh diagnostics", "Workbench", ["again", "fetch"],
             (shell) => shell.state.panelOpen && shell.state.panelSurface === "diagnostics",
             (shell) => shell.act.refreshDiagnostics()),
-    command(ID.panelClose, "Close the side panel", "Workbench", ["hide", "dismiss"],
+    command(ID.panelClose, "Close the panel", "Workbench", ["hide", "dismiss"],
             (shell) => shell.state.panelOpen, (shell) => shell.act.closePanel()),
-    command(ID.panelWider, "Widen the side panel", "Workbench", ["resize", "bigger"],
-            (shell) => shell.state.panelMode === "beside" && shell.state.canWiden,
-            (shell) => shell.act.widenPanel()),
-    command(ID.panelNarrower, "Narrow the side panel", "Workbench", ["resize", "smaller"],
-            (shell) => shell.state.panelMode === "beside" && shell.state.canNarrow,
-            (shell) => shell.act.narrowPanel()),
+    command(ID.sidebarToggle, "Show or hide the sidebar", "Workbench", ["sidebar", "session", "navigation"],
+            always, (shell) => shell.act.toggleSidebar()),
     command(ID.layoutReset, "Reset layout", "Workbench", ["default", "restore"],
             always, (shell) => shell.act.resetLayout()),
     command(ID.regionNext, "Next region", "Workbench", ["focus", "pane"],
@@ -184,6 +177,8 @@ export function workbenchBindings(): Binding[] {
     { key: "mod+2", command: ID.viewCore },
     { key: "mod+3", command: ID.viewDiagnostics },
     { key: "mod+/", command: ID.viewShortcuts },
+    { key: "mod+o", command: ID.workspaceChange },
+    { key: "mod+b", command: ID.sidebarToggle },
     { key: "f6", command: ID.regionNext },
     { key: "shift+f6", command: ID.regionPrevious },
     // After D1's Escape (Cancel), so the composer still finds Cancel first;
