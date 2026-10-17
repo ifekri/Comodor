@@ -915,9 +915,18 @@ textarea:focus {
    icons, by the footer's own width (the turn's Cancel makes it fuller). */
 @container (max-width: 820px) {
   .composer-actions .composer-send::after,
-  .prompt-later > span:not(.icon),
-  .prompt-link-label {
+  .prompt-later > span:not(.icon) {
     display: none;
+  }
+
+  /* Hidden from sight, still the link's name (WCAG 2.5.3). */
+  .prompt-link-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .composer-actions .composer-send::after {
@@ -1352,11 +1361,13 @@ button.link {
   border-right: 1.5px solid var(--border-strong);
 }
 
-/* Positioned within its own grid row: under the top bar, above the status bar. */
+/* Out of the grid, against the shell itself (engines differ on an absolute
+   grid item's box): under the top bar, above the status bar. */
 .sidebar-covering {
+  grid-area: auto;
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 64px;
+  bottom: 31px;
   left: 0;
   z-index: 22;
   width: clamp(236px, 20vw, 250px);

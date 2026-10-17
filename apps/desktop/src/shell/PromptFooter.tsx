@@ -61,12 +61,12 @@ export function PromptTrail() {
   return (
     <>
       <span className="prompt-sep" aria-hidden="true">|</span>
-      <button type="button" className="prompt-link" aria-label="Commands"
+      <button type="button" className="prompt-link" data-focus-key="prompt-commands"
               title={palette ? `Commands (${palette})` : "Commands"} onClick={() => run(ID.paletteOpen)}>
         <span className="prompt-link-label">Command</span>{palette && <span className="prompt-link-key">[{palette}]</span>}
       </button>
       <span className="prompt-sep prompt-shortcuts-sep" aria-hidden="true">|</span>
-      <button type="button" className="prompt-link prompt-shortcuts" aria-label="Keyboard shortcuts"
+      <button type="button" className="prompt-link prompt-shortcuts"
               title={shortcuts ? `Keyboard shortcuts (${shortcuts})` : "Keyboard shortcuts"}
               onClick={() => run(ID.viewShortcuts)}>
         <span className="prompt-link-label">Shortcuts</span>{shortcuts && <span className="prompt-link-key">[{shortcuts}]</span>}

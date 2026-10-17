@@ -95,8 +95,26 @@ describe("the reference's regions", () => {
     const { container } = await openWindow(show, until, native);
     const footer = container.querySelector<HTMLElement>('[data-testid="composer"] .composer-actions')!;
     expect(footer.querySelector('[data-testid="mode"]')).not.toBeNull();
-    expect(footer.querySelector('button[aria-label="Commands"]')).not.toBeNull();
+    expect(footer.querySelector('button[data-focus-key="prompt-commands"]')).not.toBeNull();
     await until(() => footer.querySelector('[data-testid="model-chip"]')?.textContent === "fake / fake-1", "the model");
+  });
+});
+
+describe("names", () => {
+  // WCAG 2.5.3: a control's visible text is part of its name; the wordmark is text.
+  test("the visible text of the search, the footer links and the wordmark is their name", async () => {
+    const { container } = await openWindow(show, until);
+    expect(paletteControl(container).getAttribute("aria-label")).toBeNull();
+    expect(paletteControl(container).textContent).toContain("Search commands");
+    const links = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer"] .prompt-link')];
+    expect(links.length).toBe(2);
+    for (const link of links) {
+      expect(link.getAttribute("aria-label")).toBeNull();
+      expect(link.querySelector(".prompt-link-label")?.textContent).toBeTruthy();
+    }
+    const wordmark = container.querySelector("header.top-bar .wordmark")!;
+    expect(wordmark.getAttribute("aria-label")).toBeNull();
+    expect(wordmark.textContent).toBe("Comodor");
   });
 });
 

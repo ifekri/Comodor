@@ -16,7 +16,7 @@ export function panel(name?: string): HTMLElement | null {
 
 /** The top bar's search: the palette's visible control (an icon when the menus fold). */
 export function paletteControl(): HTMLButtonElement | null {
-  return document.querySelector<HTMLButtonElement>('header.top-bar button[aria-label="Commands"]');
+  return document.querySelector<HTMLButtonElement>('header.top-bar button[data-focus-key="palette-control"]');
 }
 
 /** The region holding focus: the top bar, the sidebar, main, the panel or the status bar. */

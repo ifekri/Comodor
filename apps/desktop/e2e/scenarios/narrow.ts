@@ -156,6 +156,11 @@ export const narrow: Scenario = async (context) => {
       toggle()!.click();
       const covering = await context.waitFor(() => document.querySelector<HTMLElement>("nav.sidebar-covering"));
       inView(covering, `${name}: the covering sidebar`);
+      const box = covering.getBoundingClientRect();
+      const top = document.querySelector("header.top-bar")!.getBoundingClientRect().bottom;
+      const bottom = document.querySelector("footer.status-bar")!.getBoundingClientRect().top;
+      expect(Math.abs(box.top - top) <= 1 && Math.abs(box.bottom - bottom) <= 1,
+             `product-failure: ${name}: the covering sidebar spans ${box.top}–${box.bottom}, not ${top}–${bottom}`);
       expect(await observed(() => region() === "sidebar", 120), `${name}: focus moved into the covering sidebar`);
       press("Escape");
       await context.waitFor(() => document.querySelector(SIDEBAR) === null);

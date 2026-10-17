@@ -101,7 +101,7 @@ describe("running", () => {
   test("Escape closes without running anything and focus returns where it was", async () => {
     const native = new FakeNative();
     const { container } = await openWindow(show, until, native);
-    const opener = container.querySelector<HTMLButtonElement>('header.top-bar button[aria-label="Commands"]')!;
+    const opener = container.querySelector<HTMLButtonElement>('header.top-bar button[data-focus-key="palette-control"]')!;
     opener.focus();
     await click(opener);
     await until(() => palette(container), "the palette");
@@ -144,7 +144,7 @@ describe("Escape with focus outside the palette", () => {
   test("closes the palette and returns focus to its opener", async () => {
     const native = new FakeNative();
     const { container } = await openWindow(show, until, native);
-    const opener = container.querySelector<HTMLButtonElement>('header.top-bar button[aria-label="Commands"]')!;
+    const opener = container.querySelector<HTMLButtonElement>('header.top-bar button[data-focus-key="palette-control"]')!;
     opener.focus();
     await click(opener);
     await until(() => palette(container), "the palette");

@@ -82,7 +82,7 @@ export function diagnosticsCell(container: HTMLElement): HTMLButtonElement {
 
 /** The top bar's search: the palette's visible control. */
 export function paletteControl(container: HTMLElement): HTMLButtonElement {
-  return container.querySelector<HTMLButtonElement>('header.top-bar button[aria-label="Commands"]')!;
+  return container.querySelector<HTMLButtonElement>('header.top-bar button[data-focus-key="palette-control"]')!;
 }
 
 /** Open the palette with the top bar's search, and wait for it. */

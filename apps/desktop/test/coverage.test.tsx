@@ -94,6 +94,6 @@ test("the palette itself has a key and visible controls, and every key resolves 
   expect(bindings.some((binding) => binding.key === "mod+k" && binding.command === "palette.open")).toBe(true);
   for (const binding of bindings) expect(commands.get(binding.command)).toBeDefined();
   const { container } = await openWindow(show, until);
-  expect(container.querySelector('header.top-bar button[aria-label="Commands"]')).not.toBeNull();
-  expect(container.querySelector('[data-testid="composer"] button[aria-label="Commands"]')).not.toBeNull();
+  expect(container.querySelector('header.top-bar button[data-focus-key="palette-control"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="composer"] button[data-focus-key="prompt-commands"]')).not.toBeNull();
 });

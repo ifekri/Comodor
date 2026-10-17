@@ -186,14 +186,15 @@ export function TopBar({ narrow, registry, context, keyFor, onRun, palette }: {
   const cancellable = context.busy && context.cancellable;
   return (
     <header className="top-bar" data-testid="top-bar">
-      <div className="wordmark" aria-label="Comodor">
+      <div className="wordmark">
         <span className="wordmark-mark" aria-hidden="true" />
-        <span className="wordmark-text" aria-hidden="true">COMODOR</span>
+        <span className="wordmark-text">Comodor</span>
       </div>
       <Menus narrow={narrow} registry={registry} context={context} keyFor={keyFor} onRun={onRun} />
       <div className={narrow ? "top-search narrow" : "top-search"}>
         {palette ?? (
-          <button type="button" className="top-search-field" aria-label="Commands" data-focus-key="palette-control"
+          <button type="button" className="top-search-field" aria-label={narrow ? "Search commands" : undefined}
+                  data-focus-key="palette-control"
                   title={paletteKey ? `Commands (${paletteKey})` : "Commands"} onClick={() => onRun(ID.paletteOpen)}>
             {!narrow && <span className="top-search-hint">Search commands…</span>}
             <span className="icon" data-icon={narrow ? "search" : "auto_awesome"} aria-hidden="true" />
