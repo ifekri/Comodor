@@ -4,6 +4,10 @@
  * actions. A menu item or action either runs a real command of the window's
  * registry or is a later-phase item that says so and runs nothing. Below
  * 760 px the menus fold into one "Menu" and the search into its icon.
+ *
+ * The menus are a WAI-ARIA menubar: one tab stop, Left and Right (Home and
+ * End) between the menus, Down, Enter or Space into one; an open menu closes
+ * when focus leaves the menubar, so nothing is left open behind it.
  */
 
 import type { CommandRegistry } from "@comodor/commands";
@@ -60,11 +64,14 @@ function Menus({ narrow, registry, context, keyFor, onRun }: {
 }) {
   const notice = useContext(LaterNotice);
   const [open, setOpen] = useState<string | null>(null);
-  const bar = useRef<HTMLElement>(null);
+  // The menubar's one tab stop: the menu last focused.
+  const [stop, setStop] = useState(0);
+  const bar = useRef<HTMLDivElement>(null);
   const menus: readonly Menu[] = narrow
     ? [{ label: "Menu", items: MENUS.flatMap((menu) => menu.items.map((item, at) => (
       { ...item, label: `${menu.label} · ${item.label}`, separator: at === 0 && menu !== MENUS[0] }))) }]
     : MENUS;
+  const tabStop = Math.min(stop, menus.length - 1);
 
   // A click anywhere else closes the open menu, as in the reference.
   useEffect(() => {
@@ -72,8 +79,16 @@ function Menus({ narrow, registry, context, keyFor, onRun }: {
     const outside = (event: MouseEvent) => {
       if (!bar.current?.contains(event.target as Node)) setOpen(null);
     };
+    // Focus leaving the menubar (Tab, F6, a click) closes it too.
+    const left = (event: FocusEvent) => {
+      if (!bar.current?.contains(event.target as Node)) setOpen(null);
+    };
     window.addEventListener("mousedown", outside);
-    return () => window.removeEventListener("mousedown", outside);
+    window.addEventListener("focusin", left);
+    return () => {
+      window.removeEventListener("mousedown", outside);
+      window.removeEventListener("focusin", left);
+    };
   }, [open]);
 
   const trigger = (label: string) => bar.current?.querySelector<HTMLButtonElement>(`[data-menu="${label}"]`);
@@ -86,6 +101,11 @@ function Menus({ narrow, registry, context, keyFor, onRun }: {
   const close = (label: string) => {
     setOpen(null);
     trigger(label)?.focus();
+  };
+  const focusMenu = (at: number) => {
+    const next = menus[(at + menus.length) % menus.length]!.label;
+    if (open !== null) openAt(next, false);
+    trigger(next)?.focus();
   };
   const neighbour = (label: string, by: 1 | -1) => {
     const at = menus.findIndex((menu) => menu.label === label);
@@ -122,13 +142,14 @@ function Menus({ narrow, registry, context, keyFor, onRun }: {
   };
 
   return (
-    <nav ref={bar} className="menubar" aria-label="Menu" data-testid="menubar">
-      {menus.map((menu) => {
+    <div ref={bar} role="menubar" aria-label="Menu" className="menubar" data-testid="menubar">
+      {menus.map((menu, place) => {
         const isOpen = open === menu.label;
         return (
-          <div key={menu.label} className="menu-anchor">
-            <button type="button" className={isOpen ? "menu-trigger open" : "menu-trigger"} data-menu={menu.label}
-                    aria-haspopup="menu" aria-expanded={isOpen}
+          <div key={menu.label} className="menu-anchor" role="none">
+            <button type="button" role="menuitem" className={isOpen ? "menu-trigger open" : "menu-trigger"}
+                    data-menu={menu.label} aria-haspopup="menu" aria-expanded={isOpen}
+                    tabIndex={place === tabStop ? 0 : -1} onFocus={() => setStop(place)}
                     onClick={() => (isOpen ? setOpen(null) : openAt(menu.label, false))}
                     onMouseEnter={() => {
                       if (open !== null && !isOpen) setOpen(menu.label);
@@ -137,6 +158,12 @@ function Menus({ narrow, registry, context, keyFor, onRun }: {
                       if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
                         openAt(menu.label, true);
+                      } else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                        event.preventDefault();
+                        focusMenu(place + (event.key === "ArrowRight" ? 1 : -1));
+                      } else if (event.key === "Home" || event.key === "End") {
+                        event.preventDefault();
+                        focusMenu(event.key === "Home" ? 0 : menus.length - 1);
                       } else if (event.key === "Escape" && isOpen) {
                         event.preventDefault();
                         event.stopPropagation();
@@ -169,7 +196,7 @@ function Menus({ narrow, registry, context, keyFor, onRun }: {
           </div>
         );
       })}
-    </nav>
+    </div>
   );
 }
 

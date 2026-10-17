@@ -10,7 +10,7 @@
  */
 
 import { expect, type Scenario, type ScenarioContext } from "../runner.ts";
-import { region, SIDEBAR } from "./workbench.ts";
+import { paletteControl, region, SIDEBAR } from "./workbench.ts";
 
 type Data = Record<string, unknown>;
 interface KeySpec { key: "q" | "k" | "F6" | "Escape" | "Tab"; mod?: boolean; shift?: boolean }
@@ -107,9 +107,9 @@ export const keyDelivery: Scenario = async (context) => {
 
   // 3. The shortcuts, each judged by what the page shows afterwards.
   const results: Data = {};
-  // The top bar's first two menus: Tab goes from one to the next.
-  const first = document.querySelector<HTMLButtonElement>('header.top-bar button[data-menu]')!;
-  const second = first.closest(".menu-anchor")!.nextElementSibling!.querySelector<HTMLElement>("button[data-menu]")!;
+  // The menubar is one tab stop: Tab goes from its menu on to the search.
+  const first = document.querySelector<HTMLButtonElement>('header.top-bar [role="menubar"] button[tabindex="0"]')!;
+  const second = paletteControl()!;
   first.focus();
   const afterTop = document.querySelector(SIDEBAR) === null ? "main" : "sidebar";
 

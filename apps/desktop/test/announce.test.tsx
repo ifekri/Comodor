@@ -74,7 +74,8 @@ describe("names", () => {
     await openPalette(container);
     const shell = container.querySelector('[data-testid="shell"]')!;
     expect([...shell.querySelectorAll("nav")].map((nav) => nav.getAttribute("aria-label")))
-      .toEqual(["Menu", "Workbench", "Mode"]);
+      .toEqual(["Workbench", "Mode"]);
+    expect(shell.querySelector('[role="menubar"]')!.getAttribute("aria-label")).toBe("Menu");
     expect(shell.querySelector('[role="dialog"].modal-panel')!.getAttribute("aria-label")).toBe("Core");
     expect(shell.querySelector('[role="dialog"]')!.getAttribute("aria-label")).toBe("Commands");
     expect(shell.querySelector('[role="listbox"]')!.getAttribute("aria-label")).toBe("Commands");

@@ -12,7 +12,7 @@ import { App } from "../src/app.tsx";
 import { MENUS } from "../src/shell/TopBar.tsx";
 import { FakeNative, openWindow, status } from "./fake-native.ts";
 import { click, render, type Rendered, until } from "./render.ts";
-import { chooseMenuItem, menuTrigger, panelOf, paletteControl, showSurface } from "./shell-helpers.ts";
+import { chooseMenuItem, key, menuTrigger, panelOf, paletteControl, showSurface } from "./shell-helpers.ts";
 
 let rendered: Rendered | undefined;
 
@@ -160,6 +160,36 @@ describe("the menus", () => {
     }
     expect(native.calls.slice(calls)).toEqual([]);
     expect(native.core.sent.length).toBe(requests);
+  });
+
+  test("are a menubar: one tab stop, Left and Right and Home and End between the menus", async () => {
+    const { container } = await openWindow(show, until);
+    const bar = container.querySelector<HTMLElement>('header.top-bar [role="menubar"]')!;
+    expect(bar.getAttribute("aria-label")).toBe("Menu");
+    expect(container.querySelector('header.top-bar nav')).toBeNull();
+    const triggers = [...bar.querySelectorAll<HTMLButtonElement>("button[data-menu]")];
+    expect(triggers.map((trigger) => trigger.getAttribute("role"))).toEqual(Array(8).fill("menuitem"));
+    expect(triggers.filter((trigger) => trigger.tabIndex === 0).map((trigger) => trigger.textContent)).toEqual(["File"]);
+    triggers[0]!.focus();
+    await key("ArrowRight", {}, triggers[0]);
+    expect(document.activeElement).toBe(menuTrigger(container, "Model"));
+    await key("End", {}, document.activeElement);
+    expect(document.activeElement).toBe(menuTrigger(container, "MCP"));
+    await key("ArrowRight", {}, document.activeElement);
+    expect(document.activeElement).toBe(menuTrigger(container, "File"));
+    await key("ArrowLeft", {}, document.activeElement);
+    expect(document.activeElement).toBe(menuTrigger(container, "MCP"));
+    // The tab stop follows the menu last focused.
+    expect(menuTrigger(container, "MCP").tabIndex).toBe(0);
+    expect(menuTrigger(container, "File").tabIndex).toBe(-1);
+  });
+
+  test("an open menu closes when focus leaves the menubar", async () => {
+    const { container } = await openWindow(show, until);
+    await click(menuTrigger(container, "File"));
+    await until(() => container.querySelector('[role="menu"]'), "the File menu");
+    container.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button:not(.later)')!.focus();
+    await until(() => container.querySelector('[role="menu"]') === null, "closed when focus left");
   });
 
   test("a real item runs its command: Open Folder changes the workspace", async () => {
