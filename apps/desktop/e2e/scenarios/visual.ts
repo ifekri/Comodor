@@ -123,13 +123,30 @@ function landmarks(): Record<string, unknown> {
   return found;
 }
 
+/** Every element that scrolls as drawn (a scrollbar the reference may not have), and by how much. */
+function scrolling(): Record<string, unknown>[] {
+  const found: Record<string, unknown>[] = [];
+  for (const element of [document.documentElement, ...document.querySelectorAll<HTMLElement>('[data-testid="shell"] *')]) {
+    const style = getComputedStyle(element);
+    const vertical = element.scrollHeight > element.clientHeight && /auto|scroll/.test(style.overflowY);
+    const horizontal = element.scrollWidth > element.clientWidth && /auto|scroll/.test(style.overflowX);
+    if (!vertical && !horizontal) continue;
+    found.push({ element: `${element.tagName.toLowerCase()}${element.className ? `.${String(element.className).split(" ").join(".")}` : ""}`,
+                 by: { vertical: element.scrollHeight - element.clientHeight, horizontal: element.scrollWidth - element.clientWidth },
+                 children: [...element.children].map((child) => `${child.tagName.toLowerCase()}.${child.className}:${
+                   Math.round(child.getBoundingClientRect().height)}`) });
+  }
+  return found;
+}
+
 async function shoot(context: ScenarioContext, name: string, shots: Shot[]): Promise<void> {
   await settled();
   const reply = await context.checkpoint("screenshot", { name });
   const shot = reply["shot"] as Shot | undefined;
   expect(shot?.["ok"] === true, `product-failure: the window could not be captured for ${name}: ${
     String(shot?.["reason"] ?? "no reply")}`);
-  shots.push({ name, page: { width: window.innerWidth, height: window.innerHeight }, landmarks: landmarks(), ...shot });
+  shots.push({ name, page: { width: window.innerWidth, height: window.innerHeight }, landmarks: landmarks(),
+               scrolls: scrolling(), ...shot });
 }
 
 /** Resize the window; the page size reached, or null when the window never gets there. */

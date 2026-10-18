@@ -806,10 +806,12 @@ textarea:focus {
   min-width: 0;
 }
 
+/* The reference's footer: Send and the links give way by their labels
+   (ellipsis), never their icons or keys. */
 .composer-actions .composer-send,
 .composer-actions .composer-cancel {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -832,9 +834,16 @@ textarea:focus {
   font-feature-settings: "liga";
 }
 
-.composer-actions .composer-send::after {
-  content: "Message";
-  margin-left: -2px;
+.composer-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-send .composer-label::after {
+  content: " Message";
 }
 
 .composer-actions .composer-cancel::before {
@@ -865,7 +874,7 @@ textarea:focus {
 
 .prompt-link {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
   gap: 4px;
   min-width: 0;
   min-height: 0;
@@ -898,8 +907,13 @@ textarea:focus {
   display: none;
 }
 
-.shell-folded .composer-actions .composer-send::after {
+/* Folded, Send and Cancel keep their own words: the footer sheds the rest first. */
+.shell-folded .composer-send .composer-label::after {
   content: none;
+}
+
+.shell-folded .composer-label {
+  flex: none;
 }
 
 .shell-folded .prompt-key {
@@ -911,33 +925,9 @@ textarea:focus {
   max-width: 110px;
 }
 
-/* As the reference's footer narrows, its labels give way to their keys and
-   icons, by the footer's own width (the turn's Cancel makes it fuller). */
-@container (max-width: 820px) {
-  .composer-actions .composer-send::after,
-  .prompt-later > span:not(.icon) {
-    display: none;
-  }
-
-  /* Hidden from sight, still the link's name (WCAG 2.5.3). */
-  .prompt-link-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-
-  .composer-actions .composer-send::after {
-    content: none;
-  }
-
-  .prompt-key {
-    margin-left: 0;
-  }
-}
-
+/* Where the reference's own footer overlaps (narrower than about 600px), the
+   window sheds the later-phase items and the shortcuts link instead, so Send
+   and the palette stay whole (FR-027). */
 @container (max-width: 600px) {
   .prompt-later,
   .prompt-shortcuts,
@@ -1866,7 +1856,9 @@ button.link {
   justify-content: safe center;
   gap: 18px;
   min-height: 0;
-  padding: 16px 24px;
+  /* Centred, the card and hint fit the reference's 393px canvas at 600px high
+     without a scrollbar (a 16px padding overflowed it by 1px). */
+  padding: 8px 24px;
   overflow: auto;
 }
 

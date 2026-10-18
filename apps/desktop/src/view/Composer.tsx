@@ -61,12 +61,12 @@ export function Composer({ busy, ready, cancellable, onSend, onCancel, handle, l
       <div className="composer-actions">
         {leading}
         <button type="button" className="composer-send" disabled={!ready} onClick={() => run(COMMAND_IDS.send)}>
-          {commands.get(COMMAND_IDS.send)?.title}
+          <span className="composer-label">{commands.get(COMMAND_IDS.send)?.title}</span>
         </button>
         {sendHint}
         {busy && (
           <button type="button" className="composer-cancel" disabled={!cancellable} onClick={() => run(COMMAND_IDS.cancel)}>
-            {commands.get(COMMAND_IDS.cancel)?.title}
+            <span className="composer-label">{commands.get(COMMAND_IDS.cancel)?.title}</span>
           </button>
         )}
         {trailing}
