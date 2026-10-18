@@ -177,6 +177,19 @@ describe("opening and closing", () => {
     expect(document.activeElement).toBe(field);
   });
 
+  test("when the element that opened it is no longer drawn, focus goes to the composer", async () => {
+    const { container } = await openWindow(show, until);
+    const link = container.querySelector<HTMLButtonElement>('[data-testid="composer"] .prompt-shortcuts')!;
+    link.focus();
+    await click(link);
+    await until(() => panelOf(container, "Keyboard shortcuts"), "the shortcuts panel");
+    // The footer narrows and sheds the link (its container query), as a resize does.
+    link.style.display = "none";
+    await key("Escape");
+    await until(() => panel(container) === null, "closed");
+    expect(document.activeElement).toBe(container.querySelector('[data-testid="composer"] textarea'));
+  });
+
   test("when the element that opened it is gone, focus goes to the composer, else to the main area", async () => {
     const { container } = await openWindow(show, until);
     const gone = document.createElement("button");

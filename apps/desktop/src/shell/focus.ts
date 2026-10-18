@@ -44,7 +44,20 @@ export class FocusReturn {
 
 /** An element that can take focus now: in the document and not disabled. */
 export function isUsable(element: Element | null | undefined): element is HTMLElement {
-  return element instanceof HTMLElement && element.isConnected && !(element as HTMLButtonElement).disabled;
+  return element instanceof HTMLElement && element.isConnected && !(element as HTMLButtonElement).disabled
+    && rendered(element);
+}
+
+/**
+ * Drawn: neither the element nor any ancestor is `display: none` (the
+ * prompt footer hides controls as it narrows). Focus on a control that is
+ * not drawn goes nowhere, so such an opener is not a place to return to.
+ */
+function rendered(element: Element): boolean {
+  for (let node: Element | null = element; node !== null; node = node.parentElement) {
+    if (getComputedStyle(node).display === "none") return false;
+  }
+  return true;
 }
 
 /**
