@@ -258,10 +258,31 @@ describe("the sidebar", () => {
     const native = new FakeNative(status({ workspace: "/work/project" }));
     const { container } = await openWindow(show, until, native);
     await click([...sidebar(container)!.querySelectorAll<HTMLButtonElement>('[role="tab"]')].at(-1)!);
-    const explorer = await until(() => sidebar(container)!.querySelector('[role="tabpanel"][aria-label="Explorer"]'),
+    const explorer = await until(() => sidebar(container)!.querySelector('[role="tabpanel"][data-tab="explorer"]'),
       "the explorer");
     expect(explorer.textContent).toContain("arrives in a later version");
     expect(explorer.querySelectorAll("button").length).toBe(0);
+  });
+});
+
+describe("the sidebar's tabs", () => {
+  test("are one tab stop, chosen with Left, Right, Home and End, each naming its panel", async () => {
+    const { container } = await openWindow(show, until);
+    const tabs = () => [...sidebar(container)!.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    expect(tabs().map((tab) => tab.tabIndex)).toEqual([0, -1]);
+    tabs()[0]!.focus();
+    await key("ArrowRight", {}, tabs()[0]);
+    await until(() => tabs()[1]!.getAttribute("aria-selected") === "true", "the explorer chosen");
+    expect(document.activeElement).toBe(tabs()[1]);
+    expect(tabs().map((tab) => tab.tabIndex)).toEqual([-1, 0]);
+    const panel = sidebar(container)!.querySelector<HTMLElement>('[role="tabpanel"]')!;
+    expect(panel.getAttribute("aria-labelledby")).toBe(tabs()[1]!.id);
+    expect(tabs()[1]!.getAttribute("aria-controls")).toBe(panel.id);
+    await key("Home", {}, tabs()[1]);
+    await until(() => tabs()[0]!.getAttribute("aria-selected") === "true", "the workspace chosen");
+    expect(document.activeElement).toBe(tabs()[0]);
+    await key("ArrowLeft", {}, tabs()[0]);
+    await until(() => tabs()[1]!.getAttribute("aria-selected") === "true", "around to the explorer");
   });
 });
 

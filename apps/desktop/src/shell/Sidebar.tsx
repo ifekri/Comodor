@@ -9,7 +9,7 @@
  */
 
 import type { Delegate, Task } from "@comodor/session";
-import { type ReactNode, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
 
 import { InertText } from "../view/InertText.tsx";
 import { LaterButton } from "./Later.tsx";
@@ -20,6 +20,9 @@ const TASK_ICONS: Readonly<Record<Task["state"], string>> = {
 };
 
 const LIVE: ReadonlySet<Delegate["state"]> = new Set(["running", "stopping"]);
+
+const TABS = ["workspace", "explorer"] as const;
+type Tab = (typeof TABS)[number];
 
 function Section({ label, count, open, onToggle, actions, children }: {
   label: string;
@@ -53,7 +56,20 @@ export function Sidebar({ session, workspace, mode, canChangeWorkspace, onChange
   onChangeWorkspace: () => void;
   onShowConversation: () => void;
 }) {
-  const [tab, setTab] = useState<"workspace" | "explorer">("workspace");
+  const [tab, setTab] = useState<Tab>("workspace");
+  // The tabs are one tab stop; Left, Right, Home and End choose between them.
+  const ids = useId();
+  const tabList = useRef<HTMLDivElement>(null);
+  const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    const at = TABS.indexOf(tab);
+    const next = event.key === "ArrowRight" ? TABS[(at + 1) % TABS.length]
+      : event.key === "ArrowLeft" ? TABS[(at - 1 + TABS.length) % TABS.length]
+      : event.key === "Home" ? TABS[0] : event.key === "End" ? TABS.at(-1) : undefined;
+    if (next === undefined) return;
+    event.preventDefault();
+    setTab(next);
+    tabList.current?.querySelector<HTMLElement>(`[data-tab="${next}"]`)?.focus();
+  };
   const [open, setOpen] = useState({ session: true, agents: true, tasks: true });
   const toggle = (key: keyof typeof open) => () => setOpen((now) => ({ ...now, [key]: !now[key] }));
   const shown = session?.shown === true;
@@ -75,17 +91,19 @@ export function Sidebar({ session, workspace, mode, canChangeWorkspace, onChange
         <span className="side-spacer" />
         <LaterButton label="Sidebar options" icon="more_vert" className="side-tool" />
       </div>
-      <div className="side-tabs" role="tablist" aria-label="Sidebar">
-        {(["workspace", "explorer"] as const).map((name) => (
+      <div ref={tabList} className="side-tabs" role="tablist" aria-label="Sidebar" onKeyDown={onTabKey}>
+        {TABS.map((name) => (
           <button key={name} type="button" role="tab" aria-selected={tab === name} className="side-tab"
-                  onClick={() => setTab(name)}>
+                  id={`${ids}-${name}-tab`} aria-controls={`${ids}-${name}-panel`} data-tab={name}
+                  tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)}>
             <span className="icon" data-icon={name === "workspace" ? "dashboard" : "folder_open"} aria-hidden="true" />
             <span>{name.toUpperCase()}</span>
           </button>
         ))}
       </div>
       {tab === "workspace" ? (
-        <div className="side-sections" role="tabpanel" aria-label="Workspace">
+        <div className="side-sections" role="tabpanel" id={`${ids}-workspace-panel`}
+             aria-labelledby={`${ids}-workspace-tab`} data-tab="workspace">
           <Section label="Session" count={shown ? "1" : "0"} open={open.session} onToggle={toggle("session")}
                    actions={<>
                      <LaterButton label="Filter sessions" icon="search" className="side-mini" />
@@ -151,7 +169,8 @@ export function Sidebar({ session, workspace, mode, canChangeWorkspace, onChange
           </Section>
         </div>
       ) : (
-        <div className="side-explorer" role="tabpanel" aria-label="Explorer">
+        <div className="side-explorer" role="tabpanel" id={`${ids}-explorer-panel`}
+             aria-labelledby={`${ids}-explorer-tab`} data-tab="explorer">
           <div className="side-section-head">
             <span className="side-section-label" dir="auto">{(folder ?? "Workspace").toUpperCase()}</span>
           </div>
