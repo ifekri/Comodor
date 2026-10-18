@@ -1,5 +1,6 @@
 /**
- * T069, corrected 2026-10-17: the sidebar beside the canvas from 900 px up
+ * T069, corrected 2026-10-17 and 2026-10-18: the sidebar beside the canvas
+ * from 760 px (the reference's minimum width) up
  * and covering it below (FR-026); the panel the same at every width, never
  * resized (FR-025 withdrawn).
  */
@@ -29,15 +30,17 @@ const toggle = (container: HTMLElement) => container.querySelector<HTMLButtonEle
 const shell = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-testid="shell"]')!;
 
 describe("beside and covering", () => {
-  test("beside at 900 and above; hidden at 899, covering when opened, closed by Escape and a click outside", async () => {
+  test("beside at 760 and above, as in the reference (899 included); hidden at 759, covering when opened, closed by Escape and a click outside", async () => {
     const { container } = await openWindow(show, until);
-    await resizeTo(900);
-    await until(() => sidebar(container)?.classList.contains("sidebar-beside"), "beside at 900");
+    await resizeTo(899);
+    await until(() => sidebar(container)?.classList.contains("sidebar-beside"), "beside at 899");
+    await resizeTo(760);
+    await until(() => sidebar(container)?.classList.contains("sidebar-beside"), "beside at 760");
     expect(shell(container).getAttribute("data-mode")).toBe("beside");
     expect(container.querySelector('[data-testid="sidebar-backdrop"]')).toBeNull();
 
-    await resizeTo(899);
-    await until(() => sidebar(container) === null, "hidden at 899");
+    await resizeTo(759);
+    await until(() => sidebar(container) === null, "hidden at 759");
     expect(shell(container).getAttribute("data-mode")).toBe("covering");
     expect(toggle(container).getAttribute("aria-expanded")).toBe("false");
 
@@ -53,7 +56,7 @@ describe("beside and covering", () => {
     await until(() => sidebar(container) === null, "closed by a click outside");
   });
 
-  test("widening past 900 puts it back beside; a covering sidebar does not stay covering", async () => {
+  test("widening past 760 puts it back beside; a covering sidebar does not stay covering", async () => {
     const { container } = await openWindow(show, until);
     await resizeTo(700);
     await until(() => shell(container).getAttribute("data-mode") === "covering", "covering mode");
@@ -63,7 +66,7 @@ describe("beside and covering", () => {
     await until(() => sidebar(container)?.classList.contains("sidebar-beside"), "beside again");
     expect(container.querySelector('[data-testid="sidebar-backdrop"]')).toBeNull();
     await resizeTo(700);
-    await until(() => sidebar(container) === null, "hidden again below 900, not covering");
+    await until(() => sidebar(container) === null, "hidden again below 760, not covering");
   });
 
   test("hiding it while it holds the focus gives the focus to its toggle, by key and from the palette", async () => {
@@ -83,11 +86,11 @@ describe("beside and covering", () => {
     expect(document.activeElement).toBe(toggle(container));
   });
 
-  test("narrowing past 900 px while it holds the focus gives the focus to its toggle", async () => {
+  test("narrowing past 760 px while it holds the focus gives the focus to its toggle", async () => {
     const { container } = await openWindow(show, until);
     sidebar(container)!.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')!.focus();
-    await resizeTo(899);
-    await until(() => sidebar(container) === null, "hidden at 899");
+    await resizeTo(759);
+    await until(() => sidebar(container) === null, "hidden at 759");
     expect(document.activeElement).toBe(toggle(container));
   });
 
@@ -107,7 +110,7 @@ describe("the panel", () => {
     native.layoutAnswer = { layout: { version: 1, panel_open: true, panel_surface: "core", panel_width: 400 },
                             stored: true };
     const { container } = await openWindow(show, until, native);
-    for (const width of [1440, 900, 899, 520]) {
+    for (const width of [1440, 900, 899, 760, 759, 520]) {
       await resizeTo(width);
       const panel = await until(() => panelOf(container, "Core"), `the panel at ${width}`);
       expect(panel.querySelector('[role="separator"]')).toBeNull();
@@ -122,7 +125,7 @@ describe("going to the message box", () => {
   // shown before it takes focus, as "Show the conversation" does.
   test("closes the panel and the covering sidebar and focuses the composer", async () => {
     const { container } = await openWindow(show, until);
-    await resizeTo(899);
+    await resizeTo(759);
     await until(() => shell(container).getAttribute("data-mode") === "covering", "covering mode");
     await click(toggle(container));
     await until(() => sidebar(container)?.classList.contains("sidebar-covering"), "covering");

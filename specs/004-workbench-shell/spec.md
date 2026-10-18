@@ -189,11 +189,33 @@ below were read from the repository, not assumed.
 | FR-005/SC-012 no entry, tab or disabled placeholder for later phases | Menus, sidebar sections, tabs, tiles and actions for sessions, agents, tasks, files, loops, skills, memory, MCP, a terminal | Allowed as truthful unavailable or empty states only (Session 2026-10-17); palette and shortcuts unchanged |
 | FR-003 the status bar holds the palette control | The status bar holds activity, folder, branch, context, terminal and debug cells; the command control is in the prompt footer ("Command [/]") | The status bar keeps D1's strip in the reference's cells; the palette control moves to the prompt footer ("Command [Ctrl+K]") |
 | FR-011 a centred palette dialog | A search field in the top bar with a results list below it, and a slash-command list above the prompt | The palette is the top bar's search: its field takes the search box's place and its results drop below in the reference's result rows |
-| FR-025/FR-026 a resizable side panel, beside from 900 px and covering below | No side panel; a fixed-width collapsible sidebar | Side-panel resizing is withdrawn (with its edge and its wider/narrower commands); the 900 px threshold now governs the sidebar: beside from 900, hidden below and covering the canvas when opened, closed by Escape or a click outside |
+| FR-025/FR-026 a resizable side panel, beside from 900 px and covering below | No side panel; a fixed-width collapsible sidebar, beside the canvas at every width the reference draws (down to its `min-width` of 760 px) | Side-panel resizing is withdrawn (with its edge and its wider/narrower commands). The sidebar is beside the canvas from 760 px up, as in the reference — 899 px included (corrected 2026-10-18; it was first hidden below 900, which no approved criterion asked for). Below 760 px see "Open decisions for the owner" |
 | FR-021/FR-022 the stored layout is the side panel's state and width | — | The stored format is unchanged (version, `panel_open`, `panel_surface`, `panel_width`); `panel_open`/`panel_surface` now name the open modal panel, restored after a reload, a Core restart and a relaunch; `panel_width` is kept and validated as before but no longer drawn |
 | The composer with Send and Cancel beside the field; the mode control above the conversation | A prompt field over a 33 px footer: model chip, attachments, Agentic, an Ask/Plan/Build segmented control, "Send Message [ENTER]", "Command [/]", "Sub-Agents [Ctrl+S]" | The footer in the reference's order with truthful content: the model the Core reports; attachments and Agentic unavailable; the Core's modes (shown Act/Plan/Ask, the Core's own labels in title case, not "Build"); Send (still labelled "Send"); "Command [Ctrl+K]"; "Shortcuts [Ctrl+/]" |
-| The 520 × 400 minimum window | `min-width: 760px` | The minimum stays; below 760 px the menus fold into one "Menu" control and the search into its icon, so nothing scrolls sideways (FR-027) |
+| The 520 × 400 minimum window | `min-width: 760px` | The minimum stays; below 760 px see "Open decisions for the owner" |
 | Demo content in the reference (named agents, tasks, sessions, files, terminal output, models) | Seeded for design review only | Never shown; every value is the Core's or the native side's, or a stated empty state |
+
+### Open decisions for the owner (2026-10-18)
+
+Below 760 px the reference cannot be matched without breaking an approved
+criterion. The reference's root has `min-width: 760px`: in a narrower window
+it keeps its full layout and the page scrolls sideways, cutting off the
+right-hand side — the search, the actions, the prompt footer's right half and
+the status bar's end. FR-027 (approved in D2) requires that from the minimum
+window (520 × 400) up the essentials are visible and usable and nothing
+scrolls horizontally. Until the owner decides otherwise, the window keeps
+FR-027 and differs from the reference below 760 px:
+
+| Below 760 px | The reference | This window (keeps FR-027) |
+| --- | --- | --- |
+| Menus | The eight menus, unchanged; the page scrolls sideways | Folded into one "Menu" control holding every item ("File · Open Folder", …) |
+| Search | Full field; partly or wholly off-screen | Its icon; the palette spans the top bar when open |
+| Sidebar | Beside the canvas (250 px), leaving the canvas narrower than the window allows | Hidden; its chevron opens it over the canvas (Escape or a click outside closes it) |
+| Horizontal scroll | Yes | None |
+
+Both renderings, at 759 × 600 and 520 × 400, are in the visual comparison.
+The owner may instead accept horizontal scrolling below 760 px (amending
+FR-027 and SC-007), which would let the window match the reference there.
 
 **Reading the rest of this specification.** Where a user story, an
 acceptance scenario, an entity or a scope line below still names the
@@ -604,10 +626,11 @@ command remains reachable.
 - **FR-025**: *Withdrawn 2026-10-17* — the reference has no resizable side
   panel. The stored `panel_width` keeps its validation (FR-036) and is not
   drawn.
-- **FR-026**: From the compact threshold (900 logical px) up, the sidebar MUST
-  sit beside the canvas; below it, the sidebar MUST be hidden and, when
-  opened, cover the canvas instead of shrinking it, dismissible with Escape or
-  a click outside, with focus returned to its opener.
+- **FR-026**: From 760 logical px — the reference's minimum width — up, the
+  sidebar MUST sit beside the canvas, as in the reference; below it (pending
+  the owner's decision above), the sidebar MUST be hidden and, when opened,
+  cover the canvas instead of shrinking it, dismissible with Escape or a
+  click outside, with focus returned to its opener.
 - **FR-027**: At every window size from the minimum (520 × 400) upward, the
   composer, Send, the Core state, the palette control and the other essential
   actions (the menus or the "Menu" control, the sidebar toggle, the mode
@@ -782,7 +805,8 @@ command remains reachable.
   command-manifest runs.
 - **SC-018**: Screenshots of the real desktop WebView — not DOM checks — on
   Windows, Linux and macOS, at the reference viewport (1440 × 900), the
-  minimum window and either side of the 900 px threshold, in the normal,
+  minimum window, either side of the 900 px threshold and either side of the
+  reference's 760 px minimum width, in the normal,
   menu, question, palette and panel states, are compared section by section
   with the reference rendered at the same sizes and states; every material
   difference is either corrected or listed with its reason (a truthful state

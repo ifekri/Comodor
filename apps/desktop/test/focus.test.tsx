@@ -43,7 +43,7 @@ const toggle = (container: HTMLElement) => container.querySelector<HTMLButtonEle
 const sidebar = (container: HTMLElement) => container.querySelector('nav[aria-label="Workbench"]');
 
 async function compact(container: HTMLElement): Promise<void> {
-  await resizeTo(800);
+  await resizeTo(700);
   await until(() => container.querySelector('[data-testid="shell"]')?.getAttribute("data-mode") === "covering",
               "covering mode");
 }
@@ -148,7 +148,7 @@ describe("opening and closing", () => {
     await until(() => panel(container) === null, "closed");
   });
 
-  test("below 900 px the sidebar covers the canvas, takes focus, and gives it back to its toggle", async () => {
+  test("below 760 px the sidebar covers the canvas, takes focus, and gives it back to its toggle", async () => {
     const { container } = await openWindow(show, until);
     await compact(container);
     expect(sidebar(container)).toBeNull();

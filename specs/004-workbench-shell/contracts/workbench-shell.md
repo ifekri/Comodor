@@ -14,7 +14,7 @@ are unchanged.*
 | Region | Accessible role and name | Present |
 | --- | --- | --- |
 | Top bar | `banner`: the wordmark; `menubar` "Menu" with File, Model, Memory, Skills, Context, Agent, Option, MCP (one "Menu" control below 760 px); the search (the palette's place); the actions | always, from the first status |
-| Sidebar | `navigation` "Workbench": a toolbar; WORKSPACE and EXPLORER tabs; SESSION, AGENTS and TASKS sections | beside from 900 px; below, hidden and covering when opened |
+| Sidebar | `navigation` "Workbench": a toolbar; WORKSPACE and EXPLORER tabs; SESSION, AGENTS and TASKS sections | beside from 760 px (the reference's minimum width); below, hidden and covering when opened |
 | Canvas | `main` — D1's existing `<main data-testid="window">`; the shell adds no second `main` | always |
 | Prompt area | inside the canvas: D1's composer over the reference's footer (model, attachments, Agentic, mode control, Send, Command, Shortcuts) | when a session is shown |
 | Status bar | `contentinfo`, D1's strip in the reference's cells, with a `status` live region for the Core state | always |
@@ -147,14 +147,14 @@ Rules:
 
 | Value | Default | Rule |
 | --- | --- | --- |
-| Compact threshold | 900 logical px | judged on the shell root's measured width (`ResizeObserver` `contentRect.width`, fractional, unrounded): below 900 the sidebar is hidden and covers the canvas when opened; the root exposes it as `data-width` and the mode as `data-mode` (`beside`/`covering`) |
+| Sidebar threshold | 760 logical px | the reference's `min-width`, judged on the shell root's measured width (`ResizeObserver` `contentRect.width`, fractional, unrounded): below 760 the sidebar is hidden and covers the canvas when opened; the root exposes the width as `data-width` and the mode as `data-mode` (`beside`/`covering`). (900 px stays the stored panel-width model's threshold, which no longer draws anything.) |
 | Top bar | 64 px | the reference's; below 760 px the menus fold into one "Menu" control and the search into its icon |
 | Sidebar width | `clamp(236px, 20vw, 250px)` | the reference's; not resizable (2026-10-17) |
 | Status bar | 31 px | the reference's |
 | Modal panel | 600 px wide at most, 24 px inset | the reference's |
 | Window minimum | 520 × 400 | unchanged from D1; the native window. On macOS the page is shorter by the title bar Tauri counts inside the inner size (measured, constant, ≤ 40 px; 520 × 368 at a 32 px offset); zero offset on Windows and Linux (spec Clarifications, 2026-10-16) |
 
-- Beside mode (900 px and up): the sidebar sits left of the canvas, as in
+- Beside mode (760 px and up): the sidebar sits left of the canvas, as in
   the reference; its chevron hides and shows it.
 - Covering mode (compact): the sidebar is hidden; opened, it covers the
   canvas, with Escape and a click outside closing it and focus returned to

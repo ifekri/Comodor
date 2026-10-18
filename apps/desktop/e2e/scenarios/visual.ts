@@ -32,6 +32,8 @@ const SIZES: readonly { name: string; width: number; height: number; native?: bo
   { name: "1440x900", width: 1440, height: 900 },
   { name: "900x600", width: 900, height: 600 },
   { name: "899x600", width: 899, height: 600 },
+  { name: "760x600", width: 760, height: 600 },
+  { name: "759x600", width: 759, height: 600 },
   { name: "520x400-minimum", width: 520, height: 400, native: true },
 ];
 
@@ -61,13 +63,73 @@ async function settled(): Promise<void> {
 
 type Shot = Record<string, unknown>;
 
+/**
+ * The window's landmarks as drawn: each one's box and typography, recorded
+ * beside its screenshot for the comparison with the reference.
+ */
+const LANDMARKS: Readonly<Record<string, string>> = {
+  "top-bar": "header.top-bar",
+  wordmark: "header.top-bar .wordmark",
+  "wordmark-text": "header.top-bar .wordmark-text",
+  menubar: 'header.top-bar [role="menubar"]',
+  search: "header.top-bar .top-search-field",
+  actions: "header.top-bar .top-actions",
+  sidebar: "nav.sidebar",
+  "sidebar-toolbar": "nav.sidebar .side-toolbar",
+  "sidebar-tabs": "nav.sidebar .side-tabs",
+  "sidebar-toggle": "button.sidebar-toggle",
+  canvas: ".canvas",
+  "home-card": ".home-card",
+  prompt: '[data-testid="composer"]',
+  "prompt-field": '[data-testid="composer"] textarea',
+  "prompt-footer": ".composer-actions",
+  "model-chip": '[data-testid="model-chip"]',
+  mode: '[data-testid="composer"] [data-testid="mode"]',
+  send: ".composer-send",
+  "status-bar": "footer.status-bar",
+  menu: '[role="menu"]',
+  "menu-item": '[role="menu"] [role="menuitem"]',
+  palette: '[role="dialog"][aria-label="Commands"]',
+  "palette-input": '[role="dialog"][aria-label="Commands"] [role="combobox"]',
+  "palette-option": '[role="option"]',
+  panel: '[role="dialog"].modal-panel',
+  "panel-title": ".modal-panel .modal-title",
+  "panel-foot": ".modal-panel .modal-foot",
+  question: '[data-testid="form"]',
+  "question-title": '[data-testid="form"] h2',
+  "question-option": '[data-testid="form"] .option',
+};
+
+function landmarks(): Record<string, unknown> {
+  const found: Record<string, unknown> = {};
+  for (const [name, selector] of Object.entries(LANDMARKS)) {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (!element) continue;
+    const box = element.getBoundingClientRect();
+    if (box.width === 0 && box.height === 0) continue;
+    const style = getComputedStyle(element);
+    found[name] = {
+      x: Math.round(box.x * 10) / 10, y: Math.round(box.y * 10) / 10,
+      width: Math.round(box.width * 10) / 10, height: Math.round(box.height * 10) / 10,
+      font: `${style.fontWeight} ${style.fontSize} ${style.fontFamily.split(",")[0]!.replaceAll('"', "")}`,
+      letterSpacing: style.letterSpacing, color: style.color, background: style.backgroundColor,
+    };
+  }
+  for (const trigger of document.querySelectorAll<HTMLElement>("header.top-bar button[data-menu]")) {
+    const box = trigger.getBoundingClientRect();
+    found[`menu-${trigger.dataset["menu"]}`] = { x: Math.round(box.x * 10) / 10, y: Math.round(box.y * 10) / 10,
+      width: Math.round(box.width * 10) / 10, height: Math.round(box.height * 10) / 10 };
+  }
+  return found;
+}
+
 async function shoot(context: ScenarioContext, name: string, shots: Shot[]): Promise<void> {
   await settled();
   const reply = await context.checkpoint("screenshot", { name });
   const shot = reply["shot"] as Shot | undefined;
   expect(shot?.["ok"] === true, `product-failure: the window could not be captured for ${name}: ${
     String(shot?.["reason"] ?? "no reply")}`);
-  shots.push({ name, page: { width: window.innerWidth, height: window.innerHeight }, ...shot });
+  shots.push({ name, page: { width: window.innerWidth, height: window.innerHeight }, landmarks: landmarks(), ...shot });
 }
 
 /** Resize the window; the page size reached, or null when the window never gets there. */

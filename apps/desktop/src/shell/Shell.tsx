@@ -24,7 +24,7 @@ import { CorePanel } from "./CorePanel.tsx";
 import { DiagnosticsPanel } from "./DiagnosticsPanel.tsx";
 import { cycleRegions, fallbackTarget, focusBack, FocusReturn, focusInto, isUsable } from "./focus.ts";
 import { currentPlatform, displayKey, isEditable, isReserved, keyName, reachesShell } from "./keys.ts";
-import { closePanel, COMPACT_BELOW, DEFAULT_LAYOUT, type LayoutPreference, type PanelSurface, showSurface } from "./layout.ts";
+import { closePanel, DEFAULT_LAYOUT, type LayoutPreference, type PanelSurface, showSurface } from "./layout.ts";
 import { LaterNotice, laterText } from "./Later.tsx";
 import { ModalPanel, SURFACE_NAMES } from "./ModalPanel.tsx";
 import type { LayoutStore } from "./preference.ts";
@@ -37,8 +37,15 @@ import { Sidebar } from "./Sidebar.tsx";
 import { StatusBar } from "./StatusBar.tsx";
 import { TopBar } from "./TopBar.tsx";
 
-/** Below this measured width the reference's menus fold into one "Menu" (its `min-width`). */
+/**
+ * The reference's `min-width`. From it up the window is the reference's: the
+ * eight menus, and the sidebar beside the canvas. Below it — where the
+ * reference itself would scroll sideways, which FR-027 forbids — the menus
+ * fold into one "Menu" and the sidebar is hidden, covering the canvas when
+ * opened (FR-026).
+ */
 export const MENUS_FOLD_BELOW = 760;
+export const SIDEBAR_COVERS_BELOW = MENUS_FOLD_BELOW;
 
 /** How long a later-phase notice stays. */
 const NOTICE_MS = 2600;
@@ -131,9 +138,9 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
   const panelFocusDue = useRef(false);
   const reducedMotion = useReducedMotion();
 
-  // The sidebar: beside from the compact threshold up (the person may hide
-  // it); below, hidden, and covering the canvas while opened (FR-026).
-  const compact = width < COMPACT_BELOW;
+  // The sidebar: beside from the reference's minimum width up (the person may
+  // hide it); below, hidden, and covering the canvas while opened (FR-026).
+  const compact = width < SIDEBAR_COVERS_BELOW;
   // Hiding the sidebar that holds the focus — by its command or by the
   // window narrowing past the threshold — gives the focus to the sidebar's
   // toggle, still in view, once it is drawn.

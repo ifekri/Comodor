@@ -287,7 +287,8 @@ or protocol change):
 
 - `Shell.tsx` lays out the reference's grid — a 64 px top bar, a body of
   sidebar and canvas, a 31 px status bar — and owns the open menu, the
-  sidebar's beside/covering state at the 900 px threshold, the modal panel,
+  sidebar's beside/covering state at 760 px (the reference's minimum width;
+  corrected 2026-10-18 from 900), the modal panel,
   the palette and a notice ("toast") for unavailable items.
 - `TopBar.tsx`: wordmark, `Menus.tsx` (the eight reference menus; items are
   real commands or unavailable), the search that opens the palette in its
@@ -312,7 +313,7 @@ or protocol change):
 `e2e/harness.mjs` captures the application's own window — Windows
 `PrintWindow` of the client area, macOS `screencapture -l`, Linux `import
 -window` under the harness's Xvfb — and a `visual` scenario drives each size
-(1440 × 900, the minimum, 899 and 900 wide) through the normal, menu,
+(1440 × 900, the minimum, 899 and 900 wide, 759 and 760 wide) through the normal, menu,
 question, palette and panel states; CI keeps the images. The reference is
 rendered locally, at the same sizes and states, in a headless browser driven
 over the DevTools protocol from the owner's checkout, and compared section by

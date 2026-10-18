@@ -53,9 +53,13 @@ export function menuTrigger(container: HTMLElement, label: string): HTMLButtonEl
 
 /** Open a menu and choose one of its items, as a person does with the mouse. */
 export async function chooseMenuItem(container: HTMLElement, menu: string, item: string): Promise<HTMLButtonElement> {
-  await click(menuTrigger(container, menu));
-  const found = await until(() => [...container.querySelectorAll<HTMLButtonElement>(`[data-menu-of="${menu}"] [role="menuitem"]`)]
-    .find((button) => button.querySelector(".menu-label")?.textContent === item), `the ${item} item`);
+  // Below 760 px the menus fold into "Menu", whose items read "Option · Core".
+  const folded = container.querySelector(`header.top-bar button[data-menu="${menu}"]`) === null;
+  const owner = folded ? "Menu" : menu;
+  const label = folded ? `${menu} · ${item}` : item;
+  await click(menuTrigger(container, owner));
+  const found = await until(() => [...container.querySelectorAll<HTMLButtonElement>(`[data-menu-of="${owner}"] [role="menuitem"]`)]
+    .find((button) => button.querySelector(".menu-label")?.textContent === label), `the ${label} item`);
   await click(found);
   return found;
 }

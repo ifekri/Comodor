@@ -224,6 +224,14 @@ jobs:
           Set-DisplayResolution -Width 1920 -Height 1080 -Force
           Get-CimInstance Win32_VideoController | Select-Object CurrentHorizontalResolution, CurrentVerticalResolution
 
+      # The same on macOS, whose runner display starts at 1024 x 768: switch to
+      # a display mode that holds a 1440 x 900 page if the runner offers one.
+      # The modes found and the mode set are printed; nothing is scaled.
+      - name: A display for the reference's window size (macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: swift apps/desktop/e2e/mac-display.swift
+
       # The toolchain pinned in apps/desktop/src-tauri/rust-toolchain.toml.
       - name: Rust
         shell: bash

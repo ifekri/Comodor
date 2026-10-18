@@ -112,6 +112,9 @@ export const narrow: Scenario = async (context) => {
     { name: "minimum", size: { width: Math.ceil(520 * s), height: Math.ceil(400 * s) } },
     // Wide enough for the eight menus, as short as the minimum: the menus must scroll.
     { name: "short", size: { width: Math.ceil(800 * s), height: Math.ceil(400 * s) } },
+    // Either side of the reference's minimum width, where the sidebar starts to cover.
+    { name: "under-760", size: { width: Math.ceil(760 * s) - 1, height } },
+    { name: "at-760", size: { width: Math.ceil(760 * s), height } },
     { name: "below", size: { width: Math.ceil(900 * s) - 1, height } },
     { name: "at", size: { width: Math.ceil(900 * s), height } },
     { name: "wide", size: wide },
@@ -151,7 +154,8 @@ export const narrow: Scenario = async (context) => {
         window.visualViewport?.width}×${window.visualViewport?.height}, screen ${screen.width}×${screen.height}`);
     }
     const measured = shellWidth();
-    const compact = measured < 900;
+    // The sidebar covers below the reference's minimum width (FR-026).
+    const compact = measured < 760;
     if (first) {
       first = false;
       await observed(() => document.activeElement !== shed, 120);

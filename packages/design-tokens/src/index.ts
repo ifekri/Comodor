@@ -142,6 +142,7 @@ export const WINDOW = [
   "surface.active",
   "surface.foot",
   "surface.backdrop",
+  "surface.chip",
   "border.strong",
   "border.subtle",
   "border.tile",
@@ -180,6 +181,7 @@ export const STAND_IN: Readonly<Record<WindowRole, Token>> = {
   "surface.active": "surface.selected",
   "surface.foot": "surface.raised",
   "surface.backdrop": "surface.base",
+  "surface.chip": "surface.selected",
   "border.strong": "border.default",
   "border.subtle": "border.default",
   "border.tile": "border.default",
@@ -215,6 +217,7 @@ export const desktop: WindowTheme = {
   "surface.active": "#2c2c2c",
   "surface.foot": "#212121",
   "surface.backdrop": "#0c0c0c",
+  "surface.chip": "#1e2a22",
 
   "border.default": "#3a3a3a",
   "border.focused": "#5fd4e8",
