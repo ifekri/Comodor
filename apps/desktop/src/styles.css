@@ -1025,6 +1025,12 @@ button.link {
 
 /* -- Top bar ------------------------------------------------------------- */
 
+/* The top bar is its own stacking context (z-index 30, under the panel's
+   layer at 40): while the palette is open in it, it rises above the panel. */
+.top-bar.palette-open {
+  z-index: 45;
+}
+
 .top-bar {
   grid-column: 1 / -1;
   grid-row: 1;

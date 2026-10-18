@@ -212,7 +212,7 @@ export function TopBar({ narrow, registry, context, keyFor, onRun, palette }: {
   const paletteKey = keyFor(ID.paletteOpen);
   const cancellable = context.busy && context.cancellable;
   return (
-    <header className="top-bar" data-testid="top-bar">
+    <header className={palette ? "top-bar palette-open" : "top-bar"} data-testid="top-bar">
       <div className="wordmark">
         <span className="wordmark-mark" aria-hidden="true" />
         <span className="wordmark-text">Comodor</span>

@@ -83,6 +83,14 @@ describe("beside and covering", () => {
     expect(document.activeElement).toBe(toggle(container));
   });
 
+  test("narrowing past 900 px while it holds the focus gives the focus to its toggle", async () => {
+    const { container } = await openWindow(show, until);
+    sidebar(container)!.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')!.focus();
+    await resizeTo(899);
+    await until(() => sidebar(container) === null, "hidden at 899");
+    expect(document.activeElement).toBe(toggle(container));
+  });
+
   test("beside, the toggle and its shortcut hide and show it", async () => {
     const { container } = await openWindow(show, until);
     await click(toggle(container));

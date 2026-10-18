@@ -49,7 +49,12 @@ export const palette: Scenario = async (context) => {
   key(input, "Enter");
   await context.waitFor(() => dialog() === null && panel("Diagnostics"));
 
+  // Opened over the open panel: drawn above it, and what the pointer reaches.
   const second = await openWithControl(context);
+  const field = second.getBoundingClientRect();
+  const hit = document.elementFromPoint(field.left + field.width / 2, field.top + field.height / 2);
+  expect(hit === second || second.contains(hit),
+         `product-failure: the palette over the panel is covered at its field by ${hit?.outerHTML.slice(0, 80) ?? "nothing"}`);
   typeInto(second, "core panel");
   const core = await context.waitFor(() =>
     document.querySelector<HTMLElement>('[role="option"][data-command="view.core"]'));

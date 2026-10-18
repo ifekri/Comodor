@@ -134,6 +134,17 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
   // The sidebar: beside from the compact threshold up (the person may hide
   // it); below, hidden, and covering the canvas while opened (FR-026).
   const compact = width < COMPACT_BELOW;
+  // Hiding the sidebar that holds the focus — by its command or by the
+  // window narrowing past the threshold — gives the focus to the sidebar's
+  // toggle, still in view, once it is drawn.
+  const toggleFocusDue = useRef(false);
+  const wasCompact = useRef(compact);
+  if (compact !== wasCompact.current) {
+    if (compact && rootRef.current?.querySelector(".sidebar-beside")?.contains(document.activeElement)) {
+      toggleFocusDue.current = true;
+    }
+    wasCompact.current = compact;
+  }
   const folded = width < MENUS_FOLD_BELOW;
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [sidebarCovering, setSidebarCovering] = useState(false);
@@ -194,9 +205,6 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
     closeSidebarCover(false);
     fallbackTarget(mainRef.current ?? document)?.focus();
   };
-  // Hiding the sidebar that holds the focus (or the palette's opener) gives
-  // the focus to the sidebar's toggle, still in view, once it is drawn.
-  const toggleFocusDue = useRef(false);
   const toggleSidebar = () => {
     if (!compact) {
       const sidebar = rootRef.current?.querySelector(".sidebar");
