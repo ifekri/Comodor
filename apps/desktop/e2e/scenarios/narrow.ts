@@ -122,6 +122,11 @@ export const narrow: Scenario = async (context) => {
   }
 
   const results: Record<string, unknown>[] = [];
+  // A control the footer sheds when it narrows holds the focus before the
+  // first (smallest) size: the focus must not fall to the page.
+  const shed = document.querySelector<HTMLElement>('[data-testid="composer"] .prompt-shortcuts');
+  shed?.focus();
+  let first = shed !== null && document.activeElement === shed;
   for (const { name, size } of sizes) {
     await context.checkpoint("resize", { width: size.width, height: size.height });
     const applied = await observed(async () => {
@@ -147,6 +152,14 @@ export const narrow: Scenario = async (context) => {
     }
     const measured = shellWidth();
     const compact = measured < 900;
+    if (first) {
+      first = false;
+      await observed(() => document.activeElement !== shed, 120);
+      const active = document.activeElement;
+      expect(active !== null && active !== document.body && active.getClientRects().length > 0,
+             `product-failure: ${name}: the focus fell to the page when the footer shed its focused control (${
+               active?.outerHTML.slice(0, 60) ?? "nothing"})`);
+    }
 
     // The sidebar's mode, judged by the measured width alone (FR-026).
     const mode = document.querySelector('[data-testid="shell"]')?.getAttribute("data-mode");

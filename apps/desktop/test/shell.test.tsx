@@ -12,13 +12,14 @@ import { App } from "../src/app.tsx";
 import { MENUS } from "../src/shell/TopBar.tsx";
 import { FakeNative, openWindow, status } from "./fake-native.ts";
 import { click, render, type Rendered, until } from "./render.ts";
-import { chooseMenuItem, key, menuTrigger, panelOf, paletteControl, showSurface } from "./shell-helpers.ts";
+import { chooseMenuItem, key, menuTrigger, panelOf, paletteControl, resizeTo, showSurface, WIDE } from "./shell-helpers.ts";
 
 let rendered: Rendered | undefined;
 
 afterEach(async () => {
   await rendered?.unmount();
   rendered = undefined;
+  await resizeTo(WIDE);
 });
 
 async function show(native: FakeNative): Promise<Rendered> {
@@ -182,6 +183,23 @@ describe("the menus", () => {
     // The tab stop follows the menu last focused.
     expect(menuTrigger(container, "MCP").tabIndex).toBe(0);
     expect(menuTrigger(container, "File").tabIndex).toBe(-1);
+  });
+
+  test("crossing 760 px keeps the focus in the menubar, on the corresponding trigger", async () => {
+    const { container } = await openWindow(show, until);
+    menuTrigger(container, "Agent").focus();
+    await resizeTo(700);
+    await until(() => container.querySelector('header.top-bar button[data-menu="Menu"]'), "folded");
+    expect(document.activeElement).toBe(menuTrigger(container, "Menu"));
+    // An item of the folded menu holding the focus: unfolding goes to its menu.
+    await key("ArrowDown", {}, menuTrigger(container, "Menu"));
+    const option = await until(() => [...container.querySelectorAll<HTMLElement>('[data-menu-of="Menu"] [role="menuitem"]')]
+      .find((item) => item.textContent?.startsWith("Option · ")), "an Option item");
+    option.focus();
+    await resizeTo(WIDE);
+    await until(() => menuTrigger(container, "Option"), "unfolded");
+    expect(document.activeElement).toBe(menuTrigger(container, "Option"));
+    expect(container.querySelector('[role="menu"]')).toBeNull();
   });
 
   test("an open menu closes when focus leaves the menubar", async () => {

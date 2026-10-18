@@ -310,6 +310,28 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
     toggleFocusDue.current = false;
     rootRef.current?.querySelector<HTMLElement>("button.sidebar-toggle")?.focus();
   });
+
+  // A change of width can hide the focused control (the prompt footer sheds
+  // its later items as it narrows). Focus that fell to the page from the
+  // shell goes to the composer, FR-019's fallback — unless a part has already
+  // placed it (the menubar's trigger, the sidebar's toggle).
+  const lastFocus = useRef<Element | null>(null);
+  useEffect(() => {
+    const shell = rootRef.current;
+    if (!shell) return;
+    const seen = (event: FocusEvent) => {
+      lastFocus.current = event.target as Element;
+    };
+    shell.addEventListener("focusin", seen);
+    return () => shell.removeEventListener("focusin", seen);
+  }, []);
+  useLayoutEffect(() => {
+    const last = lastFocus.current;
+    const active = document.activeElement;
+    const drawn = (element: Element) => element.isConnected && element.getClientRects().length > 0;
+    const lost = active === null || active === document.body || !drawn(active);
+    if (last !== null && lost && !drawn(last)) fallbackTarget(mainRef.current ?? document)?.focus();
+  }, [width]);
   const runFromPalette = (id: string) => {
     closePalette();
     run(id);

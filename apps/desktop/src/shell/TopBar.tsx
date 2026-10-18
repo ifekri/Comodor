@@ -11,7 +11,7 @@
  */
 
 import type { CommandRegistry } from "@comodor/commands";
-import { type KeyboardEvent, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { COMMAND_IDS, type WindowContext } from "../commands.ts";
 import { WORKBENCH_COMMAND_IDS as ID } from "./commands.ts";
@@ -72,6 +72,30 @@ function Menus({ narrow, registry, context, keyFor, onRun }: {
       { ...item, label: `${menu.label} · ${item.label}`, separator: at === 0 && menu !== MENUS[0] }))) }]
     : MENUS;
   const tabStop = Math.min(stop, menus.length - 1);
+
+  // Folding or unfolding (the window crossing 760 px) redraws the triggers:
+  // focus held in the menubar moves to the corresponding trigger — "Menu"
+  // when folding; when unfolding, the menu whose item had it, else the first.
+  const wasNarrow = useRef(narrow);
+  const refocus = useRef<string | null>(null);
+  if (narrow !== wasNarrow.current) {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && bar.current?.contains(active)) {
+      const item = active.querySelector(".menu-label")?.textContent ?? "";
+      refocus.current = narrow ? "Menu"
+        : MENUS.find((menu) => item.startsWith(`${menu.label} · `))?.label ?? MENUS[0]!.label;
+    }
+    wasNarrow.current = narrow;
+  }
+  useLayoutEffect(() => {
+    const label = refocus.current;
+    if (label === null) return;
+    refocus.current = null;
+    setOpen(null);
+    const at = menus.findIndex((menu) => menu.label === label);
+    if (at >= 0) setStop(at);
+    bar.current?.querySelector<HTMLButtonElement>(`[data-menu="${label}"]`)?.focus();
+  });
 
   // A click anywhere else closes the open menu, as in the reference.
   useEffect(() => {
