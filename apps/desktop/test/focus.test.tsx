@@ -233,23 +233,39 @@ describe("Escape", () => {
     expect(native.core.requests("session.cancel").length).toBe(1);
   });
 
-  test("the panel and the covering sidebar each give focus back to their own opener, whichever closes first", async () => {
+  test("opening the covering sidebar from the open panel closes the panel, keeps the focus topmost, and returns it to the panel's opener", async () => {
     const { container } = await openWindow(show, until);
     await compact(container);
     const cell = diagnosticsCell(container);
     cell.focus();
     await click(cell);
     await until(() => panelOf(container, "Diagnostics"), "the panel");
-    // Opened from inside the panel: the covering sidebar's opener is in the panel.
     await key("b", { ctrlKey: true }, document.activeElement);
     await until(() => container.querySelector("nav.sidebar-covering"), "the covering sidebar");
+    // One overlay at a time: the panel is gone, and the focus is in the sidebar on top.
+    expect(panel(container)).toBeNull();
+    await until(() => document.activeElement?.closest("nav.sidebar-covering"), "focus in the sidebar");
+    await key("Escape");
+    await until(() => sidebar(container) === null, "the sidebar closed");
+    expect(document.activeElement).toBe(diagnosticsCell(container));
+  });
+
+  test("the panel opened over the covering sidebar closes first and gives focus back to its own opener", async () => {
+    const { container } = await openWindow(show, until);
+    await compact(container);
+    toggle(container).focus();
+    await click(toggle(container));
+    await until(() => container.querySelector("nav.sidebar-covering"), "the covering sidebar");
+    const cell = diagnosticsCell(container);
+    cell.focus();
+    await click(cell);
+    await until(() => panelOf(container, "Diagnostics"), "the panel over it");
     await key("Escape");
     await until(() => panel(container) === null, "the panel closed first");
     expect(document.activeElement).toBe(diagnosticsCell(container));
     await key("Escape");
     await until(() => sidebar(container) === null, "the sidebar closed");
-    // Its opener went with the panel: the composer, as FR-019 says.
-    expect(document.activeElement).toBe(container.querySelector('[data-testid="composer"] textarea'));
+    expect(document.activeElement).toBe(toggle(container));
   });
 
   test("with the panel open, Escape in the composer cancels once (D1) and leaves the panel open", async () => {

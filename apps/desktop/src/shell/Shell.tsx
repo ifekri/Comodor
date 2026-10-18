@@ -223,7 +223,16 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
       closeSidebarCover(true);
       return;
     }
-    coverReturn.push(currentFocus());
+    if (layout.panel_open) {
+      // One overlay at a time: the panel gives way to the covering sidebar
+      // (drawn below the panel's layer), which then gives the focus back to
+      // the element that had opened the panel.
+      const opener = panelReturn.take();
+      setLayout(closePanel(layout));
+      coverReturn.push(opener);
+    } else {
+      coverReturn.push(currentFocus());
+    }
     setSidebarCovering(true);
     requestAnimationFrame(() => focusInto(rootRef.current?.querySelector<HTMLElement>(".sidebar") ?? null));
   };
