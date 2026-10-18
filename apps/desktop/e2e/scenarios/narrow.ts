@@ -181,6 +181,23 @@ export const narrow: Scenario = async (context) => {
       expect(Math.abs(box.top - top) <= 1 && Math.abs(box.bottom - bottom) <= 1,
              `product-failure: ${name}: the covering sidebar spans ${box.top}–${box.bottom}, not ${top}–${bottom}`);
       expect(await observed(() => region() === "sidebar", 120), `${name}: focus moved into the covering sidebar`);
+      // Every section stays reachable in a short window: sections taller than
+      // their box scroll by the person's own wheel or keys (a hidden overflow
+      // only scrolls programmatically), and the last header, scrolled to, is whole.
+      const sections = covering.querySelector<HTMLElement>(".side-sections")!;
+      if (sections.scrollHeight > sections.clientHeight + 1) {
+        expect(/auto|scroll/.test(getComputedStyle(sections).overflowY),
+               `product-failure: ${name}: the covering sidebar's sections overflow by ${
+                 sections.scrollHeight - sections.clientHeight} px and cannot be scrolled`);
+      }
+      const tasks = covering.querySelector<HTMLElement>('section[aria-label="Tasks"] .side-section-toggle')!;
+      tasks.scrollIntoView({ block: "nearest" });
+      const header = tasks.getBoundingClientRect();
+      const within = covering.getBoundingClientRect();
+      expect(header.top >= within.top - 1 && header.bottom <= within.bottom + 1,
+             `product-failure: ${name}: the covering sidebar's TASKS header is clipped (${header.top}–${header.bottom} in ${
+               within.top}–${within.bottom})`);
+      usable(tasks, `${name}: the covering sidebar's TASKS header`);
       press("Escape");
       await context.waitFor(() => document.querySelector(SIDEBAR) === null);
       expect(document.activeElement === toggle(), `${name}: Escape gave focus back to the sidebar toggle`);

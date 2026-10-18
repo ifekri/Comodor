@@ -1017,7 +1017,8 @@ button.link {
 
 /* The top bar is its own stacking context (z-index 30, under the panel's
    layer at 40): while the palette is open in it, it rises above the panel. */
-.top-bar.palette-open {
+.top-bar.palette-open,
+.top-bar.menu-open {
   z-index: 45;
 }
 
@@ -1457,13 +1458,15 @@ button.link {
   color: var(--text-primary);
 }
 
+/* In a short window the sections scroll, so the lower ones stay reachable. */
 .side-sections,
 .side-explorer {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding-top: 4px;
 }
 

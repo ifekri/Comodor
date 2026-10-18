@@ -60,7 +60,21 @@ export const palette: Scenario = async (context) => {
     document.querySelector<HTMLElement>('[role="option"][data-command="view.core"]'));
   core.click();
   await context.waitFor(() => dialog() === null && panel("Core"));
-  return { opened: ["view.diagnostics", "view.core"] };
+
+  // A menu opened while the panel is open is drawn above it: its first item
+  // is what the pointer reaches, not the panel's backdrop.
+  const file = document.querySelector<HTMLButtonElement>('header.top-bar button[data-menu="File"]')
+    ?? document.querySelector<HTMLButtonElement>('header.top-bar button[data-menu="Menu"]')!;
+  file.focus();
+  file.click();
+  const item = await context.waitFor(() => document.querySelector<HTMLElement>('[role="menu"] [role="menuitem"]'));
+  const box = item.getBoundingClientRect();
+  const reached = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  expect(reached === item || item.contains(reached),
+         `product-failure: the menu over the panel is covered at its first item by ${reached?.outerHTML.slice(0, 80) ?? "nothing"}`);
+  file.click();
+  await context.waitFor(() => document.querySelector('[role="menu"]') === null);
+  return { opened: ["view.diagnostics", "view.core"], menuOverPanel: true };
 };
 
 export const paletteFailure: Scenario = async (context) => {

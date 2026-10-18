@@ -212,6 +212,17 @@ describe("the menus", () => {
     expect(document.activeElement?.textContent).toContain("Thread Space");
   });
 
+  test("an open menu raises the top bar above the panel's layer", async () => {
+    const { container } = await openWindow(show, until);
+    const bar = container.querySelector("header.top-bar")!;
+    expect(bar.classList.contains("menu-open")).toBe(false);
+    await click(menuTrigger(container, "File"));
+    await until(() => container.querySelector('[role="menu"]'), "the File menu");
+    expect(bar.classList.contains("menu-open")).toBe(true);
+    await click(menuTrigger(container, "File"));
+    await until(() => !bar.classList.contains("menu-open"), "lowered again when it closes");
+  });
+
   test("an open menu closes when focus leaves the menubar", async () => {
     const { container } = await openWindow(show, until);
     await click(menuTrigger(container, "File"));

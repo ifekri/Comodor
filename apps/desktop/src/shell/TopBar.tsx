@@ -55,15 +55,19 @@ export const MENUS: readonly Menu[] = [
   { label: "MCP", items: [{ label: "Servers" }, { label: "Add Server" }, { label: "Logs" }] },
 ];
 
-function Menus({ narrow, registry, context, keyFor, onRun }: {
+function Menus({ narrow, registry, context, keyFor, onRun, onOpenChange }: {
   narrow: boolean;
   registry: CommandRegistry<WindowContext>;
   context: WindowContext;
   keyFor: (id: string) => string | undefined;
   onRun: (id: string) => void;
+  onOpenChange: (open: boolean) => void;
 }) {
   const notice = useContext(LaterNotice);
   const [open, setOpen] = useState<string | null>(null);
+  // The top bar is raised above the panel's layer while a menu is open —
+  // before the menu is painted, so it is never drawn beneath the panel.
+  useLayoutEffect(() => onOpenChange(open !== null), [open, onOpenChange]);
   // The menubar's one tab stop: the menu last focused.
   const [stop, setStop] = useState(0);
   const bar = useRef<HTMLDivElement>(null);
@@ -234,14 +238,17 @@ export function TopBar({ narrow, registry, context, keyFor, onRun, palette }: {
   palette: ReactNode;
 }) {
   const paletteKey = keyFor(ID.paletteOpen);
+  const [menuOpen, setMenuOpen] = useState(false);
   const cancellable = context.busy && context.cancellable;
   return (
-    <header className={palette ? "top-bar palette-open" : "top-bar"} data-testid="top-bar">
+    <header className={["top-bar", palette ? "palette-open" : "", menuOpen ? "menu-open" : ""].join(" ").trim()}
+            data-testid="top-bar">
       <div className="wordmark">
         <span className="wordmark-mark" aria-hidden="true" />
         <span className="wordmark-text">Comodor</span>
       </div>
-      <Menus narrow={narrow} registry={registry} context={context} keyFor={keyFor} onRun={onRun} />
+      <Menus narrow={narrow} registry={registry} context={context} keyFor={keyFor} onRun={onRun}
+             onOpenChange={setMenuOpen} />
       <div className={narrow ? "top-search narrow" : "top-search"}>
         {palette ?? (
           <button type="button" className="top-search-field" aria-label={narrow ? "Search commands" : undefined}
