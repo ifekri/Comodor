@@ -233,6 +233,25 @@ describe("Escape", () => {
     expect(native.core.requests("session.cancel").length).toBe(1);
   });
 
+  test("the panel and the covering sidebar each give focus back to their own opener, whichever closes first", async () => {
+    const { container } = await openWindow(show, until);
+    await compact(container);
+    const cell = diagnosticsCell(container);
+    cell.focus();
+    await click(cell);
+    await until(() => panelOf(container, "Diagnostics"), "the panel");
+    // Opened from inside the panel: the covering sidebar's opener is in the panel.
+    await key("b", { ctrlKey: true }, document.activeElement);
+    await until(() => container.querySelector("nav.sidebar-covering"), "the covering sidebar");
+    await key("Escape");
+    await until(() => panel(container) === null, "the panel closed first");
+    expect(document.activeElement).toBe(diagnosticsCell(container));
+    await key("Escape");
+    await until(() => sidebar(container) === null, "the sidebar closed");
+    // Its opener went with the panel: the composer, as FR-019 says.
+    expect(document.activeElement).toBe(container.querySelector('[data-testid="composer"] textarea'));
+  });
+
   test("with the panel open, Escape in the composer cancels once (D1) and leaves the panel open", async () => {
     const native = new FakeNative();
     const { container } = await openWindow(show, until, native);

@@ -1100,6 +1100,7 @@ button.link {
   color: var(--text-primary);
 }
 
+/* In a short window a menu scrolls rather than run past the status bar. */
 .menu {
   position: absolute;
   top: 45px;
@@ -1108,6 +1109,8 @@ button.link {
   display: flex;
   flex-direction: column;
   width: 232px;
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
   padding: 4px 0;
   background: var(--surface-raised);
   border: 1px solid var(--border-strong);
@@ -1116,8 +1119,6 @@ button.link {
 
 .shell-folded .menu {
   width: 260px;
-  max-height: calc(100vh - 110px);
-  overflow-y: auto;
 }
 
 .menu-rule {

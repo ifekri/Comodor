@@ -110,6 +110,8 @@ export const narrow: Scenario = async (context) => {
   };
   const sizes: { name: string; size: Size }[] = [
     { name: "minimum", size: { width: Math.ceil(520 * s), height: Math.ceil(400 * s) } },
+    // Wide enough for the eight menus, as short as the minimum: the menus must scroll.
+    { name: "short", size: { width: Math.ceil(800 * s), height: Math.ceil(400 * s) } },
     { name: "below", size: { width: Math.ceil(900 * s) - 1, height } },
     { name: "at", size: { width: Math.ceil(900 * s), height } },
     { name: "wide", size: wide },
@@ -206,6 +208,20 @@ export const narrow: Scenario = async (context) => {
     const menus = [...document.querySelectorAll<HTMLButtonElement>("header.top-bar button[data-menu]")];
     expect(menus.length === (measured < 760 ? 1 : 8), `${name}: ${menus.length} menu triggers at ${measured}`);
     for (const button of menus) usable(button, `${name}: the menu ${button.textContent}`);
+    // Each menu, open, ends above the status bar; its last item, scrolled to, is reachable.
+    const barTop = document.querySelector("footer.status-bar")!.getBoundingClientRect().top;
+    for (const button of menus) {
+      button.click();
+      const menu = await context.waitFor(() => document.querySelector<HTMLElement>('[role="menu"]'));
+      const box = menu.getBoundingClientRect();
+      expect(box.bottom <= barTop + 1,
+             `product-failure: ${name}: the ${button.textContent} menu runs to ${box.bottom}, past the status bar at ${barTop}`);
+      const last = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].at(-1)!;
+      last.scrollIntoView({ block: "nearest" });
+      usable(last, `${name}: the last item of the ${button.textContent} menu`, true);
+      button.click();
+      await context.waitFor(() => document.querySelector('[role="menu"]') === null);
+    }
     for (const button of document.querySelectorAll<HTMLButtonElement>('nav[aria-label="Mode"] button')) {
       usable(button, `${name}: the mode ${button.textContent}`);
     }

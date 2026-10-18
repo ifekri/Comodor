@@ -123,7 +123,11 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [refreshes, setRefreshes] = useState(0);
-  const [focusReturn] = useState(() => new FocusReturn());
+  // Where focus goes back to, one record per overlay: closing one never
+  // takes another's opener, whatever order they opened and close in.
+  const [panelReturn] = useState(() => new FocusReturn());
+  const [coverReturn] = useState(() => new FocusReturn());
+  const [paletteReturn] = useState(() => new FocusReturn());
   const panelFocusDue = useRef(false);
   const reducedMotion = useReducedMotion();
 
@@ -164,14 +168,14 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
   const close = () => {
     if (!layout.panel_open) return;
     setLayout(closePanel(layout));
-    focusReturn.restore(root());
+    panelReturn.restore(root());
   };
   const showPanel = (surface: PanelSurface) => {
     if (layout.panel_open && layout.panel_surface === surface) {
       close();
       return;
     }
-    if (!layout.panel_open) focusReturn.push(currentFocus());
+    if (!layout.panel_open) panelReturn.push(currentFocus());
     setLayout(showSurface(layout, surface));
     panelFocusDue.current = true;
     setAnnouncement(`${SURFACE_NAMES[surface]} panel opened`);
@@ -179,13 +183,13 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
   const closeSidebarCover = (restore: boolean) => {
     if (!sidebarCovering) return;
     setSidebarCovering(false);
-    if (restore) focusReturn.restore(root());
-    else focusReturn.drop();
+    if (restore) coverReturn.restore(root());
+    else coverReturn.drop();
   };
   const showConversation = () => {
     if (layout.panel_open) {
       setLayout(closePanel(layout));
-      focusReturn.drop();
+      panelReturn.drop();
     }
     closeSidebarCover(false);
     fallbackTarget(mainRef.current ?? document)?.focus();
@@ -204,14 +208,14 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
       closeSidebarCover(true);
       return;
     }
-    focusReturn.push(currentFocus());
+    coverReturn.push(currentFocus());
     setSidebarCovering(true);
     requestAnimationFrame(() => focusInto(rootRef.current?.querySelector<HTMLElement>(".sidebar") ?? null));
   };
 
   const act: ShellActions = {
     openPalette: () => {
-      focusReturn.push(document.activeElement);
+      paletteReturn.push(document.activeElement);
       setPaletteOpen(true);
     },
     showConversation,
@@ -222,7 +226,7 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
       const wasOpen = layout.panel_open;
       setLayout(DEFAULT_LAYOUT);
       setSidebarHidden(false);
-      if (wasOpen) focusReturn.restore(root());
+      if (wasOpen) panelReturn.restore(root());
     },
     nextRegion: () => cycleRegions(root(), 1),
     previousRegion: () => cycleRegions(root(), -1),
@@ -280,7 +284,7 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
   // search) takes it once the palette is gone — unless the command chosen in
   // the palette has placed focus itself.
   const closePalette = () => {
-    const opener = focusReturn.take();
+    const opener = paletteReturn.take();
     setPaletteOpen(false);
     if (isUsable(opener)) opener.focus();
     else pendingOpener.current = { element: opener, focusAtClose: document.activeElement };
