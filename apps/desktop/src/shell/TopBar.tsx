@@ -174,9 +174,9 @@ function Menus({ narrow, registry, context, keyFor, onRun }: {
             <button type="button" role="menuitem" className={isOpen ? "menu-trigger open" : "menu-trigger"}
                     data-menu={menu.label} aria-haspopup="menu" aria-expanded={isOpen}
                     tabIndex={place === tabStop ? 0 : -1} onFocus={() => setStop(place)}
-                    onClick={() => (isOpen ? setOpen(null) : openAt(menu.label, false))}
+                    onClick={() => (isOpen ? setOpen(null) : openAt(menu.label, true))}
                     onMouseEnter={() => {
-                      if (open !== null && !isOpen) setOpen(menu.label);
+                      if (open !== null && !isOpen) openAt(menu.label, true);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {

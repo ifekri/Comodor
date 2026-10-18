@@ -202,6 +202,16 @@ describe("the menus", () => {
     expect(container.querySelector('[role="menu"]')).toBeNull();
   });
 
+  test("a menu opened with the pointer takes the focus, on its first item", async () => {
+    const { container } = await openWindow(show, until);
+    await click(menuTrigger(container, "Option"));
+    const first = await until(() => container.querySelector<HTMLElement>('[data-menu-of="Option"] [role="menuitem"]'),
+      "the Option menu");
+    await until(() => document.activeElement === first, "focus on its first item");
+    await key("ArrowDown", {}, first);
+    expect(document.activeElement?.textContent).toContain("Thread Space");
+  });
+
   test("an open menu closes when focus leaves the menubar", async () => {
     const { container } = await openWindow(show, until);
     await click(menuTrigger(container, "File"));
