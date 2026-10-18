@@ -1277,7 +1277,9 @@ button.link {
   max-width: none;
 }
 
-.palette-input {
+/* The search field itself, opened: its own background and type, over the
+   generic text input's (whose selector would otherwise win). */
+input.palette-input {
   display: block;
   width: 100%;
   height: 32px;
@@ -1288,7 +1290,7 @@ button.link {
   border-radius: 3px;
   color: var(--text-primary);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .palette-results {
