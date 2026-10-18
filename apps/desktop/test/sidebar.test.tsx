@@ -66,6 +66,23 @@ describe("beside and covering", () => {
     await until(() => sidebar(container) === null, "hidden again below 900, not covering");
   });
 
+  test("hiding it while it holds the focus gives the focus to its toggle, by key and from the palette", async () => {
+    const { container } = await openWindow(show, until);
+    const inside = () => sidebar(container)!.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')!;
+    inside().focus();
+    await key("b", { ctrlKey: true }, inside());
+    await until(() => sidebar(container) === null, "hidden by Ctrl+B");
+    expect(document.activeElement).toBe(toggle(container));
+    await key("b", { ctrlKey: true });
+    await until(() => sidebar(container), "shown again");
+    inside().focus();
+    await key("k", { ctrlKey: true }, inside());
+    await until(() => container.querySelector('[role="dialog"][aria-label="Commands"]'), "the palette");
+    await click(container.querySelector<HTMLElement>('[role="option"][data-command="sidebar.toggle"]')!);
+    await until(() => sidebar(container) === null, "hidden from the palette");
+    expect(document.activeElement).toBe(toggle(container));
+  });
+
   test("beside, the toggle and its shortcut hide and show it", async () => {
     const { container } = await openWindow(show, until);
     await click(toggle(container));

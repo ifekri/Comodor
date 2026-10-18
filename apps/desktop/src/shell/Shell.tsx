@@ -190,8 +190,13 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
     closeSidebarCover(false);
     fallbackTarget(mainRef.current ?? document)?.focus();
   };
+  // Hiding the sidebar that holds the focus (or the palette's opener) gives
+  // the focus to the sidebar's toggle, still in view, once it is drawn.
+  const toggleFocusDue = useRef(false);
   const toggleSidebar = () => {
     if (!compact) {
+      const sidebar = rootRef.current?.querySelector(".sidebar");
+      toggleFocusDue.current = !sidebarHidden && sidebar?.contains(currentFocus()) === true;
       setSidebarHidden((hidden) => !hidden);
       return;
     }
@@ -287,6 +292,11 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
     const active = document.activeElement;
     const placed = active !== null && active !== document.body && active.isConnected && active !== pending.focusAtClose;
     if (!placed) focusBack(pending.element, root());
+  });
+  useLayoutEffect(() => {
+    if (!toggleFocusDue.current) return;
+    toggleFocusDue.current = false;
+    rootRef.current?.querySelector<HTMLElement>("button.sidebar-toggle")?.focus();
   });
   const runFromPalette = (id: string) => {
     closePalette();
