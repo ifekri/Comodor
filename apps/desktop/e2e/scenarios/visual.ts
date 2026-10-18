@@ -4,7 +4,10 @@
  * with the `_ide_ui` reference — 1440 × 900 (the reference's viewport), 900
  * and 899 (either side of the sidebar's threshold) as viewports, and the
  * minimum native window 520 × 400 (FR-027) — each in the normal, menu,
- * palette and panel states, below 900 also with the covering sidebar, and
+ * palette and panel states, in the reference's interaction states: nothing
+ * focused in the normal and question states (as the reference loads), the
+ * File menu opened by a click, the palette open with the query "set" typed
+ * (the reference's capture), the panel opened from the Option menu; below 900 also with the covering sidebar, and
  * then with a question asked.
  *
  * A size the window never reaches (a runner's display too small) is recorded
@@ -89,7 +92,8 @@ const LANDMARKS: Readonly<Record<string, string>> = {
   "status-bar": "footer.status-bar",
   menu: '[role="menu"]',
   "menu-item": '[role="menu"] [role="menuitem"]',
-  palette: '[role="dialog"][aria-label="Commands"]',
+  // The results list, as the reference's dropdown below its search.
+  palette: '[role="dialog"][aria-label="Commands"] .palette-results',
   "palette-input": '[role="dialog"][aria-label="Commands"] [role="combobox"]',
   "palette-option": '[role="option"]',
   panel: '[role="dialog"].modal-panel',
@@ -139,7 +143,14 @@ function scrolling(): Record<string, unknown>[] {
   return found;
 }
 
-async function shoot(context: ScenarioContext, name: string, shots: Shot[]): Promise<void> {
+/** The query typed into both palettes for the comparison: the reference's capture. */
+const PALETTE_QUERY = "set";
+
+async function shoot(context: ScenarioContext, name: string, shots: Shot[],
+                     { unfocused = false }: { unfocused?: boolean } = {}): Promise<void> {
+  // The reference loads with nothing focused; a state that the window reached
+  // by earlier steps (a menu trigger given focus back) is cleared to match.
+  if (unfocused && document.activeElement instanceof HTMLElement) document.activeElement.blur();
   await settled();
   const reply = await context.checkpoint("screenshot", { name });
   const shot = reply["shot"] as Shot | undefined;
@@ -193,7 +204,7 @@ export const visual: Scenario = async (context) => {
     sizes.push({ name: size.name, outcome: "captured", ...reached,
                  mode: document.querySelector('[data-testid="shell"]')?.getAttribute("data-mode") });
 
-    await shoot(context, `${size.name}-normal`, shots);
+    await shoot(context, `${size.name}-normal`, shots, { unfocused: true });
 
     // A menu open: the reference's File menu, or "Menu" when the menus fold.
     const trigger = document.querySelector<HTMLButtonElement>('header.top-bar button[data-menu="File"]')
@@ -206,6 +217,10 @@ export const visual: Scenario = async (context) => {
 
     paletteControl()!.click();
     const input = await context.element('[role="dialog"][aria-label="Commands"] [role="combobox"]');
+    // Focused and holding the reference's query, its results listed below.
+    typeInto(input, PALETTE_QUERY);
+    await context.waitFor(() => document.activeElement === input
+      && (input as HTMLInputElement).value === PALETTE_QUERY && document.querySelector('[role="option"]'));
     await shoot(context, `${size.name}-palette`, shots);
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     await context.waitFor(() => document.querySelector('[role="dialog"][aria-label="Commands"]') === null);
@@ -237,7 +252,7 @@ export const visual: Scenario = async (context) => {
     const reached = await resize(context, size, titleBar);
     expect(reached !== null, `product-failure: ${size.name} was reached before and not now`);
     await context.element('[data-testid="form"]');
-    await shoot(context, `${size.name}-question`, shots);
+    await shoot(context, `${size.name}-question`, shots, { unfocused: true });
     // With a question asked, the composer and Send stay in view (FR-027).
     for (const [what, element] of [["the composer", field],
                                    ["Send", withText('[data-testid="composer"] button', "Send")]] as const) {
