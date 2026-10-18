@@ -49,7 +49,8 @@ export const accessibilityReady: Scenario = async (context) => {
   await context.waitFor(() => panel() === null);
 
   const { scale_factor: scale } = await context.query("window" as never) as unknown as { scale_factor: number };
-  await context.checkpoint("resize", { width: Math.ceil(800 * scale), height: Math.ceil(600 * scale) });
+  // Below the reference's minimum width (760 px) the sidebar covers the canvas.
+  await context.checkpoint("resize", { width: Math.ceil(700 * scale), height: Math.ceil(600 * scale) });
   await context.waitFor(() => document.querySelector('[data-testid="shell"]')?.getAttribute("data-mode") === "covering");
   document.querySelector<HTMLButtonElement>("button.sidebar-toggle")!.click();
   await context.waitFor(() => document.querySelector("nav.sidebar-covering"));

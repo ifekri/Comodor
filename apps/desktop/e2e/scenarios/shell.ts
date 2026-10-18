@@ -11,7 +11,7 @@ import { panel, paletteControl, SIDEBAR } from "./workbench.ts";
 function regions(): void {
   expect(document.querySelector("header.top-bar") !== null, "the top bar is there");
   expect(document.querySelector(SIDEBAR) !== null || document.querySelector("button.sidebar-toggle") !== null,
-         "the sidebar, or its toggle below 900 px");
+         "the sidebar, or its toggle below 760 px");
   const mains = document.querySelectorAll("main");
   expect(mains.length === 1 && mains[0]!.getAttribute("data-testid") === "window",
          `one main, D1's: ${mains.length}`);
