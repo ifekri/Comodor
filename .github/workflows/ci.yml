@@ -203,13 +203,34 @@ jobs:
 
       # WebKitGTK is the Linux WebView; the window needs a display and the
       # single-instance plugin a D-Bus session, which the harness starts.
+      # ImageMagick captures the window for the visual evidence (SC-018).
       - name: Linux WebView and display
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
             libsoup-3.0-dev libxdo-dev libssl-dev pkg-config build-essential \
-            xvfb xauth dbus dbus-x11 xdotool
+            xvfb xauth dbus dbus-x11 xdotool imagemagick
+
+      # D2 (SC-018): the runner's display starts at 1024 x 768, too small for
+      # the reference's 1440 x 900 window. More is asked for; whatever the
+      # display ends up, the visual scenario records the sizes the window
+      # reached and names the others capability-unavailable.
+      - name: A display for the reference's window size (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Get-CimInstance Win32_VideoController | Select-Object CurrentHorizontalResolution, CurrentVerticalResolution
+
+      # The same on macOS, whose runner display starts at 1024 x 768: switch to
+      # a display mode that holds a 1440 x 900 page if the runner offers one.
+      # The modes found and the mode set are printed; nothing is scaled.
+      - name: A display for the reference's window size (macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: swift apps/desktop/e2e/mac-display.swift
 
       # The toolchain pinned in apps/desktop/src-tauri/rust-toolchain.toml.
       - name: Rust
@@ -279,6 +300,16 @@ jobs:
         with:
           name: desktop-chooser-${{ matrix.os }}
           path: apps/desktop/e2e/out/chooser-evidence
+          if-no-files-found: ignore
+
+      - name: Keep the real window's screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-visual-${{ matrix.os }}
+          path: |
+            apps/desktop/e2e/out/visual/shots
+            apps/desktop/e2e/out/visual/result.json
           if-no-files-found: ignore
 
       - name: Keep what the scenarios left

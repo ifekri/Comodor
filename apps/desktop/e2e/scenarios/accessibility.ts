@@ -7,6 +7,7 @@
  */
 
 import { expect, expectAccessible, type Scenario, type ScenarioContext, withText } from "../runner.ts";
+import { panel, paletteControl, showSurface } from "./workbench.ts";
 
 async function ready(context: ScenarioContext): Promise<void> {
   await context.element('[data-testid="status-strip"][data-state="ready"]');
@@ -17,17 +18,22 @@ function stripState(): string | null {
   return document.querySelector('[data-testid="status-strip"]')?.getAttribute("data-state") ?? null;
 }
 
-const rail = (name: string) =>
-  document.querySelector<HTMLButtonElement>(`nav[aria-label="Workbench"] button[aria-label="${name}"]`)!;
-
-/** Ready, with the palette open, with each side panel, and in covering mode. */
+/** Ready (the home card), with a menu open, the palette open, each panel, and the covering sidebar. */
 export const accessibilityReady: Scenario = async (context) => {
   await ready(context);
   const checked: string[] = [];
   await expectAccessible("ready");
   checked.push("ready");
 
-  document.querySelector<HTMLButtonElement>('footer.status-bar button[aria-label="Commands"]')!.click();
+  const file = document.querySelector<HTMLButtonElement>('header.top-bar button[data-menu="File"]')!;
+  file.click();
+  await context.element('[role="menu"][aria-label="File"]');
+  await expectAccessible("a menu open");
+  checked.push("menu");
+  file.click();
+  await context.waitFor(() => document.querySelector('[role="menu"]') === null);
+
+  paletteControl()!.click();
   const input = await context.element('[role="dialog"][aria-label="Commands"] [role="combobox"]');
   await expectAccessible("the palette open");
   checked.push("palette");
@@ -35,16 +41,20 @@ export const accessibilityReady: Scenario = async (context) => {
   await context.waitFor(() => document.querySelector('[role="dialog"]') === null);
 
   for (const surface of ["Core", "Diagnostics", "Keyboard shortcuts"]) {
-    rail(surface).click();
-    await context.element(`aside[aria-label="${surface}"]`);
+    await showSurface(context, surface);
     await expectAccessible(`the ${surface} panel`);
     checked.push(surface);
   }
+  panel()!.querySelector<HTMLButtonElement>(".modal-done")!.click();
+  await context.waitFor(() => panel() === null);
 
   const { scale_factor: scale } = await context.query("window" as never) as unknown as { scale_factor: number };
-  await context.checkpoint("resize", { width: Math.ceil(800 * scale), height: Math.ceil(600 * scale) });
-  await context.waitFor(() => document.querySelector("aside.side-panel-covering"));
-  await expectAccessible("covering mode");
+  // Below the reference's minimum width (760 px) the sidebar covers the canvas.
+  await context.checkpoint("resize", { width: Math.ceil(700 * scale), height: Math.ceil(600 * scale) });
+  await context.waitFor(() => document.querySelector('[data-testid="shell"]')?.getAttribute("data-mode") === "covering");
+  document.querySelector<HTMLButtonElement>("button.sidebar-toggle")!.click();
+  await context.waitFor(() => document.querySelector("nav.sidebar-covering"));
+  await expectAccessible("the covering sidebar");
   checked.push("covering");
   return { checked };
 };

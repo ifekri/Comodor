@@ -6,6 +6,7 @@
  */
 
 import { expect, type Scenario, type ScenarioContext } from "../runner.ts";
+import { panel, paletteControl, region, SIDEBAR } from "./workbench.ts";
 
 const MAC = /Mac/i.test(navigator.userAgent);
 
@@ -15,16 +16,6 @@ function press(key: string, modifiers: { mod?: boolean; shift?: boolean } = {}):
     key, bubbles: true, cancelable: true, shiftKey: modifiers.shift ?? false,
     ctrlKey: (modifiers.mod ?? false) && !MAC, metaKey: (modifiers.mod ?? false) && MAC,
   }));
-}
-
-function region(): string | null {
-  const active = document.activeElement;
-  if (!active) return null;
-  if (active.closest('nav[aria-label="Workbench"]')) return "rail";
-  if (active.closest("main")) return "main";
-  if (active.closest("aside")) return "panel";
-  if (active.closest("footer.status-bar")) return "status";
-  return null;
 }
 
 /** The focus token's colour, as the browser computes `outline-color` from it. */
@@ -57,10 +48,11 @@ export const keyboard: Scenario = async (context) => {
   const regions: (string | null)[] = [];
 
   // F6 around the regions, focus visible at each stop.
-  document.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button')!.focus();
+  paletteControl()!.focus();
   regions.push(region());
-  ringVisible("rail");
-  for (const expected of ["main", "status", "rail"]) {
+  ringVisible("top");
+  const around = document.querySelector(SIDEBAR) === null ? ["main", "status", "top"] : ["sidebar", "main", "status", "top"];
+  for (const expected of around) {
     press("F6");
     await settled(context, () => region() === expected);
     ringVisible(expected);
@@ -86,6 +78,6 @@ export const keyboard: Scenario = async (context) => {
   press("F6");
   await settled(context, () => region() === "status");
   press("2", { mod: true });
-  await settled(context, () => document.querySelector("aside") === null);
+  await settled(context, () => panel() === null);
   return { regions, modality: "dispatched in the page" };
 };

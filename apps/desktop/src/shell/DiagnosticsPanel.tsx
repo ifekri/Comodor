@@ -34,6 +34,9 @@ export function DiagnosticsPanel({ api, refreshes, failure }: {
   if (tail === null) return <p className="quiet" data-testid="diagnostics-empty">No diagnostic output yet.</p>;
   if (tail === "") return <p className="quiet" data-testid="diagnostics-empty">The Core has written no diagnostics.</p>;
   return (
-    <pre className="diagnostics" data-testid="diagnostics-tail" dir="auto"><InertText text={tail} linked={false} /></pre>
+    <>
+      <h3 className="panel-section">OUTPUT</h3>
+      <pre className="diagnostics" data-testid="diagnostics-tail" dir="auto"><InertText text={tail} linked={false} /></pre>
+    </>
   );
 }

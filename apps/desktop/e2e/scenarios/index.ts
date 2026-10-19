@@ -23,6 +23,7 @@ import { ready } from "./ready.ts";
 import { reducedMotion, reducedMotionTransition } from "./reduced-motion.ts";
 import { shell, shellFailure } from "./shell.ts";
 import { unconfigured } from "./unconfigured.ts";
+import { visual } from "./visual.ts";
 import { crash, reload, wake } from "./recovery.ts";
 import { workspaceChange, workspaceLaunch, workspaceLaunchPath, workspaceProjectRoot } from "./workspace-launch.ts";
 
@@ -73,6 +74,7 @@ export const SCENARIOS: Readonly<Record<string, Scenario>> = {
   shell,
   "shell-failure": shellFailure,
   unconfigured,
+  visual,
   wake,
   "workspace-change": workspaceChange,
   "workspace-launch": workspaceLaunch,

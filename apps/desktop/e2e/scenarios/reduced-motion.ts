@@ -14,6 +14,7 @@
  */
 
 import { expect, type Scenario } from "../runner.ts";
+import { paletteControl, showSurface } from "./workbench.ts";
 
 const QUERY = "(prefers-reduced-motion: reduce)";
 
@@ -67,11 +68,10 @@ export const reducedMotion: Scenario = async (context) => {
   const shell = document.querySelector('[data-testid="shell"]');
   expect(shell?.getAttribute("data-reduced-motion") === "true",
          "product-failure: the shell did not mark itself for reduced motion");
-  document.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button[aria-label="Core"]')!.click();
-  const panel = await context.element('aside[aria-label="Core"]');
+  const panel = await showSurface(context, "Core");
   expect(still(panel), `product-failure: the panel moves (${getComputedStyle(panel).animationName} ${
     getComputedStyle(panel).animationDuration})`);
-  document.querySelector<HTMLButtonElement>('footer.status-bar button[aria-label="Commands"]')!.click();
+  paletteControl()!.click();
   const palette = await context.element('[role="dialog"][aria-label="Commands"]');
   expect(still(palette), "product-failure: the palette moves");
   return { outcome: "verified", platform: navigator.userAgent };
@@ -106,8 +106,7 @@ export const reducedMotionTransition: Scenario = async (context) => {
 
   const reported = window.matchMedia(QUERY).matches;
   const marked = document.querySelector('[data-testid="shell"]')?.getAttribute("data-reduced-motion");
-  document.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button[aria-label="Core"]')!.click();
-  const panel = await context.element('aside[aria-label="Core"]');
+  const panel = await showSurface(context, "Core");
   const panelMotion = motionOf(panel);
 
   if (phase.phase === "off") {
@@ -125,7 +124,7 @@ export const reducedMotionTransition: Scenario = async (context) => {
   }
   expect(marked === "true", `product-failure: the shell did not mark itself for reduced motion (${marked})`);
   expect(still(panel), `product-failure: with reduced motion on the panel moves (${JSON.stringify(panelMotion)})`);
-  document.querySelector<HTMLButtonElement>('footer.status-bar button[aria-label="Commands"]')!.click();
+  paletteControl()!.click();
   const palette = await context.element('[role="dialog"][aria-label="Commands"]');
   const paletteMotion = motionOf(palette);
   expect(still(palette), `product-failure: with reduced motion on the palette moves (${JSON.stringify(paletteMotion)})`);

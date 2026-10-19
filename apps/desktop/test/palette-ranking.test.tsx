@@ -47,5 +47,5 @@ test("Enter runs the highlighted result", async () => {
   await until(() => highlighted(container) === "view.shortcuts", "the shortcuts first");
   await key("Enter", {}, paletteInput(container));
   await until(() => palette(container) === null, "closed");
-  await until(() => container.querySelector('aside[aria-label="Keyboard shortcuts"]'), "the shortcuts reference");
+  await until(() => container.querySelector('[role="dialog"][aria-label="Keyboard shortcuts"]'), "the shortcuts reference");
 });

@@ -159,6 +159,9 @@ export const SETUPS = {
   },
   // D2: narrow windows, sized in physical pixels from the scale factor.
   narrow: { workspaceArgument: true },
+  // D2 (SC-018): the real window captured at the reference's sizes and states,
+  // with the question fixture for the question card.
+  visual: { core: ["scripted_core.py", "question"], workspaceArgument: true },
   // D2: the Core panel across a crash and a workspace change, and the
   // diagnostics panel over a real Core's stderr.
   "core-panel": { workspaceArgument: true, choose: ["$stored"], params: { stored: "$stored" } },

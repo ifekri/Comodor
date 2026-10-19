@@ -10,8 +10,8 @@ import { App } from "../src/app.tsx";
 import { commands } from "../src/commands.ts";
 import { displayKey } from "../src/shell/keys.ts";
 import { FakeNative, openWindow } from "./fake-native.ts";
-import { click, render, type Rendered, until } from "./render.ts";
-import { key, railButton } from "./shell-helpers.ts";
+import { render, type Rendered, until } from "./render.ts";
+import { key, panelOf, showSurface } from "./shell-helpers.ts";
 
 let rendered: Rendered | undefined;
 
@@ -27,9 +27,8 @@ async function show(native: FakeNative): Promise<Rendered> {
 
 async function reference(): Promise<HTMLElement> {
   const { container } = await openWindow(show, until);
-  await click(railButton(container, "Keyboard shortcuts"));
-  return await until(() => container.querySelector<HTMLElement>('aside[aria-label="Keyboard shortcuts"]'),
-                     "the reference");
+  await showSurface(container, "Keyboard shortcuts");
+  return await until(() => panelOf(container, "Keyboard shortcuts"), "the reference");
 }
 
 describe("the reference", () => {
@@ -48,11 +47,10 @@ describe("the reference", () => {
     expect(panel.textContent).not.toContain("Cmd");
   });
 
-  test("names the panel edge's arrow keys where they act", async () => {
+  test("lists no key of the withdrawn panel edge (FR-025)", async () => {
     const panel = await reference();
-    expect(panel.textContent).toContain("Widen the side panel");
-    expect(panel.textContent).toContain("Narrow the side panel");
-    expect(panel.textContent).toContain("focused panel edge");
+    expect(panel.textContent).not.toMatch(/widen|narrow|panel edge/i);
+    expect([...panel.querySelectorAll("th")].map((cell) => cell.textContent)).toEqual(["Command", "Keys"]);
   });
 });
 

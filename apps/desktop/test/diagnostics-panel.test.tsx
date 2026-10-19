@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { App } from "../src/app.tsx";
 import { FakeNative, openWindow, status } from "./fake-native.ts";
 import { click, render, type Rendered, until } from "./render.ts";
-import { openPalette, paletteInput, railButton } from "./shell-helpers.ts";
+import { openPalette, paletteInput, showSurface } from "./shell-helpers.ts";
 import { typeInto } from "./render.ts";
 
 let rendered: Rendered | undefined;
@@ -28,7 +28,7 @@ const ADVERSARIAL = "Traceback\n\x1b[2J\x1b[H\x1b]0;owned\x07 <script>alert(1)</
   + "javascript:alert(1) https://example.com/x [Connected] [Ready]";
 
 function tail(container: HTMLElement): HTMLElement | null {
-  return container.querySelector<HTMLElement>('aside[aria-label="Diagnostics"] [data-testid="diagnostics-tail"]');
+  return container.querySelector<HTMLElement>('[role="dialog"][aria-label="Diagnostics"] [data-testid="diagnostics-tail"]');
 }
 
 describe("the tail", () => {
@@ -37,10 +37,10 @@ describe("the tail", () => {
     native.diagnostics = ADVERSARIAL;
     const { container } = await openWindow(show, until, native);
     const before = native.commands("diagnostics").length;
-    await click(railButton(container, "Diagnostics"));
+    await showSurface(container, "Diagnostics");
     const shown = await until(() => tail(container)?.textContent?.includes("Traceback") && tail(container), "the tail");
     expect(native.commands("diagnostics").length).toBe(before + 1);
-    const panel = container.querySelector<HTMLElement>('aside[aria-label="Diagnostics"]')!;
+    const panel = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Diagnostics"]')!;
     expect(panel.querySelector("script, img, iframe, object, embed, a")).toBeNull();
     expect(panel.querySelector("button.link")).toBeNull();
     expect(shown.textContent).not.toContain("\x1b");
@@ -55,7 +55,7 @@ describe("the tail", () => {
     const native = new FakeNative();
     native.diagnostics = "first";
     const { container } = await openWindow(show, until, native);
-    await click(railButton(container, "Diagnostics"));
+    await showSurface(container, "Diagnostics");
     await until(() => tail(container)?.textContent === "first", "the first tail");
     native.diagnostics = "second";
     await openPalette(container);
@@ -69,7 +69,7 @@ describe("the tail", () => {
     const native = new FakeNative();
     native.diagnostics = "before";
     const { container } = await openWindow(show, until, native);
-    await click(railButton(container, "Diagnostics"));
+    await showSurface(container, "Diagnostics");
     await until(() => tail(container)?.textContent === "before", "the tail");
     native.diagnostics = "after the failure";
     native.push(status({ state: "failed", core: null, failure: { class: "crashed", message: "x" } }));
@@ -83,7 +83,7 @@ describe("the tail", () => {
       native.diagnostics = `tail while ${overrides.state}`;
       const view = await show(native);
       await until(() => view.container.querySelector('[data-testid="status-strip"]'), "the strip");
-      await click(railButton(view.container, "Diagnostics"));
+      await showSurface(view.container, "Diagnostics");
       await until(() => tail(view.container)?.textContent === `tail while ${overrides.state}`, overrides.state);
       await rendered!.unmount();
       rendered = undefined;

@@ -276,6 +276,54 @@ Windows, Linux and macOS in the `desktop` job; none calls a provider.
 | New dev dependency `axe-core` (exact pin, test build only) | SC-006 requires an automated WCAG 2.1 A/AA check in the real WebView on three platforms | A hand-written rule set would be less complete and unproven; checking in happy-dom cannot see contrast or focus visibility |
 | Test-build-only `resize` act | Geometry (FR-027, SC-007) exists only in the real WebView, and the page has no permission to resize its window | Granting a window-resize permission to the release page adds a release permission for a test need (FR-031) |
 
+## Correction 2026-10-17: the reference window
+
+The owner's `_ide_ui` reference binds the whole window (spec Clarifications
+2026-10-17 and its conflict table). It is read from the owner's checkout and
+never copied, committed or bundled.
+
+**Structure** (`apps/desktop/src/shell/`, presentation only; no Core, native
+or protocol change):
+
+- `Shell.tsx` lays out the reference's grid — a 64 px top bar, a body of
+  sidebar and canvas, a 31 px status bar — and owns the open menu, the
+  sidebar's beside/covering state at 760 px (the reference's minimum width;
+  corrected 2026-10-18 from 900), the modal panel,
+  the palette and a notice ("toast") for unavailable items.
+- `TopBar.tsx`: wordmark, `Menus.tsx` (the eight reference menus; items are
+  real commands or unavailable), the search that opens the palette in its
+  place, and the four actions (Cancel the turn is real; the others are
+  unavailable).
+- `Sidebar.tsx`: toolbar (Change workspace is real), WORKSPACE/EXPLORER tabs,
+  SESSION (the session the Core opened), AGENTS (the snapshot's delegates),
+  TASKS (the snapshot's task list), each read-only or a truthful empty state.
+- The canvas keeps D1's `<main data-testid="window">` and D1's views; on an
+  empty conversation it shows the reference's tile card (Workspace = Change
+  workspace; Loop, Skill, Memory unavailable).
+- The prompt area is D1's composer over the reference's footer: the model the
+  Core reports, unavailable attachments and Agentic, D1's mode control,
+  Send/Cancel, "Command [Ctrl+K]", "Shortcuts [Ctrl+/]".
+- `StatusBar.tsx` renders D1's strip once, in the reference's cells, plus
+  Diagnostics (real) and the unavailable Terminal and power cells.
+- `ModalPanel.tsx` replaces `SidePanel.tsx`: the reference's modal for the
+  Core panel, diagnostics and keyboard shortcuts; the stored layout's
+  `panel_open`/`panel_surface` reopen it; `panel_width` is not drawn.
+
+**Evidence** (SC-018): a test-build-only `screenshot` checkpoint in
+`e2e/harness.mjs` captures the application's own window — Windows
+`PrintWindow` of the client area, macOS `screencapture -l`, Linux `import
+-window` under the harness's Xvfb — and a `visual` scenario drives each size
+(1440 × 900, the minimum, 899 and 900 wide, 759 and 760 wide) through the normal, menu,
+question, palette and panel states; CI keeps the images. The reference is
+rendered locally, at the same sizes and states, in a headless browser driven
+over the DevTools protocol from the owner's checkout, and compared section by
+section; the comparison table and both sets of images go into the pull
+request.
+
+| Item | Why needed | Simpler alternative rejected because |
+| --- | --- | --- |
+| Test-build-only `screenshot` checkpoint (harness side only) | SC-018 needs the real WebView's pixels on three platforms; the page cannot read its own pixels | DOM or happy-dom checks cannot show composition, typography or rendering (the owner ruled them insufficient) |
+
 ## Remaining before `/speckit.tasks`
 
 No blocker. The earlier SC-001 wording note is resolved by the owner's

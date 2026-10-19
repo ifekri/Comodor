@@ -14,7 +14,7 @@ import { App } from "../src/app.tsx";
 import { commands } from "../src/commands.ts";
 import { FakeNative, openWindow, status } from "./fake-native.ts";
 import { byText, click, render, type Rendered, typeInto, until } from "./render.ts";
-import { key, openPalette, optionIds, palette, paletteInput, railButton } from "./shell-helpers.ts";
+import { key, openPalette, optionIds, palette, paletteInput, showSurface } from "./shell-helpers.ts";
 
 let rendered: Rendered | undefined;
 
@@ -54,8 +54,8 @@ test("every command is reachable from the palette in some state, by key and by c
   native.core.emit("session.updated", { session: { ...native.core.session, busy: true } });
   await until(() => byText(container, '[data-testid="composer"] button', "Cancel"), "busy");
   add(await listedNow(container));
-  await click(railButton(container, "Diagnostics"));
-  await until(() => container.querySelector('aside[aria-label="Diagnostics"]'), "diagnostics");
+  await showSurface(container, "Diagnostics");
+  await until(() => container.querySelector('[role="dialog"][aria-label="Diagnostics"]'), "diagnostics");
   add(await listedNow(container));
   await fresh();
 
@@ -94,6 +94,6 @@ test("the palette itself has a key and visible controls, and every key resolves 
   expect(bindings.some((binding) => binding.key === "mod+k" && binding.command === "palette.open")).toBe(true);
   for (const binding of bindings) expect(commands.get(binding.command)).toBeDefined();
   const { container } = await openWindow(show, until);
-  expect(container.querySelector('nav[aria-label="Workbench"] button[aria-label="Commands"]')).not.toBeNull();
-  expect(container.querySelector('footer.status-bar button[aria-label="Commands"]')).not.toBeNull();
+  expect(container.querySelector('header.top-bar button[data-focus-key="palette-control"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="composer"] button[data-focus-key="prompt-commands"]')).not.toBeNull();
 });

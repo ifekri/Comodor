@@ -92,8 +92,10 @@ test("desktop text reaches WCAG AA on every ground it is drawn on", () => {
   const pairs: [Role, Role][] = [
     ...grounds.flatMap((ground) => inks.map((ink) => [ink, ground] as [Role, Role])),
     ["text.primary", "surface.hover"], ["text.secondary", "surface.hover"],
+    ["text.primary", "surface.active"], ["text.secondary", "surface.active"],
+    ["text.primary", "surface.foot"], ["text.secondary", "surface.foot"], ["text.muted", "surface.foot"],
     ["text.primary", "surface.primary"],
-    ["mode.act", "surface.act"], ["mode.plan", "surface.plan"],
+    ["mode.act", "surface.act"], ["mode.act", "surface.chip"], ["mode.plan", "surface.plan"],
     ["mode.ask", "surface.ask"], ["mode.chat", "surface.chat"],
   ];
   const short = pairs

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { App } from "../src/app.tsx";
 import { FakeNative, openWindow, status } from "./fake-native.ts";
 import { click, render, type Rendered, typeInto, until } from "./render.ts";
-import { openPalette, options, paletteInput, railButton } from "./shell-helpers.ts";
+import { openPalette, options, paletteInput, showSurface } from "./shell-helpers.ts";
 
 let rendered: Rendered | undefined;
 const realMatchMedia = window.matchMedia;
@@ -52,7 +52,7 @@ describe("announcements", () => {
 
   test("a panel opening is said by its name", async () => {
     const { container } = await openWindow(show, until);
-    await click(railButton(container, "Diagnostics"));
+    await showSurface(container, "Diagnostics");
     await until(() => announcer(container).textContent === "Diagnostics panel opened", "said");
   });
 
@@ -69,12 +69,14 @@ describe("announcements", () => {
 describe("names", () => {
   test("every region and every control has an accessible name", async () => {
     const { container } = await openWindow(show, until);
-    await click(railButton(container, "Core"));
-    await until(() => container.querySelector("aside"), "the panel");
+    await showSurface(container, "Core");
+    await until(() => container.querySelector('[role="dialog"].modal-panel'), "the panel");
     await openPalette(container);
     const shell = container.querySelector('[data-testid="shell"]')!;
-    expect(shell.querySelector("nav")!.getAttribute("aria-label")).toBe("Workbench");
-    expect(shell.querySelector("aside")!.getAttribute("aria-label")).toBe("Core");
+    expect([...shell.querySelectorAll("nav")].map((nav) => nav.getAttribute("aria-label")))
+      .toEqual(["Workbench", "Mode"]);
+    expect(shell.querySelector('[role="menubar"]')!.getAttribute("aria-label")).toBe("Menu");
+    expect(shell.querySelector('[role="dialog"].modal-panel')!.getAttribute("aria-label")).toBe("Core");
     expect(shell.querySelector('[role="dialog"]')!.getAttribute("aria-label")).toBe("Commands");
     expect(shell.querySelector('[role="listbox"]')!.getAttribute("aria-label")).toBe("Commands");
     for (const control of shell.querySelectorAll<HTMLElement>("button, input, textarea, [role='option']")) {

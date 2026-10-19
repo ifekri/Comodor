@@ -6,12 +6,12 @@
  */
 
 import { expect, type Scenario, type ScenarioContext, withText } from "../runner.ts";
+import { panel, showSurface } from "./workbench.ts";
 
 const NOT_REPORTED = "not reported yet";
 
 function value(label: string): string | null {
-  const panel = document.querySelector('aside[aria-label="Core"]');
-  const term = [...(panel?.querySelectorAll("dt") ?? [])].find((element) => element.textContent === label);
+  const term = [...(panel("Core")?.querySelectorAll("dt") ?? [])].find((element) => element.textContent === label);
   return term?.nextElementSibling?.textContent?.trim() ?? null;
 }
 
@@ -42,7 +42,7 @@ async function anotherCore(context: ScenarioContext, pid: number): Promise<boole
 
 export const corePanel: Scenario = async (context) => {
   await ready(context);
-  document.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button[aria-label="Core"]')!.click();
+  await showSurface(context, "Core");
   await context.waitFor(() => value("Model") !== null && value("Model") !== NOT_REPORTED);
   const first = { model: value("Model"), core: value("Core"), protocol: value("Protocol version"),
                   restarts: value("Restarts") };
@@ -69,11 +69,10 @@ export const corePanel: Scenario = async (context) => {
 
 export const diagnosticsPanel: Scenario = async (context) => {
   await ready(context);
-  document.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button[aria-label="Diagnostics"]')!.click();
-  const tail = await context.element('aside[aria-label="Diagnostics"] [data-testid="diagnostics-tail"]');
+  const shown = await showSurface(context, "Diagnostics");
+  const tail = await context.element('[role="dialog"][aria-label="Diagnostics"] [data-testid="diagnostics-tail"]');
   await context.waitFor(() => (tail.textContent ?? "").includes("doubles: diagnostic line"));
-  const panel = document.querySelector('aside[aria-label="Diagnostics"]')!;
-  expect(panel.querySelector("a, script, img, iframe, object, embed, button.link") === null, "nothing but text");
+  expect(shown.querySelector("a, script, img, iframe, object, embed, button.link") === null, "nothing but text");
   expect(!(tail.textContent ?? "").includes("\x1b"), "no raw control character");
   return { length: (tail.textContent ?? "").length };
 };

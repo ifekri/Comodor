@@ -4,7 +4,7 @@
  * zero that would do nothing, zero missing (FR-012, FR-015, SC-004).
  *
  * In every case the palette is open (so "Commands" itself is not listed),
- * the side panel is closed, and the composer is empty.
+ * the panel is closed, and the composer is empty.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
@@ -29,7 +29,7 @@ async function show(native: FakeNative): Promise<Rendered> {
 
 /** Applies in every state: the shell's own layout and navigation. */
 const ALWAYS = ["view.conversation", "view.core", "view.diagnostics", "view.shortcuts", "layout.reset",
-                "region.next", "region.previous"];
+                "region.next", "region.previous", "sidebar.toggle"];
 
 /** A session shown, the Core ready, ACT confirmed, nothing busy. */
 const SESSION = ["composer.focus", "view.tail", "mode.plan", "mode.ask", "mode.next", "mode.previous"];

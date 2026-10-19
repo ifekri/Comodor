@@ -10,6 +10,7 @@
  */
 
 import { expect, type Scenario, type ScenarioContext } from "../runner.ts";
+import { paletteControl, region, SIDEBAR } from "./workbench.ts";
 
 type Data = Record<string, unknown>;
 interface KeySpec { key: "q" | "k" | "F6" | "Escape" | "Tab"; mod?: boolean; shift?: boolean }
@@ -58,15 +59,6 @@ async function press(context: ScenarioContext, key: KeySpec): Promise<void> {
   if (!result?.ok) throw capabilityUnavailable(result?.reason ?? "the key could not be sent");
 }
 
-function region(): string | null {
-  const active = document.activeElement;
-  if (!active) return null;
-  if (active.closest('nav[aria-label="Workbench"]')) return "rail";
-  if (active.closest("main")) return "main";
-  if (active.closest("aside")) return "panel";
-  if (active.closest("footer.status-bar")) return "status";
-  return null;
-}
 
 export const keyDelivery: Scenario = async (context) => {
   await context.element('[data-testid="status-strip"][data-state="ready"]');
@@ -115,9 +107,11 @@ export const keyDelivery: Scenario = async (context) => {
 
   // 3. The shortcuts, each judged by what the page shows afterwards.
   const results: Data = {};
-  const first = document.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button')!;
-  const second = first.nextElementSibling as HTMLElement;
+  // The menubar is one tab stop: Tab goes from its menu on to the search.
+  const first = document.querySelector<HTMLButtonElement>('header.top-bar [role="menubar"] button[tabindex="0"]')!;
+  const second = paletteControl()!;
   first.focus();
+  const afterTop = document.querySelector(SIDEBAR) === null ? "main" : "sidebar";
 
   await press(context, { key: "Tab" });
   if (!(await observed(() => document.activeElement === second))) {
@@ -127,11 +121,11 @@ export const keyDelivery: Scenario = async (context) => {
   first.focus();
 
   await press(context, { key: "F6" });
-  if (!(await observed(() => region() === "main"))) throw productFailure(`F6 left focus in ${String(region())}`);
+  if (!(await observed(() => region() === afterTop))) throw productFailure(`F6 left focus in ${String(region())}`);
   results["F6"] = region();
 
   await press(context, { key: "F6", shift: true });
-  if (!(await observed(() => region() === "rail"))) throw productFailure(`Shift+F6 left focus in ${String(region())}`);
+  if (!(await observed(() => region() === "top"))) throw productFailure(`Shift+F6 left focus in ${String(region())}`);
   results["Shift+F6"] = region();
 
   const opener = document.activeElement;

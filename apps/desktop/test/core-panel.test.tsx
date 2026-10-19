@@ -9,7 +9,7 @@ import { App } from "../src/app.tsx";
 import { FakeCore } from "./fake-core.ts";
 import { FakeNative, openWindow, status } from "./fake-native.ts";
 import { click, render, type Rendered, until } from "./render.ts";
-import { railButton } from "./shell-helpers.ts";
+import { showSurface } from "./shell-helpers.ts";
 
 let rendered: Rendered | undefined;
 
@@ -27,7 +27,7 @@ const NOT_REPORTED = "not reported yet";
 
 /** The panel's values, by their label. */
 function values(container: HTMLElement): Record<string, string> {
-  const panel = container.querySelector<HTMLElement>('aside[aria-label="Core"]');
+  const panel = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Core"]');
   const shown: Record<string, string> = {};
   for (const term of panel?.querySelectorAll("dt") ?? []) {
     shown[term.textContent ?? ""] = (term.nextElementSibling?.textContent ?? "").trim();
@@ -36,8 +36,8 @@ function values(container: HTMLElement): Record<string, string> {
 }
 
 async function openCore(container: HTMLElement): Promise<void> {
-  await click(railButton(container, "Core"));
-  await until(() => container.querySelector('aside[aria-label="Core"]'), "the Core panel");
+  await showSurface(container, "Core");
+  await until(() => container.querySelector('[role="dialog"][aria-label="Core"]'), "the Core panel");
 }
 
 describe("the values", () => {
@@ -90,7 +90,7 @@ describe("the values", () => {
     native.core.session = { ...native.core.session, workspace: long };
     const { container } = await openWindow(show, until, native);
     await openCore(container);
-    const value = await until(() => container.querySelector<HTMLElement>(`aside [title="${long}"]`), "the whole value");
+    const value = await until(() => container.querySelector<HTMLElement>(`.modal-panel [title="${long}"]`), "the whole value");
     expect(value.tabIndex).toBe(0);
     expect(value.classList.contains("core-value")).toBe(true);
   });
@@ -131,8 +131,8 @@ describe("the actions", () => {
     const native = new FakeNative();
     const { container } = await openWindow(show, until, native);
     await openCore(container);
-    const panel = container.querySelector<HTMLElement>('aside[aria-label="Core"]')!;
-    const labels = () => [...panel.querySelectorAll("button:not(.side-panel-close)")]
+    const panel = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Core"]')!;
+    const labels = () => [...panel.querySelectorAll('[data-testid="core-panel"] button')]
       .map((button) => button.textContent);
     expect(labels()).toEqual(["Change workspace…"]);
     await click([...panel.querySelectorAll("button")].find((button) => button.textContent === "Change workspace…")!);

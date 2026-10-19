@@ -6,9 +6,12 @@
  */
 
 import { expect, pressKey, type Scenario, typeInto, withText } from "../runner.ts";
+import { panel, paletteControl, SIDEBAR } from "./workbench.ts";
 
 function regions(): void {
-  expect(document.querySelector('nav[aria-label="Workbench"]') !== null, "the rail is there");
+  expect(document.querySelector("header.top-bar") !== null, "the top bar is there");
+  expect(document.querySelector(SIDEBAR) !== null || document.querySelector("button.sidebar-toggle") !== null,
+         "the sidebar, or its toggle below 760 px");
   const mains = document.querySelectorAll("main");
   expect(mains.length === 1 && mains[0]!.getAttribute("data-testid") === "window",
          `one main, D1's: ${mains.length}`);
@@ -17,7 +20,7 @@ function regions(): void {
   expect(bar!.querySelector('[role="status"]') !== null, "the status bar announces the Core state");
   const strips = document.querySelectorAll('[data-testid="status-strip"]');
   expect(strips.length === 1 && bar!.contains(strips[0]!), "one status strip, in the status bar");
-  expect(bar!.querySelector('button[aria-label="Commands"]') !== null, "the palette control");
+  expect(paletteControl() !== null, "the palette control, the top bar's search");
 }
 
 export const shell: Scenario = async (context) => {
@@ -43,11 +46,9 @@ export const shellFailure: Scenario = async (context) => {
   const failure = await context.element('[data-testid="failure-view"]');
   expect(failure.closest("main")?.getAttribute("data-testid") === "window", "the failure view is in main");
   regions();
-  const rail = document.querySelector('nav[aria-label="Workbench"]')!;
-  const diagnostics = [...rail.querySelectorAll<HTMLButtonElement>("button")]
-    .find((button) => button.getAttribute("aria-label") === "Diagnostics")!;
-  expect(!diagnostics.disabled, "the rail stays usable");
+  const diagnostics = document.querySelector<HTMLButtonElement>("footer.status-bar .status-diagnostics")!;
+  expect(!diagnostics.disabled, "the status bar's Diagnostics stays usable");
   diagnostics.click();
-  await context.waitFor(() => document.querySelector('aside[aria-label="Diagnostics"]'));
+  await context.waitFor(() => panel("Diagnostics"));
   return { state: document.querySelector('[data-testid="status-strip"]')?.getAttribute("data-state") };
 };

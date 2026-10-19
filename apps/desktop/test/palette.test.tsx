@@ -8,7 +8,7 @@ import { App } from "../src/app.tsx";
 import { commands } from "../src/commands.ts";
 import { FakeNative, openWindow, status } from "./fake-native.ts";
 import { click, render, type Rendered, typeInto, until } from "./render.ts";
-import { highlighted, key, openPalette, optionIds, options, palette, paletteInput } from "./shell-helpers.ts";
+import { highlighted, key, openPalette, optionIds, options, palette, paletteControl, paletteInput } from "./shell-helpers.ts";
 
 let rendered: Rendered | undefined;
 
@@ -82,7 +82,7 @@ describe("running", () => {
     await until(() => highlighted(container) === "view.diagnostics", "diagnostics highlighted");
     await key("Enter", {}, paletteInput(container));
     await until(() => palette(container) === null, "the palette closed");
-    await until(() => container.querySelector('aside[aria-label="Diagnostics"]'), "diagnostics shown");
+    await until(() => container.querySelector('[role="dialog"][aria-label="Diagnostics"]'), "diagnostics shown");
   });
 
   test("a click runs a result, with the same effect as its button", async () => {
@@ -101,16 +101,17 @@ describe("running", () => {
   test("Escape closes without running anything and focus returns where it was", async () => {
     const native = new FakeNative();
     const { container } = await openWindow(show, until, native);
-    const opener = container.querySelector<HTMLButtonElement>('footer.status-bar button[aria-label="Commands"]')!;
+    const opener = container.querySelector<HTMLButtonElement>('header.top-bar button[data-focus-key="palette-control"]')!;
     opener.focus();
     await click(opener);
     await until(() => palette(container), "the palette");
     const before = native.calls.length;
     await key("Escape", {}, paletteInput(container));
     await until(() => palette(container) === null, "closed");
-    expect(document.activeElement).toBe(opener);
+    // The search is drawn anew once the palette is gone: focus is on it again.
+    await until(() => document.activeElement === paletteControl(container), "focus back on the search");
     expect(native.calls.length).toBe(before);
-    expect(container.querySelector("aside")).toBeNull();
+    expect(container.querySelector('[role="dialog"].modal-panel')).toBeNull();
   });
 
   test("a click outside closes it without running anything", async () => {
@@ -118,7 +119,7 @@ describe("running", () => {
     await openPalette(container);
     await click(container.querySelector('[data-testid="palette-backdrop"]')!);
     await until(() => palette(container) === null, "closed");
-    expect(container.querySelector("aside")).toBeNull();
+    expect(container.querySelector('[role="dialog"].modal-panel')).toBeNull();
   });
 });
 
@@ -143,7 +144,7 @@ describe("Escape with focus outside the palette", () => {
   test("closes the palette and returns focus to its opener", async () => {
     const native = new FakeNative();
     const { container } = await openWindow(show, until, native);
-    const opener = container.querySelector<HTMLButtonElement>('footer.status-bar button[aria-label="Commands"]')!;
+    const opener = container.querySelector<HTMLButtonElement>('header.top-bar button[data-focus-key="palette-control"]')!;
     opener.focus();
     await click(opener);
     await until(() => palette(container), "the palette");
@@ -152,7 +153,8 @@ describe("Escape with focus outside the palette", () => {
     outside.focus();
     await key("Escape", {}, outside);
     await until(() => palette(container) === null, "closed");
-    expect(document.activeElement).toBe(opener);
+    // The search is drawn anew once the palette is gone: focus is on it again.
+    await until(() => document.activeElement === paletteControl(container), "focus back on the search");
     expect(native.calls.length).toBe(before);
   });
 });

@@ -11,27 +11,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import { expect, type Scenario, type ScenarioContext, withText } from "../runner.ts";
+import { panel, showSurface } from "./workbench.ts";
 
 const PLACE = "comodor-e2e-layout-place";
-
-function panel(): HTMLElement | null {
-  return document.querySelector<HTMLElement>("aside");
-}
 
 async function ready(context: ScenarioContext): Promise<void> {
   await context.element('[data-testid="status-strip"][data-state="ready"]');
   await context.waitFor(() => document.querySelector('[data-testid="session"]'));
-}
-
-async function runCommand(context: ScenarioContext, query: string, id: string): Promise<void> {
-  document.querySelector<HTMLButtonElement>('footer.status-bar button[aria-label="Commands"]')!.click();
-  const input = await context.element('[role="dialog"][aria-label="Commands"] [role="combobox"]') as HTMLInputElement;
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-  setter.call(input, query);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  const option = await context.waitFor(() => document.querySelector<HTMLElement>(`[role="option"][data-command="${id}"]`));
-  option.click();
-  await context.waitFor(() => document.querySelector('[role="dialog"]') === null);
 }
 
 async function preferences(context: ScenarioContext): Promise<{ bytes: string | null; temporary: boolean }> {
@@ -49,9 +35,9 @@ async function anotherCore(context: ScenarioContext, pid: number): Promise<boole
   return false;
 }
 
+/** The arranged layout: the panel open on a surface other than the default (FR-025: the width is not drawn). */
 function arranged(): boolean {
-  const shown = panel();
-  return shown?.getAttribute("aria-label") === "Core" && shown.style.width === "352px";
+  return panel()?.getAttribute("aria-label") === "Diagnostics";
 }
 
 export const layout: Scenario = async (context) => {
@@ -59,10 +45,8 @@ export const layout: Scenario = async (context) => {
   await ready(context);
 
   if (place === null) {
-    // Arrange: the Core panel, one step wider.
-    document.querySelector<HTMLButtonElement>('nav[aria-label="Workbench"] button[aria-label="Core"]')!.click();
-    await context.waitFor(() => panel()?.getAttribute("aria-label") === "Core");
-    await runCommand(context, "widen", "panel.wider");
+    // Arrange: the Diagnostics panel open.
+    await showSurface(context, "Diagnostics");
     await context.waitFor(() => arranged());
     sessionStorage.setItem(PLACE, "reloaded");
     location.reload();
@@ -111,9 +95,9 @@ export const layoutSeeded: Scenario = async (context) => {
   const expectOpen = context.params["expect"] === "restored";
   if (expectOpen) {
     await context.waitFor(() => panel()?.getAttribute("aria-label") === "Keyboard shortcuts");
-    expect(panel()!.style.width === "300px", `the stored width: ${panel()!.style.width}`);
+    expect(panel()!.style.width === "", `the stored width is carried, not drawn: ${panel()!.style.width}`);
   } else {
-    expect(panel() === null, "the defaults: no side panel");
+    expect(panel() === null, "the defaults: no panel");
   }
   const file = await preferences(context);
   const stored = JSON.parse(atob(file.bytes!)) as Record<string, unknown>;

@@ -13,6 +13,11 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { WindowContext } from "../commands.ts";
 import { displayKey, type Platform } from "./keys.ts";
 
+/** Each group's icon, as the reference marks its result rows. */
+const GROUP_ICONS: Readonly<Record<string, string>> = {
+  Conversation: "forum", Mode: "tune", Core: "deployed_code", Workbench: "dashboard",
+};
+
 export function Palette({ registry, context, platform, onClose, onRun, onCount }: {
   registry: CommandRegistry<WindowContext>;
   /** The context now; the list follows it while the palette is open. */
@@ -77,6 +82,8 @@ export function Palette({ registry, context, platform, onClose, onRun, onCount }
               <li key={command.id} id={optionId(at)} role="option" aria-selected={at === highlighted}
                   data-command={command.id} className={at === highlighted ? "palette-option active" : "palette-option"}
                   onMouseMove={() => setIndex(at)} onClick={() => onRun(command.id)}>
+                <span className="icon palette-icon" data-icon={GROUP_ICONS[command.group ?? ""] ?? "terminal"}
+                      aria-hidden="true" />
                 <span className="palette-title">{command.title}</span>
                 {command.group && <span className="palette-group">{command.group}</span>}
                 {key && <kbd className="palette-key">{displayKey(key, platform)}</kbd>}
