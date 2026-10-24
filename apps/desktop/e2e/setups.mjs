@@ -69,6 +69,8 @@ export const SETUPS = {
     lifetime: true, workspaceArgument: true, confirm: true, params: { stored: "$stored" },
   },
   empty: { workspaceArgument: true },
+  // D3 spike (throwaway, never merged): spike/README.md.
+  "spike-monaco": { workspaceArgument: true },
   boundary: { core: ["scripted_core.py", "adversarial"], workspaceArgument: true },
   "canary-early": { core: ["scripted_core.py", "adversarial"], workspaceArgument: true, canary: true },
   conversation: { core: ["scripted_core.py", "question"], workspaceArgument: true },

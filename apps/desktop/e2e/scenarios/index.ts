@@ -22,6 +22,7 @@ import { palette, paletteClosing, paletteFailure, paletteUnconfigured } from "./
 import { ready } from "./ready.ts";
 import { reducedMotion, reducedMotionTransition } from "./reduced-motion.ts";
 import { shell, shellFailure } from "./shell.ts";
+import { spikeIdle, spikeMonaco } from "./spike-monaco.ts";
 import { unconfigured } from "./unconfigured.ts";
 import { visual } from "./visual.ts";
 import { crash, reload, wake } from "./recovery.ts";
@@ -73,6 +74,8 @@ export const SCENARIOS: Readonly<Record<string, Scenario>> = {
   reload,
   shell,
   "shell-failure": shellFailure,
+  "spike-idle": spikeIdle,
+  "spike-monaco": spikeMonaco,
   unconfigured,
   visual,
   wake,

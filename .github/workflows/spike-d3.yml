@@ -1,0 +1,82 @@
+name: D3 spike
+
+# Throwaway measurement for D3 (apps/desktop/spike/README.md): runs only on
+# the spike branch, never on main or pull requests, and is never merged.
+on:
+  push:
+    branches: ['spike/d3-monaco-csp-dialog']
+
+concurrency:
+  group: spike-d3-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    name: D3 spike on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      COMODOR_PYTHON: ${{ matrix.os == 'windows-latest' && 'python' || 'python3' }}
+      COMODOR_E2E_OS_LEVEL: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - run: npm ci
+
+      - name: Linux WebView, display and accessibility tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libsoup-3.0-dev libxdo-dev libssl-dev pkg-config build-essential \
+            xvfb xauth dbus dbus-x11 xdotool imagemagick at-spi2-core gir1.2-atspi-2.0 python3-gi
+
+      - name: Rust
+        shell: bash
+        run: |
+          channel=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' apps/desktop/src-tauri/rust-toolchain.toml)
+          test -n "$channel"
+          rustup toolchain install "$channel" --profile minimal
+
+      # Builds the test build (page in e2e mode, Monaco included) and runs the
+      # one spike scenario in the real WebView, with the CSP unchanged.
+      - name: Monaco under the unchanged CSP
+        continue-on-error: true
+        run: npm run -w apps/desktop e2e -- spike-monaco
+
+      - name: The page bundle's sizes
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/e2e/out
+          ls -l apps/desktop/dist/assets | tee apps/desktop/e2e/out/bundle-sizes.txt
+
+      - name: The three-button native dialog
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: node apps/desktop/spike/dialog-evidence.mjs
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: d3-spike-${{ matrix.os }}
+          path: apps/desktop/e2e/out
+          if-no-files-found: ignore

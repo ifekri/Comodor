@@ -67,6 +67,12 @@ pub fn run() {
             wake::watch(desktop.wake.clone(), move || waking.state::<Desktop>().supervisor.woke());
             app.manage(desktop);
             create_main_window(&handle)?;
+            // D3 spike (throwaway, never merged; spike/README.md): show the
+            // three-button dialog instead of starting anything.
+            if std::env::var_os("COMODOR_SPIKE_DIALOG").is_some() {
+                spike_dialog(handle.clone());
+                return Ok(());
+            }
             let launching = handle.clone();
             std::thread::Builder::new().name("launch-workspace".into()).spawn(move || {
                 launching.state::<Desktop>().launch(command_line_workspace());
@@ -84,6 +90,52 @@ pub fn run() {
                 api.prevent_exit();
             }
         }
+    });
+}
+
+/// D3 spike (throwaway, never merged; spike/README.md): one native message
+/// dialog with three custom buttons, parented to the window, answered from
+/// outside by `spike/dialog-evidence.mjs`. The answer is printed on stdout
+/// and the application ends.
+fn spike_dialog(app: tauri::AppHandle) {
+    use std::io::Write;
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult};
+    let _ = std::thread::Builder::new().name("spike-dialog".into()).spawn(move || {
+        let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+            println!("@@comodor-spike-dialog@@ {}", serde_json::json!({ "error": "no window" }));
+            let _ = std::io::stdout().flush();
+            app.exit(2);
+            return;
+        };
+        let _ = window.show();
+        let _ = window.set_focus();
+        let started = std::time::Instant::now();
+        let result = app
+            .dialog()
+            .message("2 files have unsaved changes.")
+            .title("Comodor spike: unsaved changes")
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::YesNoCancelCustom(
+                "Save".into(),
+                "Discard".into(),
+                "Cancel".into(),
+            ))
+            .parent(&window)
+            .blocking_show_with_result();
+        let answer = match &result {
+            MessageDialogResult::Custom(label) => label.clone(),
+            other => format!("{other:?}"),
+        };
+        println!(
+            "@@comodor-spike-dialog@@ {}",
+            serde_json::json!({
+                "answer": answer,
+                "raw": format!("{result:?}"),
+                "shownForMs": started.elapsed().as_millis() as u64,
+            })
+        );
+        let _ = std::io::stdout().flush();
+        app.exit(0);
     });
 }
 
