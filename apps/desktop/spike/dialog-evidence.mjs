@@ -139,7 +139,8 @@ $all = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [Syst
 $elements = @($all | ForEach-Object { $b = $_.Current.BoundingRectangle
   @{ type = $_.Current.ControlType.ProgrammaticName; name = $_.Current.Name; focused = $_.Current.HasKeyboardFocus;
      x = [int]($b.X + $b.Width / 2); y = [int]($b.Y + $b.Height / 2) } })
-$buttons = @($elements | Where-Object { $_.type -eq 'ControlType.Button' })
+$labels = @('Save', 'Discard', 'Cancel')
+$buttons = @($elements | Where-Object { $labels -contains $_.name })
 [Dlg]::Raise($hwnd)
 $foreground = [Dlg]::ForegroundPid()
 $acted = "none"
@@ -148,7 +149,7 @@ switch ('${action}') {
   'enter'  { $sent = [Dlg]::Key(0x0D); $acted = "Return by SendInput after raising the dialog (sent $sent events)" }
   'close'  { [void][Dlg]::PostMessage($hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero); $acted = "WM_CLOSE posted to the dialog's window" }
   default {
-    $target = $all | Where-Object { $_.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $_.Current.Name -eq '${press}' } | Select-Object -First 1
+    $target = $all | Where-Object { @('ControlType.Button', 'ControlType.Pane') -contains $_.Current.ControlType.ProgrammaticName -and $_.Current.Name -eq '${press}' } | Select-Object -First 1
     if ($target) {
       $b = $target.Current.BoundingRectangle
       $sent = [Dlg]::Click([int]($b.X + $b.Width / 2), [int]($b.Y + $b.Height / 2))
@@ -172,6 +173,7 @@ gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi
 PID, ACTION, ENDS = int(sys.argv[1]), sys.argv[2], time.monotonic() + float(sys.argv[3])
 LABELS = {"Save", "Discard", "Cancel"}
+DEFAULT = getattr(Atspi.StateType, "IS_DEFAULT", None)
 
 def children(node):
     for index in range(node.get_child_count()):
@@ -224,7 +226,7 @@ listed = []
 for b in buttons:
     states = b.get_state_set()
     listed.append({"name": label(b), "focused": states.contains(Atspi.StateType.FOCUSED),
-                   "default": states.contains(Atspi.StateType.DEFAULT), "centre": centre(b)})
+                   "default": states.contains(DEFAULT) if DEFAULT is not None else None, "centre": centre(b)})
 acted = "none"
 if ACTION.startswith("press-"):
     want = ACTION[len("press-"):]

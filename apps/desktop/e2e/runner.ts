@@ -107,7 +107,9 @@ export async function runScenario(): Promise<void> {
     void verdict({ ok: false, error: `page error: ${event.message}`, page: page() });
   });
   window.addEventListener("unhandledrejection", (event) => {
-    void verdict({ ok: false, error: `unhandled rejection: ${String(event.reason)}`, page: page() });
+    // D3 spike (throwaway): the stack too, to find where Monaco fails.
+    const stack = event.reason instanceof Error ? `\n${event.reason.stack ?? ""}` : "";
+    void verdict({ ok: false, error: `unhandled rejection: ${String(event.reason)}${stack}`, page: page() });
   });
   // Ahead of the harness's own deadline, so a stalled run says what the page
   // showed instead of being killed blind. A bound on failure, never a delay.
