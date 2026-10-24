@@ -26,13 +26,38 @@ function axeUnderFrozenPrototypes(): Plugin {
   };
 }
 
+/**
+ * D3 spike (throwaway, never merged; spike/README.md): Monaco 0.57.0 assigns
+ * `X.toString = toString` on plain namespace objects at import time
+ * (`base/common/keyCodes`, `base/common/severity`, `platform/markers/common/
+ * markers`, the inline-suggest alternative action). Under `freezePrototype`
+ * that throws, so Monaco does not load at all. This rewrites each such
+ * assignment into the `Object.defineProperty` it means, and logs every site,
+ * so the spike can go on to measure the CSP. A measurement aid, not a
+ * proposal: whether D3 needs such a transform is the owner's decision.
+ */
+function monacoUnderFrozenPrototypes(): Plugin {
+  const assignment = /([A-Za-z_$][\w$]*)\.toString = toString;/g;
+  return {
+    name: "comodor-spike-monaco-under-frozen-prototypes",
+    transform(code, id) {
+      if (!/[\\/]monaco-editor[\\/]/.test(id)) return null;
+      const sites = code.match(assignment) ?? [];
+      if (sites.length === 0) return null;
+      console.log(`[spike] frozen-prototype rewrite in ${id.split("monaco-editor")[1]}: ${sites.join(" | ")}`);
+      return code.replace(assignment, "Object.defineProperty($1, \"toString\", "
+        + "{ configurable: true, enumerable: true, writable: true, value: toString });");
+    },
+  };
+}
+
 // The window's content is served from the application bundle only: no
 // development server in a test or release build, no remote origin, and no
 // inline script (the Content Security Policy in src-tauri/tauri.conf.json
 // refuses it). `--mode e2e` adds the scenario runner; any other mode leaves
 // it out entirely.
 export default defineConfig(({ mode }) => ({
-  plugins: mode === "e2e" ? [react(), axeUnderFrozenPrototypes()] : [react()],
+  plugins: mode === "e2e" ? [react(), axeUnderFrozenPrototypes(), monacoUnderFrozenPrototypes()] : [react()],
   clearScreen: false,
   server: { port: 5173, strictPort: true, host: "127.0.0.1" },
   build: {

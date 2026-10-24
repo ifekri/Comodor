@@ -9,10 +9,10 @@
  * window, and prints the button it received. For every case this records the
  * labels and roles read from the dialog through the platform's accessibility
  * interface, which button the dialog marks default or cancel where the
- * platform says, a screenshot of the dialog's window alone, the action taken,
- * and the application's answer. Nothing here waits by elapsed time for a
- * result: waits are bounded searches for the dialog, and a case that never
- * answers ends at its deadline and is recorded as such.
+ * platform says, a screenshot of the dialog's window alone (taken before it
+ * is answered), the action taken, and the application's answer. Waits are
+ * bounded searches for the dialog; a case that never answers ends at its
+ * deadline and is recorded as such.
  *
  *   node spike/dialog-evidence.mjs
  *
@@ -54,49 +54,112 @@ function json(text) {
   try { return JSON.parse(text.trim().split("\n").pop() ?? ""); } catch { return { unparsed: text.slice(-600) }; }
 }
 
-// -- Windows: UI Automation ----------------------------------------------
+// -- Windows: the dialog's own window, UI Automation from its handle -----
 
-function windowsAct(action, shot) {
+const WINDOWS_NATIVE = String.raw`
+using System; using System.Runtime.InteropServices; using System.Text;
+public static class Dlg {
+  public delegate bool EnumProc(IntPtr w, IntPtr d);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx; public int dy; public uint data; public uint flags; public uint time; public IntPtr extra; }
+  [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort vk; public ushort scan; public uint flags; public uint time; public IntPtr extra; }
+  [StructLayout(LayoutKind.Explicit)] public struct UNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
+  [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public UNION u; }
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc p, IntPtr d);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr w);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr w, out uint pid);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr w, StringBuilder t, int n);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr w, out RECT r);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr w);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr w);
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool on);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr w, uint m, IntPtr a, IntPtr b);
+  [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint n, INPUT[] i, int size);
+  public static IntPtr Find(uint target, string title) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((w, d) => {
+      uint pid; GetWindowThreadProcessId(w, out pid);
+      if (pid != target || !IsWindowVisible(w)) return true;
+      var t = new StringBuilder(256); GetWindowText(w, t, t.Capacity);
+      if (t.ToString() == title) { found = w; return false; }
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
+  public static void Raise(IntPtr w) {
+    uint ignored; uint fg = GetWindowThreadProcessId(GetForegroundWindow(), out ignored); uint me = GetCurrentThreadId();
+    bool joined = fg != 0 && fg != me && AttachThreadInput(me, fg, true);
+    BringWindowToTop(w); SetForegroundWindow(w);
+    if (joined) AttachThreadInput(me, fg, false);
+  }
+  public static uint ForegroundPid() { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid; }
+  public static uint Key(ushort vk) {
+    var i = new INPUT[2];
+    i[0].type = 1; i[0].u.ki.vk = vk;
+    i[1].type = 1; i[1].u.ki.vk = vk; i[1].u.ki.flags = 2;
+    return SendInput(2, i, Marshal.SizeOf(typeof(INPUT)));
+  }
+  public static uint Click(int x, int y) {
+    SetCursorPos(x, y);
+    var i = new INPUT[2];
+    i[0].type = 0; i[0].u.mi.flags = 2;
+    i[1].type = 0; i[1].u.mi.flags = 4;
+    return SendInput(2, i, Marshal.SizeOf(typeof(INPUT)));
+  }
+}
+`;
+
+function windowsAct(pid, action, shot) {
   const press = action.startsWith("press-") ? action.slice("press-".length) : "";
   const script = `
 $ErrorActionPreference = "Stop"
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, System.Drawing
-Add-Type -Namespace Native -Name Dpi -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr w);'
-[void][Native.Dpi]::SetProcessDPIAware()
-$A = [System.Windows.Automation.AutomationElement]
-$name = New-Object System.Windows.Automation.PropertyCondition($A::NameProperty, '${TITLE}')
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
+Add-Type -TypeDefinition @"
+${WINDOWS_NATIVE}
+"@
+[void][Dlg]::SetProcessDPIAware()
 $ends = (Get-Date).AddSeconds(${DIALOG_DEADLINE_S})
-$dialog = $null
-while (-not $dialog -and (Get-Date) -lt $ends) { $dialog = $A::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $name) }
-if (-not $dialog) { @{ found = $false } | ConvertTo-Json -Compress; exit 0 }
-$isButton = New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
-$buttons = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $isButton) | ForEach-Object {
-  @{ name = $_.Current.Name; focused = $_.Current.HasKeyboardFocus; automationId = $_.Current.AutomationId } })
-$r = $dialog.Current.BoundingRectangle
-$bmp = New-Object System.Drawing.Bitmap ([int]$r.Width), ([int]$r.Height)
+$hwnd = [IntPtr]::Zero
+while ($hwnd -eq [IntPtr]::Zero -and (Get-Date) -lt $ends) { $hwnd = [Dlg]::Find(${pid}, '${TITLE}'); if ($hwnd -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 200 } }
+if ($hwnd -eq [IntPtr]::Zero) { @{ found = $false } | ConvertTo-Json -Compress; exit 0 }
+$rect = New-Object Dlg+RECT
+[void][Dlg]::GetWindowRect($hwnd, [ref]$rect)
+$w = $rect.R - $rect.L; $h = $rect.B - $rect.T
+$bmp = New-Object System.Drawing.Bitmap $w, $h
 $g = [System.Drawing.Graphics]::FromImage($bmp)
-$g.CopyFromScreen([int]$r.X, [int]$r.Y, 0, 0, $bmp.Size)
+$g.CopyFromScreen($rect.L, $rect.T, 0, 0, $bmp.Size)
 $bmp.Save('${shot.replaceAll("'", "''")}', [System.Drawing.Imaging.ImageFormat]::Png)
+$A = [System.Windows.Automation.AutomationElement]
+$root = $A::FromHandle($hwnd)
+$all = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition))
+$elements = @($all | ForEach-Object { $b = $_.Current.BoundingRectangle
+  @{ type = $_.Current.ControlType.ProgrammaticName; name = $_.Current.Name; focused = $_.Current.HasKeyboardFocus;
+     x = [int]($b.X + $b.Width / 2); y = [int]($b.Y + $b.Height / 2) } })
+$buttons = @($elements | Where-Object { $_.type -eq 'ControlType.Button' })
+[Dlg]::Raise($hwnd)
+$foreground = [Dlg]::ForegroundPid()
 $acted = "none"
-$handle = [System.IntPtr]$dialog.Current.NativeWindowHandle
 switch ('${action}') {
-  'escape' { [void][Native.Dpi]::SetForegroundWindow($handle); $dialog.SetFocus(); [System.Windows.Forms.SendKeys]::SendWait("{ESC}"); $acted = "Escape sent (SendKeys) to the focused dialog" }
-  'enter'  { [void][Native.Dpi]::SetForegroundWindow($handle); $dialog.SetFocus(); [System.Windows.Forms.SendKeys]::SendWait("{ENTER}"); $acted = "Enter sent (SendKeys) to the focused dialog" }
-  'close'  {
-    $pattern = $null
-    if ($dialog.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern, [ref]$pattern)) { $pattern.Close(); $acted = "WindowPattern.Close" }
-    else { [void][Native.Dpi]::SetForegroundWindow($handle); [System.Windows.Forms.SendKeys]::SendWait("%{F4}"); $acted = "Alt+F4 sent (no WindowPattern)" }
-  }
+  'escape' { $sent = [Dlg]::Key(0x1B); $acted = "Escape by SendInput after raising the dialog (sent $sent events)" }
+  'enter'  { $sent = [Dlg]::Key(0x0D); $acted = "Return by SendInput after raising the dialog (sent $sent events)" }
+  'close'  { [void][Dlg]::PostMessage($hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero); $acted = "WM_CLOSE posted to the dialog's window" }
   default {
-    $want = New-Object System.Windows.Automation.AndCondition($isButton, (New-Object System.Windows.Automation.PropertyCondition($A::NameProperty, '${press}')))
-    $button = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $want)
-    if ($button) { $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); $acted = "InvokePattern on the button named '${press}'" }
-    else { $acted = "no button named '${press}'" }
+    $target = $all | Where-Object { $_.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $_.Current.Name -eq '${press}' } | Select-Object -First 1
+    if ($target) {
+      $b = $target.Current.BoundingRectangle
+      $sent = [Dlg]::Click([int]($b.X + $b.Width / 2), [int]($b.Y + $b.Height / 2))
+      $acted = "pointer click (SendInput) at the centre of the button named '${press}' (sent $sent events)"
+    } else { $acted = "no button named '${press}' in the dialog's UI Automation tree" }
   }
 }
-@{ found = $true; buttons = $buttons; bounds = "$($r.Width)x$($r.Height)"; acted = $acted; className = $dialog.Current.ClassName } | ConvertTo-Json -Compress -Depth 4
+@{ found = $true; hwnd = $hwnd.ToInt64(); size = "$($w)x$($h)"; elements = $elements; buttons = $buttons;
+   foregroundIsApp = ($foreground -eq ${pid}); acted = $acted } | ConvertTo-Json -Compress -Depth 5
 `;
-  const run = spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf-8" });
+  const run = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf-8" });
   return { ...json(run.stdout), stderr: run.stderr.trim().slice(-600) || undefined };
 }
 
@@ -107,7 +170,8 @@ import json, sys, threading, time
 import gi
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi
-PID, TITLE, ACTION, ENDS = int(sys.argv[1]), sys.argv[2], sys.argv[3], time.monotonic() + float(sys.argv[4])
+PID, ACTION, ENDS = int(sys.argv[1]), sys.argv[2], time.monotonic() + float(sys.argv[3])
+LABELS = {"Save", "Discard", "Cancel"}
 
 def children(node):
     for index in range(node.get_child_count()):
@@ -121,46 +185,63 @@ def walk(node, depth=0):
         for child in children(node):
             yield from walk(child, depth + 1)
 
-def dialog():
+def label(node):
+    return (node.get_name() or "").replace("_", "")
+
+def search():
+    apps = []
     for app in children(Atspi.get_desktop(0)):
         try:
-            if app.get_process_id() != PID:
-                continue
+            pid = app.get_process_id()
         except Exception:
             continue
+        apps.append([pid, app.get_name()])
+        if pid != PID:
+            continue
         for window in children(app):
-            if window.get_name() == TITLE:
-                return window
-    return None
+            buttons = [n for n in walk(window) if n.get_role() == Atspi.Role.PUSH_BUTTON and label(n) in LABELS]
+            if len(buttons) >= 2:
+                return window, buttons, apps
+    return None, [], apps
 
-found = None
-while time.monotonic() < ENDS and found is None:
-    found = dialog()
-    if found is None:
+window, buttons, apps = None, [], []
+while time.monotonic() < ENDS and window is None:
+    window, buttons, apps = search()
+    if window is None:
         threading.Event().wait(0.25)
-if found is None:
-    print(json.dumps({"found": False}))
+if window is None:
+    print(json.dumps({"found": False, "applications": apps}))
     sys.exit(0)
-buttons = []
-for node in walk(found):
-    if node.get_role() == Atspi.Role.PUSH_BUTTON:
-        states = node.get_state_set()
-        buttons.append({"name": node.get_name(), "focused": states.contains(Atspi.StateType.FOCUSED),
-                        "default": states.contains(Atspi.StateType.DEFAULT), "node": node})
+
+def centre(node):
+    try:
+        e = node.get_extents(Atspi.CoordType.SCREEN)
+        return {"x": e.x + e.width // 2, "y": e.y + e.height // 2}
+    except Exception:
+        return None
+
+listed = []
+for b in buttons:
+    states = b.get_state_set()
+    listed.append({"name": label(b), "focused": states.contains(Atspi.StateType.FOCUSED),
+                   "default": states.contains(Atspi.StateType.DEFAULT), "centre": centre(b)})
 acted = "none"
 if ACTION.startswith("press-"):
     want = ACTION[len("press-"):]
-    match = [b for b in buttons if b["name"].replace("_", "") == want]
+    match = [b for b in buttons if label(b) == want]
     if match:
-        action = match[0]["node"].get_action_iface()
-        names = [action.get_action_name(i) for i in range(action.get_n_actions())]
-        index = names.index("click") if "click" in names else 0
-        action.do_action(index)
-        acted = "AT-SPI action '%s' on the button named '%s'" % (names[index] if names else "?", want)
+        action = match[0].get_action_iface()
+        names = [action.get_action_name(i) for i in range(action.get_n_actions())] if action else []
+        if names:
+            index = names.index("click") if "click" in names else 0
+            action.do_action(index)
+            acted = "AT-SPI action '%s' on the button named '%s'" % (names[index], want)
+        else:
+            acted = "the button named '%s' has no AT-SPI action" % want
     else:
         acted = "no button named '%s'" % want
-print(json.dumps({"found": True, "role": found.get_role_name(), "acted": acted,
-                  "buttons": [{k: v for k, v in b.items() if k != "node"} for b in buttons]}))
+print(json.dumps({"found": True, "window": {"role": window.get_role_name(), "name": window.get_name()},
+                  "buttons": listed, "acted": acted}))
 `;
 
 function linuxAct(pid, action, shot) {
@@ -170,8 +251,7 @@ function linuxAct(pid, action, shot) {
   const captured = id ? spawnSync("import", ["-window", id, shot], { encoding: "utf-8" }) : null;
   const script = path.join(os.tmpdir(), "comodor-spike-dialog-atspi.py");
   fs.writeFileSync(script, ATSPI);
-  // Read the dialog (and press a button for press-* cases) through AT-SPI.
-  const read = spawnSync("/usr/bin/python3", [script, String(pid), TITLE, action.startsWith("press-") ? action : "read",
+  const read = spawnSync("/usr/bin/python3", [script, String(pid), action.startsWith("press-") ? action : "read",
                                               String(DIALOG_DEADLINE_S)], { encoding: "utf-8" });
   const seen = { ...json(read.stdout), xwindow: id || null, captureError: captured?.stderr.trim() || undefined,
                  atspiStderr: read.stderr.trim().slice(-400) || undefined };
@@ -188,9 +268,7 @@ function linuxAct(pid, action, shot) {
 
 // -- macOS: Accessibility, CoreGraphics ----------------------------------
 
-function macAct(pid, action, shot) {
-  const press = action.startsWith("press-") ? action.slice("press-".length) : "";
-  const swift = `
+const MAC_SWIFT = `
 import AppKit
 import ApplicationServices
 import CoreGraphics
@@ -210,8 +288,11 @@ func all(_ e: AXUIElement, _ depth: Int = 0, _ keep: (AXUIElement) -> Bool) -> [
 func emit(_ o: [String: Any]) -> Never {
   print(String(data: try! JSONSerialization.data(withJSONObject: o), encoding: .utf8)!); exit(0)
 }
+let args = CommandLine.arguments
+let pid = pid_t(args[1])!
+let mode = args[2]
+let wanted = args.count > 3 ? args[3] : ""
 guard AXIsProcessTrusted() else { emit(["found": false, "error": "not trusted for Accessibility"]) }
-let pid = pid_t(${pid})
 let app = AXUIElementCreateApplication(pid)
 let deadline = Date().addingTimeInterval(${DIALOG_DEADLINE_S})
 var holder: AXUIElement? = nil
@@ -225,62 +306,49 @@ while Date() < deadline {
   usleep(200_000)
 }
 guard let window = holder else { emit(["found": false]) }
-let sheets = all(window) { role($0) == "AXSheet" }
-let container = sheets.first ?? window
-let defaultButton = (value(container, kAXDefaultButtonAttribute as String)).map { title($0 as! AXUIElement) } ?? ""
-let cancelButton = (value(container, kAXCancelButtonAttribute as String)).map { title($0 as! AXUIElement) } ?? ""
-let listed = buttons.map { ["name": title($0), "focused": (value($0, kAXFocusedAttribute as String) as? Bool) ?? false] as [String: Any] }
-// The window that holds the alert, captured alone (a sheet is drawn with its window).
-let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-let ours = list.filter { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) }
-let ids = ours.compactMap { $0[kCGWindowNumber as String] as? Int }
-var acted = "none"
-let action = "${action}"
-func key(_ code: CGKeyCode) {
-  NSRunningApplication(processIdentifier: pid)?.activate(options: [])
-  usleep(300_000)
-  let src = CGEventSource(stateID: .hidSystemState)
-  CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true)?.post(tap: .cghidEventTap)
-  CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false)?.post(tap: .cghidEventTap)
+if mode == "read" {
+  let sheets = all(window) { role($0) == "AXSheet" }
+  let container = sheets.first ?? window
+  func named(_ attribute: String) -> String {
+    guard let v = value(container, attribute) else { return "" }
+    return title(v as! AXUIElement)
+  }
+  let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+  let ids = list.filter { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) }.compactMap { $0[kCGWindowNumber as String] as? Int }
+  emit(["found": true, "container": role(container), "windowRole": role(window),
+        "buttons": buttons.map { ["name": title($0), "focused": (value($0, kAXFocusedAttribute as String) as? Bool) ?? false] as [String: Any] },
+        "defaultButton": named(kAXDefaultButtonAttribute as String), "cancelButton": named(kAXCancelButtonAttribute as String),
+        "windowIds": ids.map(String.init)])
 }
-var shotIds = ids.map(String.init)
-if action == "escape" { acted = "Escape posted (CGEvent, HID tap) after activating the application" }
-else if action == "enter" { acted = "Return posted (CGEvent, HID tap) after activating the application" }
-else if action == "close" { acted = "not applicable: the alert is a sheet with no close control" }
-else if let b = buttons.first(where: { title($0) == "${press}" }) {
-  acted = AXUIElementPerformAction(b, kAXPressAction as CFString) == .success ? "AXPress on the button titled '${press}'" : "AXPress failed"
-} else { acted = "no button titled '${press}'" }
-emit(["found": true, "container": role(container), "buttons": listed, "defaultButton": defaultButton,
-      "cancelButton": cancelButton, "windowIds": shotIds, "acted": acted,
-      "postKey": action == "escape" ? 53 : action == "enter" ? 36 : -1])
+if mode == "press" {
+  guard let b = buttons.first(where: { title($0) == wanted }) else { emit(["acted": "no button titled " + wanted]) }
+  let ok = AXUIElementPerformAction(b, kAXPressAction as CFString) == .success
+  emit(["acted": ok ? "AXPress on the button titled " + wanted : "AXPress failed"])
+}
+let code: CGKeyCode = mode == "escape" ? 53 : 36
+NSRunningApplication(processIdentifier: pid)?.activate(options: [])
+let src = CGEventSource(stateID: .hidSystemState)
+CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true)?.post(tap: .cghidEventTap)
+CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false)?.post(tap: .cghidEventTap)
+emit(["acted": (mode == "escape" ? "Escape" : "Return") + " posted (CGEvent, HID tap) after activating the application"])
 `;
+
+function macAct(pid, action, shot) {
   const script = path.join(os.tmpdir(), "comodor-spike-dialog.swift");
-  fs.writeFileSync(script, swift);
-  // First pass: read and (for press-*) act; for keys, the screenshot comes first.
-  const run = spawnSync("swift", [script], { encoding: "utf-8" });
-  const seen = { ...json(run.stdout), stderr: run.stderr.trim().slice(-400) || undefined };
+  fs.writeFileSync(script, MAC_SWIFT);
+  // Read and capture first, then act: an answered dialog is gone before it can be captured.
+  const read = spawnSync("swift", [script, String(pid), "read"], { encoding: "utf-8" });
+  const seen = { ...json(read.stdout), stderr: read.stderr.trim().slice(-400) || undefined };
   const firstId = seen.windowIds?.[0];
   if (firstId) {
     const shotRun = spawnSync("screencapture", ["-x", "-o", "-l", firstId, shot], { encoding: "utf-8" });
     seen.captureError = shotRun.stderr.trim() || undefined;
   }
-  if (seen.found && (action === "escape" || action === "enter")) {
-    const code = action === "escape" ? 53 : 36;
-    const post = `
-import AppKit
-import CoreGraphics
-NSRunningApplication(processIdentifier: ${pid})?.activate(options: [])
-usleep(300_000)
-let src = CGEventSource(stateID: .hidSystemState)
-CGEvent(keyboardEventSource: src, virtualKey: ${code}, keyDown: true)?.post(tap: .cghidEventTap)
-CGEvent(keyboardEventSource: src, virtualKey: ${code}, keyDown: false)?.post(tap: .cghidEventTap)
-`;
-    const keyScript = path.join(os.tmpdir(), "comodor-spike-key.swift");
-    fs.writeFileSync(keyScript, post);
-    const keyed = spawnSync("swift", [keyScript], { encoding: "utf-8" });
-    seen.keyStatus = keyed.status;
-  }
-  return seen;
+  if (!seen.found) return seen;
+  if (action === "close") return { ...seen, acted: "not applicable: the alert has no close control" };
+  const mode = action.startsWith("press-") ? "press" : action;
+  const acted = spawnSync("swift", [script, String(pid), mode, action.replace(/^press-/, "")], { encoding: "utf-8" });
+  return { ...seen, ...json(acted.stdout), actStderr: acted.stderr.trim().slice(-300) || undefined };
 }
 
 // -- the cases -----------------------------------------------------------
@@ -302,7 +370,7 @@ async function runCase(action) {
   const stderr = [];
   app.stderr.on("data", (chunk) => stderr.push(String(chunk)));
   let seen;
-  if (process.platform === "win32") seen = windowsAct(action, shot);
+  if (process.platform === "win32") seen = windowsAct(app.pid, action, shot);
   else if (process.platform === "darwin") seen = macAct(app.pid, action, shot);
   else seen = linuxAct(app.pid, action, shot);
   const deadline = new Promise((resolve) => {
