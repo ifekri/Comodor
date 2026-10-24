@@ -42,7 +42,17 @@ function monacoUnderFrozenPrototypes(): Plugin {
     name: "comodor-spike-monaco-under-frozen-prototypes",
     transform(code, id) {
       if (!/[\\/]monaco-editor[\\/]/.test(id)) return null;
+      // Monarch's keyword table: `result[e] = true` for every keyword, and
+      // the TypeScript and JavaScript lists contain `constructor`.
+      if (/[\\/]monarch[\\/]monarchCompile\.js$/.test(id)) {
+        const write = "        result[e] = true;";
+        if (code.split(write).length !== 2) throw new Error("spike: Monarch's keyword-table write was not found exactly once");
+        console.log(`[spike] frozen-prototype rewrite in monarchCompile.js: ${write.trim()}`);
+        code = code.replace(write, "        Object.defineProperty(result, e, "
+          + "{ configurable: true, enumerable: true, writable: true, value: true });");
+      }
       const sites = code.match(assignment) ?? [];
+      if (sites.length === 0) return /[\\/]monarchCompile\.js$/.test(id) ? code : null;
       if (sites.length === 0) return null;
       console.log(`[spike] frozen-prototype rewrite in ${id.split("monaco-editor")[1]}: ${sites.join(" | ")}`);
       return code.replace(assignment, "Object.defineProperty($1, \"toString\", "

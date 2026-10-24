@@ -367,7 +367,9 @@ async function runCase(action) {
     createInterface({ input: app.stdout }).on("line", (line) => {
       if (line.startsWith(PREFIX)) answer = JSON.parse(line.slice(PREFIX.length));
     });
-    app.once("exit", (code, signal) => resolve({ code, signal }));
+    // `close`, not `exit`: the answer line may still be in the pipe when the
+    // process has exited.
+    app.once("close", (code, signal) => resolve({ code, signal }));
   });
   const stderr = [];
   app.stderr.on("data", (chunk) => stderr.push(String(chunk)));
