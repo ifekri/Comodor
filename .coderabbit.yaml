@@ -1,0 +1,228 @@
+# Comodor: Python Core, protocol v2, Tauri desktop, TUI, web, and shared packages.
+# Reviews are manual so each PR is reviewed only when explicitly requested.
+language: en-US
+tone_instructions: "Be concise and direct. Report actionable defects with the affected path, failure mode, and a practical fix; avoid style-only comments."
+
+reviews:
+  profile: chill
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  review_status: true
+  review_info: true
+  review_details: true
+  in_progress_fortune: false
+  poem: false
+  suggested_labels: false
+  auto_apply_labels: false
+  suggested_reviewers: false
+  auto_assign_reviewers: false
+  enable_prompt_for_ai_agents: false
+
+  auto_review:
+    enabled: false
+    auto_incremental_review: false
+    drafts: false
+
+  auto_approvals:
+    enabled: false
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+
+  # Keep dependency lock files visible; CodeRabbit normally ignores them.
+  # These exact patterns override its defaults without limiting other paths.
+  path_filters:
+    - "**/package-lock.json"
+    - "**/*.lock"
+
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Review for correctness, data loss, security boundaries, compatibility,
+        lifecycle races, and changed behavior across the affected surfaces.
+        Ground findings in the changed code and a concrete failing scenario.
+        The Python Core is authoritative; desktop, TUI, web, and CLI are clients.
+        Do not treat green CI, a passing unit test, or a written spec as proof
+        that a platform-specific behavior was exercised in a real window.
+        Cite missing evidence as such; do not assert a test ran when it did not.
+        Do not suggest bypassing required checks or silently changing protocols.
+
+    - path: "src/comodor/**"
+      instructions: |
+        Check behavior shared by CLI, TUI, web, and desktop. Trace changes to
+        permissions, modes, events, persistence, error handling, and public
+        behavior through each affected adapter. Preserve transport independence.
+
+    - path: "src/comodor/safety/**"
+      instructions: |
+        Prioritize permission boundaries, explicit approvals, secret redaction,
+        SSRF protections, checkpoints, and path confinement. Check symlinks,
+        alternate paths, read/write races, and fail-closed behavior. A content
+        scan reduces exposure but does not guarantee that no secret is shown.
+
+    - path: "src/comodor/tools/**"
+      instructions: |
+        Check mode and permission gates for agent tools, workspace confinement,
+        checkpoint-before-write behavior, encoding, conflict handling, and
+        failure paths. Manual user actions must not grant the agent new tools.
+
+    - path: "src/comodor/agent/**"
+      instructions: |
+        Verify ACT, PLAN, and ASK boundaries, approval state, tool visibility,
+        cancellation, and deterministic restoration after resume or resync.
+
+    - path: "src/comodor/session/**"
+      instructions: |
+        Check journal ordering, snapshot/resume equivalence, pending questions,
+        streaming state, truncation markers, and stale or duplicated events.
+
+    - path: "src/comodor/github/**"
+      instructions: |
+        Check credential handling, installation keys, OAuth state, URL opening,
+        clipboard fallbacks, and redaction in logs and diagnostics.
+
+    - path: "src/comodor/protocol/**"
+      instructions: |
+        Compare the schema and TypeScript client with this Python implementation.
+        Keep protocol framing transport-independent; never print incidental
+        output to the stdio protocol stream. Incompatible changes must fail at
+        the handshake, rather than silently decoding different shapes.
+
+    - path: "src/comodor/transport/**"
+      instructions: |
+        Check stdio framing, EOF, partial writes, ordering, shutdown, version
+        negotiation, and errors across reconnection or process termination.
+
+    - path: "schemas/**"
+      instructions: |
+        Treat schemas as the protocol source of truth. Verify compatible v2
+        additions, generated Python and TypeScript outputs, capability gating,
+        handshake failures, and tests for older clients.
+
+    - path: "packages/**"
+      instructions: |
+        Check all seven shared packages for API drift across desktop and TUI.
+        Preserve command key ownership, mode semantics, question identifiers,
+        session ordering, design-token surface mappings, and client resync.
+
+    - path: "apps/desktop/src-tauri/**"
+      instructions: |
+        Check the native capability allowlist, IPC inputs, CSP, Core ownership,
+        first-run chooser, workspace switching, close/quit/restart ordering,
+        stale page generations, orphan prevention, and Windows/macOS/Linux
+        differences. Never assume an unsaved-change report is current without
+        a fresh page-bound handshake before stopping the Core.
+
+    - path: "apps/desktop/src/**"
+      instructions: |
+        Check focus return, overlays, keyboard shortcuts, narrow layouts,
+        accessibility and reduced motion. Values shown as live must come from
+        the Core; unfinished features must remain truthful and inert. Keep
+        credentials out of the WebView and its storage. Treat Core errors and
+        reconnection as visible states rather than inventing sample data.
+
+    - path: "apps/desktop/e2e/**"
+      instructions: |
+        Check that OS-level scenarios exercise the real window and assert
+        observable outcomes. Distinguish synthetic input from human testing,
+        platform-specific N/A from verified, and CI screenshots from claims
+        about an untested screen size. Preserve canary and D1 regression gates.
+
+    - path: "apps/desktop/test/**"
+      instructions: |
+        Require meaningful behavior and failure-path coverage for changed
+        desktop logic. Tests that still pass when a claimed fix is removed do
+        not establish that fix. Avoid tests that only mirror implementation.
+
+    - path: "apps/tui/**"
+      instructions: |
+        Check actual renderer output, keyboard input, resizing and scrolling
+        across narrow terminal widths. Do not claim renderer verification from
+        pure unit tests. Preserve terminal design-token mapping.
+
+    - path: "src/comodor/tui/**"
+      instructions: |
+        Check real terminal behavior, output framing, Unicode/RTL, narrow
+        widths, event ordering, and session restoration on reconnect.
+
+    - path: "src/comodor/web/**"
+      instructions: |
+        Check authentication, CORS, request boundaries, sensitive values,
+        protocol compatibility, and that desktop-only methods are not exposed
+        to a browser without an explicit authorization design.
+
+    - path: "src/comodor/api/**"
+      instructions: |
+        Check API authorization, validation, error responses, rate and size
+        limits, and consistency with Core permissions and protocol contracts.
+
+    - path: "src/comodor/channels/**"
+      instructions: |
+        Check sender identity, credentials, replay/duplicate delivery,
+        authorization, timeouts, and safe failure on network errors.
+
+    - path: "src/comodor/mcp/**"
+      instructions: |
+        Check untrusted tool results, permissions, network boundaries,
+        cancellation, and redaction when bridging external tool calls.
+
+    - path: "tests/**"
+      instructions: |
+        Check regressions across affected surfaces and failure paths, not
+        merely snapshots of the implementation. For claimed guard fixes,
+        ensure the test detects removal of the guard. Keep offline tests
+        deterministic and avoid live provider calls unless explicitly marked.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Check permissions, untrusted PR inputs, artifact contents, secret
+        exposure, pinned actions, cancellation, OS matrix coverage, and that
+        checks correspond to the actual PR head. Do not weaken release gates.
+
+    - path: "docker/**"
+      instructions: |
+        Check runtime permissions, exposed ports, persistent storage,
+        credential handling, health checks, and packaging of the Python Core.
+
+    - path: "**/Dockerfile"
+      instructions: |
+        Check runtime dependencies, image provenance, non-root execution,
+        packaging, and accidental inclusion of private files or credentials.
+
+    - path: "**/package.json"
+      instructions: |
+        Check dependency and script changes across npm workspaces, compatible
+        shared package versions, build reproducibility, and lockfile updates.
+
+    - path: "**/Cargo.toml"
+      instructions: |
+        Check Rust dependencies and Tauri plugins against the native capability
+        allowlist, platform support, and the lockfile.
+
+    - path: "pyproject.toml"
+      instructions: |
+        Check supported Python versions, package contents, dependencies,
+        optional features, and release/build reproducibility.
+
+    - path: "specs/**"
+      instructions: |
+        Check that changed requirements, contracts, plan, and tasks agree.
+        Do not mark an unticked task complete solely because CI was green;
+        distinguish tested, visually verified, and NOT VERIFIED evidence.
+
+    - path: "docs/**"
+      instructions: |
+        Check technical claims against current code and specifications,
+        especially protocol, desktop architecture, safety, and surface parity.
+        Flag stale architecture diagrams or unsupported verification claims.
