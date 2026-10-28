@@ -27,6 +27,21 @@ function hex(rgb: string): string {
   return parts.length === 3 ? `#${parts.map((n) => n.toString(16).padStart(2, "0")).join("")}` : rgb;
 }
 
+/**
+ * Inside a shadow root: the runner's `waitFor` watches the document, and a
+ * shadow root's changes never reach its observer, so this checks each frame
+ * instead, within a bound (a failure deadline, not a delay).
+ */
+async function inShadow<T>(find: () => T | null | undefined | false, what: string): Promise<T> {
+  const ends = performance.now() + 20_000;
+  for (;;) {
+    const found = find();
+    if (found) return found;
+    if (performance.now() > ends) throw new Error(`not seen in the viewer: ${what}`);
+    await frames(1);
+  }
+}
+
 async function row(context: ScenarioContext, path: string): Promise<HTMLElement> {
   return context.element(`[role="tree"] [data-path="${path}"]`);
 }
@@ -89,7 +104,8 @@ export const explorer: Scenario = async (context) => {
   expect(view.dataset["state"] === "text", "src/app.ts opens as text");
   const host = view.querySelector<HTMLElement>('[data-testid="file-code"]')!;
   const shadow = host.shadowRoot!;
-  await context.waitFor(() => [...shadow.querySelectorAll(".cm-line span")].some((s) => s.textContent === "export"));
+  await inShadow(() => [...shadow.querySelectorAll(".cm-line span")].some((s) => s.textContent === "export"),
+                 "the coloured keyword");
   await frames(2);
   const keyword = [...shadow.querySelectorAll<HTMLElement>(".cm-line span")].find((s) => s.textContent === "export")!;
   const expected = getComputedStyle(document.documentElement).getPropertyValue("--text-keyword").trim().toLowerCase();
