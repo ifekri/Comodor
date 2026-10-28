@@ -53,6 +53,7 @@ ends with the agent doing something useful.
 | [Configuration](configuration.md) | Every setting, where files live, what wins |
 | [Architecture](architecture.md) | Shared ownership, dependency direction, and product surfaces |
 | [Surface parity contract](surface-parity.md) | Required PR impact assessment and verification evidence |
+| [Trading architecture](trading.md) | Modes, the Decimal and UTC invariants, and why live is off |
 
 ### Build a client for it
 
