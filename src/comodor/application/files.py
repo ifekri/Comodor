@@ -29,6 +29,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -234,7 +235,8 @@ class Workspace:
             return None
         relative = f"{parent}/{child.name}" if parent else child.name
         try:
-            is_link = child.is_symlink()
+            # A Windows junction is a link too, though `is_symlink` says no.
+            is_link = child.is_symlink() or bool(getattr(child, "is_junction", lambda: False)())
             is_dir = child.is_dir(follow_symlinks=True)
         except OSError:
             return None
@@ -244,7 +246,7 @@ class Workspace:
             entry["link"] = True
         try:
             self._check_rules(path, path.resolve(strict=False))
-            if is_link and not _inside(path.resolve(strict=False), self.root):
+            if not _inside(path.resolve(strict=False), self.root):
                 entry["refused"] = OUTSIDE_WORKSPACE
         except P.ProtocolError as refusal:
             reason = refusal.data.get("reason")
@@ -284,6 +286,9 @@ class Workspace:
             raise _refused(PERMISSION_DENIED, "the file cannot be read") from None
         if path.is_dir():
             raise _invalid(NOT_A_FILE, "this is a folder")
+        # A FIFO, socket or device is never read: reading one can block the Core.
+        if not stat.S_ISREG(info.st_mode):
+            raise _invalid(NOT_A_FILE, "this is not a regular file")
         result: dict[str, Any] = {"path": normal, "size": info.st_size}
         if info.st_size > MAX_OPEN_BYTES:
             return {**result, "unavailable": TOO_LARGE}

@@ -30,6 +30,9 @@ _PATTERNS: tuple[re.Pattern[str], ...] = (
                re.DOTALL),
 )
 
+# `contains_credential` checks the last two (JWT, private key) its own way.
+assert "eyJ" in _PATTERNS[-2].pattern and "PRIVATE KEY" in _PATTERNS[-1].pattern
+
 # `SECRET_NAME = value` in env files, TOML, YAML, shell exports and JSON.
 _ASSIGNMENT = re.compile(
     r"""(?ix)
@@ -62,7 +65,37 @@ def contains_credential(text: str) -> bool:
     is not found. The assignment rule (`API_KEY = …`) is left out, because
     ordinary source names its variables that way.
     """
-    return any(pattern.search(text) for pattern in _PATTERNS)
+    # The single-segment shapes fail fast on text that does not match. The
+    # JWT and private-key shapes do not: as regular expressions they rescan
+    # the rest of the text from every `eyJ` or BEGIN, which on 2 MB of
+    # crafted text runs for minutes. They are checked in linear time instead,
+    # with the same meaning.
+    single = _PATTERNS[:-2]
+    return (any(pattern.search(text) for pattern in single)
+            or _has_jwt(text) or _has_private_key(text))
+
+
+_WORD = re.compile(r"[A-Za-z0-9_\-.]+")
+_KEY_BEGIN = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+_KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+
+
+def _has_jwt(text: str) -> bool:
+    """`eyJ` + 10 or more, `.`, 10 or more, `.`, 10 or more (base64url), once per word."""
+    for word in _WORD.finditer(text):
+        parts = word.group().split(".")
+        for index in range(len(parts) - 2):
+            at = parts[index].find("eyJ")
+            if (at >= 0 and len(parts[index]) - at >= 13
+                    and len(parts[index + 1]) >= 10 and len(parts[index + 2]) >= 10):
+                return True
+    return False
+
+
+def _has_private_key(text: str) -> bool:
+    """A private key's BEGIN line with its END line somewhere after it."""
+    begin = _KEY_BEGIN.search(text)
+    return begin is not None and _KEY_END.search(text, begin.end()) is not None
 
 
 def redact(text: str, extra: Iterable[str] = ()) -> str:

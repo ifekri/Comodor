@@ -194,6 +194,8 @@ def test_a_link_that_resolves_outside_is_refused_on_every_platform(tmp_path: Pat
         with pytest.raises(P.ProtocolError) as refused:
             call()
         assert reason(refused) == F.OUTSIDE_WORKSPACE
+    entry = next(e for e in ws.list("")["entries"] if e["name"] == "door")
+    assert entry["refused"] == F.OUTSIDE_WORKSPACE and entry["link"] is True
 
 
 def test_an_oversized_file_is_never_read_into_memory(workspace: Path, ws: Workspace,
@@ -489,3 +491,50 @@ def test_paths_are_built_from_the_configured_data_folder(tmp_path: Path, workspa
     finally:
         service.close()
     assert ".comodor-home" not in names
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes are POSIX")
+def test_a_named_pipe_is_never_read(workspace: Path, ws: Workspace):
+    os.mkfifo(workspace / "pipe")
+    with pytest.raises(P.ProtocolError) as refused:
+        ws.read("pipe")
+    assert reason(refused) == F.NOT_A_FILE
+
+
+SCAN_TIMING = """
+import time
+from comodor.safety.redact import contains_credential as scan
+cases = ["eyJ" * 666_666, ("eyJ" + "a" * 9 + ".") * 150_000,
+         "-----BEGIN RSA PRIVATE KEY-----\\n" * 60_000,
+         ("eyJ" + "a" * 20 + "." + "b" * 5 + " ") * 60_000]
+start = time.perf_counter()
+found = [scan(text) for text in cases]
+print(found, round(time.perf_counter() - start, 3))
+"""
+
+
+def test_the_credential_scan_takes_linear_time_on_crafted_text():
+    """2 MB built to make a backtracking JWT or private-key pattern rescan the
+    rest of the text from every start. Run in a child process with a deadline:
+    a quadratic scan fails the test instead of hanging it."""
+    import subprocess
+
+    run = subprocess.run([sys.executable, "-c", SCAN_TIMING], capture_output=True, text=True,
+                         timeout=60)
+    assert run.returncode == 0, run.stderr
+    found, seconds = run.stdout.strip().rsplit(" ", 1)
+    assert found == "[False, False, False, False]"
+    assert float(seconds) < 10, f"the scan took {seconds} s"
+
+
+@pytest.mark.parametrize("text,found", [
+    ("x = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fw'", True),
+    ("-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----", True),
+    ("-----BEGIN RSA PRIVATE KEY-----\nno end", False),
+    ("eyJabcdefghij.short.abcdefghijk", False),
+    ("prefix-eyJabcdefghij.klmnopqrst.uvwxyzabcd", True),
+    ("ordinary text with eyJ in it", False),
+])
+def test_the_linear_scan_finds_what_the_patterns_describe(text: str, found: bool):
+    from comodor.safety.redact import contains_credential
+    assert contains_credential(text) is found
