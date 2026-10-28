@@ -55,6 +55,16 @@ def _mask_assignment(match: re.Match[str]) -> str:
     return f"{name}={quote}{keep}{MASK}{quote}"
 
 
+def contains_credential(text: str) -> bool:
+    """Does `text` hold one of the well-known credential shapes above?
+
+    An aid, not a guarantee: a secret in a shape these patterns do not know
+    is not found. The assignment rule (`API_KEY = …`) is left out, because
+    ordinary source names its variables that way.
+    """
+    return any(pattern.search(text) for pattern in _PATTERNS)
+
+
 def redact(text: str, extra: Iterable[str] = ()) -> str:
     """Mask credentials in ``text``.
 

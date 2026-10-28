@@ -147,6 +147,17 @@ export const WINDOW = [
   "border.subtle",
   "border.tile",
   "text.accent",
+  // D3a: a file's text in the read-only viewer, coloured by what each part is.
+  "text.code",
+  "text.keyword",
+  "text.string",
+  "text.number",
+  "text.type",
+  "text.function",
+  "text.property",
+  "text.tag",
+  "text.comment",
+  "text.punctuation",
 ] as const;
 
 export type WindowRole = (typeof WINDOW)[number];
@@ -186,6 +197,16 @@ export const STAND_IN: Readonly<Record<WindowRole, Token>> = {
   "border.subtle": "border.default",
   "border.tile": "border.default",
   "text.accent": "border.focused",
+  "text.code": "text.primary",
+  "text.keyword": "mode.plan",
+  "text.string": "semantic.success",
+  "text.number": "semantic.warning",
+  "text.type": "mode.plan",
+  "text.function": "semantic.info",
+  "text.property": "text.secondary",
+  "text.tag": "semantic.danger",
+  "text.comment": "text.muted",
+  "text.punctuation": "text.muted",
 };
 
 /**
@@ -230,6 +251,19 @@ export const desktop: WindowTheme = {
   "text.secondary": "#b8b8b8",
   "text.muted": "#929292",
   "text.accent": "#5fd4e8",
+  // The reference's syntax colours (its §6.3). Where its comment, punctuation
+  // and tag colours fall below AA on the code ground or on a selection, the
+  // nearest passing value is used.
+  "text.code": "#d6d6d6",
+  "text.keyword": "#5fd4e8",
+  "text.string": "#7fd39a",
+  "text.number": "#e0a04a",
+  "text.type": "#9be6f2",
+  "text.function": "#8ab8ff",
+  "text.property": "#cdb892",
+  "text.tag": "#e66a64",
+  "text.comment": "#929292",
+  "text.punctuation": "#9a9a9a",
 
   "semantic.success": "#35c46a",
   "semantic.warning": "#e0a04a",

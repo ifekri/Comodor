@@ -202,6 +202,11 @@ class Server:
             "model.set": lambda p: service.set_model(
                 p["model"], str(p.get("provider", ""))),
             "workspace.get": lambda p: service.workspace(),
+            "workspace.list": lambda p: service.workspace_files().list(
+                str(p.get("path", "")), str(p.get("cursor", "")),
+                int(p.get("limit", 0) or 0)),
+            "workspace.stat": lambda p: service.workspace_files().stat(p["path"]),
+            "workspace.read": lambda p: service.workspace_files().read(p["path"]),
             "session.snapshot": lambda p: {
                 "snapshot": service.snapshot(p["session_id"])},
             # `answers` and `cancelled`, which is what `AnswerParams` says.

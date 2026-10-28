@@ -8,9 +8,11 @@
  * later. Nothing is invented.
  */
 
+import type { CoreClient } from "@comodor/client";
 import type { Delegate, Task } from "@comodor/session";
 import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
 
+import { Explorer } from "../explorer/Explorer.tsx";
 import { InertText } from "../view/InertText.tsx";
 import { LaterButton } from "./Later.tsx";
 import type { SharedSession } from "./session-store.ts";
@@ -47,7 +49,19 @@ function Section({ label, count, open, onToggle, actions, children }: {
   );
 }
 
-export function Sidebar({ session, workspace, mode, canChangeWorkspace, onChangeWorkspace, onShowConversation }: {
+/**
+ * What the EXPLORER tab needs from the Core, or why there is nothing to show:
+ * `waiting` while no Core is ready, `unsupported` when the ready Core does not
+ * offer its files (an older Core).
+ */
+export interface ExplorerSource {
+  readonly client: CoreClient;
+  readonly workspaceId: string;
+  readonly activePath: string | null;
+  readonly onOpen: (path: string) => void;
+}
+
+export function Sidebar({ session, workspace, mode, canChangeWorkspace, onChangeWorkspace, onShowConversation, files }: {
   session: SharedSession | null;
   /** The workspace as reported (the Core's, else the native side's); null when there is none. */
   workspace: string | null;
@@ -55,6 +69,7 @@ export function Sidebar({ session, workspace, mode, canChangeWorkspace, onChange
   canChangeWorkspace: boolean;
   onChangeWorkspace: () => void;
   onShowConversation: () => void;
+  files: ExplorerSource | "waiting" | "unsupported";
 }) {
   const [tab, setTab] = useState<Tab>("workspace");
   // The tabs are one tab stop; Left, Right, Home and End choose between them.
@@ -171,11 +186,21 @@ export function Sidebar({ session, workspace, mode, canChangeWorkspace, onChange
       ) : (
         <div className="side-explorer" role="tabpanel" id={`${ids}-explorer-panel`}
              aria-labelledby={`${ids}-explorer-tab`} data-tab="explorer">
-          <div className="side-section-head">
-            <span className="side-section-label" dir="auto">{(folder ?? "Workspace").toUpperCase()}</span>
-          </div>
-          <p className="side-empty">Browsing the workspace's files arrives in a later version.</p>
-          {workspace && <p className="side-path" dir="auto"><InertText text={workspace} linked={false} /></p>}
+          {typeof files === "object" ? (
+            <Explorer client={files.client} workspaceName={folder ?? "Workspace"} workspaceId={files.workspaceId}
+                      activePath={files.activePath} onOpen={files.onOpen} />
+          ) : (
+            <>
+              <div className="side-section-head">
+                <span className="side-section-label" dir="auto">{(folder ?? "Workspace").toUpperCase()}</span>
+              </div>
+              <p className="side-empty" data-testid="explorer-empty">
+                {files === "unsupported" ? "This Core does not offer the workspace's files."
+                  : "The workspace's files appear here once the Core is ready."}
+              </p>
+              {workspace && <p className="side-path" dir="auto"><InertText text={workspace} linked={false} /></p>}
+            </>
+          )}
         </div>
       )}
     </nav>

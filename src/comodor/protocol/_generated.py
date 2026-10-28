@@ -37,6 +37,9 @@ METHOD_SHAPES: dict[str, tuple[str, str]] = {
     "permission.reply": ("PermissionReplyParams", "AckResult"),
     "delegate.stop": ("DelegateStopParams", "DelegateStopResult"),
     "shutdown": ("Empty", "AckResult"),
+    "workspace.list": ("WorkspaceListParams", "WorkspaceListResult"),
+    "workspace.stat": ("WorkspacePathParams", "WorkspaceStatResult"),
+    "workspace.read": ("WorkspacePathParams", "WorkspaceReadResult"),
 }
 
 METHODS: frozenset[str] = frozenset(METHOD_SHAPES)
@@ -104,6 +107,7 @@ CORE_CAPABILITIES: tuple[str, ...] = (
     "delegates",
     "usage",
     "clarification_required",
+    "workspace_files",
 )
 CLIENT_CAPABILITIES: tuple[str, ...] = (
     "questions",
@@ -425,6 +429,45 @@ SHAPES: dict[str, dict[str, tuple[str, bool]]] = {
     },
     "SessionHistoryResult": {
         "sessions": ("list", True),
+    },
+    "WorkspaceListParams": {
+        "path": ("str", False),
+        "cursor": ("str", False),
+        "limit": ("int", False),
+    },
+    "WorkspacePathParams": {
+        "path": ("str", True),
+    },
+    "WorkspaceEntry": {
+        "name": ("str", True),
+        "path": ("str", True),
+        "kind": ("str", True),
+        "link": ("bool", False),
+        "size": ("int", False),
+        "refused": ("str", False),
+    },
+    "WorkspaceListResult": {
+        "path": ("str", True),
+        "entries": ("list", True),
+        "cursor": ("str", False),
+    },
+    "WorkspaceStatResult": {
+        "path": ("str", True),
+        "kind": ("str", True),
+        "size": ("int", False),
+        "modified_ns": ("int", True),
+    },
+    "WorkspaceReadResult": {
+        "path": ("str", True),
+        "size": ("int", True),
+        "unavailable": ("str", False),
+        "text": ("str", False),
+        "encoding": ("str", False),
+        "bom": ("bool", False),
+        "replaced": ("bool", False),
+        "eol": ("str", False),
+        "lines": ("int", False),
+        "hash": ("str", False),
     },
 }
 
@@ -1057,3 +1100,75 @@ class SessionHistoryEntry(_SessionHistoryEntryRequired, total=False):
 
 class SessionHistoryResult(TypedDict):
     sessions: list[SessionHistoryEntry]
+
+
+class _WorkspaceListParamsRequired(TypedDict):
+    pass
+
+
+class WorkspaceListParams(_WorkspaceListParamsRequired, total=False):
+    path: str
+    cursor: str
+    limit: int
+
+
+class WorkspacePathParams(TypedDict):
+    path: str
+
+
+class _WorkspaceEntryRequired(TypedDict):
+    name: str
+    path: str
+    kind: str
+
+
+class WorkspaceEntry(_WorkspaceEntryRequired, total=False):
+    """One child of a folder. `refused` names why it cannot be opened (it is
+    still listed so the folder's contents are not misrepresented);
+    Comodor's own data is not listed at all.
+    """
+
+    link: bool
+    size: int
+    refused: str
+
+
+class _WorkspaceListResultRequired(TypedDict):
+    path: str
+    entries: list[WorkspaceEntry]
+
+
+class WorkspaceListResult(_WorkspaceListResultRequired, total=False):
+    cursor: str
+
+
+class _WorkspaceStatResultRequired(TypedDict):
+    path: str
+    kind: str
+    modified_ns: int
+
+
+class WorkspaceStatResult(_WorkspaceStatResultRequired, total=False):
+    size: int
+
+
+class _WorkspaceReadResultRequired(TypedDict):
+    path: str
+    size: int
+
+
+class WorkspaceReadResult(_WorkspaceReadResultRequired, total=False):
+    """Either `text` (with how it was decoded) or `unavailable` (`too_large`,
+    `binary`). `eol` is lf, crlf, cr, mixed or none; `bom` says whether a
+    UTF-8 byte-order mark was removed; `replaced` that undecodable bytes
+    were replaced. `hash` is the SHA-256 of the bytes on disk.
+    """
+
+    unavailable: str
+    text: str
+    encoding: str
+    bom: bool
+    replaced: bool
+    eol: str
+    lines: int
+    hash: str

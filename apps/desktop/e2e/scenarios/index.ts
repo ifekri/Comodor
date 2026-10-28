@@ -9,6 +9,7 @@ import { boundary, canaryEarly } from "./boundary.ts";
 import { conversation, conversationCancel, conversationPermission } from "./conversation.ts";
 import { corePanel, diagnosticsPanel } from "./core-panel.ts";
 import { empty } from "./empty.ts";
+import { explorer } from "./explorer.ts";
 import {
   lifetimeClose, lifetimeKill, lifetimeQuitHeld, lifetimeQuitNow, lifetimeSecondConfirmed,
   lifetimeSecondDeclined, lifetimeSecondSame,
@@ -45,6 +46,7 @@ export const SCENARIOS: Readonly<Record<string, Scenario>> = {
   crash,
   "diagnostics-panel": diagnosticsPanel,
   empty,
+  explorer,
   "key-delivery": keyDelivery,
   keyboard,
   layout,

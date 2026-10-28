@@ -293,13 +293,18 @@ describe("the sidebar", () => {
     }
   });
 
-  test("the explorer tab says browsing arrives later and shows the workspace as reported", async () => {
+  // D3a changed this D2 test: the explorer is no longer a later-phase
+  // placeholder. A Core that does not offer its files (this fake does not)
+  // is said to, and nothing pretends to browse.
+  test("the explorer tab says when the Core does not offer files, and shows the workspace as reported", async () => {
     const native = new FakeNative(status({ workspace: "/work/project" }));
     const { container } = await openWindow(show, until, native);
     await click([...sidebar(container)!.querySelectorAll<HTMLButtonElement>('[role="tab"]')].at(-1)!);
     const explorer = await until(() => sidebar(container)!.querySelector('[role="tabpanel"][data-tab="explorer"]'),
       "the explorer");
-    expect(explorer.textContent).toContain("arrives in a later version");
+    expect(explorer.textContent).toContain("This Core does not offer the workspace's files.");
+    expect(explorer.textContent).toContain("/work/project");
+    expect(explorer.querySelector('[role="tree"]')).toBeNull();
     expect(explorer.querySelectorAll("button").length).toBe(0);
   });
 });

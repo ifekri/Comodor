@@ -26,6 +26,9 @@ export const METHODS = [
   "permission.reply",
   "delegate.stop",
   "shutdown",
+  "workspace.list",
+  "workspace.stat",
+  "workspace.read",
 ] as const;
 export type Method = (typeof METHODS)[number];
 
@@ -80,6 +83,7 @@ export const CORE_CAPABILITIES = [
   "delegates",
   "usage",
   "clarification_required",
+  "workspace_files",
 ] as const;
 export const CLIENT_CAPABILITIES = [
   "questions",
@@ -653,6 +657,62 @@ export interface SessionHistoryEntry {
 
 export interface SessionHistoryResult {
   sessions: Array<SessionHistoryEntry>;
+}
+
+export interface WorkspaceListParams {
+  path?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface WorkspacePathParams {
+  path: string;
+}
+
+/**
+ * One child of a folder. `refused` names why it cannot be opened (it is
+ * still listed so the folder's contents are not misrepresented); Comodor's
+ * own data is not listed at all.
+ */
+export interface WorkspaceEntry {
+  name: string;
+  path: string;
+  kind: "file" | "directory";
+  link?: boolean;
+  size?: number;
+  refused?: string;
+}
+
+export interface WorkspaceListResult {
+  path: string;
+  entries: Array<WorkspaceEntry>;
+  cursor?: string;
+}
+
+export interface WorkspaceStatResult {
+  path: string;
+  kind: "file" | "directory";
+  size?: number;
+  modified_ns: number;
+}
+
+/**
+ * Either `text` (with how it was decoded) or `unavailable` (`too_large`,
+ * `binary`). `eol` is lf, crlf, cr, mixed or none; `bom` says whether a
+ * UTF-8 byte-order mark was removed; `replaced` that undecodable bytes were
+ * replaced. `hash` is the SHA-256 of the bytes on disk.
+ */
+export interface WorkspaceReadResult {
+  path: string;
+  size: number;
+  unavailable?: string;
+  text?: string;
+  encoding?: string;
+  bom?: boolean;
+  replaced?: boolean;
+  eol?: string;
+  lines?: number;
+  hash?: string;
 }
 
 /**

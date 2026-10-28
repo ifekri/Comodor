@@ -1813,7 +1813,19 @@ input.palette-input {
   overflow: hidden;
 }
 
-.canvas > .window {
+.canvas > .canvas-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.canvas > .canvas-body[hidden] {
+  display: none;
+}
+
+.canvas-body > .window {
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -2418,4 +2430,240 @@ kbd {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* -- D3a: the explorer, the file tabs and the read-only viewer ------------ */
+
+.explorer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.explorer-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 6px 8px;
+}
+
+.explorer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding-inline-start: calc(4px + var(--depth, 0) * 12px);
+  padding-inline-end: 6px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.explorer-row:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.explorer-row:focus-visible {
+  outline: 1px solid var(--border-focused);
+  outline-offset: -1px;
+}
+
+.explorer-row.is-active {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.explorer-row.is-locked {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.explorer-row .icon::before {
+  font-size: 16px;
+}
+
+.explorer-chevron {
+  width: 16px;
+  flex: none;
+}
+
+.explorer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.explorer-note,
+.explorer-more {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.explorer-more {
+  font-style: normal;
+  color: var(--text-accent);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.file-tabs {
+  display: flex;
+  flex: none;
+  height: 34px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--surface-bar);
+  border-bottom: 1px solid var(--border-default);
+  padding-inline-start: 34px;
+}
+
+.file-tab {
+  display: flex;
+  align-items: center;
+  max-width: 220px;
+  min-width: 0;
+  border-right: 1px solid var(--border-default);
+  color: var(--text-muted);
+}
+
+.file-tab.is-active {
+  background: var(--surface-base);
+  color: var(--text-primary);
+  box-shadow: inset 0 1px 0 var(--border-focused);
+}
+
+.file-tab-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 6px 0 10px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.file-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tab-close {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 6px;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+
+.file-tab-label:focus-visible,
+.file-tab-close:focus-visible {
+  outline: 1px solid var(--border-focused);
+  outline-offset: -2px;
+}
+
+.file-tab .icon::before {
+  font-size: 15px;
+}
+
+.file-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface-base);
+}
+
+.file-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-height: 30px;
+  padding: 0 12px;
+  background: var(--surface-bar);
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.file-crumb-path {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.file-crumb {
+  display: inline-flex;
+  align-items: center;
+}
+
+.file-crumb.is-last {
+  color: var(--text-primary);
+}
+
+.file-facts {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: end;
+}
+
+.file-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 2px 8px;
+  background: var(--surface-input);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.file-action:focus-visible {
+  outline: 1px solid var(--border-focused);
+}
+
+.file-notice {
+  margin: 24px;
+  color: var(--text-secondary);
+}
+
+.file-code {
+  flex: 1;
+  min-height: 0;
+}
+
+.file-code[hidden] {
+  display: none;
 }
