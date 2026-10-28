@@ -41,22 +41,24 @@ function TabStrip({ tabs, onKeyShown }: { tabs: TabsStore; onKeyShown?: () => vo
       {ids.map((path) => {
         const shown = path === state.active;
         return (
-          <div key={path ?? "thread"} className={shown ? "file-tab is-active" : "file-tab"}>
-            <button type="button" role="tab" aria-selected={shown} tabIndex={shown ? 0 : -1}
-                    className="file-tab-label" title={path ?? "The conversation"} data-path={path ?? ""}
-                    onClick={() => tabs.show(path)}>
-              <span className="icon" aria-hidden="true" data-icon={path === null ? "forum" : "description"} />
-              <span className="file-tab-name" dir="auto">
-                {path === null ? "Thread" : <InertText text={baseName(path)} linked={false} />}
-              </span>
-            </button>
+          // Only tabs belong to a tablist: the close mark is part of its tab,
+          // not a control of its own; the keyboard closes the shown tab with Delete.
+          <button key={path ?? "thread"} type="button" role="tab" aria-selected={shown} tabIndex={shown ? 0 : -1}
+                  className={shown ? "file-tab is-active" : "file-tab"} data-path={path ?? ""}
+                  title={path === null ? "The conversation" : `${path} (Delete closes it)`}
+                  aria-keyshortcuts={path === null ? undefined : "Delete"}
+                  onClick={() => tabs.show(path)}>
+            <span className="icon" aria-hidden="true" data-icon={path === null ? "forum" : "description"} />
+            <span className="file-tab-name" dir="auto">
+              {path === null ? "Thread" : <InertText text={baseName(path)} linked={false} />}
+            </span>
             {path !== null && (
-              <button type="button" className="file-tab-close" aria-label={`Close ${baseName(path)}`}
-                      title="Close" onClick={() => tabs.close(path)}>
-                <span className="icon" data-icon="close" aria-hidden="true" />
-              </button>
+              <span className="file-tab-close" aria-hidden="true" data-close={path}
+                    onClick={(event) => { event.stopPropagation(); tabs.close(path); }}>
+                <span className="icon" data-icon="close" />
+              </span>
             )}
-          </div>
+          </button>
         );
       })}
     </div>

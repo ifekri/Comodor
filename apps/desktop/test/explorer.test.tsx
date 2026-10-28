@@ -151,7 +151,9 @@ describe("the file tabs", () => {
     expect(tabs.map((tab) => tab.textContent?.trim())).toEqual(["Thread", "README.md"]);
     expect(container.querySelector<HTMLElement>(".canvas-body")!.hidden).toBe(true);
     expect(native.core.requests("workspace.read").map((r) => r.params)).toEqual([{ path: "README.md" }]);
-    await click(container.querySelector<HTMLElement>('[aria-label="Close README.md"]')!);
+    const tablist = container.querySelector<HTMLElement>('[data-testid="file-tabs"]')!;
+    expect([...tablist.children].every((child) => child.getAttribute("role") === "tab")).toBe(true);
+    await click(container.querySelector<HTMLElement>('[data-close="README.md"]')!);
     await until(() => container.querySelector('[data-testid="file-view"]') === null, "the view closed");
     expect(container.querySelector<HTMLElement>(".canvas-body")!.hidden).toBe(false);
   });

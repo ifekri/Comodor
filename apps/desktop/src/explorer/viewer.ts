@@ -50,8 +50,9 @@ const theme = EditorView.theme({
   ".cm-content": { caretColor: color("border.focused") },
   "&.cm-focused": { outline: `1px solid ${color("border.focused")}`, outlineOffset: "-1px" },
   ".cm-gutters": { backgroundColor: color("surface.base"), color: color("text.muted"), border: "none" },
-  ".cm-activeLine": { backgroundColor: color("surface.active") },
-  ".cm-activeLineGutter": { backgroundColor: color("surface.active"), color: color("text.primary") },
+  // The bar ground, not the hover ground: every syntax colour reaches AA on it.
+  ".cm-activeLine": { backgroundColor: color("surface.bar") },
+  ".cm-activeLineGutter": { backgroundColor: color("surface.bar"), color: color("text.primary") },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": {
     backgroundColor: color("surface.selected") },
   ".cm-panels": { backgroundColor: color("surface.panel"), color: color("text.primary") },
