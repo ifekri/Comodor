@@ -110,7 +110,10 @@ export async function probe(hooks: ProbeHooks): Promise<Data> {
   await frames(4);
   results["readOnlyTyping"] = { osKey: keyReadOnly, unchanged: view.state.doc.toString() === before };
   results["shotViewer"] = await hooks.shot("spike-cm6-viewer");
+  // axe-core builds its own elements while it measures: a phase of its own.
+  hooks.phase("axe");
   results["axeViewer"] = await hooks.axe("CodeMirror 6 viewer in a shadow root");
+  hooks.phase("shadow-viewer-after-axe");
 
   // 2. Editable instance: OS-level typing reaches it.
   hooks.phase("shadow-editable");

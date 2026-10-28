@@ -87,7 +87,10 @@ export async function probe(hooks: ProbeHooks): Promise<Data> {
                               selection: selectionRects(host),
                               newViolations: hooks.violations().length - violationsBeforeRecovery };
   results["shotAfter"] = await hooks.shot("spike-monaco-after-recovery");
+  // axe-core builds its own elements while it measures: a phase of its own.
+  hooks.phase("axe");
   results["axe"] = await hooks.axe("Monaco viewer");
+  hooks.phase("recovery-after-axe");
 
   // Adversarial content under freezePrototype.
   hooks.phase("adversarial");
