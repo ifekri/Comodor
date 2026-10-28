@@ -195,12 +195,15 @@ be assumed.
 | `model.get` / `model.set` | provider, model, and whether it is configured |
 | `model.list` | the models the active provider can name, for a chooser |
 | `workspace.get` | the directory the agent is pointed at |
+| `workspace.list` | one page of one workspace folder, folders first, and a `cursor` when more follow (capability `workspace_files`) |
+| `workspace.stat` | a workspace path's kind, size and modification time |
+| `workspace.read` | a workspace file's text and how it was decoded, or `unavailable` (binary, too large); refusals carry `data.reason` |
 | `question.answer` | acknowledgement |
 | `permission.reply` | acknowledgement |
 | `delegate.stop` | whether there was a running background delegate to stop |
 | `shutdown` | acknowledgement, then the core exits |
 
-There are eighteen. The list is short because a method exists when something
+There are twenty-one. The list is short because a method exists when something
 calls it — the way to get a hundred speculative operations is to write them
 before anything needs them, and then to keep them working forever.
 

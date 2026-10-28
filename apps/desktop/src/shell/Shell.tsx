@@ -18,6 +18,9 @@ import type { CoreClient } from "@comodor/client";
 
 import type { CoreStatus, NativeApi } from "../bridge.ts";
 import { commands, type WindowContext } from "../commands.ts";
+import { CanvasTabs } from "../explorer/FilePane.tsx";
+import { offersFiles } from "../explorer/files.ts";
+import { TabsStore } from "../explorer/tabs.ts";
 import { stateLabel } from "../view/StatusStrip.tsx";
 import { type ShellActions, type ShellContext, type ShellState, WORKBENCH_COMMAND_IDS } from "./commands.ts";
 import { CorePanel } from "./CorePanel.tsx";
@@ -137,6 +140,22 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
   const [paletteReturn] = useState(() => new FocusReturn());
   const panelFocusDue = useRef(false);
   const reducedMotion = useReducedMotion();
+  // D3a: the files open as tabs, kept for this launch only (paths, never text).
+  const [tabs] = useState(() => new TabsStore(typeof window === "undefined" ? undefined : window.sessionStorage));
+  const tabsState = useSyncExternalStore(tabs.subscribe, tabs.get);
+  const conversationFocusDue = useRef(false);
+  useLayoutEffect(() => {
+    if (!conversationFocusDue.current || tabsState.active !== null) return;
+    conversationFocusDue.current = false;
+    fallbackTarget(mainRef.current ?? document)?.focus();
+  }, [tabsState.active]);
+  // Another workspace: no tab of the previous one stays open.
+  const workspaceId = status?.workspace_id ?? null;
+  const shownWorkspace = useRef(workspaceId);
+  useEffect(() => {
+    if (workspaceId !== null && shownWorkspace.current !== null && workspaceId !== shownWorkspace.current) tabs.clear();
+    if (workspaceId !== null) shownWorkspace.current = workspaceId;
+  }, [workspaceId, tabs]);
 
   // The sidebar: beside from the reference's minimum width up (the person may
   // hide it); below, hidden, and covering the canvas while opened (FR-026).
@@ -210,6 +229,13 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
       panelReturn.drop();
     }
     closeSidebarCover(false);
+    // A file shown in the canvas gives way to the thread first; the focus
+    // follows once the thread is drawn again.
+    if (tabs.get().active !== null) {
+      conversationFocusDue.current = true;
+      tabs.show(null);
+      return;
+    }
     fallbackTarget(mainRef.current ?? document)?.focus();
   };
   const toggleSidebar = () => {
@@ -426,7 +452,11 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
           {sidebarShown && (
             <Sidebar session={session} workspace={workspace} mode={compact ? "covering" : "beside"}
                      canChangeWorkspace={changeEnabled} onChangeWorkspace={() => run(WORKBENCH_COMMAND_IDS.workspaceChange)}
-                     onShowConversation={() => run(WORKBENCH_COMMAND_IDS.viewConversation)} />
+                     onShowConversation={() => run(WORKBENCH_COMMAND_IDS.viewConversation)}
+                     files={client === null || status?.state !== "ready" ? "waiting"
+                       : !offersFiles(client) ? "unsupported"
+                       : { client, workspaceId: workspaceId ?? "", activePath: tabsState.active,
+                           onOpen: (path: string) => tabs.open(path) }} />
           )}
           <div className="canvas">
             <button type="button" className="sidebar-toggle" aria-label={sidebarShown ? "Hide the sidebar" : "Show the sidebar"}
@@ -435,7 +465,8 @@ export function Shell({ api, status, client, store, layouts, native, runRef, chi
                     onClick={() => run(WORKBENCH_COMMAND_IDS.sidebarToggle)}>
               <span className="icon" data-icon="chevron_left" aria-hidden="true" />
             </button>
-            <main ref={mainRef} className="window" data-testid="window" tabIndex={-1}>{children}</main>
+            <CanvasTabs client={client} tabs={tabs}
+                        thread={<main ref={mainRef} className="window" data-testid="window" tabIndex={-1}>{children}</main>} />
           </div>
           <StatusBar status={status} session={session} announcement={announcement} notice={notice}
                      diagnosticsKey={keyFor(WORKBENCH_COMMAND_IDS.viewDiagnostics)}

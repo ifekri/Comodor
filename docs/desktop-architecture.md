@@ -2,12 +2,13 @@
 
 D1 — the desktop foundation — is built: `apps/desktop`, a Tauri 2 window
 that owns one Comodor Core and holds one conversation with it. D2 — the
-workbench shell — is built on it: a navigation rail, a status bar, a command
-palette over the shared command registry, a keyboard model and side panels,
-with the layout kept between launches. It runs from source on Windows, Linux
-and macOS; it is not packaged yet. Everything past the shell (Monaco, the
-terminal, agent and session panels, packaging) is D3–D6 and does not exist
-yet.
+workbench shell — is built on it: the reference window's top bar and menus, a
+sidebar, a command palette over the shared command registry, a keyboard model,
+a centred panel and a status bar, with the layout kept between launches. D3a
+adds the workspace's files: an explorer tree and a read-only viewer, every
+byte from the Core. It runs from source on Windows, Linux and macOS; it is
+not packaged yet. Editing (D3b), the terminal, agent and session panels and
+packaging (D4–D6) do not exist yet.
 
 This records what the desktop is, what the Core had to be true for, and what
 remains.
@@ -160,15 +161,17 @@ unavailable, and "Check again" restarts the Core to read it.
 
 ### The workbench shell (D2)
 
-Around that screen the shell adds, and adds nothing else (no menu, editor,
-terminal, explorer or agent panel — those are later phases):
+Around that screen the shell adds the reference window's composition (PR #66;
+`specs/004-workbench-shell`, Clarifications 2026-10-17):
 
-- **A navigation rail** with exactly four surfaces — the conversation, the
-  Core panel, diagnostics and the keyboard shortcuts — and the palette
-  control.
-- **A status bar** holding D1's status strip once (the Core's state, the
-  workspace, provider and model as reported), the palette control and the
-  one polite announcement region.
+- **A top bar** with the WAI-ARIA menubar (folded into one "Menu" below
+  760 px) and the palette in the search field.
+- **A sidebar** with WORKSPACE (session, agents, tasks — only what the Core
+  reports) and EXPLORER tabs, beside the canvas from 760 px and covering it
+  below; every later-phase control is unavailable and says so.
+- **A status bar** holding D1's status strip in the reference's cells (the
+  Core's state, the workspace, provider and model as reported) and the one
+  polite announcement region.
 - **A command palette** over the same `@comodor/commands` registry the
   buttons use: D1's Send and Cancel first, then the workbench commands. It
   lists what applies now and runs exactly what a button would.
@@ -176,15 +179,13 @@ terminal, explorer or agent panel — those are later phases):
   system or a text field owns are never taken; Escape closes the palette,
   then a covering panel, then reaches the composer; F6 and Shift+F6 cycle the
   regions; focus returns to whatever opened a panel or the palette.
-- **Side panels** beside the conversation from 900 logical pixels of the
-  shell's measured width, covering it below that; the edge is dragged or
-  moved with the arrow keys.
-- **The Core panel** shows only what the current Core reported, and "not
-  reported yet" for the rest; **diagnostics** show the native side's tail as
-  inert text, in every state.
+- **A centred, non-modal panel** for the Core panel, diagnostics and the
+  keyboard shortcuts. **The Core panel** shows only what the current Core
+  reported, and "not reported yet" for the rest; **diagnostics** show the
+  native side's tail as inert text, in every state.
 
-**The layout preference** — whether a side panel is open, which, and its
-width — is one object in D1's `preferences.json`, read once after `connect`
+**The layout preference** — whether the panel is open and which (its stored
+width is kept but no longer drawn) — is one object in D1's `preferences.json`, read once after `connect`
 through `read_layout` and written after each completed change through
 `write_layout`. The native side validates every write (version, the four
 known fields, their types, the width range, the surface, a 1 KiB bound)
@@ -197,6 +198,26 @@ by the default without touching D1's own preferences.
 JetBrains Mono and Material Symbols bundled with the page, a 31px status bar
 and 34px panel headers. Every text colour reaches WCAG 2.1 AA on its ground,
 and the test build checks every window state with `axe-core`.
+
+### The workspace's files (D3a)
+
+`specs/005-workspace-explorer`. The window never touches the disk: EXPLORER
+and the viewer ask the Core (`workspace.list`, `workspace.stat`,
+`workspace.read`, behind the `workspace_files` capability), which resolves
+every workspace-relative path and refuses, before reading, anything outside
+the workspace (symlinks and junctions included), Comodor's own data folder
+and the project's `.comodor/` (except `skills/`), names that usually hold
+secrets, and text with a known credential shape — an aid, not a guarantee.
+A workspace that is Comodor's data folder is refused whole. Folders are read
+500 entries at a time with a continuation cursor.
+
+The viewer is **CodeMirror 6 in a shadow root**: there its styles reach the
+page as a constructable stylesheet, which the CSP allows, so the policy and
+`freezePrototype` stay as they are. Monaco was measured and rejected: it
+needs a build transform to load under `freezePrototype`, and it draws the
+selection, line numbers and decorations with inline `style` attributes the
+CSP blocks. Open files are tabs after the thread, kept (paths only) for the
+launch. The native operation set is unchanged.
 
 ---
 
@@ -286,8 +307,8 @@ If any of these is reimplemented for the desktop, the boundary has failed:
 ```text
 F1–F8  terminal foundation and parity            ← done
 D1     Tauri foundation                          ← done
-D2     the workbench shell                       ← this
-D3     Monaco and the workspace
+D2     the workbench shell                       ← done
+D3     the workspace and the editor              ← D3a (explorer, read-only viewer) this; D3b editing
 D4     the integrated terminal
 D5     agent, task and session panels
 D6     production hardening: packaging, signing, updates, keychain

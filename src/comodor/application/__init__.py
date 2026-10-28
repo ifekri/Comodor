@@ -44,6 +44,7 @@ from ..events import Event, EventBus, Kind, Request
 from ..safety.modes import ALL as MODE_NAMES
 from ..safety.modes import known as known_mode
 from ..safety.permissions import Risk
+from .files import Workspace
 from .journal import Journal
 
 __all__ = ["Assembly", "assemble", "Binding", "CoreService", "DecisionRejected",
@@ -846,6 +847,14 @@ class CoreService:
     def workspace(self) -> dict[str, Any]:
         root = Path(self._config.paths.project)
         return {"path": str(root), "name": root.name}
+
+    def workspace_files(self) -> Workspace:
+        """The workspace as a client may browse and read it (D3a).
+
+        Built per request from the configuration, so a changed workspace or
+        profile is never answered from a stale view.
+        """
+        return Workspace.of(self._config.paths.project, self._config.paths.user)
 
     def list_handles(self) -> list[SessionHandle]:
         with self._lock:

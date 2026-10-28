@@ -129,3 +129,12 @@ test("the terminal mapping carries none of the window's roles; CSS gives it stan
     assert.ok(css.includes(`--${role.replace(/\./g, "-")}: ${terminal[STAND_IN[role]]};`), `${role} has no stand-in`);
   }
 });
+
+test("a file's syntax colours reach WCAG AA on the code ground, the active line and a selection", () => {
+  const inks: Role[] = ["text.code", "text.keyword", "text.string", "text.number", "text.type", "text.function",
+    "text.property", "text.tag", "text.comment", "text.punctuation"];
+  const short = (["surface.base", "surface.bar", "surface.selected"] as Role[])
+    .flatMap((ground) => inks.map((ink) => ({ ink, ground, ratio: contrast(desktop[ink], desktop[ground]) })))
+    .filter(({ ratio }) => ratio < 4.5);
+  assert.deepEqual(short, []);
+});

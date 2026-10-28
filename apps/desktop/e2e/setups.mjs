@@ -43,6 +43,10 @@
  *   then on, each in a fresh launch, and restore the exact original after,
  *   with COMODOR_E2E_OS_LEVEL=1 only.
  *
+ * - `files` (D3a): the workspace's files before launch, by workspace-relative
+ *   path: a string, `{ base64 }`, `{ size }` (sparse) or `{ many }` (a folder
+ *   of that many empty files).
+ *
  * Placeholders, anywhere above: `$workspace` (the launch's workspace folder)
  * and `$stored` (another existing folder, standing for the last one chosen).
  */
@@ -69,6 +73,21 @@ export const SETUPS = {
     lifetime: true, workspaceArgument: true, confirm: true, params: { stored: "$stored" },
   },
   empty: { workspaceArgument: true },
+  // D3a: the explorer and the read-only viewer over the real Core.
+  explorer: {
+    realCore: true, workspaceArgument: true, canary: true,
+    files: {
+      "src/app.ts": "// D3a viewer\nexport async function load(path: string): Promise<number> {\n  return path.length;\n}\n",
+      "src/token.ts": "export const token = \"ghp_D3aSpikeTokenAbCdEfGhIjKlMnOp1234\";\n",
+      ".env": "API_KEY=ENV-SECRET-D3A-7f3c91\n",
+      "notes/bom.txt": { base64: Buffer.from("﻿with a byte-order mark\n", "utf-8").toString("base64") },
+      "notes/crlf.txt": "one\r\ntwo\r\n",
+      "notes/persian.md": "# سلام mixed متن text \u{1F600}\n",
+      "media/logo.bin": { base64: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 1, 2, 3]).toString("base64") },
+      "media/huge.txt": { size: 2_000_001 },
+      "big": { many: 600 },
+    },
+  },
   boundary: { core: ["scripted_core.py", "adversarial"], workspaceArgument: true },
   "canary-early": { core: ["scripted_core.py", "adversarial"], workspaceArgument: true, canary: true },
   conversation: { core: ["scripted_core.py", "question"], workspaceArgument: true },

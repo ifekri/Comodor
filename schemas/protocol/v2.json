@@ -47,7 +47,7 @@
     "internal_error": "A fault in the core. The message is safe to show; details go to stderr."
   },
   "x-capabilities": {
-    "description": "What each side can do, exchanged at the handshake. A name absent from the list means not supported; a name present that the other side does not know is ignored. Neither side may assume a capability it did not see. `clarification_required` must be advertised by both sides for the `clarification.required` event to be sent: it changes what a finished turn means, and a client that did not ask for it keeps the older meaning.",
+    "description": "What each side can do, exchanged at the handshake. A name absent from the list means not supported; a name present that the other side does not know is ignored. Neither side may assume a capability it did not see. `clarification_required` must be advertised by both sides for the `clarification.required` event to be sent: it changes what a finished turn means, and a client that did not ask for it keeps the older meaning. `workspace_files` says the core answers `workspace.list`, `workspace.stat` and `workspace.read`.",
     "core": [
       "streaming",
       "questions",
@@ -57,7 +57,8 @@
       "tasks",
       "delegates",
       "usage",
-      "clarification_required"
+      "clarification_required",
+      "workspace_files"
     ],
     "client": [
       "questions",
@@ -155,6 +156,21 @@
       "summary": "Close every session and stop. The core answers, then exits.",
       "params": "Empty",
       "result": "AckResult"
+    },
+    "workspace.list": {
+      "summary": "One page of one folder of the workspace, in a stable order: folders first, then names. `cursor` continues where the previous page ended. Paths are workspace-relative; anything outside the workspace, Comodor's own data and names that usually hold secrets are refused (`not_allowed`, `data.reason`).",
+      "params": "WorkspaceListParams",
+      "result": "WorkspaceListResult"
+    },
+    "workspace.stat": {
+      "summary": "What one workspace path is now: its kind, size and modification time.",
+      "params": "WorkspacePathParams",
+      "result": "WorkspaceStatResult"
+    },
+    "workspace.read": {
+      "summary": "One workspace file's text for a read-only view, with how it was decoded. A file too large or binary comes back `unavailable`; a refused file is an error with `data.reason`.",
+      "params": "WorkspacePathParams",
+      "result": "WorkspaceReadResult"
     }
   },
   "x-events": {
@@ -1496,6 +1512,156 @@
           "items": {
             "$ref": "#/$defs/SessionHistoryEntry"
           }
+        }
+      }
+    },
+    "WorkspaceListParams": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Workspace-relative, '/'-separated; empty is the workspace itself."
+        },
+        "cursor": {
+          "type": "string",
+          "description": "Opaque; from the previous page of the same folder."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "At most 500."
+        }
+      }
+    },
+    "WorkspacePathParams": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "WorkspaceEntry": {
+      "description": "One child of a folder. `refused` names why it cannot be opened (it is still listed so the folder's contents are not misrepresented); Comodor's own data is not listed at all.",
+      "type": "object",
+      "required": [
+        "name",
+        "path",
+        "kind"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "file",
+            "directory"
+          ]
+        },
+        "link": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "refused": {
+          "type": "string"
+        }
+      }
+    },
+    "WorkspaceListResult": {
+      "type": "object",
+      "required": [
+        "path",
+        "entries"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkspaceEntry"
+          }
+        },
+        "cursor": {
+          "type": "string",
+          "description": "Present when more entries follow."
+        }
+      }
+    },
+    "WorkspaceStatResult": {
+      "type": "object",
+      "required": [
+        "path",
+        "kind",
+        "modified_ns"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "file",
+            "directory"
+          ]
+        },
+        "size": {
+          "type": "integer"
+        },
+        "modified_ns": {
+          "type": "integer"
+        }
+      }
+    },
+    "WorkspaceReadResult": {
+      "description": "Either `text` (with how it was decoded) or `unavailable` (`too_large`, `binary`). `eol` is lf, crlf, cr, mixed or none; `bom` says whether a UTF-8 byte-order mark was removed; `replaced` that undecodable bytes were replaced. `hash` is the SHA-256 of the bytes on disk.",
+      "type": "object",
+      "required": [
+        "path",
+        "size"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "unavailable": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "encoding": {
+          "type": "string"
+        },
+        "bom": {
+          "type": "boolean"
+        },
+        "replaced": {
+          "type": "boolean"
+        },
+        "eol": {
+          "type": "string"
+        },
+        "lines": {
+          "type": "integer"
+        },
+        "hash": {
+          "type": "string"
         }
       }
     }

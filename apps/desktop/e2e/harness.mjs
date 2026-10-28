@@ -520,6 +520,19 @@ async function runScenario(name) {
     fs.mkdirSync(inner);
   }
   const places = { $workspace: workspace, $stored: stored, $inner: inner };
+  // D3a: files the workspace holds before launch (text, base64 bytes, or a
+  // size for a sparse file), and `many` folders of numbered empty files.
+  for (const [relative, spec] of Object.entries(setup.files ?? {})) {
+    const target = path.join(workspace, ...relative.split("/"));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    if (typeof spec === "string") fs.writeFileSync(target, spec);
+    else if (spec.base64 !== undefined) fs.writeFileSync(target, Buffer.from(spec.base64, "base64"));
+    else if (spec.size !== undefined) { fs.writeFileSync(target, ""); fs.truncateSync(target, spec.size); }
+    else if (spec.many !== undefined) {
+      fs.mkdirSync(target, { recursive: true });
+      for (let at = 0; at < spec.many; at += 1) fs.writeFileSync(path.join(target, `f${String(at).padStart(4, "0")}.txt`), "");
+    }
+  }
 
   if (setup.lastSelectedFolder !== undefined) {
     fs.writeFileSync(path.join(data, "preferences.json"), JSON.stringify({
