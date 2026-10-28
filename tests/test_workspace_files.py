@@ -189,11 +189,30 @@ def test_a_link_that_resolves_outside_is_refused_on_every_platform(tmp_path: Pat
     (outside / "notes.txt").write_bytes(b"outside")
     if not link_outside(workspace / "door", outside):
         pytest.skip("this machine can create neither a symlink nor a junction")
+    entry = next(e for e in ws.list()["entries"] if e["name"] == "door")
+    assert entry["refused"] == F.OUTSIDE_WORKSPACE
     for call in (lambda: ws.list("door"), lambda: ws.read("door/notes.txt"),
                  lambda: ws.stat("door")):
         with pytest.raises(P.ProtocolError) as refused:
             call()
         assert reason(refused) == F.OUTSIDE_WORKSPACE
+
+
+def test_an_outside_resolved_directory_is_locked_even_without_a_symlink_flag(
+        tmp_path: Path, workspace: Path, ws: Workspace, monkeypatch: pytest.MonkeyPatch):
+    # A Windows junction resolves elsewhere but DirEntry.is_symlink() is false.
+    # Model that resolution on every platform so the listing policy is exercised.
+    door = workspace / "door"
+    door.mkdir()
+    original = Path.resolve
+
+    def resolve(path, *args, **kwargs):
+        return tmp_path if path == door else original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    entry = next(e for e in ws.list()["entries"] if e["name"] == "door")
+    assert entry["kind"] == "directory"
+    assert entry["refused"] == F.OUTSIDE_WORKSPACE
 
 
 def test_an_oversized_file_is_never_read_into_memory(workspace: Path, ws: Workspace,
@@ -318,9 +337,13 @@ def test_a_folder_that_holds_keys_is_refused_with_everything_in_it(workspace: Pa
     assert reason(refused) == F.SENSITIVE_NAME
 
 
+@pytest.mark.parametrize("token", [
+    "ghp_" + "a1B2c3D4" * 4,
+    "eyJ" + "A" * 5000 + "." + "B" * 5000 + "." + "C" * 5000,
+    "-----BEGIN RSA PRIVATE KEY-----" + "X" * 20000 + "-----END RSA PRIVATE KEY-----",
+])
 def test_a_credential_shape_in_an_ordinary_file_is_refused_before_it_is_returned(
-        workspace: Path, ws: Workspace):
-    token = "ghp_" + "a1B2c3D4" * 4
+        workspace: Path, ws: Workspace, token: str):
     (workspace / "src" / "client.ts").write_bytes(f'const token = "{token}";\n'.encode("utf-8"))
     with pytest.raises(P.ProtocolError) as refused:
         ws.read("src/client.ts")
@@ -382,6 +405,21 @@ def test_stat_reports_kind_size_and_time(workspace: Path, ws: Workspace):
 def test_reading_a_folder_is_not_a_read(ws: Workspace):
     with pytest.raises(P.ProtocolError) as refused:
         ws.read("src")
+    assert reason(refused) == F.NOT_A_FILE
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO")
+def test_a_fifo_is_rejected_before_opening_it(
+        workspace: Path, ws: Workspace, monkeypatch: pytest.MonkeyPatch):
+    os.mkfifo(workspace / "pipe")
+
+    def unexpected_read(path):
+        pytest.fail("a FIFO must be refused before a read can block the Core")
+
+    monkeypatch.setattr(Path, "read_bytes", unexpected_read)
+    with pytest.raises(P.ProtocolError) as refused:
+        ws.read("pipe")
+    assert refused.value.code == P.INVALID_PARAMS
     assert reason(refused) == F.NOT_A_FILE
 
 

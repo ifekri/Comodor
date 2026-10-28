@@ -252,8 +252,8 @@ export const desktop: WindowTheme = {
   "text.muted": "#929292",
   "text.accent": "#5fd4e8",
   // The reference's syntax colours (its §6.3). Where its comment, punctuation
-  // and tag colours fall below AA on the code ground or on a selection, the
-  // nearest passing value is used.
+  // and tag colours fall below AA on code, selection or active-line grounds,
+  // a passing value is used.
   "text.code": "#d6d6d6",
   "text.keyword": "#5fd4e8",
   "text.string": "#7fd39a",
@@ -261,8 +261,8 @@ export const desktop: WindowTheme = {
   "text.type": "#9be6f2",
   "text.function": "#8ab8ff",
   "text.property": "#cdb892",
-  "text.tag": "#e66a64",
-  "text.comment": "#929292",
+  "text.tag": "#e96d67",
+  "text.comment": "#9a9a9a",
   "text.punctuation": "#9a9a9a",
 
   "semantic.success": "#35c46a",

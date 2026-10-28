@@ -25,10 +25,49 @@ _PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"AKIA[0-9A-Z]{16}"),                    # AWS access key id
     re.compile(r"AIza[0-9A-Za-z_\-]{30,}"),             # Google
     re.compile(r"xox[baprs]-[A-Za-z0-9\-]{10,}"),       # Slack
-    re.compile(r"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"),  # JWT
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
-               re.DOTALL),
 )
+
+# Each base64url run is considered once. A bare regex search would retry at
+# every `eyJ` inside an unmatched run, even with possessive segment matching.
+_JWT_RUN = re.compile(r"[A-Za-z0-9_\-]+")
+_JWT = re.compile(r"eyJ[A-Za-z0-9_\-]{10,}+\.[A-Za-z0-9_\-]{10,}+\.[A-Za-z0-9_\-]{10,}+")
+_KEY_BEGIN = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+_KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+
+
+def _jwt_spans(text: str) -> Iterable[tuple[int, int]]:
+    end = 0
+    for run in _JWT_RUN.finditer(text):
+        if run.start() < end or run.end() - run.start() < 13:
+            continue
+        start = text.find("eyJ", run.start(), run.end() - 10)
+        # All starts in this run share the same following segments. If the
+        # earliest eligible start fails, no later one can make a valid token.
+        if start >= 0 and (match := _JWT.match(text, start)):
+            end = match.end()
+            yield start, end
+
+
+def _private_key_spans(text: str) -> Iterable[tuple[int, int]]:
+    at = 0
+    # Keep the first BEGIN and the next END, just as the previous lazy body
+    # match did, without rescanning the body for every unmatched BEGIN.
+    while begin := _KEY_BEGIN.search(text, at):
+        end = _KEY_END.search(text, begin.end())
+        if end is None:
+            return
+        yield begin.start(), end.end()
+        at = end.end()
+
+
+def _mask_spans(text: str, spans: Iterable[tuple[int, int]]) -> str:
+    parts = []
+    end = 0
+    for start, stop in spans:
+        parts.extend((text[end:start], MASK))
+        end = stop
+    parts.append(text[end:])
+    return "".join(parts)
 
 # `SECRET_NAME = value` in env files, TOML, YAML, shell exports and JSON.
 _ASSIGNMENT = re.compile(
@@ -62,7 +101,8 @@ def contains_credential(text: str) -> bool:
     is not found. The assignment rule (`API_KEY = …`) is left out, because
     ordinary source names its variables that way.
     """
-    return any(pattern.search(text) for pattern in _PATTERNS)
+    return (any(pattern.search(text) for pattern in _PATTERNS)
+            or any(_jwt_spans(text)) or any(_private_key_spans(text)))
 
 
 def redact(text: str, extra: Iterable[str] = ()) -> str:
@@ -80,6 +120,8 @@ def redact(text: str, extra: Iterable[str] = ()) -> str:
 
     for pattern in _PATTERNS:
         text = pattern.sub(MASK, text)
+    text = _mask_spans(text, _jwt_spans(text))
+    text = _mask_spans(text, _private_key_spans(text))
 
     return _ASSIGNMENT.sub(_mask_assignment, text)
 

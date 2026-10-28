@@ -3646,7 +3646,9 @@ describe("the question overlay at every width", () => {
     test(`${width} columns: the free row and the position marker are visible`, async () => {
       const view = await screen(width, 30);
       view.core.push(event("question.requested", form as never));
-      await view.waitForFrame((frame) => frame.includes("Which database"));
+      // The Core event can arrive while the renderer is idle; wait through
+      // that gap using the same content deadline as other asynchronous flows.
+      await waitForText(view, "Which database");
 
       const frame = view.frame();
       expect(frame).toContain("Something else");
@@ -3660,7 +3662,7 @@ describe("the question overlay at every width", () => {
     test(`${width} columns: the keyboard reaches the free row`, async () => {
       const view = await screen(width, 30);
       view.core.push(event("question.requested", form as never));
-      await view.waitForFrame((frame) => frame.includes("Which database"));
+      await waitForText(view, "Which database");
 
       // Down twice lands on the write-your-own row; space opens the field.
       view.mockInput.pressArrow("down");
@@ -3674,7 +3676,7 @@ describe("the question overlay at every width", () => {
     test(`${width} columns: the keyboard walks to the second question`, async () => {
       const view = await screen(width, 30);
       view.core.push(event("question.requested", form as never));
-      await view.waitForFrame((frame) => frame.includes("Which database"));
+      await waitForText(view, "Which database");
 
       view.mockInput.pressArrow("right");
       await view.waitForFrame((frame) => frame.includes("Which languages?"));

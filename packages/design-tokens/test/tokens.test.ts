@@ -130,10 +130,10 @@ test("the terminal mapping carries none of the window's roles; CSS gives it stan
   }
 });
 
-test("a file's syntax colours reach WCAG AA on the code ground and on a selection", () => {
+test("a file's syntax colours reach WCAG AA on code, selection and active-line grounds", () => {
   const inks: Role[] = ["text.code", "text.keyword", "text.string", "text.number", "text.type", "text.function",
     "text.property", "text.tag", "text.comment", "text.punctuation"];
-  const short = (["surface.base", "surface.selected"] as Role[])
+  const short = (["surface.base", "surface.selected", "surface.active"] as Role[])
     .flatMap((ground) => inks.map((ink) => ({ ink, ground, ratio: contrast(desktop[ink], desktop[ground]) })))
     .filter(({ ratio }) => ratio < 4.5);
   assert.deepEqual(short, []);
