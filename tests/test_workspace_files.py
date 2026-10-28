@@ -12,6 +12,7 @@ import io
 import json
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -202,11 +203,18 @@ def test_an_oversized_file_is_never_read_into_memory(workspace: Path, ws: Worksp
                                                      monkeypatch: pytest.MonkeyPatch):
     with (workspace / "huge.log").open("wb") as handle:
         handle.truncate(F.MAX_OPEN_BYTES + 10)
-    reads: list[Path] = []
-    original = Path.read_bytes
-    monkeypatch.setattr(Path, "read_bytes", lambda self: (reads.append(self), original(self))[1])
+    original = Workspace._open_read
+
+    @contextmanager
+    def open_without_read(self, path):
+        with original(self, path) as handle:
+            def unexpected_read(*args):
+                pytest.fail("an oversized file must be rejected before reading bytes")
+            monkeypatch.setattr(handle, "read", unexpected_read)
+            yield handle
+
+    monkeypatch.setattr(Workspace, "_open_read", open_without_read)
     assert ws.read("huge.log")["unavailable"] == F.TOO_LARGE
-    assert reads == []
 
 
 def test_a_symlink_inside_the_workspace_is_followed(tmp_path: Path, workspace: Path, ws: Workspace):
@@ -215,6 +223,90 @@ def test_a_symlink_inside_the_workspace_is_followed(tmp_path: Path, workspace: P
     (workspace / "src" / "a.py").write_bytes("print(1)\n".encode("utf-8"))
     (workspace / "alias").symlink_to(workspace / "src", target_is_directory=True)
     assert ws.read("alias/a.py")["text"] == "print(1)\n"
+
+
+@pytest.mark.parametrize("destination", ["outside", "data", "sensitive"])
+@pytest.mark.parametrize("replace", ["directory", "file", "root"])
+def test_a_link_installed_after_resolution_never_exposes_its_target(
+        tmp_path: Path, workspace: Path, home: Path, ws: Workspace,
+        monkeypatch: pytest.MonkeyPatch, destination: str, replace: str):
+    target = {"outside": tmp_path / "outside", "data": home,
+              "sensitive": workspace / ".ssh"}[destination]
+    target.mkdir(exist_ok=True)
+    (target / "notes.txt").write_bytes(b"must never reach the window")
+    folder = workspace / "src"
+    (folder / "notes.txt").write_bytes(b"safe")
+    original = Workspace.resolve
+
+    def resolve_then_replace(self, relative):
+        resolved = original(self, relative)
+        if replace == "root":
+            # The substitute root contains the same relative name.
+            (target / "src").mkdir()
+            (target / "src" / "notes.txt").write_bytes(b"must never reach the window")
+            workspace.rename(tmp_path / "old-root")
+            moved_target = tmp_path / "old-root" / ".ssh" if destination == "sensitive" else target
+            if not link_outside(workspace, moved_target):
+                pytest.skip("this machine cannot create links")
+        elif replace == "directory":
+            folder.rename(workspace / "old-src")
+            if not link_outside(folder, target):
+                pytest.skip("this machine cannot create links")
+        else:
+            if not can_symlink(tmp_path):
+                pytest.skip("this machine cannot create symlinks")
+            (folder / "notes.txt").unlink()
+            (folder / "notes.txt").symlink_to(target / "notes.txt")
+        return resolved
+
+    monkeypatch.setattr(Workspace, "resolve", resolve_then_replace)
+    with pytest.raises(P.ProtocolError) as refused:
+        ws.read("src/notes.txt")
+    assert reason(refused) in (F.OUTSIDE_WORKSPACE, F.COMODOR_DATA, F.SENSITIVE_NAME)
+
+
+def test_replacing_the_path_after_open_does_not_change_the_bytes_read(
+        tmp_path: Path, workspace: Path, ws: Workspace, monkeypatch: pytest.MonkeyPatch):
+    if not can_symlink(tmp_path):
+        pytest.skip("this machine cannot create symlinks")
+    target = workspace / "notes.txt"
+    target.write_bytes(b"safe")
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"must never reach the window")
+    original = os.fstat
+
+    def stat_then_replace(fd):
+        info = original(fd)
+        try:
+            target.rename(workspace / "old-notes.txt")
+        except PermissionError:
+            # Windows may pin the name while the CRT read handle is open.
+            if sys.platform != "win32":
+                raise
+            return info
+        target.symlink_to(outside)
+        return info
+
+    monkeypatch.setattr(os, "fstat", stat_then_replace)
+    assert ws.read("notes.txt")["text"] == "safe"
+
+
+def test_a_file_that_grows_after_stat_is_read_with_a_bound(
+        workspace: Path, ws: Workspace, monkeypatch: pytest.MonkeyPatch):
+    target = workspace / "growing.txt"
+    target.write_bytes(b"small")
+    original = os.fstat
+
+    def stat_then_grow(fd):
+        info = original(fd)
+        with target.open("ab") as writer:
+            writer.truncate(F.MAX_OPEN_BYTES * 2)
+        return info
+
+    monkeypatch.setattr(os, "fstat", stat_then_grow)
+    got = ws.read("growing.txt")
+    assert got == {"path": "growing.txt", "size": F.MAX_OPEN_BYTES + 1,
+                   "unavailable": F.TOO_LARGE}
 
 
 # --------------------------------------------------------------------------- #
@@ -498,6 +590,17 @@ def test_a_named_pipe_is_never_read(workspace: Path, ws: Workspace):
     os.mkfifo(workspace / "pipe")
     with pytest.raises(P.ProtocolError) as refused:
         ws.read("pipe")
+    assert reason(refused) == F.NOT_A_FILE
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="filesystem sockets are POSIX")
+def test_a_socket_is_not_a_regular_file(workspace: Path, ws: Workspace):
+    import socket
+
+    with socket.socket(socket.AF_UNIX) as listener:
+        listener.bind(str(workspace / "socket"))
+        with pytest.raises(P.ProtocolError) as refused:
+            ws.read("socket")
     assert reason(refused) == F.NOT_A_FILE
 
 

@@ -25,15 +25,17 @@ pages and no entry is shown twice.
 from __future__ import annotations
 
 import base64
+import errno
 import fnmatch
 import hashlib
 import json
 import os
 import stat
 import sys
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, Iterator
 
 from .. import protocol as P
 from ..safety.redact import contains_credential
@@ -178,7 +180,7 @@ class Workspace:
         self._check_rules(candidate, resolved)
         return resolved, "/".join(parts)
 
-    def _check_rules(self, candidate: Path, resolved: Path) -> None:
+    def _check_rules(self, candidate: Path, resolved: Path, *, file: bool = False) -> None:
         for data in self.protected:
             if _inside(resolved, data):
                 raise _refused(COMODOR_DATA, _MESSAGES[COMODOR_DATA])
@@ -194,7 +196,7 @@ class Workspace:
                         raise _refused(COMODOR_DATA, _MESSAGES[COMODOR_DATA])
             for index, part in enumerate(parts):
                 last = index == len(parts) - 1
-                directory = not last or path.is_dir()
+                directory = not last or (not file and path.is_dir())
                 if sensitive_name(part, directory):
                     raise _refused(SENSITIVE_NAME, _MESSAGES[SENSITIVE_NAME])
 
@@ -262,6 +264,39 @@ class Workspace:
 
     # -- one file ------------------------------------------------------------- #
 
+    @contextmanager
+    def _open_read(self, path: Path) -> Iterator[BinaryIO]:
+        # Resolution alone is not confinement: an ancestor can be exchanged
+        # for a link before open. Pin every resolved directory, refusing any
+        # new links, and keep the resulting file open through validation/read.
+        with ExitStack() as stack:
+            if os.name == "nt":
+                if path.is_dir():
+                    raise _invalid(NOT_A_FILE, "this is a folder")
+                fd = os.open(path, os.O_RDONLY | os.O_BINARY | os.O_NOINHERIT)
+            else:
+                flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                parent = os.open(path.anchor, flags)
+                stack.callback(os.close, parent)
+                for part in path.parent.parts[1:]:
+                    parent = os.open(part, flags, dir_fd=parent)
+                    stack.callback(os.close, parent)
+                fd = os.open(path.name or ".", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=parent)
+            # Register ownership before anything else can fail.
+            stack.callback(os.close, fd)
+            handle = stack.enter_context(os.fdopen(fd, "rb", closefd=False))
+            if os.name == "nt":
+                # Windows lacks openat/O_NOFOLLOW. Validate the name belonging
+                # to the opened handle, never a second resolution of the path.
+                actual = _windows_final_path(fd)
+                if not _inside(actual, self.root):
+                    raise _refused(OUTSIDE_WORKSPACE, "this path is outside the workspace")
+                self._check_rules(path, actual, file=True)
+            else:
+                self._check_rules(path, path, file=True)
+            yield handle
+
     def stat(self, relative: str) -> dict[str, Any]:
         path, normal = self.resolve(relative)
         try:
@@ -279,24 +314,27 @@ class Workspace:
     def read(self, relative: str) -> dict[str, Any]:
         path, normal = self.resolve(relative)
         try:
-            info = path.stat()
+            with self._open_read(path) as handle:
+                info = os.fstat(handle.fileno())
+                # A FIFO, socket or device is never read. O_NONBLOCK also
+                # prevents a FIFO installed during open from blocking the Core.
+                if not stat.S_ISREG(info.st_mode):
+                    raise _invalid(NOT_A_FILE, "this is not a regular file")
+                result: dict[str, Any] = {"path": normal, "size": info.st_size}
+                if info.st_size > MAX_OPEN_BYTES:
+                    return {**result, "unavailable": TOO_LARGE}
+                raw = handle.read(MAX_OPEN_BYTES + 1)
         except FileNotFoundError:
             raise _invalid(NOT_FOUND, "there is nothing at this path") from None
         except PermissionError:
             raise _refused(PERMISSION_DENIED, "the file cannot be read") from None
-        if path.is_dir():
-            raise _invalid(NOT_A_FILE, "this is a folder")
-        # A FIFO, socket or device is never read: reading one can block the Core.
-        if not stat.S_ISREG(info.st_mode):
-            raise _invalid(NOT_A_FILE, "this is not a regular file")
-        result: dict[str, Any] = {"path": normal, "size": info.st_size}
-        if info.st_size > MAX_OPEN_BYTES:
-            return {**result, "unavailable": TOO_LARGE}
-        try:
-            raw = path.read_bytes()
-        except PermissionError:
-            raise _refused(PERMISSION_DENIED, "the file cannot be read") from None
-        except OSError:
+        except IsADirectoryError:
+            raise _invalid(NOT_A_FILE, "this is a folder") from None
+        except OSError as exc:
+            if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                raise _refused(OUTSIDE_WORKSPACE, "this path changed during access") from None
+            if exc.errno in (errno.ENXIO, errno.ENODEV):
+                raise _invalid(NOT_A_FILE, "this is not a regular file") from None
             raise _invalid(NOT_FOUND, "the file could not be read") from None
         if len(raw) > MAX_OPEN_BYTES:
             return {**result, "size": len(raw), "unavailable": TOO_LARGE}
@@ -311,6 +349,32 @@ class Workspace:
         return {**result, "text": text, "encoding": encoding, "bom": bom, "replaced": replaced,
                 "eol": line_endings(text), "lines": len(text.splitlines()),
                 "hash": hashlib.sha256(raw).hexdigest()}
+
+
+def _windows_final_path(fd: int) -> Path:
+    """The final DOS path of this handle, including any traversed junctions."""
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    final_path = kernel.GetFinalPathNameByHandleW
+    final_path.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+    final_path.restype = wintypes.DWORD
+    handle = msvcrt.get_osfhandle(fd)
+    size = final_path(handle, None, 0, 0)
+    if not size:
+        raise ctypes.WinError(ctypes.get_last_error())
+    buffer = ctypes.create_unicode_buffer(size + 1)
+    written = final_path(handle, buffer, len(buffer), 0)
+    if not written or written >= len(buffer):
+        raise OSError("the opened file's path could not be verified")
+    name = buffer.value
+    if name.startswith("\\\\?\\UNC\\"):
+        name = "\\\\" + name[8:]
+    elif name.startswith("\\\\?\\"):
+        name = name[4:]
+    return Path(name)
 
 
 def _decode(body: bytes, bom: bool) -> tuple[str, str, bool]:
