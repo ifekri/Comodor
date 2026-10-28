@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { App } from "../src/app.tsx";
+import { CanvasTabs } from "../src/explorer/FilePane.tsx";
 import { EMPTY_TREE, treeReducer, visibleRows } from "../src/explorer/files.ts";
 import { TabsStore } from "../src/explorer/tabs.ts";
 import type { FakeCore } from "./fake-core.ts";
@@ -137,6 +138,44 @@ describe("the explorer", () => {
 });
 
 describe("the file tabs", () => {
+  for (const gesture of ["close mark", "Delete"] as const) {
+    for (const [position, paths, closing, next] of [
+      ["middle", ["a.ts", "b.ts", "c.ts"], "b.ts", "c.ts"],
+      ["last", ["a.ts", "b.ts"], "b.ts", "a.ts"],
+      ["only", ["a.ts"], "a.ts", null],
+    ] as const) {
+      test(`${gesture} on the focused ${position} file tab keeps focus with the selected view`, async () => {
+        const tabs = new TabsStore(undefined);
+        for (const path of paths) tabs.open(path);
+        tabs.show(closing);
+        rendered = await render(<CanvasTabs client={null} tabs={tabs} thread={<p>Conversation</p>} />);
+        const { container } = rendered;
+        const focused = container.querySelector<HTMLElement>(`[role="tab"][data-path="${closing}"]`)!;
+        focused.focus();
+        if (gesture === "Delete") await key("Delete", {}, focused);
+        else await click(focused.querySelector("[data-close]")!);
+        expect(tabs.get().active).toBe(next);
+        const selected = next === null ? container.querySelector(".canvas-body")
+          : container.querySelector('[role="tab"][aria-selected="true"]');
+        expect(document.activeElement === selected).toBe(true);
+      });
+    }
+  }
+
+  test("closing a file tab without focus preserves focus on the conversation tab", async () => {
+    const tabs = new TabsStore(undefined);
+    tabs.open("a.ts");
+    tabs.open("b.ts");
+    tabs.show(null);
+    rendered = await render(<CanvasTabs client={null} tabs={tabs} thread={<p>Conversation</p>} />);
+    const { container } = rendered;
+    const thread = container.querySelector<HTMLElement>('[role="tab"][data-path=""]')!;
+    thread.focus();
+    await click(container.querySelector('[data-close="a.ts"]')!);
+    expect(tabs.get()).toEqual({ open: ["b.ts"], active: null });
+    expect(document.activeElement).toBe(thread);
+  });
+
   test("opening a file shows it in a tab after the thread; closing it shows the thread again", async () => {
     const native = new FakeNative();
     offerFiles(native.core, { "": [file("README.md")] }, { "README.md": "# Hello\n" });

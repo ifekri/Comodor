@@ -53,7 +53,7 @@ TEXT_ENCODINGS = ("utf-8", "cp1252", "latin-1")
 SENSITIVE_DIRECTORIES = frozenset({".ssh", ".gnupg", ".aws", ".kube", ".docker"})
 #: File names refused wherever they appear (glob patterns, matched on the name).
 SENSITIVE_FILES = (
-    ".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore",
+    ".env*", "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore",
     "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
     ".netrc", "_netrc", ".npmrc", ".pypirc", ".git-credentials", ".htpasswd",
     "credentials", "credentials.*", "secrets.*", "*.secret", "kubeconfig",
@@ -117,9 +117,23 @@ def sensitive_name(name: str, directory: bool) -> bool:
     folded = _fold(name)
     if directory:
         return folded in {_fold(d) for d in SENSITIVE_DIRECTORIES}
-    if folded.endswith(".pub"):
+    if folded.endswith(".pub") and not folded.startswith(".env"):
         return False
     return any(fnmatch.fnmatchcase(folded, _fold(pattern)) for pattern in SENSITIVE_FILES)
+
+
+def _is_link(child: os.DirEntry[str]) -> bool:
+    if child.is_symlink():
+        return True
+    junction = getattr(child, "is_junction", None)
+    if junction is not None:
+        return junction()
+    # Python 3.11 has no DirEntry.is_junction; Windows lstat still exposes
+    # the mount-point tag. Other reparse points must not be marked as links.
+    mount_point = getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", None)
+    return mount_point is not None and getattr(
+        child.stat(follow_symlinks=False), "st_reparse_tag", None
+    ) == mount_point
 
 
 def line_endings(text: str) -> str:
@@ -238,7 +252,7 @@ class Workspace:
         relative = f"{parent}/{child.name}" if parent else child.name
         try:
             # A Windows junction is a link too, though `is_symlink` says no.
-            is_link = child.is_symlink() or bool(getattr(child, "is_junction", lambda: False)())
+            is_link = _is_link(child)
             is_dir = child.is_dir(follow_symlinks=True)
         except OSError:
             return None

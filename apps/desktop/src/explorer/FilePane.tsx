@@ -9,6 +9,7 @@
 
 import type { CoreClient } from "@comodor/client";
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 
 import { InertText } from "../view/InertText.tsx";
 import { EOL_NAMES, type FileContent, LANGUAGE_NAMES, languageOf, readFile, reasonText } from "./files.ts";
@@ -19,6 +20,19 @@ function TabStrip({ tabs, onKeyShown }: { tabs: TabsStore; onKeyShown?: () => vo
   const state = useSyncExternalStore(tabs.subscribe, tabs.get);
   const ids: (string | null)[] = [null, ...state.open];
   const stripRef = useRef<HTMLDivElement>(null);
+  const closeTab = (path: string) => {
+    const canvas = stripRef.current?.parentElement;
+    const closing = [...(stripRef.current?.querySelectorAll<HTMLElement>("[role=tab]") ?? [])]
+      .find((tab) => tab.dataset["path"] === path);
+    const hadFocus = closing?.contains(closing.ownerDocument.activeElement) ?? false;
+    // The replacement tab must be committed before focus moves to it. When
+    // the last file closes, the strip disappears and the conversation remains.
+    flushSync(() => tabs.close(path));
+    if (hadFocus) {
+      const selected = stripRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+      (selected ?? canvas?.querySelector<HTMLElement>(".canvas-body"))?.focus();
+    }
+  };
   const focusTab = (index: number) => {
     const next = (index + ids.length) % ids.length;
     tabs.show(ids[next] ?? null);
@@ -30,7 +44,7 @@ function TabStrip({ tabs, onKeyShown }: { tabs: TabsStore; onKeyShown?: () => vo
     else if (event.key === "ArrowLeft") focusTab(at - 1);
     else if (event.key === "Home") focusTab(0);
     else if (event.key === "End") focusTab(ids.length - 1);
-    else if (event.key === "Delete" && state.active !== null) tabs.close(state.active);
+    else if (event.key === "Delete" && state.active !== null) closeTab(state.active);
     else return;
     event.preventDefault();
     onKeyShown?.();
@@ -54,7 +68,7 @@ function TabStrip({ tabs, onKeyShown }: { tabs: TabsStore; onKeyShown?: () => vo
             </span>
             {path !== null && (
               <span className="file-tab-close" aria-hidden="true" data-close={path}
-                    onClick={(event) => { event.stopPropagation(); tabs.close(path); }}>
+                    onClick={(event) => { event.stopPropagation(); closeTab(path); }}>
                 <span className="icon" data-icon="close" />
               </span>
             )}
@@ -155,7 +169,7 @@ export function CanvasTabs({ client, tabs, thread }: { client: CoreClient | null
   return (
     <>
       {showFiles && <TabStrip tabs={tabs} />}
-      <div className="canvas-body" hidden={state.active !== null}>{thread}</div>
+      <div className="canvas-body" tabIndex={-1} hidden={state.active !== null}>{thread}</div>
       {state.active !== null && client !== null && <FileView key={state.active} client={client} path={state.active} />}
     </>
   );

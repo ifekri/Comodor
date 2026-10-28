@@ -14,6 +14,7 @@ import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -197,6 +198,27 @@ def test_a_link_that_resolves_outside_is_refused_on_every_platform(tmp_path: Pat
         assert reason(refused) == F.OUTSIDE_WORKSPACE
     entry = next(e for e in ws.list("")["entries"] if e["name"] == "door")
     assert entry["refused"] == F.OUTSIDE_WORKSPACE and entry["link"] is True
+
+
+@pytest.mark.parametrize("tag,is_link", [(0xA0000003, True), (0x8000001B, False), (0, False)])
+def test_listing_marks_legacy_windows_junctions_without_direntry_is_junction(
+        tmp_path: Path, workspace: Path, ws: Workspace, monkeypatch: pytest.MonkeyPatch,
+        tag: int, is_link: bool):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    door = workspace / "door"
+    if not link_outside(door, outside):
+        pytest.skip("this machine cannot create links")
+    monkeypatch.setattr(F.stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003, raising=False)
+
+    # Python 3.11 DirEntry metadata for a junction: it has neither the new
+    # method nor the symlink flag, but lstat exposes its reparse tag.
+    child = SimpleNamespace(path=str(door), name="door", is_symlink=lambda: False,
+                            is_dir=lambda **kwargs: True,
+                            stat=lambda **kwargs: SimpleNamespace(st_reparse_tag=tag))
+    entry = ws._entry(child, "", F.IgnoreRules(workspace))
+    assert entry is not None and entry["refused"] == F.OUTSIDE_WORKSPACE
+    assert entry.get("link", False) is is_link
 
 
 def test_an_oversized_file_is_never_read_into_memory(workspace: Path, ws: Workspace,
@@ -383,7 +405,8 @@ def test_the_projects_comodor_folder_is_refused_except_its_skills(workspace: Pat
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("name", [".env", ".env.local", "server.pem", "tls.key", "id_rsa",
+@pytest.mark.parametrize("name", [".env", ".env.local", ".envbackup", ".envrc", ".envbackup.pub",
+                                  "server.pem", "tls.key", "id_rsa",
                                   "id_ed25519",
                                   ".npmrc", ".netrc", "credentials", "credentials.json",
                                   "secrets.yaml", "prod.tfvars", "terraform.tfstate", "kubeconfig"])
