@@ -73,8 +73,15 @@ function tokenColour(scope: ParentNode, word: string): string | null {
 export async function probe(hooks: ProbeHooks): Promise<Data> {
   const results: Data = { editor: "codemirror6", versions: { view: "6.43.14", state: "6.7.6", styleMod: "4.1.4" } };
 
+  // 0. Baseline: the same steps with no editor at all (screenshot, OS key).
+  hooks.phase("baseline-shot");
+  results["baselineShot"] = await hooks.shot("spike-cm6-baseline");
+  hooks.phase("baseline-key");
+  results["baselineKey"] = await hooks.pressQ();
+  await frames(4);
+
   // 1. Read-only viewer in a shadow root (the D3a candidate).
-  hooks.phase("shadow-viewer");
+  hooks.phase("cm6-create");
   const viewer = host("cm-shadow", 0, 320, true);
   const started = performance.now();
   const view = new EditorView({
@@ -96,6 +103,7 @@ export async function probe(hooks: ProbeHooks): Promise<Data> {
     role: view.contentDOM.getAttribute("role"), ariaReadonly: view.contentDOM.getAttribute("aria-readonly"),
   };
   // Selection is drawn by CodeMirror's own layer: measure it.
+  hooks.phase("cm6-select");
   view.dispatch({ selection: { anchor: 0, head: 60 } });
   view.focus();
   await frames(3);
@@ -105,10 +113,12 @@ export async function probe(hooks: ProbeHooks): Promise<Data> {
   });
   results["selection"] = { rects: selections, visible: selections.some((r) => r.w > 0 && r.h > 0) };
   // Typing into the read-only viewer must change nothing.
+  hooks.phase("cm6-type-readonly");
   const before = view.state.doc.toString();
   const keyReadOnly = await hooks.pressQ();
   await frames(4);
   results["readOnlyTyping"] = { osKey: keyReadOnly, unchanged: view.state.doc.toString() === before };
+  hooks.phase("cm6-shot");
   results["shotViewer"] = await hooks.shot("spike-cm6-viewer");
   // axe-core builds its own elements while it measures: a phase of its own.
   hooks.phase("axe");
