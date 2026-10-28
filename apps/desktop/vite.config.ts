@@ -26,13 +26,41 @@ function axeUnderFrozenPrototypes(): Plugin {
   };
 }
 
+/**
+ * D3 editor spike 2 (throwaway, never merged): the spike-1 transform that
+ * keeps Monaco 0.57.0 loadable under freezePrototype — four
+ * `X.toString = toString` namespace assignments and Monarch's keyword table
+ * (`result[e] = true`, whose TypeScript/JavaScript lists contain
+ * `constructor`) rewritten into `Object.defineProperty`. CodeMirror 6 is not
+ * transformed.
+ */
+function monacoUnderFrozenPrototypes(): Plugin {
+  const assignment = /\b([A-Za-z_$][\w$]*)\.toString = toString;/g;
+  return {
+    name: "comodor-spike-monaco-under-frozen-prototypes",
+    transform(code, id) {
+      if (!/[\\/]monaco-editor[\\/]/.test(id)) return null;
+      let out = code;
+      if (/[\\/]monarch[\\/]monarchCompile\.js$/.test(id)) {
+        const write = "        result[e] = true;";
+        if (out.split(write).length !== 2) throw new Error("spike: Monarch's keyword-table write was not found exactly once");
+        out = out.replace(write, "        Object.defineProperty(result, e, "
+          + "{ configurable: true, enumerable: true, writable: true, value: true });");
+      }
+      out = out.replace(assignment, "Object.defineProperty($1, \"toString\", "
+        + "{ configurable: true, enumerable: true, writable: true, value: toString });");
+      return out === code ? null : out;
+    },
+  };
+}
+
 // The window's content is served from the application bundle only: no
 // development server in a test or release build, no remote origin, and no
 // inline script (the Content Security Policy in src-tauri/tauri.conf.json
 // refuses it). `--mode e2e` adds the scenario runner; any other mode leaves
 // it out entirely.
 export default defineConfig(({ mode }) => ({
-  plugins: mode === "e2e" ? [react(), axeUnderFrozenPrototypes()] : [react()],
+  plugins: mode === "e2e" ? [react(), axeUnderFrozenPrototypes(), monacoUnderFrozenPrototypes()] : [react()],
   clearScreen: false,
   server: { port: 5173, strictPort: true, host: "127.0.0.1" },
   build: {

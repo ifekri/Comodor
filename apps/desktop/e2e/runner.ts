@@ -103,11 +103,18 @@ export async function runScenario(): Promise<void> {
     ended = true;
     await report({ phase: "result", scenario: name, ...result });
   };
+  // D3 editor spike (throwaway): while a probe records errors as measurements
+  // (`__spikeCapture`), they do not end the run.
+  const capturing = () => Boolean((window as unknown as { __spikeCapture?: boolean }).__spikeCapture);
   window.addEventListener("error", (event) => {
+    if (capturing()) return;
     void verdict({ ok: false, error: `page error: ${event.message}`, page: page() });
   });
   window.addEventListener("unhandledrejection", (event) => {
-    void verdict({ ok: false, error: `unhandled rejection: ${String(event.reason)}`, page: page() });
+    if (capturing()) return;
+    const stack = event.reason instanceof Error ? `
+${event.reason.stack ?? ""}` : "";
+    void verdict({ ok: false, error: `unhandled rejection: ${String(event.reason)}${stack}`, page: page() });
   });
   // Ahead of the harness's own deadline, so a stalled run says what the page
   // showed instead of being killed blind. A bound on failure, never a delay.

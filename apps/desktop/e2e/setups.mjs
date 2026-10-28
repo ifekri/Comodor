@@ -69,6 +69,10 @@ export const SETUPS = {
     lifetime: true, workspaceArgument: true, confirm: true, params: { stored: "$stored" },
   },
   empty: { workspaceArgument: true },
+  // D3 editor spike 2 (throwaway, never merged). `canary`: a unique key in the
+  // Core's home must appear nowhere the window can reach.
+  "spike-cm6": { workspaceArgument: true, canary: true },
+  "spike-monaco": { workspaceArgument: true, canary: true },
   boundary: { core: ["scripted_core.py", "adversarial"], workspaceArgument: true },
   "canary-early": { core: ["scripted_core.py", "adversarial"], workspaceArgument: true, canary: true },
   conversation: { core: ["scripted_core.py", "question"], workspaceArgument: true },
