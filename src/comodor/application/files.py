@@ -20,17 +20,42 @@ What is refused, in the order it is checked (specs/005-workspace-explorer):
 
 Listing is paged by a keyset cursor, so a folder of any size is read in
 pages and no entry is shown twice.
+
+The checks above are made on a resolved path, and the disk can change between
+the check and the open: a folder exchanged for a link, a file for a link, a
+pipe or a device, a file that grows. So nothing is read by path. What is
+opened is proven to be what was checked (`_open`):
+
+- POSIX: every folder below the workspace root is opened one name at a time
+  from the folder above it, never following a link (`openat`, `O_NOFOLLOW`);
+  the last name is examined without following it, opened the same way and
+  without blocking, and must still be the same file (device and inode).
+- Windows, which has no `openat`: the path is opened and the opened handle's
+  own final path must equal the checked path, so a junction or symlink
+  exchanged in anywhere along it is refused. A folder is then listed from
+  that handle, not from its path again.
+- A system that offers neither is refused whole (`cannot_confine`).
+
+A file is read through the descriptor that was proven, at most one byte past
+the limit, so a file that grows is reported too large, never read whole. A
+file renamed or hard-linked into the workspace is workspace content: only
+the credential scan stands between it and the window.
 """
 
 from __future__ import annotations
 
 import base64
+import errno
 import fnmatch
+import functools
 import hashlib
 import json
 import os
 import stat
+import struct
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,7 +76,7 @@ TEXT_ENCODINGS = ("utf-8", "cp1252", "latin-1")
 SENSITIVE_DIRECTORIES = frozenset({".ssh", ".gnupg", ".aws", ".kube", ".docker"})
 #: File names refused wherever they appear (glob patterns, matched on the name).
 SENSITIVE_FILES = (
-    ".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore",
+    ".env*", "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore",
     "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
     ".netrc", "_netrc", ".npmrc", ".pypirc", ".git-credentials", ".htpasswd",
     "credentials", "credentials.*", "secrets.*", "*.secret", "kubeconfig",
@@ -75,8 +100,14 @@ SECRET_CONTENT = "secret_content"
 PERMISSION_DENIED = "permission_denied"
 TOO_LARGE = "too_large"
 BINARY = "binary"
+CHANGED = "changed"
+CANNOT_CONFINE = "cannot_confine"
 
 _CASE_INSENSITIVE = sys.platform in ("win32", "darwin")
+_WINDOWS = os.name == "nt"
+#: Names Windows opens as devices wherever they appear; opening one can block.
+_WINDOWS_DEVICES = frozenset({"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+                              *(f"{port}{n}" for port in ("COM", "LPT") for n in "0123456789¹²³")})
 
 #: What a person is told, by reason.
 _MESSAGES = {
@@ -87,6 +118,10 @@ _MESSAGES = {
                     "Open it in your own editor.",
     SECRET_CONTENT: "This file appears to contain a secret, so Comodor does not open it here. "
                     "Open it in your own editor.",
+    CHANGED: "This path changed while it was being opened, so nothing was shown. "
+             "Refresh and try again.",
+    CANNOT_CONFINE: "This system cannot open files without the risk of following a path that "
+                    "changed underneath, so Comodor does not show the workspace's files here.",
 }
 
 
@@ -115,9 +150,14 @@ def sensitive_name(name: str, directory: bool) -> bool:
     folded = _fold(name)
     if directory:
         return folded in {_fold(d) for d in SENSITIVE_DIRECTORIES}
-    if folded.endswith(".pub"):
+    # A public key is not a secret; an env file is, whatever it ends with.
+    if folded.endswith(".pub") and not folded.startswith(".env"):
         return False
     return any(fnmatch.fnmatchcase(folded, _fold(pattern)) for pattern in SENSITIVE_FILES)
+
+
+def _device_name(name: str) -> bool:
+    return name.split(".")[0].rstrip(" ").upper() in _WINDOWS_DEVICES
 
 
 def line_endings(text: str) -> str:
@@ -168,6 +208,10 @@ class Workspace:
         if Path(relative).is_absolute() or (len(parts[0]) == 2 and parts[0][1] == ":") \
                 or any(part in ("", ".", "..") for part in parts):
             raise _invalid(BAD_PATH, "paths are relative to the workspace, without '.' or '..'")
+        # On Windows `name:stream` opens a file's alternate stream under a
+        # name no rule knows, and `COM1` or `CON` opens a device.
+        if _WINDOWS and any(":" in part or _device_name(part) for part in parts):
+            raise _invalid(BAD_PATH, "this name is a Windows device or stream, not a file")
         candidate = self.root.joinpath(*parts)
         try:
             resolved = candidate.resolve(strict=False)
@@ -198,24 +242,93 @@ class Workspace:
                 if sensitive_name(part, directory):
                     raise _refused(SENSITIVE_NAME, _MESSAGES[SENSITIVE_NAME])
 
+    # -- opening what was checked, and nothing else ------------------------- #
+
+    @contextmanager
+    def _open(self, path: Path, want: str) -> Iterator[tuple[int, os.stat_result]]:
+        """A descriptor of the checked, resolved `path` and its status, proven
+        to be that path (see the module's docstring). `want` is `file`,
+        `directory` or `any` (either); anything else there is refused."""
+        if not _confinable():
+            raise _refused(CANNOT_CONFINE, _MESSAGES[CANNOT_CONFINE])
+        try:
+            fd, info = (_open_windows(path) if _WINDOWS else self._open_posix(path))
+        except FileNotFoundError:
+            raise _invalid(NOT_FOUND, "there is nothing at this path") from None
+        except PermissionError:
+            raise _refused(PERMISSION_DENIED, "this cannot be read") from None
+        except OSError as problem:
+            if problem.errno == errno.ELOOP:
+                raise _refused(CHANGED, _MESSAGES[CHANGED]) from None
+            if problem.errno == errno.ENOTDIR:
+                raise _invalid(NOT_FOUND, "there is nothing at this path") from None
+            raise _invalid(NOT_FOUND, "this could not be opened") from None
+        try:
+            is_dir, is_file = stat.S_ISDIR(info.st_mode), stat.S_ISREG(info.st_mode)
+            if want == "directory" and not is_dir:
+                raise _invalid(NOT_A_DIRECTORY, "this is not a folder")
+            if want == "file" and is_dir:
+                raise _invalid(NOT_A_FILE, "this is a folder")
+            # A FIFO, socket or device is never read: reading one can block the Core.
+            if not (is_dir or is_file):
+                raise _invalid(NOT_A_FILE, "this is not a regular file")
+            yield fd, info
+        finally:
+            os.close(fd)
+
+    def _open_posix(self, path: Path) -> tuple[int, os.stat_result]:
+        names = path.parts[len(self.root.parts):]
+        here = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for name in names[:-1]:
+                try:
+                    below = os.open(name, _POSIX_FOLDER, dir_fd=here)
+                except OSError:
+                    # Some filesystems say ENOENT or ENOTDIR for a link here.
+                    if stat.S_ISLNK(os.stat(name, dir_fd=here, follow_symlinks=False).st_mode):
+                        raise OSError(errno.ELOOP, "a link took a folder's place") from None
+                    raise
+                os.close(here)
+                here = below
+            if not names:
+                info = os.fstat(here)
+                opened, here = here, -1
+                return opened, info
+            last = names[-1]
+            before = os.stat(last, dir_fd=here, follow_symlinks=False)
+            if stat.S_ISLNK(before.st_mode):
+                raise OSError(errno.ELOOP, "a link appeared where the path was checked")
+            # A FIFO, socket or device is not even opened.
+            if not (stat.S_ISDIR(before.st_mode) or stat.S_ISREG(before.st_mode)):
+                raise _invalid(NOT_A_FILE, "this is not a regular file")
+            opened = os.open(last, _POSIX_FOLDER if stat.S_ISDIR(before.st_mode) else _POSIX_FILE,
+                             dir_fd=here)
+            info = os.fstat(opened)
+            if (info.st_dev, info.st_ino) != (before.st_dev, before.st_ino):
+                os.close(opened)
+                raise OSError(errno.ELOOP, "another file took this path's place")
+            return opened, info
+        finally:
+            if here >= 0:
+                os.close(here)
+
     # -- listing -------------------------------------------------------------- #
 
     def list(self, relative: str = "", cursor: str = "", limit: int = PAGE_SIZE) -> dict[str, Any]:
         directory, normal = self.resolve(relative)
-        if not directory.exists():
-            raise _invalid(NOT_FOUND, "there is nothing at this path")
-        if not directory.is_dir():
-            raise _invalid(NOT_A_DIRECTORY, "this is not a folder")
         after = _decode_cursor(cursor, normal) if cursor else None
         limit = max(1, min(int(limit or PAGE_SIZE), PAGE_SIZE))
         rules = IgnoreRules(self.root)
         entries: list[tuple[tuple[int, str, str], dict[str, Any]]] = []
-        try:
-            children = list(os.scandir(directory))
-        except PermissionError:
-            raise _refused(PERMISSION_DENIED, "the folder cannot be read") from None
+        with self._open(directory, "directory") as (fd, _):
+            try:
+                children = _children(fd)
+            except PermissionError:
+                raise _refused(PERMISSION_DENIED, "the folder cannot be read") from None
+            except OSError:
+                raise _invalid(NOT_FOUND, "the folder could not be read") from None
         for child in children:
-            entry = self._entry(child, normal, rules)
+            entry = self._entry(child, directory, normal, rules)
             if entry is not None:
                 is_dir = entry["kind"] == "directory"
                 key = (0 if is_dir else 1, child.name.casefold(), child.name)
@@ -228,49 +341,42 @@ class Workspace:
             result["cursor"] = _encode_cursor(normal, page[-1][0])
         return result
 
-    def _entry(self, child: os.DirEntry[str], parent: str,
+    def _entry(self, child: _Child, directory: Path, parent: str,
                rules: IgnoreRules) -> dict[str, Any] | None:
-        path = Path(child.path)
+        # What the entry says is only a label: whatever it names is opened,
+        # and proven, when it is listed or read itself.
+        path = directory / child.name
         if rules.ignored(path):
             return None
         relative = f"{parent}/{child.name}" if parent else child.name
-        try:
-            # A Windows junction is a link too, though `is_symlink` says no.
-            is_link = child.is_symlink() or bool(getattr(child, "is_junction", lambda: False)())
-            is_dir = child.is_dir(follow_symlinks=True)
-        except OSError:
-            return None
         entry: dict[str, Any] = {"name": child.name, "path": relative,
-                                 "kind": "directory" if is_dir else "file"}
-        if is_link:
+                                 "kind": "directory" if child.directory else "file"}
+        if child.link:
             entry["link"] = True
         try:
-            self._check_rules(path, path.resolve(strict=False))
-            if not _inside(path.resolve(strict=False), self.root):
+            resolved = path.resolve(strict=False)
+            self._check_rules(path, resolved)
+            if not _inside(resolved, self.root):
                 entry["refused"] = OUTSIDE_WORKSPACE
         except P.ProtocolError as refusal:
             reason = refusal.data.get("reason")
             if reason == COMODOR_DATA:
                 return None          # Comodor's data is not listed at all.
             entry["refused"] = reason
-        if not is_dir and "refused" not in entry:
-            try:
-                entry["size"] = child.stat(follow_symlinks=True).st_size
-            except OSError:
-                pass
+        except (OSError, RuntimeError):
+            entry["refused"] = OUTSIDE_WORKSPACE
+        # A link's size would be its target's, read by path: it is left out.
+        if not child.directory and not child.link and "refused" not in entry \
+                and child.size is not None:
+            entry["size"] = child.size
         return entry
 
     # -- one file ------------------------------------------------------------- #
 
     def stat(self, relative: str) -> dict[str, Any]:
         path, normal = self.resolve(relative)
-        try:
-            info = path.stat()
-        except FileNotFoundError:
-            raise _invalid(NOT_FOUND, "there is nothing at this path") from None
-        except PermissionError:
-            raise _refused(PERMISSION_DENIED, "the file cannot be read") from None
-        kind = "directory" if path.is_dir() else "file"
+        with self._open(path, "any") as (_, info):
+            kind = "directory" if stat.S_ISDIR(info.st_mode) else "file"
         result: dict[str, Any] = {"path": normal, "kind": kind, "modified_ns": info.st_mtime_ns}
         if kind == "file":
             result["size"] = info.st_size
@@ -278,26 +384,17 @@ class Workspace:
 
     def read(self, relative: str) -> dict[str, Any]:
         path, normal = self.resolve(relative)
-        try:
-            info = path.stat()
-        except FileNotFoundError:
-            raise _invalid(NOT_FOUND, "there is nothing at this path") from None
-        except PermissionError:
-            raise _refused(PERMISSION_DENIED, "the file cannot be read") from None
-        if path.is_dir():
-            raise _invalid(NOT_A_FILE, "this is a folder")
-        # A FIFO, socket or device is never read: reading one can block the Core.
-        if not stat.S_ISREG(info.st_mode):
-            raise _invalid(NOT_A_FILE, "this is not a regular file")
-        result: dict[str, Any] = {"path": normal, "size": info.st_size}
-        if info.st_size > MAX_OPEN_BYTES:
-            return {**result, "unavailable": TOO_LARGE}
-        try:
-            raw = path.read_bytes()
-        except PermissionError:
-            raise _refused(PERMISSION_DENIED, "the file cannot be read") from None
-        except OSError:
-            raise _invalid(NOT_FOUND, "the file could not be read") from None
+        with self._open(path, "file") as (fd, info):
+            result: dict[str, Any] = {"path": normal, "size": info.st_size}
+            if info.st_size > MAX_OPEN_BYTES:
+                return {**result, "unavailable": TOO_LARGE}
+            try:
+                # One byte past the limit: a file that grew since is too large.
+                raw = _read_at_most(fd, MAX_OPEN_BYTES + 1)
+            except PermissionError:
+                raise _refused(PERMISSION_DENIED, "the file cannot be read") from None
+            except OSError:
+                raise _invalid(NOT_FOUND, "the file could not be read") from None
         if len(raw) > MAX_OPEN_BYTES:
             return {**result, "size": len(raw), "unavailable": TOO_LARGE}
         if b"\x00" in raw[:BINARY_SNIFF]:
@@ -311,6 +408,167 @@ class Workspace:
         return {**result, "text": text, "encoding": encoding, "bom": bom, "replaced": replaced,
                 "eol": line_endings(text), "lines": len(text.splitlines()),
                 "hash": hashlib.sha256(raw).hexdigest()}
+
+
+# -- opening, by platform ------------------------------------------------------ #
+
+_POSIX_FOLDER = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+#: Never blocks on a FIFO or a terminal that took a checked file's place.
+_POSIX_FILE = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+               | getattr(os, "O_NOCTTY", 0))
+
+
+#: Can this system open a path so that what was checked is what is read?
+_CONFINABLE = _WINDOWS or (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+                           and os.open in os.supports_dir_fd and os.stat in os.supports_dir_fd
+                           and os.scandir in os.supports_fd)
+
+
+def _confinable() -> bool:
+    return _CONFINABLE
+
+
+@dataclass(frozen=True)
+class _Child:
+    """One name in a listed folder, as the folder itself reports it."""
+
+    name: str
+    link: bool                  # a symlink, or a Windows junction
+    directory: bool
+    size: int | None            # a file's own size; None for a link
+
+
+def _children(fd: int) -> list[_Child]:
+    """The names in the folder open as `fd`, read from it rather than from a path."""
+    if _WINDOWS:
+        return _windows_children(fd)
+    children = []
+    with os.scandir(fd) as names:
+        for child in names:
+            try:
+                link = child.is_symlink()
+                directory = child.is_dir(follow_symlinks=True)
+                size = None if directory or link else child.stat(follow_symlinks=False).st_size
+            except OSError:
+                continue
+            children.append(_Child(child.name, link, directory, size))
+    return children
+
+
+def _read_at_most(fd: int, limit: int) -> bytes:
+    parts: list[bytes] = []
+    left = limit
+    while left > 0:
+        chunk = os.read(fd, min(left, 1 << 16))
+        if not chunk:
+            break
+        parts.append(chunk)
+        left -= len(chunk)
+    return b"".join(parts)
+
+
+_GENERIC_READ = 0x80000000
+_SHARE_ALL = 0x1 | 0x2 | 0x4            # read, write, delete: an editor may save meanwhile
+_OPEN_EXISTING = 3
+_BACKUP_SEMANTICS = 0x02000000          # lets a folder be opened as a handle
+_FULL_DIRECTORY_INFO, _FULL_DIRECTORY_RESTART = 14, 15
+_NO_MORE_FILES = 18
+_ATTRIBUTE_DIRECTORY, _ATTRIBUTE_REPARSE_POINT = 0x10, 0x400
+_TAG_SYMLINK, _TAG_MOUNT_POINT = 0xA000000C, 0xA0000003
+#: FILE_FULL_DIR_INFO up to its name; with a reparse point, `EaSize` holds the tag (MS-FSCC 2.4.17).
+_FULL_DIR_INFO = struct.Struct("<IIqqqqqqIII")
+
+
+@functools.cache
+def _kernel32() -> Any:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                   ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p]
+    kernel.CreateFileW.restype = ctypes.c_void_p
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.GetFinalPathNameByHandleW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, wintypes.DWORD,
+                                                 wintypes.DWORD]
+    kernel.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+    kernel.GetFileInformationByHandleEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p,
+                                                    wintypes.DWORD]
+    kernel.GetFileInformationByHandleEx.restype = wintypes.BOOL
+    return kernel
+
+
+def _open_windows(path: Path) -> tuple[int, os.stat_result]:
+    import ctypes
+    import msvcrt
+
+    kernel = _kernel32()
+    handle = kernel.CreateFileW(str(path), _GENERIC_READ, _SHARE_ALL, None, _OPEN_EXISTING,
+                                _BACKUP_SEMANTICS, None)
+    if handle is None or handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY)
+    except OSError:
+        kernel.CloseHandle(handle)
+        raise
+    try:
+        # The handle says where it really is, junctions and links traversed.
+        if os.path.normcase(_final_path(handle)) != os.path.normcase(str(path)):
+            raise OSError(errno.ELOOP, "the opened path is not the checked one")
+        return fd, os.fstat(fd)
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _final_path(handle: int) -> str:
+    import ctypes
+
+    kernel = _kernel32()
+    size = kernel.GetFinalPathNameByHandleW(handle, None, 0, 0)
+    if size:
+        buffer = ctypes.create_unicode_buffer(size + 1)
+        written = kernel.GetFinalPathNameByHandleW(handle, buffer, len(buffer), 0)
+        if 0 < written < len(buffer):
+            name = buffer.value
+            if name.startswith("\\\\?\\UNC\\"):
+                return "\\\\" + name[8:]
+            return name[4:] if name.startswith("\\\\?\\") else name
+    # Without the handle's own path, what was opened cannot be proven.
+    raise _refused(CANNOT_CONFINE, _MESSAGES[CANNOT_CONFINE])
+
+
+def _windows_children(fd: int) -> list[_Child]:
+    import ctypes
+    import msvcrt
+
+    handle = msvcrt.get_osfhandle(fd)
+    buffer = ctypes.create_string_buffer(1 << 16)
+    children: list[_Child] = []
+    info_class = _FULL_DIRECTORY_RESTART
+    while True:
+        if not _kernel32().GetFileInformationByHandleEx(handle, info_class, buffer, len(buffer)):
+            code = ctypes.get_last_error()
+            if code == _NO_MORE_FILES:
+                return children
+            raise ctypes.WinError(code)
+        info_class = _FULL_DIRECTORY_INFO
+        raw, offset = buffer.raw, 0
+        while True:
+            (following, _, _, _, _, _, size, _, attributes, length,
+             tag) = _FULL_DIR_INFO.unpack_from(raw, offset)
+            start = offset + _FULL_DIR_INFO.size
+            name = raw[start:start + length].decode("utf-16-le")
+            if name not in (".", ".."):
+                link = bool(attributes & _ATTRIBUTE_REPARSE_POINT) and tag in (_TAG_SYMLINK,
+                                                                              _TAG_MOUNT_POINT)
+                directory = bool(attributes & _ATTRIBUTE_DIRECTORY)
+                children.append(_Child(name, link, directory,
+                                       None if directory or link else size))
+            if not following:
+                break
+            offset += following
 
 
 def _decode(body: bytes, bom: bool) -> tuple[str, str, bool]:

@@ -100,15 +100,17 @@ Consequences carried into D3a and D3b:
   request), each with a machine-readable `data.reason`: `bad_path`,
   `outside_workspace`, `comodor_data`, `workspace_is_comodor_data`,
   `sensitive_name`, `secret_content`, `permission_denied`, `not_found`,
-  `not_a_directory`, `not_a_file`, `bad_cursor`.
+  `not_a_directory`, `not_a_file`, `bad_cursor`, `changed`, `cannot_confine`.
 - **FR-005** The methods are protocol methods, not agent tools: the agent
   cannot call them and they change no mode, grant or approval.
 
 ### What is refused (checked on the resolved path, before any byte is read)
 
 - **FR-010** Paths are workspace-relative; `.`/`..` segments, absolute and
-  drive paths are refused; a path, symlink or junction resolving outside the
-  workspace is refused, and such a link is listed but never followed.
+  drive paths are refused, and on Windows a device name (`CON`, `NUL`,
+  `COM1` …) or a stream (`name:stream`, `id_rsa::$DATA`) too (`bad_path`); a
+  path, symlink or junction resolving outside the workspace is refused, and
+  such a link is listed but never followed.
 - **FR-011** Comodor's data, deny-by-default: the active data folder
   (`COMODOR_HOME` or the platform default, per profile) and the folder that
   holds every profile are hidden and refused wherever they lie; the project's
@@ -123,6 +125,38 @@ Consequences carried into D3a and D3b:
   a secret reaching the window.
 - **FR-014** `.gitignore` and the Core's built-in ignore list hide entries.
 
+### Opening what was checked (the disk may change in between)
+
+The rules above are checked on a resolved path. Another process can change
+the disk between that check and the open; the threats considered are a
+folder or file exchanged for a symlink or junction (to outside, or to a
+refused name inside), a file exchanged for a FIFO, socket or device, a file
+replaced by another, a folder exchanged after it was opened, and a file that
+grows after it was measured.
+
+- **FR-015** Nothing is read by path after the check; what is opened is
+  proven to be what was checked, or the request is refused (`changed`):
+  - POSIX (Linux, macOS): every folder below the workspace root is opened from
+    the one above it without following a link (`openat`, `O_NOFOLLOW`,
+    `O_DIRECTORY`); the last name is examined without following it, opened
+    the same way and non-blocking, and must still be the same file (device
+    and inode). A FIFO, socket or device is refused without being opened.
+  - Windows (no `openat`): the path is opened as a handle and the handle's own
+    final path (`GetFinalPathNameByHandleW`) must equal the checked path, so a
+    junction or symlink exchanged in anywhere along it is refused; only a
+    regular file or folder is accepted.
+  - A folder is listed from its open descriptor or handle (`scandir(fd)`;
+    `GetFileInformationByHandleEx`), never from its path a second time.
+  - A system offering neither mechanism refuses every request
+    (`cannot_confine`) rather than open by path.
+- **FR-016** A file is read through the proven descriptor, at most one byte
+  past the 2,000,000-byte limit: a file that grew after it was measured is
+  `too_large`, never read whole.
+- **FR-017** Out of scope, by definition rather than by race: a file or folder
+  renamed or hard-linked into the workspace by a process with the person's
+  own rights is workspace content; only the credential-shape scan (FR-013)
+  stands between such a file and the window.
+
 ### Window
 
 - **FR-020** EXPLORER shows the workspace as a WAI-ARIA tree (one tab stop;
@@ -130,7 +164,9 @@ Consequences carried into D3a and D3b:
   the next page, refused entries locked with their reason, names as inert text
   (RTL-aware), Refresh and Collapse all.
 - **FR-021** Opening a file adds a tab after the thread (one tab per file);
-  closing the shown tab shows its neighbour or the thread; tabs keep paths
+  closing the shown tab shows its neighbour or the thread, and a closed tab
+  that held the focus passes it to the tab now shown, or to the thread after
+  the last file; tabs keep paths
   only, for the launch, in the window's session storage; a workspace change
   closes them. "Show the conversation" returns to the thread.
 - **FR-022** The viewer is read-only CodeMirror 6 in a shadow root, coloured
@@ -162,7 +198,20 @@ Consequences carried into D3a and D3b:
   mode isolation. Mutation-checked: removing confinement, dot-segment
   refusal, the data-folder rule, the whole-workspace rule, the `.comodor/`
   rule, sensitive names, the content scan, cursor continuation, the binary
-  sniff or the pre-read size check each fails the suite.
+  sniff or the pre-read size check each fails the suite. The disk changing
+  between check and open (FR-015, FR-016): a folder exchanged for a link
+  after the check (read, list, stat), a file exchanged for a link to outside
+  or to the workspace's `.env`, a file replaced between examination and open,
+  a file exchanged for a FIFO (refused without blocking), a folder exchanged
+  after it was opened (still the one listed), a file that grows after it was
+  measured (never more than the limit + 1 byte read), a system that cannot
+  confine an open, Windows device and stream names, and an unhooked real race
+  (another thread flipping a folder and a link while it is read and listed:
+  nothing from outside is returned). Mutation-checked: following folders,
+  following the last name, the inode comparison, the Windows final-path
+  comparison, listing from the handle, the bounded read, the size check after
+  the read, the `cannot_confine` refusal, the Windows name refusal, `.env*`
+  and `.env` files ending in `.pub` each fail the suite.
 - **SC-002** `apps/desktop/test/explorer.test.tsx`: the tree, keyboard,
   paging, refusals, tabs and what reaches the Core, over an in-memory Core.
 - **SC-003** e2e `explorer` (real WebView, real Core, Windows, Linux, macOS in

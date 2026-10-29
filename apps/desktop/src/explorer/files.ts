@@ -43,7 +43,7 @@ export type FileContent =
 const MESSAGES: Readonly<Record<string, string>> = {
   not_found: "This file is no longer there.",
   not_a_directory: "This is not a folder.",
-  not_a_file: "This is a folder, not a file.",
+  not_a_file: "This is not a file that can be shown: a folder, or a pipe or device.",
   bad_path: "This path is not inside the workspace.",
   bad_cursor: "The folder changed; refresh it to see its contents.",
   outside_workspace: "This leads outside the workspace, so it is not opened here.",
@@ -56,6 +56,9 @@ const MESSAGES: Readonly<Record<string, string>> = {
   permission_denied: "This cannot be read: the system refused access.",
   too_large: "This file is too large to open here.",
   binary: "This is a binary file, so it is not shown as text.",
+  changed: "This path changed while it was being opened, so nothing was shown. Refresh and try again.",
+  cannot_confine: "This system cannot open files without the risk of following a path that changed underneath, "
+    + "so Comodor does not show the workspace's files here.",
 };
 
 export function reasonText(reason: string, size?: number): string {

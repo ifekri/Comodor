@@ -209,7 +209,12 @@ the workspace (symlinks and junctions included), Comodor's own data folder
 and the project's `.comodor/` (except `skills/`), names that usually hold
 secrets, and text with a known credential shape — an aid, not a guarantee.
 A workspace that is Comodor's data folder is refused whole. Folders are read
-500 entries at a time with a continuation cursor.
+500 entries at a time with a continuation cursor. Because the disk can change
+between that check and the open, nothing is read by path afterwards: POSIX
+opens every folder from the one above it without following a link and checks
+the file is the one examined; Windows checks the opened handle's own final
+path; a folder is listed from its open handle; a file is read at most one
+byte past the limit. A system that can do neither is refused whole.
 
 The viewer is **CodeMirror 6 in a shadow root**: there its styles reach the
 page as a constructable stylesheet, which the CSP allows, so the policy and

@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -202,9 +203,9 @@ def test_an_oversized_file_is_never_read_into_memory(workspace: Path, ws: Worksp
                                                      monkeypatch: pytest.MonkeyPatch):
     with (workspace / "huge.log").open("wb") as handle:
         handle.truncate(F.MAX_OPEN_BYTES + 10)
-    reads: list[Path] = []
-    original = Path.read_bytes
-    monkeypatch.setattr(Path, "read_bytes", lambda self: (reads.append(self), original(self))[1])
+    reads: list[int] = []
+    original = os.read
+    monkeypatch.setattr(os, "read", lambda fd, n: (reads.append(n), original(fd, n))[1])
     assert ws.read("huge.log")["unavailable"] == F.TOO_LARGE
     assert reads == []
 
@@ -291,7 +292,8 @@ def test_the_projects_comodor_folder_is_refused_except_its_skills(workspace: Pat
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("name", [".env", ".env.local", "server.pem", "tls.key", "id_rsa",
+@pytest.mark.parametrize("name", [".env", ".env.local", ".envrc", ".env-local", ".env_prod",
+                                  ".env.pub", "server.pem", "tls.key", "id_rsa",
                                   "id_ed25519",
                                   ".npmrc", ".netrc", "credentials", "credentials.json",
                                   "secrets.yaml", "prod.tfvars", "terraform.tfstate", "kubeconfig"])
@@ -400,6 +402,248 @@ def test_an_unreadable_file_says_so(workspace: Path, ws: Workspace):
         assert reason(refused) == F.PERMISSION_DENIED
     finally:
         target.chmod(0o600)
+
+
+# --------------------------------------------------------------------------- #
+# the disk changing between the check and the open
+# --------------------------------------------------------------------------- #
+
+SECRET = b"OUTSIDE-SECRET-7d41"
+
+
+def between_check_and_open(monkeypatch: pytest.MonkeyPatch, change) -> None:
+    """Run `change` once, after a request's path is resolved and checked and
+    before anything is opened: the window a race needs, made certain."""
+    original = Workspace.resolve
+
+    def resolve(self: Workspace, relative: str):
+        checked = original(self, relative)
+        change()
+        return checked
+
+    monkeypatch.setattr(Workspace, "resolve", resolve)
+
+
+@pytest.fixture
+def outside(tmp_path: Path) -> Path:
+    place = tmp_path / "secret-place"
+    place.mkdir()
+    (place / "notes.txt").write_bytes(SECRET)
+    (place / "secret-name-only-outside.txt").write_bytes(SECRET)
+    return place
+
+
+@pytest.fixture
+def docs(workspace: Path) -> Path:
+    (workspace / "docs").mkdir()
+    (workspace / "docs" / "notes.txt").write_bytes(b"inside")
+    return workspace / "docs"
+
+
+def exchange_for_link(folder: Path, target: Path) -> None:
+    folder.rename(folder.with_name(folder.name + "-moved"))
+    assert link_outside(folder, target), "the link could not be made"
+
+
+def needs_a_folder_link(tmp_path: Path) -> None:
+    probe = tmp_path / "probe-target"
+    probe.mkdir()
+    if not link_outside(tmp_path / "probe-link", probe):
+        pytest.skip("this machine can create neither a symlink nor a junction")
+
+
+@pytest.mark.parametrize("method", ["read", "list", "stat"])
+def test_a_folder_exchanged_for_a_link_after_the_check_is_never_followed(
+        tmp_path: Path, workspace: Path, ws: Workspace, docs: Path, outside: Path,
+        monkeypatch: pytest.MonkeyPatch, method: str):
+    needs_a_folder_link(tmp_path)
+    between_check_and_open(monkeypatch, lambda: exchange_for_link(docs, outside))
+    call = {"read": lambda: ws.read("docs/notes.txt"), "list": lambda: ws.list("docs"),
+            "stat": lambda: ws.stat("docs/notes.txt")}[method]
+    with pytest.raises(P.ProtocolError) as refused:
+        call()
+    assert reason(refused) == F.CHANGED
+
+
+def test_a_folder_exchanged_after_it_is_opened_is_still_the_one_listed(
+        tmp_path: Path, workspace: Path, ws: Workspace, docs: Path, outside: Path,
+        monkeypatch: pytest.MonkeyPatch):
+    """The names come from the folder that was opened and proven, not from
+    its path a second time."""
+    needs_a_folder_link(tmp_path)
+    measure = os.fstat
+    exchanged: list[bool] = []
+
+    def measured(fd: int):
+        # The open's last step on every platform: the folder is opened and
+        # proven, and not yet read.
+        info = measure(fd)
+        if stat.S_ISDIR(info.st_mode) and not exchanged and (docs / "notes.txt").exists():
+            exchanged.append(True)
+            exchange_for_link(docs, outside)
+        return info
+
+    monkeypatch.setattr(os, "fstat", measured)
+    names = {entry["name"] for entry in ws.list("docs")["entries"]}
+    assert exchanged, "the folder was never exchanged"
+    assert names == {"notes.txt"}
+
+
+@pytest.mark.parametrize("target", ["outside", "inside-secret"])
+def test_a_file_exchanged_for_a_link_after_the_check_is_never_followed(
+        tmp_path: Path, workspace: Path, ws: Workspace, docs: Path, outside: Path,
+        monkeypatch: pytest.MonkeyPatch, target: str):
+    if not can_symlink(tmp_path):
+        pytest.skip("this machine cannot create file symlinks")
+    (workspace / ".env").write_bytes(b"TOKEN=" + SECRET)
+    pointed = outside / "notes.txt" if target == "outside" else workspace / ".env"
+
+    def exchange() -> None:
+        (docs / "notes.txt").unlink()
+        (docs / "notes.txt").symlink_to(pointed)
+
+    between_check_and_open(monkeypatch, exchange)
+    with pytest.raises(P.ProtocolError) as refused:
+        ws.read("docs/notes.txt")
+    assert reason(refused) == F.CHANGED
+
+
+def test_a_file_replaced_by_another_between_its_examination_and_its_open_is_refused(
+        workspace: Path, ws: Workspace, docs: Path, monkeypatch: pytest.MonkeyPatch):
+    """POSIX examines the last name without following it, then opens it; the
+    opened file must be the examined one (device and inode)."""
+    if sys.platform == "win32":
+        pytest.skip("Windows proves the opened handle's own path instead")
+    (docs / "other.txt").write_bytes(b"another file")
+    original = os.open
+
+    def opening(path, flags, mode=0o777, *, dir_fd=None):
+        if path == "notes.txt" and dir_fd is not None:
+            os.replace(docs / "other.txt", docs / "notes.txt")
+        return original(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", opening)
+    with pytest.raises(P.ProtocolError) as refused:
+        ws.read("docs/notes.txt")
+    assert reason(refused) == F.CHANGED
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes are POSIX")
+def test_a_file_exchanged_for_a_pipe_after_the_check_is_refused_without_blocking(
+        workspace: Path, ws: Workspace, docs: Path, monkeypatch: pytest.MonkeyPatch):
+    import threading
+
+    def exchange() -> None:
+        (docs / "notes.txt").unlink()
+        os.mkfifo(docs / "notes.txt")
+
+    between_check_and_open(monkeypatch, exchange)
+    outcome: list[object] = []
+
+    def read() -> None:
+        try:
+            outcome.append(ws.read("docs/notes.txt"))
+        except P.ProtocolError as refusal:
+            outcome.append(refusal)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    reader.join(timeout=30)
+    if reader.is_alive():
+        # Release the blocked reader before failing, so the run can end.
+        os.close(os.open(docs / "notes.txt", os.O_WRONLY | os.O_NONBLOCK))
+        pytest.fail("reading a pipe that took a file's place blocked the Core")
+    assert isinstance(outcome[0], P.ProtocolError)
+    assert outcome[0].data["reason"] == F.NOT_A_FILE
+
+
+def test_a_file_that_grows_after_it_is_measured_is_too_large_and_never_read_whole(
+        workspace: Path, ws: Workspace, monkeypatch: pytest.MonkeyPatch):
+    target = workspace / "growing.log"
+    target.write_bytes(b"a" * (F.MAX_OPEN_BYTES - 10))
+    measure, read = os.fstat, os.read
+    taken: list[int] = []
+    grown: list[bool] = []
+
+    def measured(fd: int):
+        info = measure(fd)
+        if stat.S_ISREG(info.st_mode) and not grown:
+            grown.append(True)
+            with target.open("ab") as handle:
+                handle.write(b"b" * 100_000)
+        return info
+
+    def reading(fd: int, n: int) -> bytes:
+        chunk = read(fd, n)
+        taken.append(len(chunk))
+        return chunk
+
+    monkeypatch.setattr(os, "fstat", measured)
+    monkeypatch.setattr(os, "read", reading)
+    got = ws.read("growing.log")
+    assert grown, "the file was never measured"
+    assert got["unavailable"] == F.TOO_LARGE and "text" not in got
+    assert sum(taken) <= F.MAX_OPEN_BYTES + 1
+
+
+def test_a_system_that_cannot_confine_an_open_shows_nothing(workspace: Path, ws: Workspace,
+                                                           monkeypatch: pytest.MonkeyPatch):
+    (workspace / "f.txt").write_bytes(b"plain")
+    monkeypatch.setattr(F, "_confinable", lambda: False)
+    for call in (lambda: ws.list(""), lambda: ws.read("f.txt"), lambda: ws.stat("f.txt")):
+        with pytest.raises(P.ProtocolError) as refused:
+            call()
+        assert reason(refused) == F.CANNOT_CONFINE
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows device and stream names")
+@pytest.mark.parametrize("path", ["COM1", "con.txt", "src/NUL", "LPT¹", "id_rsa::$DATA",
+                                  "notes.txt:hidden"])
+def test_windows_device_and_stream_names_are_refused(ws: Workspace, path: str):
+    for call in (lambda: ws.read(path), lambda: ws.stat(path), lambda: ws.list(path)):
+        with pytest.raises(P.ProtocolError) as refused:
+            call()
+        assert reason(refused) == F.BAD_PATH
+
+
+def test_a_folder_flipping_between_real_and_a_link_never_shows_what_is_outside(
+        tmp_path: Path, workspace: Path, ws: Workspace, docs: Path, outside: Path):
+    """A real race, with no hook: another thread exchanges the folder for a
+    link to outside and back, as fast as it can, while the folder is read
+    and listed. Whatever wins each time, nothing from outside is returned.
+    (The hooked tests above make the window certain; this one makes it real.)"""
+    import threading
+
+    needs_a_folder_link(tmp_path)
+    stop = threading.Event()
+    real, moved = docs, docs.with_name("docs-real")
+
+    def flip() -> None:
+        while not stop.is_set():
+            try:
+                real.rename(moved)
+                link_outside(real, outside)
+                (os.rmdir if sys.platform == "win32" else os.unlink)(real)
+                moved.rename(real)
+            except OSError:
+                pass
+
+    flipper = threading.Thread(target=flip, daemon=True)
+    flipper.start()
+    seen: list[bytes] = []
+    try:
+        for _ in range(300):
+            for call in (lambda: ws.read("docs/notes.txt").get("text", "").encode(),
+                         lambda: json.dumps(ws.list("docs")).encode()):
+                try:
+                    seen.append(call())
+                except P.ProtocolError:
+                    pass
+    finally:
+        stop.set()
+        flipper.join(timeout=30)
+    assert seen, "no read or listing succeeded at all"
+    assert not any(SECRET in got or b"secret-name-only-outside" in got for got in seen)
 
 
 # --------------------------------------------------------------------------- #

@@ -8,17 +8,24 @@
  */
 
 import type { CoreClient } from "@comodor/client";
-import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore,
+} from "react";
 
 import { InertText } from "../view/InertText.tsx";
 import { EOL_NAMES, type FileContent, LANGUAGE_NAMES, languageOf, readFile, reasonText } from "./files.ts";
 import { baseName, type TabsStore } from "./tabs.ts";
 import { createViewer, type Viewer } from "./viewer.ts";
 
-function TabStrip({ tabs, onKeyShown }: { tabs: TabsStore; onKeyShown?: () => void }) {
+function TabStrip({ tabs, onClosedFocused }: { tabs: TabsStore; onClosedFocused: () => void }) {
   const state = useSyncExternalStore(tabs.subscribe, tabs.get);
   const ids: (string | null)[] = [null, ...state.open];
   const stripRef = useRef<HTMLDivElement>(null);
+  // Closing the tab that holds the focus removes it: the focus must move on.
+  const close = (path: string) => {
+    if (stripRef.current?.contains(document.activeElement)) onClosedFocused();
+    tabs.close(path);
+  };
   const focusTab = (index: number) => {
     const next = (index + ids.length) % ids.length;
     tabs.show(ids[next] ?? null);
@@ -30,10 +37,9 @@ function TabStrip({ tabs, onKeyShown }: { tabs: TabsStore; onKeyShown?: () => vo
     else if (event.key === "ArrowLeft") focusTab(at - 1);
     else if (event.key === "Home") focusTab(0);
     else if (event.key === "End") focusTab(ids.length - 1);
-    else if (event.key === "Delete" && state.active !== null) tabs.close(state.active);
+    else if (event.key === "Delete" && state.active !== null) close(state.active);
     else return;
     event.preventDefault();
-    onKeyShown?.();
   };
   return (
     <div ref={stripRef} className="file-tabs" role="tablist" aria-label="Open files" onKeyDown={onKey}
@@ -54,7 +60,7 @@ function TabStrip({ tabs, onKeyShown }: { tabs: TabsStore; onKeyShown?: () => vo
             </span>
             {path !== null && (
               <span className="file-tab-close" aria-hidden="true" data-close={path}
-                    onClick={(event) => { event.stopPropagation(); tabs.close(path); }}>
+                    onClick={(event) => { event.stopPropagation(); close(path); }}>
                 <span className="icon" data-icon="close" />
               </span>
             )}
@@ -152,10 +158,21 @@ export function FileView({ client, path }: { client: CoreClient; path: string })
 export function CanvasTabs({ client, tabs, thread }: { client: CoreClient | null; tabs: TabsStore; thread: ReactNode }) {
   const state = useSyncExternalStore(tabs.subscribe, tabs.get);
   const showFiles = state.open.length > 0;
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const refocus = useRef(false);
+  // After a focused tab closes: the tab now shown, or the thread when the
+  // last file closed and the strip went with it.
+  useLayoutEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    const canvas = bodyRef.current?.parentElement;
+    const shown = canvas?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    (shown ?? bodyRef.current?.firstElementChild as HTMLElement | null)?.focus();
+  }, [state]);
   return (
     <>
-      {showFiles && <TabStrip tabs={tabs} />}
-      <div className="canvas-body" hidden={state.active !== null}>{thread}</div>
+      {showFiles && <TabStrip tabs={tabs} onClosedFocused={() => { refocus.current = true; }} />}
+      <div ref={bodyRef} className="canvas-body" hidden={state.active !== null}>{thread}</div>
       {state.active !== null && client !== null && <FileView key={state.active} client={client} path={state.active} />}
     </>
   );

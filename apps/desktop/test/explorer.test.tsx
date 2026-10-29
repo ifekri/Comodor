@@ -158,6 +158,27 @@ describe("the file tabs", () => {
     expect(container.querySelector<HTMLElement>(".canvas-body")!.hidden).toBe(false);
   });
 
+  test("closing the focused tab moves the focus to the tab now shown, and to the thread after the last", async () => {
+    const native = new FakeNative();
+    offerFiles(native.core, { "": [file("a.md"), file("b.md")] }, { "a.md": "a\n", "b.md": "b\n" });
+    const { container } = await openWindow(show, until, native);
+    const tree = await openExplorer(container);
+    for (const name of ["a.md", "b.md"]) {
+      await click(await until(() => tree.querySelector<HTMLElement>(`[data-path="${name}"]`), name));
+      await until(() => container.querySelector(`[data-testid="file-view"][data-path="${name}"]`), `${name} shown`);
+    }
+    const tab = (path: string) => container.querySelector<HTMLElement>(`[data-testid="file-tabs"] [data-path="${path}"]`);
+    tab("b.md")!.focus();
+    await key("Delete");
+    await until(() => tab("b.md") === null, "b.md closed");
+    expect(document.activeElement).toBe(tab("a.md"));
+    expect(tab("a.md")!.getAttribute("aria-selected")).toBe("true");
+    // The last file, closed with its mark: the strip goes, and the thread has the focus.
+    await click(container.querySelector<HTMLElement>('[data-close="a.md"]')!);
+    await until(() => container.querySelector('[data-testid="file-tabs"]') === null, "the strip gone");
+    expect(document.activeElement).toBe(container.querySelector('[data-testid="window"]'));
+  });
+
   test("a refused or binary file says why and shows no text", async () => {
     const native = new FakeNative();
     offerFiles(native.core, { "": [file("logo.png")] });
