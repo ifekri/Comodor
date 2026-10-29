@@ -1,0 +1,67 @@
+name: Diagnose Linux F6
+
+# Diagnostic only (branch diag/linux-f6, never merged): the same commit's
+# key-delivery scenario on the previous and the current ubuntu-latest image.
+on:
+  push:
+    branches: ['diag/linux-f6']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  key-delivery:
+    name: key-delivery on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+    env:
+      COMODOR_PYTHON: python3
+      COMODOR_E2E_OS_LEVEL: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Linux WebView and display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libsoup-3.0-dev libxdo-dev libssl-dev pkg-config build-essential \
+            xvfb xauth dbus dbus-x11 xdotool imagemagick x11-xkb-utils x11-xserver-utils
+      - name: Versions
+        run: |
+          head -3 /etc/os-release
+          dpkg-query -W -f='${Package} ${Version}\n' 'libgtk-3-0*' 'libwebkit2gtk-4.1-0' xvfb xdotool xkb-data 'libxkbcommon0' 'libxdo3' || true
+      - name: Rust
+        run: |
+          channel=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' apps/desktop/src-tauri/rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal
+      - name: Build the page
+        run: npm run -w apps/desktop build
+      - name: The keymap a bare Xvfb gives F5-F7
+        run: |
+          Xvfb :97 -screen 0 1280x800x24 &
+          for i in $(seq 1 50); do DISPLAY=:97 xdpyinfo >/dev/null 2>&1 && break; sleep 0.1; done
+          DISPLAY=:97 xmodmap -pke | grep -E '= F5 |= F6 |= F7 ' || true
+          DISPLAY=:97 setxkbmap -print || true
+          kill %1 || true
+      - name: key-delivery
+        run: npm run -w apps/desktop e2e -- key-delivery keyboard
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diag-f6-${{ matrix.os }}
+          path: apps/desktop/e2e/out

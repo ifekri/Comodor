@@ -120,9 +120,23 @@ export const keyDelivery: Scenario = async (context) => {
   results["Tab"] = "next control";
   first.focus();
 
+  // DIAGNOSTIC (branch diag/linux-f6 only): every key and focus event the page sees around F6.
+  const f6seen: string[] = [];
+  const f6listen = (event: Event) => {
+    const k = event as KeyboardEvent;
+    const target = event.target as Element | null;
+    f6seen.push(`${event.type}:${k.key ?? ""}:${k.code ?? ""}:${k.keyCode ?? ""}:prevented=${event.defaultPrevented}`
+      + `:target=${target?.tagName ?? "?"}.${(target as HTMLElement | null)?.className ?? ""}`);
+  };
+  for (const type of ["keydown", "keyup", "focusin", "focusout", "blur", "focus"]) window.addEventListener(type, f6listen, true);
+  const f6before = `${document.activeElement?.tagName}.${(document.activeElement as HTMLElement | null)?.className} hasFocus=${document.hasFocus()}`;
   await press(context, { key: "F6" });
-  if (!(await observed(() => region() === afterTop))) throw productFailure(`F6 left focus in ${String(region())}`);
+  const f6ok = await observed(() => region() === afterTop);
+  for (const type of ["keydown", "keyup", "focusin", "focusout", "blur", "focus"]) window.removeEventListener(type, f6listen, true);
+  console.log(`DIAG-F6 ok=${f6ok} before=${f6before} after=${document.activeElement?.tagName} region=${String(region())} events=${JSON.stringify(f6seen)}`);
+  if (!f6ok) throw productFailure(`F6 left focus in ${String(region())}; DIAG before=${f6before} events=${JSON.stringify(f6seen)}`);
   results["F6"] = region();
+  results["F6-diag"] = { before: f6before, events: f6seen };
 
   await press(context, { key: "F6", shift: true });
   if (!(await observed(() => region() === "top"))) throw productFailure(`Shift+F6 left focus in ${String(region())}`);
