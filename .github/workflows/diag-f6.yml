@@ -57,6 +57,8 @@ jobs:
           for i in $(seq 1 50); do DISPLAY=:97 xdpyinfo >/dev/null 2>&1 && break; sleep 0.1; done
           DISPLAY=:97 xmodmap -pke | grep -E '= F5 |= F6 |= F7 ' || true
           DISPLAY=:97 setxkbmap -print || true
+          DISPLAY=:97 xkbcomp -xkb :97 - 2>/dev/null | sed -n '/type "CTRL+ALT"/,/};/p' || true
+          DISPLAY=:97 xkbcomp -xkb :97 - 2>/dev/null | grep -A4 '<FK06>' | head -20 || true
           kill %1 || true
       - name: key-delivery
         run: npm run -w apps/desktop e2e -- key-delivery keyboard
