@@ -222,7 +222,56 @@ function pressMac(pid, spec) {
 
 // -- Linux ---------------------------------------------------------------
 
-const XDOTOOL_KEY = { q: "q", k: "k", F6: "F6", Escape: "Escape", Tab: "Tab" };
+const X_KEYSYM = { q: "q", k: "k", F6: "F6", Escape: "Escape", Tab: "Tab" };
+
+/**
+ * Exactly the named keys, through XTest, each on the keycode that types its
+ * keysym with no modifier held; nothing else is pressed. `xdotool key F6`
+ * chooses the modifiers itself from the key's type, taking the first map
+ * entry for the level it wants: Ubuntu 26.04's xkb-data (2.46) gives the
+ * function keys' type "CTRL+ALT" an explicit `map[Alt]= Level1`, so xdotool
+ * held Alt and the window received Alt+F6. The Windows and macOS senders
+ * above name their key codes for the same reason.
+ */
+const LINUX_SCRIPT = String.raw`
+import ctypes, ctypes.util, sys
+x11 = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
+xtst = ctypes.CDLL(ctypes.util.find_library("Xtst") or "libXtst.so.6")
+x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+x11.XOpenDisplay.restype = ctypes.c_void_p
+x11.XStringToKeysym.argtypes = [ctypes.c_char_p]
+x11.XStringToKeysym.restype = ctypes.c_ulong
+x11.XDisplayKeycodes.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+x11.XkbKeycodeToKeysym.argtypes = [ctypes.c_void_p, ctypes.c_ubyte, ctypes.c_int, ctypes.c_int]
+x11.XkbKeycodeToKeysym.restype = ctypes.c_ulong
+x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+xtst.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+display = x11.XOpenDisplay(None)
+if not display:
+    print("capability-unavailable: the display could not be opened")
+    sys.exit(3)
+low, high = ctypes.c_int(), ctypes.c_int()
+x11.XDisplayKeycodes(display, ctypes.byref(low), ctypes.byref(high))
+codes = []
+for name in sys.argv[1:]:
+    keysym = x11.XStringToKeysym(name.encode())
+    code = next((c for c in range(low.value, high.value + 1)
+                 if keysym and x11.XkbKeycodeToKeysym(display, c, 0, 0) == keysym), 0)
+    if not code:
+        print("capability-unavailable: no key on this display types " + name + " unmodified")
+        sys.exit(3)
+    codes.append(code)
+for code in codes:
+    xtst.XTestFakeKeyEvent(display, code, 1, 0)
+for code in reversed(codes):
+    xtst.XTestFakeKeyEvent(display, code, 0, 0)
+x11.XSync(display, 0)
+x11.XCloseDisplay(display)
+print("sent")
+`;
+
+let linuxHelper;
 
 function xdotool(...args) {
   return spawnSync("timeout", ["20", "xdotool", ...args], { encoding: "utf-8" });
@@ -254,9 +303,16 @@ function pressLinux(pid, spec) {
       return unavailable(`the input focus is on window ${focus} (process ${owner || "unknown"}), not the application`);
     }
   }
-  const name = [...(spec.mod ? ["ctrl"] : []), ...(spec.shift ? ["shift"] : []), XDOTOOL_KEY[spec.key]].join("+");
-  const sent = xdotool("key", name);
-  if (sent.status !== 0) return unavailable(`xdotool could not send ${name}: ${sent.stderr}`);
+  if (!linuxHelper) {
+    linuxHelper = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "comodor-keys-")), "press-key.py");
+    fs.writeFileSync(linuxHelper, LINUX_SCRIPT);
+  }
+  const names = [...(spec.mod ? ["Control_L"] : []), ...(spec.shift ? ["Shift_L"] : []), X_KEYSYM[spec.key]];
+  const result = spawnSync("/usr/bin/python3", [linuxHelper, ...names], { encoding: "utf-8", timeout: 20_000 });
+  if (result.error) return unavailable(`python3 could not run: ${result.error.message}`);
+  const said = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+  if (result.status === 3) return unavailable(said.replace(/^capability-unavailable:\s*/, ""));
+  if (result.status !== 0) return unavailable(`the injection failed: ${said}`);
   return { ok: true };
 }
 
@@ -275,6 +331,7 @@ export function preflight() {
   }
   const result = spawnSync("xdotool", ["version"], { encoding: "utf-8" });
   if (result.error || result.status !== 0) return unavailable("xdotool is not installed");
+  if (!fs.existsSync("/usr/bin/python3")) return unavailable("/usr/bin/python3, which sends the keys, is not installed");
   return process.env.DISPLAY ? { ok: true } : unavailable("no DISPLAY: the harness's Xvfb is not running");
 }
 
