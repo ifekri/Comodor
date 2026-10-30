@@ -238,7 +238,11 @@ class Workspace:
                         raise _refused(COMODOR_DATA, _MESSAGES[COMODOR_DATA])
             for index, part in enumerate(parts):
                 last = index == len(parts) - 1
-                directory = not last or path.is_dir()
+                try:
+                    directory = not last or path.is_dir()
+                except OSError:
+                    # A name mid-exchange can fail to stat (macOS: EINVAL).
+                    raise _refused(CHANGED, _MESSAGES[CHANGED]) from None
                 if sensitive_name(part, directory):
                     raise _refused(SENSITIVE_NAME, _MESSAGES[SENSITIVE_NAME])
 

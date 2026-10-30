@@ -606,6 +606,23 @@ def test_windows_device_and_stream_names_are_refused(ws: Workspace, path: str):
         assert reason(refused) == F.BAD_PATH
 
 
+def test_a_name_that_cannot_be_examined_mid_exchange_is_refused_as_changed(
+        workspace: Path, ws: Workspace, docs: Path, monkeypatch: pytest.MonkeyPatch):
+    """A name caught mid-exchange can fail to stat with an error pathlib does
+    not swallow (macOS gives EINVAL): the request is refused, not crashed."""
+    import errno
+
+    def failing(self: Path, *, follow_symlinks: bool = True) -> bool:
+        raise OSError(errno.EINVAL, "Invalid argument", str(self))
+
+    monkeypatch.setattr(Path, "is_dir", failing)
+    for call in (lambda: ws.list("docs"), lambda: ws.read("docs/notes.txt"),
+                 lambda: ws.stat("docs/notes.txt")):
+        with pytest.raises(P.ProtocolError) as refused:
+            call()
+        assert reason(refused) == F.CHANGED
+
+
 def test_a_folder_flipping_between_real_and_a_link_never_shows_what_is_outside(
         tmp_path: Path, workspace: Path, ws: Workspace, docs: Path, outside: Path):
     """A real race, with no hook: another thread exchanges the folder for a
